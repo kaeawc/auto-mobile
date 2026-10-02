@@ -1,3 +1,6 @@
+import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
+import { createSetActiveDeviceHandler } from "./setActiveDevice";
+export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
 import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
 import { runSessionClockMutation } from "./sessionClock";
@@ -6,7 +9,6 @@ import {
   createSessionLocationAppliedCallback,
   runSessionLocationMutation,
 } from "./sessionLocation";
-import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
@@ -29,10 +31,7 @@ import {
   type DisplayConfigResult,
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
-import { logger } from "../utils/logger";
 import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { BootedDevice, Platform } from "../models";
@@ -45,10 +44,6 @@ import {
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
-import {
-  registerDirectSessionDevice,
-  resolveDirectSessionDevice,
-} from "./directSessionDeviceRegistry";
 import type { SessionManager } from "../daemon/sessionManager";
 import {
   applyStateAfterBiometricCaptureFailure,
@@ -87,6 +82,13 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(
   z
     .object({
       deviceId: z.string(),
+      display: z
+        .string()
+        .nullable()
+        .optional()
+        .describe(
+          "Session display pin: physical panel key or inner/cover/rear/external; null clears, omitted preserves. active/all cannot be pinned. Requires a daemon session. JSON result displayPin reports the resulting selector or null after clearing; omitted for a never-pinned session.",
+        ),
       // #5870: the platform is inferred from the resolved device (or the session),
       // so callers targeting a concrete `deviceId` need not also send `platform`.
       platform: platformSchema.optional(),
@@ -441,11 +443,6 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
 );
 
 // Export interfaces for type safety
-export interface SetActiveDeviceArgs {
-  deviceId: string;
-  platform?: Platform;
-}
-
 export interface ChangeLocalizationArgs {
   // #6154: optional — resolved from deviceId/session when omitted.
   platform?: Platform;
@@ -597,123 +594,13 @@ async function captureBiometricEnrollment(
 }
 
 // Register tools
-export function registerUtilityTools() {
-  // Set active device handler
-  const setActiveDeviceHandler = async (args: SetActiveDeviceArgs & { sessionUuid?: string }) => {
-    const mcpSessionId = (args as SetActiveDeviceArgs & { __mcpSessionId?: string }).__mcpSessionId;
-    let selectedAutolockSession: string | undefined;
-    try {
-      if (mcpSessionId && DaemonState.getInstance().isInitialized()) {
-        const ownedSession = DaemonState.getInstance()
-          .getDevicePool()
-          .resolveAutolockSessionForMcpSession(
-            mcpSessionId,
-            args.platform,
-            undefined,
-            args.deviceId,
-          );
-        const targetSession =
-          ownedSession ??
-          DaemonState.getInstance()
-            .getDevicePool()
-            .resolveAutolockSessionForMcpSession(mcpSessionId);
-        args.sessionUuid ??= targetSession;
-        if (targetSession === args.sessionUuid) {
-          selectedAutolockSession = targetSession;
-        }
-      }
-      if (args.sessionUuid && DaemonState.getInstance().isInitialized()) {
-        // Session-scoped: bind the specific requested device to this session
-        const sessionManager = DaemonState.getInstance().getSessionManager();
-        const devicePool = DaemonState.getInstance().getDevicePool();
-        let pooledDevice = devicePool.getDevice(args.deviceId);
-        if (!pooledDevice) {
-          await devicePool.refreshDevices();
-          pooledDevice = devicePool.getDevice(args.deviceId);
-        }
-        if (!pooledDevice) {
-          throw new ActionableError(`Device '${args.deviceId}' not found in device pool`);
-        }
-        devicePool.assertDeviceCleanupComplete(args.deviceId);
-        await resumeCtrlProxyIfCurrentlyBooted(args.deviceId, pooledDevice.platform);
-        if (pooledDevice.sessionId && pooledDevice.sessionId !== args.sessionUuid) {
-          const owningSession = sessionManager.getSession(pooledDevice.sessionId);
-          if (owningSession) {
-            throw new ActionableError(
-              `Device '${args.deviceId}' is already assigned to session ${pooledDevice.sessionId}`,
-            );
-          }
-        }
-        // The pool persists a replacement binding before it releases the previous
-        // one, so a failed write leaves the caller's existing session intact.
-        const existing = sessionManager.getSession(args.sessionUuid);
-        if (!existing || existing.assignedDevice !== args.deviceId) {
-          // #5870: infer the platform from the resolved pool device when the
-          // caller did not send one.
-          const boundSession = await devicePool.bindOrReuseDeviceSession(
-            args.sessionUuid,
-            args.deviceId,
-            args.platform ?? pooledDevice.platform,
-            undefined,
-            undefined,
-            undefined,
-            true,
-          );
-          if (boundSession !== args.sessionUuid) {
-            throw new ActionableError(
-              `Device '${args.deviceId}' is already assigned to session ${boundSession}`,
-            );
-          }
-          sessionManager.setDeviceReadiness(args.sessionUuid, "booted");
-        }
-        logger.info(
-          `[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`,
-        );
-      } else {
-        // Legacy single-agent path: sets global active device
-        const sessionManager = DeviceSessionManager.getInstance();
-        const previousDevice = sessionManager.getCurrentDevice();
-        const previousPlatform = sessionManager.getCurrentPlatform();
-
-        // #5870: with no explicit platform, "either" lets the deviceId
-        // disambiguate; the resolved device carries the effective platform.
-        const readyDevice = await sessionManager.ensureDeviceReady(
-          args.platform ?? "either",
-          args.deviceId,
-        );
-        const resolvedPlatform = args.platform ?? readyDevice.platform;
-        await resumeCtrlProxyIfCurrentlyBooted(readyDevice.deviceId, resolvedPlatform);
-        if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
-          registerDirectSessionDevice(args.sessionUuid, readyDevice);
-        }
-
-        // When switching platforms, clear observation caches to prevent stale
-        // data from the previous platform contaminating subsequent observe calls.
-        if (previousPlatform && previousPlatform !== resolvedPlatform && previousDevice) {
-          logger.info(
-            `[setActiveDevice] Platform switch detected (${previousPlatform} -> ${resolvedPlatform}), ` +
-              `clearing observation cache for previous device ${previousDevice.deviceId}`,
-          );
-          RealObserveScreen.clearCache(previousDevice.deviceId);
-        }
-        sessionManager.setExplicitDevicePin(readyDevice);
-      }
-
-      if (selectedAutolockSession) {
-        await DaemonState.getInstance()
-          .getDevicePool()
-          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId);
-      }
-      return createJSONToolResponse({
-        message: `Active device set to '${args.deviceId}'`,
-        deviceId: args.deviceId,
-        ...(args.sessionUuid ? { sessionUuid: args.sessionUuid } : {}),
-      });
-    } catch (error) {
-      logger.error("Failed to set active device:", error);
-      throw toActionableError(error, `Failed to set active device`);
-    }
-  };
+export function registerUtilityTools(
+  options: { displayInventory?: DisplayInventoryProvider } = {},
+) {
+  const setActiveDeviceHandler = createSetActiveDeviceHandler({
+    displayInventory: options.displayInventory,
+    resumeCtrlProxy: resumeCtrlProxyIfCurrentlyBooted,
+  });
 
   const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocalizationArgs) => {
     assertChangeLocalizationPlatformConstraints(device.platform, args);
@@ -963,7 +850,7 @@ export function registerUtilityTools() {
   // Register with the tool registry
   ToolRegistry.register(
     "setActiveDevice",
-    "Set active device",
+    "Set active device using existing session binding or legacy global selection. With a daemon session, display pins a physical panel key or role (inner/cover/rear/external); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. active/all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
     setActiveDeviceSchema,
     setActiveDeviceHandler,
     { defaultEnabled: true },

@@ -3375,6 +3375,11 @@
                     "key": {
                       "type": "string"
                     },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "role": {
                       "type": "string",
                       "enum": ["inner", "cover", "rear", "external", "unknown"]
@@ -4505,6 +4510,11 @@
                   "properties": {
                     "key": {
                       "type": "string"
+                    },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "role": {
                       "type": "string",
@@ -6269,6 +6279,47 @@
         },
         "error": {
           "type": "string"
+        },
+        "pinnedDisplay": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "availablePanels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["inner", "cover", "rear", "external", "unknown"]
+                  }
+                },
+                "required": ["key", "role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["pin", "availablePanels"],
+          "additionalProperties": false
+        },
+        "displayInventory": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["retryable"],
+          "additionalProperties": false
         },
         "staleDisplay": {
           "type": "object",
@@ -8669,6 +8720,11 @@
             "key": {
               "type": "string"
             },
+            "pinned": {
+              "description": "This call selected the panel using its session display pin.",
+              "type": "boolean",
+              "const": true
+            },
             "role": {
               "type": "string",
               "enum": ["inner", "cover", "rear", "external", "unknown"]
@@ -8736,6 +8792,11 @@
                 "properties": {
                   "key": {
                     "type": "string"
+                  },
+                  "pinned": {
+                    "description": "This call selected the panel using its session display pin.",
+                    "type": "boolean",
+                    "const": true
                   },
                   "role": {
                     "type": "string",
@@ -14043,6 +14104,11 @@
                     "key": {
                       "type": "string"
                     },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "role": {
                       "type": "string",
                       "enum": ["inner", "cover", "rear", "external", "unknown"]
@@ -15173,6 +15239,11 @@
                   "properties": {
                     "key": {
                       "type": "string"
+                    },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "role": {
                       "type": "string",
@@ -16937,6 +17008,47 @@
         },
         "error": {
           "type": "string"
+        },
+        "pinnedDisplay": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "availablePanels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["inner", "cover", "rear", "external", "unknown"]
+                  }
+                },
+                "required": ["key", "role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["pin", "availablePanels"],
+          "additionalProperties": false
+        },
+        "displayInventory": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["retryable"],
+          "additionalProperties": false
         },
         "staleDisplay": {
           "type": "object",
@@ -18783,6 +18895,11 @@
                     "key": {
                       "type": "string"
                     },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "role": {
                       "type": "string",
                       "enum": ["inner", "cover", "rear", "external", "unknown"]
@@ -19913,6 +20030,11 @@
                   "properties": {
                     "key": {
                       "type": "string"
+                    },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "role": {
                       "type": "string",
@@ -21678,6 +21800,47 @@
         "error": {
           "type": "string"
         },
+        "pinnedDisplay": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "availablePanels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["inner", "cover", "rear", "external", "unknown"]
+                  }
+                },
+                "required": ["key", "role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["pin", "availablePanels"],
+          "additionalProperties": false
+        },
+        "displayInventory": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["retryable"],
+          "additionalProperties": false
+        },
         "staleDisplay": {
           "type": "object",
           "properties": {
@@ -22038,6 +22201,47 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "pinnedDisplay": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "availablePanels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["inner", "cover", "rear", "external", "unknown"]
+                  }
+                },
+                "required": ["key", "role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["pin", "availablePanels"],
+          "additionalProperties": false
+        },
+        "displayInventory": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["retryable"],
+          "additionalProperties": false
+        },
         "staleDisplay": {
           "type": "object",
           "properties": {
@@ -22067,6 +22271,47 @@
           "items": {
             "type": "object",
             "properties": {
+              "pinnedDisplay": {
+                "type": "object",
+                "properties": {
+                  "pin": {
+                    "type": "string"
+                  },
+                  "availablePanels": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": ["inner", "cover", "rear", "external", "unknown"]
+                        }
+                      },
+                      "required": ["key", "role"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["pin", "availablePanels"],
+                "additionalProperties": false
+              },
+              "displayInventory": {
+                "type": "object",
+                "properties": {
+                  "pin": {
+                    "type": "string"
+                  },
+                  "retryable": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": ["retryable"],
+                "additionalProperties": false
+              },
               "staleDisplay": {
                 "type": "object",
                 "properties": {
@@ -22163,13 +22408,24 @@
   },
   {
     "name": "setActiveDevice",
-    "description": "Set active device",
+    "description": "Set active device using existing session binding or legacy global selection. With a daemon session, display pins a physical panel key or role (inner/cover/rear/external); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. active/all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "deviceId": {
           "type": "string"
+        },
+        "display": {
+          "description": "Session display pin: physical panel key or inner/cover/rear/external; null clears, omitted preserves. active/all cannot be pinned. Requires a daemon session. JSON result displayPin reports the resulting selector or null after clearing; omitted for a never-pinned session.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "platform": {
           "type": "string",
@@ -23659,6 +23915,11 @@
           "properties": {
             "key": {
               "type": "string"
+            },
+            "pinned": {
+              "description": "This call selected the panel using its session display pin.",
+              "type": "boolean",
+              "const": true
             },
             "role": {
               "type": "string",
@@ -25732,6 +25993,11 @@
                     "key": {
                       "type": "string"
                     },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "role": {
                       "type": "string",
                       "enum": ["inner", "cover", "rear", "external", "unknown"]
@@ -26862,6 +27128,11 @@
                   "properties": {
                     "key": {
                       "type": "string"
+                    },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "role": {
                       "type": "string",
@@ -28842,6 +29113,47 @@
         "error": {
           "type": "string"
         },
+        "pinnedDisplay": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "availablePanels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["inner", "cover", "rear", "external", "unknown"]
+                  }
+                },
+                "required": ["key", "role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["pin", "availablePanels"],
+          "additionalProperties": false
+        },
+        "displayInventory": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["retryable"],
+          "additionalProperties": false
+        },
         "staleDisplay": {
           "type": "object",
           "properties": {
@@ -29333,6 +29645,11 @@
                   "properties": {
                     "key": {
                       "type": "string"
+                    },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "role": {
                       "type": "string",
@@ -30464,6 +30781,11 @@
                   "properties": {
                     "key": {
                       "type": "string"
+                    },
+                    "pinned": {
+                      "description": "This call selected the panel using its session display pin.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "role": {
                       "type": "string",
@@ -32228,6 +32550,47 @@
         },
         "error": {
           "type": "string"
+        },
+        "pinnedDisplay": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "availablePanels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["inner", "cover", "rear", "external", "unknown"]
+                  }
+                },
+                "required": ["key", "role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["pin", "availablePanels"],
+          "additionalProperties": false
+        },
+        "displayInventory": {
+          "type": "object",
+          "properties": {
+            "pin": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["retryable"],
+          "additionalProperties": false
         },
         "staleDisplay": {
           "type": "object",

@@ -10,6 +10,18 @@ import { platformSchema } from "./toolSchemaHelpers";
 import { z } from "zod/v4";
 import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
 
+const displayInventoryUnavailableSchema = z.object({
+  pin: z.string().optional(),
+  retryable: z.literal(true),
+});
+
+const pinnedDisplaySchema = z.object({
+  pin: z.string(),
+  availablePanels: z.array(
+    z.object({ key: z.string(), role: z.enum(["inner", "cover", "rear", "external", "unknown"]) }),
+  ),
+});
+
 const staleDisplaySchema = z.object({
   observedGeneration: z.number().int().nonnegative(),
   currentGeneration: z.number().int().nonnegative(),
@@ -93,11 +105,15 @@ export const keyboardResultSchema = z
 /** IME fields live on each command result, never on the sendKeys envelope. */
 export const sendKeysResultSchema = z
   .object({
+    pinnedDisplay: pinnedDisplaySchema.optional(),
+    displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
     commands: z
       .array(
         z
           .object({
+            pinnedDisplay: pinnedDisplaySchema.optional(),
+            displayInventory: displayInventoryUnavailableSchema.optional(),
             staleDisplay: staleDisplaySchema.optional(),
             backend: z.literal("autoMobileIme").optional(),
             capability: z.literal("semanticText").optional(),
@@ -713,6 +729,10 @@ const observationDeviceIdSchema = z
 const observationDisplaySchema = z
   .object({
     key: z.string(),
+    pinned: z
+      .literal(true)
+      .optional()
+      .describe("This call selected the panel using its session display pin."),
     role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
     posture: z.enum([
       "closed",
@@ -1348,6 +1368,8 @@ const lifecycleActionOutputFields = {
   observationDiff: observationDiffMetadataSchema.optional(),
   effect: tapEffectSchema.optional(),
   error: z.string().optional(),
+  pinnedDisplay: pinnedDisplaySchema.optional(),
+  displayInventory: displayInventoryUnavailableSchema.optional(),
   staleDisplay: staleDisplaySchema.optional(),
   warnings: z.array(z.string()).optional(),
 };
@@ -1557,6 +1579,8 @@ export const rotateResultSchema = z
     observationDiff: observationDiffMetadataSchema.optional(),
     effect: tapEffectSchema.optional(),
     error: z.string().optional(),
+    pinnedDisplay: pinnedDisplaySchema.optional(),
+    displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
     warnings: z.array(z.string()).optional(),
   })
@@ -1603,6 +1627,8 @@ export const tapOnResultSchema = z
     selectedElements: z.array(selectedElementSchema).optional(),
     skipped: z.literal("already-checked").optional(),
     error: z.string().optional(),
+    pinnedDisplay: pinnedDisplaySchema.optional(),
+    displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
     pressRecognized: z.boolean().optional(),
     contextMenuOpened: z.boolean().optional(),

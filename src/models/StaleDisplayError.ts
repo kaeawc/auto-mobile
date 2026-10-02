@@ -1,3 +1,5 @@
+import { displayPinFailure } from "../features/observe/SessionDisplayContext";
+import { PinnedDisplayUnavailableError } from "./PinnedDisplayError";
 import { ActionableError } from "./ActionableError";
 import type { BaseActionResult } from "./BaseActionResult";
 
@@ -33,6 +35,10 @@ export function staleDisplayError(
 
 /** Preserve the canonical message and typed details in the action's existing result channel. */
 export function withStaleDisplay<T extends BaseActionResult>(result: T, error: unknown): T {
+  const pinError = displayPinFailure(error);
+  if (pinError instanceof PinnedDisplayUnavailableError) {
+    return { ...result, error: pinError.message, pinnedDisplay: pinError.details };
+  }
   return error instanceof StaleDisplayError
     ? { ...result, error: error.message, staleDisplay: error.details }
     : result;

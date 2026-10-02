@@ -282,7 +282,20 @@ export const DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS = 15_000;
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
+/** Bound queued bytes to max(cap, one frame); bytes measure memory and frames are ~100+ bytes, so no count cap is needed. */
 const DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES = 1024 * 1024;
+
+export class DaemonSocketQueueOverflowError extends Error {
+  readonly reason = "queue_overflow";
+
+  constructor(
+    readonly queuedBytes: number,
+    readonly limitBytes: number,
+  ) {
+    super(`Daemon RPC socket queued bytes exceeded ${limitBytes}`);
+    this.name = "DaemonSocketQueueOverflowError";
+  }
+}
 
 /**
  * The loopback MCP HTTP server answers an unknown `mcp-session-id` with 404
@@ -1493,11 +1506,15 @@ export class UnixSocketServer {
     try {
       const payload = JSON.stringify(frame) + "\n";
       const byteLength = Buffer.byteLength(payload);
-      if (socket.writableLength + byteLength > DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES) {
-        const error = new Error(
-          `Daemon RPC socket queued bytes exceeded ${DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES}`,
+      const queuedBytes = socket.writableLength + byteLength;
+      if (queuedBytes > Math.max(DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, byteLength)) {
+        const error = new DaemonSocketQueueOverflowError(
+          queuedBytes,
+          DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES,
         );
-        logger.warn(`Daemon RPC socket ${sessionId} write queue exceeded limit; destroying`);
+        logger.warn(
+          `Daemon RPC socket ${sessionId} write queue exceeded limit; queuedBytes=${queuedBytes}, limitBytes=${DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES}; destroying`,
+        );
         onFlushed?.(error);
         socket.destroy();
         return;

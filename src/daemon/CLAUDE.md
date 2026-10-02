@@ -87,6 +87,17 @@ const server = new MySocketServer(socketPath, fakeTimer);
 fakeTimer.advance(10000);
 ```
 
+## Outbound write bound
+
+RPC sockets cap queued bytes at 1 MiB, allowing one larger frame when the queue
+is empty; a following write over the cap is rejected. The bound is bytes-only:
+bytes measure memory, and each frame is ~100+ bytes, so a frame-count cap adds
+state without tightening memory. Rejection calls `onFlushed` once with
+`DaemonSocketQueueOverflowError` (`reason: "queue_overflow"`, `queuedBytes`,
+`limitBytes`), then destroys the socket. Once a write returns false, inbound data,
+`drain`, or a successful write callback leaving `writableLength` zero refreshes
+idle; write calls do not.
+
 ## Registration-only sessions
 
 `daemon/registerSession { sessionId, clientName }` validates a client UUID and a

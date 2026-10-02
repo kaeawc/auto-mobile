@@ -101,72 +101,83 @@ test.each(["android", "ios"] as const)(
   },
 );
 
-test("physical iOS with no reachable runner or cached screenshot reports the capture limitation", async () => {
-  const timer = new FakeTimer();
-  const device: BootedDevice = {
-    deviceId: "00008030-001C195E0C10802E",
-    name: "iPhone",
-    platform: "ios",
-  };
-  const factory = new FakeAdbClientFactory(new FakeAdbExecutor());
-  const client = IOSCtrlProxyClient.createForTesting(
-    device,
-    8765,
-    createInstantFailureWebSocketFactory(timer),
-    timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    true,
-  );
-  const connect = spyOn(client, "connectForObservationRead").mockResolvedValue(false);
-  const close = spyOn(client, "close");
-  const transient = spyOn(IOSCtrlProxyClient, "createForObservationRead").mockReturnValue(client);
-  const writer = new FakeScreenshotFileWriter();
-  const screenshot = new TakeScreenshot(
-    device,
-    factory,
-    timer,
-    new CountingIdGenerator("observer"),
-    writer,
-    undefined,
-    undefined,
-    undefined,
-    false,
-  );
-  const screen = new RealObserveScreen(
-    device,
-    factory,
-    {
-      deviceReadOnly: true,
-      window: new FakeWindow(),
-      cacheStore: new FakeObserveCacheStore(timer),
-      screenshotStateStore: new FakeScreenshotStateStore(timer),
-      hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
-      screenshot,
-    },
-    timer,
-  );
-  try {
-    const result = await screen.executeDeviceRead();
-    expect(result.freshness?.unavailableReason).toBe("connection_lost");
-    expect(result.freshness?.unavailableDetail).toContain("no reachable hierarchy service");
-    expect(result.screenshotCaptureAttempted).toBe(true);
-    expect(result.screenshotSettled).toBe(false);
-    expect(result.screenshotPath).toBeUndefined();
-    expect(result.screenshotSource).toBeUndefined();
-    expect(result.screenshotSettledError).toBe(
-      "No screenshot could be captured: this unowned physical iOS device has no reachable runner. Physical iOS has no host-side screenshot capture path without the runner.",
+test.each([false, true])(
+  "physical iOS without a runner reports capture limitation (cached screenshot: %s)",
+  async (cached) => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      deviceId: "00008030-001C195E0C10802E",
+      name: "iPhone",
+      platform: "ios",
+    };
+    const factory = new FakeAdbClientFactory(new FakeAdbExecutor());
+    const client = IOSCtrlProxyClient.createForTesting(
+      device,
+      8765,
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
     );
-    expect(writer.written).toEqual([]);
-    expect(connect).toHaveBeenCalledTimes(2);
-    expect(close).toHaveBeenCalledTimes(2);
-  } finally {
-    transient.mockRestore();
-    connect.mockRestore();
-    close.mockRestore();
-    await client.close();
-  }
-});
+    const connect = spyOn(client, "connectForObservationRead").mockResolvedValue(false);
+    const close = spyOn(client, "close");
+    const transient = spyOn(IOSCtrlProxyClient, "createForObservationRead").mockReturnValue(client);
+    const writer = new FakeScreenshotFileWriter();
+    const screenshot = new TakeScreenshot(
+      device,
+      factory,
+      timer,
+      new CountingIdGenerator("observer"),
+      writer,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+    const state = new FakeScreenshotStateStore(timer);
+    if (cached) {
+      state.update(device.deviceId, "/fake/cached.png");
+    }
+    const screen = new RealObserveScreen(
+      device,
+      factory,
+      {
+        deviceReadOnly: true,
+        window: new FakeWindow(),
+        screenshotEvidenceFiles: {
+          stat: async () => ({ isFile: () => true, size: 12, mtimeMs: timer.now() }),
+        },
+        cacheStore: new FakeObserveCacheStore(timer),
+        screenshotStateStore: state,
+        hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
+        screenshot,
+      },
+      timer,
+    );
+    try {
+      const result = await screen.executeDeviceRead();
+      expect(result.freshness?.unavailableReason).toBe("connection_lost");
+      expect(result.freshness?.unavailableDetail).toContain("no reachable hierarchy service");
+      expect(result.screenshotCaptureAttempted).toBe(true);
+      expect(result.screenshotSettled).toBe(false);
+      expect(result.screenshotPath).toBe(cached ? "/fake/cached.png" : undefined);
+      expect(result.screenshotSource).toBe(cached ? "cached" : undefined);
+      expect(state.getPath(device.deviceId)).toBe(cached ? "/fake/cached.png" : undefined);
+      expect(result.screenshotSettledError).toBe(
+        "No screenshot could be captured: this unowned physical iOS device has no reachable runner. Physical iOS has no host-side screenshot capture path without the runner.",
+      );
+      expect(writer.written).toEqual([]);
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledTimes(2);
+    } finally {
+      transient.mockRestore();
+      connect.mockRestore();
+      close.mockRestore();
+      await client.close();
+    }
+  },
+);

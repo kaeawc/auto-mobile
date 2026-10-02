@@ -131,7 +131,7 @@ export class DeviceStateCollector {
     }
   }
 
-  async collectActiveWindow(result: ObserveResult): Promise<void> {
+  async collectActiveWindow(result: ObserveResult, readOnly = false): Promise<void> {
     const { window, timer } = this.opts;
     try {
       const startedAt = timer.now();
@@ -146,7 +146,9 @@ export class DeviceStateCollector {
       // (#5939) — routine, not rare (#6099). The extra dumpsys is still cheap
       // relative to a wrong window; the cache must never win over current
       // window state (#6070).
-      const activeWindow = await window.getActive(true);
+      const activeWindow = readOnly
+        ? await window.getActive(true, undefined, { cacheResult: false })
+        : await window.getActive(true);
       logger.debug(`Bootstrap active window retrieval took ${timer.now() - startedAt}ms`);
       if (activeWindow) {
         result.activeWindow = activeWindow;

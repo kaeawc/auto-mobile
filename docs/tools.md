@@ -190,39 +190,68 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 `observe {"deviceId":"emulator-5554"}` returns the normal screen observation,
 including hierarchy or skeleton, active window, screen size, display, device lock,
-and a screenshot path with its fresh or cached label. It does not acquire a
-session or change device ownership, and it works while another session owns the
-device. An observer read does not update that session's observation baseline,
-snapshot references, navigation graph, or observation stream. The read only
-connects to an already-running hierarchy service; it never starts, installs,
-enables, or restarts one. With `sessionUuid`, the call is a
-session observe, and `deviceId` must match that session's device.
+and an available screenshot with its fresh or cached label. With `sessionUuid`,
+the call is a session observe, and `deviceId` must match that session's device.
 
-- If the owning session's hierarchy client is disconnected, hierarchy freshness
-  reports `connection_lost`; `unavailableDetail` and the warning tell the owner
-  to run a session observe to reconnect. The read does not create a second client.
-- Hierarchy reads wait behind requests tracked by the service client, with a
-  deadline. ADB-driven owner actions run independently: an observer may capture
-  their intermediate UI but does not cancel or reorder their commands. Android
-  ADB screenshots share a capture lock; the observer waits at most 10 seconds
-  before reporting a screenshot failure, without cancelling the owner's capture.
-- An unowned device with an unreachable service reports an unavailable hierarchy.
-  Android can still capture via ADB, and iOS simulators via `simctl`. A physical
-  iOS device without a reachable runner has no host-side screenshot path. If no
-  cached screenshot is available, `screenshotPath` is absent,
-  `screenshotSettled` is false, and `screenshotSettledError` explains why no
-  screenshot could be captured. Otherwise a cached screenshot is labelled as such.
+#### Reading a device you do not own (`deviceId`)
+
+A deviceId read is connect-only: it never installs, enables, sets up, starts or
+restarts CtrlProxy or the iOS runner. Whether it may start a service is an open
+owner decision tracked in #8621. It does not acquire a session or change ownership.
+
+Unavailable hierarchies have `freshness.category: "unavailable"`. The table shows
+exact `unavailableDetail` templates (`${deviceId}` and `${timeoutMs}` are replaced
+with the device ID and connection budget; the default hierarchy budget is 15000ms).
+The detail is also appended to `freshness.warning` and limited to 500 characters.
+
+| `unavailableReason`  | `unavailableDetail`                                                                                                                                                                                                                                   | Caller recovery                                                                                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connection_lost`    | `Device ${deviceId} has no reachable hierarchy service`                                                                                                                                                                                               | An unowned device needs an already-running service; arrange setup through a session, then retry.                                                                              |
+| `connection_lost`    | `Device ${deviceId} is session-owned and has no connected hierarchy service: the owning session's hierarchy client is disconnected. Run a session observe as the owner to reconnect it; a deviceId read only connects to an already-running service.` | The owner must run a session observe to reconnect. This read never creates a second client next to the owner's.                                                               |
+| `connection_lost`    | `Device ${deviceId} hierarchy service did not answer`                                                                                                                                                                                                 | The owned client's socket was connected but the read received no hierarchy; retry, or have the owner check the service through a session observe.                             |
+| `connection_lost`    | `Device ${deviceId} hierarchy read timed out`                                                                                                                                                                                                         | The connection consumed the hierarchy budget before extraction; retry.                                                                                                        |
+| `connection_lost`    | `Observer hierarchy connection for ${deviceId} timed out after ${timeoutMs}ms`                                                                                                                                                                        | The transient connection exceeded its deadline; check service reachability and retry.                                                                                         |
+| `request_timed_out`  | `Owner's in-flight request exceeded the observer hierarchy deadline`                                                                                                                                                                                  | Let the owner's tracked request finish, then retry.                                                                                                                           |
+| `connection_lost`    | Other caught connection/conversion error text                                                                                                                                                                                                         | Check the reported error and retry; cancellation propagates as an error instead of an unavailable observation.                                                                |
+| `incomplete_capture` | Absent for a rootless incomplete Android capture                                                                                                                                                                                                      | Retry after the UI settles; follow the cause-specific freshness warning if the capture remains incomplete. Observer reads do not run the device-writing UIAutomator fallback. |
+| `unknown`            | Absent for a returned error hierarchy or failed platform validation without a typed cause                                                                                                                                                             | Retry and inspect the service's capture; this is the freshness fallback for an unclassified unavailable hierarchy.                                                            |
+
+The observer's result does not update the owner's session baseline, snapshot
+references, observe cache or its generation, screenshot state, navigation graph,
+stream, active-window cache, or display-transition tracker. Android display/posture probes may read
+shared mappings but never populate or refresh them. Android device commands issued
+through ADB are read-only (including streamed `screencap`, `dumpsys`, and display
+and device-state queries); they do not delay, abort, fail or reorder an ADB-driven
+owner action. A read during an action can show intermediate UI: it is not an
+atomic snapshot of that action. Hierarchy reads queue behind requests tracked by
+the service client, within the hierarchy budget. Android still delivers a changed
+observer hierarchy frame through the normal native push path; those ordinary
+service updates can update the stream, navigation and display state independently
+of observation assembly. An unchanged observer frame skips that path. Unowned
+reads close their temporary client and release its host port forward/allocation.
+
+Android ADB screenshots share a capture lock; the observer waits at most 10 seconds
+without cancelling the owner's capture. Android can capture without CtrlProxy,
+and iOS simulators can capture via `simctl`. An unowned physical iOS device without
+a reachable runner has no host-side screenshot capture path. Its exact
+`screenshotSettledError` is:
+
+> No screenshot could be captured: this unowned physical iOS device has no reachable runner. Physical iOS has no host-side screenshot capture path without the runner.
+
+With no eligible cached screenshot, `screenshotPath` is absent. Otherwise the
+cached screenshot is returned with `screenshotSource: "cached"` and the same
+capture failure detail. In both cases `screenshotSettled` is false. The hierarchy
+connection failure still reports `unavailableReason: "connection_lost"`.
 
 Session-less device reads reject `waitFor`, `raw: true`, and `skipBackStack: true`
-before hierarchy or screenshot capture. Use a session observe (pass `sessionUuid`)
-for waiting; `settled` requires `waitFor` and is covered by that rejection.
-Use `project: "full"` for the full filtered hierarchy. Device reads omit
-`snapshotReference`.
+before capture. Use a session observe (`sessionUuid`) for waiting; `settled`
+requires `waitFor` and is covered by that rejection. Use `project: "full"` for the
+full filtered hierarchy. Device reads omit `snapshotReference`.
 
 The default `screenshot: "settled"` awaits a fresh validated capture; it does not
 wait for action history to settle. `screenshot: "async"` also awaits capture on
-device reads, while `"none"` skips it. If capture fails, an eligible cached
-screenshot may be returned with its cached label and capture failure details.
+device reads, while `"none"` skips it. Capture failures retain eligible cached
+screenshots with their cached label and failure details.
 
 ## Interact with the UI
 

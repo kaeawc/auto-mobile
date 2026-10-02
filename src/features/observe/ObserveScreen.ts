@@ -1007,6 +1007,10 @@ export class RealObserveScreen implements ObserveScreen {
    */
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     const observerMode = options?.observerMode === true;
+    // Observer probes may finish after an owner invalidates its display mapping.
+    const androidDisplayCache = observerMode
+      ? new ObservedAndroidDisplayCache(this.timer, true)
+      : this.observedAndroidDisplayCache;
     const displayRequest = options?.display ?? this.requestedDisplay;
     const queryOptions = options?.queryOptions;
     const perf = options?.perf ?? new NoOpPerformanceTracker();
@@ -1041,7 +1045,7 @@ export class RealObserveScreen implements ObserveScreen {
       let recordProvenance = captureStart;
       const observedAndroid =
         this.device.platform === "android"
-          ? await this.observedAndroidDisplayCache.resolve(this.device, this.adb, signal)
+          ? await androidDisplayCache.resolve(this.device, this.adb, signal)
           : undefined;
       if (observedAndroid) {
         result.display = observedAndroid.display;
@@ -1056,7 +1060,7 @@ export class RealObserveScreen implements ObserveScreen {
         : undefined;
       const requestedDisplayId =
         requestedPanel && this.device.platform === "android"
-          ? await this.observedAndroidDisplayCache.logicalIdForPanel(
+          ? await androidDisplayCache.logicalIdForPanel(
               this.device,
               this.adb,
               requestedPanel.key,
@@ -1222,7 +1226,7 @@ export class RealObserveScreen implements ObserveScreen {
         }
         const focusedPanel =
           typeof reportedId === "number" || panelUniqueId
-            ? await this.observedAndroidDisplayCache.panelForLogicalId(
+            ? await androidDisplayCache.panelForLogicalId(
                 this.device,
                 this.adb,
                 reportedId,
@@ -1242,9 +1246,9 @@ export class RealObserveScreen implements ObserveScreen {
         );
         const refreshed =
           geometryChanged && !explicitlyRouted
-            ? await this.observedAndroidDisplayCache.resolve(this.device, this.adb, signal, true)
+            ? await androidDisplayCache.resolve(this.device, this.adb, signal, true)
             : observedAndroid;
-        result.display.posture = await this.observedAndroidDisplayCache.posture(
+        result.display.posture = await androidDisplayCache.posture(
           this.device,
           this.adb,
           signal,
@@ -1937,7 +1941,7 @@ export class RealObserveScreen implements ObserveScreen {
         // that bootstrap interval only; once CtrlProxy supplied an app/activity
         // or hierarchy package, never make the legacy Window query.
         if (!result.activeWindow) {
-          await this.deviceStateCollector.collectActiveWindow(result);
+          await this.deviceStateCollector.collectActiveWindow(result, readOnly);
         }
 
         // Preserve package attribution when the accessibility service did not

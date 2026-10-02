@@ -165,6 +165,7 @@ async function normalizeSyncedHierarchy(options: {
   deadline: number;
   signal?: AbortSignal;
   timer: Timer;
+  observerMode?: boolean;
 }): Promise<ViewHierarchyResult> {
   const { device, dependencies, syncClient, synced, deadline, signal, timer } = options;
   if (device.platform === "ios") {
@@ -180,7 +181,8 @@ async function normalizeSyncedHierarchy(options: {
   if (synced.frameContext !== undefined) {
     hierarchy.frameContext = synced.frameContext;
   }
-  if (!hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
+  // UIAutomator supplementation writes a dump and can interfere with an owner action.
+  if (options.observerMode || !hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
     return hierarchy;
   }
   const supplemented = await supplementAndroidHierarchy(
@@ -256,6 +258,7 @@ export function createDeviceHierarchyCapture(
           deadline,
           signal: request.signal,
           timer,
+          observerMode: request.observerMode,
         });
       } finally {
         if (transient) {

@@ -171,7 +171,7 @@ export class TakeScreenshot implements ScreenshotService {
       return await raceWithDeadline(
         async () => {
           if (this.device.platform !== "ios") {
-            return this.captureAndroidScreenshotViaAdb(finalPath, options, captureSignal);
+            return this.captureScreenshotBase64(finalPath, options, captureSignal, true);
           }
           const capture = await this.captureIosObserverScreenshot(captureSignal);
           return this.writeiOSScreenshot(
@@ -760,6 +760,7 @@ export class TakeScreenshot implements ScreenshotService {
     finalPath: string,
     options: ScreenshotOptions = { format: "png" },
     signal?: AbortSignal,
+    readOnly = false,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     logger.info(`[SCREENSHOT] Trying base64 approach`);
@@ -769,7 +770,10 @@ export class TakeScreenshot implements ScreenshotService {
 
     // Single command: screencap -> base64 encode -> remove temp file
     const displayArgument = await this.screencapDisplayArgument(options, signal);
-    const command = `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
+    // Device reads stream the pixels without creating or removing guest files.
+    const command = readOnly
+      ? `shell "screencap ${displayArgument}-p | base64"`
+      : `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
     // Use larger maxBuffer (50MB) to handle high-resolution screenshots
     const maxBuffer = 50 * 1024 * 1024; // 50MB
     const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () => {

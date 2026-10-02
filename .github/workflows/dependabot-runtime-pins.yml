@@ -1,7 +1,10 @@
 name: Dependabot Runtime Pins
 
-# pull_request uses Dependabot secrets, not Actions secrets. Unlike
-# pull_request_target, it does not grant a privileged base context to PR code.
+# Dependabot-actor pull_request runs use the Dependabot secrets store; maintainer
+# runs (such as reopened PRs) use Actions secrets. AUTO_MOBILE_PR_TOKEN already
+# exists in Actions secrets for merge.yml, nightly.yml and prepare-release.yml,
+# and must also be configured in the Dependabot secrets store.
+# Unlike pull_request_target, this event does not grant a privileged base context to PR code.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -16,7 +19,7 @@ concurrency:
 
 jobs:
   regenerate:
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && (github.event.action != 'synchronize' || github.actor == 'dependabot[bot]') && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -62,7 +65,7 @@ jobs:
 
   push:
     needs: regenerate
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && (github.event.action != 'synchronize' || github.actor == 'dependabot[bot]') && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -86,7 +89,7 @@ jobs:
           path: runtime-pins
 
       # Only trusted base code receives the PAT, on a runner that never ran PR
-      # code. The PAT retriggers CI; its owner's actor guard prevents a loop.
+      # code. The PAT retriggers CI; the synchronize actor guard prevents a loop.
       - name: Commit and push runtime pins
         env:
           TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}

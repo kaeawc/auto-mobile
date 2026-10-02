@@ -37,7 +37,8 @@ remote_sha() {
 }
 
 changed_pins() {
-  printf '{"updated":true}\n' | tee "$PINS_DIR/package.json" "$PINS_DIR/bun.lock" "$PINS_DIR/scripts/release/runtime-graph.json" >/dev/null
+  printf '{"dependencies":{"updated":"1.0.0"}}\n' > "$PINS_DIR/package.json"
+  printf '{"updated":true}\n' | tee "$PINS_DIR/bun.lock" "$PINS_DIR/scripts/release/runtime-graph.json" >/dev/null
 }
 
 assert_rejected() {
@@ -77,6 +78,123 @@ WRAPPER
   [ "$(remote_git diff-tree --no-commit-id --name-only -r "$new_sha")" = $'bun.lock\npackage.json\nscripts/release/runtime-graph.json' ]
   [ "$(remote_git show "$new_sha:unrelated.txt")" = untouched ]
   [ "$(remote_git show -s --format='%an <%ae>' "$new_sha")" = 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>' ]
+}
+
+@test "artifact package scripts cannot change from the PR head" {
+  printf '{"scripts":{"postinstall":"curl evil"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  assert_rejected
+  [[ "$output" == *'package.json'* ]]
+}
+
+@test "artifact package name and bin cannot change from the PR head" {
+  for tampered in '{"name":"evil"}' '{"bin":{"evil":"evil.sh"}}'; do
+    printf '%s\n' "$tampered" > "$PINS_DIR/package.json"
+    run bash "$SCRIPT"
+    assert_rejected
+    [[ "$output" == *'package.json'* ]]
+  done
+}
+
+@test "artifact trustedDependencies cannot change from the PR head" {
+  printf '{"trustedDependencies":["evil"]}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  assert_rejected
+  [[ "$output" == *'Artifact package.json changed fields outside the allowed dependency keys.'* ]]
+}
+
+@test "artifact overrides cannot change from the PR head" {
+  printf '{"overrides":{"a":"1.0.1"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  assert_rejected
+  [[ "$output" == *'Artifact package.json changed fields outside the allowed dependency keys.'* ]]
+}
+
+@test "artifact resolutions cannot change from the PR head" {
+  printf '{"resolutions":{"a":"1.0.1"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  assert_rejected
+  [[ "$output" == *'Artifact package.json changed fields outside the allowed dependency keys.'* ]]
+}
+
+@test "artifact optionalDependencies cannot change from the PR head" {
+  printf '{"optionalDependencies":{"a":"1.0.1"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  assert_rejected
+  [[ "$output" == *'Artifact package.json changed fields outside the allowed dependency keys.'* ]]
+}
+
+@test "artifact peerDependencies cannot change from the PR head" {
+  printf '{"peerDependencies":{"a":"1.0.1"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  assert_rejected
+  [[ "$output" == *'Artifact package.json changed fields outside the allowed dependency keys.'* ]]
+}
+
+@test "dependency version changes are accepted and pushed" {
+  printf '{"dependencies":{"a":"1.0.0"}}\n' > package.json
+  git add -- package.json
+  git commit -qm 'dependency before pin regeneration'
+  HEAD_SHA="$(git rev-parse HEAD)"
+  git push -q origin HEAD:refs/heads/"$HEAD_REF"
+  printf '{"dependencies":{"a":"1.0.1"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(remote_sha)" != "$HEAD_SHA" ]
+  [ "$(remote_git show "$(remote_sha):package.json")" = '{"dependencies":{"a":"1.0.1"}}' ]
+}
+
+@test "devDependency version changes are accepted and pushed" {
+  printf '{"devDependencies":{"a":"1.0.0"}}\n' > package.json
+  git add -- package.json
+  git commit -qm 'devDependency before pin regeneration'
+  HEAD_SHA="$(git rev-parse HEAD)"
+  git push -q origin HEAD:refs/heads/"$HEAD_REF"
+  printf '{"devDependencies":{"a":"1.0.1"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(remote_sha)" != "$HEAD_SHA" ]
+  [ "$(remote_git show "$(remote_sha):package.json")" = '{"devDependencies":{"a":"1.0.1"}}' ]
+}
+
+@test "a new transitive dependency pin is accepted and pushed" {
+  # Pin rewrites legitimately add/remove/move names: repartitionDependencies in
+  # scripts/release/lib/runtime-pins.ts promotes closure pins into dependencies
+  # and moves entries to devDependencies. Name-set changes within the three
+  # written keys are NOT rejected; this is deliberate.
+  printf '{"dependencies":{"a":"1.0.0"}}\n' > package.json
+  git add -- package.json
+  git commit -qm 'dependency before closure pin addition'
+  HEAD_SHA="$(git rev-parse HEAD)"
+  git push -q origin HEAD:refs/heads/"$HEAD_REF"
+  printf '{"dependencies":{"a":"1.0.0","transitive":"2.0.0"}}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(remote_sha)" != "$HEAD_SHA" ]
+  [ "$(remote_git show "$(remote_sha):package.json")" = '{"dependencies":{"a":"1.0.0","transitive":"2.0.0"}}' ]
+}
+
+@test "package comparison ignores formatting and object key order" {
+  printf '{"name":"safe","scripts":{"test":"bun test","build":"bun run build"}}\n' > package.json
+  git add -- package.json
+  git commit -qm 'package metadata'
+  HEAD_SHA="$(git rev-parse HEAD)"
+  git push -q origin HEAD:refs/heads/"$HEAD_REF"
+  printf '{\n "scripts": {"build":"bun run build", "test":"bun test"},\n "name": "safe",\n "dependencies": {"a":"1.0.1"}\n}\n' > "$PINS_DIR/package.json"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(remote_sha)" != "$HEAD_SHA" ]
+}
+
+@test "PR head without package.json is rejected" {
+  git rm -q package.json
+  git commit -qm 'missing package'
+  HEAD_SHA="$(git rev-parse HEAD)"
+  git push -q origin HEAD:refs/heads/"$HEAD_REF"
+  changed_pins
+  run bash "$SCRIPT"
+  assert_rejected
+  [[ "$output" == *'package.json'* ]]
 }
 
 @test "extra paths including dotfiles and directories are rejected" {
@@ -155,6 +273,7 @@ WRAPPER
   assert_rejected
   [[ "$output" == *'::error::Missing AUTO_MOBILE_PR_TOKEN'* ]]
   [[ "$output" == *'Dependabot secrets store'* ]]
+  [[ "$output" == *'Actions secrets store'* ]]
 }
 
 @test "malicious template hooks config and PR symlinks cannot execute or redirect writes" {
@@ -168,10 +287,10 @@ WRAPPER
   printf '[core]\n hooksPath = %s/hooks\n fsmonitor = %s/hooks/pre-commit\n' "$GIT_TEMPLATE_DIR" "$GIT_TEMPLATE_DIR" > "$GIT_TEMPLATE_DIR/config"
   # A checkout would materialize these paths. The trusted script uses the index
   # only, so neither the template config nor PR symlinks affect copying/staging.
-  rm package.json
-  ln -s .git/config package.json
+  rm bun.lock
+  ln -s .git/config bun.lock
   printf 'package.json working-tree-encoding=UTF-16\n' > .gitattributes
-  git add -- package.json .gitattributes
+  git add -- bun.lock .gitattributes
   git commit -qm 'malicious PR paths'
   HEAD_SHA="$(git rev-parse HEAD)"
   git push -q origin HEAD:refs/heads/"$HEAD_REF"
@@ -181,7 +300,8 @@ WRAPPER
   [ ! -e "$HOOK_MARKER" ]
   local new_sha
   new_sha="$(remote_sha)"
-  [ "$(remote_git show "$new_sha:package.json")" = '{"updated":true}' ]
+  [ "$(remote_git show "$new_sha:package.json")" = '{"dependencies":{"updated":"1.0.0"}}' ]
+  [ "$(remote_git show "$new_sha:bun.lock")" = '{"updated":true}' ]
   [ "$(remote_git diff-tree --no-commit-id --name-only -r "$new_sha")" = $'bun.lock\npackage.json\nscripts/release/runtime-graph.json' ]
 }
 

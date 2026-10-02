@@ -733,10 +733,10 @@ jobs:
       - name: "Stop isolated Gradle daemon and remove desktop home"
         if: always() && runner.environment == 'self-hosted'
         shell: bash
-        working-directory: android
+        working-directory: .
         run: |
           if [[ -d "${GRADLE_USER_HOME:-}" ]]; then
-            if ! ./gradlew --stop; then
+            if ! (cd android && ./gradlew --stop); then
               echo '::warning::Failed to stop the isolated Gradle daemon before removing its home.' >&2
             fi
           fi

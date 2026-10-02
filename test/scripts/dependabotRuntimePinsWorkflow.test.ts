@@ -23,12 +23,12 @@ const script = readFileSync(
   "utf8",
 );
 const guard =
-  "github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository";
+  "github.event.pull_request.user.login == 'dependabot[bot]' && (github.event.action != 'synchronize' || github.actor == 'dependabot[bot]') && github.event.pull_request.head.repo.full_name == github.repository";
 const artifactName =
   "runtime-pins-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}";
 
 describe("Dependabot runtime pin refresh contract", () => {
-  test("two guarded jobs handle only same-repository Dependabot dependency PRs", () => {
+  test("two guarded jobs allow maintainer reopens but restrict synchronize to Dependabot", () => {
     expect(Object.keys(workflow.on ?? {})).toEqual(["pull_request"]);
     expect(workflow.on?.pull_request?.types).toEqual(["opened", "synchronize", "reopened"]);
     expect(workflow.on?.pull_request?.paths).toEqual(["package.json", "bun.lock"]);
@@ -38,6 +38,10 @@ describe("Dependabot runtime pin refresh contract", () => {
       // No always(): the default success() condition prevents a failed check
       // from uploading data or allowing the dependent push job to run.
       expect(job?.if).toBe(guard);
+      expect(job?.if).toContain("github.event.pull_request.user.login == 'dependabot[bot]'");
+      expect(job?.if).toContain(
+        "(github.event.action != 'synchronize' || github.actor == 'dependabot[bot]')",
+      );
       expect(job?.["timeout-minutes"]).toBeGreaterThan(0);
       expect(job?.["runs-on"]).toBe("ubuntu-latest");
       expect(job?.permissions).toEqual({ contents: "read" });
@@ -135,6 +139,43 @@ describe("Dependabot runtime pin refresh contract", () => {
     expect(upload?.with?.["retention-days"]).toBe(1);
     expect(upload?.with?.name).toBe(artifactName);
     expect(download?.with).toEqual({ name: artifactName, path: "runtime-pins" });
+  });
+
+  test("package.json preserves PR head fields outside the dependency keys before writing blobs", () => {
+    expect(script).toContain('run_git show "$HEAD_SHA:package.json"');
+    const keyLists = [...script.matchAll(/^package_keys='([^']+)'$/gm)];
+    expect(keyLists).toHaveLength(1);
+    const ignoredKeys: string[] = JSON.parse(keyLists[0]![1]!);
+    // The sparse trusted checkout cannot read this file at runtime, and writeMode
+    // has no exported key contract, so scan its assignments to detect drift.
+    const pinSource = readFileSync(
+      join(import.meta.dir, "../../scripts/release/pin-runtime-deps.ts"),
+      "utf8",
+    );
+    const writeStart = pinSource.indexOf("function writeMode");
+    expect(writeStart).toBeGreaterThanOrEqual(0);
+    const writeEnd = pinSource.indexOf("\nfunction ", writeStart + 1);
+    expect(writeEnd).toBeGreaterThan(writeStart);
+    const writeBody = pinSource.slice(writeStart, writeEnd);
+    const writtenKeys = [...new Set([...writeBody.matchAll(/pkg\.(\w+) = /g)].map((m) => m[1]!))];
+    expect(writtenKeys).not.toHaveLength(0);
+    expect(ignoredKeys.sort()).toEqual(writtenKeys.sort());
+    for (const key of [
+      "overrides",
+      "resolutions",
+      "trustedDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+      "bundleDependencies",
+    ]) {
+      expect(script).not.toContain(key);
+    }
+    expect(script).toContain("package_filter='delpaths($keys | map([.]))'");
+    expect(script.match(/--argjson keys "\$package_keys" "\$package_filter"/g)).toHaveLength(2);
+    expect(script).toContain("jq -S -c");
+    expect(script.indexOf('run_git show "$HEAD_SHA:package.json"')).toBeLessThan(
+      script.indexOf("run_git hash-object -w"),
+    );
   });
 
   test("trusted git operations use isolated config and env-only auth without force or skip-ci", () => {

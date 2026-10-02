@@ -209,12 +209,23 @@ export class SwipeOn extends BaseVisualChange {
   }> {
     throwIfAborted(signal);
     let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
-    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
+    const staleCachedRefetch = BaseVisualChange.shouldRefetchCachedObservation(observeResult);
+    if (
+      staleCachedRefetch ||
+      !observeResult.viewHierarchy ||
+      observeResult.viewHierarchy.hierarchy?.error
+    ) {
       throwIfAborted(signal);
-      observeResult = await this.observeScreen.execute({ freshness: "cached-ok", signal });
+      observeResult = await this.observeScreen.execute({
+        freshness: staleCachedRefetch ? "fresh" : "cached-ok",
+        signal,
+      });
     }
 
-    if (!observeResult.viewHierarchy) {
+    if (
+      !observeResult.viewHierarchy ||
+      (staleCachedRefetch && observeResult.viewHierarchy.hierarchy?.error)
+    ) {
       return { scrollables: [], candidates: [], observeResult };
     }
 

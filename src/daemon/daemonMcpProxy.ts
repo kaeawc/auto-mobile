@@ -2068,6 +2068,9 @@ export class DaemonMcpProxy {
       if (!this.isRecoverableDaemonSessionError(error, established)) {
         throw error;
       }
+      if (error instanceof DaemonShuttingDownError) {
+        this.waitForDaemonShutdownDisconnect();
+      }
       const refusedToolName = this.ambiguousReplayToolName(
         error,
         established,
@@ -2083,9 +2086,6 @@ export class DaemonMcpProxy {
       logger.warn(
         `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
       );
-      if (error instanceof DaemonShuttingDownError) {
-        this.waitForDaemonShutdownDisconnect();
-      }
       await this.resetConnection();
       this.throwIfBoundSessionFenced(allowReleasedSession);
       await this.ensureConnected();
@@ -2194,7 +2194,7 @@ export class DaemonMcpProxy {
   private isProvablyUndispatchedError(error: unknown): boolean {
     return (
       error instanceof DaemonRequestNotDeliveredError ||
-      error instanceof DaemonShuttingDownError ||
+      (error instanceof DaemonShuttingDownError && !error.requestMayHaveDispatched) ||
       error instanceof DaemonHandshakeMismatchError ||
       this.isRecoverableUnknownToolError(error)
     );

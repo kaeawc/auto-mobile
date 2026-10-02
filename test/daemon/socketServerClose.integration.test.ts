@@ -231,12 +231,16 @@ describe("UnixSocketServer close", () => {
           expect.objectContaining({
             id: "queued",
             success: false,
-            daemonShuttingDown: expect.objectContaining({ code: "daemon_shutting_down" }),
+            daemonShuttingDown: { code: "daemon_shutting_down", retryable: true },
           }),
           expect.objectContaining({
             id: "refresh",
             success: false,
-            daemonShuttingDown: expect.objectContaining({ code: "daemon_shutting_down" }),
+            daemonShuttingDown: {
+              code: "daemon_shutting_down",
+              retryable: true,
+              requestMayHaveDispatched: true,
+            },
           }),
         ]);
         expect(refreshStarts).toBe(1);

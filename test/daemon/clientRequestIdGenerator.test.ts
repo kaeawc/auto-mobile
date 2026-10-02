@@ -6,6 +6,10 @@ import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+interface DaemonClientFrameInternals {
+  handleData(data: Buffer): void;
+}
+
 /**
  * Capture every frame written to the socket so the test can inspect the request
  * `id` the client stamped. The client writes newline-delimited JSON.
@@ -77,30 +81,36 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     await pending;
   });
 
-  test("classifies a structured quiescing daemon response as retryable", async () => {
-    const idGenerator = new CountingIdGenerator("req");
-    const writes: string[] = [];
-    const client = createConnectedClient(fakeTimer, idGenerator, writes);
+  test.each([undefined, true] as const)(
+    "preserves shutdown dispatch marker %s in the client error",
+    async (requestMayHaveDispatched) => {
+      const idGenerator = new CountingIdGenerator("req");
+      const writes: string[] = [];
+      const client = createConnectedClient(fakeTimer, idGenerator, writes);
 
-    const pending = client.callTool("tapOn", {});
-    (client as any).handleData(
-      Buffer.from(
-        JSON.stringify({
-          id: "req-1",
-          type: "mcp_response",
-          success: false,
-          error: "A malformed error message must not affect shutdown classification",
-          daemonShuttingDown: {
-            code: DAEMON_SHUTTING_DOWN_ERROR_CODE,
-            retryable: true,
-          },
-        }) + "\n",
-      ),
-    );
+      const pending = client.callTool("tapOn", {});
+      (client as unknown as DaemonClientFrameInternals).handleData(
+        Buffer.from(
+          JSON.stringify({
+            id: "req-1",
+            type: "mcp_response",
+            success: false,
+            error: "A malformed error message must not affect shutdown classification",
+            daemonShuttingDown: {
+              code: DAEMON_SHUTTING_DOWN_ERROR_CODE,
+              retryable: true,
+              ...(requestMayHaveDispatched ? { requestMayHaveDispatched } : {}),
+            },
+          }) + "\n",
+        ),
+      );
 
-    await expect(pending).rejects.toBeInstanceOf(DaemonShuttingDownError);
-    await client.close();
-  });
+      const error: unknown = await pending.catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(DaemonShuttingDownError);
+      expect(error).toMatchObject({ requestMayHaveDispatched: requestMayHaveDispatched === true });
+      await client.close();
+    },
+  );
 
   test("does not classify an unmarked error message as daemon shutdown", async () => {
     const idGenerator = new CountingIdGenerator("req");

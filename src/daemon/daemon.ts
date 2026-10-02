@@ -1,3 +1,4 @@
+import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
 import {
@@ -42,6 +43,7 @@ import {
   DAEMON_PORT_RANGE_END,
   DAEMON_LAUNCH_LOG_PATH_ENV,
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
 import { statSync } from "node:fs";
@@ -237,7 +239,6 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
-const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
 const DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS = 2_000;
 const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
 
@@ -362,6 +363,7 @@ export class Daemon {
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
   private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
   private stoppingRecordings: Set<string> = new Set();
+  private observerSessionRegistry: ObserverSessionRegistry;
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
   private deviceSessionRegistry: DeviceSessionRegistry;
@@ -484,6 +486,7 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.observerSessionRegistry = new ObserverSessionRegistry(this.timer);
     registerLocationRouteSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
@@ -615,6 +618,7 @@ export class Daemon {
       this.sessionManager,
       this.devicePool,
       this.deviceSessionRegistry,
+      this.observerSessionRegistry,
     );
 
     // Apply CLI flags to serverConfig so daemon tools respect them
@@ -3255,7 +3259,10 @@ export class Daemon {
           // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
           // and hit the just-closed connection (issue #2912; #2792 safety window).
           name: "session cleanup timer",
-          run: () => this.sessionManager.stopCleanupTimer(),
+          run: () => {
+            this.sessionManager.stopCleanupTimer();
+            this.observerSessionRegistry.dispose();
+          },
         },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },

@@ -1,3 +1,4 @@
+import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -22,6 +23,7 @@ export interface DaemonStateLike {
  */
 export class DaemonState implements DaemonStateLike {
   private static instance: DaemonState;
+  private observerSessionRegistry: ObserverSessionStore | null = null;
   private sessionManager: SessionManager | null = null;
   private devicePool: DevicePool | null = null;
   private deviceSessionRegistry: DeviceSessionRegistry | null = null;
@@ -52,8 +54,13 @@ export class DaemonState implements DaemonStateLike {
     // production caller relying on it would get an empty registry that no device
     // lifecycle ever populates.
     deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry(),
+    observerSessionRegistry?: ObserverSessionStore,
   ): void {
     this.sessionManager = sessionManager;
+    this.observerSessionRegistry = observerSessionRegistry ?? null;
+    if (observerSessionRegistry) {
+      sessionManager.setObserverSessionRegistry(observerSessionRegistry);
+    }
     this.devicePool = devicePool;
     this.deviceSessionRegistry = deviceSessionRegistry;
     // The pool's incarnation counter is the only connection-epoch token in the
@@ -68,6 +75,10 @@ export class DaemonState implements DaemonStateLike {
         sessionManager.resetDeviceReadinessForDevice(deviceId),
     });
     setDeviceIncarnationBumper((deviceId) => devicePool.bumpDeviceIncarnation(deviceId));
+  }
+
+  getObserverSessionRegistry(): ObserverSessionStore | undefined {
+    return this.observerSessionRegistry ?? undefined;
   }
 
   /**
@@ -115,6 +126,8 @@ export class DaemonState implements DaemonStateLike {
    * Reset state (for testing or shutdown)
    */
   reset(): void {
+    this.observerSessionRegistry?.dispose();
+    this.observerSessionRegistry = null;
     this.sessionManager = null;
     this.devicePool = null;
     this.deviceSessionRegistry = null;

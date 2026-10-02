@@ -27,9 +27,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
+private const val DAEMON_REGISTER_SESSION_METHOD = "daemon/registerSession"
 private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
 private const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
 private const val INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream"
@@ -71,6 +74,16 @@ class McpDaemonClient(
     statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
   ) : this(socketPathValue = socketPathValue, statusRequestTimeoutMs = statusRequestTimeoutMs) {
     this.daemonLifecycle = daemonLifecycle
+  }
+
+  private var requestTransport: DaemonRequestTransport? = null
+
+  internal constructor(
+    requestTransport: DaemonRequestTransport,
+    json: Json = DaemonJson,
+  ) : this(socketPathValue = "in-memory-daemon", json = json, clientVersion = null) {
+    this.daemonLifecycle = null
+    this.requestTransport = requestTransport
   }
 
   val socketPath: String
@@ -811,6 +824,17 @@ class McpDaemonClient(
     }
   }
 
+  /** Registers an identity without binding or reserving any device. */
+  fun registerSession(sessionId: String, clientName: String): RegisterSessionResult {
+    val response =
+      sendRequest(
+        DAEMON_REGISTER_SESSION_METHOD,
+        json.encodeToJsonElement(RegisterSessionRequest(sessionId, clientName)).jsonObject,
+      )
+    ensureSuccess(response)
+    return json.decodeFromJsonElement(serializer<RegisterSessionResult>(), response.result!!)
+  }
+
   /** Releases this client's daemon session, if it owns one. */
   internal fun releaseSession() {
     val sessionId = sessionUuid ?: return
@@ -982,6 +1006,18 @@ class McpDaemonClient(
     timeoutMs: Long? = null,
     skipLifecyclePreflight: Boolean = false,
   ): DaemonResponse {
+    requestTransport?.let { transport ->
+      return transport.send(
+        DaemonRequest(
+          id = UUID.randomUUID().toString(),
+          type = "mcp_request",
+          method = method,
+          params = params,
+          clientVersion = clientVersion,
+          timeoutMs = timeoutMs,
+        )
+      )
+    }
     // Status is a passive health probe. Its purpose is to report a wedged daemon, so running the
     // lifecycle preflight first can itself hang before the request watchdog is armed.
     if (!skipLifecyclePreflight) {
@@ -1222,6 +1258,20 @@ object DaemonSocketPaths {
       userName
     }
   }
+}
+
+@Serializable data class RegisterSessionRequest(val sessionId: String, val clientName: String)
+
+@Serializable
+data class RegisterSessionResult(
+  val accepted: Boolean,
+  val heartbeatTimeoutMs: Long,
+  val expiresAtMs: Long,
+)
+
+/** In-memory request seam; production continues to use the daemon socket. */
+internal fun interface DaemonRequestTransport {
+  fun send(request: DaemonRequest): DaemonResponse
 }
 
 @Serializable

@@ -1,3 +1,9 @@
+import { z } from "zod";
+import {
+  MAX_OBSERVER_CLIENT_NAME_LENGTH,
+  MAX_OBSERVER_SESSION_ID_LENGTH,
+  type ObserverSessionStore,
+} from "./observerSessionRegistry";
 import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
@@ -7,7 +13,9 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
 
@@ -26,8 +34,10 @@ export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
+  getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
@@ -101,6 +111,52 @@ export interface ListedDeviceSessionRecord extends DeviceSessionRecord {
   identityUnresolved?: true;
 }
 
+const registerSessionParams = z.object({
+  sessionId: z.string().max(MAX_OBSERVER_SESSION_ID_LENGTH).uuid(),
+  clientName: z.string().max(MAX_OBSERVER_CLIENT_NAME_LENGTH).trim().min(1),
+});
+
+async function handleRegisterSession(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const params: unknown = request.params;
+  const parsed = registerSessionParams.safeParse(params);
+  if (!parsed.success) {
+    return { success: false, error: `Invalid registerSession parameters: ${parsed.error.message}` };
+  }
+  const { sessionId, clientName } = parsed.data;
+  const manager = state.getSessionManager();
+  if (
+    (await manager.waitForSessionReleaseWithin?.(sessionId, SESSION_RELEASE_DRAIN_TIMEOUT_MS)) ===
+    false
+  ) {
+    return {
+      success: false,
+      error: `Session ${sessionId} release is still in progress after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms; retry registration`,
+    };
+  }
+  const session = manager.getSession(sessionId);
+  if (session) {
+    return {
+      success: true,
+      result: {
+        accepted: true,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        expiresAtMs: session.lastHeartbeat + session.heartbeatTimeoutMs,
+      },
+    };
+  }
+  const registry = state.getObserverSessionRegistry?.();
+  if (!registry) {
+    return { success: false, error: "Observer session registration is unavailable" };
+  }
+  const registration = registry.register(sessionId, clientName);
+  return registration.accepted
+    ? { success: true, result: { ...registration } }
+    : { success: false, error: registration.error };
+}
+
 export async function handleDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
@@ -118,7 +174,11 @@ export async function handleDaemonRequest(
     return {
       success: true,
       result: {
-        capabilities: [INPUT_TYPE_TEXT_APPEND_CAPABILITY, INPUT_GESTURE_STREAM_CAPABILITY],
+        capabilities: [
+          INPUT_TYPE_TEXT_APPEND_CAPABILITY,
+          INPUT_GESTURE_STREAM_CAPABILITY,
+          DAEMON_REGISTER_SESSION_METHOD,
+        ],
       },
     };
   }
@@ -131,6 +191,8 @@ export async function handleDaemonRequest(
   }
 
   switch (request.method) {
+    case DAEMON_REGISTER_SESSION_METHOD:
+      return handleRegisterSession(request, state);
     case DAEMON_HEARTBEAT_METHOD: {
       const heartbeatParams = request.params as
         | {
@@ -151,6 +213,12 @@ export async function handleDaemonRequest(
       const manager = state.getSessionManager();
       const session = manager.getSession(sessionId);
       if (!session) {
+        if (
+          typeof sessionId === "string" &&
+          state.getObserverSessionRegistry?.()?.heartbeat(sessionId)
+        ) {
+          return { success: true, result: { sessionId } };
+        }
         return {
           success: false,
           error: `Session not found: ${sessionId}`,
@@ -309,9 +377,20 @@ export async function handleDaemonRequest(
         };
       }
       const manager = state.getSessionManager();
-      const pool = state.getDevicePool();
       const session = manager.getSession(sessionId);
       if (!session) {
+        if (
+          typeof sessionId === "string" &&
+          state.getObserverSessionRegistry?.()?.release(sessionId)
+        ) {
+          return {
+            success: true,
+            result: {
+              message: `Session ${sessionId} released`,
+              alreadyReleased: false,
+            },
+          };
+        }
         // Session doesn't exist - treat as already released (idempotent)
         // This happens when daemon auto-releases after executePlan completes
         return {
@@ -322,6 +401,7 @@ export async function handleDaemonRequest(
           },
         };
       }
+      const pool = state.getDevicePool();
       const deviceId = session.assignedDevice;
       await manager.releaseSession(sessionId);
       await pool.releaseDevice(deviceId, sessionId);

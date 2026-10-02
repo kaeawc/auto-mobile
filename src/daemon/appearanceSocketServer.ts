@@ -13,7 +13,11 @@ import {
 } from "../server/appearanceManager";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
-import { triggerAppearanceSync } from "../utils/appearance/AppearanceSyncScheduler";
+import {
+  DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
+  triggerAppearanceSync,
+} from "../utils/appearance/AppearanceSyncScheduler";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DaemonState } from "./daemonState";
 import type {
   AppearanceConfig,
@@ -58,6 +62,7 @@ export interface AppearanceSocketServerDependencies {
   resolveMode: (config: AppearanceConfig) => Promise<AppearanceMode>;
   applyToDevice: (device: BootedDevice, mode: AppearanceMode) => Promise<void>;
   triggerSync: () => Promise<void>;
+  applyDeadlineMs?: number;
 }
 
 const defaultDependencies: AppearanceSocketServerDependencies = {
@@ -176,7 +181,11 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
 
     for (const device of targets) {
       try {
-        await this.dependencies.applyToDevice(device, mode);
+        await raceWithDeadline(() => this.dependencies.applyToDevice(device, mode), {
+          timer: this.timer,
+          timeoutMs: this.dependencies.applyDeadlineMs ?? DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
+          label: `Appearance apply for ${device.deviceId}`,
+        });
       } catch (error) {
         logger.warn(`[Appearance] Failed to apply appearance to ${device.deviceId}: ${error}`);
       }

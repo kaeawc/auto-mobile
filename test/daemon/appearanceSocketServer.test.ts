@@ -101,6 +101,58 @@ describe("AppearanceSocketServer", () => {
     socket = new FakeSocket();
   });
 
+  it("continues after a hung target's deadline and returns the applied mode", async () => {
+    const applied: string[] = [];
+    let triggered = false;
+    const dependencies = fakeDependencies();
+    dependencies.applyDeadlineMs = 25;
+    dependencies.applyToDevice = async (target, mode) => {
+      applied.push(`${target.deviceId}:${mode}`);
+      if (target.deviceId === "hung") {
+        await new Promise<void>(() => {});
+      }
+    };
+    dependencies.triggerSync = async () => {
+      triggered = true;
+    };
+    const source: AppearanceDeviceSource = {
+      getPooledDevices: () => [device("hung"), device("ready")],
+      getCurrentDevice: () => undefined,
+    };
+    server = new TestableAppearanceSocketServer(timer, allowAllAuthenticator, source, dependencies);
+    await server.startFake();
+    let finished = false;
+    const request = server
+      .simulateLine(
+        socket,
+        JSON.stringify({ id: "bounded", command: "set_appearance", mode: "dark" }),
+      )
+      .then(() => {
+        finished = true;
+      });
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve();
+    }
+    expect(applied).toEqual(["hung:dark"]);
+    timer.advanceTime(26);
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve();
+    }
+    expect(applied).toEqual(["hung:dark", "ready:dark"]);
+    expect(finished).toBe(true);
+    await request;
+    expect(triggered).toBe(true);
+    expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+      {
+        id: "bounded",
+        type: "appearance_response",
+        success: true,
+        result: { config: expect.any(Object), appliedMode: "dark" },
+      },
+    ]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   describe("validation and command resolution (rejects before side effects)", () => {
     interface Row {
       name: string;

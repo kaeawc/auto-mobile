@@ -43,6 +43,7 @@ import {
   DAEMON_PORT_RANGE_END,
   DAEMON_LAUNCH_LOG_PATH_ENV,
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
 import { statSync } from "node:fs";
@@ -238,7 +239,6 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
-const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
 const DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS = 2_000;
 const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
 

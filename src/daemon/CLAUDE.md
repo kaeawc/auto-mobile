@@ -94,6 +94,10 @@ non-blank client name (128-character caps). It returns the usual success envelop
 with `{ accepted, heartbeatTimeoutMs, expiresAtMs }`, or `success: false, error`
 with an actionable quota message. It stays on the per-socket request queue;
 `daemon/heartbeat` retains its existing out-of-band dispatch.
+Registration waits up to the shared 5,000ms release drain timeout for an in-flight
+release of that UUID to settle, then rechecks whether to accept the device session
+or register an observer. If release is still in progress, it returns a typed failure
+asking the client to retry registration; unrelated UUIDs do not wait for that release.
 
 `ObserverSessionRegistry` is a separate in-memory registry, never a `Session`
 and never persisted. Defaults pending owner confirmation: cap 32

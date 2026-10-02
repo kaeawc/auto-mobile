@@ -15,6 +15,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
 
@@ -36,6 +37,7 @@ export interface DaemonStateAccess {
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
@@ -114,17 +116,27 @@ const registerSessionParams = z.object({
   clientName: z.string().max(MAX_OBSERVER_CLIENT_NAME_LENGTH).trim().min(1),
 });
 
-function handleRegisterSession(
+async function handleRegisterSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
-): DaemonMethodResult {
+): Promise<DaemonMethodResult> {
   const params: unknown = request.params;
   const parsed = registerSessionParams.safeParse(params);
   if (!parsed.success) {
     return { success: false, error: `Invalid registerSession parameters: ${parsed.error.message}` };
   }
   const { sessionId, clientName } = parsed.data;
-  const session = state.getSessionManager().getSession(sessionId);
+  const manager = state.getSessionManager();
+  if (
+    (await manager.waitForSessionReleaseWithin?.(sessionId, SESSION_RELEASE_DRAIN_TIMEOUT_MS)) ===
+    false
+  ) {
+    return {
+      success: false,
+      error: `Session ${sessionId} release is still in progress after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms; retry registration`,
+    };
+  }
+  const session = manager.getSession(sessionId);
   if (session) {
     return {
       success: true,

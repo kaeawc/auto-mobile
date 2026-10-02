@@ -2454,6 +2454,34 @@ export class SessionManager {
     }
   }
 
+  /** Wait for this session's admitted release to settle, including failure, within a bound. */
+  async waitForSessionReleaseWithin(sessionId: string, timeoutMs: number): Promise<boolean> {
+    const release =
+      this.pendingSessionReleases.get(sessionId) ?? this.releasePromises.get(sessionId);
+    if (!release) {
+      return true;
+    }
+    const deadline = new Error("Session release wait timed out");
+    try {
+      return await raceWithDeadline(
+        Promise.allSettled([release.promise]).then(() => true),
+        {
+          timer: this.timer,
+          timeoutMs,
+          label: "Session release wait",
+          timeoutError: () => deadline,
+        },
+      );
+    } catch (error) {
+      if (error === deadline) {
+        // A release may legitimately outlast the registration wait; the client can retry.
+        logger.debug(`Timed out after ${timeoutMs}ms waiting for session ${sessionId} release`);
+        return false;
+      }
+      throw error;
+    }
+  }
+
   private async releaseSessionInternal(
     sessionId: string,
     session: Session,

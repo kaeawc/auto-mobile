@@ -412,6 +412,9 @@ export const DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD = "daemon/subscribe-notificat
 /** Queued registration of a client identity without device allocation. */
 export const DAEMON_REGISTER_SESSION_METHOD = "daemon/registerSession";
 
+/** Bound for waiting on in-flight session releases during registration or shutdown. */
+export const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
+
 /**
  * Bound-session keepalive method. Must be answered immediately, never queued
  * behind an in-flight `tools/call` on the same socket: the MCP proxy's keeper

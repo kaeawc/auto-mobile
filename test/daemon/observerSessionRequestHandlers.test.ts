@@ -3,7 +3,10 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/constants";
+import {
+  DAEMON_REGISTER_SESSION_METHOD,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
+} from "../../src/daemon/constants";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   ObserverSessionRegistry,
@@ -23,6 +26,19 @@ const request = (method: string, params: unknown): DaemonRequest => ({
   method,
   params,
 });
+
+class DeferredReleasePersistence extends FakeDeviceSessionPersistence {
+  readonly releaseStarted = Promise.withResolvers<void>();
+  readonly finishRelease = Promise.withResolvers<void>();
+
+  override async markReleased(
+    ...args: Parameters<FakeDeviceSessionPersistence["markReleased"]>
+  ): Promise<void> {
+    this.releaseStarted.resolve();
+    await this.finishRelease.promise;
+    await super.markReleased(...args);
+  }
+}
 
 describe("registration-only daemon requests", () => {
   let timer: FakeTimer;
@@ -189,5 +205,162 @@ describe("registration-only daemon requests", () => {
       ).success,
     ).toBe(true);
     expect(registry.list()).toEqual([]);
+  });
+
+  test("registration waits for teardown, then registers an observer that can heartbeat", async () => {
+    const session = await manager.createSession(sessionId, "device-a", "android");
+    session.heartbeatTimeoutMs = 20000;
+    const finishSetup = Promise.withResolvers<void>();
+    const setup = manager.trackSessionSetup(session, () => finishSetup.promise);
+    const release = manager.releaseSession(sessionId, "explicit-release");
+    let responded = false;
+    const registration = handleDaemonRequest(
+      request(DAEMON_REGISTER_SESSION_METHOD, { sessionId, clientName: "desktop" }),
+      state,
+    ).then((response) => {
+      responded = true;
+      return response;
+    });
+    try {
+      // Await another UUID's registration to flush the immediate-response path as well
+      // as proving that the first UUID's release does not block other registrations.
+      const otherId = "00000000-0000-4000-8000-000000000002";
+      const unrelated = await handleDaemonRequest(
+        request(DAEMON_REGISTER_SESSION_METHOD, { sessionId: otherId, clientName: "other" }),
+        state,
+      );
+      expect(unrelated.success).toBe(true);
+      registry.release(otherId);
+      expect(responded).toBe(false);
+      expect(registry.list()).toEqual([]);
+      expect(manager.getSession(sessionId)).toBe(session);
+
+      finishSetup.resolve();
+      await setup;
+      await release;
+      expect(await registration).toEqual({
+        success: true,
+        result: { accepted: true, heartbeatTimeoutMs: 10000, expiresAtMs: 10000 },
+      });
+      expect(registry.list()).toHaveLength(1);
+      expect(registry.list()[0]?.sessionId).toBe(sessionId);
+      expect(manager.getSession(sessionId)).toBeNull();
+      expect(await handleDaemonRequest(request("daemon/heartbeat", { sessionId }), state)).toEqual({
+        success: true,
+        result: { sessionId },
+      });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      finishSetup.resolve();
+      await release;
+      await registration;
+    }
+  });
+
+  test("registration returns a retry failure at the release deadline without an observer", async () => {
+    const persistence = new DeferredReleasePersistence();
+    manager.stopCleanupTimer();
+    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager.setObserverSessionRegistry(registry);
+    await manager.createSession(sessionId, "device-a", "android");
+    const release = manager.releaseSession(sessionId, "explicit-release");
+    await persistence.releaseStarted.promise;
+    const registration = handleDaemonRequest(
+      request(DAEMON_REGISTER_SESSION_METHOD, { sessionId, clientName: "desktop" }),
+      state,
+    );
+    try {
+      timer.advanceTime(SESSION_RELEASE_DRAIN_TIMEOUT_MS);
+      expect(await registration).toEqual({
+        success: false,
+        error: `Session ${sessionId} release is still in progress after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms; retry registration`,
+      });
+      expect(registry.list()).toEqual([]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.getPendingSleepCount()).toBe(0);
+    } finally {
+      persistence.finishRelease.resolve();
+      await release;
+    }
+  });
+
+  test("registration succeeds as an observer after an in-flight release rejects", async () => {
+    const persistence = new DeferredReleasePersistence();
+    manager.stopCleanupTimer();
+    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager.setObserverSessionRegistry(registry);
+    await manager.createSession(sessionId, "device-a", "android");
+    const release = manager.releaseSession(sessionId, "device-restart:device-a");
+    const releaseError = release.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await persistence.releaseStarted.promise;
+    let responded = false;
+    const registration = handleDaemonRequest(
+      request(DAEMON_REGISTER_SESSION_METHOD, { sessionId, clientName: "desktop" }),
+      state,
+    ).then((response) => {
+      responded = true;
+      return response;
+    });
+    try {
+      const otherId = "00000000-0000-4000-8000-000000000002";
+      await handleDaemonRequest(
+        request(DAEMON_REGISTER_SESSION_METHOD, { sessionId: otherId, clientName: "other" }),
+        state,
+      );
+      registry.release(otherId);
+      expect(responded).toBe(false);
+      expect(registry.list()).toEqual([]);
+      persistence.finishRelease.reject(new Error("release write failed"));
+      expect(await releaseError).toBeInstanceOf(Error);
+      expect(await registration).toEqual({
+        success: true,
+        result: { accepted: true, heartbeatTimeoutMs: 10000, expiresAtMs: 10000 },
+      });
+      expect(registry.list()).toHaveLength(1);
+      expect(manager.getSession(sessionId)).toBeNull();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      persistence.finishRelease.reject(new Error("release write failed"));
+      await releaseError;
+      await registration;
+    }
+  });
+
+  test("registration rechecks a device session published while release was in flight", async () => {
+    const session = await manager.createSession(sessionId, "device-a", "android");
+    session.heartbeatTimeoutMs = 20000;
+    const finishRelease = Promise.withResolvers<void>();
+    let publishedSession = session;
+    state.getSessionManager = () => ({
+      getSession: () => publishedSession,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+      waitForSessionReleaseWithin: async () => {
+        await finishRelease.promise;
+        return true;
+      },
+    });
+    const registration = handleDaemonRequest(
+      request(DAEMON_REGISTER_SESSION_METHOD, { sessionId, clientName: "desktop" }),
+      state,
+    );
+    try {
+      expect(registry.list()).toEqual([]);
+      publishedSession = { ...session, assignedDevice: "device-b", heartbeatTimeoutMs: 30000 };
+      finishRelease.resolve();
+      expect(await registration).toEqual({
+        success: true,
+        result: { accepted: true, heartbeatTimeoutMs: 30000, expiresAtMs: 30000 },
+      });
+      expect(state.getSessionManager().getSession(sessionId)?.assignedDevice).toBe("device-b");
+      expect(registry.list()).toEqual([]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      finishRelease.resolve();
+      await registration;
+    }
   });
 });

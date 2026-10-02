@@ -39,7 +39,7 @@ describe("checkWorkProfileAccessibility", () => {
     const result = await checkWorkProfileAccessibility(fakeFactory);
 
     expect(result.status).toBe("pass");
-    expect(result.message).toBe("No work profiles detected");
+    expect(result.message).toBe("device=emulator-5554; No work profiles detected");
   });
 
   test("returns pass when work profile has accessibility service enabled", async () => {
@@ -75,7 +75,9 @@ describe("checkWorkProfileAccessibility", () => {
     const result = await checkWorkProfileAccessibility(fakeFactory);
 
     expect(result.status).toBe("pass");
-    expect(result.message).toBe("Accessibility service enabled for 1 work profile(s)");
+    expect(result.message).toBe(
+      "device=emulator-5554; Accessibility service enabled for 1 work profile(s)",
+    );
   });
 
   test("returns warn when work profile is missing accessibility service", async () => {
@@ -127,7 +129,7 @@ describe("checkWorkProfileAccessibility", () => {
     const result = await checkWorkProfileAccessibility(fakeFactory);
 
     expect(result.status).toBe("pass");
-    expect(result.message).toBe("No work profiles detected");
+    expect(result.message).toBe("device=emulator-5554; No work profiles detected");
   });
 
   test.each([
@@ -137,7 +139,7 @@ describe("checkWorkProfileAccessibility", () => {
         { userId: 0, name: "Owner", flags: 0x13, running: true },
         { userId: 10, name: "Personal secondary", flags: 0x10, running: true },
       ],
-      expected: { status: "pass", message: "No work profiles detected" },
+      expected: { status: "pass", message: "device=emulator-5554; No work profiles detected" },
     },
     {
       name: "a stopped managed profile",
@@ -145,7 +147,7 @@ describe("checkWorkProfileAccessibility", () => {
         { userId: 0, name: "Owner", flags: 0x13, running: true },
         { userId: 10, name: "Stopped work", flags: 0x30, running: false },
       ],
-      expected: { status: "pass", message: "No work profiles detected" },
+      expected: { status: "pass", message: "device=emulator-5554; No work profiles detected" },
     },
   ])("does not warn for $name", async ({ users, expected }) => {
     fakeAdb.setDevices([{ name: "emulator-5554", platform: "android", deviceId: "emulator-5554" }]);
@@ -167,8 +169,8 @@ describe("checkWorkProfileAccessibility", () => {
     const result = await checkWorkProfileAccessibility(fakeFactory);
 
     expect(result).toMatchObject({
-      status: "skip",
-      message: "Could not check: adb server not running",
+      status: "warn",
+      message: "Could not check device=emulator-5554: adb server not running",
     });
   });
 

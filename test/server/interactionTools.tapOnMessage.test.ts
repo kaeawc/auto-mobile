@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { warmedTests } from "../helpers/interactionCancellation";
+import { afterEach, describe, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   buildTapOnResultMessage,
@@ -27,6 +28,13 @@ import type {
 } from "../../src/models";
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 import { ActionableError } from "../../src/models/ActionableError";
+
+const test = warmedTests(() => {
+  resetTapAtElementFactory();
+  resetTapOnElementFactory();
+  resetHitTestObservationFactory();
+  ToolRegistry.clearTools();
+});
 
 const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElement => ({
   text: "",

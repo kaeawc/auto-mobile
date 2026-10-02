@@ -1,10 +1,13 @@
-import { expect, spyOn, test } from "bun:test";
+import { warmedTests } from "../helpers/interactionCancellation";
+import { expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+
+const test = warmedTests(() => ToolRegistry.clearTools());
 
 test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME switch or tap", async () => {
   const mutations: string[] = [];

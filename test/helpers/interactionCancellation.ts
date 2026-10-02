@@ -4,8 +4,8 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { logger, LogLevel } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-/** Warm the exact fake-driven scenarios outside Bun's per-test timing budget. */
-export function cancellationTests(reset: () => void) {
+/** Opt handler scenarios into warm-up outside Bun's per-test timing budget. */
+export function warmedTests(reset: () => void) {
   type Scenario = () => void | Promise<unknown>;
   const scenarios: Scenario[] = [];
   beforeAll(async () => {
@@ -34,17 +34,30 @@ export function cancellationTests(reset: () => void) {
     scenarios.push(scenario);
     bunTest(name, scenario, timeout);
   }
-  // These suites use single-value tables; let Bun retain its test-name formatting.
-  test.each = <T>(cases: readonly T[]) => {
-    return (name: string, scenario: (value: T) => void | Promise<unknown>, timeout?: number) => {
+  // Let Bun retain test-name formatting and spread array rows in both runs.
+  function each<const T extends readonly unknown[]>(
+    cases: readonly T[],
+  ): (name: string, scenario: (...args: T) => void | Promise<unknown>, timeout?: number) => void;
+  function each<T>(
+    cases: readonly T[],
+  ): (name: string, scenario: (value: T) => void | Promise<unknown>, timeout?: number) => void;
+  function each(cases: readonly unknown[]) {
+    return (
+      name: string,
+      scenario: (...args: unknown[]) => void | Promise<unknown>,
+      timeout?: number,
+    ) => {
       for (const value of cases) {
-        scenarios.push(() => scenario(value));
+        scenarios.push(() => scenario(...(Array.isArray(value) ? value : [value])));
       }
       bunTest.each(cases)(name, scenario, timeout);
     };
-  };
+  }
+  test.each = each;
   return test;
 }
+
+export const cancellationTests = warmedTests;
 
 /** Register once, retaining real handler wiring even when another suite clears the registry. */
 export function cancellationHandlers(names: readonly string[]) {

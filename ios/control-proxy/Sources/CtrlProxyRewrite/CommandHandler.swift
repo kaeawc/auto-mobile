@@ -1756,7 +1756,8 @@ final class CommandHandler: CommandHandling {
                 key: entry?.key,
                 value: entry?.value,
                 valueType: entry?.type,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: totalTimeMs(from: startTime),
+                redacted: entry?.redacted
             )
         } catch {
             return StorageEntryResponse(

@@ -3,6 +3,18 @@ import Foundation
 import XCTest
 
 final class SdkPreferenceClientTests: XCTestCase {
+    func testGetDecodesOptionalRedactedFlag() async throws {
+        for (flag, expected) in [(",\"redacted\":true", true), ("", false)] {
+            let body = Data("{\"entry\":{\"key\":\"token\",\"value\":\"[REDACTED]\",\"type\":\"STRING\"\(flag)}}".utf8)
+            let client = try SdkPreferenceClient(
+                baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+                transport: StubHTTPTransport(status: 200, body: body)
+            )
+            let entry = try await client.get(appId: "com.example.app", suiteName: "Standard", key: "token")
+            XCTAssertEqual(entry?.redacted, expected ? true : nil)
+        }
+    }
+
     func testListDoesNotExposeSdkSession() async throws {
         let transport = StubHTTPTransport(
             status: 200,

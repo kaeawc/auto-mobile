@@ -1,7 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
-import type { DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import {
+  resolveIosInstallBackend,
+  SimulatorIosInstallBackend,
+  PhysicalIosInstallBackend,
+  type IosInstallBackend,
+} from "../../../src/utils/ios-cmdline-tools/IosDeviceBackend";
+import type { DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
 import { FakeDeviceAppTerminator } from "../../fakes/FakeDeviceAppTerminator";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
@@ -302,4 +308,97 @@ describe("resolveIosTerminateBackend", () => {
     expect(resolveIosColdStartTerminateBackend(physicalUdid, { simctl })).toBeNull();
     expect(simctl.getMethodCalls("terminateApp")).toEqual([]);
   });
+});
+
+describe("resolveIosInstallBackend", () => {
+  test("simulator install and verification use simctl with the resolved device ID", async () => {
+    const simctl = new FakeSimctl();
+    const apps = [{ bundleId, bundlePath: "/tmp/Test.app" }];
+    simctl.setInstalledApps(apps);
+    const physicalCalls: string[] = [];
+    const backend: IosInstallBackend = resolveIosInstallBackend(simulatorUdid, {
+      simctl,
+      deviceAppInstaller: {
+        installApp: async () => {
+          physicalCalls.push("install");
+        },
+      },
+      physicalAppLister: {
+        listInstalledApps: async () => {
+          physicalCalls.push("list");
+          return [];
+        },
+      },
+    });
+
+    expect(backend).toBeInstanceOf(SimulatorIosInstallBackend);
+    await backend.installApp("/tmp/Test.app");
+    expect(await backend.listApps()).toEqual(apps);
+    expect(simctl.getMethodCalls("installApp")).toEqual([
+      { appPath: "/tmp/Test.app", deviceId: simulatorUdid },
+    ]);
+    expect(simctl.getMethodCalls("listAppsOrThrow")).toEqual([{ deviceId: simulatorUdid }]);
+    expect(physicalCalls).toEqual([]);
+  });
+
+  test("physical install and verification use the injected device transports", async () => {
+    const simctl = new FakeSimctl();
+    const calls: Array<{ deviceId: string; artifactPath?: string }> = [];
+    const apps = [{ bundleIdentifier: bundleId }];
+    const backend = resolveIosInstallBackend(physicalUdid, {
+      simctl,
+      deviceAppInstaller: {
+        installApp: async (deviceId, artifactPath) => {
+          calls.push({ deviceId, artifactPath });
+        },
+      },
+      physicalAppLister: {
+        listInstalledApps: async (deviceId) => {
+          calls.push({ deviceId });
+          return apps;
+        },
+      },
+    });
+
+    expect(backend).toBeInstanceOf(PhysicalIosInstallBackend);
+    await backend.installApp("/tmp/Test.ipa");
+    expect(await backend.listApps()).toBe(apps);
+    expect(calls).toEqual([
+      { deviceId: physicalUdid, artifactPath: "/tmp/Test.ipa" },
+      { deviceId: physicalUdid },
+    ]);
+    expect(simctl.getMethodCalls("installApp")).toEqual([]);
+    expect(simctl.getMethodCalls("listAppsOrThrow")).toEqual([]);
+  });
+
+  test.each([simulatorUdid, physicalUdid])(
+    "preserves install and listing errors for %s",
+    async (deviceId) => {
+      const installError = new Error("install rejected");
+      const listingError = new Error("listing unavailable");
+      const backend = resolveIosInstallBackend(deviceId, {
+        simctl: {
+          installApp: async () => {
+            throw installError;
+          },
+          listAppsOrThrow: async () => {
+            throw listingError;
+          },
+        },
+        deviceAppInstaller: {
+          installApp: async () => {
+            throw installError;
+          },
+        },
+        physicalAppLister: {
+          listInstalledApps: async () => {
+            throw listingError;
+          },
+        },
+      });
+
+      await expect(backend.installApp("/tmp/Test.app")).rejects.toBe(installError);
+      await expect(backend.listApps()).rejects.toBe(listingError);
+    },
+  );
 });

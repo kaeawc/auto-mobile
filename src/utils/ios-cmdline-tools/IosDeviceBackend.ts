@@ -385,3 +385,58 @@ export function resolveIosColdStartTerminateBackend(
   });
   return backend.requiresInstalledAppCheck ? backend : null;
 }
+
+/** Install transport and strict app listings used to verify the installed bundle. */
+export interface IosInstallBackend {
+  installApp(artifactPath: string): Promise<void>;
+  listApps(): Promise<Record<string, unknown>[]>;
+}
+
+export interface IosInstallBackendDeps {
+  simctl: Pick<SimCtlClient, "installApp" | "listAppsOrThrow">;
+  deviceAppInstaller: {
+    installApp(deviceUdid: string, artifactPath: string): Promise<void>;
+  };
+  physicalAppLister: {
+    listInstalledApps(deviceUdid: string): Promise<Record<string, unknown>[]>;
+  };
+}
+
+export class SimulatorIosInstallBackend implements IosInstallBackend {
+  constructor(
+    private readonly deviceId: string,
+    private readonly simctl: IosInstallBackendDeps["simctl"],
+  ) {}
+
+  installApp(artifactPath: string): Promise<void> {
+    return this.simctl.installApp(artifactPath, this.deviceId);
+  }
+
+  listApps(): Promise<Record<string, unknown>[]> {
+    return this.simctl.listAppsOrThrow(this.deviceId);
+  }
+}
+
+export class PhysicalIosInstallBackend implements IosInstallBackend {
+  constructor(
+    private readonly deviceId: string,
+    private readonly deps: Pick<IosInstallBackendDeps, "deviceAppInstaller" | "physicalAppLister">,
+  ) {}
+
+  installApp(artifactPath: string): Promise<void> {
+    return this.deps.deviceAppInstaller.installApp(this.deviceId, artifactPath);
+  }
+
+  listApps(): Promise<Record<string, unknown>[]> {
+    return this.deps.physicalAppLister.listInstalledApps(this.deviceId);
+  }
+}
+
+export function resolveIosInstallBackend(
+  deviceId: string,
+  deps: IosInstallBackendDeps,
+): IosInstallBackend {
+  return isIosSimulatorUdid(deviceId)
+    ? new SimulatorIosInstallBackend(deviceId, deps.simctl)
+    : new PhysicalIosInstallBackend(deviceId, deps);
+}

@@ -1757,6 +1757,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * @internal Clear registry entries for isolated tests only. This closes
+   * nothing and resets no ports, observers, or retired-device state. Unlike
+   * resetInstances(), it avoids fire-and-forget close() cleanup that can run
+   * real adb/socket work and avoids resetting PortManager's clock/allocations,
+   * which some test files configure in beforeAll.
+   */
+  public static clearInstanceRegistryForTesting(): void {
+    AndroidCtrlProxyClient.instances.clear();
+  }
+
+  /**
    * Evict the singleton for a device from the registry. `close()` disables
    * auto-reconnect permanently, so a detached instance left in the map would be
    * handed back to a device that later reuses the same serial (a re-booted

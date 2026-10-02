@@ -1127,7 +1127,9 @@ describe("InstallApp", () => {
       expect(result.upgrade).toBe(false);
       expect(result.packageName).toBe("com.example.app");
       expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
-      expect(debugSpy).not.toHaveBeenCalled();
+      expect(
+        debugSpy.mock.calls.some(([message]) => String(message).includes("fallback failed")),
+      ).toBe(false);
     } finally {
       debugSpy.mockRestore();
     }

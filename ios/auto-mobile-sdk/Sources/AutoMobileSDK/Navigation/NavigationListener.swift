@@ -7,7 +7,7 @@ public protocol NavigationListener: AnyObject, Sendable {
 }
 
 /// Closure-based navigation listener for convenience.
-public final class BlockNavigationListener: NavigationListener, @unchecked Sendable {
+public final class BlockNavigationListener: NavigationListener, Sendable {
     private let block: @Sendable (NavigationEvent) -> Void
 
     public init(_ block: @escaping @Sendable (NavigationEvent) -> Void) {

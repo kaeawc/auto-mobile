@@ -2,6 +2,7 @@
 // Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
 
 @testable import AutoMobileSDK
+import os
 import XCTest
 
 private final class EventCollector: @unchecked Sendable {
@@ -1289,6 +1290,40 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             return AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
         }
 
+        func testConcurrentFaultSchedulerAccessAndFakeCapture() {
+            let scheduler = FakeFaultScheduler()
+            defer { AutoMobileURLProtocol.faultScheduler = RealFaultScheduler() }
+            let calls = OSAllocatedUnfairLock(initialState: 0)
+
+            DispatchQueue.concurrentPerform(iterations: 32) { _ in
+                AutoMobileURLProtocol.faultScheduler = scheduler
+                AutoMobileURLProtocol.faultScheduler.schedule(delayMs: 100) {
+                    calls.withLock { $0 += 1 }
+                }
+                scheduler.captured?()
+            }
+
+            XCTAssertEqual(calls.withLock { $0 }, 32)
+        }
+
+        func testReplacingFaultSchedulerReleasesItOutsideStorageLock() {
+            final class ReentrantScheduler: FaultScheduling {
+                let onDeinit: @Sendable () -> Void
+                init(onDeinit: @escaping @Sendable () -> Void) { self.onDeinit = onDeinit }
+                func schedule(delayMs _: Int, work: @escaping @Sendable () -> Void) { work() }
+                deinit { onDeinit() }
+            }
+
+            let releases = OSAllocatedUnfairLock(initialState: 0)
+            AutoMobileURLProtocol.faultScheduler = ReentrantScheduler {
+                _ = AutoMobileURLProtocol.faultScheduler
+                releases.withLock { $0 += 1 }
+            }
+            AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
+
+            XCTAssertEqual(releases.withLock { $0 }, 1)
+        }
+
         // The delayed fault fires normally when the protocol has NOT been stopped.
         func testDelayedFaultFiresWhenNotStopped() {
             let scheduler = FakeFaultScheduler()
@@ -1302,13 +1337,13 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             let proto = makeDelayedFaultProtocol(client: client)
             proto.startLoading() // schedules the fault via the fake scheduler (captured, not fired)
 
-            scheduler.captured?.perform() // fire the delayed fault
+            scheduler.captured?() // fire the delayed fault
 
             XCTAssertEqual(client.calls, ["didFail"], "an un-stopped delayed fault serves the client")
         }
 
-        // A fault whose work item fires AFTER stopLoading — the already-running interleaving —
-        // must not invoke the client, because serveFault's stopped-check is atomic with delivery.
+        // A delayed closure fired AFTER stopLoading must not invoke the client:
+        // serveFault checks the stopped flag before making client callbacks.
         func testDelayedFaultFiringAfterStopDoesNotCallClient() {
             let scheduler = FakeFaultScheduler()
             AutoMobileURLProtocol.faultScheduler = scheduler
@@ -1319,10 +1354,10 @@ final class NetworkCaptureRecorderTests: XCTestCase {
 
             let client = RecordingURLProtocolClient()
             let proto = makeDelayedFaultProtocol(client: client)
-            proto.startLoading() // captures the work item
-            proto.stopLoading() // marks the protocol stopped (and cancels the work item)
+            proto.startLoading() // captures the delayed closure
+            proto.stopLoading() // marks the protocol stopped
 
-            scheduler.captured?.perform() // fire the (now stale) work item anyway
+            scheduler.captured?() // fire the (now stale) closure anyway
 
             XCTAssertTrue(
                 client.calls.isEmpty,
@@ -1333,11 +1368,14 @@ final class NetworkCaptureRecorderTests: XCTestCase {
 }
 
 #if DEBUG
-    /// Captures the delayed-fault work item so a test can fire it deterministically, instead
+    /// Captures the delayed-fault closure so a test can fire it deterministically, instead
     /// of waiting on the real timer.
     private final class FakeFaultScheduler: FaultScheduling {
-        var captured: DispatchWorkItem?
-        func schedule(delayMs _: Int, work: DispatchWorkItem) { captured = work }
+        private let work = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
+        var captured: (@Sendable () -> Void)? { work.withLock { $0 } }
+        func schedule(delayMs _: Int, work: @escaping @Sendable () -> Void) {
+            self.work.withLock { $0 = work }
+        }
     }
 #endif
 

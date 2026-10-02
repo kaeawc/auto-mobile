@@ -385,7 +385,7 @@
         private func withRequestBody(
             _ connection: NWConnection,
             initialData: Data,
-            execute: @escaping (SdkHierarchyServer, Data?) -> Void
+            execute: @escaping @Sendable (SdkHierarchyServer, Data?) -> Void
         ) {
             readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
                 guard let self = self else {
@@ -463,7 +463,7 @@
         private func handleBodyRoute(
             _ connection: NWConnection,
             initialData: Data,
-            route: @escaping (Data) -> SdkRouteResponse
+            route: @escaping @Sendable (Data) -> SdkRouteResponse
         ) {
             withRequestBody(connection, initialData: initialData) { server, body in
                 server.sendRouteResponse(connection, route(body ?? Data()))
@@ -473,7 +473,7 @@
         private func readCompleteHttpHeaders(
             _ connection: NWConnection,
             initialData: Data,
-            completion: @escaping (Data?) -> Void
+            completion: @escaping @Sendable (Data?) -> Void
         ) {
             if initialData.range(of: Self.httpHeaderDelimiter) != nil {
                 completion(initialData)
@@ -513,7 +513,7 @@
         private func readCompleteHttpBody(
             _ connection: NWConnection,
             initialData: Data,
-            completion: @escaping (Data?) -> Void
+            completion: @escaping @Sendable (Data?) -> Void
         ) {
             guard let range = initialData.range(of: Self.httpHeaderDelimiter) else {
                 completion(nil)
@@ -552,7 +552,7 @@
             _ connection: NWConnection,
             accumulatedBody: Data,
             expectedLength: Int,
-            completion: @escaping (Data?) -> Void
+            completion: @escaping @Sendable (Data?) -> Void
         ) {
             let remainingLength = expectedLength - accumulatedBody.count
             guard remainingLength > 0 else {

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Grouped parameters for recording a network request/response manually.
 ///
@@ -88,35 +89,39 @@ public struct NetworkRequestRecord: Sendable {
 ///
 /// Use ``protocolClass()`` to register automatic interception with `URLSessionConfiguration`,
 /// or call ``recordRequest(_:)`` to record requests manually.
-public final class AutoMobileNetwork: @unchecked Sendable {
+public final class AutoMobileNetwork: Sendable {
     public static let shared = AutoMobileNetwork()
     private static let defaultMaxBodyBytes = 32 * 1024
 
-    private let lock = NSLock()
-    private var bundleId: String?
-    private var buffer: SdkEventBuffer?
-    private var _isEnabled = true
-    private var _captureHeaders = false
-    private var _captureBodies = false
-    // Leading-underscore backing field is internal (not private) for URLProtocol access.
+    private struct State: Sendable {
+        var bundleId: String?
+        var buffer: SdkEventBuffer?
+        var isEnabled = true
+        var captureHeaders = false
+        var captureBodies = false
+        var maxBodyBytes = AutoMobileNetwork.defaultMaxBodyBytes
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    // Keep the internal testing seam while storing its value under the same lock.
     // swiftlint:disable:next identifier_name
-    var _maxBodyBytes: Int = AutoMobileNetwork.defaultMaxBodyBytes // 32KB default (internal for URLProtocol access)
+    var _maxBodyBytes: Int {
+        get { state.withLock { $0.maxBodyBytes } }
+        set { state.withLock { $0.maxBodyBytes = newValue } }
+    }
 
     /// Thread-safe read of maxBodyBytes for URLProtocol callbacks.
     var maxBodyBytes: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return _maxBodyBytes
+        state.withLock { $0.maxBodyBytes }
     }
 
     /// Byte limit for request body capture, or nil when capture is disabled.
     var requestBodyCaptureLimit: Int? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard _captureBodies, _maxBodyBytes > 0 else {
-            return nil
+        state.withLock { state in
+            guard state.captureBodies, state.maxBodyBytes > 0 else { return nil }
+            return state.maxBodyBytes
         }
-        return _maxBodyBytes
     }
 
     /// Text content types eligible for body capture.
@@ -138,31 +143,25 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 
     /// Whether network tracking is enabled.
     public var isEnabled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isEnabled
+        state.withLock { $0.isEnabled }
     }
 
     /// Enable or disable network tracking.
     /// When disabled, recordRequest and recordWebSocketFrame short-circuit.
     public func setEnabled(_ enabled: Bool) {
-        lock.lock()
-        _isEnabled = enabled
-        lock.unlock()
+        state.withLock { $0.isEnabled = enabled }
     }
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
-        lock.lock()
-        self.bundleId = bundleId
-        self.buffer = buffer
-        lock.unlock()
+        state.withLock { state in
+            state.bundleId = bundleId
+            state.buffer = buffer
+        }
     }
 
     /// Configure whether to capture request/response headers.
     public func setCaptureHeaders(_ capture: Bool) {
-        lock.lock()
-        _captureHeaders = capture
-        lock.unlock()
+        state.withLock { $0.captureHeaders = capture }
     }
 
     /// Configure whether to capture request/response bodies.
@@ -170,18 +169,14 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     /// auth tokens, credentials, or PII.
     public func setCaptureBodies(_ capture: Bool) {
         #if DEBUG
-            lock.lock()
-            _captureBodies = capture
-            lock.unlock()
+            state.withLock { $0.captureBodies = capture }
         #endif
     }
 
     /// Configure maximum body bytes to capture (default: 32KB).
     /// Values <= 0 disable body capture truncation (uses 0, meaning no capture).
     public func setMaxBodyBytes(_ bytes: Int) {
-        lock.lock()
-        _maxBodyBytes = max(0, bytes)
-        lock.unlock()
+        state.withLock { $0.maxBodyBytes = max(0, bytes) }
     }
 
     /// Returns the `URLProtocol` subclass that intercepts and records network requests.
@@ -223,16 +218,15 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     public func recordRequest(_ record: NetworkRequestRecord) {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
-        lock.lock()
-        guard _isEnabled else {
-            lock.unlock()
-            return
+        let snapshot = state.withLock { state -> State? in
+            guard state.isEnabled else { return nil }
+            return state
         }
-        let captureHeaders = _captureHeaders
-        let captureBodies = _captureBodies
-        let maxBytes = _maxBodyBytes
-        let currentBuffer = buffer
-        lock.unlock()
+        guard let snapshot else { return }
+        let captureHeaders = snapshot.captureHeaders
+        let captureBodies = snapshot.captureBodies
+        let maxBytes = snapshot.maxBodyBytes
+        let currentBuffer = snapshot.buffer
 
         // Truncate bodies if needed
         let finalRequestBody: String? = captureBodies ? record.requestBody
@@ -433,13 +427,12 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     ) {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
-        lock.lock()
-        guard _isEnabled else {
-            lock.unlock()
-            return
+        let snapshot = state.withLock { state -> (buffer: SdkEventBuffer?, enabled: Bool) in
+            guard state.isEnabled else { return (nil, false) }
+            return (state.buffer, true)
         }
-        let currentBuffer = buffer
-        lock.unlock()
+        guard snapshot.enabled else { return }
+        let currentBuffer = snapshot.buffer
 
         let event = SdkWebSocketFrameEvent(
             url: url,
@@ -453,14 +446,14 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     // MARK: - Testing Support
 
     func reset() {
-        lock.lock()
-        bundleId = nil
-        buffer = nil
-        _isEnabled = true
-        _captureHeaders = false
-        _captureBodies = false
-        _maxBodyBytes = AutoMobileNetwork.defaultMaxBodyBytes
-        lock.unlock()
+        state.withLock { state in
+            state.bundleId = nil
+            state.buffer = nil
+            state.isEnabled = true
+            state.captureHeaders = false
+            state.captureBodies = false
+            state.maxBodyBytes = AutoMobileNetwork.defaultMaxBodyBytes
+        }
     }
 }
 
@@ -468,14 +461,14 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 
 #if DEBUG
     /// Seam for scheduling a delayed network fault (issue #5697), so tests can fire it
-    /// deterministically instead of waiting on a real timer. Production schedules the work
-    /// item on a global queue via `asyncAfter`.
-    protocol FaultScheduling {
-        func schedule(delayMs: Int, work: DispatchWorkItem)
+    /// deterministically instead of waiting on a real timer. Production schedules the closure
+    /// on a global queue via `asyncAfter`.
+    protocol FaultScheduling: Sendable {
+        func schedule(delayMs: Int, work: @escaping @Sendable () -> Void)
     }
 
     struct RealFaultScheduler: FaultScheduling {
-        func schedule(delayMs: Int, work: DispatchWorkItem) {
+        func schedule(delayMs: Int, work: @escaping @Sendable () -> Void) {
             DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: work)
         }
     }
@@ -490,7 +483,20 @@ public class AutoMobileURLProtocol: URLProtocol {
     #if DEBUG
         /// Injectable delayed-fault scheduler; tests override it to fire the fault on demand
         /// (no real timer). Reset to `RealFaultScheduler()` in `tearDown`.
-        static var faultScheduler: FaultScheduling = RealFaultScheduler()
+        private static let faultSchedulerStorage = OSAllocatedUnfairLock<any FaultScheduling>(
+            initialState: RealFaultScheduler()
+        )
+        static var faultScheduler: FaultScheduling {
+            get { faultSchedulerStorage.withLock { $0 } }
+            set {
+                let old = faultSchedulerStorage.withLock { scheduler in
+                    let old = scheduler
+                    scheduler = newValue
+                    return old
+                }
+                withExtendedLifetime(old) {}
+            }
+        }
     #endif
     private var startTime: Date?
     private var urlSession: URLSession?
@@ -550,10 +556,9 @@ public class AutoMobileURLProtocol: URLProtocol {
                     // so a fault whose timer fires after stopLoading() never touches the client
                     // (the guard also covers the case where the timer already began executing —
                     // which a work-item cancel could not). No cancellation needed.
-                    let workItem = DispatchWorkItem { [weak self] in
+                    Self.faultScheduler.schedule(delayMs: delayMs) { [weak self] in
                         self?.serveFault(fault, url: url)
                     }
-                    Self.faultScheduler.schedule(delayMs: delayMs, work: workItem)
                 } else {
                     serveFault(fault, url: url)
                 }

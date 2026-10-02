@@ -7,7 +7,7 @@ public protocol AutoMobileCrashesAPI: AnyObject, Sendable {
 }
 
 /// Default implementation of `AutoMobileCrashesAPI` backed by `AutoMobileCrashes.shared`.
-public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, @unchecked Sendable {
+public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, Sendable {
     private let crashes = AutoMobileCrashes.shared
 
     public init() {}

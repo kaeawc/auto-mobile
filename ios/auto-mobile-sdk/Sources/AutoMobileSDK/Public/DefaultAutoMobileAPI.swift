@@ -1,7 +1,7 @@
 import Foundation
 
 /// Default implementation of `AutoMobileAPI` backed by `AutoMobileSDK.shared`.
-public final class DefaultAutoMobileAPI: AutoMobileAPI, @unchecked Sendable {
+public final class DefaultAutoMobileAPI: AutoMobileAPI, Sendable {
     private let sdk = AutoMobileSDK.shared
 
     public init() {}

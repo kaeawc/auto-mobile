@@ -6,6 +6,7 @@
 
 - The iOS SDK sub-package manifests (`ios/auto-mobile-sdk`, `ios/highlight-core`) now declare the same iOS 17 / macOS 15 floor as the published root `Package.swift` and `XCTestRunner` (iOS 17 was introduced in #6773). This is a breaking change for apps or tools that depend on those sub-packages directly and target iOS 15/16 or macOS 13/14. (#5839) (ios)
 - The public iOS SDK types `NetworkFaultTransport`, `NetworkFaultAction`, `NetworkFaultRuleDTO`, `NetworkMockRuleStore.FaultRequest`, and `NetworkMockRuleStore.FaultDecision` gained `Sendable` conformance; `DatabaseInspector`, `NetworkMockRuleStore`, `NetworkCaptureRecorder`, `URLSessionNetworkCaptureAdapter`, `WebSocketNetworkCaptureAdapter`, `NWConnectionNetworkCaptureAdapter`, and `AutoMobileWebViewPolicy` now conform to checked `Sendable` instead of `@unchecked Sendable`. These changes are source-compatible and additive. (#5839) (ios)
+- The iOS SDK types `AutoMobileBiometrics`, `AutoMobileFailures`, `AutoMobileNetwork`, `AutoMobileNotifications`, `AutoMobileInteractionTracker`, `ViewBodyTracker`, `NavigationAdapterHub`, `DeepLinkNavigationAdapter`, `CustomNavigationAdapter`, `UIKitNavigationAdapter`, `SwiftUINavigationAdapter`, `BlockNavigationListener`, `DefaultAutoMobileAPI`, `DefaultAutoMobileCrashesAPI`, and `DefaultAutoMobileNetworkAPI` now conform to checked `Sendable` instead of `@unchecked Sendable`. These changes are source-compatible and additive. (#5839) (ios)
 
 ### Removed
 

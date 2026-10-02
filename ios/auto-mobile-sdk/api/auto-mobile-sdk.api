@@ -44,7 +44,7 @@ public enum BiometricResult: Sendable, Equatable
   case failure
   case cancel
   case error(code: Int, message: String)
-public final class AutoMobileBiometrics: @unchecked Sendable
+public final class AutoMobileBiometrics: Sendable
   public static let shared = AutoMobileBiometrics()
   public static let overrideNotification = Notification.Name( "dev.jasonpearson.automobile.sdk.BIOMETRIC_OVERRIDE" )
   public func overrideResult(_ result: BiometricResult, ttlMs: Int64 = 5000)
@@ -307,7 +307,7 @@ public struct SdkEventBatch: Codable, Sendable
   public init( bundleId: String?, events: [SdkEventEnvelope], timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000) )
 
 // Failures/AutoMobileFailures.swift
-public final class AutoMobileFailures: @unchecked Sendable
+public final class AutoMobileFailures: Sendable
   public static let shared = AutoMobileFailures()
   public func recordHandledException( _ error: Error, message: String? = nil, currentScreen: String? = nil )
   public func getRecentEvents() -> [HandledExceptionEvent]
@@ -336,7 +336,7 @@ public final class AutoMobileHangs: @unchecked Sendable
   public func setEnabled(_ enabled: Bool)
 
 // Interaction/AutoMobileInteractionTracker.swift
-public final class AutoMobileInteractionTracker: @unchecked Sendable
+public final class AutoMobileInteractionTracker: Sendable
   public static let shared = AutoMobileInteractionTracker()
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
@@ -364,35 +364,35 @@ public final class AutoMobileLog: Sendable
   public func fault(_ tag: String? = nil, _ message: String)
 
 // Navigation/Adapters/NavigationAdapters.swift
-public final class NavigationAdapterHub: @unchecked Sendable
+public final class NavigationAdapterHub: Sendable
   public static let shared = NavigationAdapterHub()
   public var isActive: Bool
   public func isActive(owner: String?) -> Bool
   public func start(owner: String = "default", redactor: any NavigationDataRedacting = NoOpNavigationRedactor())
   public func stop(owner: String = "default")
   public func record( owner: String = "default", destination: String, source: NavigationSource, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true, arguments: [String: String] = [:], metadata: [String: String] = [:] )
-public final class DeepLinkNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
+public final class DeepLinkNavigationAdapter: NavigationFrameworkAdapter, Sendable
   public static let shared = DeepLinkNavigationAdapter()
   public var isActive: Bool
   public func start()
   public func stop()
   public func record( destination: String, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, arguments: [String: String] = [:], metadata: [String: String] = [:] )
-public final class CustomNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
+public final class CustomNavigationAdapter: NavigationFrameworkAdapter, Sendable
   public static let shared = CustomNavigationAdapter()
   public var isActive: Bool
   public func start()
   public func stop()
   public func record( destination: String, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true, arguments: [String: String] = [:], metadata: [String: String] = [:] )
-public final class UIKitNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
+public final class UIKitNavigationAdapter: NavigationFrameworkAdapter, Sendable
   public static let shared = UIKitNavigationAdapter()
   public var isActive: Bool
   public func start()
   public func stop()
-  public func recordPush(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true)
-  public func recordPop(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true)
-  public func recordPresentation(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true)
+  public func recordPush( _ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true )
+  public func recordPop( _ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true )
+  public func recordPresentation( _ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true )
   public func recordTabSelection(_ viewController: UIViewController, sceneIdentifier: String? = nil)
-  public func recordSplitColumn(_ viewController: UIViewController, column: String, sceneIdentifier: String? = nil)
+  public func recordSplitColumn( _ viewController: UIViewController, column: String, sceneIdentifier: String? = nil )
 
 // Navigation/Adapters/NavigationFrameworkAdapter.swift
 public protocol NavigationFrameworkAdapter: AnyObject, Sendable
@@ -401,7 +401,7 @@ public protocol NavigationFrameworkAdapter: AnyObject, Sendable
   var isActive: Bool { get }
 
 // Navigation/Adapters/SwiftUINavigationAdapter.swift
-public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
+public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, Sendable
   public static let shared = SwiftUINavigationAdapter()
   public var isActive: Bool
   public func start()
@@ -412,8 +412,7 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchec
   public func trackSplitColumn(destination: String, column: String, sceneIdentifier: String? = nil)
 public struct TrackNavigationModifier: ViewModifier
   public func body(content: Content) -> some View
-public extension View
-  func trackNavigation( destination: String, arguments: [String: String] = [:], metadata: [String: String] = [:] ) -> some View
+  public func trackNavigation( destination: String, arguments: [String: String] = [:], metadata: [String: String] = [:] )
 
 // Navigation/NavigationEvent.swift
 public struct NavigationEvent: Sendable
@@ -448,7 +447,7 @@ public struct NavigationEventFactory: Sendable
 // Navigation/NavigationListener.swift
 public protocol NavigationListener: AnyObject, Sendable
   func onNavigationEvent(_ event: NavigationEvent)
-public final class BlockNavigationListener: NavigationListener, @unchecked Sendable
+public final class BlockNavigationListener: NavigationListener, Sendable
   public init(_ block: @escaping @Sendable (NavigationEvent) -> Void)
   public func onNavigationEvent(_ event: NavigationEvent)
 
@@ -480,7 +479,7 @@ public struct NetworkRequestRecord: Sendable
   public var responseBody: String?
   public var contentType: String?
   public init( url: String, method: String, requestId: String? = nil, connectionId: String? = nil, direction: NetworkCaptureDirection? = nil, protocolName: String? = nil, metadata: [String: String]? = nil, sequenceNumber: UInt64? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
-public final class AutoMobileNetwork: @unchecked Sendable
+public final class AutoMobileNetwork: Sendable
   public static let shared = AutoMobileNetwork()
   public static func isTextContentType(_ contentType: String?) -> Bool
   public var isEnabled: Bool
@@ -640,12 +639,12 @@ public struct NotificationAction: Sendable
   public let label: String
   public let actionId: String
   public init(label: String, actionId: String)
-public final class AutoMobileNotifications: @unchecked Sendable
+public final class AutoMobileNotifications: Sendable
   public static let shared = AutoMobileNotifications()
   public static let categoryIdentifier = "dev.jasonpearson.automobile.sdk.NOTIFICATION"
   public static let actionNotification = Notification.Name( "dev.jasonpearson.automobile.sdk.NOTIFICATION_ACTION" )
-  public func post( title: String, body: String, style: NotificationStyle = .default, imagePath: String? = nil, actions: [NotificationAction] = [], categoryId: String? = nil ) async -> Bool
-  public func installActionHandler(on center: UNUserNotificationCenter = .current()) -> UNUserNotificationCenterDelegate
+  public func post( title: String, body: String, style _: NotificationStyle = .default, imagePath: String? = nil, actions: [NotificationAction] = [], categoryId: String? = nil )
+  public func installActionHandler(on center: UNUserNotificationCenter = .current())
 
 // Observation/AutoMobileObservationBridge.swift
 public enum AutoMobileCoordinateSpace: String, Codable, Sendable
@@ -759,7 +758,7 @@ public protocol AutoMobileAPI: AnyObject, Sendable
 public protocol AutoMobileCrashesAPI: AnyObject, Sendable
   func enableSignalHandlers()
   func setCurrentScreenProvider(_ provider: (@Sendable () -> String?)?)
-public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, @unchecked Sendable
+public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, Sendable
   public init()
   public func enableSignalHandlers()
   public func setCurrentScreenProvider(_ provider: (@Sendable () -> String?)?)
@@ -770,7 +769,7 @@ public protocol AutoMobileNetworkAPI: AnyObject, Sendable
   func captureRecorder() -> NetworkCaptureRecorder
   func setCaptureHeaders(_ enabled: Bool)
   func setCaptureBodies(_ enabled: Bool)
-public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked Sendable
+public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, Sendable
   public init()
   public func recordRequest(_ record: NetworkRequestRecord)
   public func captureRecorder() -> NetworkCaptureRecorder
@@ -778,7 +777,7 @@ public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked
   public func setCaptureBodies(_ enabled: Bool)
 
 // Public/DefaultAutoMobileAPI.swift
-public final class DefaultAutoMobileAPI: AutoMobileAPI, @unchecked Sendable
+public final class DefaultAutoMobileAPI: AutoMobileAPI, Sendable
   public init()
   public func initialize()
   public func initialize(configuration: AutoMobileConfiguration)
@@ -921,7 +920,7 @@ public enum KeyValueType: String, Sendable
   case unknown
 
 // ViewBody/ViewBodyTracker.swift
-public final class ViewBodyTracker: @unchecked Sendable
+public final class ViewBodyTracker: Sendable
   public static let shared = ViewBodyTracker()
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
@@ -930,8 +929,7 @@ public final class ViewBodyTracker: @unchecked Sendable
   public func getSnapshots() -> [ViewBodySnapshot]
 public struct TrackViewBodyModifier: ViewModifier
   public func body(content: Content) -> some View
-public extension View
-  func trackViewBody(id: String, viewName: String? = nil) -> some View
+  public func trackViewBody(id: String, viewName: String? = nil) -> some View
 public struct MeasureViewBody<Content: View>: View
   public init( id: String, viewName: String? = nil, @ViewBuilder content: @escaping () -> Content )
   public var body: some View

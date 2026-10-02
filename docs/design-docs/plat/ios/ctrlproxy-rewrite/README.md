@@ -108,24 +108,54 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
 **Other native-Swift components needing their own Swift-6 pass (ranked, separate from this rewrite):**
 
 - **`ios/auto-mobile-sdk`** (in-app instrumentation SDK; ctrl-proxy links it for wire models) — **largest
-  need.** It is architecturally the _pre-rewrite ctrl-proxy state_: **26 `@unchecked Sendable`** in
-  `Sources/` (down from 35 after the base step, ~44 originally) + NSLock,
-  ~20 mutable singletons, real flagged races (signal-handler globals; the `AutoMobileURLProtocol`
-  Sendable error already in STATUS §5). **CI builds it macOS-only**, so its iOS UIKit `@MainActor`
-  surface is unchecked → an _iOS Simulator_ `-strict-concurrency=complete` build now measures
-  **163 unique diagnostics** (down from 165): 150 actor isolation, 6 non-Sendable captures,
-  5 global/static mutable state (down from 7), 2 Sendable conformance, versus **12 on the macOS host**.
+  need.** It is architecturally the _pre-rewrite ctrl-proxy state_: **11 `@unchecked Sendable`** in
+  `Sources/` (down from 26 before step 3, 35 after the base step, ~44 originally) + NSLock.
+  **CI builds it macOS-only**, so its iOS UIKit `@MainActor` surface is unchecked → an
+  _iOS Simulator_ `SWIFT_STRICT_CONCURRENCY=complete` build now measures **158 unique diagnostics**
+  (down from 163 before step 3): 150 actor isolation (unchanged; UIKit main-actor pass not started),
+  4 global/static mutable state (from 5), 2 non-Sendable captures/conversions (from 6),
+  2 Sendable conformance (unchanged).
   Converted so far (#5839): Storage (`DatabaseInspector`, `DefaultDatabaseDriver`,
   `DefaultUserDefaultsDriver`, `UserDefaultsStoreResolver`, per-call ISO-8601 formatter),
   `NetworkMockRuleStore` plus Sendable conformances on `NetworkFaultTransport`, `NetworkFaultAction`,
   `NetworkFaultRuleDTO`, `FaultRequest`, `FaultDecision`; `NetworkCaptureRecorder` and its three
-  adapters; `AutoMobileWebViewPolicy`. Remaining unchecked groups: navigation adapters, feature
-  singletons (`AutoMobileCrashes/Failures/Hangs/Biometrics/OsEvents/Notifications/...`), `Default*API`
-  wrappers, `UserDefaultsInspector` (non-Sendable public `UserDefaultsChangeListener` values and a
-  notification-center observer token), `SQLiteDatabaseDriver` (cached raw `OpaquePointer` handles),
-  `AutoMobileWebViewBridge` (mutable `weak var WKWebView` and main-actor WebKit delegate requirements),
-  `SdkHierarchyServer`, `ViewHierarchyTracker`, `ViewBodyTracker`, `AutoMobileNetwork`,
-  `AutoMobileInteractionTracker`. The **iOS 17 / macOS 15 floor** is decided and applied (#5839,
+  adapters; `AutoMobileWebViewPolicy`. Step 3 converts 15 more types to checked `Sendable`:
+  `AutoMobileBiometrics`, `AutoMobileFailures`, `AutoMobileNetwork`, `AutoMobileNotifications`,
+  `AutoMobileInteractionTracker`, `ViewBodyTracker`, `NavigationAdapterHub`,
+  `DeepLinkNavigationAdapter`, `CustomNavigationAdapter`, `UIKitNavigationAdapter`,
+  `SwiftUINavigationAdapter`, `BlockNavigationListener`, `DefaultAutoMobileAPI`,
+  `DefaultAutoMobileCrashesAPI`, `DefaultAutoMobileNetworkAPI`.
+  Five diagnostics fixed at source: lock-protected `AutoMobileURLProtocol.faultScheduler`
+  (internal DEBUG-only `FaultScheduling` is now `Sendable`, taking a `@Sendable` closure instead of
+  `DispatchWorkItem`), two `UNUserNotificationCenter` delegate completion handlers in internal
+  `NotificationActionHandler`, and two private HTTP body-reader completions in `SdkHierarchyServer`
+  (all four closures now `@Sendable`). Remaining unchecked (11): `AutoMobileSDK`,
+  `AutoMobileNotificationObserver`, `AutoMobileOsEvents`, `ViewHierarchyTracker` (non-Sendable
+  NotificationCenter observer tokens `[NSObjectProtocol]`); `AutoMobileCrashes` (non-Sendable
+  injected handler closures); `AutoMobileHangs` (`Thread?` and non-Sendable injected closures);
+  `NotificationActionHandler` (weak non-Sendable `UNUserNotificationCenterDelegate`);
+  `SdkHierarchyServer` (injected `any NSLocking`, non-Sendable listener existentials, weak server
+  reference, non-Sendable factory/logging closures); by owner decision D52, `UserDefaultsInspector`
+  (non-Sendable public `UserDefaultsChangeListener` values and observer token), `SQLiteDatabaseDriver`
+  (cached raw `OpaquePointer` handles), `AutoMobileWebViewBridge` (mutable `weak var WKWebView` and
+  main-actor WebKit delegate requirements).
+  Remaining non-actor blockers (4 global/static + 2 captures/conversions + 2 conformance):
+  `AutoMobileCrashes.signalCrashFilePath` / `previousSignalHandlers` (C signal handler must stay
+  lock-free and async-signal-safe); `SdkHighlightOverlayManager.shared`, timer `self` capture and
+  removal-closure conversion (UIKit/Timer state, main-actor pass); `AutoMobileURLProtocol`
+  (non-final class / Sendable-superclass restriction and mutable `startTime`; making it `final` is
+  a public API break, and a URLProtocol subclass cannot be checked Sendable).
+  Main-actor sizing: `ViewHierarchyWalker` is a public enum with synchronous public `walk(bundleId:)`
+  / `computeHash(_:)`; whole-type `@MainActor` changes public API → nonisolated public facades over
+  an isolated internal implementation. Callers: `ViewHierarchyTracker.walkNow()` / `performWalk()`
+  / hash, reached from the Network.framework request queue via `SdkHierarchyServer`.
+  `SdkHighlightOverlayManager` is internal → whole-type `@MainActor` is possible without a public
+  change; highlight-show caller is `SdkHierarchyServer`'s off-main HTTP request continuation,
+  plus main-isolated Playground tests. Timer callback and teardown need internal work.
+  Next: UIKit main-actor pass over those two types and the remaining actor-diagnostic files
+  (`AutoMobileOsEvents.swift`, `AutoMobileInteractionTracker.swift`, `NavigationAdapters.swift`,
+  `AutoMobileFailures.swift`, `ViewHierarchyTracker.swift`); signal-handler globals and URLProtocol
+  decisions; then enable `.v6`. The **iOS 17 / macOS 15 floor** is decided and applied (#5839,
   owner decision 2026-10-02): iOS 17 already shipped in #6773;
   the SDK and highlight-core sub-package manifests were aligned here. Use **`OSAllocatedUnfairLock`**
   for the concurrency pass; `Mutex` requires iOS 18.

@@ -1,45 +1,49 @@
 import Foundation
+import os
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 /// Automatic tap tracking.
 /// iOS equivalent of Android's AutoMobileClickTracker.
 /// Tracks user taps with coordinates, target view info, and accessibility labels.
-public final class AutoMobileInteractionTracker: @unchecked Sendable {
+public final class AutoMobileInteractionTracker: Sendable {
     public static let shared = AutoMobileInteractionTracker()
 
-    private let lock = NSLock()
-    private var buffer: SdkEventBuffer?
-    private var bundleId: String?
-    private var _isEnabled = false
-    private var lastTapProcessedAt: TimeInterval = 0
+    private struct State: Sendable {
+        var buffer: SdkEventBuffer?
+        var bundleId: String?
+        var isEnabled = false
+        var lastTapProcessedAt: TimeInterval = 0
+        var dateProvider: DateProvider = SystemDateProvider()
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     /// Minimum interval between tap event processing (milliseconds).
     static let tapDebounceMs: TimeInterval = 100
 
     private init() {}
 
-    func initialize(bundleId: String?, buffer: SdkEventBuffer) {
-        lock.lock()
-        self.bundleId = bundleId
-        self.buffer = buffer
-        lock.unlock()
+    func initialize(
+        bundleId: String?, buffer: SdkEventBuffer, dateProvider: DateProvider = SystemDateProvider()
+    ) {
+        state.withLock { state in
+            state.bundleId = bundleId
+            state.buffer = buffer
+            state.dateProvider = dateProvider
+        }
     }
 
     /// Whether interaction tracking is enabled.
     public var isEnabled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isEnabled
+        state.withLock { $0.isEnabled }
     }
 
     /// Enable or disable interaction tracking.
     /// When enabled, call `recordTap` from your gesture recognizers or SwiftUI tap handlers.
     public func setEnabled(_ enabled: Bool) {
-        lock.lock()
-        _isEnabled = enabled
-        lock.unlock()
+        state.withLock { $0.isEnabled = enabled }
     }
 
     /// Record a tap event at the given coordinates.
@@ -54,22 +58,21 @@ public final class AutoMobileInteractionTracker: @unchecked Sendable {
     ) {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
-        lock.lock()
-        guard _isEnabled else {
-            lock.unlock()
-            return
-        }
+        let snapshot = state.withLock { state -> (buffer: SdkEventBuffer?, accepted: Bool) in
+            guard state.isEnabled else {
+                return (nil, false)
+            }
 
-        let now = Date().timeIntervalSince1970
-        let elapsed = (now - lastTapProcessedAt) * 1000
-        guard elapsed >= Self.tapDebounceMs else {
-            lock.unlock()
-            return
+            let now = state.dateProvider.now().timeIntervalSince1970
+            let elapsed = (now - state.lastTapProcessedAt) * 1000
+            guard elapsed >= Self.tapDebounceMs else {
+                return (nil, false)
+            }
+            state.lastTapProcessedAt = now
+            return (state.buffer, true)
         }
-        lastTapProcessedAt = now
-
-        let currentBuffer = buffer
-        lock.unlock()
+        guard snapshot.accepted else { return }
+        let currentBuffer = snapshot.buffer
 
         var properties: [String: String] = [
             "x": String(format: "%.1f", x),
@@ -94,33 +97,34 @@ public final class AutoMobileInteractionTracker: @unchecked Sendable {
     }
 
     #if canImport(UIKit)
-    /// Record a tap from a UITapGestureRecognizer.
-    /// Inspects the view hierarchy to extract accessibility info from the tapped view.
-    public func recordTap(from recognizer: UITapGestureRecognizer, in view: UIView) {
-        guard isEnabled else { return }
+        /// Record a tap from a UITapGestureRecognizer.
+        /// Inspects the view hierarchy to extract accessibility info from the tapped view.
+        public func recordTap(from recognizer: UITapGestureRecognizer, in view: UIView) {
+            guard isEnabled else { return }
 
-        let location = recognizer.location(in: view)
-        let hitView = view.hitTest(location, with: nil)
+            let location = recognizer.location(in: view)
+            let hitView = view.hitTest(location, with: nil)
 
-        recordTap(
-            x: Double(location.x),
-            y: Double(location.y),
-            accessibilityLabel: hitView?.accessibilityLabel,
-            accessibilityIdentifier: hitView?.accessibilityIdentifier,
-            viewType: hitView.map { String(describing: type(of: $0)) },
-            text: (hitView as? UILabel)?.text ?? (hitView as? UIButton)?.titleLabel?.text
-        )
-    }
+            recordTap(
+                x: Double(location.x),
+                y: Double(location.y),
+                accessibilityLabel: hitView?.accessibilityLabel,
+                accessibilityIdentifier: hitView?.accessibilityIdentifier,
+                viewType: hitView.map { String(describing: type(of: $0)) },
+                text: (hitView as? UILabel)?.text ?? (hitView as? UIButton)?.titleLabel?.text
+            )
+        }
     #endif
 
     // MARK: - Testing Support
 
-    internal func reset() {
-        lock.lock()
-        buffer = nil
-        bundleId = nil
-        _isEnabled = false
-        lastTapProcessedAt = 0
-        lock.unlock()
+    func reset() {
+        state.withLock { state in
+            state.buffer = nil
+            state.bundleId = nil
+            state.isEnabled = false
+            state.lastTapProcessedAt = 0
+            state.dateProvider = SystemDateProvider()
+        }
     }
 }

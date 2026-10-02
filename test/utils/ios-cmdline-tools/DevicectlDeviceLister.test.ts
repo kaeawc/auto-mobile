@@ -325,7 +325,7 @@ describe("DevicectlDeviceLister", () => {
     expect(options?.signal).toBeUndefined();
   });
 
-  test("a partially unreadable sweep without last-good inventory is incomplete and empty", async () => {
+  test("a partially unreadable sweep without last-good inventory includes recognized devices", async () => {
     const lister = makeLister({
       readFile: async () =>
         JSON.stringify(
@@ -335,7 +335,7 @@ describe("DevicectlDeviceLister", () => {
 
     const discovery = await lister.listConnectedDevices();
 
-    expect(discovery.devices).toEqual([]);
+    expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
     expect(discovery).toMatchObject({ complete: false, error: { code: "failed" } });
   });
 

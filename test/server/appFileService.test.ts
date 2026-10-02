@@ -1879,6 +1879,59 @@ function appFileOperationCommands(
   ];
 }
 
+describe("Android app-file running candidates", () => {
+  test.each([
+    {
+      name: "running owner bypasses stopped installation",
+      installed: [0, 10],
+      workRunning: false,
+      resolved: 0,
+      foregroundCalls: 0,
+    },
+    {
+      name: "sole stopped installation remains selectable",
+      installed: [10],
+      workRunning: false,
+      resolved: 10,
+      foregroundCalls: 0,
+    },
+    {
+      name: "two running installations still prefer foreground work app",
+      installed: [0, 10],
+      workRunning: true,
+      resolved: 10,
+      foregroundCalls: 1,
+    },
+  ])("$name", async (scenario) => {
+    const adb = new AppFileUserAdb();
+    adb.setUsers([
+      { userId: 0, name: "Owner", running: true, flags: 0 },
+      { userId: 10, name: "Work", running: scenario.workRunning, flags: 0 },
+    ]);
+    for (const userId of [0, 10]) {
+      adb.setCommandResponse(
+        `shell pm list packages --user ${userId}`,
+        execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+      );
+    }
+    const foreground = new FakeForegroundAppLookup();
+    foreground.app = { packageName: "com.example.app", userId: 10 };
+    const { service } = appFileUserService(adb, foreground);
+    await service.listFiles({
+      deviceId: appFileUserDevice.deviceId,
+      appId: "com.example.app",
+      container: "documents",
+    });
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell pm list packages --user 0",
+      "shell pm list packages --user 10",
+      ...appFileOperationCommands("list", "documents", scenario.resolved),
+    ]);
+    expect(foreground.calls).toBe(scenario.foregroundCalls);
+    expect(adb.listUsersCalls).toBe(1);
+  });
+});
+
 for (const operation of ["put", "list", "read"] as const) {
   describe(`Android app-file user targeting: ${operation}`, () => {
     test.each(appFileUserCases)("$name (exact commands)", async (scenario) => {

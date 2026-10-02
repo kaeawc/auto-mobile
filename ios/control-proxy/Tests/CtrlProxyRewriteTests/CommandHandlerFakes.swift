@@ -57,6 +57,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var tapCalls = 0
     var swipeCalls = 0
     var onSwipe: (() -> Void)?
+    var onPressKey: (() -> Void)?
     var multiFingerSwipeCalls = 0
     var pinchCalls = 0
     var setTextCalls = 0
@@ -81,6 +82,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var keyWarning: String?
 
     func pressKey(key: String, modifiers: [String]) async throws -> Bool? {
+        onPressKey?()
         if let keyError { throw keyError }
         keyCalls.append((key, modifiers))
         return keyVerified

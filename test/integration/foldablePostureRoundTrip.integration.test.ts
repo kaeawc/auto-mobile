@@ -7,7 +7,14 @@ import { fileURLToPath } from "node:url";
 import type { ObserveResult, SkeletonElement } from "../../src/models/ObserveResult";
 import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
-import { assertRecordingSpansObservation } from "./foldableRecordingSpan";
+import {
+  assertContainerDurationSpans,
+  assertRecordingSpansObservation,
+  awaitScreenSizeChange,
+  probeContainerDurationMs,
+  runCleanupSteps,
+  selectErrorToThrow,
+} from "./foldableRecordingSpan";
 
 const runLane = process.env.AUTOMOBILE_FOLDABLE_LANE === "1";
 const describeLane = runLane ? describe : describe.skip;
@@ -53,6 +60,24 @@ async function cli(args: string[]): Promise<ToolResponse> {
     throw error;
   }
 }
+
+const ffprobeRunner = {
+  async run(args: string[]): Promise<string | undefined> {
+    try {
+      const { stdout } = await execFileAsync("ffprobe", args, {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 30_000,
+      });
+      return stdout;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        console.warn("ffprobe not found; skipping container duration check");
+        return undefined;
+      }
+      throw error;
+    }
+  },
+};
 
 function payload<T>(response: ToolResponse): T {
   const value = response.content?.find((item) => item.type === "text")?.text;
@@ -266,6 +291,7 @@ describeLane("foldable posture round trips through the daemon", () => {
     let opened: ObserveResult | undefined;
     let closed: ObserveResult | undefined;
     let reopened: ObserveResult | undefined;
+    let primary: { error: unknown } | undefined;
     try {
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
       opened = await expectPanel(sessionUuid, undefined, isFold ? "inner" : undefined, "opened");
@@ -288,7 +314,19 @@ describeLane("foldable posture round trips through the daemon", () => {
       // Let the encoder receive frames before the first panel goes inactive.
       await Bun.sleep(1000);
       await setPosture(sessionUuid, "closed", isFold ? undefined : "phone");
-      closed = await expectPanel(sessionUuid, undefined, isFold ? "cover" : undefined, "closed");
+      if (isFold) {
+        closed = await expectPanel(sessionUuid, undefined, isFold ? "cover" : undefined, "closed");
+      } else {
+        const changed = await awaitScreenSizeChange({
+          observe: () => observe(sessionUuid),
+          baseline: opened.screenSize,
+          attempts: 10,
+          delayMs: 500,
+          sleep: (ms) => Bun.sleep(ms),
+        });
+        expect(changed.screenSize).not.toEqual(opened.screenSize);
+        closed = await expectPanel(sessionUuid, changed.screenSize, undefined, "closed");
+      }
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
       reopened = await expectPanel(
         sessionUuid,
@@ -296,31 +334,51 @@ describeLane("foldable posture round trips through the daemon", () => {
         isFold ? "inner" : undefined,
         "opened",
       );
+    } catch (error) {
+      primary = { error };
     } finally {
-      try {
-        if (recordingStarted) {
-          stopped = await tool<RecordingResult>(sessionUuid, "videoRecording", [
-            "--action",
-            "stop",
-            ...(recording?.recordingId ? ["--recordingId", recording.recordingId] : []),
-          ]);
-          await mkdir(outputDirectory, { recursive: true });
-          await writeFile(
-            join(outputDirectory, "stop-result.json"),
-            JSON.stringify(stopped, null, 2),
-          );
-        }
-      } finally {
-        try {
-          if (recording?.outputPath) {
-            await mkdir(outputDirectory, { recursive: true });
-            await cp(dirname(recording.outputPath), join(outputDirectory, recording.recordingId), {
-              recursive: true,
-            });
-          }
-        } finally {
-          await releaseSession(sessionUuid);
-        }
+      const failures = await runCleanupSteps(
+        [
+          {
+            name: "stop recording and write stop result",
+            run: async () => {
+              if (!recordingStarted) {
+                return;
+              }
+              stopped = await tool<RecordingResult>(sessionUuid, "videoRecording", [
+                "--action",
+                "stop",
+                ...(recording?.recordingId ? ["--recordingId", recording.recordingId] : []),
+              ]);
+              await mkdir(outputDirectory, { recursive: true });
+              await writeFile(
+                join(outputDirectory, "stop-result.json"),
+                JSON.stringify(stopped, null, 2),
+              );
+            },
+          },
+          {
+            name: "copy recording directory",
+            run: async () => {
+              if (recording?.outputPath) {
+                await mkdir(outputDirectory, { recursive: true });
+                await cp(
+                  dirname(recording.outputPath),
+                  join(outputDirectory, recording.recordingId),
+                  {
+                    recursive: true,
+                  },
+                );
+              }
+            },
+          },
+          { name: "release session", run: () => releaseSession(sessionUuid) },
+        ],
+        (message) => console.warn(message),
+      );
+      const errorToThrow = selectErrorToThrow(primary, failures);
+      if (errorToThrow !== undefined) {
+        throw errorToThrow;
       }
     }
 
@@ -335,6 +393,15 @@ describeLane("foldable posture round trips through the daemon", () => {
     // Timer.now), comparable to recording startedAt on the same stable host clock.
     // Android freshness.actualTimestamp and updatedAt can use the device clock.
     assertRecordingSpansObservation(metadata, Date.parse(reopened.screenshotCapturedAt ?? ""));
+    const containerPath = stopped.recordings[0].outputPath ?? metadata.filePath;
+    const containerDurationMs = await probeContainerDurationMs(ffprobeRunner, containerPath);
+    if (containerDurationMs !== undefined) {
+      assertContainerDurationSpans(
+        containerDurationMs,
+        Date.parse(metadata.startedAt),
+        Date.parse(reopened.screenshotCapturedAt ?? ""),
+      );
+    }
     // config.resolution is a requested size, not measured output dimensions;
     // the stop result cannot assert the absence of a letterboxed union canvas.
     // Resizable's single-display AVD leaves device.displays undefined, so no panel metadata is emitted.

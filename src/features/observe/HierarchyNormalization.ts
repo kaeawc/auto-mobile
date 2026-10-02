@@ -6,6 +6,22 @@ import { parseBounds } from "../../utils/bounds";
 import { cleanupIosXCTestHierarchy } from "./ios/cleanupIosHierarchy";
 import { assignStableViewIds } from "./android/StableNodeIdentity";
 import { extractHierarchyScreenSize } from "./hierarchyScreenSize";
+import type { ScreenSize } from "../../models/ScreenSize";
+
+// Key by the projected tree so DefaultHierarchyCapture's shallow wrapper copy
+// retains the pre-pruning size without trusting stale runner point metadata.
+const projectedScreenSizes = new WeakMap<ViewHierarchyResult["hierarchy"], ScreenSize>();
+
+/** Prefer the size recorded before visibility pruning, then resolve an unprojected tree. */
+export function resolveActionableHierarchyScreenSize(
+  hierarchy: ViewHierarchyResult,
+  iosMultiPanel = false,
+): ScreenSize | null {
+  return (
+    projectedScreenSizes.get(hierarchy.hierarchy) ??
+    extractHierarchyScreenSize(hierarchy, iosMultiPanel)
+  );
+}
 
 export function normalizeIosHierarchy(
   hierarchy: any,
@@ -57,7 +73,9 @@ export function projectActionableHierarchy(
   if (platform !== "ios") {
     return source;
   }
-  const size = extractHierarchyScreenSize(source, iosMultiPanel) ?? {
+  const size = (iosMultiPanel
+    ? resolveActionableHierarchyScreenSize(source, true)
+    : extractHierarchyScreenSize(source)) ?? {
     width: source.screenWidth ?? 0,
     height: source.screenHeight ?? 0,
   };
@@ -77,6 +95,7 @@ export function projectActionableHierarchy(
         : window.hierarchy,
     }));
   }
+  projectedScreenSizes.set(result.hierarchy, size);
   return result;
 }
 

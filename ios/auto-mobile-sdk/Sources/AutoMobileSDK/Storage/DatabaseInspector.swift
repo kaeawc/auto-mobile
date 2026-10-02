@@ -1,143 +1,129 @@
 import Foundation
+import os
 
 /// Debug-time SQLite database inspection.
 /// iOS equivalent of Android's DatabaseInspector.
-public final class DatabaseInspector: @unchecked Sendable {
+public final class DatabaseInspector: Sendable {
     public static let shared = DatabaseInspector()
 
-    private let lock = NSLock()
-    private var _isEnabled = false
-    private var _driver: DatabaseDriver?
-    private var _configuration = StorageInspectionConfiguration()
-    private var _hostMutationAuthorization = false
-    private var _sessionMutationAuthorization: String?
-    #if DEBUG
-        private var _mutationToken: String?
-    #endif
+    private struct State: Sendable {
+        var isEnabled = false
+        var driver: DatabaseDriver?
+        var configuration = StorageInspectionConfiguration()
+        var hostMutationAuthorization = false
+        var sessionMutationAuthorization: String?
+        #if DEBUG
+            var mutationToken: String?
+        #endif
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     private init() {}
 
     func initialize() {
-        lock.lock()
-        defer { lock.unlock() }
-        _driver = SQLiteDatabaseDriver()
+        setDriver(SQLiteDatabaseDriver())
     }
 
     /// Whether inspection is enabled.
     public var isEnabled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isEnabled
+        state.withLock { $0.isEnabled }
     }
 
     /// Enable or disable inspection.
     public func setEnabled(_ enabled: Bool) {
-        lock.lock()
-        _isEnabled = enabled
-        lock.unlock()
+        state.withLock { $0.isEnabled = enabled }
     }
 
     /// Configure explicit storage registrations and transport limits.
     public func configure(_ configuration: StorageInspectionConfiguration) {
-        lock.lock()
-        _configuration = configuration
-        lock.unlock()
+        state.withLock { $0.configuration = configuration }
     }
 
     /// Register an app-group suite for host-coordinated inspection.
     public func registerAppGroupSuite(_ suiteName: String) {
-        lock.lock()
-        _configuration.registeredAppGroupSuites.insert(suiteName)
-        lock.unlock()
+        state.withLock { _ = $0.configuration.registeredAppGroupSuites.insert(suiteName) }
     }
 
     /// Register Core Data metadata supplied by the host.
     public func registerCoreDataStore(_ store: CoreDataStoreRegistration) {
-        lock.lock()
-        _configuration.coreDataStores.removeAll { $0.identifier == store.identifier }
-        _configuration.coreDataStores.append(store)
-        lock.unlock()
+        state.withLock { state in
+            state.configuration.coreDataStores.removeAll { $0.identifier == store.identifier }
+            state.configuration.coreDataStores.append(store)
+        }
     }
 
     /// Authorize the host half of the mutation gate.
     public func authorizeHostMutations(_ authorized: Bool) {
-        lock.lock()
-        _hostMutationAuthorization = authorized
-        lock.unlock()
+        state.withLock { $0.hostMutationAuthorization = authorized }
     }
 
     /// Authorize mutations for one active SDK session.
     public func authorizeSessionMutations(sessionId: String?) {
-        lock.lock()
-        _sessionMutationAuthorization = sessionId
-        lock.unlock()
+        state.withLock { $0.sessionMutationAuthorization = sessionId }
     }
 
     #if DEBUG
         /// Require a launch-scoped mutation token for host-authorized writes.
         public func authorizeMutationToken(_ token: String) {
-            lock.lock()
-            _mutationToken = token.isEmpty ? nil : token
-            lock.unlock()
+            state.withLock { $0.mutationToken = token.isEmpty ? nil : token }
         }
     #endif
 
     var inspectionConfiguration: StorageInspectionConfiguration {
-        lock.lock()
-        defer { lock.unlock() }
-        return _configuration
+        state.withLock { $0.configuration }
     }
 
     func canMutate(sessionId: String?, currentSessionId: String?, mutationToken: String? = nil) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard _configuration.allowMutations && _hostMutationAuthorization else { return false }
-        #if DEBUG
-            if let mutationToken, let registered = _mutationToken,
-               !mutationToken.isEmpty, !registered.isEmpty
-            {
-                let supplied = Array(mutationToken.utf8)
-                let expected = Array(registered.utf8)
-                var difference = supplied.count ^ expected.count
-                for index in 0 ..< max(supplied.count, expected.count) {
-                    difference |= Int(supplied.indices.contains(index) ? supplied[index] : 0)
-                        ^ Int(expected.indices.contains(index) ? expected[index] : 0)
+        state.withLock { state in
+            guard state.configuration.allowMutations && state.hostMutationAuthorization else { return false }
+            #if DEBUG
+                if let mutationToken, let registered = state.mutationToken,
+                   !mutationToken.isEmpty, !registered.isEmpty
+                {
+                    let supplied = Array(mutationToken.utf8)
+                    let expected = Array(registered.utf8)
+                    var difference = supplied.count ^ expected.count
+                    for index in 0 ..< max(supplied.count, expected.count) {
+                        difference |= Int(supplied.indices.contains(index) ? supplied[index] : 0)
+                            ^ Int(expected.indices.contains(index) ? expected[index] : 0)
+                    }
+                    if difference == 0 { return true }
                 }
-                if difference == 0 { return true }
-            }
-        #endif
-        return sessionId != nil
-            && sessionId == currentSessionId
-            && sessionId == _sessionMutationAuthorization
+            #endif
+            return sessionId != nil
+                && sessionId == currentSessionId
+                && sessionId == state.sessionMutationAuthorization
+        }
     }
 
     /// Get the driver for direct access.
     public func getDriver() -> DatabaseDriver? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard _isEnabled else { return nil }
-        return _driver
+        state.withLock { state in
+            guard state.isEnabled else { return nil }
+            return state.driver
+        }
     }
 
     // MARK: - Testing Support
 
     func setDriver(_ driver: DatabaseDriver) {
-        lock.lock()
-        _driver = driver
-        lock.unlock()
+        let old = state.withLock { state in
+            let old = state.driver
+            state.driver = driver
+            return old
+        }
+        // A host-supplied driver's deinit may re-enter the inspector.
+        withExtendedLifetime(old) {}
     }
 
     func reset() {
-        lock.lock()
-        _isEnabled = false
-        _driver = nil
-        _configuration = StorageInspectionConfiguration()
-        _hostMutationAuthorization = false
-        _sessionMutationAuthorization = nil
-        #if DEBUG
-            _mutationToken = nil
-        #endif
-        lock.unlock()
+        let old = state.withLock { state in
+            let old = state.driver
+            state = State()
+            return old
+        }
+        withExtendedLifetime(old) {}
     }
 }
 
@@ -247,7 +233,7 @@ public struct SQLExecutionResult: Sendable {
 
 // MARK: - Default Implementation
 
-final class DefaultDatabaseDriver: DatabaseDriver, @unchecked Sendable {
+final class DefaultDatabaseDriver: DatabaseDriver, Sendable {
     func getDatabases() -> [DatabaseDescriptor] {
         var databases: [DatabaseDescriptor] = []
 

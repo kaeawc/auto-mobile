@@ -108,12 +108,25 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
 **Other native-Swift components needing their own Swift-6 pass (ranked, separate from this rewrite):**
 
 - **`ios/auto-mobile-sdk`** (in-app instrumentation SDK; ctrl-proxy links it for wire models) — **largest
-  need.** It is architecturally the _pre-rewrite ctrl-proxy state_: ~44 `@unchecked Sendable` + NSLock,
+  need.** It is architecturally the _pre-rewrite ctrl-proxy state_: **26 `@unchecked Sendable`** in
+  `Sources/` (down from 35 after the base step, ~44 originally) + NSLock,
   ~20 mutable singletons, real flagged races (signal-handler globals; the `AutoMobileURLProtocol`
   Sendable error already in STATUS §5). **CI builds it macOS-only**, so its iOS UIKit `@MainActor`
-  surface is unchecked → an _iOS-platform_ strict-complete build measured **165 unique diagnostics**
-  (150 UIKit main-actor isolation), versus **12 on the macOS host**. The **iOS 17 / macOS 15 floor**
-  is decided and applied (#5839, owner decision 2026-10-02): iOS 17 already shipped in #6773;
+  surface is unchecked → an _iOS Simulator_ `-strict-concurrency=complete` build now measures
+  **163 unique diagnostics** (down from 165): 150 actor isolation, 6 non-Sendable captures,
+  5 global/static mutable state (down from 7), 2 Sendable conformance, versus **12 on the macOS host**.
+  Converted so far (#5839): Storage (`DatabaseInspector`, `DefaultDatabaseDriver`,
+  `DefaultUserDefaultsDriver`, `UserDefaultsStoreResolver`, per-call ISO-8601 formatter),
+  `NetworkMockRuleStore` plus Sendable conformances on `NetworkFaultTransport`, `NetworkFaultAction`,
+  `NetworkFaultRuleDTO`, `FaultRequest`, `FaultDecision`; `NetworkCaptureRecorder` and its three
+  adapters; `AutoMobileWebViewPolicy`. Remaining unchecked groups: navigation adapters, feature
+  singletons (`AutoMobileCrashes/Failures/Hangs/Biometrics/OsEvents/Notifications/...`), `Default*API`
+  wrappers, `UserDefaultsInspector` (non-Sendable public `UserDefaultsChangeListener` values and a
+  notification-center observer token), `SQLiteDatabaseDriver` (cached raw `OpaquePointer` handles),
+  `AutoMobileWebViewBridge` (mutable `weak var WKWebView` and main-actor WebKit delegate requirements),
+  `SdkHierarchyServer`, `ViewHierarchyTracker`, `ViewBodyTracker`, `AutoMobileNetwork`,
+  `AutoMobileInteractionTracker`. The **iOS 17 / macOS 15 floor** is decided and applied (#5839,
+  owner decision 2026-10-02): iOS 17 already shipped in #6773;
   the SDK and highlight-core sub-package manifests were aligned here. Use **`OSAllocatedUnfairLock`**
   for the concurrency pass; `Mutex` requires iOS 18.
 - **`ios/XCTestRunner`** (standalone MCP-client XCTest wrapper — the iOS analog of the Android JUnit

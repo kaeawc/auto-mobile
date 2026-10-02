@@ -358,7 +358,11 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         defaults.register(defaults: ["key": "registered"])
-        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in defaults })
+        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in
+            let defaults = UserDefaults(suiteName: name)
+            defaults?.register(defaults: ["key": "registered"])
+            return defaults
+        })
         let response = try resolvedHandler(driver).handle(body: request(
             "remove", suite: name, key: "key", sessionId: "session-1"
         ))
@@ -377,7 +381,11 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         defaults.set("stored", forKey: "key")
         // Same-process persistent reads must see set/remove immediately, without synchronize.
         XCTAssertEqual(defaults.persistentDomain(forName: name)?["key"] as? String, "stored")
-        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in defaults })
+        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in
+            let defaults = UserDefaults(suiteName: name)
+            defaults?.register(defaults: ["key": "registered"])
+            return defaults
+        })
         let response = try resolvedHandler(driver).handle(body: request(
             "remove", suite: name, key: "key", sessionId: "session-1"
         ))
@@ -392,7 +400,11 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         defaults.register(defaults: ["key": "registered"])
-        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in defaults })
+        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in
+            let defaults = UserDefaults(suiteName: name)
+            defaults?.register(defaults: ["key": "registered"])
+            return defaults
+        })
         let response = try resolvedHandler(driver).handle(body: request(
             "set", suite: name, key: "key", value: "written", type: "STRING", sessionId: "session-1"
         ))
@@ -427,7 +439,11 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         defaults.register(defaults: ["registeredOnly": "registered", "key": "registered"])
         defaults.set("stored", forKey: "key")
         defaults.set(42, forKey: "other")
-        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in defaults })
+        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in
+            let defaults = UserDefaults(suiteName: name)
+            defaults?.register(defaults: ["registeredOnly": "registered", "key": "registered"])
+            return defaults
+        })
         let response = try resolvedHandler(driver).handle(body: request(
             "clear", suite: name, sessionId: "session-1"
         ))
@@ -490,7 +506,7 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         let name = "auto-mobile-test-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
-        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in defaults })
+        let driver = DefaultUserDefaultsDriver(makeDefaults: { _ in UserDefaults(suiteName: name) })
         let handler = SdkPreferenceRouteHandler(
             driver: { driver }, bundleId: { "com.example.app" }, currentSessionId: { "session-1" }
         )

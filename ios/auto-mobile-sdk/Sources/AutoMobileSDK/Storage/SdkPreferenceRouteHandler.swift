@@ -6,13 +6,13 @@
         private let driver: () -> (any UserDefaultsDriver)?
         private let bundleId: () -> String?
         private let currentSessionId: () -> String?
-        private let suiteIsValid: (String) -> Bool
+        private let suiteIsValid: @Sendable (String) -> Bool
 
         init(
             driver: @escaping () -> (any UserDefaultsDriver)? = { UserDefaultsInspector.shared.getDriver() },
             bundleId: @escaping () -> String? = { Bundle.main.bundleIdentifier },
             currentSessionId: @escaping () -> String? = { AutoMobileSDK.shared.currentSessionId() },
-            suiteIsValid: @escaping (String) -> Bool = UserDefaultsStoreResolver.defaultSuiteIsValid
+            suiteIsValid: @escaping @Sendable (String) -> Bool = UserDefaultsStoreResolver.defaultSuiteIsValid
         ) {
             self.driver = driver
             self.bundleId = bundleId

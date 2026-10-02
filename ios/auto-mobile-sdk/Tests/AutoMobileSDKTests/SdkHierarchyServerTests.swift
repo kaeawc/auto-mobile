@@ -34,7 +34,11 @@ final class SdkHierarchyServerTests: XCTestCase {
             "test.bundle"
         }
 
-        var isApplicationActive: Bool { true }
+        let isApplicationActive: Bool
+
+        init(isApplicationActive: Bool = true) {
+            self.isApplicationActive = isApplicationActive
+        }
 
         func getLatestHierarchy() -> SdkViewHierarchy? {
             nil
@@ -274,13 +278,21 @@ final class SdkHierarchyServerTests: XCTestCase {
 
     private func withRunningServer(
         tracker: any SdkHierarchyServing,
+        identity: SdkSimulatorIdentity = SdkSimulatorIdentity(environment: [:]),
         _ body: (NWEndpoint.Port) throws -> Void
     )
         throws
     {
         let listener = try LoopbackListener()
         let server = SdkHierarchyServer(
-            tracker: tracker, listenerFactory: { listener }, identity: SdkSimulatorIdentity(environment: [:])
+            tracker: tracker, identity: identity,
+            portListenerFactory: { port in
+                // This helper owns one ephemeral listener; skip the simulator's legacy listener.
+                if identity.udid != nil, port == SdkHierarchyServer.port {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EADDRINUSE))
+                }
+                return listener
+            }
         )
         server.start()
         defer { server.stop() }
@@ -291,6 +303,24 @@ final class SdkHierarchyServerTests: XCTestCase {
             return
         }
         try body(port)
+    }
+
+    func testBackgroundSimulatorHealthRejectsEvenMatchingIdentity() throws {
+        let udid = "ABCDEF00-1234-4567-89AB-000000000001"
+        let tracker = FakeHierarchyTracker(isApplicationActive: false)
+        let identity = SdkSimulatorIdentity(environment: ["SIMULATOR_UDID": udid])
+        try withRunningServer(tracker: tracker, identity: identity) { port in
+            let response = try roundTrip(
+                port: port,
+                head: "GET /health HTTP/1.1\r\nHost: localhost\r\nX-AutoMobile-Simulator-Udid: \(udid)\r\n\r\n",
+                body: ""
+            )
+            XCTAssertTrue(response.hasPrefix("HTTP/1.1 409 Conflict"), "expected a 409, got: \(response)")
+            let body = try XCTUnwrap(response.components(separatedBy: "\r\n\r\n").last)
+            XCTAssertEqual(body, "{\"error\":\"app_not_active\"}")
+            let payload = try JSONDecoder().decode([String: String].self, from: Data(body.utf8))
+            XCTAssertEqual(payload, ["error": "app_not_active"])
+        }
     }
 
     /// A body-bearing route must re-check the foreground gate AFTER the body is

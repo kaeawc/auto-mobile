@@ -22,5 +22,33 @@ accumulating across repeated reads (#7008).
 `available` for `adb`, and for at least one Apple developer-tooling entry, is
 an operational requirement for the corresponding AutoMobile device automation.
 This resource itself is diagnostic only: it does not gate any tool call, change
-host state, or enumerate devices. Doctor and readiness gating remain separate
+host state. Its CoreDevice diagnostic reads existing simulator state. Doctor and readiness gating remain separate
 and are unaffected.
+
+The `devicectl` entry's `coreDevice` payload reports `simulatorBootState` as
+`{ status: "available", booted, shutdown, unknown }`, or `unavailable` with a
+reason. Counts include transitional states as unknown and have fixed payload
+size. A one-second cached/coalesced simctl listing bounds repeat reads; fresh
+boot checks bypass this diagnostic cache and simctl's stale fallback.
+
+`capabilities` contains `status` (`not probed` or `probed`) and at most 64
+`entries`, each with simulator-type `scope`, `command`, `status` (`supported`
+or `unsupported`), and `featureId` when captured. Success captures do not
+contain a feature ID, so supported commands retain their command name. An
+unobserved command is not probed. Unsupported feature IDs and learned command
+links each use a 64-entry FIFO bound. Type/runtime scope prevents a non-Duo hinge
+failure disabling a Duo; unknown types fall back to the device ID.
+
+Reading this resource or running the CoreDevice doctor check performs the existing
+bounded `devicectl --version` availability read every time. The measured result
+seeds the injected process-owned probe, so a later `checkSimulatorCommand` reuses
+it without a second version invocation. Concurrent version reads share an in-flight
+invocation. Capability commands stay lazy: diagnostic reads never spawn them.
+There is currently no production simulator command caller; the existing
+simulator tools use simctl. No new tool is introduced.
+
+`downgradeGuard` remains exactly `not checked`. A production guard provider is
+not configured: measuring the selected Xcode's bundled CoreDevice version and
+the installed system framework (and identifying the installing Xcode) still
+needs a capture and a comparison contract. Injected guard providers continue
+to block unverifiable or older developer directories before any devicectl call.

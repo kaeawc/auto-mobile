@@ -11,6 +11,8 @@ import {
 import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
+import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
+import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import {
@@ -328,6 +330,10 @@ function defaultDaemonProcessBirthTime(): number {
 }
 
 export class Daemon {
+  // One probe lifetime shared by all MCP connections and daemon doctor calls.
+  private readonly iosDoctorDependencies = createIosDoctorDependencies({
+    coreDeviceProbe: createProductionCoreDeviceProbe(),
+  });
   private httpServer: HttpServer | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
@@ -1202,6 +1208,7 @@ export class Daemon {
           let mcpServer;
           try {
             mcpServer = createMcpServer({
+              iosDependencies: this.iosDoctorDependencies,
               debug: this.debug,
               sessionContext,
               daemonMode: true,

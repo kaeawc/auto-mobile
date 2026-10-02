@@ -36,12 +36,16 @@ import {
 } from "../../utils/ios-cmdline-tools/SecurityClient";
 import type { DoctorProbeOptions } from "../types";
 import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
-import { checkDevicectlAvailability } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { createCoreDeviceProbeHolder } from "../../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import {
   formatCoreDeviceVersion,
   parseCoreDeviceVersion,
+  type CoreDeviceProbeDiagnostics,
+  type CoreDeviceCapabilities,
+  type SimulatorBootSummary,
   REQUIRED_SIMULATOR_COREDEVICE_VERSION,
 } from "../../utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
+import { checkDevicectlAvailability } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { compareSimctlVersions } from "../../utils/ios-cmdline-tools/simctlVersion";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
@@ -102,15 +106,8 @@ export interface IosObserveRoundTripInspector {
 
 type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
 
-/**
- * Bound every external diagnostic call. Tools like `xcrun`, `security`
- * (keychain), and `xcode-select` can block indefinitely (license prompts, stuck
- * keychain, missing CLT). Without a timeout a single wedged tool hangs the whole
- * `doctor` run. On timeout execFile rejects, which each check already turns into
- * a clean `fail` result. Overridable for slow CI hosts via
- * AUTOMOBILE_DOCTOR_TIMEOUT_MS.
- */
-export const DOCTOR_EXEC_TIMEOUT_MS = Number(process.env.AUTOMOBILE_DOCTOR_TIMEOUT_MS) || 5000;
+import { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
+export { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
 
 // Route generic host-command execution through the shared HostCommandExecutor
 // seam rather than a raw child_process execFile. The exec leaf lives in
@@ -119,6 +116,7 @@ export const DOCTOR_EXEC_TIMEOUT_MS = Number(process.env.AUTOMOBILE_DOCTOR_TIMEO
 const hostCommandExecutor = new DefaultHostCommandExecutor();
 
 export interface IosDoctorDependencies {
+  getCoreDeviceProbe: () => CoreDeviceProbeDiagnostics;
   platform: () => NodeJS.Platform;
   execFile: (
     file: string,
@@ -464,24 +462,30 @@ export function createIosObserveRoundTripInspector(
   };
 }
 
-export const createIosDoctorDependencies = (): IosDoctorDependencies => ({
-  platform: () => process.platform,
-  execFile: (file, args, options = {}) =>
-    hostCommandExecutor.executeCommand(file, args, {
-      timeoutMs: options.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
-      signal: options.signal,
-      killSignal: "SIGKILL",
-    }),
-  xcodebuild: new XcodebuildClient(),
-  fileExists: existsSync,
-  readDir: async (path) => fs.readdir(path),
-  homedir,
-  securityClient: new SecurityClient(),
-  logger,
-  createSimctlClient: () => new SimCtlClient(),
-  runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger),
-  observeRoundTripInspector: createIosObserveRoundTripInspector(() => new SimCtlClient(), logger),
-});
+export function createIosDoctorDependencies(
+  options: { coreDeviceProbe?: CoreDeviceProbeDiagnostics } = {},
+): IosDoctorDependencies {
+  const holder = createCoreDeviceProbeHolder();
+  return {
+    getCoreDeviceProbe: () => options.coreDeviceProbe ?? holder.get(),
+    platform: () => process.platform,
+    execFile: (file, args, options = {}) =>
+      hostCommandExecutor.executeCommand(file, args, {
+        timeoutMs: options.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
+        signal: options.signal,
+        killSignal: "SIGKILL",
+      }),
+    xcodebuild: new XcodebuildClient(),
+    fileExists: existsSync,
+    readDir: async (path) => fs.readdir(path),
+    homedir,
+    securityClient: new SecurityClient(),
+    logger,
+    createSimctlClient: () => new SimCtlClient(),
+    runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger),
+    observeRoundTripInspector: createIosObserveRoundTripInspector(() => new SimCtlClient(), logger),
+  };
+}
 
 function parseXcodeVersion(output: string): string | null {
   const match = output.match(/Xcode\s+([0-9]+(?:\.[0-9]+)*)/);
@@ -741,14 +745,15 @@ export async function checkSimctlAvailable(
   }
 }
 
-export type CoreDeviceDiagnostic =
+export type CoreDeviceDiagnostic = (
   | { status: "meets-requirement"; version: string }
   | { status: "below-required"; version: string }
   | { status: "non-darwin"; reason: string }
   | { status: "missing"; reason: string }
-  | { status: "unparsable"; reason: string };
+  | { status: "unparsable"; reason: string }
+) & { simulatorBootState?: SimulatorBootSummary; capabilities?: CoreDeviceCapabilities };
 
-/** Read only the version; the simulator boot and downgrade-guard seams are not wired. */
+/** Preserve the bounded availability read; only capability state stays lazy. */
 export async function probeCoreDeviceVersion(
   dependencies = createIosDoctorDependencies(),
   probe: DoctorProbeOptions = {},
@@ -756,28 +761,63 @@ export async function probeCoreDeviceVersion(
   if (dependencies.platform() !== "darwin") {
     return { status: "non-darwin", reason: "iOS development requires macOS" };
   }
-  const availability = await checkDevicectlAvailability({
-    platform: dependencies.platform,
-    invoke: dependencies.execFile,
-    logger: dependencies.logger,
-    probe: remainingDoctorProbe(probe),
+  const capabilityProbe = dependencies.getCoreDeviceProbe();
+  const measured = await capabilityProbe.refreshVersion(async () => {
+    const availability = await checkDevicectlAvailability({
+      platform: dependencies.platform,
+      invoke: dependencies.execFile,
+      logger: dependencies.logger,
+      probe: remainingDoctorProbe(probe),
+    });
+    if (availability.status !== "pass") {
+      return { kind: "unavailable", reasonKind: "missing", reason: availability.message };
+    }
+    const version = parseCoreDeviceVersion(String(availability.value ?? ""));
+    if (!version) {
+      const reason = "devicectl returned an unrecognized CoreDevice version";
+      dependencies.logger.warn(`CoreDevice version check failed: ${reason}`);
+      return { kind: "unavailable", reasonKind: "unparsable", reason };
+    }
+    return { kind: "available", version };
   });
-  if (availability.status !== "pass") {
-    return { status: "missing", reason: availability.message };
+  let simulatorBootState: SimulatorBootSummary;
+  try {
+    simulatorBootState = await awaitDoctorProbe(probe, () =>
+      capabilityProbe.readSimulatorBootState(remainingDoctorProbe(probe)),
+    );
+  } catch (error) {
+    dependencies.logger.warn(
+      `CoreDevice simulator state read failed: ${errorMessage(error)}`,
+      error,
+    );
+    simulatorBootState = { status: "unavailable", reason: errorMessage(error) };
   }
-  const version = parseCoreDeviceVersion(String(availability.value ?? ""));
-  if (!version) {
-    const reason = "devicectl returned an unrecognized CoreDevice version";
-    dependencies.logger.warn(`CoreDevice version check failed: ${reason}`);
-    return { status: "unparsable", reason };
+  const state = { simulatorBootState, capabilities: capabilityProbe.getCapabilities() };
+  if (measured.kind === "unavailable") {
+    return { status: measured.reasonKind ?? "missing", reason: measured.reason, ...state };
   }
   return {
     status:
-      compareSimctlVersions(version, REQUIRED_SIMULATOR_COREDEVICE_VERSION) >= 0
+      compareSimctlVersions(measured.version, REQUIRED_SIMULATOR_COREDEVICE_VERSION) >= 0
         ? "meets-requirement"
         : "below-required",
-    version: formatCoreDeviceVersion(version),
+    version: formatCoreDeviceVersion(measured.version),
+    ...state,
   };
+}
+
+function describeCoreDeviceState(result: CoreDeviceDiagnostic): string {
+  const boot = result.simulatorBootState;
+  const bootState =
+    boot?.status === "available"
+      ? `${boot.booted} booted, ${boot.shutdown} shutdown, ${boot.unknown} unknown`
+      : `unavailable (${boot?.reason ?? "simulator state unavailable"})`;
+  const capabilities = result.capabilities?.entries.length
+    ? result.capabilities.entries
+        .map((entry) => `${entry.featureId ?? entry.command} ${entry.status} (${entry.scope})`)
+        .join(", ")
+    : "not probed";
+  return `simulator boot state: ${bootState}; capabilities: ${capabilities}; downgrade guard not checked`;
 }
 
 export async function checkCoreDeviceVersion(
@@ -786,11 +826,13 @@ export async function checkCoreDeviceVersion(
 ): Promise<CheckResult> {
   const name = "CoreDevice";
   const required = formatCoreDeviceVersion(REQUIRED_SIMULATOR_COREDEVICE_VERSION);
-  const unchecked = "simulator boot state and downgrade guard not checked";
+  let unchecked =
+    "simulator boot state: unavailable; capabilities: not probed; downgrade guard not checked";
   const unavailable =
     "devicectl-only simulator features will be unavailable; simctl-based features are unaffected";
   try {
     const result = await probeCoreDeviceVersion(dependencies, probe);
+    unchecked = describeCoreDeviceState(result);
     if (result.status === "non-darwin") {
       return { name, status: "skip", message: `${result.reason}; ${unchecked}` };
     }

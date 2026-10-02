@@ -6,6 +6,7 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
+import type { IosDoctorDependencies } from "../doctor/checks/ios";
 import { runDoctor } from "../doctor";
 
 /**
@@ -29,16 +30,21 @@ export interface DoctorArgs {
 /**
  * Register the doctor diagnostic tool
  */
-export function registerDoctorTools(): void {
+export function registerDoctorTools(
+  options: { iosDependencies?: IosDoctorDependencies } = {},
+): void {
   ToolRegistry.register(
     "doctor",
     "Run AutoMobile setup diagnostics",
     doctorSchema,
     async (args: DoctorArgs) => {
-      const report = await runDoctor({
-        android: args.android,
-        ios: args.ios,
-      });
+      const report = await runDoctor(
+        {
+          android: args.android,
+          ios: args.ios,
+        },
+        { iosDependencies: options.iosDependencies },
+      );
 
       return createJSONToolResponse(report);
     },

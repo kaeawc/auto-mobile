@@ -2,7 +2,7 @@
 
 ## Summary and decision
 
-Use one `IosDeviceBackend` interface for simulator and physical-device branches (Planned #8348). Physical-device operations use `devicectl`. Simulator operations use `simctl` wherever it supports the operation, and use `devicectl` only for capabilities that exist only there. Keep one command-line tool as the owner of each simulator concern. The current implementation has no CoreDevice-version gate; the proposed probe is Planned (#8354).
+Use one `IosDeviceBackend` interface for simulator and physical-device branches (Planned #8348). Physical-device operations use `devicectl`. Simulator operations use `simctl` wherever it supports the operation, and use `devicectl` only for capabilities that exist only there. Keep one command-line tool as the owner of each simulator concern. The current implementation has no CoreDevice-version gate; the production probe is lazy and injectable (#8354), with no current simulator-command consumer.
 
 The capability and behavior details in this document are per #8347, tested there with Xcode 27.1 beta and CoreDevice 651.13.4. They are evidence from that issue, not a claim that this checkout has re-verified them.
 
@@ -112,7 +112,7 @@ with no physical device; they are not newly verified hardware behavior:
 
 The devicectl-only simulator features in this design require CoreDevice >= 651. Gate on the installed CoreDevice version, not the selected Xcode version. Per #8347, `xcrun devicectl` and `xcrun simctl` are shims into system-wide CoreDevice and CoreSimulator frameworks under `/Library/Developer/PrivateFrameworks`; `DEVELOPER_DIR` does not select the framework version. An older Xcode's devicectl shim with a newer installed CoreDevice can trigger `xcodebuild -runFirstLaunch`, with a CoreDevice downgrade hazard.
 
-A cached `devicectl --version` probe and per-device, per-command memoization of “not supported by this device” (`1001`) are Planned (#8354). Until that work lands, no current tool is gated on CoreDevice version. Use the label “requires CoreDevice >= 651”; do not describe this as “Xcode 27+”.
+A lazy process-owned `devicectl --version` probe and bounded memoization of unsupported feature identifiers (`1001`), scoped by simulator type/runtime, are wired (#8354). Boot state is checked before simulator capability invocations; diagnostics retain the bounded devicectl availability/version read, seed the probe, and report bounded simctl boot-state counts. Capability commands remain lazy. The production downgrade guard remains unconfigured pending version measurements. No current tool calls the probe, so no current tool is gated on CoreDevice version. Use the label “requires CoreDevice >= 651”; do not describe this as “Xcode 27+”.
 
 Apple documents devicectl for physical and simulated devices and says to start simulators with simctl or Device Hub first. simctl is not deprecated; Xcode 27 release notes add `reboot` to both tools. These documentation points are per #8347.
 
@@ -122,7 +122,7 @@ On older installed CoreDevice versions, continue simulator operations through `s
 
 ## Guardrails
 
-`test/lint/simctlDevicectlBoundary.test.ts` fails when structurally simulator-scoped TypeScript directly routes a covered simctl-owned concern to devicectl. It recognizes simulator-specific paths and names, explicit simulator branches, and simulator-UDID arguments. Covered concerns are pasteboard, lifecycle verbs, privacy, keychain reset, push, addmedia, spawn, app-container access, and process termination; it also checks the app-termination owner API in simulator scope. It deliberately allows generic physical-device calls, including `device process terminate --pid`, unless simulator scope is clear. Simulator scope inferred only from runtime values, dynamically assembled argv, and arbitrary wrapper/API indirection remain Planned (#8353). The guard allows devicectl for explicitly devicectl-only simulator capabilities after the CoreDevice gate exists (Planned #8354).
+`test/lint/simctlDevicectlBoundary.test.ts` fails when structurally simulator-scoped TypeScript directly routes a covered simctl-owned concern to devicectl. It recognizes simulator-specific paths and names, explicit simulator branches, and simulator-UDID arguments. Covered concerns are pasteboard, lifecycle verbs, privacy, keychain reset, push, addmedia, spawn, app-container access, and process termination; it also checks the app-termination owner API in simulator scope. It deliberately allows generic physical-device calls, including `device process terminate --pid`, unless simulator scope is clear. Simulator scope inferred only from runtime values, dynamically assembled argv, and arbitrary wrapper/API indirection remain Planned (#8353). The guard allows devicectl for explicitly devicectl-only simulator capabilities through the boot-first CoreDevice probe (#8354); production simulator command consumers remain planned.
 
 ## Out of scope
 

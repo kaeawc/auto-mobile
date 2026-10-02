@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   createHostToolchainResourceHandler,
@@ -7,8 +9,15 @@ import {
 } from "../../../src/server/hostToolchainResources";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { DOCTOR_EXEC_TIMEOUT_MS } from "../../../src/doctor/checks/ios";
+import {
+  createIosDoctorDependencies,
+  checkCoreDeviceVersion,
+  DOCTOR_EXEC_TIMEOUT_MS,
+} from "../../../src/doctor/checks/ios";
 import type { CheckResult, DoctorProbeOptions } from "../../../src/doctor/types";
+
+import { createProductionCoreDeviceProbe } from "../../../src/utils/ios-cmdline-tools/CoreDeviceProbeHolder";
+import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 
 const pass = (value?: string): CheckResult => ({
   name: "test",
@@ -33,7 +42,12 @@ function makeDependencies(
     checkXcodeCommandLineTools: async () => pass("/Applications/Xcode.app/Contents/Developer"),
     checkXcrunAvailable: async () => pass(),
     checkSimctlAvailable: async () => pass(),
-    probeCoreDeviceVersion: async () => ({ status: "meets-requirement", version: "651.13.4" }),
+    probeCoreDeviceVersion: async () => ({
+      status: "meets-requirement",
+      version: "651.13.4",
+      simulatorBootState: { status: "available", booted: 1, shutdown: 2, unknown: 0 },
+      capabilities: { status: "not probed", entries: [] },
+    }),
     ...overrides,
   };
 }
@@ -89,7 +103,8 @@ describe("host toolchain resource", () => {
         coreDevice: {
           status: "meets-requirement",
           requiredVersion: "651.0.0",
-          simulatorBootState: "not checked",
+          simulatorBootState: { status: "available", booted: 1, shutdown: 2, unknown: 0 },
+          capabilities: { status: "not probed", entries: [] },
           downgradeGuard: "not checked",
         },
       },
@@ -139,7 +154,11 @@ describe("host toolchain resource", () => {
     const entry = payload.entries.find((item: { name: string }) => item.name === "devicectl");
     expect(entry.available).toBe(available);
     expect(entry.coreDevice.status).toBe(diagnostic.status);
-    expect(entry.coreDevice.simulatorBootState).toBe("not checked");
+    expect(entry.coreDevice.simulatorBootState).toEqual({
+      status: "unavailable",
+      reason: "simulator state unavailable",
+    });
+    expect(entry.coreDevice.capabilities).toEqual({ status: "not probed", entries: [] });
     expect(entry.coreDevice.downgradeGuard).toBe("not checked");
     expect(entry.version ?? entry.error).toBe(detail);
   });
@@ -248,5 +267,181 @@ describe("host toolchain resource", () => {
   test("registers a static resource", () => {
     registerHostToolchainResources();
     expect(ResourceRegistry.getResource(HOST_TOOLCHAIN_RESOURCE_URI)).toBeDefined();
+  });
+  test.each([
+    ["meets", "651.13.4", "darwin", true, "meets-requirement", "651.13.4", undefined],
+    ["below", "650.2.0", "darwin", true, "below-required", "650.2.0", undefined],
+    [
+      "missing",
+      undefined,
+      "darwin",
+      false,
+      "missing",
+      undefined,
+      "devicectl not functional: command not found",
+    ],
+    [
+      "unparsable",
+      "unexpected output",
+      "darwin",
+      false,
+      "unparsable",
+      undefined,
+      "devicectl returned an unrecognized CoreDevice version",
+    ],
+    [
+      "non-darwin",
+      "651.13.4",
+      "linux",
+      false,
+      "non-darwin",
+      undefined,
+      "iOS development requires macOS",
+    ],
+  ] as const)(
+    "fresh resource preserves the exact HEAD version fields for %s",
+    async (_outcome, output, platform, available, status, version, error) => {
+      const executor = new FakeHostCommandExecutor();
+      const timer = new FakeTimer();
+      const stdout =
+        output === "651.13.4"
+          ? readFileSync(join(process.cwd(), "test/fixtures/ios-devicectl/version.txt"), "utf8")
+          : (output ?? "");
+      const capabilityProbe = createProductionCoreDeviceProbe({
+        executor,
+        timer,
+        simctl: {
+          getDeviceInfo: async () => null,
+          listSimulatorImages: async () => [],
+        },
+      });
+      const calls: string[] = [];
+      const ios = {
+        ...createIosDoctorDependencies({ coreDeviceProbe: capabilityProbe }),
+        platform: () => platform,
+        execFile: async (
+          file: string,
+          args: string[],
+          options?: { timeoutMs?: number; signal?: AbortSignal },
+        ) => {
+          calls.push([file, ...args].join(" "));
+          expect(options?.timeoutMs).toBe(DOCTOR_EXEC_TIMEOUT_MS);
+          expect(options?.signal).toBeDefined();
+          if (output === undefined) {
+            throw new Error("command not found");
+          }
+          return {
+            stdout,
+            stderr: "",
+            toString: () => stdout,
+            trim: () => stdout.trim(),
+            includes: (value: string) => stdout.includes(value),
+          };
+        },
+      };
+      const { probeCoreDeviceVersion: _readVersion, ...otherChecks } = makeDependencies({ timer });
+      // Omit the fake version reader so the default handler exercises the injected iOS dependencies.
+      void _readVersion;
+      const payload = JSON.parse(
+        (await createHostToolchainResourceHandler({ ...otherChecks, iosDependencies: ios })())
+          .text!,
+      );
+      const entry = payload.entries.find((item: { name: string }) => item.name === "devicectl");
+      const { simulatorBootState: boot, capabilities, ...coreDevice } = entry.coreDevice;
+      expect(boot.status).toBe(platform === "darwin" ? "available" : "unavailable");
+      expect(capabilities).toEqual({ status: "not probed", entries: [] });
+      expect({ ...entry, coreDevice }).toEqual({
+        name: "devicectl",
+        available,
+        ...(version ? { version } : { error }),
+        coreDevice: { status, requiredVersion: "651.0.0", downgradeGuard: "not checked" },
+      });
+      expect(calls).toEqual(platform === "darwin" ? ["xcrun devicectl --version"] : []);
+      expect(executor.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test("fresh resource preserves HEAD version fields, reads only --version, and seeds later capabilities", async () => {
+    const executor = new FakeHostCommandExecutor();
+    const timer = new FakeTimer();
+    const stdout = readFileSync(
+      join(process.cwd(), "test/fixtures/ios-devicectl/version.txt"),
+      "utf8",
+    );
+    executor.setCommandResponse("xcrun devicectl --version", {
+      stdout,
+      stderr: "",
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (value) => stdout.includes(value),
+    });
+    const capabilityProbe = createProductionCoreDeviceProbe({
+      executor,
+      timer,
+      files: {
+        tmpdir: () => "/fake",
+        mkdtemp: async () => "/fake/probe",
+        readFile: async () =>
+          readFileSync(
+            join(process.cwd(), "test/fixtures/ios-devicectl/info-displays-booted-simulator.json"),
+            "utf8",
+          ),
+        rm: async () => undefined,
+      },
+      simctl: {
+        getDeviceInfo: async () => null,
+        listSimulatorImages: async () => [
+          { name: "one", platform: "ios", deviceId: "one", state: "Booted" },
+          { name: "two", platform: "ios", deviceId: "two", state: "Shutdown" },
+        ],
+      },
+    });
+    const ios = {
+      ...createIosDoctorDependencies({ coreDeviceProbe: capabilityProbe }),
+      platform: () => "darwin" as const,
+      execFile: (
+        file: string,
+        args: string[],
+        options?: { timeoutMs?: number; signal?: AbortSignal },
+      ) => executor.executeCommand(file, args, options),
+    };
+    const { probeCoreDeviceVersion: _readVersion, ...otherChecks } = makeDependencies({ timer });
+    // Omit the fake version reader so the default handler exercises the injected iOS dependencies.
+    void _readVersion;
+    const handler = createHostToolchainResourceHandler({ ...otherChecks, iosDependencies: ios });
+    expect(ios.getCoreDeviceProbe()).toBe(capabilityProbe);
+    expect(executor.getExecutedCommands()).toEqual([]);
+    const payload = JSON.parse((await handler()).text!);
+    const entry = payload.entries.find((item: { name: string }) => item.name === "devicectl");
+    expect(entry.coreDevice).toMatchObject({
+      status: "meets-requirement",
+      requiredVersion: "651.0.0",
+      simulatorBootState: { status: "available", booted: 1, shutdown: 1, unknown: 0 },
+      capabilities: { status: "not probed", entries: [] },
+      downgradeGuard: "not checked",
+    });
+    expect(entry.available).toBe(true);
+    expect(entry.version).toBe("651.13.4");
+    expect(entry.error).toBeUndefined();
+    expect(executor.getExecutedCommands()).toEqual(["xcrun devicectl --version"]);
+    const doctorResult = await checkCoreDeviceVersion(ios);
+    expect(doctorResult).toMatchObject({
+      status: "pass",
+      value: "651.13.4",
+      message: expect.stringContaining(
+        "CoreDevice 651.13.4 installed (requires CoreDevice >= 651.0.0); ",
+      ),
+    });
+    expect(ios.getCoreDeviceProbe()).toBe(capabilityProbe);
+    expect(
+      await capabilityProbe.checkSimulatorCommand("one", "info displays", [651, 0, 0]),
+    ).toEqual({ kind: "supported" });
+    expect(
+      executor.getExecutedCommands().filter((call) => call.includes("--version")),
+    ).toHaveLength(2);
+    await handler();
+    expect(
+      executor.getExecutedCommands().filter((call) => call.includes("--version")),
+    ).toHaveLength(3);
   });
 });

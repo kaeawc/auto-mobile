@@ -8,10 +8,12 @@ const ROOT = join(import.meta.dir, "..", "..");
 // coherent devicectl domain kept deliberately narrow (issue #4053):
 //   - DeviceAppManager: app lifecycle (launch/terminate/info apps).
 //   - DevicectlDeviceLister: physical-device discovery (`devicectl list devices`, #5620).
+//   - ProductionDevicectlCommandInvoker: deadline-bounded version/capability probe (#8354).
 // Any OTHER file that reaches devicectl directly must route through one of these.
 const OWNERS = [
   "src/utils/ios-cmdline-tools/DeviceAppManager.ts",
   "src/utils/ios-cmdline-tools/DevicectlDeviceLister.ts",
+  "src/utils/ios-cmdline-tools/ProductionDevicectlCommandInvoker.ts",
 ];
 const PRIMARY_OWNER = OWNERS[0];
 

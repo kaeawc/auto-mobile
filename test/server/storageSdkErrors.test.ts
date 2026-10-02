@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   IOS_STORAGE_MUTATION_AUTHORIZATION_HINT,
   mapStorageSdkError,
+  iosSqlErrorMessage,
 } from "../../src/server/storageSdkErrors";
 
 describe("storage SDK error mapping", () => {
@@ -66,4 +67,62 @@ describe("storage SDK error mapping", () => {
       }),
     ).toContain("/app/notes.db");
   });
+});
+
+// Failure strings from CommandHandler's foreground gates, SdkDatabaseClient.requestData,
+// SdkHierarchyServer.requireApplicationActive, and IOSCtrlProxyClient.sdkUnavailableResult.
+const sdkPrefix =
+  "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)";
+const foregroundMessage =
+  "The target app is not in the foreground; bring it to the foreground and retry.";
+const capabilityMessage =
+  "Failed to execute SQL on iOS. The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).";
+
+test.each([
+  `${sdkPrefix}: app_not_active`,
+  "Database inspection requires requested appId com.example.app to be the foreground app",
+  "iOS key-value storage requires com.example.app to be the foreground app",
+])("maps definite foreground failures across SQL and storage: %s", (message) => {
+  expect(iosSqlErrorMessage(new Error(message), "/app/notes.db")).toBe(foregroundMessage);
+  expect(mapStorageSdkError(new Error(message), { operation: "storage" })).toBe(foregroundMessage);
+  expect(mapStorageSdkError(new Error(message), { operation: "database" })).toBe(foregroundMessage);
+});
+
+test("capability absence lists foreground and SDK setup as possible causes", () => {
+  expect(
+    iosSqlErrorMessage(
+      new Error("The foreground iOS app does not expose the AutoMobile SDK capability database."),
+      "/app/notes.db",
+    ),
+  ).toBe(capabilityMessage);
+});
+
+test.each([
+  `${sdkPrefix}: db_inspection_disabled`,
+  `${sdkPrefix}: HTTP 503`,
+  `${sdkPrefix}: The operation couldn’t be completed. (NSURLErrorDomain error -1004.)`,
+  "Failed to connect to CtrlProxy",
+])("preserves exact setup advice: %s", (message) => {
+  expect(iosSqlErrorMessage(new Error(message), "/app/notes.db")).toBe(
+    "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build and calls DatabaseInspector.shared.setEnabled(true).",
+  );
+});
+
+test("preserves wrong-simulator advice", () => {
+  const message =
+    "AutoMobile SDK answered from simulator B, but simulator A was requested; the SDK app on this simulator is not reachable. Launch it and retry.";
+  expect(iosSqlErrorMessage(new Error(message), "/app/notes.db")).toBe(
+    `Failed to execute SQL on iOS: ${message}`,
+  );
+});
+
+test.each([
+  "Other storage requires com.example.app to be the foreground app",
+  "Database inspection requires requested appId com.example.app to be the foreground app; unrelated detail",
+  "prefix: iOS key-value storage requires com.example.app to be the foreground app",
+])("does not infer foreground failure from unrelated text: %s", (message) => {
+  expect(mapStorageSdkError(new Error(message), { operation: "storage" })).toBeNull();
+  expect(iosSqlErrorMessage(new Error(message), "/app/notes.db")).toBe(
+    `Failed to execute SQL on iOS: ${message}`,
+  );
 });

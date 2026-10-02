@@ -3113,6 +3113,171 @@ describe("DeviceDataStreamSocketServer", () => {
     }
   });
 
+  describe("device build-context frames", () => {
+    interface BuildFrame {
+      type: string;
+      deviceId?: string;
+      deviceSessionUuid?: string | null;
+      packageId?: string;
+      timestamp?: number;
+      buildKey?: {
+        packageId: string;
+        versionCode: number;
+        versionKey?: string;
+        contentHash: string;
+      } | null;
+    }
+    const keyA = { packageId: "app.a", versionCode: 1, contentHash: "hash-a" };
+    const keyB = { packageId: "app.b", versionCode: 0, versionKey: "1.2.3", contentHash: "hash-b" };
+    const buildFrames = (socket: FakeSocket) =>
+      socket
+        .getWrittenMessages<BuildFrame>()
+        .filter((frame) => frame.type === "device_build_context");
+    async function subscribe(deviceSessionUuid?: string): Promise<FakeSocket> {
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "subscribe", command: "subscribe", deviceSessionUuid }),
+      );
+      return socket;
+    }
+
+    it("routes keys only to their own device; all-device frames retain each device's uuid", () => {
+      const a = server.simulateSubscription({ deviceId: "device-a" });
+      const b = server.simulateSubscription({ deviceId: "device-b" });
+      const all = server.simulateSubscription({});
+      server.pushBuildContextUpdate("device-a", "app.a", keyA);
+      server.pushBuildContextUpdate("device-b", "app.b", keyB);
+      expect(buildFrames(a.socket)).toEqual([
+        expect.objectContaining({
+          deviceId: "device-a",
+          deviceSessionUuid: "session-device-a",
+          timestamp: timer.now(),
+          buildKey: keyA,
+        }),
+      ]);
+      expect(buildFrames(b.socket)).toEqual([
+        expect.objectContaining({
+          deviceId: "device-b",
+          deviceSessionUuid: "session-device-b",
+          buildKey: keyB,
+        }),
+      ]);
+      expect(
+        buildFrames(all.socket).map((frame) => [frame.deviceSessionUuid, frame.buildKey]),
+      ).toEqual([
+        ["session-device-a", keyA],
+        ["session-device-b", keyB],
+      ]);
+    });
+
+    it("replays every known app only to the newly subscribed entitled pane", async () => {
+      server.sessionResolver
+        .bind("device-a", "session-device-a")
+        .bind("device-b", "session-device-b");
+      server.pushBuildContextUpdate("device-a", "app.a", keyA);
+      server.pushBuildContextUpdate("device-a", "app.b", keyB);
+      server.pushBuildContextUpdate("device-b", "app.b", keyB);
+      const a = await subscribe("session-device-a");
+      expect(buildFrames(a).map((frame) => frame.buildKey)).toEqual([keyA, keyB]);
+      const all = await subscribe();
+      expect(buildFrames(all).map((frame) => frame.deviceSessionUuid)).toEqual([
+        "session-device-a",
+        "session-device-a",
+        "session-device-b",
+      ]);
+      expect(buildFrames(a)).toHaveLength(2);
+    });
+
+    it("changes and clears replace replay state; unknown contexts emit no key", async () => {
+      const all = server.simulateSubscription({});
+      server.sessionResolver.bind("device-a", "session-device-a");
+      server.pushBuildContextUpdate("device-a", "app.a", {
+        ...keyA,
+        versionCode: 0,
+        contentHash: "",
+      });
+      expect(buildFrames(all.socket)).toEqual([]);
+      server.pushBuildContextUpdate("device-a", "app.a", keyA);
+      server.pushBuildContextUpdate("device-a", "app.a", { ...keyA, contentHash: "changed" });
+      expect(buildFrames(await subscribe("session-device-a"))[0]?.buildKey?.contentHash).toBe(
+        "changed",
+      );
+      server.pushBuildContextUpdate("device-a", "app.a", null);
+      expect(buildFrames(all.socket).at(-1)).toMatchObject({ packageId: "app.a", buildKey: null });
+      expect(buildFrames(await subscribe("session-device-a"))).toEqual([]);
+    });
+
+    it.each(["started", "ended"] as const)(
+      "drops the per-device replay cache when a session is %s",
+      async (event) => {
+        server.sessionResolver
+          .bind("device-a", "session-device-a")
+          .bind("device-b", "session-device-b");
+        server.pushBuildContextUpdate("device-a", "app.a", keyA);
+        server.pushBuildContextUpdate("device-b", "app.b", keyB);
+        const record = {
+          deviceId: "device-a",
+          deviceSessionUuid: "session-device-a",
+          platform: "android" as const,
+          epochStartedAt: timer.now(),
+        };
+        if (event === "started") {
+          server.pushDeviceSessionStarted(record);
+        } else {
+          server.pushDeviceSessionEnded(record);
+        }
+        expect(buildFrames(await subscribe()).map((frame) => frame.buildKey)).toEqual([keyB]);
+      },
+    );
+
+    it("unbound serials reach only all-device panes and are never replayed under a later uuid", async () => {
+      const a = server.simulateSubscription({ deviceId: "device-a" });
+      const all = server.simulateSubscription({});
+      server.pushBuildContextUpdate("unbound", "app.b", keyB);
+      expect(buildFrames(a.socket)).toEqual([]);
+      expect(buildFrames(all.socket)[0]).toMatchObject({
+        deviceId: "unbound",
+        deviceSessionUuid: null,
+        buildKey: keyB,
+      });
+      server.sessionResolver.bind("unbound", "new-session");
+      expect(buildFrames(await subscribe("new-session"))).toEqual([]);
+    });
+
+    it("quarantine and resolver epoch changes cannot replay an old key", async () => {
+      server.sessionResolver.bind("device-a", "session-device-a");
+      server.pushBuildContextUpdate("device-a", "app.a", keyA);
+      server.sessionResolver.quarantine("device-a");
+      expect(buildFrames(await subscribe())).toEqual([]);
+      server.sessionResolver.resolveIdentity("device-a").bind("device-a", "new-session");
+      expect(buildFrames(await subscribe("new-session"))).toEqual([]);
+    });
+
+    it("keeps build keys out of existing hierarchy, screenshot and navigation frames", () => {
+      const all = server.simulateSubscription({});
+      server.sessionResolver.bind("device-a", "session-device-a");
+      server.pushBuildContextUpdate("device-a", "app.a", keyA);
+      server.pushHierarchyUpdate("device-a", { hierarchy: {} });
+      server.pushScreenshotUpdate("device-a", encodedFrames.jpeg.toString("base64"), 37, 53);
+      server.pushNavigationGraphUpdate(
+        { appId: "app.a", nodes: [], edges: [], currentScreen: null },
+        "device-a",
+      );
+      const oldFrames = all.socket
+        .getWrittenMessages<BuildFrame>()
+        .filter((frame) => frame.type !== "device_build_context");
+      expect(oldFrames.map((frame) => frame.type)).toEqual([
+        "hierarchy_update",
+        "screenshot_update",
+        "navigation_update",
+      ]);
+      for (const frame of oldFrames) {
+        expect("buildKey" in frame).toBe(false);
+      }
+    });
+  });
+
   describe("deviceSessionUuid routing (#5259)", () => {
     interface Frame {
       type: string;

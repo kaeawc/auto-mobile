@@ -8,6 +8,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { iosRecordToMetadata } from "../../../../src/features/observe/GetAppMetadata";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../../../src/db/navigationRepository";
@@ -62,7 +63,7 @@ class FakeIosMetadataSource implements IosAppMetadataSource {
 }
 
 class FakeContentHashProvider implements ContentHashProvider {
-  calls: [BootedDevice, string, number][] = [];
+  calls: [BootedDevice, string, number | string][] = [];
   invalidations: [string, string][] = [];
   result: string | null = "fake-content-hash";
   pending: Promise<string | null> | null = null;
@@ -71,7 +72,7 @@ class FakeContentHashProvider implements ContentHashProvider {
   async resolveContentHash(
     device: BootedDevice,
     bundleId: string,
-    versionCode: number,
+    versionCode: number | string,
   ): Promise<string | null> {
     this.calls.push([device, bundleId, versionCode]);
     if (this.failure) {
@@ -263,7 +264,51 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     expect(harness.manager.getDeviceIdForApp(appId)).toBe(simulatorId);
   });
 
-  test.each(["", "1.2.3", "42.0", "unknown", "-1", "0x2a", "4e1", "9007199254740992"])(
+  test.each(["\t42", "42\n", `${" ".repeat(65)}42`])(
+    "trimmed integer build number %j retains the integer provenance path",
+    async (buildNumber) => {
+      source.buildNumber = buildNumber;
+      hierarchyUpdate();
+      await settle();
+      expect(provider.calls[0]?.slice(1)).toEqual([appId, 42]);
+      expect(setContext).toHaveBeenCalledWith({
+        appId,
+        deviceId: simulatorId,
+        versionCode: 42,
+        contentHash: "fake-content-hash",
+      });
+      expect(setContext.mock.calls.at(-1)?.[0]).not.toHaveProperty("versionKey");
+    },
+  );
+
+  test.each(["   ", "\t42", "42\n", " 1.2.3 "])(
+    "metadata trims build number %j before exposing it to resource consumers",
+    (buildNumber) => {
+      expect(iosRecordToMetadata(appId, { CFBundleVersion: buildNumber }).buildNumber).toBe(
+        buildNumber.trim(),
+      );
+    },
+  );
+
+  test.each(["1.2.3", "42.0", "unknown", "-1", "0x2a", "4e1", "9007199254740992", "v".repeat(64)])(
+    "string build number %j resolves real provenance without a numeric mapping",
+    async (buildNumber) => {
+      source.buildNumber = ` ${buildNumber} `;
+      hierarchyUpdate();
+      await settle();
+      expect(provider.calls[0]?.slice(1)).toEqual([appId, buildNumber]);
+      expect(setContext).toHaveBeenCalledWith({
+        appId,
+        deviceId: simulatorId,
+        versionCode: 0,
+        versionKey: buildNumber,
+        contentHash: "fake-content-hash",
+      });
+      expect(harness.manager.getDeviceIdForApp(appId)).toBe(simulatorId);
+    },
+  );
+
+  test.each(["", "   ", "v".repeat(65), "1\u00002", "1\n2", " 1\n2 ", "1\u007f2", "1\u00852"])(
     "terminal build number %j attributes the device under the unknown build key until invalidation",
     async (buildNumber) => {
       source.buildNumber = buildNumber;
@@ -287,7 +332,8 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       expect(source.simulatorCalls).toHaveLength(1);
       expect(
         infoLog.mock.calls.filter(
-          ([message]) => message.includes(appId) && message.includes(JSON.stringify(buildNumber)),
+          ([message]) =>
+            message.includes(appId) && message.includes(JSON.stringify(buildNumber.trim())),
         ),
       ).toHaveLength(1);
       client.clearSdkScreenIdentity(appId);

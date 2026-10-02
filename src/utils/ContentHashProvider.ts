@@ -27,11 +27,11 @@ export interface ContentHashProvider {
   resolveContentHash(
     device: BootedDevice,
     packageId: string,
-    versionCode: number,
+    versionCode: number | string,
   ): Promise<string | null>;
 
   /**
-   * Drop every cached hash for `(deviceId, packageId)` across all versionCodes, so
+   * Drop every cached hash for `(deviceId, packageId)` across all numeric/string versions, so
    * the next resolution recomputes. Called on a package update/reinstall/removal —
    * a same-versionCode rebuild with different content must not reuse the old hash.
    */
@@ -44,11 +44,15 @@ export interface ContentHashProvider {
  * with a fake; the real Android/iOS implementations are integration-only.
  */
 export interface AppContentHasher {
-  computeHash(device: BootedDevice, packageId: string, versionCode: number): Promise<string>;
+  computeHash(
+    device: BootedDevice,
+    packageId: string,
+    versionCode: number | string,
+  ): Promise<string>;
 }
 
 /**
- * Caches by `(deviceId, packageId, versionCode)` (computed once per install) and
+ * Caches by `(deviceId, packageId, numeric/string version)` (computed once per install) and
  * degrades to `null` on any hashing failure so a mutation never blocks on — or
  * fails because of — content hashing.
  *
@@ -64,7 +68,7 @@ export class CachingContentHashProvider implements ContentHashProvider {
   // Indexed by the invalidation key `(deviceId, packageId)` first, then versionCode,
   // so invalidate() drops exactly that package's entries instead of scanning every
   // cached key on the device (#6892).
-  private readonly cache = new Map<string, Map<number, string>>();
+  private readonly cache = new Map<string, Map<number | string, string>>();
   // Per-(device,package) generation, bumped by invalidate(). A computeHash that
   // started before an invalidate must NOT repopulate the cache with a stale hash,
   // so a result is only cached when the generation is unchanged since it began.
@@ -75,7 +79,7 @@ export class CachingContentHashProvider implements ContentHashProvider {
   async resolveContentHash(
     device: BootedDevice,
     packageId: string,
-    versionCode: number,
+    versionCode: number | string,
   ): Promise<string | null> {
     const genKey = packageKey(device.deviceId, packageId);
     const cached = this.cache.get(genKey)?.get(versionCode);
@@ -101,8 +105,8 @@ export class CachingContentHashProvider implements ContentHashProvider {
     }
   }
 
-  private cacheHash(genKey: string, versionCode: number, hash: string): void {
-    const byVersion = this.cache.get(genKey) ?? new Map<number, string>();
+  private cacheHash(genKey: string, versionCode: number | string, hash: string): void {
+    const byVersion = this.cache.get(genKey) ?? new Map<number | string, string>();
     byVersion.set(versionCode, hash);
     this.cache.set(genKey, byVersion);
   }

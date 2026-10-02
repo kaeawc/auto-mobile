@@ -361,6 +361,149 @@
     }
   },
   {
+    "name": "appLifecycle",
+    "description": "State-preserving background-process kill for saved-state restoration tests.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["background", "killBackgrounded"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["background", "killBackgrounded"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "mechanism": {
+          "type": "string",
+          "enum": ["home", "am-kill", "unsupported"]
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pid": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pidBefore": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pidAfter": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "processReclaimed": {
+          "type": "boolean"
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": [
+            "app_not_running",
+            "app_in_foreground",
+            "background_not_verified",
+            "kill_failed",
+            "ambiguous_user",
+            "invalid_app_id"
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["message", "success", "supported", "action", "platform", "appId", "mechanism"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "barrier",
     "description": "Synchronize multiple devices at a barrier, then let all proceed concurrently (no serialized section).",
     "inputSchema": {
@@ -1632,6 +1775,7 @@
             "enum": [
               "accessibility",
               "accessibilityFocus",
+              "appLifecycle",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -1757,6 +1901,7 @@
             "enum": [
               "accessibility",
               "accessibilityFocus",
+              "appLifecycle",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -16010,6 +16155,7 @@
             "enum": [
               "accessibility",
               "accessibilityFocus",
+              "appLifecycle",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",
@@ -22095,6 +22241,7 @@
           "enum": [
             "accessibility",
             "accessibilityFocus",
+            "appLifecycle",
             "biometricAuth",
             "changeLocalization",
             "clearKeyValueFile",
@@ -22186,6 +22333,7 @@
             "enum": [
               "accessibility",
               "accessibilityFocus",
+              "appLifecycle",
               "biometricAuth",
               "changeLocalization",
               "clearKeyValueFile",

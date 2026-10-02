@@ -14,6 +14,7 @@ export * from "./ClearAppDataResult";
 export * from "./ClearTextResult";
 export * from "./ClipboardResult";
 export * from "./CrashAppResult";
+export * from "./AppLifecycleResult";
 export * from "./CurrentFocusResult";
 export * from "./DeepLinkResult";
 export * from "./DisplayedTimeMetric";

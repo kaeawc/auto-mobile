@@ -5,11 +5,14 @@ import {
   ActionableError,
   BootedDevice,
   type CrashAppResult,
+  type AppLifecycleAction,
+  type AppLifecycleResult,
   type LaunchAppResult,
   type TerminateAppResult,
   type InstallAppResult,
 } from "../models";
 import { toActionableError } from "../models/ActionableError";
+import { AppLifecycle, type AppLifecycleExecutionOptions } from "../features/action/AppLifecycle";
 import { CrashApp } from "../features/action/CrashApp";
 import { LaunchApp } from "../features/action/LaunchApp";
 import {
@@ -215,6 +218,37 @@ export function setCrashAppToolDependencies(deps: Partial<CrashAppToolDependenci
 
 export function resetCrashAppToolDependencies(): void {
   crashAppToolDependencies = null;
+}
+
+export interface AppLifecycleExecutor {
+  execute(
+    appId: string,
+    action: AppLifecycleAction,
+    options?: AppLifecycleExecutionOptions,
+  ): Promise<AppLifecycleResult>;
+}
+
+export interface AppLifecycleToolDependencies {
+  createAppLifecycle(device: BootedDevice): AppLifecycleExecutor;
+}
+
+let appLifecycleToolDependencies: AppLifecycleToolDependencies | null = null;
+
+function getAppLifecycleToolDependencies(): AppLifecycleToolDependencies {
+  return (appLifecycleToolDependencies ??= {
+    createAppLifecycle: (device) => new AppLifecycle(device),
+  });
+}
+
+export function setAppLifecycleToolDependencies(deps: Partial<AppLifecycleToolDependencies>): void {
+  const current = getAppLifecycleToolDependencies();
+  appLifecycleToolDependencies = {
+    createAppLifecycle: deps.createAppLifecycle ?? current.createAppLifecycle,
+  };
+}
+
+export function resetAppLifecycleToolDependencies(): void {
+  appLifecycleToolDependencies = null;
 }
 
 export interface InstallAppExecutor {
@@ -460,6 +494,43 @@ export const crashAppSchema = withAppIdAliases(
       .strict(),
   ),
 );
+
+export const appLifecycleSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        appId: z.string().trim().min(1),
+        action: z.enum(["background", "killBackgrounded"]),
+      })
+      .strict(),
+  ),
+);
+
+export const appLifecycleResultSchema = z.object({
+  message: z.string(),
+  success: z.boolean(),
+  supported: z.boolean(),
+  action: z.enum(["background", "killBackgrounded"]),
+  platform: z.enum(["android", "ios"]),
+  appId: z.string(),
+  mechanism: z.enum(["home", "am-kill", "unsupported"]),
+  userId: z.number().int().nonnegative().optional(),
+  pid: z.number().int().positive().optional(),
+  pidBefore: z.number().int().positive().optional(),
+  pidAfter: z.number().int().positive().nullable().optional(),
+  processReclaimed: z.boolean().optional(),
+  errorCode: z
+    .enum([
+      "app_not_running",
+      "app_in_foreground",
+      "background_not_verified",
+      "kill_failed",
+      "ambiguous_user",
+      "invalid_app_id",
+    ])
+    .optional(),
+  error: z.string().optional(),
+});
 
 export const crashAppResultSchema = z.object({
   message: z.string(),
@@ -1027,6 +1098,44 @@ export function registerAppTools() {
     }
   };
 
+  const appLifecycleHandler = async (
+    device: BootedDevice,
+    args: { appId: string; action: AppLifecycleAction },
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    let mutationMayHaveHappened = false;
+    try {
+      signal?.throwIfAborted();
+      const result = await getAppLifecycleToolDependencies()
+        .createAppLifecycle(device)
+        .execute(args.appId, args.action, {
+          signal,
+          onMutation: () => {
+            mutationMayHaveHappened = true;
+          },
+        });
+      signal?.throwIfAborted();
+      const message = result.success
+        ? (result.message ??
+          (args.action === "background"
+            ? `Backgrounded app ${args.appId}`
+            : `Completed background kill request for ${args.appId}`))
+        : (result.error ?? `Failed to perform appLifecycle ${args.action} for ${args.appId}`);
+      return createStructuredToolResponse({ ...result, message });
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (isDeviceLostError(error) || error instanceof ActionableError) {
+        throw error;
+      }
+      throw toActionableError(error, "Failed to perform app lifecycle action");
+    } finally {
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
+      }
+    }
+  };
+
   // Install app handler
   const installAppHandler = async (
     device: BootedDevice,
@@ -1160,6 +1269,14 @@ export function registerAppTools() {
     crashAppSchema,
     crashAppHandler,
     { defaultEnabled: true, outputSchema: crashAppResultSchema },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "appLifecycle",
+    "State-preserving background-process kill for saved-state restoration tests.",
+    appLifecycleSchema,
+    appLifecycleHandler,
+    { defaultEnabled: true, outputSchema: appLifecycleResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(

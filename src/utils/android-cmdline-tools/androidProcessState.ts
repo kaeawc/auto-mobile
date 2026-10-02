@@ -89,15 +89,18 @@ function processRecordOwnsPackage(record: string, packageName: string): boolean 
 /**
  * Finds a process PID for an Android package in the selected user, preferring
  * the package's main process over a `package:suffix` secondary process.
+ * Accepts raw output or the already filtered package records from the reader.
  */
 export function findAndroidPackageProcessId(
-  processesOutput: string,
+  processesOutput: string | readonly AndroidPackageProcess[],
   packageName: string,
   userId: number,
 ): number | null {
-  const processes = findAndroidPackageProcesses(processesOutput, packageName).filter(
-    (process) => process.userId === userId,
-  );
+  const records =
+    typeof processesOutput === "string"
+      ? findAndroidPackageProcesses(processesOutput, packageName)
+      : processesOutput;
+  const processes = records.filter((process) => process.userId === userId);
   return (
     processes.find((process) => process.processName === packageName)?.pid ??
     processes[0]?.pid ??
@@ -126,4 +129,22 @@ export function isAndroidPackageRunning(
   return findAndroidPackageProcesses(processesOutput, packageName).some(
     (process) => userId === undefined || process.userId === userId,
   );
+}
+
+/** Select a sole running user, or disambiguate multiple users by foreground identity. */
+export async function selectAndroidUserId(
+  adb: Pick<AdbExecutor, "getForegroundApp">,
+  appId: string,
+  processes: readonly AndroidPackageProcess[],
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<number | null> {
+  const userIds = new Set(processes.map((process) => process.userId));
+  if (userIds.size === 1) {
+    return userIds.values().next().value ?? null;
+  }
+
+  const foreground = await adb.getForegroundApp(options.signal, options.timeoutMs ?? 5_000);
+  return foreground?.packageName === appId && userIds.has(foreground.userId)
+    ? foreground.userId
+    : null;
 }

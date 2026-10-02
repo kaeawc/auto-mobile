@@ -1,0 +1,40 @@
+{
+  "error" : {
+    "code" : 1001,
+    "domain" : "com.apple.dt.CoreDeviceError",
+    "userInfo" : {
+      "CapabilityFeatureIdentifier" : {
+        "string" : "com.apple.coredevice.feature.getlockstate"
+      },
+      "CapabilityName" : {
+        "string" : "Get Lock State"
+      },
+      "DeviceIdentifier" : {
+        "string" : "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E"
+      },
+      "NSLocalizedDescription" : {
+        "string" : "The capability “Get Lock State” is not supported by this device."
+      }
+    }
+  },
+  "errorSignature" : "(com.apple.dt.CoreDeviceError 1001)",
+  "info" : {
+    "arguments" : [
+      "devicectl",
+      "device",
+      "info",
+      "lockState",
+      "--device",
+      "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E",
+      "--json-output",
+      "shutdown-lockstate.json"
+    ],
+    "commandType" : "devicectl.device.info.lockState",
+    "environment" : {
+
+    },
+    "jsonVersion" : 5,
+    "outcome" : "failed",
+    "version" : "651.13.4"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "error" : {
+    "code" : 1001,
+    "domain" : "com.apple.dt.CoreDeviceError",
+    "userInfo" : {
+      "CapabilityFeatureIdentifier" : {
+        "string" : "com.apple.coredevice.feature.listFiles"
+      },
+      "CapabilityName" : {
+        "string" : "List Files"
+      },
+      "DeviceIdentifier" : {
+        "string" : "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E"
+      },
+      "NSLocalizedDescription" : {
+        "string" : "The capability “List Files” is not supported by this device."
+      }
+    }
+  },
+  "errorSignature" : "(com.apple.dt.CoreDeviceError 1001)",
+  "info" : {
+    "arguments" : [
+      "devicectl",
+      "device",
+      "info",
+      "files",
+      "--device",
+      "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E",
+      "--domain-type",
+      "appDataContainer",
+      "--domain-identifier",
+      "dev.jasonpearson.automobile.Playground",
+      "--json-output",
+      "booted-files.json"
+    ],
+    "commandType" : "devicectl.device.info.files",
+    "environment" : {
+
+    },
+    "jsonVersion" : 5,
+    "outcome" : "failed",
+    "version" : "651.13.4"
+  }
+}

@@ -1,0 +1,7 @@
+ERROR: Hinge angle monitoring is not available on this device. (com.apple.dt.CoreDeviceError error 1001 (0x3E9))
+       CapabilityFeatureIdentifier = com.apple.coredevice.feature.monitormotion
+       CapabilityName = Monitor Motion
+Hinge angle monitoring encountered an issue: CoreDeviceError(errorCode: 1001, errorUserInfo: ["CapabilityFeatureIdentifier": "com.apple.coredevice.feature.monitormotion", "NSLocalizedDescription": "Hinge angle monitoring is not available on this device.", "CapabilityName": "Monitor Motion"])
+Error type: CoreDeviceError
+Description: Hinge angle monitoring is not available on this device.
+Hinge angle monitoring stopped.

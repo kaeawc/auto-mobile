@@ -1,0 +1,4 @@
+ERROR: The capability ?List Files? is not supported by this device. (com.apple.dt.CoreDeviceError error 1001 (0x3E9))
+       CapabilityName = List Files
+       CapabilityFeatureIdentifier = com.apple.coredevice.feature.listFiles
+       DeviceIdentifier = 1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E

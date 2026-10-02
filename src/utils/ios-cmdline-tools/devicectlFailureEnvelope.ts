@@ -13,12 +13,22 @@ export interface DevicectlFailureEnvelope {
   domain?: string;
   code: number;
   kind: "device-not-found" | "capability-unsupported" | "other";
+  capabilityFeatureId?: string;
 }
 
 const CORE_DEVICE_FAILURE_KINDS = new Map<number, DevicectlFailureEnvelope["kind"]>([
   [1000, "device-not-found"],
   [1001, "capability-unsupported"],
 ]);
+
+function readCapabilityMetadata(
+  userInfo: unknown,
+): Pick<DevicectlFailureEnvelope, "capabilityFeatureId"> {
+  const capabilityFeatureId = asString(
+    asRecord(asRecord(userInfo)?.CapabilityFeatureIdentifier)?.string,
+  );
+  return capabilityFeatureId ? { capabilityFeatureId } : {};
+}
 
 export function parseDevicectlFailureEnvelope(data: unknown): DevicectlFailureEnvelope | undefined {
   const root = asRecord(data);
@@ -34,5 +44,10 @@ export function parseDevicectlFailureEnvelope(data: unknown): DevicectlFailureEn
   const domain = asString(error.domain);
   const coreDevice = domain?.toLowerCase().includes("coredevice");
   const kind = coreDevice ? (CORE_DEVICE_FAILURE_KINDS.get(error.code) ?? "other") : "other";
-  return { ...(domain ? { domain } : {}), code: error.code, kind };
+  return {
+    ...(domain ? { domain } : {}),
+    code: error.code,
+    kind,
+    ...readCapabilityMetadata(error.userInfo),
+  };
 }

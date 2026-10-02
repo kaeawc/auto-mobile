@@ -1,0 +1,4 @@
+ERROR: The capability ?Get Lock State? is not supported by this device. (com.apple.dt.CoreDeviceError error 1001 (0x3E9))
+       CapabilityFeatureIdentifier = com.apple.coredevice.feature.getlockstate
+       CapabilityName = Get Lock State
+       DeviceIdentifier = 1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E

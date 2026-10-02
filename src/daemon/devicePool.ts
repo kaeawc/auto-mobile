@@ -4037,8 +4037,8 @@ export class DevicePool {
           livenessUnknown ||= selection.livenessUnknown;
         }
 
-        let totalDevices = selectCandidates().length;
         if (device) {
+          const totalDevices = selectCandidates().length;
           // No await between the final validation above and claim's field writes.
           const assignment = await this.claimSelectedDeviceForSession(
             sessionId,
@@ -4058,7 +4058,7 @@ export class DevicePool {
         }
 
         candidates = selectCandidates();
-        totalDevices = candidates.length;
+        const totalDevices = candidates.length;
         this.assertHealthyAllocationPossible(candidates, device);
         const busyDevices = candidates.filter(
           (candidate) => candidate.status === "busy" || this.isReservedForAssignment(candidate),

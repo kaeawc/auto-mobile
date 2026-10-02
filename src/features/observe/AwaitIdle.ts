@@ -7,7 +7,7 @@ import { logger } from "../../utils/logger";
 import { Idle } from "./Idle";
 import { BootedDevice, GfxMetrics } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import type { AwaitIdle as AwaitIdleInterface, UiStabilityState } from "./interfaces/AwaitIdle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
@@ -44,14 +44,18 @@ export class AwaitIdle implements AwaitIdleInterface {
    * @param timeoutMs - Maximum time to wait in milliseconds
    * @returns Promise that resolves when rotation completes or rejects on timeout
    */
-  async waitForRotation(targetRotation: number, timeoutMs: number = 500): Promise<void> {
+  async waitForRotation(
+    targetRotation: number,
+    timeoutMs: number = 500,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const startTime = this.timer.now();
 
     while (true) {
-      const rotationResult = await this.idle.getRotationStatus(
-        targetRotation,
-        startTime,
-        timeoutMs,
+      throwIfAborted(signal);
+      const rotationResult = await awaitWhileRequestIsLive(
+        this.idle.getRotationStatus(targetRotation, startTime, timeoutMs),
+        signal,
       );
 
       if (rotationResult.rotationComplete) {
@@ -64,7 +68,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       }
 
       // Wait a short interval before checking again
-      await this.timer.sleep(this.pollIntervalMs);
+      await awaitWhileRequestIsLive(this.timer.sleep(this.pollIntervalMs), signal);
     }
   }
 

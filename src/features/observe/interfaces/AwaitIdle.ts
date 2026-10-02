@@ -24,7 +24,7 @@ export interface AwaitIdle {
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 500)
    * @returns Promise that resolves when rotation completes or rejects on timeout
    */
-  waitForRotation(targetRotation: number, timeoutMs?: number): Promise<void>;
+  waitForRotation(targetRotation: number, timeoutMs?: number, signal?: AbortSignal): Promise<void>;
 
   /**
    * Initialize UI stability tracking state.

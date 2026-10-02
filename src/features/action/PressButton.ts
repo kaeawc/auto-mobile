@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -26,7 +27,12 @@ export class PressButton extends BaseVisualChange {
     this.device = device;
   }
 
-  async execute(button: string, progress?: ProgressCallback): Promise<PressButtonResult> {
+  async execute(
+    button: string,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<PressButtonResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("pressButton");
 
@@ -38,12 +44,15 @@ export class PressButton extends BaseVisualChange {
 
     return this.observedInteraction(
       async () => {
-        return await perf.track("buttonPress", () => this.press(button));
+        return await perf.track("buttonPress", () =>
+          this.press(button, undefined, undefined, signal),
+        );
       },
       {
         changeExpected: isNavigationButton,
         timeoutMs: 2000,
         progress,
+        signal,
         perf,
       },
     );
@@ -72,16 +81,18 @@ export class PressButton extends BaseVisualChange {
     frameContext?: string,
     signal?: AbortSignal,
   ): Promise<PressButtonResult> {
+    throwIfAborted(signal);
     try {
       switch (this.device.platform) {
         case "android":
           return await this.executeAndroidButtonPress(button, timeoutMs, frameContext, signal);
         case "ios":
-          return await this.executeiOSButtonPress(button, timeoutMs, frameContext);
+          return await this.executeiOSButtonPress(button, timeoutMs, frameContext, signal);
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`Failed to press ${button}: ${errorMessage(error)}`, error);
       return {
         success: false,
@@ -157,39 +168,44 @@ export class PressButton extends BaseVisualChange {
     // cancel the ADB keyevent fallback: passing `signal` alone would replace the
     // ambient signal AdbClient.executeArgsImpl would otherwise pick up, dropping
     // MCP request cancellation on this fallback dispatch (issue #6289).
+    throwIfAborted(signal);
     const dispatchSignal = combineWithAmbientAbort(signal);
     let validationFailure: PressButtonResult | undefined;
     try {
-      await this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
-        timeoutMs: adbBudget,
-        noRetry: true,
-        signal: dispatchSignal,
-        beforeDispatch:
-          frameContext === undefined
-            ? undefined
-            : async () => {
-                validationFailure = await this.validateFrameContextBeforeAdb(
-                  button,
-                  keyCode,
-                  deadlineMs,
-                  frameContext,
-                  signal,
-                );
-                if (validationFailure) {
-                  throw new Error(validationFailure.error);
-                }
-                const remainingMs = this.remainingMs(deadlineMs);
-                if (remainingMs !== undefined && remainingMs <= 0) {
-                  validationFailure = {
-                    success: false,
+      await awaitWhileRequestIsLive(
+        this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
+          timeoutMs: adbBudget,
+          noRetry: true,
+          signal: dispatchSignal,
+          beforeDispatch:
+            frameContext === undefined
+              ? undefined
+              : async () => {
+                  validationFailure = await this.validateFrameContextBeforeAdb(
                     button,
-                    keyCode: -1,
-                    error: `Button press deadline exhausted before ADB keyevent for ${button}`,
-                  };
-                  throw new Error(validationFailure.error);
-                }
-              },
-      });
+                    keyCode,
+                    deadlineMs,
+                    frameContext,
+                    signal,
+                  );
+                  throwIfAborted(signal);
+                  if (validationFailure) {
+                    throw new Error(validationFailure.error);
+                  }
+                  const remainingMs = this.remainingMs(deadlineMs);
+                  if (remainingMs !== undefined && remainingMs <= 0) {
+                    validationFailure = {
+                      success: false,
+                      button,
+                      keyCode: -1,
+                      error: `Button press deadline exhausted before ADB keyevent for ${button}`,
+                    };
+                    throw new Error(validationFailure.error);
+                  }
+                },
+        }),
+        signal,
+      );
     } catch (error) {
       if (validationFailure) {
         return validationFailure;
@@ -245,14 +261,19 @@ export class PressButton extends BaseVisualChange {
         ? PressButton.GLOBAL_ACTION_TIMEOUT_MS
         : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
     try {
+      throwIfAborted(signal);
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-      const result = await client.requestGlobalAction(
-        normalized,
-        globalActionTimeout,
-        undefined,
-        frameContext,
+      const result = await awaitWhileRequestIsLive(
+        client.requestGlobalAction(
+          normalized,
+          globalActionTimeout,
+          undefined,
+          frameContext,
+          signal,
+        ),
         signal,
       );
+      throwIfAborted(signal);
       if (result.success) {
         // "home" specifically can self-report success while leaving the
         // foreground app unchanged on API 28 (issue #6147). Confirm the
@@ -275,6 +296,7 @@ export class PressButton extends BaseVisualChange {
         logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
       }
     } catch (error) {
+      throwIfAborted(signal);
       // The validated ADB fallback remains safe when the global-action RPC fails.
       logger.debug(
         `[PRESS_BUTTON] Global action threw for ${button}, falling back to ADB: ${error}`,
@@ -331,7 +353,9 @@ export class PressButton extends BaseVisualChange {
     button: string,
     timeoutMs?: number,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<PressButtonResult> {
+    throwIfAborted(signal);
     const normalizedButton = button.toLowerCase();
     if (PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)) {
       const client = IOSCtrlProxyClient.getInstance(this.device);
@@ -340,6 +364,7 @@ export class PressButton extends BaseVisualChange {
         normalizedButton,
         timeoutMs,
         frameContext,
+        signal,
       );
 
       if (!result.success) {
@@ -360,11 +385,9 @@ export class PressButton extends BaseVisualChange {
 
     if (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)) {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = await client.requestPressButton(
-        normalizedButton,
-        timeoutMs,
-        undefined,
-        frameContext,
+      const result = await awaitWhileRequestIsLive(
+        client.requestPressButton(normalizedButton, timeoutMs, undefined, frameContext),
+        signal,
       );
 
       if (!result.success) {
@@ -401,22 +424,37 @@ export class PressButton extends BaseVisualChange {
     button: string,
     timeoutMs?: number,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string }> {
+    throwIfAborted(signal);
     switch (button) {
       case "home":
         if (isIosSimulatorUdid(this.device.deviceId)) {
-          await new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
-            undefined,
-            frameContext,
-            timeoutMs,
+          await awaitWhileRequestIsLive(
+            new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
+              undefined,
+              frameContext,
+              timeoutMs,
+              signal,
+            ),
+            signal,
           );
           return { success: true };
         }
-        return client.requestPressHome(timeoutMs, undefined, frameContext);
+        return await awaitWhileRequestIsLive(
+          client.requestPressHome(timeoutMs, undefined, frameContext),
+          signal,
+        );
       case "back":
-        return client.requestPressBack(timeoutMs, undefined, frameContext);
+        return await awaitWhileRequestIsLive(
+          client.requestPressBack(timeoutMs, undefined, frameContext),
+          signal,
+        );
       case "recent":
-        return client.requestRecentApps(timeoutMs, undefined, frameContext);
+        return await awaitWhileRequestIsLive(
+          client.requestRecentApps(timeoutMs, undefined, frameContext),
+          signal,
+        );
       default:
         return { success: false, error: `Unsupported iOS button: ${button}` };
     }

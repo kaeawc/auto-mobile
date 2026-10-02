@@ -56,7 +56,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yTapCoordinatesResult> {
+    beforeSend?.();
     this.checkFailure("tap");
     this.tapHistory.push({
       x,
@@ -571,8 +573,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     await this.applyDelay("swipe");
+    beforeSend?.();
     if (this.swipeDispatchesBeforeResult) {
       onDispatch?.();
     }
@@ -612,8 +616,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     frameContext?: string,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yDragResult> {
     await this.applyDelay("drag");
+    beforeSend?.();
     this.checkFailure("drag");
 
     this.dragHistory.push({
@@ -656,8 +662,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yPinchResult> {
     await this.applyDelay("pinch");
+    beforeSend?.();
     this.checkFailure("pinch");
 
     this.pinchHistory.push({
@@ -864,8 +872,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     await this.applyDelay("requestTwoFingerSwipe");
+    beforeSend?.();
     this.checkFailure("requestTwoFingerSwipe");
 
     this.twoFingerSwipeHistory.push({

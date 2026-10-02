@@ -1035,6 +1035,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult>;
 
   requestTapCoordinates(
@@ -1047,6 +1048,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(
@@ -1061,6 +1063,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     frameContext?: string,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yDragResult>;
 
   requestPinch(
@@ -1074,6 +1077,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yPinchResult>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
@@ -2957,6 +2961,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestSwipe(
       x1,
@@ -2970,6 +2975,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       onDispatch,
       signal,
       displayId,
+      beforeSend,
     );
   }
 
@@ -2986,6 +2992,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yTapCoordinatesResult> {
     return this.gestures.requestTapCoordinates(
       x,
@@ -2997,6 +3004,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       signal,
       onDispatch,
       displayId,
+      beforeSend,
     );
   }
 
@@ -3010,6 +3018,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestTwoFingerSwipe(
       x1,
@@ -3021,6 +3030,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       timeoutMs,
       perf,
       displayId,
+      beforeSend,
     );
   }
 
@@ -3036,6 +3046,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     frameContext?: string,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yDragResult> {
     return this.gestures.requestDrag(
       x1,
@@ -3049,6 +3060,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       frameContext,
       signal,
       displayId,
+      beforeSend,
     );
   }
 
@@ -3063,6 +3075,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yPinchResult> {
     return this.gestures.requestPinch(
       centerX,
@@ -3075,11 +3088,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       perf,
       signal,
       displayId,
+      beforeSend,
     );
   }
 
   // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,
   // chained into a single continued AccessibilityService gesture by the runner.
+  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
   async requestGestureStart(
     gestureId: string,
     x: number,
@@ -3087,8 +3102,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureStart(gestureId, x, y, timeoutMs, perf, displayId);
+    return this.gestures.requestGestureStart(
+      gestureId,
+      x,
+      y,
+      timeoutMs,
+      perf,
+      displayId,
+      beforeSend,
+    );
   }
 
   async requestGestureMove(

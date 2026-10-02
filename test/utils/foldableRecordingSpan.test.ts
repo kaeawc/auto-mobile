@@ -3,7 +3,7 @@ import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import {
   assertRecordingSpansObservation,
   RECORDING_SPAN_TOLERANCE_MS,
-} from "./foldableRecordingSpan";
+} from "../integration/foldableRecordingSpan";
 
 // Minimal typed function inputs, not captured videoRecording tool payloads.
 const recording: Pick<VideoRecordingMetadata, "startedAt" | "durationMs"> = {

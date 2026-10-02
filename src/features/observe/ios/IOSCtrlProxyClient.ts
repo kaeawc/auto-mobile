@@ -2760,6 +2760,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           logger.debug(line);
         }
       }
+      if (type === "tap_coordinates_result" && message.tapDiagnostics !== undefined) {
+        // Wire values came from JSON.parse, so native JSON.stringify preserves arrays
+        // without cycles. The logger's existing 1,000-character line bound still applies.
+        logger.debug(`[CTRLPROXY_TAP_DIAG] ${JSON.stringify(message.tapDiagnostics)}`);
+      }
       const decoded = decodeCtrlProxyMessage(message);
       if (decoded) {
         if (decoded.runnerBusy && decoded.errorMessage !== undefined) {

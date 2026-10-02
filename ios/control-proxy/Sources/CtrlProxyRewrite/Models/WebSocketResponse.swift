@@ -23,6 +23,7 @@ public struct WebSocketResponse: Codable, Sendable {
     /// center) or `"element-anchored"` (public fallback, center-less). Only set on
     /// `pinch_result` responses (issue #2910); nil elsewhere.
     public let pinchPath: String?
+    public let tapDiagnostics: TapDiagnostics?
     public let resolvedStore: String?
     var effectiveValueDiffers: Bool?
 
@@ -41,7 +42,8 @@ public struct WebSocketResponse: Codable, Sendable {
         verified: Bool? = nil,
         warning: String? = nil,
         pinchPath: String? = nil,
-        resolvedStore: String? = nil
+        resolvedStore: String? = nil,
+        tapDiagnostics: TapDiagnostics? = nil
     ) {
         self.type = type
         self.timestamp = timestamp
@@ -56,6 +58,7 @@ public struct WebSocketResponse: Codable, Sendable {
         self.perfTiming = perfTiming
         self.verified = verified
         self.warning = warning
+        self.tapDiagnostics = tapDiagnostics
         self.pinchPath = pinchPath
         self.resolvedStore = resolvedStore
     }
@@ -66,7 +69,8 @@ public struct WebSocketResponse: Codable, Sendable {
         totalTimeMs: Int64,
         text: String? = nil,
         pinchPath: String? = nil,
-        resolvedStore: String? = nil
+        resolvedStore: String? = nil,
+        tapDiagnostics: TapDiagnostics? = nil
     )
         -> WebSocketResponse
     {
@@ -77,7 +81,8 @@ public struct WebSocketResponse: Codable, Sendable {
             totalTimeMs: totalTimeMs,
             text: text,
             pinchPath: pinchPath,
-            resolvedStore: resolvedStore
+            resolvedStore: resolvedStore,
+            tapDiagnostics: tapDiagnostics
         )
     }
 
@@ -116,7 +121,8 @@ public struct WebSocketResponse: Codable, Sendable {
             verified: verified,
             warning: warning,
             pinchPath: pinchPath,
-            resolvedStore: resolvedStore
+            resolvedStore: resolvedStore,
+            tapDiagnostics: tapDiagnostics
         )
         response.effectiveValueDiffers = effectiveValueDiffers
         return response

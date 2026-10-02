@@ -126,6 +126,7 @@
 		97EAAC89501A682F6B97E655 /* SdkEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D360F9D9789EBB26ADD8FA97 /* SdkEndpointResolver.swift */; };
 		982B72985B6426E4DAE02A8A /* RequestSetText.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22C1D3B8693A321680EC6B /* RequestSetText.swift */; };
 		98F705C8C54057FCB4B0CEDF /* SdkExecuteSqlResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B94462B9A346CFA47B40D98F /* SdkExecuteSqlResult.swift */; };
+		9941387A8DC3AD269B9858D5 /* TapDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754597427372B30B2E66A93D /* TapDiagnostics.swift */; };
 		9A4BB68D82D6B6C48EA4A7F2 /* RequestPressKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C2287CAA890BFCEDF55788 /* RequestPressKey.swift */; };
 		9E6205C7381BF3BFAEA410B6 /* ForegroundTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = E662BDE02C14A797054A0E68 /* ForegroundTracker.swift */; };
 		A0E84402AD33647B2C61CFB0 /* PinchGesturePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40FB6E3F285DAC364799570 /* PinchGesturePath.swift */; };
@@ -153,6 +154,7 @@
 		BA290F017F37A2042E0BAC39 /* RequestResetPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BF6E895F1F331333F86EFE5 /* RequestResetPermissions.swift */; };
 		BB8B8559621861C4D0DFA7B4 /* RequestGetTableData.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40FE00992971DF4071339CB /* RequestGetTableData.swift */; };
 		BBD0D85DB2DE1B68964ADC27 /* KeyboardWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C52DF2AC3D783B58A24273F /* KeyboardWait.swift */; };
+		BC8B834635C1591E318B163F /* TapDiagnosticsSampling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 542518F925DF5D13D824DCC4 /* TapDiagnosticsSampling.swift */; };
 		BFA8AEF0A192A83AB712B535 /* VoiceOverToggling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 542D4AB842B818229F5C7B80 /* VoiceOverToggling.swift */; };
 		C0702528FE9F997DBA9E34B9 /* DefaultVoiceOverStateProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD92262189F3B0BAD4C3B31 /* DefaultVoiceOverStateProvider.swift */; };
 		C2650ABD84F60EEE62384D47 /* SdkCoreDataStoreRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B194AD52B54ACDACF3999C /* SdkCoreDataStoreRegistration.swift */; };
@@ -321,6 +323,7 @@
 		51908107F65189FFE5F1B48E /* WebSocketFraming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketFraming.swift; sourceTree = "<group>"; };
 		520057BB8FF70A53CA17C826 /* SdkPreferenceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkPreferenceClient.swift; sourceTree = "<group>"; };
 		5221B349FCFBC47E268B8C47 /* StorageEntriesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageEntriesResponse.swift; sourceTree = "<group>"; };
+		542518F925DF5D13D824DCC4 /* TapDiagnosticsSampling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapDiagnosticsSampling.swift; sourceTree = "<group>"; };
 		542D4AB842B818229F5C7B80 /* VoiceOverToggling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverToggling.swift; sourceTree = "<group>"; };
 		5546E563FFB0CEE4BFC158E9 /* Highlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlight.swift; sourceTree = "<group>"; };
 		56D7093935E79C5B0A3669D3 /* SetNetworkErrorSimulationResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetNetworkErrorSimulationResponse.swift; sourceTree = "<group>"; };
@@ -349,6 +352,7 @@
 		70078B2ADB6C85E6C05F0DE4 /* ConnectionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionRegistry.swift; sourceTree = "<group>"; };
 		70A2F1DCB1D420472C7005A1 /* CurrentFocusResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentFocusResponse.swift; sourceTree = "<group>"; };
 		7366D3444D35815F837642AA /* HingeAngleSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HingeAngleSetting.swift; sourceTree = "<group>"; };
+		754597427372B30B2E66A93D /* TapDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapDiagnostics.swift; sourceTree = "<group>"; };
 		76D1AFB114A68CF3595A65DB /* SdkGestureInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkGestureInfo.swift; sourceTree = "<group>"; };
 		7946430E328DC8DE651C1693 /* WebSocketConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketConnection.swift; sourceTree = "<group>"; };
 		7C7D0326E1B35DF9109E8677 /* SdkHierarchyCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCache.swift; sourceTree = "<group>"; };
@@ -560,6 +564,7 @@
 				84C1B94B13CDEB3DE3915785 /* SystemTimeProvider.swift */,
 				8153B3AE17D4A41DCB7D8227 /* SystemTimer.swift */,
 				1BF44B809165C65F617A2C33 /* SystemVoiceOverDefaultsReader.swift */,
+				542518F925DF5D13D824DCC4 /* TapDiagnosticsSampling.swift */,
 				DD7279227112665E843CF54D /* TimeProvider.swift */,
 				99EFC8B8B00E931A14BC129D /* VoiceOverDefaultsReading.swift */,
 				B2E262C2217BCFDEDBD29BE4 /* VoiceOverStateProviding.swift */,
@@ -679,6 +684,7 @@
 				0603E765B283E038514EA598 /* SystemChromeInfo.swift */,
 				C7CFEA77FB2BC89907377168 /* TableDataResponse.swift */,
 				DB100456A6C417597B41A835 /* TableStructureResponse.swift */,
+				754597427372B30B2E66A93D /* TapDiagnostics.swift */,
 				65220C877E9C454E5EF23A29 /* TraversalOrderResponse.swift */,
 				5CB495028AAEEF0B73F1985D /* UIElementInfo.swift */,
 				0B4AF05BB8592BAC9A569E2F /* ViewHierarchy.swift */,
@@ -1099,6 +1105,8 @@
 				F4F26CC962D55BED65AD14C9 /* SystemVoiceOverDefaultsReader.swift in Sources */,
 				EFEEDCEBF2BF5F4F0176374E /* TableDataResponse.swift in Sources */,
 				EEBC50F886F2F6E98B9EBFCB /* TableStructureResponse.swift in Sources */,
+				9941387A8DC3AD269B9858D5 /* TapDiagnostics.swift in Sources */,
+				BC8B834635C1591E318B163F /* TapDiagnosticsSampling.swift in Sources */,
 				5DD547806EC69DBD73337837 /* TimeProvider.swift in Sources */,
 				6C7997E79ECC85116ED16A96 /* TraversalOrderResponse.swift in Sources */,
 				E1EBEA80F4999ACC85FDBBA1 /* UIElementInfo.swift in Sources */,

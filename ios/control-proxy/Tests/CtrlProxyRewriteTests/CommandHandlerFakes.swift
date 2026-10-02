@@ -55,6 +55,8 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var keyCalls: [(String, [String])] = []
     var keyError: CommandError?
     var tapCalls = 0
+    var diagnosticTapCalls = 0
+    var tapDiagnosticsResult: TapDiagnostics?
     var swipeCalls = 0
     var onSwipe: (() -> Void)?
     var onPressKey: (() -> Void)?
@@ -93,6 +95,11 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     }
 
     func tap(x _: Double, y _: Double, duration _: TimeInterval) throws { tapCalls += 1 }
+    func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {
+        diagnosticTapCalls += 1
+        return tapDiagnosticsResult ?? TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))
+    }
+
     func doubleTap(x _: Double, y _: Double) throws {}
     func longPress(x _: Double, y _: Double, duration _: TimeInterval) throws {}
     func swipe(startX _: Double, startY _: Double, endX _: Double, endY _: Double, duration _: TimeInterval) throws {
@@ -208,4 +215,17 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     func activateApp(bundleId _: String) throws {}
     func updateApplication(bundleId _: String) {}
     func resetAuthorizations(bundleId _: String, resources _: [String]) throws {}
+}
+
+@MainActor
+final class FakeTapDiagnosticsSampler: TapDiagnosticsSampling {
+    let result: TapDiagnostics
+    var requests: [TapDiagnostics.Requested] = []
+
+    init(result: TapDiagnostics) { self.result = result }
+
+    func sample(requested: TapDiagnostics.Requested, reads _: TapDiagnosticReads) -> TapDiagnostics {
+        requests.append(requested)
+        return result
+    }
 }

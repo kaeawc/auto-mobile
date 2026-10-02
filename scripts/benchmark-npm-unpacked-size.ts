@@ -16,6 +16,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { findPackedAssetViolations } from "./build/packed-runtime-assets";
 
 const DEFAULT_CONFIG_PATH = path.join("scripts", "npm-unpacked-size-thresholds.json");
 const REQUIRED_DIST_ENTRY = path.join("dist", "src", "index.js");
@@ -174,12 +175,13 @@ function ensureBuildOutput(): void {
   }
 }
 
-function parsePackOutput(stdout: string): {
+export function parsePackOutput(stdout: string): {
   name: string;
   version: string;
   filename: string | null;
   tarballBytes: number | null;
   unpackedBytes: number;
+  files: { path: string; size: number; mode: number }[];
 } {
   const trimmed = stdout.trim();
   if (!trimmed) {
@@ -203,10 +205,25 @@ function parsePackOutput(stdout: string): {
     filename?: string;
     size?: number;
     unpackedSize?: number;
+    files?: { path: string; size: number; mode: number }[];
   };
 
   if (typeof packResult.unpackedSize !== "number") {
     throw new Error("npm pack output missing unpackedSize");
+  }
+
+  if (
+    !Array.isArray(packResult.files) ||
+    !packResult.files.every(
+      (file) =>
+        file !== null &&
+        typeof file === "object" &&
+        typeof file.path === "string" &&
+        typeof file.size === "number" &&
+        typeof file.mode === "number",
+    )
+  ) {
+    throw new Error("npm pack output missing or invalid files manifest");
   }
 
   return {
@@ -215,6 +232,7 @@ function parsePackOutput(stdout: string): {
     filename: packResult.filename ?? null,
     tarballBytes: typeof packResult.size === "number" ? packResult.size : null,
     unpackedBytes: packResult.unpackedSize,
+    files: packResult.files,
   };
 }
 
@@ -239,7 +257,7 @@ function runBenchmark(config: ThresholdConfig, outputPath: string | null): Bench
     packFilename = packInfo.filename;
 
     const result = checkThreshold(packInfo.unpackedBytes, config.thresholds.unpackedBytes);
-    const violations: string[] = [];
+    const violations = findPackedAssetViolations(packInfo.files.map((file) => file.path));
 
     if (!result.passed) {
       violations.push(
@@ -249,7 +267,7 @@ function runBenchmark(config: ThresholdConfig, outputPath: string | null): Bench
 
     const report: BenchmarkReport = {
       timestamp: new Date().toISOString(),
-      passed: result.passed,
+      passed: violations.length === 0,
       results: {
         unpackedSize: result,
       },
@@ -273,7 +291,7 @@ function runBenchmark(config: ThresholdConfig, outputPath: string | null): Bench
         report.violations.length > 0
           ? `\n${report.violations.map((violation) => `- ${violation}`).join("\n")}`
           : "";
-      throw new Error(`NPM unpacked size benchmark failed - threshold exceeded${details}`);
+      throw new Error(`NPM unpacked size benchmark failed${details}`);
     }
 
     console.log(
@@ -301,4 +319,6 @@ function main(): void {
   }
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

@@ -5902,6 +5902,12 @@ describe("DevicePool", () => {
     });
 
     test("does not launch an AVD while recovery already owns its boot", async () => {
+      const drainUntil = async (predicate: () => boolean): Promise<void> => {
+        for (let turn = 0; turn < 1_000 && !predicate(); turn++) {
+          await Promise.resolve();
+        }
+        expect(predicate()).toBe(true);
+      };
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
@@ -5937,25 +5943,151 @@ describe("DevicePool", () => {
           ],
           3_000,
         );
+        let allocationSettled = false;
+        void allocation.then(
+          () => {
+            allocationSettled = true;
+          },
+          () => {
+            allocationSettled = true;
+          },
+        );
+
+        // The allocation has completed its launch decision and is waiting while
+        // recovery readiness is still gated, so this launch count is meaningful.
+        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0);
+        expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
+        expect(devicePool.getRecoveringAndroidTargets().names.has("pixel_8_api_35")).toBe(true);
         expect(manager.childProcesses).toHaveLength(2);
         manager.releaseRecovery();
-        await new Promise((resolve) => setImmediate(resolve));
-
-        await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow(
-          "Timed out allocating devices",
+        await drainUntil(
+          () => !devicePool.getRecoveringAndroidTargets().names.has("pixel_8_api_35"),
         );
+
+        for (let step = 0; step < 4; step++) {
+          expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
+          fakeTimer.advanceTime(1_000);
+          await drainUntil(() => allocationSettled || fakeTimer.getPendingSleepCount() > 0);
+        }
+        expect(allocationSettled).toBe(true);
+        await expect(allocation).rejects.toThrow("Timed out allocating devices");
         expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-5554");
         expect(manager.childProcesses).toHaveLength(2);
       } finally {
         manager.releaseRecovery();
-        await new Promise((resolve) => setImmediate(resolve));
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        try {
+          await drainUntil(
+            () => !devicePool.getRecoveringAndroidTargets().names.has("pixel_8_api_35"),
+          );
+        } finally {
+          if (originalRebootOnDeath === undefined) {
+            delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+          } else {
+            process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+          }
         }
       }
     });
+
+    test.each(["criteria", "platform"] as const)(
+      "joins an AVD boot completed while %s allocation waited for its lifecycle lease",
+      async (allocationPath) => {
+        const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
+        fakeDeviceManager.deviceImages = [
+          {
+            name: "pixel_8_api_35",
+            platform: "android",
+            isRunning: false,
+            deviceId: "emulator-5554",
+            deviceType: "Pixel 8",
+            source: "local",
+          },
+        ];
+        devicePool = new DevicePool(
+          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+            timer: fakeTimer,
+            installedAppsRepository: fakeAppsRepo,
+            deviceManager: fakeDeviceManager,
+            retryExecutor: new DefaultRetryExecutor(fakeTimer),
+            lifecycleCoordinator,
+          }),
+        );
+        const owner = await lifecycleCoordinator.reserve(
+          { kind: "stable", platform: "android", stableId: "pixel_8_api_35" },
+          { operation: "recovery", deadlineMs: 300_000 },
+        );
+        const pendingTimeouts = fakeTimer.getPendingTimeoutCount();
+        const allocation =
+          allocationPath === "criteria"
+            ? devicePool.assignMultipleDevicesByCriteria(
+                [
+                  {
+                    sessionId: "session-2",
+                    criteria: { platform: "android", simulatorType: "Pixel 8" },
+                  },
+                ],
+                3_000,
+              )
+            : devicePool.assignMultipleDevices(["session-2"], 3_000, "android");
+        let allocationSettled = false;
+        void allocation.then(
+          () => {
+            allocationSettled = true;
+          },
+          () => {
+            allocationSettled = true;
+          },
+        );
+        try {
+          // The pool's start timeout plus the coordinator's waiter timeout prove
+          // acquisition passed candidate selection and queued behind the owner.
+          for (
+            let turn = 0;
+            turn < 1_000 && fakeTimer.getPendingTimeoutCount() < pendingTimeouts + 2;
+            turn++
+          ) {
+            await Promise.resolve();
+          }
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(pendingTimeouts + 2);
+          expect(fakeDeviceManager.startedDevices).toHaveLength(0);
+          fakeDeviceManager.bootedDevices = [
+            {
+              name: "pixel_8_api_35",
+              platform: "android",
+              deviceId: "emulator-5554",
+              deviceType: "Pixel 8",
+              source: "local",
+            },
+          ];
+          // Recovery publishes the winner before releasing its lifecycle lease.
+          await devicePool.refreshDevices();
+          owner.release();
+          for (let turn = 0; turn < 1_000 && !allocationSettled; turn++) {
+            await Promise.resolve();
+          }
+          expect(allocationSettled).toBe(true);
+          const assignments = await allocation;
+          expect(assignments.get("session-2")).toBe("emulator-5554");
+          expect(fakeDeviceManager.startedDevices).toHaveLength(0);
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(pendingTimeouts);
+          let leaseReleased = false;
+          const nextOwner = lifecycleCoordinator.reserve(
+            { kind: "stable", platform: "android", stableId: "pixel_8_api_35" },
+            { operation: "start", deadlineMs: 3_000 },
+          );
+          void nextOwner.then((lease) => {
+            leaseReleased = true;
+            lease.release();
+          });
+          for (let turn = 0; turn < 1_000 && !leaseReleased; turn++) {
+            await Promise.resolve();
+          }
+          expect(leaseReleased).toBe(true);
+        } finally {
+          owner.release();
+        }
+      },
+    );
 
     test("does not defer incompatible criteria allocation for an unrelated recovering AVD", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;

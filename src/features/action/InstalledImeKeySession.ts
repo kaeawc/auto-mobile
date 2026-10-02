@@ -1,5 +1,6 @@
 import type { BootedDevice, ViewHierarchyResult, ViewHierarchyNode } from "../../models";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
+import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -21,6 +22,18 @@ import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 
 const READY_TIMEOUT_MS = 2_000;
 const READY_POLL_MS = 100;
+const ENABLED_DRIFT_DIAGNOSTIC_MAX_CHARS = 512;
+
+export class ImeSessionFocusLostError extends ActionableError {
+  constructor(readonly reason: "editorFocusLost" | "imeWindowDisappeared") {
+    super(
+      reason === "editorFocusLost"
+        ? "Focused text input lost focus while waiting for a visible IME key."
+        : "Selected IME window disappeared while waiting for a visible key.",
+    );
+    this.name = "ImeSessionFocusLostError";
+  }
+}
 
 interface FrameBoundKeyPoint {
   x: number;
@@ -129,7 +142,10 @@ export class InstalledImeKeySession {
       }
       const after = await catalog.list();
       if (after.activeImeId !== original || !sameEnabledSet(before, after)) {
-        throw new Error("IME state did not return to its original active and enabled state.");
+        // This session never enables/disables IMEs; external drift is reported, never repaired.
+        throw new Error(
+          `IME state did not return to its original active and enabled state${enabledSetDriftDiagnostic(before, after)}.`,
+        );
       }
     } catch (restoreError) {
       quarantineAndroidIme(this.deviceId);
@@ -248,11 +264,10 @@ export class InstalledImeKeySession {
   private async waitForVisibleKey(imeId: string, key: string, signal?: AbortSignal) {
     const { hierarchy, timer } = this.dependencies;
     const deadline = timer.now() + READY_TIMEOUT_MS;
-    let sawImeWindow = false;
+    let seen = { focusedEditor: false, imeWindow: false };
     do {
       signal?.throwIfAborted();
       const current = await hierarchy.read(signal);
-      sawImeWindow ||= current ? matchingImeWindows(current, imeId).length > 0 : false;
       const point = current ? findVisibleImeKey(current, imeId, key) : null;
       if (point) {
         if (!current?.frameContext?.trim()) {
@@ -262,17 +277,39 @@ export class InstalledImeKeySession {
         }
         return { ...point, frameContext: current.frameContext };
       }
+      if (current) {
+        seen = observeImeWaitFocus(current, imeId, seen);
+      }
       const remaining = deadline - timer.now();
       if (remaining <= 0) {
         break;
       }
       await timer.sleep(Math.min(READY_POLL_MS, remaining));
     } while (timer.now() < deadline);
-    if (!sawImeWindow) {
+    if (!seen.imeWindow) {
       throw new Error(`Selected IME window did not appear within ${READY_TIMEOUT_MS} ms.`);
     }
     throw new Error(`Visible key ${JSON.stringify(key)} was not found in the selected IME window.`);
   }
+}
+
+function observeImeWaitFocus(
+  current: ViewHierarchyResult,
+  imeId: string,
+  seen: { focusedEditor: boolean; imeWindow: boolean },
+) {
+  const focusedEditor = Boolean(new DefaultElementFinder().findFocusedTextInput(current));
+  const imeWindow = matchingImeWindows(current, imeId).length > 0;
+  if (seen.focusedEditor && !focusedEditor) {
+    throw new ImeSessionFocusLostError("editorFocusLost");
+  }
+  if (seen.imeWindow && !imeWindow) {
+    throw new ImeSessionFocusLostError("imeWindowDisappeared");
+  }
+  return {
+    focusedEditor: seen.focusedEditor || focusedEditor,
+    imeWindow: seen.imeWindow || imeWindow,
+  };
 }
 
 interface FocusedEditorEvidence {
@@ -288,12 +325,37 @@ function focusedEditorEvidence(hierarchy: ViewHierarchyResult): FocusedEditorEvi
 }
 
 function sameEnabledSet(before: ImeCatalogState, after: ImeCatalogState): boolean {
+  const { added, removed } = diffEnabledSet(before, after);
+  return added.length === 0 && removed.length === 0;
+}
+
+export function diffEnabledSet(
+  before: ImeCatalogState,
+  after: ImeCatalogState,
+): {
+  added: string[];
+  removed: string[];
+} {
   const enabled = (state: ImeCatalogState) =>
-    state.installed
-      .filter((ime) => ime.enabled)
-      .map((ime) => ime.id)
-      .sort();
-  return JSON.stringify(enabled(before)) === JSON.stringify(enabled(after));
+    new Set(state.installed.filter((ime) => ime.enabled).map((ime) => ime.id));
+  const beforeIds = enabled(before);
+  const afterIds = enabled(after);
+  return {
+    added: [...afterIds].filter((id) => !beforeIds.has(id)).sort(),
+    removed: [...beforeIds].filter((id) => !afterIds.has(id)).sort(),
+  };
+}
+
+function enabledSetDriftDiagnostic(before: ImeCatalogState, after: ImeCatalogState): string {
+  const drift = diffEnabledSet(before, after);
+  const ids = [...drift.added.map((id) => `+${id}`), ...drift.removed.map((id) => `-${id}`)].join(
+    ", ",
+  );
+  const boundedIds =
+    ids.length > ENABLED_DRIFT_DIAGNOSTIC_MAX_CHARS
+      ? `${ids.slice(0, ENABLED_DRIFT_DIAGNOSTIC_MAX_CHARS - 3)}...`
+      : ids;
+  return ids ? ` (enabled set drift: ${boundedIds})` : "";
 }
 
 function findVisibleImeKey(

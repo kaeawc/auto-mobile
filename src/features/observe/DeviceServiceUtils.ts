@@ -256,6 +256,8 @@ interface SendCommandBaseOptions {
   abortSignal?: AbortSignal;
   /** Must be explicitly confirmed on the current connection immediately before sending. */
   requiredCapability?: string;
+  /** Synchronous caller fence, checked on the ready connection immediately before dispatch. */
+  beforeSend?: () => void;
   /**
    * Invoked synchronously right after `ws.send()` succeeds — i.e. the wire
    * request was actually dispatched to the device (#6249 P1 follow-up).
@@ -391,6 +393,10 @@ export async function sendCommand<T>(
           ),
         );
       } else {
+        // Capability, caller fence, and cancellation share this synchronous pre-send step.
+        // No await may separate these checks from sending the first committing message.
+        options.beforeSend?.();
+        options.abortSignal?.throwIfAborted();
         ws.send(msg);
         options.onDispatch?.(requestId);
       }

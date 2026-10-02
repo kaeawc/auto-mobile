@@ -1,5 +1,5 @@
-import { cancellationHandlers } from "../helpers/interactionCancellation";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { cancellationHandlers, cancellationTests } from "../helpers/interactionCancellation";
+import { describe, expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { DOUBLE_TAP_GAP_MS } from "../../src/features/action/tapAtGesture";
 import {
@@ -24,7 +24,7 @@ const devices = [
 const registeredHandler = cancellationHandlers(["tapAt", "tapOn", "tapAny", "dragAndDrop"]);
 
 describe("registered interaction handler cancellation", () => {
-  afterEach(() => {
+  const test = cancellationTests(() => {
     resetTapAtElementFactory();
     resetTapOnElementFactory();
     resetTapAnyElementFactory();

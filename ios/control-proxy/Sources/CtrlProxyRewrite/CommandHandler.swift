@@ -733,8 +733,12 @@ final class CommandHandler: CommandHandling {
         try requireFinite(request.x, field: "x")
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
-        try await performContextCheckedGesture(expected: request.frameContext) {
+        let diagnostics: TapDiagnostics? = try await performContextCheckedGesture(expected: request.frameContext) {
+            if request.diagnostics == true {
+                return try self.gesturePerformer.tapWithDiagnostics(x: request.x, y: request.y, durationMs: duration)
+            }
             try self.gesturePerformer.tap(x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0)
+            return nil
         }
         if let locator = elementLocator as? ElementLocator {
             await locator.clearAppSwitcherHint()
@@ -743,7 +747,8 @@ final class CommandHandler: CommandHandling {
         return WebSocketResponse.success(
             type: ResponseType.tapCoordinatesResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            tapDiagnostics: diagnostics
         )
     }
 

@@ -632,6 +632,7 @@ public final class GesturePerformer: GesturePerforming {
         /// freshly created XCUIApplication instances that have no other strong owner.
         private var ownedApplication: XCUIApplication?
         private let elementLocator: ElementLocating
+        private let tapDiagnosticsSampler: any TapDiagnosticsSampling
 
         /// Cached SpringBoard app reference for system alert handling.
         private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -645,6 +646,18 @@ public final class GesturePerformer: GesturePerforming {
             self.application = application
             self.elementLocator = elementLocator
             self.keyboardClock = keyboardClock
+            tapDiagnosticsSampler = DefaultTapDiagnosticsSampler()
+        }
+
+        init(
+            application: XCUIApplication?, elementLocator: ElementLocating,
+            keyboardClock: any Clock<Duration>, tapDiagnosticsSampler: any TapDiagnosticsSampling
+        ) {
+            DeviceRotation.startMonitoring()
+            self.application = application
+            self.elementLocator = elementLocator
+            self.keyboardClock = keyboardClock
+            self.tapDiagnosticsSampler = tapDiagnosticsSampler
         }
 
         /// `catchingObjCException` for methods that cannot propagate errors: a caught
@@ -918,15 +931,56 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Tap Gestures
 
         public func tap(x: Double, y: Double, duration: TimeInterval = 0) throws {
+            _ = try performTap(x: x, y: y, duration: duration, requested: nil)
+        }
+
+        public func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {
+            // The requested value is always returned when delivery succeeds, even if every read fails.
+            let requested = TapDiagnostics.Requested(x: x, y: y, durationMs: durationMs)
+            return try performTap(x: x, y: y, duration: TimeInterval(durationMs) / 1000.0, requested: requested)
+                ?? TapDiagnostics(requested: requested, sampleErrors: ["sampler: no sample returned"])
+        }
+
+        /// Shared construction keeps the opt-out path free of additional XCUI/UIKit reads.
+        private func performTap(
+            x: Double, y: Double, duration: TimeInterval, requested: TapDiagnostics.Requested?
+        )
+            throws -> TapDiagnostics?
+        {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
             guard let app = application else {
                 throw GestureError.noApplication
             }
 
-            try catchingObjCException {
+            return try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
-                let coordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: x, dy: y))
+                let base = app.coordinate(withNormalizedOffset: .zero)
+                let coordinate = base.withOffset(CGVector(dx: x, dy: y))
+                var diagnostics: TapDiagnostics?
+                if let requested {
+                    diagnostics = tapDiagnosticsSampler.sample(requested: requested, reads: TapDiagnosticReads(
+                        baseScreenPoint: { try Self.diagnosticPoint(base.screenPoint) },
+                        resolvedScreenPoint: { try Self.diagnosticPoint(coordinate.screenPoint) },
+                        // Only the necessary app frame attribute; no snapshot tree/window query.
+                        // XCUIApplication exposes no cheap public bundle identifier getter.
+                        application: { try .init(frame: Self.diagnosticFrame(app.frame)) },
+                        screen: {
+                            let screen = UIScreen.main
+                            guard screen.scale.isFinite, screen.nativeScale.isFinite else {
+                                throw GestureError.gestureFailed("non-finite diagnostic scale")
+                            }
+                            return try .init(
+                                bounds: Self.diagnosticFrame(screen.bounds),
+                                nativeBounds: Self.diagnosticFrame(screen.nativeBounds),
+                                scale: Double(screen.scale), nativeScale: Double(screen.nativeScale),
+                                source: "runnerProcessUIScreenMain"
+                            )
+                        },
+                        deviceOrientation: { .device(rawValue: XCUIDevice.shared.orientation.rawValue) },
+                        interfaceOrientation: { DeviceRotation.tapDiagnosticInterfaceOrientation() }
+                    ))
+                    if let diagnostics { logger.warning("\(diagnostics.logLine(), privacy: .public)") }
+                }
 
                 GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
@@ -935,7 +989,26 @@ public final class GesturePerformer: GesturePerforming {
                 } else {
                     coordinate.tap()
                 }
+                return diagnostics
             }
+        }
+
+        private static func diagnosticPoint(_ point: CGPoint) throws -> TapDiagnostics.Point {
+            guard point.x.isFinite,
+                  point.y.isFinite else { throw GestureError.gestureFailed("non-finite diagnostic point") }
+            return .init(x: Double(point.x), y: Double(point.y))
+        }
+
+        private static func diagnosticFrame(_ frame: CGRect) throws -> TapDiagnostics.Frame {
+            guard frame.origin.x.isFinite, frame.origin.y.isFinite, frame.width.isFinite, frame.height.isFinite else {
+                throw GestureError.gestureFailed("non-finite diagnostic frame")
+            }
+            return .init(
+                x: Double(frame.origin.x),
+                y: Double(frame.origin.y),
+                width: Double(frame.width),
+                height: Double(frame.height)
+            )
         }
 
         public func doubleTap(x: Double, y: Double) throws {

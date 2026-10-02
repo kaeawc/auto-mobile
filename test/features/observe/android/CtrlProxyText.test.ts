@@ -137,6 +137,59 @@ describe("Android CtrlProxyText", () => {
     expect((await resultPromise).sessionUnsafe).toBeUndefined();
   });
 
+  test.each([true, false])(
+    "caller abort waits for cancellation acknowledgement=%s",
+    async (acknowledged) => {
+      const timer = new FakeTimer();
+      const socket = new CapturingWebSocket("ws://localhost", "none", 0, timer);
+      await waitForSocketOpen(socket);
+      const manager = new RequestManager(timer);
+      const context: DelegateContext = {
+        getWebSocket: () => socket as unknown as WebSocket,
+        requestManager: manager,
+        timer,
+        ensureConnected: async () => true,
+        cancelScreenshotBackoff: () => {},
+      };
+      const controller = new AbortController();
+      let settled = false;
+      const promise = new CtrlProxyText(context).commitViaIme(
+        "text",
+        "prior",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      void promise.then(() => {
+        settled = true;
+      });
+      const commit = await waitForRequest(socket, "request_commit_text");
+      controller.abort();
+      const cancel = await waitForRequest(socket, "request_cancel_ime_commit");
+      expect(cancel.targetRequestId).toBe(commit.requestId);
+      expect(settled).toBe(false);
+      timer.advanceTime(1_999);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      if (acknowledged) {
+        manager.resolve(cancel.requestId as string, {
+          success: true,
+          targetRequestId: commit.requestId,
+          partialApplication: true,
+          committedUnits: 2,
+        });
+      } else {
+        timer.advanceTime(1);
+      }
+      const result = await promise;
+      expect(result).toMatchObject({ success: false, partialApplication: true });
+      expect(result.sessionUnsafe).toBe(acknowledged ? undefined : true);
+      expect(result.committedUnits).toBe(acknowledged ? 2 : undefined);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      socket.close();
+    },
+  );
+
   test("sends request_insert_text and resolves its result", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -280,9 +333,10 @@ describe("Android CtrlProxyText", () => {
           requestId: eventRequest.requestId,
           success: true,
           totalTimeMs: 3,
+          committedUnits: 3,
         }),
       );
-      expect((await eventPromise).success).toBe(true);
+      expect(await eventPromise).toMatchObject({ success: true, committedUnits: 3 });
 
       socket.sentMessages.length = 0;
       const failed = textDelegate.commitViaIme("long text", "prior-ime");
@@ -293,12 +347,48 @@ describe("Android CtrlProxyText", () => {
           timestamp: 2,
           requestId: failedRequest.requestId,
           success: false,
+          // Flat payload emitted by CtrlProxy.kt broadcastCommitTextResult.
           error: "IME commit deadline exceeded",
           totalTimeMs: 4000,
           partialApplication: true,
+          committedUnits: 3,
         }),
       );
-      expect(await failed).toMatchObject({ success: false, partialApplication: true });
+      expect(await failed).toMatchObject({
+        success: false,
+        partialApplication: true,
+        committedUnits: 3,
+      });
+
+      socket.sentMessages.length = 0;
+      const controller = new AbortController();
+      const aborted = textDelegate.commitViaIme(
+        "text",
+        "prior-ime",
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      const abortedRequest = await waitForRequest(socket, "request_commit_text");
+      controller.abort();
+      const cancelRequest = await waitForRequest(socket, "request_cancel_ime_commit");
+      // Flat payload emitted by CtrlProxy.kt requestCancelImeCommit, not nested data.
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "cancel_ime_commit_result",
+          timestamp: 3,
+          requestId: cancelRequest.requestId,
+          success: true,
+          targetRequestId: abortedRequest.requestId,
+          partialApplication: true,
+          committedUnits: 2,
+        }),
+      );
+      expect(await aborted).toMatchObject({
+        success: false,
+        partialApplication: true,
+        committedUnits: 2,
+      });
     } finally {
       await client.close();
     }

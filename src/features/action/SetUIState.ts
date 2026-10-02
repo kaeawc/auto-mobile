@@ -204,7 +204,7 @@ const RESPONSE_HEADROOM_MS = 3_000;
 export class SetUIState extends BaseVisualChange {
   private fieldTypeDetector: FieldTypeDetector;
   private finder: ElementFinder;
-  private readonly iosSelector = new ResolverElementSelector();
+  private readonly iosSelector: ResolverElementSelector;
   private dependencies: SetUIStateDependencies;
 
   constructor(
@@ -214,6 +214,9 @@ export class SetUIState extends BaseVisualChange {
     finder: ElementFinder = new DefaultElementFinder(),
   ) {
     super(device, adb, dependencies.timer ?? defaultTimer);
+    this.iosSelector = new ResolverElementSelector(undefined, undefined, {
+      iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
+    });
     this.fieldTypeDetector = dependencies.fieldTypeDetector ?? new FieldTypeDetector();
     this.finder = finder;
     this.dependencies = dependencies;

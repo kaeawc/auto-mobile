@@ -58,13 +58,15 @@ export function identifyObservedHierarchy(
   freshness: HierarchyCaptureRequest["freshness"],
   timer: Timer = defaultTimer,
   ids: IdGenerator = defaultIdGenerator,
-  captureId?: string,
+  captureIdentity?: string | { captureId?: string; iosMultiPanel?: boolean },
 ): HierarchySnapshot {
   const existing = getHierarchySnapshot(source);
   if (existing) {
     return existing;
   }
-  const hierarchy = projectActionableHierarchy(platform, source);
+  const { captureId, iosMultiPanel = false } =
+    (typeof captureIdentity === "string" ? { captureId: captureIdentity } : captureIdentity) ?? {};
+  const hierarchy = projectActionableHierarchy(platform, source, iosMultiPanel);
   const snapshot: HierarchySnapshot = {
     captureId: captureId ?? ids.next(),
     platform,

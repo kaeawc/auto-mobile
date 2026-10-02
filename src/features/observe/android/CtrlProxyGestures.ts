@@ -45,6 +45,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
     // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
@@ -66,6 +67,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       timeoutMs,
       perf,
       errorLabel: "Two-finger swipe",
+      beforeSend,
       requiredCapability:
         displayId === undefined || displayId === 0 ? undefined : "gesture_display_id_v1",
     });
@@ -77,7 +79,10 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * tracks the pointer live (issue: streaming gesture input). Each frame is correlated by requestId
    * and answered with the shared `swipe_result` frame, like the sibling gestures. Deliberately no
    * `frameContext` — streamed gestures are frame-identity-free, like taps.
+   * The display fence guards start only; a mid-stream transition does not cancel move/end.
+   * The runner continues the accepted gesture on its original display.
    */
+  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
   async requestGestureStart(
     gestureId: string,
     x: number,
@@ -85,6 +90,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_start",
@@ -99,6 +105,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       timeoutMs,
       perf,
       errorLabel: "Gesture start",
+      beforeSend,
       requiredCapability:
         displayId === undefined || displayId === 0 ? undefined : "gesture_display_id_v1",
     });

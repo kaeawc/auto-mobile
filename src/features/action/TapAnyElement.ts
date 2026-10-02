@@ -8,7 +8,7 @@ import {
   type HierarchyCapture,
   type HierarchySnapshot,
 } from "../observe/HierarchyCapture";
-import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
+import { resolveActionableHierarchyScreenSize } from "../observe/HierarchyNormalization";
 import type { TapAnyElementResult } from "../../models/TapAnyElementResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -387,6 +387,8 @@ export const TAP_ANY_LONG_PRESS_MAX_DURATION_MS =
   (TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS + TAP_ANY_SEARCH_UNTIL_MAX_MS);
 
 export class TapAnyElement extends BaseVisualChange {
+  private readonly iosMultiPanel =
+    this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1;
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
   private finder: ElementFinder;
@@ -428,7 +430,9 @@ export class TapAnyElement extends BaseVisualChange {
   ) {
     super(device, adb, options.timer, options.renderedDisplayRevision, options);
     this.geometry = new DefaultElementGeometry();
-    this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
+    this.elementSelector =
+      options.elementSelector ??
+      new ResolverElementSelector(undefined, undefined, { iosMultiPanel: this.iosMultiPanel });
     this.finder = new DefaultElementFinder();
     this.accessibilityService =
       options.accessibilityService ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
@@ -745,24 +749,18 @@ export class TapAnyElement extends BaseVisualChange {
     );
   }
 
-  private isElementCenterOffScreen(
-    element: Element,
-    viewHierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-  ): boolean {
-    return isElementCenterOffScreen(
-      element.bounds,
-      resolveElementScreenSize(viewHierarchy, screenSize),
-    );
-  }
-
   private findClickableElement(
     options: TapAnyElementOptions,
     viewHierarchy: ViewHierarchyResult,
     screenSize?: ObserveResult["screenSize"],
   ): { element: Element | null; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
-    const effectiveScreenSize = resolveElementScreenSize(viewHierarchy, screenSize);
+    // Match tapOn's multi-panel correction while retaining legacy metadata
+    // precedence for Android and single-panel iOS captures.
+    const effectiveScreenSize = this.iosMultiPanel
+      ? (resolveActionableHierarchyScreenSize(viewHierarchy, true) ??
+        resolveElementScreenSize(viewHierarchy, screenSize))
+      : resolveElementScreenSize(viewHierarchy, screenSize);
     const hierarchyWithResolvedSize = effectiveScreenSize
       ? {
           ...viewHierarchy,
@@ -778,7 +776,7 @@ export class TapAnyElement extends BaseVisualChange {
     });
     if (
       selection.element &&
-      this.isElementCenterOffScreen(selection.element, viewHierarchy, screenSize)
+      isElementCenterOffScreen(selection.element.bounds, effectiveScreenSize)
     ) {
       return { element: null, containerFound };
     }
@@ -860,7 +858,7 @@ export class TapAnyElement extends BaseVisualChange {
         "fresh",
         this.timer,
         undefined,
-        snapshot.captureId,
+        { captureId: snapshot.captureId, iosMultiPanel: this.iosMultiPanel },
       );
       return snapshot.hierarchy;
     } catch (error) {
@@ -1223,7 +1221,7 @@ export class TapAnyElement extends BaseVisualChange {
             "cached-ok",
             this.timer,
             undefined,
-            observeResult.observationId,
+            { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
           );
           const searchDurationMs = this.getSearchUntilDuration(options);
           const startTime = this.timer.now();
@@ -1234,7 +1232,8 @@ export class TapAnyElement extends BaseVisualChange {
           let found = this.findClickableElement(
             options,
             selectedCapture.hierarchy,
-            extractHierarchyScreenSize(selectedCapture.hierarchy) ?? observeResult.screenSize,
+            resolveActionableHierarchyScreenSize(selectedCapture.hierarchy, this.iosMultiPanel) ??
+              observeResult.screenSize,
           );
           let element = found.element;
           let containerFoundEver = found.containerFound;
@@ -1278,11 +1277,16 @@ export class TapAnyElement extends BaseVisualChange {
                 refreshed,
                 "fresh",
                 this.timer,
+                undefined,
+                { iosMultiPanel: this.iosMultiPanel },
               );
               found = this.findClickableElement(
                 options,
                 selectedCapture.hierarchy,
-                extractHierarchyScreenSize(selectedCapture.hierarchy) ?? undefined,
+                resolveActionableHierarchyScreenSize(
+                  selectedCapture.hierarchy,
+                  this.iosMultiPanel,
+                ) ?? undefined,
               );
               element = found.element;
               containerFoundEver = containerFoundEver || found.containerFound;

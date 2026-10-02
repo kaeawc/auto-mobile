@@ -153,7 +153,7 @@ import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
-import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
+import { CtrlProxyText, imeCommitUnitFields, type ImeCommitActionResult } from "./CtrlProxyText";
 import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
@@ -408,12 +408,14 @@ interface WsSetTextResultMessage extends WsRequestBase {
 interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
   partialApplication?: boolean;
+  committedUnits?: number;
 }
 
 interface WsCancelImeCommitResultMessage extends WsRequestBase {
   type: "cancel_ime_commit_result";
   targetRequestId?: string;
   partialApplication?: boolean;
+  committedUnits?: number;
 }
 
 interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
@@ -1035,6 +1037,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult>;
 
   requestTapCoordinates(
@@ -1047,6 +1050,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(
@@ -1061,6 +1065,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     frameContext?: string,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yDragResult>;
 
   requestPinch(
@@ -1074,6 +1079,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yPinchResult>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
@@ -2957,6 +2963,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestSwipe(
       x1,
@@ -2970,6 +2977,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       onDispatch,
       signal,
       displayId,
+      beforeSend,
     );
   }
 
@@ -2986,6 +2994,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yTapCoordinatesResult> {
     return this.gestures.requestTapCoordinates(
       x,
@@ -2997,6 +3006,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       signal,
       onDispatch,
       displayId,
+      beforeSend,
     );
   }
 
@@ -3010,6 +3020,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestTwoFingerSwipe(
       x1,
@@ -3021,6 +3032,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       timeoutMs,
       perf,
       displayId,
+      beforeSend,
     );
   }
 
@@ -3036,6 +3048,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     frameContext?: string,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yDragResult> {
     return this.gestures.requestDrag(
       x1,
@@ -3049,6 +3062,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       frameContext,
       signal,
       displayId,
+      beforeSend,
     );
   }
 
@@ -3063,6 +3077,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11yPinchResult> {
     return this.gestures.requestPinch(
       centerX,
@@ -3075,11 +3090,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       perf,
       signal,
       displayId,
+      beforeSend,
     );
   }
 
   // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,
   // chained into a single continued AccessibilityService gesture by the runner.
+  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
   async requestGestureStart(
     gestureId: string,
     x: number,
@@ -3087,8 +3104,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureStart(gestureId, x, y, timeoutMs, perf, displayId);
+    return this.gestures.requestGestureStart(
+      gestureId,
+      x,
+      y,
+      timeoutMs,
+      perf,
+      displayId,
+      beforeSend,
+    );
   }
 
   async requestGestureMove(
@@ -4973,6 +4999,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         partialApplication: message.partialApplication,
+        ...imeCommitUnitFields(message),
         perfTiming: message.perfTiming,
       })),
 
@@ -4981,6 +5008,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         success: message.success,
         targetRequestId: message.targetRequestId,
         partialApplication: message.partialApplication,
+        ...imeCommitUnitFields(message),
         error: message.error,
       })),
 

@@ -235,15 +235,41 @@ bun run bench:settled-screenshot --device <device-id> --app <bundle-or-package>
 ```
 
 Options include `--warmup W` (default 3), `--iterations N` (default 30),
-`--server <path>`, and `--json`. A timestamped full JSON report is always saved
-under `scratch/`; `--json` selects JSON for console output.
+`--server <path>`, `--json`, and `--allow-failures`. The server entry must exist;
+otherwise the script fails before creating a child or temp directory with
+`run "bun run build" first`. A timestamped full JSON report is always saved
+under `scratch/` after measurements; `--json` selects JSON for console output.
+Failed measured iterations, including thrown tool errors, have deduplicated
+messages and counts in JSON and a "Failure reasons:" section under the table.
+JSON retains full messages; table messages are flattened and truncated to 200
+characters. Partially failed series retain their measured latency percentiles.
+An all-failed series is `INVALID`, has no JSON latency percentiles, and is
+excluded from settled-versus-async deltas. It exits with status 1 unless
+`--allow-failures` is passed; the report is still written and printed.
 
-This is manual only and is never run in CI or fast gates. It starts the specified
-server entry script as a fresh MCP stdio child. It creates a unique temporary
-`AUTOMOBILE_AUX_SOCKET_DIR` for that child and removes it in cleanup, isolating
-auxiliary daemon sockets from `~/.auto-mobile` and `/tmp/auto-mobile-daemon-*`.
-It does not access or alter the resident daemon. No device state is changed
-beyond the optional one-time `launchApp` and the volume-up probe.
+This is manual only and is never run in CI or fast gates. Each MCP stdio child
+gets a full private daemon namespace in a unique short `am-bench-` directory
+under the OS temp directory: lifecycle socket/PID/lock, auxiliary and WebRTC
+sockets, data, logs, database, and launch working directory. Conflicting DB
+settings and legacy aliases are removed from the child's environment; the
+parent environment stays unchanged. Guards verify that exact private namespace
+before either MCP launch or the namespace-scoped `--daemon stop` cleanup.
+The script refuses to target the resident daemon. Cleanup closes MCP, stops
+the private daemon, then removes the run directory. A failed or timed-out stop
+logs a warning and retains the directory and PID record for the operator;
+cleanup errors do not replace the primary error. Stop waits are bounded at 30
+seconds without signalling any process.
+
+True coexistence with a live resident daemon depends on #8749: while that
+manager bug remains, another live AutoMobile daemon process can cause private
+startup to be refused. The script aborts immediately on that refusal, including
+during warmup, and explains that the operator must wait for the fix or stop
+the resident daemon themselves. It will not stop or reuse the resident daemon.
+`AUTOMOBILE_COORDINATION_DIR` remains inherited: device coordination is shared,
+not a daemon selector. The fresh private data directory can require fetching
+CtrlProxy/video assets again. `pressButton volume_up` is valid on both Android
+and iOS simulators since #8370; no platform special case is needed. The probe
+changes device volume and optional `--app` launches the specified app.
 
 ## Other Scripts
 

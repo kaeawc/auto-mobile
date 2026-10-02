@@ -1,3 +1,8 @@
+import type WebSocket from "ws";
+import { CtrlProxyGestures } from "../../../src/features/observe/android/CtrlProxyGestures";
+import { RequestManager } from "../../../src/utils/RequestManager";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -1307,8 +1312,9 @@ describe("CtrlProxy display-targeted action routing", () => {
         expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
         const requests = [...tap.mock.calls, ...swipe.mock.calls, ...drag.mock.calls];
         expect(requests).toHaveLength(1);
-        expect(requests[0].at(-2)).toBe(controller.signal);
-        expect(requests[0].at(-1)).toBe(2);
+        expect(requests[0].at(-3)).toBe(controller.signal);
+        expect(requests[0].at(-2)).toBe(2);
+        expect(requests[0].at(-1)).toBeFunction();
         expect(
           executor.getExecutedCommands().filter((cmd) => cmd.startsWith("shell input")),
         ).toEqual([]);
@@ -1479,9 +1485,10 @@ describe("CtrlProxy display-targeted action routing", () => {
                   expect(result.error).toContain(response.error!);
                 }
                 expect(calls).toHaveLength(gesture === "doubleTapOn" && !failure ? 2 : 1);
-                expect(calls[0].at(-1)).toBe(panel === "external" ? 2 : undefined);
+                expect(calls[0].at(-2)).toBe(panel === "external" ? 2 : undefined);
+                expect(calls[0].at(-1)).toBeFunction();
                 if (panel === "external") {
-                  expect(calls[0].at(-2)).toBe(controller.signal);
+                  expect(calls[0].at(-3)).toBe(controller.signal);
                 }
                 expect(inputs).toEqual([]);
                 if (gesture === "longPressAt") {
@@ -1626,6 +1633,175 @@ describe("display routing capability lookup fences", () => {
           for (const spy of [capability, tap, swipe, drag, pinch]) {
             spy.mockRestore();
           }
+          displayTransitions.reset(android.deviceId);
+        }
+      });
+    }
+  }
+});
+
+describe("display gesture dispatch boundary race", () => {
+  const kinds = ["tapOn", "tapAt", "swipe", "drag", "pinch", "defaultTapAt"] as const;
+  for (const kind of kinds) {
+    for (const phase of ["transition", "unchanged", "abort", "adbTransition"] as const) {
+      // Targeted pinch has no ADB implementation; absence of capability remains a refusal.
+      if (kind === "pinch" && phase === "adbTransition") {
+        continue;
+      }
+      test(`${kind}: ${phase} at the final dispatch boundary`, async () => {
+        displayTransitions.reset(android.deviceId);
+        const transitions = new FakeDisplayTransitionReader();
+        transitions.fullRevision = 0;
+        transitions.generation = 1;
+        transitions.panel = { key: "external", role: "external" };
+        const connecting = Promise.withResolvers<boolean>();
+        const reachedDispatch = Promise.withResolvers<void>();
+        class DispatchAdb extends FakeAdbExecutor {
+          override async execute(args: string[], options: AdbExecuteOptions = {}) {
+            if (args.join(" ").startsWith("shell input")) {
+              transitions.transition();
+            }
+            return super.execute(args, options);
+          }
+          override async executeCommand(...args: Parameters<FakeAdbExecutor["executeCommand"]>) {
+            // Model path resolution on the old positional API as well as execute().
+            if (phase === "adbTransition" && args[0].startsWith("shell input")) {
+              transitions.transition();
+            }
+            return super.executeCommand(...args);
+          }
+        }
+        const executor = phase === "adbTransition" ? new DispatchAdb() : adb();
+        executor.setCommandResponse("cmd display get-displays", {
+          stdout:
+            'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+          stderr: "",
+        });
+        const observation = screen("external");
+        const observe = new FakeObserveScreen();
+        observe.setObserveResult(observation);
+        const timer = autoTimer();
+        const wireTimer = new FakeTimer();
+        const requestManager = new RequestManager(wireTimer);
+        const sent: string[] = [];
+        const socket = {
+          readyState: 1,
+          send: (data: string) => {
+            sent.push(data);
+            const message = JSON.parse(data) as { requestId: string };
+            requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
+          },
+        } as WebSocket;
+        const deps = {
+          timer,
+          lastRenderedObservation: () => observation,
+          displayTransitions: transitions,
+        };
+        const action =
+          kind === "tapOn"
+            ? new TapOnElement(android, executor, deps)
+            : kind === "tapAt" || kind === "defaultTapAt"
+              ? new TapAtCoordinate(android, executor, deps)
+              : kind === "swipe"
+                ? new SwipeOn(android, executor as unknown as AdbClient, {
+                    ...deps,
+                    observeScreen: observe,
+                  })
+                : kind === "drag"
+                  ? new DragAndDrop(android, executor as unknown as AdbClient, timer, deps)
+                  : new PinchOn(android, executor as unknown as AdbClient, deps);
+        action.observeScreen = observe;
+        const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
+        const previousGestures = client["_gestures"];
+        client["_gestures"] = new CtrlProxyGestures({
+          getWebSocket: () => socket,
+          ensureConnected: () => {
+            reachedDispatch.resolve();
+            return phase === "adbTransition" ? Promise.resolve(false) : connecting.promise;
+          },
+          isCommandSupported: () => true,
+          requestManager,
+          timer: wireTimer,
+          cancelScreenshotBackoff: () => {},
+        });
+        const capability = spyOn(client, "supportsCommand").mockResolvedValue(
+          phase !== "adbTransition",
+        );
+        const manager = spyOn(AndroidCtrlProxyManager.prototype, "isAvailable").mockResolvedValue(
+          true,
+        );
+        const controller = new AbortController();
+        // Keep this test about action dispatch, not post-observation settling.
+        Object.assign(action, { observedInteraction: async (run: () => Promise<object>) => run() });
+        try {
+          const display = kind === "defaultTapAt" ? undefined : "external";
+          const pending = (
+            action instanceof TapOnElement
+              ? action.execute({ text: "Settings", display }, undefined, controller.signal)
+              : action instanceof TapAtCoordinate
+                ? action.execute({ x: 40, y: 50, display }, undefined, controller.signal)
+                : action instanceof SwipeOn
+                  ? action.execute({ direction: "up", display }, undefined, controller.signal)
+                  : action instanceof DragAndDrop
+                    ? action.execute(
+                        { source: { text: "Settings" }, target: { text: "Settings" }, display },
+                        undefined,
+                        controller.signal,
+                      )
+                    : action.execute(
+                        { direction: "in", display, autoTarget: false },
+                        undefined,
+                        controller.signal,
+                      )
+          ).then(
+            (result) => ({ result, error: undefined }),
+            (error: unknown) => ({ result: undefined, error }),
+          );
+          if (phase !== "adbTransition") {
+            await reachedDispatch.promise;
+            expect(sent).toHaveLength(0);
+            if (phase === "transition") {
+              transitions.transition();
+            }
+            if (phase === "abort") {
+              controller.abort(new Error("Operation cancelled"));
+            }
+            connecting.resolve(true);
+          }
+          const outcome = await pending;
+          expect(requestManager.getPendingCount()).toBe(0);
+          expect(wireTimer.getPendingTimeoutCount()).toBe(0);
+          const inputs = executor
+            .getExecutedCommands()
+            .filter((command) => command.startsWith("shell input"));
+          if (phase === "transition" || phase === "adbTransition") {
+            expect(sent).toHaveLength(0);
+            expect(inputs).toEqual([]);
+            expect(outcome.result?.success).toBe(false);
+            expect(outcome.result?.staleDisplay).toMatchObject({
+              observedGeneration: 1,
+              currentGeneration: 2,
+              retry: "observe",
+            });
+          } else if (phase === "abort") {
+            expect(sent).toHaveLength(0);
+            expect(inputs).toEqual([]);
+            if (kind === "swipe" || kind === "pinch") {
+              expect(outcome.error).toBeInstanceOf(Error);
+              expect((outcome.error as Error).message).toContain("Operation cancelled");
+            } else {
+              expect(outcome.result?.success).toBe(false);
+              expect(outcome.result?.error).toContain("Operation cancelled");
+            }
+          } else {
+            expect(sent).toHaveLength(1);
+            expect(inputs).toEqual([]);
+            expect(outcome.result?.success).toBe(true);
+          }
+        } finally {
+          client["_gestures"] = previousGestures;
+          capability.mockRestore();
+          manager.mockRestore();
           displayTransitions.reset(android.deviceId);
         }
       });

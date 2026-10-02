@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
+import * as imeSession from "../../../src/features/action/InstalledImeKeySession";
 import {
   InstalledImeKeySession,
   tapFrameBoundImeKey,
@@ -56,6 +57,7 @@ function fixture(
   initial: ViewHierarchyResult = focused,
   afterTap: ViewHierarchyResult = window,
   selectedIme: string = target,
+  waitReads?: Array<ViewHierarchyResult | null>,
 ) {
   const events: string[] = [];
   const timer = new FakeTimer();
@@ -72,13 +74,15 @@ function fixture(
   const deviceId = `native-session-device-${++fixtureNumber}`;
   let subtype: number | null = 7;
   let subtypeRestoreError: string | undefined;
+  const enabledIds = new Set([original, selectedIme]);
+  const installedIds = new Set(enabledIds);
   const session = new InstalledImeKeySession(deviceId, {
     catalog: {
       list: async () => ({
         activeImeId: active,
-        installed: [original, selectedIme].map((id) => ({
+        installed: [...installedIds].map((id) => ({
           id,
-          enabled: true,
+          enabled: enabledIds.has(id),
           active: id === active,
           capabilities: imeCapabilities(id),
         })),
@@ -94,9 +98,9 @@ function fixture(
         }
         return {
           activeImeId: active,
-          installed: [original, selectedIme].map((item) => ({
+          installed: [...installedIds].map((item) => ({
             id: item,
-            enabled: true,
+            enabled: enabledIds.has(item),
             active: item === active,
             capabilities: imeCapabilities(item),
           })),
@@ -128,7 +132,16 @@ function fixture(
       },
     },
     hierarchy: {
-      read: async () => (++readCount === 1 ? initial : readCount === 2 ? window : afterTap),
+      read: async () => {
+        readCount++;
+        if (readCount === 1) {
+          return initial;
+        }
+        if (waitReads?.length) {
+          return waitReads[Math.min(readCount - 2, waitReads.length - 1)];
+        }
+        return readCount === 2 ? window : afterTap;
+      },
     },
     tap: {
       execute: async ({ x, y, frameContext }) => {
@@ -170,8 +183,204 @@ function fixture(
       afterTapDispatch = action;
     },
     getActive: () => active,
+    getSubtype: () => subtype,
+    getEnabledIds: () => [...enabledIds].sort(),
+    setEnabled: (id: string, enabled: boolean) => {
+      // External drift hook: the session dependencies deliberately cannot enable/disable.
+      installedIds.add(id);
+      if (enabled) {
+        enabledIds.add(id);
+      } else {
+        enabledIds.delete(id);
+      }
+    },
   };
 }
+
+const focusedWithoutKey: ViewHierarchyResult = {
+  ...focused,
+  hierarchy: {
+    node: {
+      $: {
+        ...focused.hierarchy?.node?.$,
+        text: "private-editor-text",
+      },
+    },
+  },
+  windows: keyWindow.windows,
+};
+const noFocusOrWindow: ViewHierarchyResult = { hierarchy: { node: { $: {} } } };
+const restoreMessage = `Could not restore the original keyboard ${original}; run "keyboard setIme ${original}" or restart the daemon.`;
+
+test.each([
+  [
+    "editorFocusLost",
+    noFocusOrWindow,
+    "Focused text input lost focus while waiting for a visible IME key.",
+  ],
+  [
+    "imeWindowDisappeared",
+    focused,
+    "Selected IME window disappeared while waiting for a visible key.",
+  ],
+] as const)("restores without tapping after %s mid-wait", async (reason, next, message) => {
+  const { session, events, getActive, getSubtype, setAfterSelection, setSubtype } = fixture(
+    keyWindow,
+    focused,
+    keyWindow,
+    target,
+    [focusedWithoutKey, next],
+  );
+  setAfterSelection(() => setSubtype(42));
+  const error: unknown = await session.tapKey(target, "a").catch((error: unknown) => error);
+  expect(error).toMatchObject({ reason, message });
+  expect(error).toBeInstanceOf(imeSession.ImeSessionFocusLostError);
+  expect(error).not.toBeInstanceOf(AggregateError);
+  expect(events).toEqual([
+    `select:${target}:cleanup`,
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
+  ]);
+  expect(getActive()).toBe(original);
+  expect(getSubtype()).toBe(7);
+});
+
+test("preserves focus loss inside a restore AggregateError and quarantines the device", async () => {
+  const { session, events, setRestoreError } = fixture(keyWindow, focused, keyWindow, target, [
+    focusedWithoutKey,
+    noFocusOrWindow,
+  ]);
+  setRestoreError("restore rejected");
+  const error: unknown = await session.tapKey(target, "a").catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(AggregateError);
+  if (!(error instanceof AggregateError)) {
+    throw new Error("Expected restoration to fail.");
+  }
+  expect(error.message).toBe(restoreMessage);
+  expect(error.errors).toHaveLength(2);
+  expect(error.errors[0]).toMatchObject({ reason: "editorFocusLost" });
+  expect(error.errors[0]).toBeInstanceOf(imeSession.ImeSessionFocusLostError);
+  expect(error.errors[1]).toEqual(new Error("restore rejected"));
+  expect(events).toEqual([
+    `select:${target}:cleanup`,
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
+  ]);
+  await expect(session.tapKey(target, "a")).rejects.toThrow("IME state is unknown");
+});
+
+test.each([
+  ["added", "com.example.third/.Ime", true, "+com.example.third/.Ime"],
+  ["removed", target, false, `-${target}`],
+] as const)(
+  "reports externally %s enabled IME without overwriting drift",
+  async (_change, id, enabled, diagnostic) => {
+    const {
+      session,
+      events,
+      setAfterSelection,
+      setEnabled,
+      setSubtype,
+      getActive,
+      getSubtype,
+      getEnabledIds,
+    } = fixture();
+    setAfterSelection(() => {
+      setEnabled(id, enabled);
+      setSubtype(42);
+    });
+    const error: unknown = await session.tapKey(target, "a").catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    if (!(error instanceof AggregateError)) {
+      throw new Error("Expected enabled-set verification to fail.");
+    }
+    expect(error.message).toBe(restoreMessage);
+    expect(error.errors).toEqual([
+      new Error(
+        `IME state did not return to its original active and enabled state (enabled set drift: ${diagnostic}).`,
+      ),
+    ]);
+    expect(getActive()).toBe(original);
+    expect(getSubtype()).toBe(7);
+    expect(getEnabledIds().includes(id)).toBe(enabled);
+    expect(events).toEqual([
+      `select:${target}:cleanup`,
+      "tap:120,420:frame-one",
+      `select:${original}:cleanup`,
+      `restoreSubtype:${original}:7`,
+    ]);
+    await expect(session.tapKey(target, "a")).rejects.toThrow("IME state is unknown");
+  },
+);
+
+test("enabled-set diff is empty when enabled components are unchanged", () => {
+  const state = {
+    activeImeId: original,
+    installed: [original, target].map((id) => ({
+      id,
+      active: id === original,
+      enabled: true,
+      capabilities: imeCapabilities(id),
+    })),
+  };
+  expect(
+    imeSession.diffEnabledSet(state, { ...state, installed: [...state.installed].reverse() }),
+  ).toEqual({
+    added: [],
+    removed: [],
+  });
+});
+
+test("enabled-set drift diagnostics are bounded even for a long component ID", async () => {
+  const { session, setAfterSelection, setEnabled } = fixture();
+  const id = `com.example.${"a".repeat(1_000)}/.Ime`;
+  setAfterSelection(() => setEnabled(id, true));
+  const error: unknown = await session.tapKey(target, "a").catch((error: unknown) => error);
+  if (!(error instanceof AggregateError) || !(error.errors[0] instanceof Error)) {
+    throw new Error("Expected enabled-set verification to fail.");
+  }
+  expect(error.errors[0].message).toContain("enabled set drift: +com.example.");
+  expect(error.errors[0].message).toEndWith("...).");
+  expect(error.errors[0].message.length).toBeLessThanOrEqual(640);
+});
+
+test("a successful session has no enabled-set mutations in its dependency contract", async () => {
+  const { session, events } = fixture();
+  await session.tapKey(target, "a");
+  expect(events).toEqual([
+    `select:${target}:cleanup`,
+    "tap:120,420:frame-one",
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
+  ]);
+});
+
+test("null reads preserve wait evidence and a matched key wins over focus loss", async () => {
+  const { session, events, timer } = fixture(keyWindow, focused, keyWindow, target, [
+    focusedWithoutKey,
+    null,
+    keyWindow,
+  ]);
+  await session.tapKey(target, "a");
+  expect(events).toContain("tap:120,420:frame-one");
+  expect(timer.now()).toBe(200);
+});
+
+test("enabled-set diff sorts additions/removals and ignores disabled components", () => {
+  const state = (enabledIds: string[]) => ({
+    activeImeId: original,
+    installed: ["z/.Z", "a/.A", "b/.B", "y/.Y", "disabled/.Ime"].map((id) => ({
+      id,
+      active: false,
+      enabled: enabledIds.includes(id),
+      capabilities: imeCapabilities(id),
+    })),
+  });
+  expect(imeSession.diffEnabledSet(state(["y/.Y", "b/.B"]), state(["z/.Z", "a/.A"]))).toEqual({
+    added: ["a/.A", "z/.Z"],
+    removed: ["b/.B", "y/.Y"],
+  });
+});
 
 test("taps one observed key in the selected IME window and restores the prior IME", async () => {
   const { session, events, getActive } = fixture();
@@ -211,9 +420,9 @@ test("does not tap an app control when no real IME window contains the key", asy
     windows: [{ type: 1, bounds: { left: 0, top: 0, right: 400, bottom: 600 } }],
   };
   const { session, events, timer } = fixture(fakeWindow);
-  await expect(session.tapKey(target, "a")).rejects.toThrow(
-    "Selected IME window did not appear within 2000 ms.",
-  );
+  await expect(session.tapKey(target, "a")).rejects.toMatchObject({
+    message: "Selected IME window did not appear within 2000 ms.",
+  });
   expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
   expect(events.at(-1)).toBe(`restoreSubtype:${original}:7`);
   expect(timer.now()).toBe(2_000);
@@ -239,9 +448,9 @@ test("does not tap a key from another IME package", async () => {
     },
   };
   const { session, events } = fixture(wrongPackage);
-  await expect(session.tapKey(target, "a")).rejects.toThrow(
-    'Visible key "a" was not found in the selected IME window.',
-  );
+  await expect(session.tapKey(target, "a")).rejects.toMatchObject({
+    message: 'Visible key "a" was not found in the selected IME window.',
+  });
   expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
 });
 

@@ -4,7 +4,11 @@ import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { setPostureResultSchema } from "../../../src/server/toolOutputSchemas";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, Posture } from "../../../src/models";
-import { classifyIosPostureObservation, SetPosture } from "../../../src/features/device/SetPosture";
+import {
+  classifyIosPostureObservation,
+  pendingPostureOperationCountForTest,
+  SetPosture,
+} from "../../../src/features/device/SetPosture";
 import type { DisplayPanel } from "../../../src/models/DisplayPanel";
 import {
   DisplayTransitionTracker,
@@ -764,6 +768,8 @@ describe("SetPosture", () => {
           try {
             const controller = new AbortController();
             const attempt = feature.execute("opened", undefined, controller.signal);
+            // Acquiring the shared lock yields once, even when uncontended.
+            await Promise.resolve();
             expect(pending).toHaveBeenCalledWith(180);
             controller.abort();
             await expect(attempt).rejects.toThrow();
@@ -1281,3 +1287,422 @@ beforeEach(() => {
   });
 });
 afterEach(() => outputSchemaSpy.mockRestore());
+
+for (const platform of ["ios", "android"] as const) {
+  describe(`${platform} posture serialization across per-call instances`, () => {
+    function harness() {
+      const device = makeDevice(
+        platform === "ios" ? "F4C35F33-224C-4E74-B8C0-668FF03E49F5" : "emulator-posture-lock",
+        ["closed", "half_opened", "opened"],
+      );
+      device.platform = platform;
+      if (platform === "ios") {
+        device.deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo";
+      }
+      device.displays!.panels = [
+        { key: "panel-cover", role: "cover", sizePx: { width: 200, height: 300 } },
+        { key: "panel-inner", role: "inner", sizePx: { width: 400, height: 600 } },
+      ];
+      const timer = new FakeTimer();
+      const tracker = new DisplayTransitionTracker(() => {});
+      const clear = spyOn(ObservedAndroidDisplayCache, "clear");
+      const clears = () => clear.mock.calls.filter(([id]) => id === device.deviceId).length;
+      const events: string[] = [];
+      const client = new FakeIOSCtrlProxy(timer);
+      const adb = new FakeAdbExecutor();
+      let posture: Posture = "opened";
+      let held: { stage: string; started: () => void; promise: Promise<void> } | undefined;
+      const wait = async (stage: string) => {
+        if (held?.stage === stage) {
+          const current = held;
+          held = undefined;
+          current.started();
+          await current.promise;
+        }
+      };
+      const hinge = spyOn(client, "requestSetHingeAngle").mockImplementation(async (angle) => {
+        posture = angle === 0 ? "closed" : angle === 130 ? "half_opened" : "opened";
+        await wait("hinge");
+        return { success: true, angle, totalTimeMs: 0 };
+      });
+      const commands = spyOn(adb, "executeCommand").mockImplementation(async (command) => {
+        if (command === "emu fold") {
+          posture = "closed";
+        }
+        if (command === "emu unfold") {
+          posture = "opened";
+        }
+        await wait(command);
+        return createExecResult(
+          command === "shell cmd device_state print-states"
+            ? foldStates
+            : command === "shell cmd device_state state"
+              ? posture === "closed"
+                ? closedState
+                : openedState
+              : "",
+          "",
+        );
+      });
+      const sink: DisplayTransitionSink = {
+        revision: (id) => tracker.revision(id),
+        identityRevision: (id) => tracker.identityRevision(id),
+        rememberIosPosture: (target, ref, requested) =>
+          tracker.rememberIosPosture(target, ref, requested),
+        notifyAndroidTransition: () => {},
+        notifyTransition: (id, reason) => {
+          events.push(reason);
+          tracker.notifyTransition(id, reason);
+        },
+      };
+      const create = (target = device) =>
+        new SetPosture(target, {
+          adbFactory: { create: () => adb },
+          iosClientProvider: () => client,
+          timer,
+          transitionSink: sink,
+          observeFactory: () =>
+            ({
+              execute: async () => {
+                await wait("observe");
+                return {
+                  ...observation,
+                  display: {
+                    ...display,
+                    key: posture === "closed" ? "panel-cover" : "panel-inner",
+                    role: posture === "closed" ? "cover" : "inner",
+                    posture,
+                  },
+                  screenSize:
+                    posture === "closed"
+                      ? { width: 200, height: 300 }
+                      : { width: 400, height: 600 },
+                  displayRevision: tracker.revision(target.deviceId),
+                };
+              },
+            }) as ObserveScreen,
+        });
+      const block = (stage = platform === "ios" ? "hinge" : "emu unfold") => {
+        const gate = Promise.withResolvers<void>();
+        const started = Promise.withResolvers<void>();
+        held = { stage, started: started.resolve, promise: gate.promise };
+        return { started: started.promise, resolve: gate.resolve };
+      };
+      const sent = () =>
+        platform === "ios" ? hinge.mock.calls.length : commands.mock.calls.length;
+      const cleanup = () => {
+        hinge.mockRestore();
+        commands.mockRestore();
+        tracker.reset(device.deviceId);
+        ObservedAndroidDisplayCache.release(device.deviceId);
+        clear.mockRestore();
+      };
+      return { create, device, timer, tracker, events, block, sent, clears, cleanup };
+    }
+
+    const firstPosture = platform === "ios" ? "half_opened" : "opened";
+    async function drainMicrotasks() {
+      for (let index = 0; index < 40; index += 1) {
+        await Promise.resolve();
+      }
+    }
+
+    test("queues all device work until the preceding operation finishes", async () => {
+      const h = harness();
+      const gate = h.block();
+      const a = h.create().execute(firstPosture);
+      await gate.started;
+      const sentBefore = h.sent();
+      const b = h.create().execute("closed");
+      await drainMicrotasks();
+      const sentWhileQueued = h.sent();
+      gate.resolve();
+      h.timer.enableAutoAdvance();
+      const results = await Promise.allSettled([a, b]);
+      try {
+        expect(sentWhileQueued).toBe(sentBefore);
+        expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("cancellation releases immediately and late command completion cannot change the retry result", async () => {
+      const h = harness();
+      const gate = h.block();
+      const controller = new AbortController();
+      const a = h.create().execute(firstPosture, undefined, controller.signal);
+      await gate.started;
+      controller.abort();
+      await expect(a).rejects.toThrow("Posture request cancelled;");
+      const b = await h.create().execute("closed");
+      const events = [...h.events];
+      const clears = h.clears();
+      const sent = h.sent();
+      gate.resolve();
+      await drainMicrotasks();
+      try {
+        expect(b).toMatchObject({
+          posture: "closed",
+          display: { generation: h.tracker.identityRevision(h.device.deviceId) },
+        });
+        expect(h.events).toEqual(events);
+        expect(h.clears()).toBe(clears);
+        expect(h.sent()).toBe(sent);
+        if (platform === "ios") {
+          expect(
+            ObservedAndroidDisplayCache.iosPosture(h.device, h.device.displays!.panels[0]),
+          ).toBe("closed");
+          expect(observedIosDisplay(h.device, { pixelWidth: 200, pixelHeight: 300 }).posture).toBe(
+            "closed",
+          );
+        }
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("aborting a queued caller sends nothing and leaves the holder current", async () => {
+      const h = harness();
+      const gate = h.block();
+      const a = h.create().execute(firstPosture);
+      await gate.started;
+      const before = h.sent();
+      const controller = new AbortController();
+      const b = h.create().execute("closed", undefined, controller.signal);
+      await drainMicrotasks();
+      controller.abort();
+      await expect(b).rejects.toThrow("Posture request cancelled;");
+      const after = h.sent();
+      gate.resolve();
+      h.timer.enableAutoAdvance();
+      const result = await Promise.allSettled([a]);
+      try {
+        expect(after).toBe(before);
+        expect(result[0]?.status).toBe("fulfilled");
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("a bounded lock wait proceeds and fences the hung operation when it resolves", async () => {
+      const h = harness();
+      const gate = h.block();
+      const a = h.create().execute(firstPosture);
+      const outcome = a.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await gate.started;
+      const before = h.sent();
+      const b = h.create().execute("closed");
+      await drainMicrotasks();
+      const whileWaiting = h.sent();
+      h.timer.advanceTime(17_999);
+      await drainMicrotasks();
+      const beforeBound = h.sent();
+      h.timer.advanceTime(1);
+      const result = await b;
+      const events = [...h.events];
+      const clears = h.clears();
+      const sent = h.sent();
+      gate.resolve();
+      h.timer.enableAutoAdvance();
+      try {
+        expect(await outcome).toBeInstanceOf(ActionableError);
+        await expect(a).rejects.toThrow(
+          "Posture request cancelled; superseded by a later setPosture request",
+        );
+        expect(whileWaiting).toBe(before);
+        expect(beforeBound).toBe(before);
+        expect(h.events).toEqual(events);
+        expect(h.clears()).toBe(clears);
+        expect(h.sent()).toBe(sent);
+        expect(result).toMatchObject({
+          display: { generation: h.tracker.identityRevision(h.device.deviceId) },
+        });
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("a superseded holder finishing cannot retire the retry's current token", async () => {
+      const h = harness();
+      const gate = h.block();
+      const a = h.create().execute(firstPosture);
+      const outcome = a.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await gate.started;
+      const retryGate = h.block(platform === "ios" ? "hinge" : "emu fold");
+      const b = h.create().execute("closed");
+      h.timer.advanceTime(18_000);
+      await retryGate.started;
+      gate.resolve();
+      const error = await outcome;
+      const pending = pendingPostureOperationCountForTest();
+      retryGate.resolve();
+      try {
+        await expect(b).resolves.toMatchObject({ posture: "closed" });
+        expect(error).toMatchObject({
+          message: "Posture request cancelled; superseded by a later setPosture request",
+        });
+        expect(pending).toBe(1);
+        expect(pendingPostureOperationCountForTest()).toBe(0);
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("cheap unsupported refusals bypass the held lock and send nothing", async () => {
+      const h = harness();
+      const gate = h.block();
+      const a = h.create().execute(firstPosture);
+      await gate.started;
+      const before = h.sent();
+      const unsupported =
+        platform === "ios"
+          ? h
+              .create({
+                ...h.device,
+                deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+              })
+              .execute("closed")
+          : h
+              .create({ ...h.device, displays: { panels: [], postures: ["opened"] } })
+              .execute("closed");
+      if (platform === "ios") {
+        await expect(unsupported).resolves.toMatchObject({ status: "unsupported" });
+      } else {
+        await expect(unsupported).rejects.toThrow("Nothing was changed");
+      }
+      const after = h.sent();
+      gate.resolve();
+      try {
+        await expect(a).resolves.toMatchObject({ posture: firstPosture });
+        expect(after).toBe(before);
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("sequential calls retire their tokens and leave no queued lock timeout", async () => {
+      const h = harness();
+      try {
+        for (const requested of [firstPosture, "closed", firstPosture] as const) {
+          await expect(h.create().execute(requested)).resolves.toMatchObject({
+            posture: requested,
+          });
+          expect(pendingPostureOperationCountForTest()).toBe(0);
+          expect(h.timer.getPendingTimeouts()).toEqual([]);
+        }
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("timeout takeover fences a late final observation before it can settle or stamp", async () => {
+      const h = harness();
+      const gate = h.block("observe");
+      const a = h.create().execute("closed");
+      const outcome = a.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await gate.started;
+      const b = h.create().execute("closed");
+      h.timer.advanceTime(18_000);
+      const result = await b;
+      const events = [...h.events];
+      const clears = h.clears();
+      const before = h.sent();
+      gate.resolve();
+      const error = await outcome;
+      try {
+        expect(error).toBeInstanceOf(ActionableError);
+        expect(error).toMatchObject({
+          message: "Posture request cancelled; superseded by a later setPosture request",
+        });
+        expect(h.events).toEqual(events);
+        expect(h.clears()).toBe(clears);
+        expect(h.sent()).toBe(before);
+        expect(result).toMatchObject({
+          display: { generation: h.tracker.identityRevision(h.device.deviceId) },
+        });
+        expect(pendingPostureOperationCountForTest()).toBe(0);
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("different device identities can run independently", async () => {
+      const h = harness();
+      const gate = h.block();
+      const a = h.create().execute(firstPosture);
+      await gate.started;
+      const otherDevice = {
+        ...h.device,
+        deviceId: platform === "ios" ? "A4C35F33-224C-4E74-B8C0-668FF03E49F5" : "emulator-other",
+      };
+      const result = await h.create(otherDevice).execute(firstPosture);
+      gate.resolve();
+      try {
+        await a;
+        expect(result).toMatchObject({ posture: firstPosture });
+      } finally {
+        h.tracker.reset(otherDevice.deviceId);
+        ObservedAndroidDisplayCache.release(otherDevice.deviceId);
+        h.cleanup();
+      }
+    });
+
+    if (platform === "android") {
+      test("a timed-out readback showing the retry's target cannot report success", async () => {
+        const h = harness();
+        const gate = h.block("shell cmd device_state state");
+        const a = h.create().execute("closed");
+        const outcome = a.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        await gate.started;
+        const b = h.create().execute("closed");
+        h.timer.advanceTime(18_000);
+        await b;
+        const before = h.sent();
+        gate.resolve();
+        const error = await outcome;
+        try {
+          expect(error).toMatchObject({
+            message: "Posture request cancelled; superseded by a later setPosture request",
+          });
+          expect(h.sent()).toBe(before);
+        } finally {
+          h.cleanup();
+        }
+      });
+
+      test("a cancelled readback cannot accept the retry's target posture", async () => {
+        const h = harness();
+        const gate = h.block("shell cmd device_state state");
+        const controller = new AbortController();
+        const a = h.create().execute("closed", undefined, controller.signal);
+        await gate.started;
+        controller.abort();
+        await expect(a).rejects.toThrow("Posture request cancelled;");
+        const b = await h.create().execute("closed");
+        const before = h.sent();
+        gate.resolve();
+        await drainMicrotasks();
+        try {
+          await expect(a).rejects.toBeInstanceOf(ActionableError);
+          expect(h.sent()).toBe(before);
+          expect(b).toMatchObject({ posture: "closed" });
+        } finally {
+          h.cleanup();
+        }
+      });
+    }
+  });
+}

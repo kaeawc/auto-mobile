@@ -4,6 +4,7 @@ import {
   STREAM_SOCKET_AUTH_ENV,
   type StreamAuthSessionManager,
 } from "../../src/daemon/streamSocketAuth";
+import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { ActionableError } from "../../src/models";
 
 function sessionManager(
@@ -100,5 +101,89 @@ describe("SessionScopedStreamAuthenticator", () => {
   test("the escape hatch disables enforcement entirely", () => {
     const env = { [STREAM_SOCKET_AUTH_ENV]: "0" } as unknown as NodeJS.ProcessEnv;
     expect(() => authenticator(sessionManager(), env).authorize({})).not.toThrow();
+  });
+});
+
+describe("stream release evidence", () => {
+  function notAdmittedManager(releasing: "none" | "same" | "different" = "none") {
+    const live = {};
+    const stale = {};
+    return {
+      ...sessionManager(),
+      getSession: (id: string) => (id === "live" ? live : null),
+      isAdmittedForAutomation: () => false,
+      getReleasingSession: () =>
+        releasing === "same" ? live : releasing === "different" ? stale : null,
+    };
+  }
+
+  test("live unregistered session preserves the different-owner device error", () => {
+    const sm = { ...notAdmittedManager(), getSessionForDevice: () => "other" };
+    expect(() => authenticator(sm).authorize({ sessionUuid: "live", deviceId: "emu" })).toThrow(
+      /bound to a different daemon session/,
+    );
+  });
+
+  test("unregistered non-admitted session may stream an unowned device", () => {
+    expect(() =>
+      authenticator(notAdmittedManager()).authorize({ sessionUuid: "live", deviceId: "emu" }),
+    ).not.toThrow();
+  });
+
+  test("terminal-fenced session without an in-flight release is not rejected as releasing", async () => {
+    const h = releasingSessionHarness();
+    try {
+      const session = await h.create();
+      h.holdTerminalFence(session);
+      h.manager.getSession = (id) => (id === session.sessionId ? session : null);
+      expect(() =>
+        authenticator(h.manager).authorize({
+          sessionUuid: session.sessionId,
+          deviceId: session.assignedDevice,
+        }),
+      ).not.toThrow();
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test("in-flight release of the same object is rejected as being released", () => {
+    expect(() =>
+      authenticator(notAdmittedManager("same")).authorize({ sessionUuid: "live" }),
+    ).toThrow(/being released/);
+  });
+
+  test("unknown session keeps the unknown or expired error", () => {
+    expect(() =>
+      authenticator(notAdmittedManager("same")).authorize({ sessionUuid: "unknown" }),
+    ).toThrow(/unknown or expired/);
+  });
+
+  test("stale in-flight release of another object does not reject the live session", () => {
+    expect(() =>
+      authenticator(notAdmittedManager("different")).authorize({
+        sessionUuid: "live",
+        deviceId: "emu",
+      }),
+    ).not.toThrow();
+  });
+
+  test("real manager with integration getSession override preserves device mismatch error", () => {
+    const h = releasingSessionHarness();
+    try {
+      // Exactly the unregistered-object lookup used by daemonStreamWiring.integration.test.ts.
+      Object.defineProperty(h.manager, "getSession", {
+        value: (id: string) => (id === "caller-session" ? {} : null),
+      });
+      h.manager.getSessionForDevice = () => "other-session";
+      expect(() =>
+        authenticator(h.manager).authorize({
+          sessionUuid: "caller-session",
+          deviceId: "emulator-5556",
+        }),
+      ).toThrow(/bound to a different daemon session/);
+    } finally {
+      h.dispose();
+    }
   });
 });

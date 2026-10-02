@@ -367,6 +367,10 @@ The requested component must already be installed and enabled; the key must
 have one visible, package-owned accessibility match inside an IME window.
 Unobservable or ambiguous keys fail closed. If restoration cannot be verified,
 AutoMobile quarantines further IME changes until restart.
+If a previously observed focused editor or IME window disappears while waiting
+for a key, the session reports focus loss and restores the original keyboard.
+Enabled-set drift is reported with bounded component IDs; the session never
+overwrites external enable/disable changes.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands:

@@ -233,6 +233,7 @@ export class PinchOn extends BaseVisualChange {
           perf,
           signal,
           displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
+          displayTarget?.assertCurrent,
         );
         throwIfAborted(signal);
         displayTarget?.assertCurrent();

@@ -410,9 +410,9 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     }
 
     private const val INPUT_CONNECTION_SYNC_TIMEOUT_MS = 2_000L
-    private const val INPUT_CONNECTION_TIMEOUT_MS = 2_000L
-    private const val COMMIT_TIMEOUT_MS = 4_000L
-    private const val INPUT_CONNECTION_POLL_MS = 50L
+    internal const val INPUT_CONNECTION_TIMEOUT_MS = 2_000L
+    internal const val COMMIT_TIMEOUT_MS = 4_000L
+    internal const val INPUT_CONNECTION_POLL_MS = 50L
     private const val IDLE_RESTORE_DELAY_MS = 10_000L
 
     @Volatile private var instance: CtrlProxyIme? = null

@@ -42,6 +42,11 @@ export class SharedGestureDelegate {
     return {};
   }
 
+  /** iOS overrides this opt-in seam; Android keeps its existing wire. */
+  protected tapDiagnosticParams(): { diagnostics?: true } {
+    return {};
+  }
+
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -52,6 +57,7 @@ export class SharedGestureDelegate {
     signal?: AbortSignal,
     onDispatch?: () => void,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<BaseResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<BaseResult>(this.context, {
@@ -64,6 +70,7 @@ export class SharedGestureDelegate {
         duration,
         frameContext,
         ...displayParams,
+        ...this.tapDiagnosticParams(),
       },
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",
@@ -76,6 +83,7 @@ export class SharedGestureDelegate {
       // await and before dispatch, so an already-abandoned tap is never sent
       // to the device after the caller has given up (issue #6306 review).
       abortSignal: signal,
+      beforeSend,
       onDispatch,
     });
   }
@@ -92,6 +100,7 @@ export class SharedGestureDelegate {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     const result = await sendCommand<GestureTimingResult>(this.context, {
@@ -114,6 +123,7 @@ export class SharedGestureDelegate {
       perf,
       errorLabel: "Swipe",
       abortSignal: signal,
+      beforeSend,
       onDispatch,
     });
     if (this.config.includeSwipeTimeoutMs && result.perfTiming) {
@@ -134,6 +144,7 @@ export class SharedGestureDelegate {
     frameContext?: string,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<GestureTimingResult>(this.context, {
@@ -156,6 +167,7 @@ export class SharedGestureDelegate {
       timeoutMs,
       errorLabel: "Drag",
       abortSignal: signal,
+      beforeSend,
     });
   }
 
@@ -175,6 +187,7 @@ export class SharedGestureDelegate {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<GestureTimingResult>(this.context, {
@@ -196,6 +209,7 @@ export class SharedGestureDelegate {
       perf,
       errorLabel: "Pinch",
       abortSignal: signal,
+      beforeSend,
     });
   }
 }

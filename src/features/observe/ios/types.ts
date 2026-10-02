@@ -155,6 +155,7 @@ export interface WebSocketMessage {
   /** Signed milliseconds to the blocking command's deadline; negative means overdue. */
   blockingDeadlineRemainingMs?: number;
   perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
+  tapDiagnostics?: CtrlProxyTapDiagnostics;
   previousOrientation?: string;
   currentOrientation?: string;
   value?: number;
@@ -185,7 +186,52 @@ export interface CtrlProxyScreenshotResult {
 export type CtrlProxySwipeResult = GestureTimingResult;
 
 /** Tap coordinates result */
-export type CtrlProxyTapResult = BaseResult;
+export type CtrlProxyTapResult = BaseResult & { tapDiagnostics?: CtrlProxyTapDiagnostics };
+
+/** Optional, best-effort runner readings; these are resolved locations, not delivered touches. */
+export interface CtrlProxyTapDiagnostics {
+  requested?: {
+    x?: number;
+    y?: number;
+    durationMs?: number;
+    mode?: string;
+    coordinateConstruction?: string;
+    units?: string;
+  };
+  baseScreenPoint?: { x?: number; y?: number };
+  resolvedScreenPoint?: { x?: number; y?: number };
+  application?: {
+    bundleIdentifier?: string;
+    frame?: TapDiagnosticFrame;
+    windowFrames?: TapDiagnosticFrame[];
+  };
+  screen?: {
+    bounds?: TapDiagnosticFrame;
+    nativeBounds?: TapDiagnosticFrame;
+    scale?: number;
+    nativeScale?: number;
+    source?: string;
+  };
+  orientation?: {
+    device?: TapDiagnosticOrientation;
+    interface?: TapDiagnosticOrientation;
+  };
+  sampleErrors?: string[];
+}
+
+interface TapDiagnosticFrame {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+interface TapDiagnosticOrientation {
+  rawValue?: number;
+  value?: string;
+  source?: string;
+  fallback?: string;
+}
 
 /** Drag result from CtrlProxy iOS */
 export type CtrlProxyDragResult = GestureTimingResult;

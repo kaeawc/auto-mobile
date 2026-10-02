@@ -8,6 +8,13 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { copyDatabaseRuntimeFiles } from "./scripts/build/copy-db-runtime-files";
+import {
+  optimizeSourceMap,
+  selectSourceMaps,
+  STRIP_SOURCES_ENV,
+  type SourceMap,
+} from "./scripts/build/optimize-sourcemap";
+import { stripToolOutputSchemas } from "./scripts/build/strip-tool-output-schemas";
 
 // Clean dist directory
 const distPath = join(import.meta.dir, "dist");
@@ -34,6 +41,24 @@ const result = await Bun.build({
   sourcemap: "external",
   minify: true,
   splitting: false,
+  plugins: [
+    {
+      name: "static-tool-definitions",
+      setup(build) {
+        const definitionsPath = join(import.meta.dir, "schemas", "tool-definitions.json");
+        build.onLoad({ filter: /[/\\]schemas[/\\]tool-definitions\.json$/ }, (args) => {
+          if (args.path !== definitionsPath) {
+            return;
+          }
+          const definitions = JSON.parse(readFileSync(args.path, "utf8")) as Record<
+            string,
+            unknown
+          >[];
+          return { contents: JSON.stringify(stripToolOutputSchemas(definitions)), loader: "json" };
+        });
+      },
+    },
+  ],
 });
 
 if (!result.success) {
@@ -46,37 +71,22 @@ if (!result.success) {
 
 console.log(`✓ Built ${result.outputs.length} files`);
 
-const sourcemapPath = join(import.meta.dir, "dist", "src", "index.js.map");
-if (existsSync(sourcemapPath)) {
+const sourcemapOptions = {
+  includeDependencySources: process.env.AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS === "true",
+  stripSources: process.env[STRIP_SOURCES_ENV] === "true",
+};
+for (const { path: sourcemapPath, options } of selectSourceMaps(
+  result.outputs.map((output) => output.path),
+  join(distPath, "src", "index.js.map"),
+  sourcemapOptions,
+)) {
   try {
-    const includeDependencySources = process.env.AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS === "true";
     const rawMap = readFileSync(sourcemapPath, "utf8");
-    const map = JSON.parse(rawMap);
-    let trimmedCount = 0;
-
-    if (
-      !includeDependencySources &&
-      Array.isArray(map.sources) &&
-      Array.isArray(map.sourcesContent)
-    ) {
-      map.sourcesContent = map.sourcesContent.map((content: string | null, index: number) => {
-        const source = String(map.sources[index] ?? "");
-        if (source.includes("node_modules") || source.includes("__bun")) {
-          if (content) {
-            trimmedCount += 1;
-          }
-          return null;
-        }
-        return content;
-      });
-    }
-
+    const { map, trimmedCount } = optimizeSourceMap(JSON.parse(rawMap) as SourceMap, options);
     writeFileSync(sourcemapPath, JSON.stringify(map));
-    if (includeDependencySources) {
-      console.log("✓ Minified sourcemap");
-    } else {
-      console.log(`✓ Minified sourcemap (trimmed ${trimmedCount} dependency sources)`);
-    }
+    console.log(
+      `✓ Minified sourcemap ${sourcemapPath} (trimmed ${trimmedCount} ${options.stripSources ? "embedded" : "dependency"} sources${options.stripSources ? "; removed sourcesContent" : ""})`,
+    );
   } catch (error) {
     console.warn("Failed to optimize sourcemap:", error);
   }
@@ -105,7 +115,10 @@ const schemasSource = join(import.meta.dir, "schemas");
 const schemasDest = join(import.meta.dir, "dist", "schemas");
 if (existsSync(schemasSource)) {
   mkdirSync(schemasDest, { recursive: true });
-  cpSync(schemasSource, schemasDest, { recursive: true });
+  cpSync(schemasSource, schemasDest, {
+    recursive: true,
+    filter: (source) => source !== join(schemasSource, "tool-definitions.json"),
+  });
   console.log("✓ Copied validation schemas");
 } else {
   console.warn(`Validation schemas not found at ${schemasSource}`);

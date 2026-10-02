@@ -399,7 +399,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         screenshotCapturer: this.screenshotCapturer,
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
-    this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
+    this.elementSelector =
+      options.elementSelector ??
+      new ResolverElementSelector(undefined, undefined, {
+        iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
+      });
     this.talkBackDriverFactory =
       options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
     this.talkBackStrategy =
@@ -2756,6 +2760,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           undefined,
           signal,
           target.displayId === 0 ? undefined : target.displayId,
+          target.assertCurrent,
         );
         throwIfAborted(signal);
         if (!result.success) {
@@ -2769,6 +2774,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             : `tap ${x} ${y}`,
           target.displayId,
           signal,
+          target.assertCurrent,
         );
       }
     };

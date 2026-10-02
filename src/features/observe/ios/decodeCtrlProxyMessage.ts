@@ -131,6 +131,9 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error && phaseSummary ? `${message.error}; ${phaseSummary}` : message.error,
         perfTiming: message.perfTiming,
+        ...(type === "tap_coordinates_result" && message.tapDiagnostics !== undefined
+          ? { tapDiagnostics: message.tapDiagnostics }
+          : {}),
       };
       break;
 

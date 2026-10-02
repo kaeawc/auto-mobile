@@ -307,7 +307,16 @@ internal constructor(
 
     try {
       val windowEntries = mutableListOf<WindowEntry>()
-      val budget = HierarchySnapshotBudget(snapshotOptions)
+      val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
+      // Preserve the full legacy allowance for a lone primary window. Reserving a second slot
+      // would truncate it sooner even when fallback is never needed.
+      val reserveFallback =
+        activeWindowRoot != null && (windows.size != 1 || windows.single().id != primaryAppWindowId)
+      val budget =
+        HierarchySnapshotBudget(
+          snapshotOptions,
+          slotCount = maxOf(1, windows.size + if (reserveFallback) 1 else 0),
+        )
       var mainHierarchy: UIElementInfo? = null
       var mainPackageName: String? = null
       var intentChooserDetected = false
@@ -323,10 +332,6 @@ internal constructor(
       var primaryAppWindowHasNullRoot = false
       var hasApplicationWindow = false
 
-      // Prefer the focused application window to an active system window. When the IME owns focus,
-      // fall back to the topmost application window with a root.
-      val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
-
       // The primary app window's own bounds, used below to correlate a permission-controller
       // dialog window with the app it belongs to (issue #6151 follow-up). `null` when no distinct
       // primary window was picked, in which case `isPrimaryWindow` already covers the active
@@ -337,6 +342,7 @@ internal constructor(
 
       // Extract from each window
       for (window in windows) {
+        val windowBudget = budget.openScope()
         var rootNode: AccessibilityNodeInfo? = null
         try {
           rootNode = window.root
@@ -385,22 +391,7 @@ internal constructor(
 
           val windowBounds = Rect()
           window.getBoundsInScreen(windowBounds)
-          windowInfos.add(
-            WindowInfo(
-              id = window.id,
-              displayId =
-                displayId
-                  ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.displayId
-                  else Display.DEFAULT_DISPLAY,
-              panelUniqueId = panelUniqueId,
-              type = window.type,
-              windowLayer = windowLayer,
-              isActive = window.isActive,
-              isFocused = window.isFocused,
-              bounds = ElementBounds(windowBounds),
-            )
-          )
-
+          windowInfos.add(windowInfo(window, windowBounds, displayId, panelUniqueId))
           val element =
             extractNodeInfo(
               rootNode,
@@ -410,7 +401,7 @@ internal constructor(
               dedupeTextContentDesc,
               accessibilityFocusedNode,
               parentPath = "w${window.id}",
-              budget = budget,
+              budget = windowBudget,
             )
           if (element != null) {
             contentHiddenRegionRoots.add(element)
@@ -472,6 +463,7 @@ internal constructor(
         } catch (e: Exception) {
           Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
         } finally {
+          finishWindowScope(windowInfos, window.id, windowBudget)
           rootNode?.recycle()
         }
       }
@@ -485,16 +477,20 @@ internal constructor(
           (!primaryAppWindowHasNullRoot ||
             activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
       ) {
-        val element =
-          extractNodeInfo(
-            activeWindowRoot,
-            0,
-            textFilter,
-            screenDimensions,
-            dedupeTextContentDesc,
-            accessibilityFocusedNode,
-            budget = budget,
-          )
+        val (element, fallbackReasons) =
+          budget.inScope(reserved = reserveFallback) { fallbackBudget ->
+            val extracted =
+              extractNodeInfo(
+                activeWindowRoot,
+                0,
+                textFilter,
+                screenDimensions,
+                dedupeTextContentDesc,
+                accessibilityFocusedNode,
+                budget = fallbackBudget,
+              )
+            extracted to fallbackBudget.truncationReasons().ifEmpty { null }
+          }
         if (element != null) {
           contentHiddenRegionRoots.add(element)
         }
@@ -513,21 +509,23 @@ internal constructor(
           notificationPermissionDetected =
             detectNotificationPermissionDialog(mainHierarchy!!, mainPackageName)
         }
+        val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
+        if (mainHierarchy != null || fallbackReasons != null) {
+          recordFallbackWindow(
+            windowInfos,
+            WindowInfo(
+              id = fallbackWindowId,
+              displayId = displayId,
+              panelUniqueId = panelUniqueId,
+              type = AccessibilityWindowInfo.TYPE_APPLICATION,
+              windowLayer = activeWindowLayer,
+              isActive = true,
+              isFocused = true,
+              truncationReasons = fallbackReasons,
+            ),
+          )
+        }
         if (mainHierarchy != null) {
-          val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
-          if (windowInfos.none { it.id == fallbackWindowId }) {
-            windowInfos.add(
-              WindowInfo(
-                id = fallbackWindowId,
-                displayId = displayId,
-                panelUniqueId = panelUniqueId,
-                type = AccessibilityWindowInfo.TYPE_APPLICATION,
-                windowLayer = activeWindowLayer,
-                isActive = true,
-                isFocused = true,
-              )
-            )
-          }
           val fallbackEntry =
             WindowEntry(
               windowId = fallbackWindowId,
@@ -545,6 +543,8 @@ internal constructor(
             windowEntries.add(fallbackEntry)
           }
         }
+      } else if (reserveFallback) {
+        budget.inScope { /* Release the unused fallback reservation. */ }
       }
 
       // Skip occlusion filtering when disabled (disableAllFiltering or the --no-occlusion
@@ -591,6 +591,8 @@ internal constructor(
         return ViewHierarchy(
           error = "No visible windows available",
           ctrlProxyIncomplete = true,
+          windows = windowInfos.takeIf { budget.truncationReasons().isNotEmpty() },
+          truncationReasons = budget.truncationReasons().ifEmpty { null },
         )
       }
 
@@ -658,6 +660,50 @@ internal constructor(
       accessibilityFocusedNode?.recycle()
     }
   }
+
+  private fun finishWindowScope(
+    windowInfos: MutableList<WindowInfo>,
+    windowId: Int,
+    budget: HierarchySnapshotBudget,
+  ) {
+    budget.finish()
+    val index = windowInfos.indexOfFirst { it.id == windowId }
+    if (index >= 0) {
+      windowInfos[index] =
+        windowInfos[index].copy(truncationReasons = budget.truncationReasons().ifEmpty { null })
+    }
+  }
+
+  private fun recordFallbackWindow(windowInfos: MutableList<WindowInfo>, fallback: WindowInfo) {
+    val index = windowInfos.indexOfFirst { it.id == fallback.id }
+    if (index < 0) {
+      windowInfos.add(fallback)
+    } else {
+      // Fallback replaces this window's tree, so attribution describes the replacement scope.
+      // The snapshot budget still retains the reasons from the original extraction.
+      windowInfos[index] = windowInfos[index].copy(truncationReasons = fallback.truncationReasons)
+    }
+  }
+
+  private fun windowInfo(
+    window: AccessibilityWindowInfo,
+    bounds: Rect,
+    displayId: Int?,
+    panelUniqueId: String?,
+  ): WindowInfo =
+    WindowInfo(
+      id = window.id,
+      displayId =
+        displayId
+          ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.displayId
+          else Display.DEFAULT_DISPLAY,
+      panelUniqueId = panelUniqueId,
+      type = window.type,
+      windowLayer = window.layer,
+      isActive = window.isActive,
+      isFocused = window.isFocused,
+      bounds = ElementBounds(bounds),
+    )
 
   private fun detectContentHiddenRegions(
     roots: List<UIElementInfo>,

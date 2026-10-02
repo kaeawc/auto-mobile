@@ -1,3 +1,4 @@
+import type { Timer } from "../utils/SystemTimer";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { ActionableError } from "../models/ActionableError";
 import {
@@ -5,6 +6,8 @@ import {
   type DeviceIncarnationListener,
 } from "../utils/deviceIncarnation";
 import {
+  fenceVideoRecordingStartsForIncarnationChange,
+  releaseVideoRecordingIncarnationFence,
   forceStopVideoRecording,
   interruptVideoRecording,
   listActiveVideoRecordings,
@@ -25,11 +28,14 @@ const defaultDependencies: VideoRecordingIncarnationDependencies = {
 /** Creates the listener that retires captures before a VM load rewinds their guest process. */
 export function createVideoRecordingDeviceIncarnationListener(
   dependencies: VideoRecordingIncarnationDependencies = defaultDependencies,
+  options: { timer?: Timer; expiryMs?: number } = {},
 ): DeviceIncarnationListener {
   const pendingRetirements = new Map<string, Set<string>>();
   return {
     name: "recordings",
     prepareForIncarnationChange: async (deviceId) => {
+      // Fence before any await: listing or cleanup failure must still block new starts.
+      fenceVideoRecordingStartsForIncarnationChange(deviceId, options);
       const activeRecordings = await dependencies.listActiveVideoRecordings({ deviceId });
       const pending = pendingRetirements.get(deviceId) ?? new Set<string>();
       pendingRetirements.set(deviceId, pending);
@@ -55,6 +61,10 @@ export function createVideoRecordingDeviceIncarnationListener(
         // Preserve the original failure for the invalidator's per-listener warning.
         throw failures[0];
       }
+    },
+    onIncarnationChangeSettled: (deviceId) => {
+      releaseVideoRecordingIncarnationFence(deviceId);
+      pendingRetirements.delete(deviceId);
     },
     onDeviceIncarnationChanged: async (deviceId) => {
       const pending = pendingRetirements.get(deviceId);

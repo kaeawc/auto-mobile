@@ -1366,7 +1366,6 @@ export function createInstalledAppsDeviceIncarnationListener(
     onDeviceIncarnationChanged: async (deviceId) => {
       // Dirty the in-process cache before the best-effort persistence write.
       invalidateCache(deviceId);
-      await notifyResourcesUpdated(deviceId);
       await coordinator.invalidate(
         deviceId,
         async () =>
@@ -1374,6 +1373,13 @@ export function createInstalledAppsDeviceIncarnationListener(
             await repository.markDeviceStale(deviceId);
           }),
       );
+    },
+    onIncarnationChangeSettled: async (deviceId, outcome) => {
+      // "Updated" invites subscribers to re-read; failed loads/readiness only
+      // invalidate caches, since the guest cannot yet provide a fresh app list.
+      if (outcome.ready) {
+        await notifyResourcesUpdated(deviceId);
+      }
     },
   };
 }

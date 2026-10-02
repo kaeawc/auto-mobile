@@ -21,6 +21,7 @@ import "./videoRecordingIncarnationListener";
 export interface DeviceIncarnationInvalidator {
   prepareForIncarnationChange(device: BootedDevice): Promise<void>;
   invalidate(device: BootedDevice): Promise<void>;
+  settleIncarnationChange(device: BootedDevice, outcome: { ready: boolean }): Promise<void>;
 }
 
 export interface CtrlProxyClientLifecycle {
@@ -61,6 +62,29 @@ export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInv
         // Safe to continue: each owner independently quiesces its current-incarnation state.
         logger.warn(
           `[DeviceIncarnationInvalidator] Failed to prepare ${preparationListeners[index].name}`,
+          result.reason,
+        );
+      }
+    }
+  }
+
+  async settleIncarnationChange(device: BootedDevice, outcome: { ready: boolean }): Promise<void> {
+    if (device.platform !== "android") {
+      return;
+    }
+    const listeners = (this.listeners ?? getDeviceIncarnationListeners()).filter(
+      (listener) => listener.onIncarnationChangeSettled !== undefined,
+    );
+    const results = await Promise.allSettled(
+      listeners.map(async (listener) => {
+        await listener.onIncarnationChangeSettled?.(device.deviceId, outcome);
+      }),
+    );
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (result.status === "rejected") {
+        logger.warn(
+          `[DeviceIncarnationInvalidator] Failed to settle ${listeners[index].name}`,
           result.reason,
         );
       }

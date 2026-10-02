@@ -241,6 +241,37 @@ let videoRecordingStartDrain: { promise: Promise<void>; resolve: () => void } | 
 const inFlightVideoRecordingStartControllers = new Set<AbortController>();
 const startingVideoRecordingDevices = new Set<string>();
 
+// Ten minutes covers the default 30s load + 30s readiness with ample headroom.
+// This is a crash-recovery bound; custom restores exceeding it may outlive the fence.
+const INCARNATION_CHANGE_FENCE_EXPIRY_MS = 10 * 60 * 1000;
+const incarnationChangeFences = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
+
+export function releaseVideoRecordingIncarnationFence(deviceId: string): void {
+  const fence = incarnationChangeFences.get(deviceId);
+  if (fence) {
+    fence.timer.clearTimeout(fence.handle);
+    incarnationChangeFences.delete(deviceId);
+  }
+}
+
+export function fenceVideoRecordingStartsForIncarnationChange(
+  deviceId: string,
+  options: { timer?: Timer; expiryMs?: number } = {},
+): void {
+  releaseVideoRecordingIncarnationFence(deviceId);
+  const timer = options.timer ?? defaultTimer;
+  const fence = {
+    timer,
+    handle: timer.setTimeout(() => {
+      // Identity protects a newer fence even if an old callback was already queued.
+      if (incarnationChangeFences.get(deviceId) === fence) {
+        releaseVideoRecordingIncarnationFence(deviceId);
+      }
+    }, options.expiryMs ?? INCARNATION_CHANGE_FENCE_EXPIRY_MS),
+  };
+  incarnationChangeFences.set(deviceId, fence);
+}
+
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
 const highlightSessionsByDeviceId = new Map<string, string>();
@@ -480,6 +511,9 @@ async function initialVideoRecordingDependencies(
 }
 
 function resetVideoRecordingManagerState(): void {
+  for (const deviceId of incarnationChangeFences.keys()) {
+    releaseVideoRecordingIncarnationFence(deviceId);
+  }
   for (const { timer, handle } of autoStopTimers.values()) {
     timer.clearTimeout(handle);
   }
@@ -526,6 +560,11 @@ function beginVideoRecordingStart(
   requestSignal?.throwIfAborted();
   if (!acceptingVideoRecordingStarts) {
     throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
+  }
+  if (incarnationChangeFences.has(deviceId)) {
+    throw new ActionableError(
+      `VM snapshot restore is in progress on device ${deviceId}. Retry video recording after it completes.`,
+    );
   }
   if (startingVideoRecordingDevices.has(deviceId)) {
     throw new ActionableError(`Video recording start already in progress for device ${deviceId}.`);

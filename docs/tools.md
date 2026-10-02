@@ -631,6 +631,28 @@ a plain pinch. Android and iOS share this convention.
 
 </details>
 
+### Semantic accessibility links
+
+For iOS `tapOn.accessibilityLink` and `tapOn.subtext`, `occurrence` is the
+zero-based index among links with the requested text (case-insensitive) within
+the owning text element. `subtext` uses the resolved text element as its owner;
+`accessibilityLink` with `container` uses that container's owner identity.
+
+Without an owner, iOS selects the first element carrying a matching semantic
+link in document order, then resolves `occurrence` within that element. This
+changes the previous tree-wide counting (#6631). It never skips to a later owner
+when the first lacks the occurrence or link geometry. With multiple candidate
+owners, a successful SDK activation includes a runner `warning` naming the
+selected owner and candidate count; use `container`/`subtext` for a specific owner.
+
+When SDK resolution fails, the XCUITest fallback remains available. Its flat
+links query has no owner grouping, so owner-less `occurrence > 0` is refused
+with an error asking for `container`/`subtext`. Owner-less occurrence 0 activates
+the first label-matching hittable link. Owner-scoped fallback indexes matching
+links within the owner's link descendants, including the owner itself if a link.
+Android is unchanged: matching links count in document order within the owner's
+subtree, or the whole active-window tree when owner-less.
+
 ## Apps, files & app data
 
 | Tool                                                                                             | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

@@ -5,7 +5,13 @@ import Foundation
 /// `ReferenceGeometry`). `@testable` reaches the internal `DeviceRotation` /
 /// `RotationCaptureSample`.
 enum RewriteGeometry {
-    static func pinchParameters(start: Double, end: Double, duration: TimeInterval) -> (scale: Double, velocity: Double) {
+    static func pinchParameters(
+        start: Double,
+        end: Double,
+        duration: TimeInterval
+    )
+        -> (scale: Double, velocity: Double)
+    {
         let p = PinchFallback.parameters(distanceStart: start, distanceEnd: end, duration: duration)
         return (Double(p.scale), Double(p.velocity))
     }
@@ -19,15 +25,16 @@ enum RewriteGeometry {
         owner: String?,
         text: String,
         occurrence: Int
-    ) throws -> (x: Double, y: Double)? {
+    )
+        throws -> (x: Double, y: Double)?
+    {
         let hierarchy = try JSONDecoder().decode(SdkViewHierarchy.self, from: sdkJSON)
-        guard let c = SemanticLinkActivation.coordinate(
+        return SemanticLinkActivation.coordinate(
             in: hierarchy,
             ownerResourceId: owner,
             text: text,
             occurrence: occurrence
-        ) else { return nil }
-        return (c.x, c.y)
+        ).map { ($0.coordinate.x, $0.coordinate.y) }
     }
 
     static func rotationFromName(_ name: String) -> Int? {

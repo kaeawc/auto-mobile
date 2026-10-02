@@ -160,6 +160,27 @@ final class ClipboardResolutionTests: XCTestCase {
 }
 
 final class GesturePerformerSemanticLinkTests: XCTestCase {
+    func testFallbackOccurrenceRequiresOwnerAboveZero() throws {
+        XCTAssertNoThrow(try GesturePerformer.validateSemanticLinkFallback(occurrence: 0, ownerResourceId: nil))
+        for occurrence in [0, 1, 2] {
+            XCTAssertNoThrow(try GesturePerformer.validateSemanticLinkFallback(
+                occurrence: occurrence, ownerResourceId: "owner"
+            ))
+        }
+        for occurrence in [1, 2] {
+            XCTAssertThrowsError(try GesturePerformer.validateSemanticLinkFallback(
+                occurrence: occurrence, ownerResourceId: nil
+            )) { error in
+                guard case let GesturePerformer.GestureError.gestureFailed(message) = error else {
+                    XCTFail("Expected typed gestureFailed error, got \(error)")
+                    return
+                }
+                XCTAssertTrue(message.contains("occurrence > 0 needs an owner"))
+                XCTAssertTrue(message.contains("container/subtext"))
+            }
+        }
+    }
+
     func testScopedLinkCandidatesIncludesAnOwnerThatIsItselfALink() {
         XCTAssertEqual(
             GesturePerformer.scopedLinkCandidates(

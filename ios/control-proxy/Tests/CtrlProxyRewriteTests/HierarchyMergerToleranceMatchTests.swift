@@ -144,6 +144,208 @@ final class HierarchyMergerToleranceMatchTests: XCTestCase {
         XCTAssertEqual(HierarchyMerger.coordinateIDs(values: [], inRange: -1 ... 1), Set<Int>())
     }
 
+    func testCounterpartExtremeDifferencesDoNotMatch() {
+        let coordinates = [(0, Int.min), (Int.min, 0), (Int.min, Int.max), (Int.max, Int.min)]
+        for (queryCoordinate, nodeCoordinate) in coordinates {
+            let query = UIElementInfo(
+                className: "UIKitButton",
+                bounds: bounds(queryCoordinate, queryCoordinate, queryCoordinate, queryCoordinate)
+            )
+            // Same class family exercises isCounterpart before nearest. Point
+            // bounds cannot enclose the distant query and hide a failed match.
+            let node = SdkViewNode(
+                className: "UIKitButton",
+                bounds: sdkBounds(nodeCoordinate, nodeCoordinate, nodeCoordinate, nodeCoordinate),
+                backgroundColor: "extreme"
+            )
+            let result = merge(sdkNodes: [node], query: query)
+
+            XCTAssertNotNil(queryNode(in: result))
+            XCTAssertNil(queryNode(in: result)?.extras?["sdk.backgroundColor"])
+            XCTAssertEqual(
+                flatten(result.hierarchy).filter { $0.extras?["sdk.source"] == "sdkWalker" }.count,
+                1
+            )
+        }
+    }
+
+    func testNearestToleranceWindowsAtIntegerExtremes() {
+        let cases: [(query: ElementBounds, within: SdkBounds, outside: SdkBounds)] = [
+            (
+                bounds(Int.min, Int.min, Int.min, Int.min),
+                sdkBounds(Int.min + 2, Int.min + 2, Int.min + 2, Int.min + 2),
+                sdkBounds(Int.min + 3, Int.min + 3, Int.min + 3, Int.min + 3)
+            ),
+            (
+                bounds(Int.max, Int.max, Int.max, Int.max),
+                sdkBounds(Int.max - 2, Int.max - 2, Int.max - 2, Int.max - 2),
+                sdkBounds(Int.max - 3, Int.max - 3, Int.max - 3, Int.max - 3)
+            ),
+            (
+                bounds(Int.min, Int.max, Int.max, Int.min),
+                sdkBounds(Int.min + 2, Int.max - 2, Int.max - 2, Int.min + 2),
+                sdkBounds(Int.min + 3, Int.max - 3, Int.max - 3, Int.min + 3)
+            ),
+        ]
+        for testCase in cases {
+            let query = UIElementInfo(className: "UIKitButton", bounds: testCase.query)
+            let within = SdkViewNode(
+                className: "_UIHostingView", bounds: testCase.within, backgroundColor: "within"
+            )
+            let outside = SdkViewNode(
+                className: "_UIHostingView", bounds: testCase.outside, backgroundColor: "outside"
+            )
+            XCTAssertEqual(
+                queryNode(in: merge(sdkNodes: [outside, within], query: query))?.extras?["sdk.backgroundColor"],
+                "within"
+            )
+            // An earlier out-of-range node cannot become a direct match. In
+            // these cases it also cannot enclose the query on at least one side.
+            XCTAssertNil(queryNode(in: merge(sdkNodes: [outside], query: query))?.extras?["sdk.backgroundColor"])
+            let exact = SdkViewNode(
+                className: "_UIHostingView",
+                bounds: sdkBounds(testCase.query.left, testCase.query.top, testCase.query.right, testCase.query.bottom),
+                backgroundColor: "exact"
+            )
+            XCTAssertEqual(
+                queryNode(in: merge(sdkNodes: [within, exact], query: query))?.extras?["sdk.backgroundColor"],
+                "exact"
+            )
+        }
+    }
+
+    func testNearestExtremeCoordinatesKeepDistanceAndDocumentOrder() {
+        let query = UIElementInfo(
+            className: "UIKitButton", bounds: bounds(Int.min, Int.max, Int.max, Int.min)
+        )
+        let farther = candidate(Int.min + 2, Int.max - 2, Int.max - 2, Int.min + 2, color: "farther")
+        let earlier = candidate(Int.min + 1, Int.max, Int.max, Int.min, color: "earlier")
+        let later = candidate(Int.min, Int.max - 1, Int.max, Int.min, color: "later")
+
+        XCTAssertEqual(
+            queryNode(in: merge(sdkNodes: [farther, earlier, later], query: query))?.extras?["sdk.backgroundColor"],
+            "earlier"
+        )
+        XCTAssertEqual(
+            queryNode(in: merge(sdkNodes: [farther, later, earlier], query: query))?.extras?["sdk.backgroundColor"],
+            "later"
+        )
+    }
+
+    func testBoundsDistanceSaturatesUnrepresentableDifferences() {
+        // Int.min - 0 is representable but abs(Int.min) is not. Opposite
+        // endpoints also exercise subtraction overflow in both directions.
+        let pairs = [(Int.min, 0), (0, Int.min), (Int.min, Int.max), (Int.max, Int.min)]
+        for (nodeCoordinate, queryCoordinate) in pairs {
+            let nodes = [
+                sdkBounds(nodeCoordinate, 0, 0, 0), sdkBounds(0, nodeCoordinate, 0, 0),
+                sdkBounds(0, 0, nodeCoordinate, 0), sdkBounds(0, 0, 0, nodeCoordinate),
+            ]
+            let queries = [
+                bounds(queryCoordinate, 0, 0, 0), bounds(0, queryCoordinate, 0, 0),
+                bounds(0, 0, queryCoordinate, 0), bounds(0, 0, 0, queryCoordinate),
+            ]
+            for (node, query) in zip(nodes, queries) {
+                XCTAssertEqual(HierarchyMerger.boundsDistance(node, query), Int.max)
+            }
+        }
+        XCTAssertEqual(HierarchyMerger.boundsDistance(sdkBounds(-2, 1, 4, 8), bounds(0, 0, 4, 7)), 2)
+        XCTAssertEqual(
+            HierarchyMerger.boundsDistance(sdkBounds(Int.min, 0, Int.max, 0), bounds(Int.min, 0, Int.max, 0)),
+            0
+        )
+    }
+
+    func testSdkAndElementDimensionsSaturateBySign() {
+        let cases: [(bounds: SdkBounds, width: Int, height: Int)] = [
+            (sdkBounds(Int.min, Int.max, Int.max, Int.min), Int.max, Int.min),
+            (sdkBounds(Int.max, Int.min, Int.min, Int.max), Int.min, Int.max),
+            (sdkBounds(4, 6, 2, 3), -2, -3),
+            (sdkBounds(0, 0, Int.min, Int.min), Int.min, Int.min),
+            (sdkBounds(0, 0, Int.max, Int.max), Int.max, Int.max),
+        ]
+        for testCase in cases {
+            let sdk = testCase.bounds
+            let element = bounds(sdk.left, sdk.top, sdk.right, sdk.bottom)
+            XCTAssertEqual(sdk.width, testCase.width)
+            XCTAssertEqual(sdk.height, testCase.height)
+            XCTAssertEqual(element.width, testCase.width)
+            XCTAssertEqual(element.height, testCase.height)
+        }
+    }
+
+    func testElementCentersUseHalfTheSaturatedSignedDimension() {
+        let forward = bounds(Int.min, Int.min, Int.max, Int.max)
+        let inverted = bounds(Int.max, Int.max, Int.min, Int.min)
+        let point = bounds(Int.max, Int.min, Int.max, Int.min)
+        let ordinary = bounds(4, 6, 1, 3)
+        let nearEdges = bounds(Int.max - 2, Int.min + 2, Int.max, Int.min)
+
+        XCTAssertEqual(forward.centerX, Int.min + Int.max / 2)
+        XCTAssertEqual(forward.centerY, Int.min + Int.max / 2)
+        XCTAssertEqual(inverted.centerX, Int.max + Int.min / 2)
+        XCTAssertEqual(inverted.centerY, Int.max + Int.min / 2)
+        XCTAssertEqual(point.centerX, Int.max)
+        XCTAssertEqual(point.centerY, Int.min)
+        XCTAssertEqual(ordinary.centerX, 3)
+        XCTAssertEqual(ordinary.centerY, 5)
+        XCTAssertEqual(nearEdges.centerX, Int.max - 1)
+        XCTAssertEqual(nearEdges.centerY, Int.min + 1)
+    }
+
+    func testSdkDecodingPreservesExtremeAndInvertedEndpoints() throws {
+        let json = """
+        {"className":"UIView","bounds":{
+            "left":\(Int.max),"top":\(Int.min),"right":\(Int.min),"bottom":\(Int.max)
+        }}
+        """
+        let node = try JSONDecoder().decode(SdkViewNode.self, from: Data(json.utf8))
+
+        XCTAssertEqual(node.bounds.left, Int.max)
+        XCTAssertEqual(node.bounds.top, Int.min)
+        XCTAssertEqual(node.bounds.right, Int.min)
+        XCTAssertEqual(node.bounds.bottom, Int.max)
+        XCTAssertEqual(node.bounds.width, Int.min)
+        XCTAssertEqual(node.bounds.height, Int.max)
+    }
+
+    func testFullMergeWithExtremeNodePreservesOrdinaryNodes() throws {
+        let ordinary = SdkViewNode(
+            className: "UIKitButton", bounds: sdkBounds(20, 120, 320, 164), backgroundColor: "ordinary"
+        )
+        let baseline = merge(sdkNodes: [ordinary])
+        let baselineRoot = try XCTUnwrap(baseline.hierarchy)
+        let baselineQuery = try XCTUnwrap(queryNode(in: baseline))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let extremeBounds = [
+            sdkBounds(Int.min, Int.min, Int.max, Int.max),
+            sdkBounds(Int.max, Int.min, Int.min, Int.max),
+        ]
+        for geometry in extremeBounds {
+            // Same family as the ordinary root exercises counterpart checks
+            // during both matching and SDK-only injection pruning.
+            let extreme = SdkViewNode(className: "UIView", bounds: geometry, backgroundColor: "extreme")
+            let result = merge(sdkNodes: [extreme, ordinary])
+            let root = try XCTUnwrap(result.hierarchy)
+            let query = try XCTUnwrap(queryNode(in: result))
+
+            XCTAssertEqual(root.className, baselineRoot.className)
+            XCTAssertEqual(root.extras, baselineRoot.extras)
+            XCTAssertEqual(root.bounds?.left, baselineRoot.bounds?.left)
+            XCTAssertEqual(root.bounds?.top, baselineRoot.bounds?.top)
+            XCTAssertEqual(root.bounds?.right, baselineRoot.bounds?.right)
+            XCTAssertEqual(root.bounds?.bottom, baselineRoot.bounds?.bottom)
+            // Compare the complete ordinary child, including injected children,
+            // rather than just the SDK color that identifies its match.
+            XCTAssertEqual(try encoder.encode(query), try encoder.encode(baselineQuery))
+            XCTAssertEqual(
+                flatten(result.hierarchy).filter { $0.extras?["sdk.source"] == "sdkWalker" }.count,
+                1
+            )
+        }
+    }
+
     private func merge(
         sdkNodes: [SdkViewNode],
         resourceId: String? = nil,

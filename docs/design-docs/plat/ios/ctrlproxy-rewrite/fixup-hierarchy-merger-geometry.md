@@ -41,9 +41,12 @@ worst case remains `O(n)`.
 
 Capture real `(xcuitest, sdk)` hierarchy pairs from a live runner and compare
 merged output to quantify which frames are affected by the nearest-match tie-break
-change. Known arithmetic limitation: `isCounterpart`'s
-`abs(bounds.x - sdkBounds.x)` comparisons and `nearest()` distance arithmetic
-still use checked `Int` operations and can trap on malformed extreme SDK bounds.
+change. Bounds arithmetic is now overflow-safe: unrepresentable absolute coordinate
+differences saturate to `Int.max` and are excluded from tolerance matches; tolerance
+windows saturate at `Int.min`/`Int.max`. Signed dimensions and areas saturate by sign,
+and centers retain origin + half the saturated signed dimension (truncated toward
+zero). Endpoints remain unchanged, including inverted bounds. Results for all
+previously non-overflowing inputs are preserved.
 
 Done: containment indexing with signed-area/document-order selection, and ±tol
 coordinate-window matching with nearest-distance/document-order selection.

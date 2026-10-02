@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Category of a breadcrumb event for classification.
 public enum BreadcrumbCategory: String, Codable, Sendable {
@@ -33,35 +34,32 @@ public protocol BreadcrumbTracking: AnyObject, Sendable {
 }
 
 /// Thread-safe ring buffer of recent breadcrumbs.
-public final class BreadcrumbTrail: BreadcrumbTracking, @unchecked Sendable {
-    private let lock = NSLock()
+public final class BreadcrumbTrail: BreadcrumbTracking, Sendable {
     private let maxSize: Int
-    private var buffer: [Breadcrumb] = []
+    private let buffer: OSAllocatedUnfairLock<[Breadcrumb]>
 
     public init(maxSize: Int = 100) {
         self.maxSize = maxSize
-        buffer.reserveCapacity(maxSize)
+        var initialBuffer: [Breadcrumb] = []
+        initialBuffer.reserveCapacity(maxSize)
+        buffer = OSAllocatedUnfairLock(initialState: initialBuffer)
     }
 
     public func add(_ breadcrumb: Breadcrumb) {
-        lock.lock()
-        if buffer.count >= maxSize {
-            buffer.removeFirst()
+        buffer.withLock { buffer in
+            if buffer.count >= maxSize {
+                buffer.removeFirst()
+            }
+            buffer.append(breadcrumb)
         }
-        buffer.append(breadcrumb)
-        lock.unlock()
     }
 
     public func snapshot() -> [Breadcrumb] {
-        lock.lock()
-        defer { lock.unlock() }
-        return Array(buffer)
+        buffer.withLock { Array($0) }
     }
 
     public func clear() {
-        lock.lock()
-        buffer.removeAll(keepingCapacity: true)
-        lock.unlock()
+        buffer.withLock { $0.removeAll(keepingCapacity: true) }
     }
 
     // MARK: - Disk Persistence for Crash Resilience
@@ -92,6 +90,7 @@ public final class BreadcrumbTrail: BreadcrumbTracking, @unchecked Sendable {
 
     private static func defaultDirectory() -> URL {
         // The caches directory always exists in userDomainMask on iOS.
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!  // swiftlint:disable:this force_unwrapping
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+            .first! // swiftlint:disable:this force_unwrapping
     }
 }

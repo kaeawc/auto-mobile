@@ -65,7 +65,7 @@ public protocol BreadcrumbTracking: AnyObject, Sendable
   func add(_ breadcrumb: Breadcrumb)
   func snapshot() -> [Breadcrumb]
   func clear()
-public final class BreadcrumbTrail: BreadcrumbTracking, @unchecked Sendable
+public final class BreadcrumbTrail: BreadcrumbTracking, Sendable
   public init(maxSize: Int = 100)
   public func add(_ breadcrumb: Breadcrumb)
   public func snapshot() -> [Breadcrumb]
@@ -350,7 +350,7 @@ public struct LogFilter: Sendable
   public let messagePattern: NSRegularExpression?
   public let minLevel: LogLevel
   public init( name: String, tagPattern: NSRegularExpression? = nil, messagePattern: NSRegularExpression? = nil, minLevel: LogLevel = .verbose )
-public final class AutoMobileLog: @unchecked Sendable
+public final class AutoMobileLog: Sendable
   public static let shared = AutoMobileLog()
   public func addFilter( name: String, tagPattern: NSRegularExpression? = nil, messagePattern: NSRegularExpression? = nil, minLevel: LogLevel = .verbose )
   public func removeFilter(name: String)

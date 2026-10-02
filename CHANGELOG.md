@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- The iOS SDK sub-package manifests (`ios/auto-mobile-sdk`, `ios/highlight-core`) now declare the same iOS 17 / macOS 15 floor as the published root `Package.swift` and `XCTestRunner` (iOS 17 was introduced in #6773). This is a breaking change for apps or tools that depend on those sub-packages directly and target iOS 15/16 or macOS 13/14. (#5839) (ios)
+
 ### Removed
 
 - Remove the deprecated `captureScreenshot` MCP tool. Use `observe({ screenshot: "settled" })` and its `screenshotPath` for a fresh, validated screenshot.

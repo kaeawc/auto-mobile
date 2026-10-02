@@ -1,56 +1,60 @@
 import Foundation
+import os
 
 /// Thread-safe mutable context holding ambient state attached to SDK events.
-final class SdkContext: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _sessionId: String?
-    private var _userId: String?
-    private var _appVersion: String?
-    private var _tags: [String: String] = [:]
+final class SdkContext: Sendable {
+    private struct State: Sendable {
+        var sessionId: String?
+        var userId: String?
+        var appVersion: String?
+        var tags: [String: String] = [:]
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     init() {}
 
     var sessionId: String? {
-        get { lock.lock(); defer { lock.unlock() }; return _sessionId }
-        set { lock.lock(); _sessionId = newValue; lock.unlock() }
+        get { state.withLock { $0.sessionId } }
+        set { state.withLock { $0.sessionId = newValue } }
     }
 
     var userId: String? {
-        get { lock.lock(); defer { lock.unlock() }; return _userId }
-        set { lock.lock(); _userId = newValue; lock.unlock() }
+        get { state.withLock { $0.userId } }
+        set { state.withLock { $0.userId = newValue } }
     }
 
     var appVersion: String? {
-        get { lock.lock(); defer { lock.unlock() }; return _appVersion }
-        set { lock.lock(); _appVersion = newValue; lock.unlock() }
+        get { state.withLock { $0.appVersion } }
+        set { state.withLock { $0.appVersion = newValue } }
     }
 
     func setTag(_ key: String, value: String) {
-        lock.lock(); _tags[key] = value; lock.unlock()
+        state.withLock { $0.tags[key] = value }
     }
 
     func removeTag(_ key: String) {
-        lock.lock(); _tags.removeValue(forKey: key); lock.unlock()
+        state.withLock { _ = $0.tags.removeValue(forKey: key) }
     }
 
     func clearTags() {
-        lock.lock(); _tags.removeAll(); lock.unlock()
+        state.withLock { $0.tags.removeAll() }
     }
 
     /// Returns an immutable snapshot.
     func snapshot() -> SdkContextSnapshot {
-        lock.lock()
-        defer { lock.unlock() }
-        return SdkContextSnapshot(
-            sessionId: _sessionId, userId: _userId,
-            appVersion: _appVersion, tags: _tags
-        )
+        state.withLock { state in
+            SdkContextSnapshot(
+                sessionId: state.sessionId, userId: state.userId,
+                appVersion: state.appVersion, tags: state.tags
+            )
+        }
     }
 
     func reset() {
-        lock.lock()
-        _sessionId = nil; _userId = nil; _appVersion = nil; _tags.removeAll()
-        lock.unlock()
+        state.withLock { state in
+            state.sessionId = nil; state.userId = nil; state.appVersion = nil; state.tags.removeAll()
+        }
     }
 }
 

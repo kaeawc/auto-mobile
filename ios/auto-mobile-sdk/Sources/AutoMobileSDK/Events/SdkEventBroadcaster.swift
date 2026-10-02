@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Protocol for event broadcasting to allow faking in tests.
 protocol EventBroadcasting: Sendable {
@@ -8,7 +9,11 @@ protocol EventBroadcasting: Sendable {
 /// Broadcasts SDK event batches via NotificationCenter for in-process communication
 /// and HTTP POST to CtrlProxy for cross-process telemetry forwarding.
 /// Supports disk-first persistence and retry with exponential backoff.
-final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
+final class SdkEventBroadcaster: EventBroadcasting, Sendable {
+    private struct Configuration: Sendable {
+        var ctrlProxyUrl: URL?
+        var persistence: (any EventPersisting)?
+    }
 
     static let eventBatchNotification = Notification.Name(
         "dev.jasonpearson.automobile.sdk.EVENT_BATCH"
@@ -25,22 +30,17 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
     /// and written from arbitrary threads (`setCtrlProxyUrl`), so all access is
     /// serialized by a lock — Optional/reference assignment is not atomic in
     /// Swift's memory model (issue #3632).
-    /// Guards the cross-thread config references (`_ctrlProxyUrl`, `_persistence`),
+    /// Guards the cross-thread config references (`ctrlProxyUrl`, `persistence`),
     /// read on the event buffer's flush thread and the URLSession completion handler
     /// while written from arbitrary threads — Optional/reference assignment is not
     /// atomic in Swift's memory model (issue #3632).
-    private let configLock = NSLock()
-    private var _ctrlProxyUrl: URL?
+    private let configLock: OSAllocatedUnfairLock<Configuration>
     var ctrlProxyUrl: URL? {
         get {
-            configLock.lock()
-            defer { configLock.unlock() }
-            return _ctrlProxyUrl
+            configLock.withLock { $0.ctrlProxyUrl }
         }
         set {
-            configLock.lock()
-            defer { configLock.unlock() }
-            _ctrlProxyUrl = newValue
+            configLock.withLock { $0.ctrlProxyUrl = newValue }
         }
     }
 
@@ -48,18 +48,16 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
     /// Disk-first event persistence for reliable delivery. Same cross-thread access
     /// pattern as `ctrlProxyUrl`, so it is guarded by the same `configLock`.
-    private var _persistence: (any EventPersisting)?
     var persistence: (any EventPersisting)? {
         get {
-            configLock.lock()
-            defer { configLock.unlock() }
-            return _persistence
+            configLock.withLock { $0.persistence }
         }
         set {
-            configLock.lock()
-            let old = _persistence
-            _persistence = newValue
-            configLock.unlock()
+            let old = configLock.withLock { configuration in
+                let old = configuration.persistence
+                configuration.persistence = newValue
+                return old
+            }
             // Release the replaced persistence AFTER unlocking, in case its deinit
             // re-enters this lock (the non-recursive lock is not re-entrant).
             withExtendedLifetime(old) {}
@@ -75,14 +73,15 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5
         config.waitsForConnectivity = false
-        self.urlSession = URLSession(configuration: config)
+        urlSession = URLSession(configuration: config)
 
         #if DEBUG
-        // Default CtrlProxy port — only in debug builds
-        _ctrlProxyUrl = URL(string: "http://localhost:8765/sdk-events")
+            // Default CtrlProxy port — only in debug builds
+            let ctrlProxyUrl = URL(string: "http://localhost:8765/sdk-events")
         #else
-        _ctrlProxyUrl = nil
+            let ctrlProxyUrl: URL? = nil
         #endif
+        configLock = OSAllocatedUnfairLock(initialState: Configuration(ctrlProxyUrl: ctrlProxyUrl))
     }
 
     /// Test-only instance to exercise the broadcaster in isolation.
@@ -92,14 +91,15 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
     /// No-op in release builds.
     func setCtrlProxyUrl(_ url: URL?) {
         #if DEBUG
-        self.ctrlProxyUrl = url
+            ctrlProxyUrl = url
         #endif
     }
 
     func broadcastBatch(bundleId: String?, events: [any SdkEvent]) {
         guard !events.isEmpty else { return }
         let sink = ctrlProxyUrl
-        InternalLogger.debug("broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(sink?.absoluteString ?? "nil")")
+        InternalLogger
+            .debug("broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(sink?.absoluteString ?? "nil")")
 
         // Persist to disk only when there is an asynchronous delivery sink whose
         // failure we must survive across a crash. Without a CtrlProxy URL the only
@@ -145,53 +145,53 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
         )
 
         #if DEBUG
-        if let url = ctrlProxyUrl {
-            deliverWithRetry(url: url, data: data, batchId: batchId, attempt: 0)
-        } else if let batchId = batchId {
-            persistence?.removeBatch(batchId)
-        }
+            if let url = ctrlProxyUrl {
+                deliverWithRetry(url: url, data: data, batchId: batchId, attempt: 0)
+            } else if let batchId = batchId {
+                persistence?.removeBatch(batchId)
+            }
         #else
-        if let batchId = batchId {
-            persistence?.removeBatch(batchId)
-        }
+            if let batchId = batchId {
+                persistence?.removeBatch(batchId)
+            }
         #endif
     }
 
     #if DEBUG
-    private func deliverWithRetry(url: URL, data: Data, batchId: String?, attempt: Int) {
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.httpBody = data
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        InternalLogger.debug("Posting \(data.count) bytes to \(url.absoluteString) (attempt \(attempt))")
-        urlSession.dataTask(with: request) { [weak self] _, response, error in
-            guard let self = self else { return }
-            let statusCode: Int
-            if let httpResponse = response as? HTTPURLResponse {
-                statusCode = httpResponse.statusCode
-                InternalLogger.debug("SDK event POST: \(statusCode), \(data.count) bytes")
-            } else if let error = error {
-                statusCode = 0
-                InternalLogger.debug("SDK event POST failed: \(error.localizedDescription)")
-            } else {
-                statusCode = 0
-            }
+        private func deliverWithRetry(url: URL, data: Data, batchId: String?, attempt: Int) {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.httpBody = data
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            InternalLogger.debug("Posting \(data.count) bytes to \(url.absoluteString) (attempt \(attempt))")
+            urlSession.dataTask(with: request) { [weak self] _, response, error in
+                guard let self = self else { return }
+                let statusCode: Int
+                if let httpResponse = response as? HTTPURLResponse {
+                    statusCode = httpResponse.statusCode
+                    InternalLogger.debug("SDK event POST: \(statusCode), \(data.count) bytes")
+                } else if let error = error {
+                    statusCode = 0
+                    InternalLogger.debug("SDK event POST failed: \(error.localizedDescription)")
+                } else {
+                    statusCode = 0
+                }
 
-            if statusCode >= 200 && statusCode < 300 {
-                if let batchId = batchId {
-                    self.persistence?.removeBatch(batchId)
-                }
-            } else {
-                let result = self.retryPolicy.shouldRetry(statusCode: statusCode, attempt: attempt)
-                if result.shouldRetry {
-                    let delaySeconds = Double(result.delayMs) / 1000.0
-                    DispatchQueue.global().asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
-                        self?.deliverWithRetry(url: url, data: data, batchId: batchId, attempt: attempt + 1)
+                if statusCode >= 200, statusCode < 300 {
+                    if let batchId = batchId {
+                        self.persistence?.removeBatch(batchId)
                     }
+                } else {
+                    let result = self.retryPolicy.shouldRetry(statusCode: statusCode, attempt: attempt)
+                    if result.shouldRetry {
+                        let delaySeconds = Double(result.delayMs) / 1000.0
+                        DispatchQueue.global().asyncAfter(deadline: .now() + delaySeconds) { [weak self] in
+                            self?.deliverWithRetry(url: url, data: data, batchId: batchId, attempt: attempt + 1)
+                        }
+                    }
+                    // If no more retries, leave batch on disk for next app launch replay
                 }
-                // If no more retries, leave batch on disk for next app launch replay
-            }
-        }.resume()
-    }
+            }.resume()
+        }
     #endif
 }

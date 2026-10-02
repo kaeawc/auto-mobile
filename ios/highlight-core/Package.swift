@@ -1,12 +1,17 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.3
 import PackageDescription
 
 let package = Package(
     name: "AutoMobileHighlightCore",
-    platforms: [.iOS(.v15), .macOS(.v13)],
+    platforms: [.iOS(.v17), .macOS(.v15)],
     products: [.library(name: "AutoMobileHighlightCore", targets: ["AutoMobileHighlightCore"])],
+    // Keep Swift 5 language mode until the strict-concurrency pass (#5839) finishes and v6 is enabled.
     targets: [
-        .target(name: "AutoMobileHighlightCore"),
-        .testTarget(name: "AutoMobileHighlightCoreTests", dependencies: ["AutoMobileHighlightCore"]),
+        .target(name: "AutoMobileHighlightCore", swiftSettings: [.swiftLanguageMode(.v5)]),
+        .testTarget(
+            name: "AutoMobileHighlightCoreTests",
+            dependencies: ["AutoMobileHighlightCore"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

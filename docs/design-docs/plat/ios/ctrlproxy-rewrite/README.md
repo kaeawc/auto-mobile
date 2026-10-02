@@ -111,10 +111,11 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
   need.** It is architecturally the _pre-rewrite ctrl-proxy state_: ~44 `@unchecked Sendable` + NSLock,
   ~20 mutable singletons, real flagged races (signal-handler globals; the `AutoMobileURLProtocol`
   Sendable error already in STATUS §5). **CI builds it macOS-only**, so its iOS UIKit `@MainActor`
-  surface is unchecked → true error count exceeds what a host build shows. With the project-wide **iOS 17
-  floor**, both `Mutex` and `OSAllocatedUnfairLock` are available. Likely warrants the same
-  parallel-target + parity-oracle playbook. First step: an _iOS-platform_
-  strict build to measure the real surface.
+  surface is unchecked → an _iOS-platform_ strict-complete build measured **165 unique diagnostics**
+  (150 UIKit main-actor isolation), versus **12 on the macOS host**. The **iOS 17 / macOS 15 floor**
+  is decided and applied (#5839, owner decision 2026-10-02): iOS 17 already shipped in #6773;
+  the SDK and highlight-core sub-package manifests were aligned here. Use **`OSAllocatedUnfairLock`**
+  for the concurrency pass; `Mutex` requires iOS 18.
 - **`ios/XCTestRunner`** (standalone MCP-client XCTest wrapper — the iOS analog of the Android JUnit
   runner; NOT an XCUITest harness, no `XCUIApplication`; no code coupling to ctrl-proxy) — **moderate,
   in-place.** Already tools-6.0/`.v5`. Work concentrates in 2 MCP-client classes (fields mutated from

@@ -331,6 +331,10 @@ setup() {
   cp "$FIXTURES/accessors/Multiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
   cp "$FIXTURES/module-extensions/Extensions.swift" "$AUTOMOBILE_IOS_API_SOURCES/AAA.swift"
   cp "$FIXTURES/module-extensions/Types.swift" "$AUTOMOBILE_IOS_API_SOURCES/ZZZ.swift"
+  cp "$FIXTURES/accessors/TypedThrows.swift" "$AUTOMOBILE_IOS_API_SOURCES/TypedThrows.swift"
+  cp "$FIXTURES/accessors/TypedThrowsMultiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/TypedThrowsMultiline.swift"
+  cp "$FIXTURES/accessors/Comments.swift" "$AUTOMOBILE_IOS_API_SOURCES/Comments.swift"
+  cp "$FIXTURES/accessors/CommentsMultiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/CommentsMultiline.swift"
   # These names sort differently under linguistic collation and byte order.
   cp "$FIXTURES/accessors/Inline.swift" "$AUTOMOBILE_IOS_API_SOURCES/a.swift"
   LC_ALL=C bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
@@ -340,4 +344,67 @@ setup() {
   cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/repeat.api"
   cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/utf8.api"
   cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/system.api"
+}
+
+@test "typed throws accessors match inline and multiline including qualified and generic types" {
+  cp "$FIXTURES/accessors/TypedThrows.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  cp "$FIXTURES/accessors/TypedThrowsMultiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$BATS_TEST_TMPDIR/multiline.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var typed: Int { get throws(E1) }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var effect: Int { get async throws(E1) }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var qualified: Int { get throws(Module.MyError) }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var generic: Int { get throws(Wrapper<A, B>) }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var invalidBefore: Int' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var invalidSetter: Int' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var invalidPrefix: Int' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var invalidCoroutine: Int' "$AUTOMOBILE_IOS_API_FILE"
+}
+
+@test "changing typed throws error types fails the API check for inline and multiline accessors" {
+  local fixture
+  for fixture in TypedThrows.swift TypedThrowsMultiline.swift; do
+    cp "$FIXTURES/accessors/$fixture" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+    bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+    sed 's/throws(E1)/throws(E2)/g' "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"
+    mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+    run bash "$SCRIPT" --check
+    [ "$status" -eq 1 ]
+    [[ "$output" == *'-  var typed: Int { get throws(E1) }'* ]]
+    [[ "$output" == *'+  var typed: Int { get throws(E2) }'* ]]
+    [[ "$output" == *'-  var effect: Int { get async throws(E1) }'* ]]
+    [[ "$output" == *'+  var effect: Int { get async throws(E2) }'* ]]
+  done
+}
+
+@test "commented inline and multiline protocol accessors produce identical dumps" {
+  cp "$FIXTURES/accessors/Comments.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  cp "$FIXTURES/accessors/CommentsMultiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$BATS_TEST_TMPDIR/multiline.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var value: Int { get set }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var line: Int { get set }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var block: Int { get set }' "$AUTOMOBILE_IOS_API_FILE"
+}
+
+@test "removing a setter from a commented inline accessor fails the API check" {
+  cp "$FIXTURES/accessors/Comments.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  sed 's@/\* setter is required \*/ set@/* setter is required */@' "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"
+  mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'-  var value: Int { get set }'* ]]
+  [[ "$output" == *'+  var value: Int { get }'* ]]
+}
+
+@test "comment stripping preserves comment-like text in accessor attribute strings" {
+  local fixture
+  for fixture in Comments.swift CommentsMultiline.swift; do
+    cp "$FIXTURES/accessors/$fixture" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+    bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+    grep -Fx '  var attributed: Int { @available(*, deprecated, message: "see http://x and /* text */") get set }' "$AUTOMOBILE_IOS_API_FILE"
+  done
 }

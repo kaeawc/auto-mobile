@@ -10,6 +10,8 @@ import type { SwipeOnDependencies } from "./swipeon/types";
 import { SwipeOn } from "./swipeon/SwipeOn";
 import type { IosScreenUnlocker, IosUnlockOptions } from "./WakeAndUnlock";
 
+const PRE_SWIPE_LOCK_PROBE_MAX_MS = 1_500;
+
 export interface IosUnlockActions {
   pressHome(timeoutMs: number, signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
   swipeUp(
@@ -65,12 +67,34 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     throwIfAborted(signal);
     await this.pressHomeBestEffort(remainingMs, signal);
     throwIfAborted(signal);
-    const swipeBudget = Math.min(5_000, remainingMs());
+    let swipeBudget = Math.min(5_000, remainingMs());
     if (swipeBudget <= 0) {
       throw new ActionableError(
         "wakeAndUnlock: iOS unlock budget exhausted before swipe; retry after the runner reconnects",
       );
     }
+    if (readUnlocked) {
+      const unlocked = await this.readUnlockedAfterWake({ readUnlocked, swipeBudget, signal });
+      if (unlocked === true) {
+        logger.info("[IosLockScreenUnlocker] device unlocked after wake; no swipe was needed");
+        return { success: true, warning: "device unlocked after wake; no swipe was needed" };
+      }
+      swipeBudget = Math.min(5_000, remainingMs());
+      if (swipeBudget <= 0) {
+        throw new ActionableError("wakeAndUnlock: iOS unlock budget exhausted before swipe");
+      }
+    }
+    return this.swipeAndDismiss({ remainingMs, signal, readUnlocked, swipeBudget });
+  }
+
+  private async swipeAndDismiss({
+    remainingMs,
+    signal,
+    readUnlocked,
+    swipeBudget,
+  }: IosUnlockOptions & {
+    swipeBudget: number;
+  }): Promise<{ success: boolean; error?: string; warning?: string }> {
     const swipeDeadline = this.timer.now() + swipeBudget;
     const fast = await this.swipe({
       timeoutMs: readUnlocked ? swipeBudget / 2 : swipeBudget,
@@ -83,7 +107,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       );
       return fast;
     }
-    const unlocked = await awaitWhileRequestIsLive(readUnlocked(), signal);
+    const unlocked = await awaitWhileRequestIsLive(readUnlocked({ phase: "afterSwipe" }), signal);
     if (unlocked === true) {
       logger.info("[IosLockScreenUnlocker] fast swipe unlocked the device");
       return fast;
@@ -102,6 +126,44 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       ...fallback,
       warning: "unlocked by the fallback swipe after the fast swipe had no effect",
     };
+  }
+
+  private async readUnlockedAfterWake({
+    readUnlocked,
+    swipeBudget,
+    signal,
+  }: {
+    readUnlocked: NonNullable<IosUnlockOptions["readUnlocked"]>;
+    swipeBudget: number;
+    signal?: AbortSignal;
+  }): Promise<boolean | undefined> {
+    const probeAbort = new AbortController();
+    try {
+      const unlocked = await raceWithDeadline(
+        () =>
+          readUnlocked({
+            phase: "afterWake",
+            signal: signal ? AbortSignal.any([signal, probeAbort.signal]) : probeAbort.signal,
+          }),
+        {
+          timer: this.timer,
+          signal,
+          // Reserve at least three quarters of the remaining budget for swipes.
+          timeoutMs: Math.min(PRE_SWIPE_LOCK_PROBE_MAX_MS, swipeBudget / 4),
+          label: "iOS post-wake lock-state probe",
+          onTimeout: () => probeAbort.abort(),
+        },
+      );
+      throwIfAborted(signal);
+      return unlocked;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(
+        `[IosLockScreenUnlocker] post-wake lock-state probe failed: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private async swipe({

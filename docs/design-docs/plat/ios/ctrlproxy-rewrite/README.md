@@ -171,6 +171,12 @@ line records the running phase and elapsed time (including queue wait), and the
 phase appears in the timeout error. When the real call returns, its final phase
 line also includes `phaseAtBound=...`, even below the slow threshold. The late
 response is discarded, while perf and failure-coordinator cleanup still runs.
+For swipes, both bound and final log lines additionally report
+`dispatch=xcuitest|synthesizedLockScreen`, `trackedApp=<cached bundle id>|none`, and
+`xcuitestEntered=true|false`, derived from whether `xcuitestGesture` began.
+The cached tracker is not an app-state query; XCUITest activity lines are not forwarded.
+Tracked-app anchoring and its implicit idle wait remain a hypothesis for stalled
+unlock swipes; explicit SpringBoard anchoring remains unbuilt pending device evidence.
 A failed unlock swipe followed by a confirmed unlocked lock state returns success
 with a warning containing the swipe error.
 

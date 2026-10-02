@@ -14,6 +14,7 @@ const device: BootedDevice = { deviceId: "ios-unlock", platform: "ios", name: "i
 
 class FakeIosActions implements IosUnlockActions {
   calls: string[] = [];
+  swipes: Array<{ timeoutMs: number; lockScreen?: true }> = [];
   homeResult: { success: boolean; error?: string } = { success: true };
   swipeResult: { success: boolean; error?: string; warning?: string } = { success: true };
 
@@ -23,9 +24,11 @@ class FakeIosActions implements IosUnlockActions {
   }
 
   async swipeUp(
-    _timeoutMs: number,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal; lockScreen?: true },
   ): Promise<{ success: boolean; error?: string; warning?: string }> {
     this.calls.push("swipe");
+    this.swipes.push({ timeoutMs, lockScreen: options?.lockScreen });
     return this.swipeResult;
   }
 }
@@ -320,6 +323,92 @@ describe("IosLockScreenUnlocker", () => {
 });
 
 describe("two-stage swipe budgets", () => {
+  test("unlocked after Home reads before any swipe and reports no swipe needed", async () => {
+    const timer = new FakeTimer();
+    const actions = new FakeIosActions();
+    const result = await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+      remainingMs: () => 5000 - timer.now(),
+      readUnlocked: async () => {
+        actions.calls.push("read");
+        return true;
+      },
+    });
+    expect(actions.calls).toEqual(["home", "read"]);
+    expect(actions.swipes).toEqual([]);
+    expect(result).toEqual({
+      success: true,
+      warning: "device unlocked after wake; no swipe was needed",
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  for (const state of [false, undefined, new Error("probe failed"), "rejected"]) {
+    test(`post-wake probe ${String(state)} still tries the fast swipe without false success`, async () => {
+      const timer = new FakeTimer();
+      const actions = new FakeIosActions();
+      actions.swipeResult = { success: false, error: "runner_busy" };
+      const result = await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+        remainingMs: () => 5000 - timer.now(),
+        readUnlocked: () => {
+          actions.calls.push("read");
+          if (state instanceof Error) {
+            throw state;
+          }
+          if (state === "rejected") {
+            return Promise.reject(new Error("probe rejected"));
+          }
+          return Promise.resolve(state);
+        },
+      });
+      expect(actions.calls).toEqual(["home", "read", "swipe"]);
+      expect(actions.swipes).toEqual([{ timeoutMs: 2500, lockScreen: true }]);
+      expect(result).toEqual({ success: false, error: "runner_busy" });
+    });
+  }
+
+  for (const remaining of [5000, 1000]) {
+    test(`hung post-wake probe reserves swipe budget (${remaining}ms remaining)`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const actions = new FakeIosActions();
+      actions.swipeResult = { success: false, error: "runner_busy" };
+      let probeSignal: AbortSignal | undefined;
+      const result = await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+        remainingMs: () => remaining - timer.now(),
+        readUnlocked: (options) => {
+          actions.calls.push("read");
+          probeSignal = options?.signal;
+          return new Promise(() => {});
+        },
+      });
+      expect(timer.now()).toBe(remaining / 4);
+      expect(probeSignal?.aborted).toBe(true);
+      expect(actions.swipes).toEqual([{ timeoutMs: (remaining * 3) / 8, lockScreen: true }]);
+      expect(result.success).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+  }
+
+  test("cancellation during the pre-swipe probe propagates without a swipe", async () => {
+    const timer = new FakeTimer();
+    const actions = new FakeIosActions();
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled");
+    await expect(
+      new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+        remainingMs: () => 5000,
+        signal: controller.signal,
+        readUnlocked: () => {
+          controller.abort(reason);
+          return new Promise(() => {});
+        },
+      }),
+    ).rejects.toThrow("Operation cancelled");
+    expect(actions.swipes).toEqual([]);
+    expect(timer.now()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("stage-local timeout aborts fast swipe and gives legacy swipe only the remainder", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -352,10 +441,13 @@ describe("two-stage swipe budgets", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const actions = new FakeIosActions();
+    let reads = 0;
     await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
       remainingMs: () => 5000 - timer.now(),
       readUnlocked: async () => {
-        await timer.sleep(5000);
+        if (++reads === 2) {
+          await timer.sleep(5000);
+        }
         return false;
       },
     });

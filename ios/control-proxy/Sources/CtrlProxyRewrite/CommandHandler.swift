@@ -774,9 +774,13 @@ final class CommandHandler: CommandHandling {
         try requireFinite(request.x2, field: "x2")
         try requireFinite(request.y2, field: "y2")
         let duration = request.duration ?? 300
+        let dispatch = swipeDispatchMode(lockScreen: request.lockScreen)
         try await performContextCheckedGesture(expected: request.frameContext, beforeOperation: checkDeadline) {
+            GesturePhaseDiagnostics.current?.annotateSwipe(
+                dispatch: dispatch, trackedApp: self.elementLocator.foregroundBundleId
+            )
             try checkDeadline()
-            switch swipeDispatchMode(lockScreen: request.lockScreen) {
+            switch dispatch {
             case .xcuitest:
                 try self.gesturePerformer.swipe(
                     startX: request.x1, startY: request.y1,

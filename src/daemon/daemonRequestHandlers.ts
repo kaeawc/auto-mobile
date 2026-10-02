@@ -249,7 +249,7 @@ export async function handleDaemonRequest(
         if (
           !currentSession ||
           currentSession !== session ||
-          manager.isAdmittedForAutomation?.(currentSession) === false
+          isSessionReleasing(manager, sessionId, currentSession)
         ) {
           return { success: false, error: `Session not found: ${sessionId}` };
         }

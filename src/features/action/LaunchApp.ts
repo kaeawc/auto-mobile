@@ -1099,7 +1099,7 @@ export class LaunchApp extends BaseVisualChange {
         // Use the first displayed metric as the TTI (time to first frame / interactive)
         if (displayedTimeMetrics.length > 0) {
           const firstMetric = displayedTimeMetrics[0];
-          setLastTtiMs(packageName, firstMetric.displayedTimeMs);
+          setLastTtiMs(this.device.deviceId, packageName, firstMetric.displayedTimeMs);
           logger.info(
             `[LaunchApp] Recorded TTI for ${packageName}: ${firstMetric.displayedTimeMs}ms`,
           );

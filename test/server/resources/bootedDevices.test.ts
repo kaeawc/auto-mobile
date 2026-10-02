@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import {
   afterAll,
@@ -56,6 +57,7 @@ import { notifyDeviceImageResourcesUpdated } from "../../../src/server/deviceIma
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
   let fakeDeviceUtils: FakeDeviceUtils;
 
   // Mock device data
@@ -88,6 +90,7 @@ describe("MCP Booted Device Resources", () => {
   };
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
   });
@@ -118,6 +121,7 @@ describe("MCP Booted Device Resources", () => {
     }
     // Reset to default device manager
     setDeviceManager(null);
+    restoreHermeticServer();
   });
 
   test("coalesces and caches the full Android booted-device resource snapshot", async () => {

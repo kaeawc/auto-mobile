@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import {
@@ -19,10 +20,12 @@ import { createTestDatabase } from "../../db/testDbHelper";
 
 describe("MCP Navigation Graph Resource", () => {
   let fixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
   let fakeGraph: FakeNavigationGraphManager;
   let sessionDb: Awaited<ReturnType<typeof createTestDatabase>>;
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
     // The migration template is process-local, so an isolated timing recheck
@@ -47,6 +50,7 @@ describe("MCP Navigation Graph Resource", () => {
     if (sessionDb) {
       await sessionDb.destroy();
     }
+    restoreHermeticServer();
   });
 
   test("re-registering the provider preserves other subsystems' graph listeners", () => {

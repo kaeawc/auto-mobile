@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, toolHasOutputSchema } from "../../../src/server/toolRegistry";
@@ -57,8 +58,10 @@ const listResult = z.object({
 
 describe("structuredContent gating (issue #2759)", () => {
   let fixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     ToolRegistry.register(
       NO_SCHEMA_TOOL,
       "throwaway tool without outputSchema",
@@ -89,6 +92,7 @@ describe("structuredContent gating (issue #2759)", () => {
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(NO_SCHEMA_TOOL);
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(SCHEMA_TOOL);
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
+    restoreHermeticServer();
   });
 
   const call = async (name: string) => {

@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -58,17 +59,28 @@ function exampleForSchema(schema: JsonSchema, depth = 0): unknown {
 }
 
 describe("advertised tool input strictness", () => {
+  let restoreHermeticServer: () => void;
+  let registered: Map<string, ReturnType<typeof ToolRegistry.getAllTools>[number]>;
+  let advertised: ReturnType<typeof ToolRegistry.getToolDefinitions>;
+
+  afterAll(() => restoreHermeticServer());
+
   beforeAll(() => {
+    restoreHermeticServer = installHermeticServerFixture();
     createMcpServer();
+    registered = new Map(
+      ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => [tool.name, tool]),
+    );
+    advertised = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).filter(
+      (definition) => definition.inputSchema.additionalProperties === false,
+    );
+    // Compile Zod's lazy parsers during setup; the test still parses every probe.
+    for (const definition of advertised) {
+      registered.get(definition.name)?.schema.safeParse(exampleForSchema(definition.inputSchema));
+    }
   });
 
   test("every tool advertising additionalProperties:false rejects an unknown root key", () => {
-    const registered = new Map(
-      ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => [tool.name, tool]),
-    );
-    const advertised = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).filter(
-      (definition) => definition.inputSchema.additionalProperties === false,
-    );
     const mismatches: string[] = [];
 
     expect(advertised.length).toBeGreaterThan(0);

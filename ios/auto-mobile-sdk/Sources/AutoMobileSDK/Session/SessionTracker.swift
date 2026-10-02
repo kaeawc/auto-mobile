@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Protocol for tracking user sessions based on app lifecycle.
 protocol SessionTracking: AnyObject, Sendable {
@@ -10,35 +11,38 @@ protocol SessionTracking: AnyObject, Sendable {
 
 /// Tracks user sessions based on app lifecycle.
 /// A new session starts on first foreground or after timeout while backgrounded.
-final class SessionTracker: SessionTracking, @unchecked Sendable {
-    enum State { case active, backgrounded, ended }
+final class SessionTracker: SessionTracking, Sendable {
+    enum State: Sendable { case active, backgrounded, ended }
 
-    private let lock = NSLock()
+    private struct LockedState: Sendable {
+        var sessionId: String?
+        var state: State = .ended
+        var timeoutTimer: (any TimerScheduling)?
+        /// Monotonic token identifying the current background cycle. Bumped on every
+        /// state transition so a timeout callback scheduled in an earlier cycle can be
+        /// recognized as stale and ignored — otherwise a timer from a previous
+        /// background could fire after a foreground/background round-trip, see the state
+        /// as `.backgrounded` again, and wrongly end the current session (the
+        /// `AutoMobileHangs` generation-guard pattern).
+        var timerGeneration = 0
+    }
+
+    private let lock = OSAllocatedUnfairLock(initialState: LockedState())
     private let timeoutMs: Int
-    private let uuidProvider: () -> String
-    private let timerFactory: () -> any TimerScheduling
-    private var _sessionId: String?
-    private var state: State = .ended
-    private var timeoutTimer: (any TimerScheduling)?
-    /// Monotonic token identifying the current background cycle. Bumped on every
-    /// state transition so a timeout callback scheduled in an earlier cycle can be
-    /// recognized as stale and ignored — otherwise a timer from a previous
-    /// background could fire after a foreground/background round-trip, see the state
-    /// as `.backgrounded` again, and wrongly end the current session (the
-    /// `AutoMobileHangs` generation-guard pattern).
-    private var timerGeneration = 0
+    private let uuidProvider: @Sendable () -> String
+    private let timerFactory: @Sendable () -> any TimerScheduling
 
     convenience init(
-        timeoutMs: Int = 30_000,
-        uuidProvider: @escaping () -> String = { UUID().uuidString }
+        timeoutMs: Int = 30000,
+        uuidProvider: @escaping @Sendable () -> String = { UUID().uuidString }
     ) {
         self.init(timeoutMs: timeoutMs, uuidProvider: uuidProvider, timerFactory: { GCDTimer() })
     }
 
     init(
         timeoutMs: Int,
-        uuidProvider: @escaping () -> String,
-        timerFactory: @escaping () -> any TimerScheduling
+        uuidProvider: @escaping @Sendable () -> String,
+        timerFactory: @escaping @Sendable () -> any TimerScheduling
     ) {
         self.timeoutMs = timeoutMs
         self.uuidProvider = uuidProvider
@@ -46,65 +50,61 @@ final class SessionTracker: SessionTracking, @unchecked Sendable {
     }
 
     func currentSessionId() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _sessionId
+        lock.withLock { $0.sessionId }
     }
 
     func onForeground() {
-        lock.lock()
-        timeoutTimer?.cancel()
-        timeoutTimer = nil
-        // Invalidate any in-flight timeout callback from the cycle we're leaving.
-        timerGeneration += 1
-        switch state {
-        case .ended:
-            _sessionId = uuidProvider()
-            state = .active
-        case .backgrounded:
-            state = .active
-        case .active:
-            break
+        lock.withLock { state in
+            state.timeoutTimer?.cancel()
+            state.timeoutTimer = nil
+            // Invalidate any in-flight timeout callback from the cycle we're leaving.
+            state.timerGeneration += 1
+            switch state.state {
+            case .ended:
+                state.sessionId = uuidProvider()
+                state.state = .active
+            case .backgrounded:
+                state.state = .active
+            case .active:
+                break
+            }
         }
-        lock.unlock()
     }
 
     func onBackground() {
-        lock.lock()
-        guard state == .active else { lock.unlock(); return }
-        state = .backgrounded
-        timerGeneration += 1
-        let generation = timerGeneration
-        let timer = timerFactory()
-        timeoutTimer = timer
-        lock.unlock()
+        let transition = lock.withLock { state -> (timer: any TimerScheduling, generation: Int)? in
+            guard state.state == .active else { return nil }
+            state.state = .backgrounded
+            state.timerGeneration += 1
+            let timer = timerFactory()
+            state.timeoutTimer = timer
+            return (timer, state.timerGeneration)
+        }
+        guard let (timer, generation) = transition else { return }
 
         timer.schedule(intervalMs: timeoutMs) { [weak self] in
             guard let self else { return }
-            self.lock.lock()
-            // Only the timer for the current background cycle may end the session. A
-            // stale timer (a foreground/background happened after it was scheduled) has
-            // an older generation and is ignored, so it can't end a session that is now
-            // active or belongs to a newer cycle.
-            guard generation == self.timerGeneration, self.state == .backgrounded else {
-                self.lock.unlock()
-                return
+            self.lock.withLock { state in
+                // Only the timer for the current background cycle may end the session. A
+                // stale timer (a foreground/background happened after it was scheduled) has
+                // an older generation and is ignored, so it can't end a session that is now
+                // active or belongs to a newer cycle.
+                guard generation == state.timerGeneration, state.state == .backgrounded else { return }
+                state.state = .ended
+                state.sessionId = nil
+                state.timeoutTimer?.cancel()
+                state.timeoutTimer = nil
             }
-            self.state = .ended
-            self._sessionId = nil
-            self.timeoutTimer?.cancel()
-            self.timeoutTimer = nil
-            self.lock.unlock()
         }
     }
 
     func shutdown() {
-        lock.lock()
-        timeoutTimer?.cancel()
-        timeoutTimer = nil
-        timerGeneration += 1
-        state = .ended
-        _sessionId = nil
-        lock.unlock()
+        lock.withLock { state in
+            state.timeoutTimer?.cancel()
+            state.timeoutTimer = nil
+            state.timerGeneration += 1
+            state.state = .ended
+            state.sessionId = nil
+        }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Protocol for persisting SDK event batches to disk for reliable delivery.
 protocol EventPersisting: AnyObject, Sendable {
@@ -13,16 +14,16 @@ protocol EventPersisting: AnyObject, Sendable {
 }
 
 /// On-disk representation of a single event: type discriminator + Codable payload bytes.
-struct PersistedEvent: Codable {
+struct PersistedEvent: Codable, Sendable {
     let eventType: SdkEventType
     /// The JSON-encoded event payload (base64 when serialized via JSONEncoder since Data is Codable).
     let payload: Data
 }
 
 /// File-backed event persistence using JSON serialization.
-final class FileEventPersistence: EventPersisting, @unchecked Sendable {
+final class FileEventPersistence: EventPersisting, Sendable {
     private let directory: URL
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock<Void>()
     private let dateProvider: DateProvider
 
     init(directory: URL, dateProvider: DateProvider = SystemDateProvider()) {
@@ -43,22 +44,23 @@ final class FileEventPersistence: EventPersisting, @unchecked Sendable {
         }
         guard !persisted.isEmpty else { return nil }
 
-        lock.lock()
-        defer { lock.unlock() }
-        guard let data = try? JSONEncoder().encode(persisted) else { return nil }
-        do {
-            try data.write(to: fileURL, options: .atomic)
-            return batchId
-        } catch {
-            return nil
+        return lock.withLock {
+            guard let data = try? JSONEncoder().encode(persisted) else { return nil }
+            do {
+                try data.write(to: fileURL, options: .atomic)
+                return batchId
+            } catch {
+                return nil
+            }
         }
     }
 
     func loadPending() -> [(batchId: String, events: [any SdkEvent])] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        lock.withLock {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            )
             .filter({ $0.lastPathComponent.hasPrefix("events_") && $0.pathExtension == "json" })
             .sorted(by: { file1, file2 in
                 let ts1 = Self.extractTimestamp(from: file1.lastPathComponent) ?? 0
@@ -66,44 +68,48 @@ final class FileEventPersistence: EventPersisting, @unchecked Sendable {
                 if ts1 != ts2 { return ts1 < ts2 }
                 return file1.lastPathComponent < file2.lastPathComponent
             })
-        else { return [] }
+            else { return [] }
 
-        let decoder = JSONDecoder()
-        return files.compactMap { fileURL in
-            guard let data = try? Data(contentsOf: fileURL),
-                  let persisted = try? decoder.decode([PersistedEvent].self, from: data)
-            else {
-                try? FileManager.default.removeItem(at: fileURL) // corrupt file
-                return nil
-            }
-            let batchId = Self.extractBatchId(from: fileURL.lastPathComponent)
+            let decoder = JSONDecoder()
+            return files.compactMap { fileURL in
+                guard let data = try? Data(contentsOf: fileURL),
+                      let persisted = try? decoder.decode([PersistedEvent].self, from: data)
+                else {
+                    try? FileManager.default.removeItem(at: fileURL) // corrupt file
+                    return nil
+                }
+                let batchId = Self.extractBatchId(from: fileURL.lastPathComponent)
 
-            let events: [any SdkEvent] = persisted.compactMap { entry in
-                decodeEvent(type: entry.eventType, data: entry.payload, decoder: decoder)
+                let events: [any SdkEvent] = persisted.compactMap { entry in
+                    decodeEvent(type: entry.eventType, data: entry.payload, decoder: decoder)
+                }
+                guard !events.isEmpty else { return nil }
+                return (batchId, events)
             }
-            guard !events.isEmpty else { return nil }
-            return (batchId, events)
         }
     }
 
     func removeBatch(_ batchId: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        let fileURL = directory.appendingPathComponent("events_\(batchId).json")
-        try? FileManager.default.removeItem(at: fileURL)
+        lock.withLock {
+            let fileURL = directory.appendingPathComponent("events_\(batchId).json")
+            try? FileManager.default.removeItem(at: fileURL)
+        }
     }
 
     func cleanup(maxAgeDays: Int = 7) {
-        lock.lock()
-        defer { lock.unlock() }
-        let cutoff = dateProvider.now().timeIntervalSince1970 * 1000 - Double(maxAgeDays * 24 * 60 * 60 * 1000)
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        lock.withLock {
+            let cutoff = dateProvider.now().timeIntervalSince1970 * 1000 - Double(maxAgeDays * 24 * 60 * 60 * 1000)
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            )
             .filter({ $0.lastPathComponent.hasPrefix("events_") })
-        else { return }
+            else { return }
 
-        for file in files {
-            if let ts = Self.extractTimestamp(from: file.lastPathComponent), ts < cutoff {
-                try? FileManager.default.removeItem(at: file)
+            for file in files {
+                if let ts = Self.extractTimestamp(from: file.lastPathComponent), ts < cutoff {
+                    try? FileManager.default.removeItem(at: file)
+                }
             }
         }
     }

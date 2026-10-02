@@ -1,5 +1,5 @@
 import Foundation
-import os.log
+import os
 
 /// A named log filter with optional regex patterns for tag and message, plus a minimum log level.
 ///
@@ -53,17 +53,16 @@ public struct LogFilter: Sendable {
 /// endpoint already reads from `OSLogStore`).
 ///
 /// Severity level mapping: Android `wtf` corresponds to iOS `fault`.
-public final class AutoMobileLog: @unchecked Sendable {
+public final class AutoMobileLog: Sendable {
     public static let shared = AutoMobileLog()
 
     private let logger = os.Logger(subsystem: "dev.jasonpearson.automobile", category: "sdk")
-    private let lock = NSLock()
-    private var _filters: [String: LogFilter] = [:]
+    private let filters = OSAllocatedUnfairLock<[String: LogFilter]>(initialState: [:])
 
     private init() {}
 
     /// Called by AutoMobileSDK.initialize; kept for interface compatibility.
-    func initialize(bundleId: String?, buffer: some EventBuffering) {
+    func initialize(bundleId _: String?, buffer _: some EventBuffering) {
         // Buffer is intentionally not stored — filters gate OSLogReader output only.
         // Buffering here would cause double-emit since CtrlProxy's /sdk-events
         // endpoint already merges SDK-buffered events with OSLogStore output.
@@ -85,30 +84,22 @@ public final class AutoMobileLog: @unchecked Sendable {
         minLevel: LogLevel = .verbose
     ) {
         let filter = LogFilter(name: name, tagPattern: tagPattern, messagePattern: messagePattern, minLevel: minLevel)
-        lock.lock()
-        _filters[name] = filter
-        lock.unlock()
+        filters.withLock { $0[name] = filter }
     }
 
     /// Removes the filter with the given name. No-op if the name is not registered.
     public func removeFilter(name: String) {
-        lock.lock()
-        _filters.removeValue(forKey: name)
-        lock.unlock()
+        filters.withLock { _ = $0.removeValue(forKey: name) }
     }
 
     /// Removes all registered filters.
     public func clearFilters() {
-        lock.lock()
-        _filters.removeAll()
-        lock.unlock()
+        filters.withLock { $0.removeAll() }
     }
 
     /// Returns a snapshot of the currently registered filter names.
     public var filterNames: [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return Array(_filters.keys)
+        filters.withLock { Array($0.keys) }
     }
 
     // MARK: - Log Methods
@@ -119,35 +110,39 @@ public final class AutoMobileLog: @unchecked Sendable {
     }
 
     public func v(_ tag: String? = nil, _ message: String) {
-        logger.debug("\(self.formatted(tag, message), privacy: .public)")
+        let text = formatted(tag, message)
+        logger.debug("\(text, privacy: .public)")
     }
 
     public func d(_ tag: String? = nil, _ message: String) {
-        logger.debug("\(self.formatted(tag, message), privacy: .public)")
+        let text = formatted(tag, message)
+        logger.debug("\(text, privacy: .public)")
     }
 
     public func i(_ tag: String? = nil, _ message: String) {
-        logger.info("\(self.formatted(tag, message), privacy: .public)")
+        let text = formatted(tag, message)
+        logger.info("\(text, privacy: .public)")
     }
 
     public func w(_ tag: String? = nil, _ message: String) {
-        logger.warning("\(self.formatted(tag, message), privacy: .public)")
+        let text = formatted(tag, message)
+        logger.warning("\(text, privacy: .public)")
     }
 
     public func e(_ tag: String? = nil, _ message: String) {
-        logger.error("\(self.formatted(tag, message), privacy: .public)")
+        let text = formatted(tag, message)
+        logger.error("\(text, privacy: .public)")
     }
 
     public func fault(_ tag: String? = nil, _ message: String) {
-        logger.fault("\(self.formatted(tag, message), privacy: .public)")
+        let text = formatted(tag, message)
+        logger.fault("\(text, privacy: .public)")
     }
 
     // MARK: - Testing Support
 
     /// Called by AutoMobileSDK.reset; kept for interface compatibility.
-    internal func reset() {
-        lock.lock()
-        _filters.removeAll()
-        lock.unlock()
+    func reset() {
+        filters.withLock { $0.removeAll() }
     }
 }

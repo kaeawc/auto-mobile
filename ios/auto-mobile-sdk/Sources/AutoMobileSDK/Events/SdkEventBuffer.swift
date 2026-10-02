@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Protocol for event buffering to allow faking in tests.
 protocol EventBuffering: AnyObject, Sendable {
@@ -11,16 +12,19 @@ protocol EventBuffering: AnyObject, Sendable {
 }
 
 /// Thread-safe event buffer that flushes on capacity or timer.
-final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
+final class SdkEventBuffer: EventBuffering, Sendable {
+    private struct State: Sendable {
+        var buffer: [any SdkEvent] = []
+        var timer: (any TimerScheduling)?
+        var isBufferEnabled = true
+    }
+
     private let maxBufferSize: Int
     private let maxPendingEvents: Int
     private let flushIntervalMs: Int
     private let onFlush: @Sendable ([any SdkEvent]) throws -> Void
-    private let lock = NSLock()
-    private var buffer: [any SdkEvent] = []
-    private var timer: (any TimerScheduling)?
-    private let timerFactory: () -> any TimerScheduling
-    private var _isBufferEnabled = true
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let timerFactory: @Sendable () -> any TimerScheduling
     private let dropCounter: (any DropCounting)?
     private let processors: [any EventProcessing]
 
@@ -29,7 +33,7 @@ final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         flushIntervalMs: Int = 500,
         maxPendingEvents: Int = 500,
         processors: [any EventProcessing] = [],
-        timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() },
+        timerFactory: @escaping @Sendable () -> any TimerScheduling = { GCDTimer() },
         dropCounter: (any DropCounting)? = nil,
         onFlush: @escaping @Sendable ([any SdkEvent]) throws -> Void
     ) {
@@ -44,45 +48,38 @@ final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
 
     var isBufferEnabled: Bool {
         get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _isBufferEnabled
+            state.withLock { $0.isBufferEnabled }
         }
         set {
-            lock.lock()
-            _isBufferEnabled = newValue
-            lock.unlock()
+            state.withLock { $0.isBufferEnabled = newValue }
         }
     }
 
     func start() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard timer == nil else { return }
-        let t = timerFactory()
-        timer = t
-        t.schedule(intervalMs: flushIntervalMs) { [weak self] in
-            self?.flush()
+        state.withLock { state in
+            guard state.timer == nil else { return }
+            let t = timerFactory()
+            state.timer = t
+            t.schedule(intervalMs: flushIntervalMs) { [weak self] in
+                self?.flush()
+            }
         }
     }
 
     /// Stop the periodic flush timer without flushing remaining events.
     func stop() {
-        lock.lock()
-        defer { lock.unlock() }
-        timer?.cancel()
-        timer = nil
+        state.withLock { state in
+            state.timer?.cancel()
+            state.timer = nil
+        }
     }
 
     func add(_ event: any SdkEvent) {
         // Check disabled state first, before running processors
-        lock.lock()
-        guard _isBufferEnabled else {
-            lock.unlock()
+        guard isBufferEnabled else {
             dropCounter?.increment(.disabled)
             return
         }
-        lock.unlock()
 
         // Run processor chain outside lock
         var current: (any SdkEvent)? = event
@@ -95,38 +92,36 @@ final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
             return
         }
 
-        var shouldFlush = false
-        var didOverflow = false
-        lock.lock()
-        guard _isBufferEnabled else {
-            lock.unlock()
+        let result = state.withLock { state -> (disabled: Bool, didOverflow: Bool, shouldFlush: Bool) in
+            guard state.isBufferEnabled else { return (true, false, false) }
+            var didOverflow = false
+            if maxPendingEvents > 0, state.buffer.count >= maxPendingEvents {
+                state.buffer.removeFirst()
+                didOverflow = true
+            }
+            state.buffer.append(processed)
+            return (false, didOverflow, state.buffer.count >= maxBufferSize)
+        }
+        if result.disabled {
             dropCounter?.increment(.disabled)
             return
         }
-        if maxPendingEvents > 0, buffer.count >= maxPendingEvents {
-            buffer.removeFirst()
-            didOverflow = true
-        }
-        buffer.append(processed)
-        shouldFlush = buffer.count >= maxBufferSize
-        lock.unlock()
-        if didOverflow {
+        if result.didOverflow {
             dropCounter?.increment(.bufferOverflow)
         }
-        if shouldFlush {
+        if result.shouldFlush {
             flush()
         }
     }
 
     func flush() {
-        lock.lock()
-        guard !buffer.isEmpty else {
-            lock.unlock()
-            return
+        let events = state.withLock { state in
+            guard !state.buffer.isEmpty else { return [any SdkEvent]() }
+            let events = state.buffer
+            state.buffer.removeAll(keepingCapacity: true)
+            return events
         }
-        let events = buffer
-        buffer.removeAll(keepingCapacity: true)
-        lock.unlock()
+        guard !events.isEmpty else { return }
         do {
             try onFlush(events)
         } catch {
@@ -135,12 +130,13 @@ final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     }
 
     func shutdown() {
-        lock.lock()
-        timer?.cancel()
-        timer = nil
-        let remaining = buffer
-        buffer.removeAll()
-        lock.unlock()
+        let remaining = state.withLock { state in
+            state.timer?.cancel()
+            state.timer = nil
+            let remaining = state.buffer
+            state.buffer.removeAll()
+            return remaining
+        }
         if !remaining.isEmpty {
             do {
                 try onFlush(remaining)
@@ -160,8 +156,8 @@ protocol TimerScheduling: AnyObject, Sendable {
 }
 
 /// GCD-based timer implementation.
-final class GCDTimer: TimerScheduling, @unchecked Sendable {
-    private var source: DispatchSourceTimer?
+final class GCDTimer: TimerScheduling, Sendable {
+    private let source = OSAllocatedUnfairLock<DispatchSourceTimer?>(initialState: nil)
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.timer")
 
     init() {}
@@ -174,15 +170,17 @@ final class GCDTimer: TimerScheduling, @unchecked Sendable {
         )
         source.setEventHandler(handler: block)
         source.resume()
-        self.source = source
+        self.source.withLock { $0 = source }
     }
 
     func cancel() {
-        source?.cancel()
-        source = nil
+        source.withLock { source in
+            source?.cancel()
+            source = nil
+        }
     }
 
     deinit {
-        source?.cancel()
+        source.withLock { _ = $0?.cancel() }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Reason an event was dropped by the SDK.
 public enum DropReason: String, Codable, Sendable, CaseIterable {
@@ -20,40 +21,31 @@ protocol DropCounting: AnyObject, Sendable {
 
 extension DropCounting {
     func increment(_ reason: DropReason, count: Int) {
-        for _ in 0..<count {
+        for _ in 0 ..< count {
             increment(reason)
         }
     }
 }
 
 /// Thread-safe default implementation of ``DropCounting``.
-final class DefaultDropCounter: DropCounting, @unchecked Sendable {
-    private let lock = NSLock()
-    private var counts: [DropReason: Int] = [:]
+final class DefaultDropCounter: DropCounting, Sendable {
+    private let counts = OSAllocatedUnfairLock<[DropReason: Int]>(initialState: [:])
 
     init() {}
 
     func increment(_ reason: DropReason) {
-        lock.lock()
-        counts[reason, default: 0] += 1
-        lock.unlock()
+        counts.withLock { $0[reason, default: 0] += 1 }
     }
 
     func increment(_ reason: DropReason, count: Int) {
-        lock.lock()
-        counts[reason, default: 0] += count
-        lock.unlock()
+        counts.withLock { $0[reason, default: 0] += count }
     }
 
     func snapshot() -> [DropReason: Int] {
-        lock.lock()
-        defer { lock.unlock() }
-        return counts
+        counts.withLock { $0 }
     }
 
     func reset() {
-        lock.lock()
-        counts.removeAll()
-        lock.unlock()
+        counts.withLock { $0.removeAll() }
     }
 }

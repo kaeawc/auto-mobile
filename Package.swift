@@ -4,7 +4,7 @@ import PackageDescription
 /// This root manifest is the published SPM entry point (consumers add the repo URL and pick the
 /// `XCTestRunner` / `AutoMobileSDK` products). The `XCTestRunner` target compiles the same sources as
 /// ios/XCTestRunner, which now depend on Tachikoma for AI-assisted recovery — so the dependency,
-/// Swift 6.0 tools, and the iOS 17 / macOS 14 floor are declared here too. Existing sources keep
+/// Swift 6.0 tools, and the iOS 17 / macOS 15 floor are declared here too. Existing sources keep
 /// compiling in the Swift 5 language mode via `.swiftLanguageMode(.v5)`.
 let package = Package(
     name: "auto-mobile",

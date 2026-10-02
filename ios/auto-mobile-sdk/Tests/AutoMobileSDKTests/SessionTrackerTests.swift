@@ -1,20 +1,24 @@
-import XCTest
 @testable import AutoMobileSDK
+import os
+import XCTest
 
 final class SessionTrackerTests: XCTestCase {
-
     private func makeTracker(
-        timeoutMs: Int = 30_000,
+        timeoutMs: Int = 30000,
         uuidSequence: [String] = ["session-1", "session-2", "session-3"]
-    ) -> (SessionTracker, FakeTimer) {
-        var index = 0
+    )
+        -> (SessionTracker, FakeTimer)
+    {
+        let index = OSAllocatedUnfairLock(initialState: 0)
         let fakeTimer = FakeTimer()
         let tracker = SessionTracker(
             timeoutMs: timeoutMs,
             uuidProvider: {
-                let id = uuidSequence[min(index, uuidSequence.count - 1)]
-                index += 1
-                return id
+                index.withLock { index in
+                    let id = uuidSequence[min(index, uuidSequence.count - 1)]
+                    index += 1
+                    return id
+                }
             },
             timerFactory: { fakeTimer }
         )
@@ -109,6 +113,7 @@ final class SessionTrackerTests: XCTestCase {
         func schedule(intervalMs _: Int, block: @escaping @Sendable () -> Void) {
             lock.lock(); self.block = block; lock.unlock()
         }
+
         // A callback already dispatched keeps running past cancel; do NOT clear it.
         func cancel() {}
         func fireStale() {
@@ -122,17 +127,19 @@ final class SessionTrackerTests: XCTestCase {
     /// generation guard the stale timer sees `state == .backgrounded` again and wrongly
     /// ends the live session, orphaning the current cycle's timer.
     func testStaleTimerDoesNotEndCurrentSession() {
-        var timers: [DispatchedTimer] = []
-        var counter = 0
+        let timers = OSAllocatedUnfairLock<[DispatchedTimer]>(initialState: [])
+        let counter = OSAllocatedUnfairLock(initialState: 0)
         let tracker = SessionTracker(
-            timeoutMs: 30_000,
+            timeoutMs: 30000,
             uuidProvider: {
-                counter += 1
-                return "session-\(counter)"
+                counter.withLock { counter in
+                    counter += 1
+                    return "session-\(counter)"
+                }
             },
             timerFactory: {
                 let timer = DispatchedTimer()
-                timers.append(timer)
+                timers.withLock { $0.append(timer) }
                 return timer
             }
         )
@@ -142,12 +149,13 @@ final class SessionTrackerTests: XCTestCase {
         tracker.onForeground() // back to active (session-1 continues); cancel can't stop timers[0]
         tracker.onBackground() // timers[1] scheduled — the current cycle
 
-        XCTAssertEqual(timers.count, 2)
+        let scheduledTimers = timers.withLock { $0 }
+        XCTAssertEqual(scheduledTimers.count, 2)
 
         // Fire the STALE timer from the first cycle — its callback was "already
         // dispatched" before the round-trip. Without the generation guard it sees
         // state == .backgrounded and ends session-1; the guard rejects it by generation.
-        timers[0].fireStale()
+        scheduledTimers[0].fireStale()
         XCTAssertEqual(
             tracker.currentSessionId(),
             "session-1",
@@ -155,8 +163,7 @@ final class SessionTrackerTests: XCTestCase {
         )
 
         // The current cycle's timer still ends the session correctly.
-        timers[1].fireStale()
+        scheduledTimers[1].fireStale()
         XCTAssertNil(tracker.currentSessionId(), "the current cycle's timer ends the session")
     }
-
 }

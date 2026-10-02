@@ -5149,7 +5149,7 @@ describe("DevicePool", () => {
       try {
         manager.childProcess.emit("exit", 0, null);
         // The ignored exit has no completion signal. Drain its bounded microtask work.
-        await drainMicrotasks(1_000);
+        await drainMicrotasks(96);
 
         expect(releaseCalls).toEqual([]);
         expect(devicePool.getDevice("emulator-5554")).toBe(reservation.device);
@@ -5820,7 +5820,7 @@ describe("DevicePool", () => {
 
         manager.childProcesses[0]!.emit("exit", 1, null);
         // The ignored exit has no completion signal. Drain its bounded microtask work.
-        await drainMicrotasks(1_000);
+        await drainMicrotasks(72);
 
         expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-2");
         expect(sessionManager.getSession("session-2")).not.toBeNull();

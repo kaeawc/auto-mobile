@@ -234,6 +234,9 @@ class WebSocketServer(
     add("ime_key_events_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     add("full_command_set_v1")
+    // Every response to a request carrying requestId echoes it, including hierarchy_update for
+    // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
+    add("request_id_echo_v1")
   }
 
   @Volatile private var server: EmbeddedServer<*, *>? = null

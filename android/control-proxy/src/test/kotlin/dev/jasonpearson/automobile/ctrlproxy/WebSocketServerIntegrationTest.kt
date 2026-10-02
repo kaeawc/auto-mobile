@@ -251,6 +251,10 @@ class WebSocketServerIntegrationTest {
             "Should advertise gesture display routing",
             supportedCommands.contains("gesture_display_id_v1"),
           )
+          assertTrue(
+            "Should advertise request ID echo",
+            supportedCommands.contains("request_id_echo_v1"),
+          )
           assertFalse(
             "Should not advertise iOS-only request_press_key",
             supportedCommands.contains("request_press_key"),

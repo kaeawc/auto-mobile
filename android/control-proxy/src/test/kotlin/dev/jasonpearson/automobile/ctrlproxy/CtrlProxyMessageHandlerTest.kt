@@ -233,6 +233,7 @@ class CtrlProxyMessageHandlerTest {
       )
     assertGuarded(response, "x2")
     assertTrue(response is SwipeResult)
+    assertEquals("s", (response as SwipeResult).requestId)
   }
 
   @Test
@@ -250,6 +251,7 @@ class CtrlProxyMessageHandlerTest {
       )
     assertGuarded(response, "y1")
     assertTrue(response is SwipeResult)
+    assertEquals("tf", (response as SwipeResult).requestId)
   }
 
   @Test
@@ -260,6 +262,7 @@ class CtrlProxyMessageHandlerTest {
       )
     assertGuarded(response, "y2")
     assertTrue(response is DragResult)
+    assertEquals("d", (response as DragResult).requestId)
   }
 
   @Test
@@ -276,6 +279,7 @@ class CtrlProxyMessageHandlerTest {
       )
     assertGuarded(response, "centerX")
     assertTrue(response is PinchResult)
+    assertEquals("p", (response as PinchResult).requestId)
   }
 
   // AC #4: rotationDegrees is a non-coordinate Float that flows to the gesture-path math; a
@@ -296,6 +300,7 @@ class CtrlProxyMessageHandlerTest {
       )
     assertGuarded(response, "rotationDegrees")
     assertTrue(response is PinchResult)
+    assertEquals("p", (response as PinchResult).requestId)
   }
 
   // Parametrized: pin EVERY coordinate field across every family — each field, individually forced

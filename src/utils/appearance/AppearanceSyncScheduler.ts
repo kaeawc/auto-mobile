@@ -5,8 +5,10 @@ import { applyAppearanceToDevice } from "../deviceAppearance";
 import { logger } from "../logger";
 import { getAppearanceConfig, resolveAppearanceMode } from "../../server/appearanceManager";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 
 const DEFAULT_SYNC_INTERVAL_MS = 10000;
+export const DEFAULT_APPEARANCE_APPLY_DEADLINE_MS = 10_000;
 
 interface AppearanceSyncTarget extends BootedDevice {
   incarnation?: number;
@@ -23,6 +25,7 @@ interface AppearanceSyncDependencies {
   getTargets: () => AppearanceSyncTarget[];
   apply: typeof applyAppearanceToDevice;
   isEnabled?: () => boolean;
+  applyDeadlineMs?: number;
 }
 
 export interface AppearanceSyncScope {
@@ -33,6 +36,7 @@ export interface AppearanceSyncScope {
 export class AppearanceSyncScheduler {
   private intervalHandle: NodeJS.Timeout | null = null;
   private lastAppliedModes = new Map<string, AppliedAppearance>();
+  private readonly inFlightApplies = new Map<string, Promise<void>>();
   private pending: Promise<void> | null = null;
   private readonly timer: Timer;
   private readonly dependencies: AppearanceSyncDependencies;
@@ -86,8 +90,7 @@ export class AppearanceSyncScheduler {
       }
       const mode = await this.dependencies.resolveMode(config);
       if (!this.stopped) {
-        await this.dependencies.apply(device, mode);
-        this.lastAppliedModes.set(device.deviceId, { mode, incarnation: device.incarnation });
+        await this.applyToDevice(device, mode);
       }
     } catch (error) {
       logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
@@ -102,6 +105,7 @@ export class AppearanceSyncScheduler {
     }
     await this.pending;
     this.lastAppliedModes.clear();
+    // Uncancellable applies stay tracked until settlement, including across restarts.
   }
 
   async trigger(): Promise<void> {
@@ -159,16 +163,44 @@ export class AppearanceSyncScheduler {
         continue;
       }
       try {
-        await this.dependencies.apply(device, mode);
-        if (!this.stopped) {
-          this.lastAppliedModes.set(device.deviceId, {
-            mode,
-            incarnation: device.incarnation,
-          });
-        }
+        await this.applyToDevice(device, mode);
       } catch (error) {
         logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
       }
+    }
+  }
+
+  private async applyToDevice(device: AppearanceSyncTarget, mode: AppearanceMode): Promise<void> {
+    if (this.inFlightApplies.has(device.deviceId)) {
+      // A timed-out apply cannot be cancelled; a later tick can retry after it settles.
+      logger.debug(`[Appearance] Skipping ${device.deviceId}: appearance apply still in flight`);
+      return;
+    }
+
+    let timedOut = false;
+    const apply = this.dependencies.apply(device, mode);
+    this.inFlightApplies.set(device.deviceId, apply);
+    void apply.then(
+      () => {
+        this.inFlightApplies.delete(device.deviceId);
+      },
+      (error: unknown) => {
+        this.inFlightApplies.delete(device.deviceId);
+        if (timedOut) {
+          logger.warn(`[Appearance] Apply failed after deadline for ${device.deviceId}`, error);
+        }
+      },
+    );
+    await raceWithDeadline(apply, {
+      timer: this.timer,
+      timeoutMs: this.dependencies.applyDeadlineMs ?? DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
+      label: `Appearance apply for ${device.deviceId}`,
+      onTimeout: () => {
+        timedOut = true;
+      },
+    });
+    if (!this.stopped) {
+      this.lastAppliedModes.set(device.deviceId, { mode, incarnation: device.incarnation });
     }
   }
 

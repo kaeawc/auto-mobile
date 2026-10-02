@@ -5,14 +5,24 @@
  * (no coordinate rounding).
  */
 
-import { SharedGestureDelegate } from "../shared/SharedGestureDelegate";
+import {
+  SharedGestureDelegate,
+  type TapDiagnosticParameters,
+} from "../shared/SharedGestureDelegate";
 import type { DelegateContext, GestureTimingResult } from "./types";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
 import { sendCommand } from "../DeviceServiceUtils";
+import {
+  DefaultSystemDetection,
+  type SystemDetection,
+} from "../../../utils/system/SystemDetection";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
-  constructor(context: DelegateContext) {
+  constructor(
+    context: DelegateContext,
+    private readonly environment: Pick<SystemDetection, "getEnvVar"> = new DefaultSystemDetection(),
+  ) {
     super(context, {
       logTag: "CTRL_PROXY",
       roundCoordinates: false,
@@ -21,8 +31,14 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   }
 
   /** Read the daemon's exported logger at request construction, with no signature changes. */
-  protected override tapDiagnosticParams(): { diagnostics?: true } {
-    return logger.getLogLevel() === LogLevel.DEBUG ? { diagnostics: true } : {};
+  protected override tapDiagnosticParams(): TapDiagnosticParameters {
+    if (logger.getLogLevel() !== LogLevel.DEBUG) {
+      return {};
+    }
+    const strategy = this.environment.getEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY");
+    return strategy === "legacy" || strategy === "appRelative" || strategy === "appRelativeObserved"
+      ? { diagnostics: true, tapStrategy: strategy }
+      : { diagnostics: true };
   }
 
   /**

@@ -31,6 +31,9 @@ public protocol GesturePerforming: Sendable {
     /// The live performer overrides this to sample immediately before delivery, inside its guard.
     func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics
 
+    func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws
+    func tapWithDiagnostics(x: Double, y: Double, durationMs: Int, strategy: String?) throws -> TapDiagnostics
+
     /// Double tap at coordinates
     func doubleTap(x: Double, y: Double) throws
 
@@ -199,6 +202,21 @@ extension GesturePerforming {
         throws
     {
         try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+    }
+
+    public func tap(x: Double, y: Double, duration: TimeInterval, strategy _: String?) throws {
+        try tap(x: x, y: y, duration: duration)
+    }
+
+    public func tapWithDiagnostics(
+        x: Double,
+        y: Double,
+        durationMs: Int,
+        strategy _: String?
+    )
+        throws -> TapDiagnostics
+    {
+        try tapWithDiagnostics(x: x, y: y, durationMs: durationMs)
     }
 
     public func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {

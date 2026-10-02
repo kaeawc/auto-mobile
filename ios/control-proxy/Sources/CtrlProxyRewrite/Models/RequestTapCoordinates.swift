@@ -11,6 +11,8 @@ public struct RequestTapCoordinates: Decodable, Sendable {
     public var duration: Int?
     public var frameContext: String?
     public var diagnostics: Bool?
+    // Keep unknown strings decodable; the performer logs and ignores them.
+    public var tapStrategy: String?
 }
 
 extension RequestTapCoordinates: CommandPayload {}

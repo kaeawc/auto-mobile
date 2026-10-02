@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -36,13 +36,13 @@ async function writeNonExecutable(filePath: string): Promise<void> {
 
 class CountingFileDownloader implements FileDownloader {
   readonly downloadedUrls: string[] = [];
-  delayMs = 0;
+  readonly entered = Promise.withResolvers<void>();
+  gate?: Promise<void>;
 
   async download(url: string, destination: string): Promise<void> {
     this.downloadedUrls.push(url);
-    if (this.delayMs > 0) {
-      await new Promise((resolve) => defaultTimer.setTimeout(resolve, this.delayMs));
-    }
+    this.entered.resolve();
+    await this.gate;
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.writeFile(destination, "fake archive");
   }
@@ -298,7 +298,8 @@ describe("WebpBinaryResolver", () => {
     const root = await makeTempDir();
     const cacheDir = path.join(root, "cache");
     const downloader = new CountingFileDownloader();
-    downloader.delayMs = 1;
+    const downloadGate = Promise.withResolvers<void>();
+    downloader.gate = downloadGate.promise;
     const archiveExtractor = new FakeArchiveExtractor();
     const checksumCalculator = fakeArchiveChecksumCalculator();
     let extractionCount = 0;
@@ -318,10 +319,36 @@ describe("WebpBinaryResolver", () => {
       checksumCalculator,
     };
 
-    const [first, second] = await Promise.all([
-      new WebpBinaryResolver(resolverOptions).resolveCwebp(),
-      new WebpBinaryResolver(resolverOptions).resolveCwebp(),
-    ]);
+    const firstResolver = new WebpBinaryResolver(resolverOptions);
+    const secondResolver = new WebpBinaryResolver(resolverOptions);
+    // Observe the second caller entering the shared in-flight map, rather than
+    // assuming its filesystem probes finish before a fixed download delay.
+    const secondProvisionStarted = Promise.withResolvers<void>();
+    const secondProvisioner = secondResolver as unknown as {
+      provisionArchiveOnce(archive: unknown): Promise<void>;
+    };
+    const provisionArchiveOnce = secondProvisioner.provisionArchiveOnce.bind(secondResolver);
+    const provisionSpy = spyOn(secondProvisioner, "provisionArchiveOnce").mockImplementation(
+      (archive) => {
+        const provision = provisionArchiveOnce(archive);
+        secondProvisionStarted.resolve();
+        return provision;
+      },
+    );
+    let first: string;
+    let second: string;
+    try {
+      const firstResolution = firstResolver.resolveCwebp();
+      await downloader.entered.promise;
+      const secondResolution = secondResolver.resolveCwebp();
+      await secondProvisionStarted.promise;
+      expect(downloader.downloadedUrls).toHaveLength(1);
+      downloadGate.resolve();
+      [first, second] = await Promise.all([firstResolution, secondResolution]);
+    } finally {
+      downloadGate.resolve();
+      provisionSpy.mockRestore();
+    }
 
     expect(first).toBe(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
     expect(second).toBe(first);

@@ -7,7 +7,6 @@ import { registerObserveTools } from "../../src/server/observeTools";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 
 interface CapturedCall {
@@ -229,19 +228,14 @@ describe("PlanExecutor executeStep refactor", () => {
         if (!signal) {
           throw new Error("expected signal");
         }
-        await new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve) => {
           if (signal.aborted) {
             resolve();
             return;
           }
-          const timeout = defaultTimer.setTimeout(
-            () => reject(new Error("abort not observed")),
-            50,
-          );
           signal.addEventListener(
             "abort",
             () => {
-              defaultTimer.clearTimeout(timeout);
               resolve();
             },
             { once: true },

@@ -5,7 +5,6 @@ import type { ChildProcess } from "node:child_process";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import { FakeRunningAvdAdvertisementReader } from "../../fakes/FakeRunningAvdAdvertisementReader";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -150,27 +149,6 @@ function createHarness(): Harness {
   };
 }
 
-/**
- * A guard REGRESSION makes `startEmulator` spawn a second emulator whose launch
- * never completes, so an unguarded `await` would hang the suite instead of
- * failing it. Bound every "this call must take the adopt path" await.
- */
-async function adoptPathWithin<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        timeoutHandle = defaultTimer.setTimeout(() => reject(new Error(label)), 500);
-      }),
-    ]);
-  } finally {
-    if (timeoutHandle) {
-      defaultTimer.clearTimeout(timeoutHandle);
-    }
-  }
-}
-
 /** Settle a launch that is deliberately left mid-flight by the test. */
 function completeStartupValidation(child: ChildProcess & EventEmitter): void {
   child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
@@ -189,10 +167,7 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
 
     // The first launch has spawned but not finished startup validation, so the
     // emulator is not yet in the device scan under any name.
-    const second = await adoptPathWithin(
-      harness.client.startEmulator(AVD),
-      "the second startEmulator did not take the adopt path",
-    );
+    const second = await harness.client.startEmulator(AVD);
 
     expect(second).toBeNull();
     expect(harness.spawnedArgs).toHaveLength(1);
@@ -213,10 +188,7 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
     // answered, so the scan can only label it `Unknown (emulator-5554)`.
     harness.adbFactory.devices = [unknownEmulator("emulator-5554")];
 
-    const second = await adoptPathWithin(
-      harness.client.startEmulator(AVD),
-      "the second startEmulator did not take the adopt path",
-    );
+    const second = await harness.client.startEmulator(AVD);
 
     expect(second).toBeNull();
     expect(harness.spawnedArgs).toHaveLength(1);
@@ -237,10 +209,7 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
     // The scan is still EMPTY: the emulator has not reached adb at all.
     expect(harness.adbFactory.devices).toHaveLength(0);
 
-    const second = await adoptPathWithin(
-      harness.client.startEmulator(AVD),
-      "the second startEmulator did not take the adopt path",
-    );
+    const second = await harness.client.startEmulator(AVD);
 
     expect(second).toBeNull();
     expect(harness.spawnedArgs).toHaveLength(1);
@@ -261,10 +230,7 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
     expect(harness.spawnedArgs[0]).not.toContain("-port");
     expect(harness.adbFactory.devices).toHaveLength(0);
 
-    const second = await adoptPathWithin(
-      harness.client.startEmulator(AVD),
-      "the second startEmulator did not take the adopt path",
-    );
+    const second = await harness.client.startEmulator(AVD);
 
     expect(second).toBeNull();
     expect(harness.spawnedArgs).toHaveLength(1);
@@ -320,12 +286,7 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
     const harness = createHarness();
     harness.adbFactory.scanError = new Error("adb: device offline");
 
-    await expect(
-      adoptPathWithin(
-        harness.client.startEmulator(AVD),
-        "the discovery failure was swallowed and the launch proceeded",
-      ),
-    ).rejects.toThrow("adb: device offline");
+    await expect(harness.client.startEmulator(AVD)).rejects.toThrow("adb: device offline");
     expect(harness.spawnedArgs).toHaveLength(0);
   });
 
@@ -333,12 +294,7 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
     const harness = createHarness();
     harness.advertisements.advertised.add(AVD);
 
-    expect(
-      await adoptPathWithin(
-        harness.client.startEmulator(AVD),
-        "an advertised AVD still reached the spawn",
-      ),
-    ).toBeNull();
+    expect(await harness.client.startEmulator(AVD)).toBeNull();
     expect(harness.spawnedArgs).toHaveLength(0);
   });
 

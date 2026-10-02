@@ -280,6 +280,9 @@ export interface InitialFrameSubscriber {
   /** Reuse the identity of a shared capture for joined and cached deliveries. */
   captureSequence?: number;
   frameContextGeneration?: number;
+  liveFrameGeneration?: number;
+  /** Routing identity bound before the initial capture starts. */
+  deviceSessionUuid?: string | null;
 }
 
 export type OnSubscriberConnectedCallback = (
@@ -388,15 +391,31 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private readonly currentFrameContexts = new Map<string, string>();
   /** Incremented for every hierarchy accepted from a device, including contextless frames. */
   private readonly frameContextGenerations = new Map<string, number>();
-  // Live hierarchy AND screenshot pushes invalidate initial captures, even without a context.
+  // Live pushes and device/session invalidation share this one initial-frame generation.
   private readonly liveFrameGenerations = new Map<string, number>();
 
   getLiveFrameGeneration(deviceId: string): number {
-    return this.liveFrameGenerations.get(deviceId) ?? 0;
+    const generation = this.liveFrameGenerations.get(deviceId) ?? 0;
+    // Remember capture-only serials too, so replacing the resolver invalidates them.
+    if (!this.liveFrameGenerations.has(deviceId)) {
+      this.liveFrameGenerations.set(deviceId, generation);
+    }
+    return generation;
   }
 
   private recordLiveFramePush(deviceId: string): void {
     this.liveFrameGenerations.set(deviceId, this.getLiveFrameGeneration(deviceId) + 1);
+  }
+
+  /** Retire captured frames and the shared input/diff state at a device or ownership boundary. */
+  invalidateDeviceFrames(deviceId: string): void {
+    this.recordLiveFramePush(deviceId);
+    this.previousHierarchyByDevice.delete(deviceId);
+    this.currentFrameContexts.delete(deviceId);
+  }
+
+  getDeviceSessionUuid(deviceId: string): string | null {
+    return this.deviceSessionResolver.resolveUuid(deviceId);
   }
 
   getCurrentFrameContext(deviceId: string): string | undefined {
@@ -450,6 +469,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   /** Wire the serial↔`deviceSessionUuid` resolver used to stamp frames and route on the epoch key. */
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
+    // Replacing a resolver is a routing boundary even if its current answers agree.
+    for (const deviceId of this.liveFrameGenerations.keys()) {
+      this.invalidateDeviceFrames(deviceId);
+    }
     this.deviceSessionResolver = resolver;
   }
 
@@ -625,6 +648,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
     return (
       this.initialFrameTargetWantsDevice(target, deviceId) &&
+      (target.liveFrameGeneration === undefined ||
+        target.liveFrameGeneration === this.getLiveFrameGeneration(deviceId)) &&
+      (target.deviceSessionUuid === undefined ||
+        target.deviceSessionUuid === this.getDeviceSessionUuid(deviceId)) &&
       (target.frameContextGeneration === undefined ||
         target.frameContextGeneration === this.getCurrentFrameContextGeneration(deviceId))
     );
@@ -779,10 +806,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * device-scoped pane and an all-device hub observe the transition.
    */
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
+    this.invalidateDeviceFrames(record.deviceId);
     this.pushDeviceSessionLifecycle("device_session_started", record);
   }
 
   pushDeviceSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
+    this.invalidateDeviceFrames(record.deviceId);
     this.pushDeviceSessionLifecycle("device_session_ended", record, successorSessionUuid);
   }
 
@@ -952,8 +981,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   onDeviceConnectionLost(deviceId: string): void {
     // Drop the diff baseline: the next hierarchy after a reconnect is a fresh
     // full frame, not a delta from the tree captured before the connection dropped.
-    this.previousHierarchyByDevice.delete(deviceId);
-    this.currentFrameContexts.delete(deviceId);
+    this.invalidateDeviceFrames(deviceId);
     // Nothing to reset for capture identity: ids are never reused (the source is monotonic for the
     // process), and clients drop their own bindings when the connection goes away.
 

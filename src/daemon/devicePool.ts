@@ -527,6 +527,7 @@ export interface DevicePoolDependencies {
   androidDeviceReboot?: AndroidDeviceReboot;
   recoveryPolicy?: DeviceRecoveryPolicy;
   onDeviceRemoved?: DeviceRemovedListener;
+  onDeviceFramesInvalidated?: (deviceId: string) => void;
   emulatorLossIncidentStore?: EmulatorLossIncidentStore;
   cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller;
   idGenerator?: IdGenerator;
@@ -626,6 +627,7 @@ export class DevicePool {
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
+  private readonly onDeviceFramesInvalidated: ((deviceId: string) => void) | undefined;
   private readonly cancelDeviceSessionExecutions: DeviceSessionExecutionCanceller;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly recoveryPolicy: DeviceRecoveryPolicy;
@@ -751,6 +753,7 @@ export class DevicePool {
     androidDeviceReboot,
     recoveryPolicy,
     onDeviceRemoved,
+    onDeviceFramesInvalidated,
     emulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
     cancelDeviceSessionExecutions,
     idGenerator = defaultIdGenerator,
@@ -949,8 +952,10 @@ export class DevicePool {
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
+    this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
     const runtimeIdentityPort: DeviceRuntimeIdentityPoolPort = {
+      notifyDeviceFramesInvalidated: (deviceId) => this.notifyDeviceFramesInvalidated(deviceId),
       getDevices: () => this.devices,
       getDeviceManager: () => this.deviceManager,
       getRetryExecutor: () => this.retryExecutor,
@@ -1280,6 +1285,7 @@ export class DevicePool {
     perf.startOperation("populatePool");
     for (const device of devices) {
       this.clearAutoStartSuppressionForBootedDevice(device);
+      this.notifyDeviceFramesInvalidated(device.deviceId);
       this.devices.set(device.deviceId, {
         id: device.deviceId,
         name: device.name,
@@ -1332,6 +1338,17 @@ export class DevicePool {
       this.onDeviceReady?.(deviceId);
     } catch (error) {
       logger.warn(`[DevicePool] Device-ready listener failed for ${deviceId}: ${error}`);
+    }
+  }
+
+  private notifyDeviceFramesInvalidated(deviceId: string): void {
+    try {
+      this.onDeviceFramesInvalidated?.(deviceId);
+    } catch (error) {
+      logger.warn(
+        `[DevicePool] Frame invalidation listener failed for ${deviceId}: ${error}`,
+        error,
+      );
     }
   }
 
@@ -1484,6 +1501,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    this.notifyDeviceFramesInvalidated(deviceId);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);
@@ -5514,6 +5532,7 @@ export class DevicePool {
       return false;
     }
     device.incarnation = this.nextDeviceIncarnation();
+    this.notifyDeviceFramesInvalidated(deviceId);
     return true;
   }
 

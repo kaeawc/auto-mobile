@@ -485,6 +485,9 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     registerLocationRouteSessionCleanup(this.sessionManager);
+    this.sessionManager.onDeviceOwnershipChange((deviceId) => {
+      this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
+    });
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
@@ -573,6 +576,8 @@ export class Daemon {
         this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit),
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryConfiguration.policy,
+      onDeviceFramesInvalidated: (deviceId) =>
+        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId),
       onDeviceRemoved: (deviceId, platform) => {
         stopLocationRouteForRemovedDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
@@ -1664,8 +1669,11 @@ export class Daemon {
   ) {
     let coordinator = this.initialFrameCoordinators.get(server);
     if (!coordinator) {
-      coordinator = new DefaultObservationInitialFrameCoordinator(this.timer, undefined, (id) =>
-        server.getLiveFrameGeneration(id),
+      coordinator = new DefaultObservationInitialFrameCoordinator(
+        this.timer,
+        undefined,
+        (id) => server.getLiveFrameGeneration(id),
+        (id) => server.getDeviceSessionUuid(id),
       );
       this.initialFrameCoordinators.set(server, coordinator);
     }

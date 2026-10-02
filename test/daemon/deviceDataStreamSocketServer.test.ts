@@ -136,13 +136,17 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   function initialFrameHarness() {
-    const coordinator = new DefaultObservationInitialFrameCoordinator(timer, 2, (id) =>
-      server.getLiveFrameGeneration(id),
+    const coordinator = new DefaultObservationInitialFrameCoordinator(
+      timer,
+      2,
+      (id) => server.getLiveFrameGeneration(id),
+      (id) => server.getDeviceSessionUuid(id),
     );
     const device = { id: "device-1", name: "Pixel", platform: "android" as const };
     let captures = 0;
     let context = "ctx-a";
     let screenshot: () => Promise<void> = async () => {};
+    let connect: () => Promise<boolean> = async () => true;
     const hierarchy = (text: string): ViewHierarchyResult => ({
       hierarchy: { node: { $: { class: "Root", text } } },
       screenWidth: 37,
@@ -157,7 +161,7 @@ describe("DeviceDataStreamSocketServer", () => {
           captures++;
           const capturedContext = context;
           const client: ObservationStreamAndroidClient = {
-            ensureConnected: async () => true,
+            ensureConnected: () => connect(),
             getLatestHierarchy: async () => ({
               hierarchy: { hierarchy: {}, updatedAt: 1 },
               fresh: true,
@@ -186,6 +190,7 @@ describe("DeviceDataStreamSocketServer", () => {
         type: string;
         frameContext?: string;
         captureSequence?: number;
+        deviceSessionUuid?: string | null;
         hierarchyDiff?: { hasBaseline: boolean; changed: number };
       }>();
     return {
@@ -198,11 +203,185 @@ describe("DeviceDataStreamSocketServer", () => {
       setContext: (value: string) => {
         context = value;
       },
+      setConnection: (value: typeof connect) => {
+        connect = value;
+      },
       setScreenshot: (value: typeof screenshot) => {
         screenshot = value;
       },
     };
   }
+
+  const frameInvalidations = [
+    {
+      name: "connection loss",
+      invalidate: () => server.onDeviceConnectionLost("device-1"),
+    },
+    {
+      name: "session replacement",
+      invalidate: () => {
+        server.sessionResolver.bind("device-1", "successor-session");
+        server.pushDeviceSessionEnded(
+          {
+            deviceId: "device-1",
+            deviceSessionUuid: "session-device-1",
+            platform: "android",
+            epochStartedAt: 0,
+          },
+          "successor-session",
+        );
+        server.pushDeviceSessionStarted({
+          deviceId: "device-1",
+          deviceSessionUuid: "successor-session",
+          platform: "android",
+          epochStartedAt: 0,
+        });
+      },
+    },
+    {
+      name: "resolver replacement",
+      invalidate: () => server.setDeviceSessionResolver(server.sessionResolver),
+    },
+    {
+      name: "session retirement",
+      invalidate: () => {
+        server.sessionResolver.retire("device-1");
+        server.pushDeviceSessionEnded({
+          deviceId: "device-1",
+          deviceSessionUuid: "session-device-1",
+          platform: "android",
+          epochStartedAt: 0,
+        });
+      },
+    },
+    {
+      name: "session start",
+      invalidate: () =>
+        server.pushDeviceSessionStarted({
+          deviceId: "device-1",
+          deviceSessionUuid: "session-device-1",
+          platform: "android",
+          epochStartedAt: 0,
+        }),
+    },
+    {
+      name: "resolver-only rebind",
+      invalidate: () => server.sessionResolver.bind("device-1", "successor-session"),
+    },
+  ];
+
+  for (const event of frameInvalidations) {
+    it(`drops an in-flight initial frame after ${event.name} and recaptures without caching it`, async () => {
+      const h = initialFrameHarness();
+      const started = Promise.withResolvers<void>();
+      const finish = Promise.withResolvers<void>();
+      h.setScreenshot(async () => {
+        started.resolve();
+        await finish.promise;
+      });
+      const a = server.simulateSubscription({ deviceSessionUuid: null });
+      server.sessionResolver.bind("device-1", "session-device-1");
+      const first = h.request(a.subscriptionId);
+      await started.promise;
+      event.invalidate();
+      finish.resolve();
+      await first;
+      expect(h.frames(a.socket).filter((frame) => frame.type.endsWith("_update"))).toEqual([]);
+      expect(server.getCurrentFrameContext("device-1")).toBeUndefined();
+      h.setContext("ctx-fresh");
+      h.setScreenshot(async () => {});
+      const b = server.simulateSubscription({ deviceSessionUuid: null });
+      await h.request(b.subscriptionId);
+      expect(h.captures).toBe(2);
+      expect(h.frames(b.socket).map((frame) => frame.frameContext)).toEqual([
+        "ctx-fresh",
+        "ctx-fresh",
+      ]);
+      expect(h.frames(b.socket).map((frame) => frame.deviceSessionUuid)).toEqual([
+        server.sessionResolver.resolveUuid("device-1"),
+        server.sessionResolver.resolveUuid("device-1"),
+      ]);
+    });
+
+    it(`recaptures a cached initial frame within 1 s after ${event.name}`, async () => {
+      const h = initialFrameHarness();
+      const a = server.simulateSubscription({ deviceSessionUuid: null });
+      server.sessionResolver.bind("device-1", "session-device-1");
+      await h.request(a.subscriptionId);
+      event.invalidate();
+      h.setContext("ctx-fresh");
+      const b = server.simulateSubscription({ deviceSessionUuid: null });
+      await h.request(b.subscriptionId);
+      expect(h.captures).toBe(2);
+      expect(h.frames(b.socket).map((frame) => frame.frameContext)).toEqual([
+        "ctx-fresh",
+        "ctx-fresh",
+      ]);
+      expect(h.frames(b.socket).map((frame) => frame.deviceSessionUuid)).toEqual([
+        server.sessionResolver.resolveUuid("device-1"),
+        server.sessionResolver.resolveUuid("device-1"),
+      ]);
+    });
+  }
+
+  it("binds the session before connection setup and drops a rebind during ensureConnected", async () => {
+    const h = initialFrameHarness();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<boolean>();
+    h.setConnection(() => {
+      started.resolve();
+      return finish.promise;
+    });
+    server.sessionResolver.bind("device-1", "old-session");
+    const a = server.simulateSubscription({ deviceSessionUuid: null });
+    const first = h.request(a.subscriptionId);
+    await started.promise;
+    server.sessionResolver.bind("device-1", "new-session");
+    finish.resolve(true);
+    await first;
+    expect(h.frames(a.socket)).toEqual([]);
+    h.setConnection(async () => true);
+    h.setContext("ctx-new-session");
+    const b = server.simulateSubscription({ deviceSessionUuid: null });
+    await h.request(b.subscriptionId);
+    expect(h.captures).toBe(2);
+    expect(h.frames(b.socket).map((frame) => frame.deviceSessionUuid)).toEqual([
+      "new-session",
+      "new-session",
+    ]);
+  });
+
+  it("recaptures for a subscription arriving after connection loss while the old capture is still in flight", async () => {
+    const h = initialFrameHarness();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    h.setScreenshot(async () => {
+      started.resolve();
+      await finish.promise;
+    });
+    const a = server.simulateSubscription({ deviceId: "device-1" });
+    const first = h.request(a.subscriptionId);
+    await started.promise;
+    server.onDeviceConnectionLost("device-1");
+    h.setContext("ctx-fresh");
+    h.setScreenshot(async () => {});
+    const b = server.simulateSubscription({ deviceId: "device-1" });
+    const next = h.request(b.subscriptionId);
+    expect(h.captures).toBe(1);
+    finish.resolve();
+    await Promise.all([first, next]);
+    expect(h.captures).toBe(2);
+    expect(h.frames(b.socket).map((frame) => frame.frameContext)).toEqual([
+      "ctx-fresh",
+      "ctx-fresh",
+    ]);
+    expect(
+      h
+        .frames(a.socket)
+        .filter((frame) => frame.type.endsWith("_update"))
+        .map((frame) => frame.frameContext),
+    ).toEqual(["ctx-fresh", "ctx-fresh"]);
+  });
 
   it("recaptures after a live hierarchy supersedes the cached initial frame", async () => {
     const h = initialFrameHarness();

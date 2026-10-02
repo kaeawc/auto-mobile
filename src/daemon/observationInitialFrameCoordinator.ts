@@ -35,6 +35,8 @@ interface Capture {
   deviceId: string;
   run: () => Promise<InitialObservationFrame | undefined>;
   started: boolean;
+  liveFrameGeneration?: number;
+  deviceSessionUuid?: string | null;
   waiters: Set<Waiter>;
 }
 
@@ -49,6 +51,7 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
     private readonly timer: Timer = defaultTimer,
     private maxConcurrency = INITIAL_FRAME_MAX_CONCURRENCY,
     private readonly getLiveFrameGeneration: (deviceId: string) => number = () => 0,
+    private readonly getDeviceSessionUuid?: (deviceId: string) => string | null,
   ) {
     if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
       throw new RangeError("Initial observation frame concurrency must be a positive integer");
@@ -74,7 +77,7 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
       return Promise.resolve(undefined);
     }
     const recent = this.recent.get(deviceId);
-    if (recent && recent.liveFrameGeneration === this.getLiveFrameGeneration(deviceId)) {
+    if (recent && this.isFrameCurrent(deviceId, recent)) {
       return Promise.resolve({ frame: recent, replay: true });
     }
     this.recent.delete(deviceId);
@@ -85,6 +88,7 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
       this.queue.push(entry);
     }
     const shared = entry;
+    const staleCapture = shared.started && !this.isCaptureCurrent(shared);
     const result = new Promise<InitialFrameResult | undefined>((resolve, reject) => {
       const cleanup = () => {
         signal.removeEventListener("abort", onAbort);
@@ -111,7 +115,34 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
       signal.addEventListener("abort", onAbort, { once: true });
     });
     this.drain();
-    return result;
+    // A subscription after invalidation waits for the old job to free its slot,
+    // then captures fresh. Pre-boundary waiters still drop the old result.
+    const requestFresh = () => this.request(deviceId, capture, signal, maxConcurrency);
+    return staleCapture
+      ? result.then(requestFresh, (error: unknown) => {
+          logger.warn(
+            `[Daemon] Superseded initial observation capture failed for ${deviceId}: ${errorMessage(error)}`,
+            error,
+          );
+          return requestFresh();
+        })
+      : result;
+  }
+
+  private isCaptureCurrent(capture: Capture): boolean {
+    return (
+      capture.liveFrameGeneration === this.getLiveFrameGeneration(capture.deviceId) &&
+      (!this.getDeviceSessionUuid ||
+        capture.deviceSessionUuid === this.getDeviceSessionUuid(capture.deviceId))
+    );
+  }
+
+  private isFrameCurrent(deviceId: string, frame: InitialObservationFrame): boolean {
+    return (
+      frame.liveFrameGeneration === this.getLiveFrameGeneration(deviceId) &&
+      (!this.getDeviceSessionUuid ||
+        frame.deviceSessionUuid === this.getDeviceSessionUuid(deviceId))
+    );
   }
 
   private drain(): void {
@@ -125,21 +156,41 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
     }
   }
 
+  private acceptCapturedFrame(
+    deviceId: string,
+    captured: InitialObservationFrame | undefined,
+    generation: number,
+    deviceSessionUuid: string | null | undefined,
+  ): InitialObservationFrame | undefined {
+    if (!captured) {
+      return undefined;
+    }
+    captured.liveFrameGeneration = generation;
+    if (deviceSessionUuid !== undefined) {
+      captured.deviceSessionUuid = deviceSessionUuid;
+    }
+    return this.isFrameCurrent(deviceId, captured) ? captured : undefined;
+  }
+
   private async capture(entry: Capture): Promise<void> {
     try {
       const generation = this.getLiveFrameGeneration(entry.deviceId);
+      const deviceSessionUuid = this.getDeviceSessionUuid?.(entry.deviceId);
+      entry.liveFrameGeneration = generation;
+      entry.deviceSessionUuid = deviceSessionUuid;
       const captured = await raceWithDeadline(entry.run, {
         timer: this.timer,
         timeoutMs: INITIAL_FRAME_CAPTURE_DEADLINE_MS,
         label: `Initial observation frame for ${entry.deviceId}`,
       });
-      // A live frame delivered while connecting/capturing supersedes this result.
-      // Drop it, including for joined waiters; a later subscription can recapture.
-      const frame =
-        generation === this.getLiveFrameGeneration(entry.deviceId) ? captured : undefined;
-      if (frame) {
-        frame.liveFrameGeneration = generation;
-      }
+      // Device/session boundaries and live pushes supersede this result. Drop it
+      // before caching or completing waiters; a later subscription can recapture.
+      const frame = this.acceptCapturedFrame(
+        entry.deviceId,
+        captured,
+        generation,
+        deviceSessionUuid,
+      );
       if (frame?.screenshot && entry.waiters.size > 0) {
         this.recent.set(entry.deviceId, frame);
       }

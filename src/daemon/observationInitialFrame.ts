@@ -109,7 +109,7 @@ export interface ObservationInitialFrameDependencies {
     Partial<
       Pick<
         DeviceDataStreamSocketServer,
-        "getCurrentFrameContextGeneration" | "getLiveFrameGeneration"
+        "getCurrentFrameContextGeneration" | "getLiveFrameGeneration" | "getDeviceSessionUuid"
       >
     >;
   androidClientFactory: (device: BootedDevice) => ObservationStreamAndroidClient;
@@ -199,6 +199,7 @@ export interface InitialObservationFrame {
   captureSequence?: number;
   frameContextGeneration?: number;
   liveFrameGeneration?: number;
+  deviceSessionUuid?: string | null;
   recordHierarchy: (captureSequence: number | null) => void;
 }
 
@@ -231,6 +232,9 @@ async function captureInitialObservationFrame(
   if (device.platform !== "android" && device.platform !== "ios") {
     return undefined;
   }
+  // Bind provenance before connection setup, which can itself cross a device boundary.
+  const liveFrameGeneration = dependencies.streamServer.getLiveFrameGeneration?.(device.id);
+  const deviceSessionUuid = dependencies.streamServer.getDeviceSessionUuid?.(device.id);
   // Narrow platform-specific calls before combining the common capture contract.
   const source =
     device.platform === "android"
@@ -252,6 +256,8 @@ async function captureInitialObservationFrame(
     hierarchy,
     frameContext: initialHierarchy.frameContext ?? hierarchy.frameContext,
     frameContextGeneration,
+    liveFrameGeneration,
+    deviceSessionUuid,
     recordHierarchy: (sequence) =>
       source.client.recordInitialObservationStreamHierarchy(hierarchy, sequence),
   };
@@ -360,6 +366,8 @@ function deliverInitialObservationFrame(
     subscriber
       ? {
           ...subscriber,
+          liveFrameGeneration: frame.liveFrameGeneration,
+          deviceSessionUuid: frame.deviceSessionUuid,
           captureSequence: frame.captureSequence,
           frameContextGeneration: frame.frameContextGeneration,
         }
@@ -394,6 +402,13 @@ function isInitialObservationFrameCurrent(
   ) {
     return false;
   }
+  if (
+    frame.deviceSessionUuid !== undefined &&
+    streamServer.getDeviceSessionUuid &&
+    frame.deviceSessionUuid !== streamServer.getDeviceSessionUuid(deviceId)
+  ) {
+    return false;
+  }
   return (
     frame.frameContextGeneration === undefined ||
     frame.frameContextGeneration === streamServer.getCurrentFrameContextGeneration?.(deviceId)
@@ -418,7 +433,13 @@ function pushInitialObservationScreenshot(
       {
         ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
         ...canonicalPixelScreenshotOptions(frame.hierarchy),
-        initialFrameSubscriber: subscriber,
+        initialFrameSubscriber: subscriber
+          ? {
+              ...subscriber,
+              liveFrameGeneration: frame.liveFrameGeneration,
+              deviceSessionUuid: frame.deviceSessionUuid,
+            }
+          : undefined,
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
       },

@@ -1969,7 +1969,7 @@
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, and networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
+          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, networkCondition, and clock. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
           "minItems": 1,
           "type": "array",
           "items": {

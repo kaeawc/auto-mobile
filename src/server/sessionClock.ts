@@ -25,7 +25,7 @@ export async function runSessionClockMutation<T>(
     }
     let completed = false;
     let result!: T;
-    await manager.trackSessionSetup(session, async () => {
+    await manager.trackClockSessionSetup(session, async () => {
       result = await mutation({
         get: () => session.cacheData.clock,
         record: (value) => {

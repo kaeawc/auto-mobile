@@ -358,8 +358,8 @@ export const getDeviceStateSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          "State fields to read; supports doNotDisturb, connectivity, biometrics, and " +
-            "networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers " +
+          "State fields to read; supports doNotDisturb, connectivity, biometrics, " +
+            "networkCondition, and clock. Defaults to doNotDisturb + connectivity, so a bare call answers " +
             "whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
         ),
     })

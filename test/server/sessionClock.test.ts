@@ -68,6 +68,30 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
 }
 
 describe("session clock restoration", () => {
+  test("release without a clock slot keeps the no-restore microtask budget and never quarantines", async () => {
+    const h = harness();
+    try {
+      await h.manager.createSession("clock-session", device.deviceId, "android");
+      let releasedDevice: string | null | undefined;
+      const releasing = h.manager.releaseSession("clock-session").then((deviceId) => {
+        releasedDevice = deviceId;
+      });
+      // Measured against HEAD~1 using these same persistence and timer fakes.
+      for (let tick = 0; tick < 8; tick++) {
+        expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+        await Promise.resolve();
+      }
+      expect(releasedDevice).toBe(device.deviceId);
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+      expect(h.manager.getSession("clock-session")).toBeNull();
+      expect(h.restored).toEqual([]);
+      expect(h.adapter.calls).toEqual([]);
+      await releasing;
+    } finally {
+      h.manager.stopCleanupTimer();
+    }
+  });
+
   test.each([0, 1] as const)(
     "release restores original auto time %s exactly once after repeated set and advance",
     async (value) => {

@@ -1940,7 +1940,9 @@ export class SessionManager {
       ? (await this.restoreNetworkConditionBestEffort(existing)).pending
       : null;
 
-    const pendingClockRestoration = (await this.getPendingClockRestoration(existing, null)).pending;
+    const pendingClockRestoration = existing.cacheData.clock
+      ? (await this.getPendingClockRestoration(existing, null)).pending
+      : null;
     const previousDevice = existing.assignedDevice;
     const pendingRebindCleanup = [
       pendingBiometricRestoration,
@@ -2563,8 +2565,9 @@ export class SessionManager {
     const pendingNetworkRestoration = session.cacheData.networkCondition
       ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
       : null;
-    const pendingClockRestoration = (await this.getPendingClockRestoration(session, pendingSetups))
-      .pending;
+    const pendingClockRestoration = session.cacheData.clock
+      ? (await this.getPendingClockRestoration(session, pendingSetups)).pending
+      : null;
     return [
       pendingSetups,
       pendingRestoration,
@@ -3864,6 +3867,25 @@ export class SessionManager {
   }
 
   /** Tracked setup retains this exact session even after a bounded release times out. */
+  trackClockSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
+    const deviceId = session.assignedDevice;
+    const generation = this.clockRemovalGenerations.get(deviceId) ?? 0;
+    return this.trackSessionSetup(session, async () => {
+      try {
+        await createSetup();
+      } finally {
+        if ((this.clockRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+          delete session.cacheData.clock;
+        } else if (this.sessions.get(session.sessionId) !== session && session.cacheData.clock) {
+          // Baseline capture can finish after the bounded release removed this
+          // session. Restore its newly recorded slot before tracked setup settles.
+          const restoration = await this.getPendingClockRestoration(session, null);
+          await restoration.pending;
+        }
+      }
+    });
+  }
+
   setClock(session: Session, state: ClockSessionState): void {
     session.cacheData.clock ??= state;
   }

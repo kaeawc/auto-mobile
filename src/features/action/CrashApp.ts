@@ -7,6 +7,7 @@ import {
 import {
   findAndroidPackageProcesses,
   readAndroidPackageProcesses,
+  selectAndroidUserId,
   type AndroidPackageProcess,
 } from "../../utils/android-cmdline-tools/androidProcessState";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -157,7 +158,10 @@ export class CrashApp {
       };
     }
 
-    const userId = await this.selectAndroidUserId(appId, packageProcesses, signal);
+    const userId = await selectAndroidUserId(this.adb, appId, packageProcesses, {
+      signal,
+      timeoutMs: PREFLIGHT_COMMAND_TIMEOUT_MS,
+    });
     if (userId === null) {
       return {
         ...base,
@@ -239,22 +243,6 @@ export class CrashApp {
       confirmed: true,
       evidence: crashMatch.evidence,
     };
-  }
-
-  private async selectAndroidUserId(
-    appId: string,
-    processes: AndroidPackageProcess[],
-    signal?: AbortSignal,
-  ): Promise<number | null> {
-    const userIds = new Set(processes.map((process) => process.userId));
-    if (userIds.size === 1) {
-      return userIds.values().next().value ?? null;
-    }
-
-    const foreground = await this.adb.getForegroundApp(signal, PREFLIGHT_COMMAND_TIMEOUT_MS);
-    return foreground?.packageName === appId && userIds.has(foreground.userId)
-      ? foreground.userId
-      : null;
   }
 
   private async prepareAndroidDispatch(

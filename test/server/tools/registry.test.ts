@@ -68,7 +68,7 @@ describe("MCP Tools Registry", () => {
   test("should expose registered output schemas in generated MCP tool definitions", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
-    for (const toolName of ["executePlan", "tapOn", "crashApp"]) {
+    for (const toolName of ["executePlan", "tapOn", "crashApp", "appLifecycle"]) {
       const tool = toolDefinitions.find((definition) => definition.name === toolName);
       expect(tool).toBeDefined();
       expect(tool).toHaveProperty("outputSchema");
@@ -111,7 +111,15 @@ describe("MCP Tools Registry", () => {
     const expectedByCategory: Record<string, string[]> = {
       observe: ["observe"],
       interaction: ["tapOn", "sendKeys", "pressButton", "swipeOn", "dragAndDrop", "pinchOn"],
-      app: ["launchApp", "terminateApp", "crashApp", "installApp", "uninstallApp", "listApps"],
+      app: [
+        "launchApp",
+        "terminateApp",
+        "crashApp",
+        "appLifecycle",
+        "installApp",
+        "uninstallApp",
+        "listApps",
+      ],
       utility: ["rotate", "setActiveDevice", "openLink", "getDeviceState", "setDeviceState"],
       device: [
         "listDeviceImages",

@@ -15,6 +15,7 @@ import {
 import { dragAndDropSchema, pinchOnSchema, swipeOnSchema } from "../../src/server/interactionTools";
 import {
   crashAppSchema,
+  appLifecycleSchema,
   installAppSchema,
   listAppsSchema,
   packageNameSchema,
@@ -80,12 +81,22 @@ const strictCases: StrictCase[] = [
   // unfiltered listing.
   { name: "listApps", schema: listAppsSchema, valid: { type: "user" } },
   { name: "terminateApp", schema: terminateAppSchema, valid: { appId: "com.example.app" } },
+  {
+    name: "appLifecycle",
+    schema: appLifecycleSchema,
+    valid: { appId: "com.example.app", action: "background" },
+  },
   { name: "crashApp", schema: crashAppSchema, valid: { appId: "com.example.app" } },
   { name: "installApp", schema: installAppSchema, valid: { artifactPath: "/tmp/app.apk" } },
   { name: "uninstallApp", schema: uninstallAppSchema, valid: { appId: "com.example.app" } },
 ];
 
 describe("issues #6712/#6613: object-shaped tool inputs reject undeclared arguments", () => {
+  test("appLifecycle rejects an unknown action", () => {
+    expect(
+      appLifecycleSchema.safeParse({ appId: "com.example.app", action: "foreground" }).success,
+    ).toBe(false);
+  });
   test("getIosSimulatorCapabilities accepts optional session targeting fields", () => {
     expect(
       getIosSimulatorCapabilitiesSchema.safeParse({

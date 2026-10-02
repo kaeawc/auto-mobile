@@ -11,6 +11,11 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  INTERNAL_TOOL_PARAM_NAMES,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+} from "../../src/daemon/constants";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 
 describe("setDeviceResources", () => {
   let controller: FakeDeviceResourceController;
@@ -115,6 +120,30 @@ describe("setDeviceResources", () => {
       __mcpLiveDeadlineKey: "key",
     });
     expect(controller.requests[0]!.deadlineMs).toBe(4_000);
+  });
+
+  test("accepts every canonical internal param without mutating the caller", async () => {
+    const metadata = Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true]));
+    const args = Object.freeze({
+      resources: { wallpaperRendering: "disabled" },
+      timeoutMs: 10_000,
+      ...metadata,
+      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 9_000,
+      [INTERNAL_NO_DIFF_PARAM]: true,
+    });
+    await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, args);
+    expect(controller.requests).toHaveLength(1);
+    expect(controller.requests[0]).toMatchObject({
+      device,
+      resources: args.resources,
+      deadlineMs: 4_000,
+    });
+    expect(Object.keys(args)).toEqual([
+      "resources",
+      "timeoutMs",
+      ...INTERNAL_TOOL_PARAM_NAMES,
+      INTERNAL_NO_DIFF_PARAM,
+    ]);
   });
 
   test("unsupported and unverified results are tool errors with structured evidence", async () => {

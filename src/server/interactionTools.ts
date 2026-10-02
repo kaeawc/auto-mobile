@@ -2330,15 +2330,24 @@ export async function setPostureHandler(
 ) {
   try {
     throwIfAborted(signal);
-    const parsed = setPostureSchema.parse(args);
+    // The tool boundary validates public args before injecting execution metadata.
+    // Direct callers still need the schema's cross-field invariants.
+    if ((args.posture !== undefined) === (args.hingeAngle !== undefined)) {
+      throw new ActionableError("Specify exactly one of posture or hingeAngle.");
+    }
+    if (args.hingeAngle !== undefined && args.displayPreset !== undefined) {
+      throw new ActionableError(
+        "displayPreset requires posture and cannot be combined with hingeAngle.",
+      );
+    }
     const action = setPostureFactory(device);
     const result: SetPostureOutput =
-      parsed.hingeAngle !== undefined
-        ? await action.executeHingeAngle(parsed.hingeAngle, {
-            displayPreset: parsed.displayPreset,
+      args.hingeAngle !== undefined
+        ? await action.executeHingeAngle(args.hingeAngle, {
+            displayPreset: args.displayPreset,
             signal,
           })
-        : await action.execute(parsed.posture!, parsed.displayPreset, signal);
+        : await action.execute(args.posture!, args.displayPreset, signal);
     const message =
       "status" in result
         ? result.message

@@ -8,11 +8,7 @@ import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
-import {
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM, deleteInternalToolParams } from "../daemon/constants";
 import {
   trackDeviceAcquisitionReadiness,
   deviceReadinessLockKey,
@@ -29,9 +25,7 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
       callerSignal?.throwIfAborted();
       const external = stripNavigationInternalParams(args);
       const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-      delete external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-      delete external[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-      delete external[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
+      deleteInternalToolParams(external);
       const parsed = setDeviceResourcesSchema.parse(external);
       const deps = dependencies();
       const requestedDeadline =

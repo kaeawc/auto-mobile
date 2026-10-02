@@ -237,6 +237,23 @@ export class AppPreferences {
       // Pin verification to the successful write route: never verify a different store.
       try {
         const readBack = await this.getIosUserDefault(input, deadlineMs, store);
+        if (
+          !readBack.redacted &&
+          readBack.found &&
+          !canParsePreferenceValue(String(readBack.value), input.type)
+        ) {
+          return {
+            ...readBack,
+            verified: false,
+            warning: [
+              readBack.warning,
+              preferenceWriteWarning(this.device.platform, input.scope, store.kind),
+              `The value was written but the effective value read back has a different type (${readBack.type} vs requested ${input.type}), so equality was not verified.`,
+            ]
+              .filter(Boolean)
+              .join(" "),
+          };
+        }
         return this.verifiedWriteResult(input, normalizedValue, readBack, store);
       } catch (error) {
         throw new ActionableError(
@@ -1005,6 +1022,17 @@ function parsePreferenceValue(value: string, type: PreferenceValueType): Prefere
       return parseFloatValue(value);
     case "string":
       return value;
+  }
+}
+
+function canParsePreferenceValue(value: string, type: PreferenceValueType): boolean {
+  try {
+    parsePreferenceValue(value, type);
+    return true;
+  } catch (error) {
+    // An effective-value override may be incompatible with the requested write type.
+    logger.debug("Preference read-back cannot be parsed as the requested type", error);
+    return false;
   }
 }
 

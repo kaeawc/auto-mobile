@@ -188,6 +188,35 @@ const faultMessages = [
 ];
 
 describe("iOS app UserDefaults resolution", () => {
+  test("bool write with a STRING override reports an unverifiable effective type", async () => {
+    const { preferences, sdk } = harness();
+    sdk.onRead = () => {
+      sdk.entry = { key: input.key, type: "STRING", value: "forced" };
+    };
+
+    const result = await preferences.setPreference({ ...input, type: "bool", value: true });
+    expect(result).toMatchObject({ found: true, value: "forced", type: "string", verified: false });
+    expect(result.warning).toContain("value was written");
+    expect(result.warning).toContain("different type (string vs requested bool)");
+    expect(result.warning).toContain("equality was not verified");
+
+    const fallback = harness("absent");
+    fallback.plist.setValue("forced", "string");
+    const fallbackResult = await fallback.preferences.setPreference({
+      ...input,
+      type: "bool",
+      value: true,
+    });
+    expect(fallbackResult).toMatchObject({
+      found: true,
+      value: "forced",
+      type: "string",
+      verified: false,
+    });
+    expect(fallbackResult.warning).toContain("bypasses the preferences daemon");
+    expect(fallbackResult.warning).toContain("different type (string vs requested bool)");
+  });
+
   for (const { type, sdkType, value, flag } of typedCases) {
     test(`SDK ${type} write and verification use the same store`, async () => {
       const { preferences, sdk, simctl, plist } = harness();

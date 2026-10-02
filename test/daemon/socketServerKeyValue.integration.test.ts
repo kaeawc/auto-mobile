@@ -143,6 +143,35 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     }
   });
 
+  test("iOS IDE mutations preserve resolved stores and set override warnings", async () => {
+    const resolution = { resolvedStore: "custom-suite", effectiveValueDiffers: true };
+    iosSetPreference.mockImplementation(async () => resolution);
+    iosRemovePreference.mockImplementation(async () => resolution);
+    iosClearPreferenceStore.mockImplementation(async () => resolution);
+    const params = {
+      platform: "ios",
+      deviceId: iosDevice.deviceId,
+      appId: "com.example.app",
+      fileName: "prefs",
+      key: "theme",
+      value: "dark",
+      type: "STRING",
+    };
+    const set = await sendRequest(socketPath, "ide/setKeyValue", params);
+    const remove = await sendRequest(socketPath, "ide/removeKeyValue", params);
+    const clear = await sendRequest(socketPath, "ide/clearKeyValueFile", params);
+    expect(set.success).toBe(true);
+    expect(set.result).toMatchObject({ success: true, ...resolution });
+    expect(set.result).toHaveProperty(
+      "warning",
+      expect.stringContaining("effective value read by the app differs"),
+    );
+    expect(remove.success).toBe(true);
+    expect(remove.result).toEqual({ success: true, resolvedStore: "custom-suite" });
+    expect(clear.success).toBe(true);
+    expect(clear.result).toEqual({ success: true, resolvedStore: "custom-suite" });
+  });
+
   test("ide/setKeyValue with platform 'ios' targets the iOS device via IOSCtrlProxyClient", async () => {
     const response = await sendRequest(socketPath, "ide/setKeyValue", {
       platform: "ios",

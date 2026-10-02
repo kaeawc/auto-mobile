@@ -499,6 +499,7 @@ describe("ListInstalledApps", function () {
 
     test("a names-only listing does not warn when CtrlProxy is unavailable", async function () {
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      warnSpy.mockClear();
       const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
         installedPackageSource: new FakeInstalledPackageSource({
           available: false,
@@ -517,6 +518,7 @@ describe("ListInstalledApps", function () {
 
     test("warns with the device when an unavailable CtrlProxy catalog falls back to adb", async function () {
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      warnSpy.mockClear();
       const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
         installedPackageSource: new FakeInstalledPackageSource({
           available: false,

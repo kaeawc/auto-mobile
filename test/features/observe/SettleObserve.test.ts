@@ -74,6 +74,8 @@ describe("RealSettleObserve", () => {
     const settle = new RealSettleObserve(fake, timer);
     const result = await settle.execute({ timeoutMs: 2500, pollMs: 150 });
 
+    expect(fake.getExecuteOptions().every((o) => o.skipBackStack === true)).toBe(true);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([result.observation]);
     expect(result.settled).toBe(true);
     expect(result.polls).toBe(3);
     // Final snapshot only — the "loading" transition never surfaces.

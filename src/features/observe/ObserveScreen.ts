@@ -583,6 +583,7 @@ export class RealObserveScreen implements ObserveScreen {
   private timer: Timer;
   private readonly observedAndroidDisplayCache: ObservedAndroidDisplayCache;
   private readonly requestedDisplay?: string;
+  private readonly deferredBackStackDisplays = new WeakMap<ObserveResult, number>();
   private idGenerator: IdGenerator;
 
   private viewHierarchy: ViewHierarchyInterface;
@@ -1863,6 +1864,12 @@ export class RealObserveScreen implements ObserveScreen {
       if (result.screenshotPath) {
         result.screenshotExpiresAt = await this.pathProtection.protect(result.screenshotPath);
       }
+      if (this.device.platform === "android" && !observerMode && skipBackStack) {
+        this.deferredBackStackDisplays.set(
+          result,
+          requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
+        );
+      }
       logger.debug("Observe command completed");
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
@@ -2264,6 +2271,37 @@ export class RealObserveScreen implements ObserveScreen {
 
   // ---------- Orchestration ----------
 
+  /** Attach the terminal Android back stack without replacing the matched hierarchy. */
+  async collectDeferredBackStack(
+    observation: ObserveResult,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const displayId = this.deferredBackStackDisplays.get(observation);
+    if (displayId === undefined || this.device.platform !== "android" || observation.backStack) {
+      return;
+    }
+    await this.deviceStateCollector.collectBackStack(
+      observation,
+      new NoOpPerformanceTracker(),
+      options.signal,
+      displayId,
+    );
+    this.scopeActiveWindowToBackStack(observation);
+  }
+
+  private scopeActiveWindowToBackStack(result: ObserveResult): void {
+    if ((result.backStack?.displayCount ?? 0) > 1 && result.activeWindow) {
+      const scopedActivity = resolveBackStackActivityAttribution(result);
+      if (scopedActivity) {
+        result.activeWindow = {
+          ...result.activeWindow,
+          appId: scopedActivity.packageName,
+          activityName: scopedActivity.activityName,
+        };
+      }
+    }
+  }
+
   /**
    * Collect all observation data with platform-specific orchestration.
    *
@@ -2421,16 +2459,7 @@ export class RealObserveScreen implements ObserveScreen {
         // dump already sampled above scopes its resumed activity to the logical
         // display mapped from `result.display.key`. Only use it when
         // the activity belongs to the captured hierarchy's app.
-        if ((result.backStack?.displayCount ?? 0) > 1 && result.activeWindow) {
-          const scopedActivity = resolveBackStackActivityAttribution(result);
-          if (scopedActivity) {
-            result.activeWindow = {
-              ...result.activeWindow,
-              appId: scopedActivity.packageName,
-              activityName: scopedActivity.activityName,
-            };
-          }
-        }
+        this.scopeActiveWindowToBackStack(result);
 
         if (result.notificationPermissionDetected && result.activeWindow) {
           result.activeWindow.type = "notification_permission_dialog";

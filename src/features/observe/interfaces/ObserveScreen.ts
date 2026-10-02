@@ -83,6 +83,12 @@ export interface ObserveScreen {
    */
   processRecomposition?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 
+  /** Collect a skipped Android back stack for the selected poll result before caching, without recapturing. */
+  collectDeferredBackStack?(
+    observation: ObserveResult,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
+
   /** Capture the cache generation at poll start for the deferred write's stale-write fence. */
   captureCacheGeneration?(): number;
 

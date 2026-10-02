@@ -19,6 +19,8 @@ export class FakeObserveScreen implements ObserveScreen {
   private accessibilityAuditCallCount: number = 0;
   private processRecompositionCallCount: number = 0;
   private cacheObserveResultCallCount: number = 0;
+  private readonly deferredBackStackObservations: ObserveResult[] = [];
+  private deferredBackStack?: ObserveResult["backStack"];
   private neverResolvingOperations: Set<string> = new Set();
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
@@ -139,7 +141,7 @@ export class FakeObserveScreen implements ObserveScreen {
 
   /** Keep a configured async operation pending so timer-bound callers can be tested. */
   setNeverResolving(
-    operation: "processRecomposition" | "cacheObserveResult",
+    operation: "processRecomposition" | "cacheObserveResult" | "collectDeferredBackStack",
     enabled: boolean,
   ): void {
     if (enabled) {
@@ -186,6 +188,7 @@ export class FakeObserveScreen implements ObserveScreen {
     this.executeOptionsHistory.length = 0;
     this.capturedScreenshotObservations.length = 0;
     this.recompositionObservations.length = 0;
+    this.deferredBackStackObservations.length = 0;
     this.cachedObserveResultObservations.length = 0;
     this.cachedObserveResultGenerations.length = 0;
     this.cachedObserveResultCachedAts.length = 0;
@@ -302,6 +305,36 @@ export class FakeObserveScreen implements ObserveScreen {
     const error = this.failures.get("processRecomposition");
     if (error) {
       throw error;
+    }
+  }
+
+  setDeferredBackStack(backStack: ObserveResult["backStack"]): void {
+    this.deferredBackStack = backStack;
+  }
+
+  getCollectDeferredBackStackCallCount(): number {
+    return this.deferredBackStackObservations.length;
+  }
+
+  getCollectDeferredBackStackObservations(): ObserveResult[] {
+    return [...this.deferredBackStackObservations];
+  }
+
+  async collectDeferredBackStack(
+    observation: ObserveResult,
+    _options?: { signal?: AbortSignal },
+  ): Promise<void> {
+    this.executedOperations.push("collectDeferredBackStack");
+    this.deferredBackStackObservations.push(observation);
+    if (this.neverResolvingOperations.has("collectDeferredBackStack")) {
+      return await new Promise<void>(() => {});
+    }
+    const error = this.failures.get("collectDeferredBackStack");
+    if (error) {
+      throw error;
+    }
+    if (this.deferredBackStack) {
+      observation.backStack = this.deferredBackStack;
     }
   }
 

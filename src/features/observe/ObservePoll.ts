@@ -61,6 +61,8 @@ export interface ObservePollOptions {
    * terminal observation once (#6932).
    */
   skipRecompositionTracking?: boolean;
+  /** Keep activity-dependent predicates reconciled each poll; otherwise defer the read (D42/#6598). */
+  readBackStackEachPoll?: boolean;
 }
 
 export interface ObservePollOutcome {
@@ -211,7 +213,11 @@ async function awaitFinalizationWhilePollIsLive(
 export async function pollObserveUntil(
   observeScreen: Pick<
     ObserveScreen,
-    "execute" | "processRecomposition" | "captureCacheGeneration" | "cacheObserveResult"
+    | "execute"
+    | "processRecomposition"
+    | "captureCacheGeneration"
+    | "cacheObserveResult"
+    | "collectDeferredBackStack"
   >,
   timer: Timer,
   options: ObservePollOptions,
@@ -248,6 +254,16 @@ export async function pollObserveUntil(
     generation?: number,
     cachedAt?: number,
   ): Promise<ObservePollOutcome> => {
+    if (!options.readBackStackEachPoll && observeScreen.collectDeferredBackStack) {
+      // Timeout results still need a back stack. Only cancellation bounds this
+      // wait here; the collector retains its own adb timeout (D42/#6598).
+      await raceWithDeadline(
+        () =>
+          observeScreen.collectDeferredBackStack!(outcome.observation, { signal: options.signal }),
+        { timer, signal: options.signal, label: "Observe poll terminal back stack" },
+      );
+      throwIfAborted(options.signal);
+    }
     if (
       options.skipRecompositionTracking &&
       canProcessRecomposition &&
@@ -307,6 +323,7 @@ export async function pollObserveUntil(
       // automatic evidence capture it once after this loop completes.
       skipScreenshot: true,
       skipCache: true,
+      skipBackStack: options.readBackStackEachPoll === true ? undefined : true,
       skipAccessibilityAudit: true,
       skipPerformanceAudit: options.skipPerformanceAudit,
       skipRecompositionTracking: options.skipRecompositionTracking,

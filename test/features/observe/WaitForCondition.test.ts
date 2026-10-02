@@ -86,6 +86,8 @@ describe("RealWaitForCondition", () => {
     const waitFor = new RealWaitForCondition(fake, timer);
     const result = await waitFor.execute(predicate, { timeoutMs: 2500, pollMs: 150 });
 
+    expect(fake.getExecuteOptions().every((o) => o.skipBackStack === true)).toBe(true);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([result.observation]);
     expect(result.matched).toBe(true);
     expect(result.timedOut).toBe(false);
     expect(result.polls).toBe(2);
@@ -314,4 +316,17 @@ describe("RealWaitForCondition", () => {
       waitFor.execute(predicate, { timeoutMs: 2500, pollMs: 150, signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
   });
+});
+
+test("forwards readBackStackEachPoll for activity predicates", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const fake = new FakeObserveScreen();
+  fake.setObserveSequence([obs({}, { updatedAt: 10 }), obs({}, { updatedAt: 20 })]);
+  const result = await new RealWaitForCondition(fake, timer).execute(() => ({ matched: true }), {
+    readBackStackEachPoll: true,
+  });
+  expect(result.polls).toBe(2);
+  expect(fake.getExecuteOptions().map((o) => o.skipBackStack)).toEqual([undefined, undefined]);
+  expect(fake.getCollectDeferredBackStackCallCount()).toBe(0);
 });

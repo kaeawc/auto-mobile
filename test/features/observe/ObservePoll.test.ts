@@ -157,6 +157,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect(outcome.stopped).toBe(false);
     expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("newest");
     expect(outcome.observation.updatedAt).toBe(30);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
     expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
     expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 30]);
   });
@@ -402,9 +403,8 @@ describe("pollObserveUntil cache writes", () => {
       true,
       true,
     ]);
-    expect(fake.getExecuteOptions().every((options) => options.skipBackStack === undefined)).toBe(
-      true,
-    );
+    expect(fake.getExecuteOptions().every((options) => options.skipBackStack === true)).toBe(true);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
     expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
   });
 
@@ -425,6 +425,7 @@ describe("pollObserveUntil cache writes", () => {
     expect(outcome).toMatchObject({ polls: 2, stopped: false, terminalReason: "timeout" });
     expect(outcome.observation).toBe(last);
     expect(outcome.observation).toEqual(last);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
     expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
   });
 
@@ -447,6 +448,7 @@ describe("pollObserveUntil cache writes", () => {
       ),
     ).rejects.toThrow();
 
+    expect(fake.getCollectDeferredBackStackCallCount()).toBe(0);
     expect(fake.getCacheObserveResultCallCount()).toBe(0);
   });
 });
@@ -494,7 +496,10 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
       },
       () => true,
     );
-    await Promise.resolve();
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
     controller.abort();
 
     const outcome = await outcomePromise;
@@ -524,6 +529,7 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
 
     expect(outcome.terminalReason).toBe("screen_off");
     expect(fake.getProcessRecompositionCallCount()).toBe(0);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
     expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
   });
 
@@ -607,6 +613,175 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
     expect(outcome.terminalReason).toBe("timeout");
     expect(outcome.observation).toBe(stale);
     expect(fake.getProcessRecompositionCallCount()).toBe(0);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
     expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
   });
+});
+
+describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
+  test.each([3, 5])("%i polls collect only the returned back stack before caching", async (n) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult((i) => obs(i + 10, "stable"));
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 10 },
+      (_observation, _previous, index) => index === n,
+    );
+    expect(outcome.polls).toBe(n);
+    expect(fake.getExecuteCallCount()).toBe(n);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
+    expect(fake.getExecutedOperations()).toEqual([
+      ...Array<string>(n).fill("execute"),
+      "collectDeferredBackStack",
+      "cacheObserveResult",
+    ]);
+    expect(fake.getExecuteOptions().every((o) => o.skipBackStack === true)).toBe(true);
+  });
+
+  test("screen-off terminal collects the returned back stack", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult({
+      ...obs(20, "asleep"),
+      wakefulness: "Asleep",
+      wakefulnessSource: "adb",
+    });
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10 },
+      () => false,
+    );
+    expect(outcome.terminalReason).toBe("screen_off");
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
+  });
+
+  test("activity predicates keep per-poll reads and skip the terminal read", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([obs(10, "baseline"), obs(20, "activity")]);
+    await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10, readBackStackEachPoll: true },
+      () => true,
+    );
+    expect(fake.getExecuteCallCount()).toBe(2);
+    expect(fake.getExecuteOptions().map((o) => o.skipBackStack)).toEqual([undefined, undefined]);
+    expect(fake.getCollectDeferredBackStackCallCount()).toBe(0);
+  });
+
+  test("unexpected terminal collector failure rejects without caching", async () => {
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs(20, "terminal"));
+    fake.setFailureMode("collectDeferredBackStack", new Error("collector failed"));
+    await expect(
+      pollObserveUntil(
+        fake,
+        new FakeTimer(),
+        { timeoutMs: 100, pollMs: 10, initialMinTimestampMs: 10 },
+        () => true,
+      ),
+    ).rejects.toThrow("collector failed");
+    expect(fake.getCollectDeferredBackStackCallCount()).toBe(1);
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+  });
+
+  test("a pending terminal read survives the exhausted budget but aborts without caching", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs(20, "terminal"));
+    fake.setNeverResolving("collectDeferredBackStack", true);
+    const controller = new AbortController();
+    const pending = pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1, pollMs: 10, signal: controller.signal },
+      () => false,
+    );
+    // Let the first execute schedule its sleep, then exhaust the fake budget.
+    await Promise.resolve();
+    timer.advanceTime(10);
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    const readsBeforeAbort = fake.getCollectDeferredBackStackCallCount();
+    controller.abort(new Error("cancel terminal"));
+    await expect(pending).rejects.toThrow("cancel terminal");
+    expect(timer.now()).toBeGreaterThanOrEqual(1);
+    expect(readsBeforeAbort).toBe(1);
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+  });
+});
+
+test("abort after terminal collection writes neither recomposition nor cache", async () => {
+  const fake = new FakeObserveScreen();
+  const controller = new AbortController();
+  const terminal = obs(20, "terminal");
+  fake.setObserveResult(terminal);
+  const collect = fake.collectDeferredBackStack.bind(fake);
+  fake.collectDeferredBackStack = async (observation, options): Promise<void> => {
+    expect(options?.signal).toBe(controller.signal);
+    await collect(observation, options);
+    controller.abort();
+  };
+  await expect(
+    pollObserveUntil(
+      fake,
+      new FakeTimer(),
+      {
+        timeoutMs: 100,
+        pollMs: 10,
+        initialMinTimestampMs: 10,
+        skipRecompositionTracking: true,
+        signal: controller.signal,
+      },
+      () => true,
+    ),
+  ).rejects.toThrow();
+  expect(fake.getCollectDeferredBackStackObservations()).toEqual([terminal]);
+  expect(fake.getProcessRecompositionCallCount()).toBe(0);
+  expect(fake.getCacheObserveResultCallCount()).toBe(0);
+});
+
+test("a collector resolving after abort never writes the returned observation", async () => {
+  const fake = new FakeObserveScreen();
+  const controller = new AbortController();
+  const terminal = obs(20, "terminal");
+  fake.setObserveResult(terminal);
+  let release = (): void => {};
+  const work = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const collect = fake.collectDeferredBackStack.bind(fake);
+  fake.collectDeferredBackStack = async (observation, options): Promise<void> => {
+    await collect(observation, options);
+    await work;
+  };
+  const pending = pollObserveUntil(
+    fake,
+    new FakeTimer(),
+    {
+      timeoutMs: 100,
+      pollMs: 10,
+      initialMinTimestampMs: 10,
+      signal: controller.signal,
+    },
+    () => true,
+  );
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
+  controller.abort(new Error("late collector cancelled"));
+  await expect(pending).rejects.toThrow("late collector cancelled");
+  release();
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
+  expect(fake.getCollectDeferredBackStackObservations()).toEqual([terminal]);
+  expect(fake.getCacheObserveResultCallCount()).toBe(0);
 });

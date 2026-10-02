@@ -312,7 +312,17 @@ describe("systemTray post-tap observation", () => {
         adbFactory: () => new SequencedFakeAdbExecutor([100000]),
         observeScreenFactory: () => observer,
       });
+      observer.setDeferredBackStack(
+        platform === "android"
+          ? { depth: 0, activities: [], tasks: [], capturedAt: 999 }
+          : undefined,
+      );
       const result = await observeSystemTrayAfterTap({ ...device, platform }, baseline);
+      expect(observer.getExecuteOptions().every((o) => o.skipBackStack === true)).toBe(true);
+      expect(observer.getCollectDeferredBackStackCallCount()).toBe(1);
+      expect(result.observation?.backStack?.capturedAt).toBe(
+        platform === "android" ? 999 : undefined,
+      );
       expect(result.settled).toBe(true);
       expect(observer.getExecuteOptions()[0].minTimestamp).toBe(901);
       expect(observer.getExecuteOptions()[0].skipPerformanceAudit).toBe(true);

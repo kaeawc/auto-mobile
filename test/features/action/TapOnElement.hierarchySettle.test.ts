@@ -72,7 +72,18 @@ function createTapWithSettleSequence(settleFrames: ObserveResult[]): TapOnElemen
   timer.enableAutoAdvance();
   const fake = new FakeObserveScreen();
   fake.setObserveSequence(settleFrames);
-  const waitForCondition = new RealWaitForCondition(fake, timer);
+  const realWait = new RealWaitForCondition(fake, timer);
+  const waitForCondition: WaitForCondition = {
+    async execute(predicate, options) {
+      const before = fake.getExecuteCallCount();
+      const result = await realWait.execute(predicate, options);
+      expect(fake.getExecuteCallCount() - before).toBe(result.polls);
+      expect(fake.getExecuteOptions().every((o) => o.skipBackStack === undefined)).toBe(true);
+      expect(fake.getCollectDeferredBackStackCallCount()).toBe(0);
+      expect(options?.readBackStackEachPoll).toBe(true);
+      return result;
+    },
+  };
   return new TapOnElement(
     { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
     new FakeAdbClient() as any,
@@ -395,4 +406,17 @@ describe("enforceFreshnessConsistencyWithEffect and the screen-off terminal (#62
     expect(result.observation.freshness?.category).toBe("effect_inconsistent");
     expect(result.observation.freshness?.warning).toContain("predates the detected transition");
   });
+});
+
+test("unchanged post-tap capture runs both activity-dependent wait loops with per-poll reads", async () => {
+  const previous = makeObservation({ updatedAt: 1, viewHierarchy: makeHierarchy("baseline") });
+  const current = makeObservation({ updatedAt: 10, viewHierarchy: makeHierarchy("baseline") });
+  const tap = createTapWithSettleSequence([
+    makeObservation({ updatedAt: 20, viewHierarchy: makeHierarchy("baseline") }),
+    makeObservation({ updatedAt: 30, viewHierarchy: makeHierarchy("destination") }),
+    makeObservation({ updatedAt: 40, viewHierarchy: makeHierarchy("destination") }),
+  ]);
+  const result = await tap["deriveTapEffectAfterPostTapObservation"](previous, current);
+  expect(result.effect?.screenChanged).toBe(true);
+  expect(result.observation.viewHierarchy?.updatedAt).toBe(40);
 });

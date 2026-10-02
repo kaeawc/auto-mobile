@@ -1,6 +1,33 @@
 import { testOverrides } from "../../src/utils/testOverrides";
 import { rmSync } from "node:fs";
+import childProcess from "node:child_process";
 import { ensureAuxSocketDir } from "./auxSocketDir";
+import { spawnArgv } from "./realDeviceToolSpawnGuard";
+
+// Install before portAvailabilityPreload imports AndroidCtrlProxyClient ->
+// deviceDataStreamSocketServer -> daemonFiles -> constants (DAEMON_VERSION).
+// An env override would leak to child server/daemon processes in integration tests.
+testOverrides.gitMetadataClient = { readVersion: () => null };
+
+/** Record import-time git probes, including ones swallowed by version fallback. */
+export const gitVersionPreloadSpawns: string[][] = [];
+childProcess.spawnSync = new Proxy(childProcess.spawnSync, {
+  apply(target, thisArg, args: unknown[]) {
+    if (args[0] === "git") {
+      gitVersionPreloadSpawns.push(["git"]);
+    }
+    return Reflect.apply(target, thisArg, args);
+  },
+});
+Bun.spawnSync = new Proxy(Bun.spawnSync, {
+  apply(target, thisArg, args: unknown[]) {
+    const argv = spawnArgv(args);
+    if (argv[0] === "git") {
+      gitVersionPreloadSpawns.push([...argv]);
+    }
+    return Reflect.apply(target, thisArg, args);
+  },
+});
 
 /** Isolate auxiliary sockets from live daemons and parallel tests (issue #7616, PR #7612). */
 const auxSocketDir = ensureAuxSocketDir();

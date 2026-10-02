@@ -1,3 +1,9 @@
+import { createMcpServer } from "../../src/server";
+import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { getMcpServerVersion } from "../../src/utils/mcpVersion";
+import { testOverrides } from "../../src/utils/testOverrides";
+import { gitVersionPreloadSpawns } from "./testPreload";
+
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
@@ -54,4 +60,21 @@ describe("CtrlProxy unit-test preload registry cleanup", () => {
     clearCtrlProxyRegistries();
     expect(IOSCtrlProxyClient.getExistingInstance(iosDevice.deviceId)).toBeNull();
   });
+});
+
+test("the preload installs the git override before server and daemon imports without spawning git", async () => {
+  // The recording hooks run before portAvailabilityPreload loads constants.
+  // Checking the installed seam catches its removal even if another test warmed
+  // the cache; the history catches an eager probe even if its error was swallowed.
+  expect(testOverrides.gitMetadataClient).toBeDefined();
+  expect(gitVersionPreloadSpawns).toEqual([]);
+  expect(typeof createMcpServer).toBe("function");
+  expect(DAEMON_VERSION).toBe(getMcpServerVersion());
+
+  // A fresh version module defeats process-wide caching: the real spawn hooks
+  // must also see no git on the first explicit version read.
+  const modulePath = "../../src/utils/mcpVersion.ts?preload-guard";
+  const fresh: typeof import("../../src/utils/mcpVersion") = await import(modulePath);
+  expect(fresh.getMcpServerVersion()).toBe(DAEMON_VERSION);
+  expect(gitVersionPreloadSpawns).toEqual([]);
 });

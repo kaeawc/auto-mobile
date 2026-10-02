@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../models";
+import type { GitMetadataClient } from "./GitMetadataClient";
 import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
 import type { PortAvailabilityChecker } from "./PortManager";
@@ -22,12 +23,15 @@ export type DeviceReadinessProxyDriverProvider = (
 
 /** Test-only values read lazily by production modules. All imports here are erased types. */
 export const testOverrides: {
+  /** In-process version metadata seam; never inherited by spawned children. */
+  gitMetadataClient: GitMetadataClient | undefined;
   hostPortAvailabilityChecker: PortAvailabilityChecker | undefined;
   deviceReadinessProxyDriverProvider: DeviceReadinessProxyDriverProvider | null;
   telemetryNoOpDefault: boolean;
   /** Directory read by auxiliary socket configs during in-process tests. */
   auxSocketDir: string | undefined;
 } = {
+  gitMetadataClient: undefined,
   hostPortAvailabilityChecker: undefined,
   deviceReadinessProxyDriverProvider: null,
   telemetryNoOpDefault: false,

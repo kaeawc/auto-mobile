@@ -22,9 +22,18 @@ private struct PreferenceHierarchyServer: SdkHierarchyFetching {
 private actor RecordingPreferenceClient: SdkPreferenceFetching {
     private let resolvedStore: String?
     private let effectiveValueDiffers: Bool?
-    init(resolvedStore: String? = "standard", effectiveValueDiffers: Bool? = nil) {
+    private let redacted: Bool?
+    private let storedEntries: [StorageEntry]
+    init(
+        resolvedStore: String? = "standard",
+        effectiveValueDiffers: Bool? = nil,
+        redacted: Bool? = nil,
+        entries: [StorageEntry] = []
+    ) {
         self.resolvedStore = resolvedStore
         self.effectiveValueDiffers = effectiveValueDiffers
+        self.redacted = redacted
+        storedEntries = entries
     }
 
     private var operations: [String] = []
@@ -38,12 +47,12 @@ private actor RecordingPreferenceClient: SdkPreferenceFetching {
 
     func entries(appId: String, suiteName: String) async throws -> [StorageEntry] {
         operations.append("entries:\(appId):\(suiteName)")
-        return []
+        return storedEntries
     }
 
     func get(appId: String, suiteName: String, key: String) async throws -> StorageEntry? {
         operations.append("get:\(appId):\(suiteName):\(key)")
-        return StorageEntry(key: key, value: "42", type: "INT")
+        return StorageEntry(key: key, value: "42", type: "INT", redacted: redacted)
     }
 
     func set(
@@ -175,6 +184,61 @@ final class StorageRoutingTests: XCTestCase {
         let tokens = await client.recordedTokens()
         XCTAssertEqual(tokens, ["launch-token", "launch-token", "launch-token"])
         XCTAssertEqual(runner.calls, 0)
+    }
+
+    func testGetPreferenceEncodesRedactedFlagAndPreservesNormalWireOutput() async throws {
+        let redactedHandler = handler(
+            client: RecordingPreferenceClient(redacted: true), runner: RunnerStorageTrap()
+        )
+        let redactedResponse = try await redactedHandler.handle(request("get_preference", fields: ["key": "token"]))
+        let redactedEntryResponse = try XCTUnwrap(redactedResponse as? StorageEntryResponse)
+        let redactedBody = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(redactedEntryResponse)) as? [String: Any]
+        )
+        XCTAssertEqual(redactedBody["redacted"] as? Bool, true)
+        XCTAssertEqual(redactedBody["key"] as? String, "token")
+        XCTAssertEqual(redactedBody["value"] as? String, "42")
+        XCTAssertEqual(redactedBody["valueType"] as? String, "INT")
+
+        for redacted in [nil, false] as [Bool?] {
+            let normalHandler = handler(
+                client: RecordingPreferenceClient(redacted: redacted), runner: RunnerStorageTrap()
+            )
+            let response = try await normalHandler.handle(request("get_preference", fields: ["key": "token"]))
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let entryResponse = try XCTUnwrap(response as? StorageEntryResponse)
+            let encodedData = try encoder.encode(entryResponse)
+            let encoded = try XCTUnwrap(String(data: encodedData, encoding: .utf8))
+            let body = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any]
+            )
+            XCTAssertNil(body["redacted"])
+            let timestamp = try XCTUnwrap(body["timestamp"])
+            let totalTimeMs = try XCTUnwrap(body["totalTimeMs"])
+            let expected = "{\"found\":true,\"key\":\"token\",\"requestId\":\"storage-test\","
+                + "\"success\":true,\"timestamp\":\(timestamp),\"totalTimeMs\":\(totalTimeMs),"
+                + "\"type\":\"get_preference_result\",\"value\":\"42\",\"valueType\":\"INT\"}"
+            XCTAssertEqual(encoded, expected)
+        }
+    }
+
+    func testGetPreferencesOnlyEncodesRedactedFlagOnRedactedEntries() async throws {
+        let client = RecordingPreferenceClient(entries: [
+            StorageEntry(key: "token", value: "[REDACTED]", type: "STRING", redacted: true),
+            StorageEntry(key: "theme", value: "dark", type: "STRING"),
+            StorageEntry(key: "legacy", value: "value", type: "STRING", redacted: false),
+        ])
+        let handler = handler(client: client, runner: RunnerStorageTrap())
+        let result = try await handler.handle(request("get_preferences"))
+        let response = try XCTUnwrap(result as? StorageEntriesResponse)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(response)) as? [String: Any])
+        let entries = try XCTUnwrap(body["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries[0]["redacted"] as? Bool, true)
+        XCTAssertNil(entries[1]["redacted"])
+        XCTAssertNil(entries[2]["redacted"])
     }
 
     func testMissingSdkFailsWithoutRunnerWrite() async throws {

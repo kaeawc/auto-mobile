@@ -59,6 +59,208 @@ describe("selected-display failure classification", () => {
   ] as const)("conservatively classifies %s / %s", (kind, reason, transient) => {
     expect(classifySelectedDisplayReadFailure(reason, {})).toEqual({ kind, transient });
   });
+  test.each([
+    [
+      "Failed to establish CtrlProxy WebSocket connection",
+      "connect-failed",
+      true,
+      "connect-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Unable to request hierarchy for Android display 2: CtrlProxy WebSocket is unavailable",
+      "socket-unavailable",
+      true,
+      "socket-unavailable",
+      true,
+      "capture-error",
+    ],
+    [
+      "Unable to request hierarchy for Android display 2: send exploded",
+      "send-failed",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "CtrlProxy WebSocket closed or changed before hierarchy wait",
+      "socket-closed-before-wait",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "CtrlProxy WebSocket disconnected while waiting for hierarchy response",
+      "socket-disconnected",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "CtrlProxy WebSocket changed while waiting for hierarchy response",
+      "socket-changed",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Screen is off while waiting for hierarchy response",
+      "screen-off",
+      false,
+      "screen-off",
+      false,
+      "screen-off",
+    ],
+    [
+      "Timed out waiting for hierarchy response after 100ms",
+      "timeout",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Timed out waiting for hierarchy response after 100ms while retrying",
+      "timeout",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Hierarchy service did not answer the sync request",
+      "no-answer",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "runner error: selected panel extraction failed",
+      "runner-error",
+      false,
+      "runner-error",
+      false,
+      "runner-error",
+    ],
+    ["hierarchy service did not answer", "no-answer", true, "send-failed", true, "capture-error"],
+    [
+      "Device emulator-5554 hierarchy service did not answer",
+      "no-answer",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Device emulator-5554 hierarchy read timed out",
+      "timeout",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Device 3f2b8c1e-9a4d-4e57-b6a1-0c5d7e8f9a12 hierarchy service did not answer",
+      "no-answer",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Device 3f2b8c1e-9a4d-4e57-b6a1-0c5d7e8f9a12 hierarchy read timed out",
+      "timeout",
+      true,
+      "send-failed",
+      true,
+      "capture-error",
+    ],
+    [
+      "Unable to capture hierarchy: malformed nodes",
+      "capture-error",
+      false,
+      "capture-error",
+      false,
+      "capture-error",
+    ],
+    [
+      "Hierarchy capture did not satisfy the device timestamp floor",
+      "timestamp-floor",
+      false,
+      "timestamp-floor",
+      false,
+      "capture-error",
+    ],
+    [
+      "CtrlProxy WebSocket is unavailable",
+      "unknown",
+      false,
+      "socket-unavailable",
+      true,
+      "capture-error",
+    ],
+    ["send exploded", "unknown", false, "send-failed", true, "capture-error"],
+  ] as const)(
+    "preserves source and wrapper precedence for %s",
+    (reason, kind, transient, requestKind, requestTransient, captureKind) => {
+      const cases = [
+        [reason, { kind, transient }],
+        [`Device X hierarchy service did not answer: ${reason}`, { kind, transient }],
+        [
+          `Unable to request hierarchy for Android display 2: ${reason}`,
+          { kind: requestKind, transient: requestTransient },
+        ],
+        [`Unable to capture hierarchy: ${reason}`, { kind: captureKind, transient: false }],
+      ] as const;
+      for (const [message, expected] of cases) {
+        for (const error of [message, new Error(message)]) {
+          expect(classifySelectedDisplayReadFailure(error, {})).toEqual(expected);
+        }
+      }
+    },
+  );
+
+  test.each([
+    ["Device fake hierarchy read timed out while retrying", "unknown", false],
+    ["Device fake hierarchy read timed out.", "unknown", false],
+    ["Device hierarchy read timed out", "timeout", true],
+    ["Device  hierarchy read timed out", "timeout", true],
+    ["hierarchy read timed out", "timeout", true],
+    ["Hierarchy service did not answer.", "unknown", false],
+    ["hierarchy service did not answer yet", "unknown", false],
+    ["Hierarchy service did not answer the sync request twice", "unknown", false],
+    ["Timed out waiting for hierarchy response after ms", "unknown", false],
+    ["Timed out waiting for hierarchy response", "unknown", false],
+  ] as const)(
+    "preserves near-miss classification for %s",
+    (reason, deviceKind, deviceTransient) => {
+      // The device prefix can supply the leading Device match for an incomplete reason.
+      const cases = [
+        [reason, { kind: "unknown", transient: false }],
+        [
+          `Device X hierarchy service did not answer: ${reason}`,
+          { kind: deviceKind, transient: deviceTransient },
+        ],
+        [
+          `Unable to request hierarchy for Android display 2: ${reason}`,
+          { kind: "send-failed", transient: true },
+        ],
+        [`Unable to capture hierarchy: ${reason}`, { kind: "capture-error", transient: false }],
+      ] as const;
+      for (const [message, expected] of cases) {
+        for (const error of [message, new Error(message)]) {
+          expect(classifySelectedDisplayReadFailure(error, {})).toEqual(expected);
+        }
+      }
+    },
+  );
+
   test("signal state takes priority over all strings", () => {
     const controller = new AbortController();
     controller.abort(new Error("unrelated abort reason"));

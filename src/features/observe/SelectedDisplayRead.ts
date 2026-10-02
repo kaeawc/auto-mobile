@@ -75,14 +75,22 @@ const failureReasons: readonly (SelectedDisplayReadFailure & { pattern: RegExp }
   {
     kind: "timeout",
     transient: true,
-    pattern:
-      /Timed out waiting for hierarchy response after \d+ms|Device .+ hierarchy read timed out$/,
+    pattern: /Timed out waiting for hierarchy response after \d+ms/,
+  },
+  {
+    kind: "timeout",
+    transient: true,
+    pattern: /Device .+ hierarchy read timed out$/,
   },
   {
     kind: "no-answer",
     transient: true,
-    pattern:
-      /Hierarchy service did not answer the sync request$|[Hh]ierarchy service did not answer$/,
+    pattern: /Hierarchy service did not answer the sync request$/,
+  },
+  {
+    kind: "no-answer",
+    transient: true,
+    pattern: /[Hh]ierarchy service did not answer$/,
   },
 ];
 

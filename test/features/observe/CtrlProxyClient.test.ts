@@ -2376,6 +2376,432 @@ describe("AndroidCtrlProxyClient", function () {
       }
     });
 
+    describe("request-correlated hierarchy suppression (#6420)", () => {
+      const createSuppressionHarness = async () => {
+        const timer = new FakeTimer();
+        const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+        const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+        const server = new DeviceDataStreamSocketServer("/fake/suppression.sock", timer, {
+          authorize: () => {},
+        });
+        installDeviceDataStreamSocketServerForTesting(server);
+        const pushes = spyOn(server, "pushHierarchyUpdate").mockReturnValue(null);
+        const backoff = spyOn(client, "startScreenshotBackoff").mockImplementation(() => {});
+        await client.ensureConnected();
+        pushes.mockClear();
+        backoff.mockClear();
+        const socket = getSocket()!;
+        const push = (text: string, requestId?: string | null, updatedAt = timer.now()) => {
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              requestId,
+              timestamp: timer.now(),
+              data: { ...hierarchyWithScreenSize(1080, 2340), updatedAt, hierarchy: { text } },
+            }),
+          );
+        };
+        const requestIds = () =>
+          socket.sentMessages
+            .map((message) => JSON.parse(message) as { type: string; requestId: string })
+            .filter((message) => message.type === "request_hierarchy")
+            .map((message) => message.requestId);
+        const request = (signal?: AbortSignal, timeoutMs = 1000) =>
+          client.requestHierarchySyncWithoutObservationStreamPush(
+            undefined,
+            false,
+            signal,
+            timeoutMs,
+          );
+        return { client, timer, socket, getSocket, push, pushes, backoff, requestIds, request };
+      };
+
+      test("debounced push stays live and the later explicit response stays suppressed", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          h.push("echo detected", "earlier-request");
+          h.pushes.mockClear();
+          h.backoff.mockClear();
+          const pending = h.request();
+          await flushMicrotasks();
+          const id = h.requestIds()[0]!;
+          let settled = false;
+          void pending.then(() => {
+            settled = true;
+          });
+          h.timer.advanceTime(250);
+          h.push("debounced", null);
+          await flushMicrotasks();
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          expect(h.backoff).toHaveBeenCalledTimes(1);
+          expect(settled).toBe(false);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(1);
+          h.timer.advanceTime(250);
+          h.push("explicit", id);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("explicit");
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          expect(h.backoff).toHaveBeenCalledTimes(1);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          expect(h.timer.getPendingTimeouts()).not.toContain(1000);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      for (const reverse of [false, true]) {
+        test(`overlapping suppressed requests consume their own IDs (${reverse ? "reverse" : "forward"})`, async () => {
+          const h = await createSuppressionHarness();
+          try {
+            const first = h.request();
+            const second = h.request();
+            await flushMicrotasks();
+            const ids = h.requestIds();
+            expect(ids).toHaveLength(2);
+            const order = reverse ? [1, 0] : [0, 1];
+            const responses = [first, second];
+            h.push("first arrival", ids[order[0]!]!);
+            expect(h.client.hierarchyObservationStreamSuppressions.has(ids[order[0]!]!)).toBe(
+              false,
+            );
+            expect(h.client.hierarchyObservationStreamSuppressions.has(ids[order[1]!]!)).toBe(true);
+            expect((await responses[order[0]!]!)?.hierarchy.hierarchy.text).toBe("first arrival");
+            h.push("second arrival", ids[order[1]!]!);
+            expect((await responses[order[1]!]!)?.hierarchy.hierarchy.text).toBe("second arrival");
+            expect(h.pushes).toHaveBeenCalledTimes(0);
+            expect(h.backoff).toHaveBeenCalledTimes(0);
+            expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          } finally {
+            await h.client.close();
+          }
+        });
+      }
+
+      test("timeout removes the token and its timer", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const pending = h.request();
+          await flushMicrotasks();
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(1);
+          h.timer.advanceTime(1000);
+          expect(await pending).toBeNull();
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          expect(h.timer.getPendingTimeouts()).not.toContain(1000);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("close clears all tokens and timers", async () => {
+        const h = await createSuppressionHarness();
+        const pending = [h.request(), h.request()];
+        await flushMicrotasks();
+        expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(2);
+        await h.client.close();
+        expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+        expect(h.timer.getPendingTimeouts()).not.toContain(1000);
+        expect(await Promise.all(pending)).toEqual([null, null]);
+      });
+
+      test("old APK consumes the oldest token for an idless response", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const pending = h.request();
+          await flushMicrotasks();
+          h.push("legacy", null);
+          h.timer.advanceTime(50);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("legacy");
+          expect(h.pushes).toHaveBeenCalledTimes(0);
+          expect(h.backoff).toHaveBeenCalledTimes(0);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("first foreign correlated frame flips detection without consuming a token", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const pending = h.request();
+          await flushMicrotasks();
+          h.push("foreign", "foreign-request");
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(1);
+          h.push("broadcast", null);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(1);
+          expect(h.pushes).toHaveBeenCalledTimes(2);
+          expect(h.backoff).toHaveBeenCalledTimes(2);
+          h.push("explicit", h.requestIds()[0]!);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("explicit");
+          expect(h.pushes).toHaveBeenCalledTimes(2);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      for (const ordinaryFirst of [false, true]) {
+        test(`suppressed and ordinary callers never share a flight (${ordinaryFirst ? "ordinary" : "suppressed"} first)`, async () => {
+          const h = await createSuppressionHarness();
+          try {
+            const first = ordinaryFirst
+              ? h.client.requestHierarchySync(undefined, false, undefined, 1000)
+              : h.request();
+            const second = ordinaryFirst
+              ? h.request()
+              : h.client.requestHierarchySync(undefined, false, undefined, 1000);
+            await flushMicrotasks();
+            const ids = h.requestIds();
+            expect(ids).toHaveLength(2);
+            h.push("first", ids[0]!);
+            expect((await first)?.hierarchy.hierarchy.text).toBe("first");
+            h.push("second", ids[1]!);
+            expect((await second)?.hierarchy.hierarchy.text).toBe("second");
+            expect(h.pushes).toHaveBeenCalledTimes(1);
+            expect(h.backoff).toHaveBeenCalledTimes(1);
+            expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          } finally {
+            await h.client.close();
+          }
+        });
+      }
+
+      for (const failure of ["abort", "runner error", "screen off"] as const) {
+        test(`${failure} removes the token before its timeout`, async () => {
+          const h = await createSuppressionHarness();
+          try {
+            const controller = new AbortController();
+            const pending = h.request(controller.signal, 3000);
+            await flushMicrotasks();
+            expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(1);
+            if (failure === "abort") {
+              controller.abort();
+            } else if (failure === "runner error") {
+              h.socket.simulateMessage(
+                JSON.stringify({
+                  type: "error",
+                  requestId: h.requestIds()[0]!,
+                  success: false,
+                  error: "extraction failed",
+                  timestamp: h.timer.now(),
+                }),
+              );
+            } else {
+              fakeAdb.setScreenState(false);
+              h.timer.advanceTime(1000);
+              await flushMicrotasks();
+              h.timer.advanceTime(50);
+            }
+            expect(await pending).toBeNull();
+            expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+            expect(h.timer.getPendingTimeouts()).not.toContain(3000);
+          } finally {
+            await h.client.close();
+          }
+        });
+      }
+
+      test("broadcast fallback replaces the failed WS token before ADB dispatch", async () => {
+        const h = await createSuppressionHarness();
+        const send = h.socket.send.bind(h.socket);
+        const executeCommand = fakeAdb.executeCommand.bind(fakeAdb);
+        let broadcastId: string | undefined;
+        h.socket.send = (data: string) => {
+          if ((JSON.parse(String(data)) as { type: string }).type === "request_hierarchy") {
+            h.socket.sentMessages.push(String(data));
+            expect(h.client.hierarchyObservationStreamSuppressions.has(h.requestIds()[0]!)).toBe(
+              true,
+            );
+            throw new Error("transient send failure");
+          }
+          send(data);
+        };
+        fakeAdb.executeCommand = async (...args: Parameters<typeof executeCommand>) => {
+          if (args[0].includes("EXTRACT_HIERARCHY")) {
+            broadcastId = args[0].split("--es uuid ")[1]!.split(" ")[0]!;
+            expect(broadcastId).toStartWith("sync_");
+            expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(1);
+            expect(h.client.hierarchyObservationStreamSuppressions.has(h.requestIds()[0]!)).toBe(
+              false,
+            );
+            expect(h.client.hierarchyObservationStreamSuppressions.has(broadcastId)).toBe(true);
+            // Respond synchronously at the injected dispatch boundary.
+            h.push("broadcast response", broadcastId);
+          }
+          return executeCommand(...args);
+        };
+        try {
+          const pending = h.request();
+          await flushMicrotasks();
+          h.timer.advanceTime(50);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("broadcast response");
+          expect(broadcastId).toBeDefined();
+          expect(h.pushes).toHaveBeenCalledTimes(0);
+          expect(h.backoff).toHaveBeenCalledTimes(0);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          expect(h.timer.getPendingTimeouts()).not.toContain(1000);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("observer responses cannot consume an explicit request's suppression", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const pending = h.request();
+          await flushMicrotasks();
+          const observer = h.client.requestHierarchySyncForObserver(
+            undefined,
+            false,
+            undefined,
+            1000,
+          );
+          await flushMicrotasks();
+          const ids = h.requestIds();
+          expect(ids).toHaveLength(2);
+          h.push("observer", ids[1]!);
+          expect((await observer)?.hierarchy.hierarchy.text).toBe("observer");
+          expect(h.client.hierarchyObservationStreamSuppressions.has(ids[0]!)).toBe(true);
+          h.push("explicit", ids[0]!);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("explicit");
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("a synchronous WS response sees its token before send returns", async () => {
+        const h = await createSuppressionHarness();
+        const send = h.socket.send.bind(h.socket);
+        h.socket.send = (data: string) => {
+          send(data);
+          const frame = JSON.parse(String(data)) as { type: string; requestId: string };
+          if (frame.type === "request_hierarchy") {
+            expect(h.client.hierarchyObservationStreamSuppressions.has(frame.requestId)).toBe(true);
+            h.push("immediate", frame.requestId);
+          }
+        };
+        try {
+          const pending = h.request();
+          await flushMicrotasks();
+          h.timer.advanceTime(50);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("immediate");
+          expect(h.pushes).toHaveBeenCalledTimes(0);
+          expect(h.backoff).toHaveBeenCalledTimes(0);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("connection reset clears tokens and resets legacy detection", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          h.push("echo detected", "previous-connection");
+          const pending = h.request();
+          await flushMicrotasks();
+          h.socket.close();
+          await flushPromises(1);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          expect(h.timer.getPendingTimeouts()).not.toContain(1000);
+          expect(await pending).toBeNull();
+          expect(h.client.hierarchy.hasSeenCorrelatedFrames()).toBe(false);
+          await h.client.ensureConnected();
+          const nextSocket = h.getSocket();
+          expect(nextSocket).not.toBeNull();
+          const legacy = h.request();
+          await flushMicrotasks();
+          h.pushes.mockClear();
+          h.backoff.mockClear();
+          nextSocket!.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              requestId: null,
+              timestamp: h.timer.now(),
+              data: { ...hierarchyWithScreenSize(1080, 2340), updatedAt: h.timer.now() },
+            }),
+          );
+          h.timer.advanceTime(50);
+          expect(await legacy).not.toBeNull();
+          expect(h.pushes).toHaveBeenCalledTimes(0);
+          expect(h.backoff).toHaveBeenCalledTimes(0);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("a stale nudge cannot finish a suppressed caller or retire its primary token", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const pending = h.request(undefined, 10000);
+          let settled = false;
+          void pending.then(() => {
+            settled = true;
+          });
+          await flushMicrotasks();
+          const primaryId = h.requestIds()[0]!;
+          h.timer.advanceTime(2000);
+          await flushMicrotasks();
+          const nudge = h.socket.sentMessages
+            .map((message) => JSON.parse(message) as { type: string; requestId: string })
+            .find((message) => message.type === "request_hierarchy_if_stale");
+          expect(nudge).toBeDefined();
+          h.push("nudge", nudge!.requestId);
+          h.timer.advanceTime(50);
+          await flushMicrotasks();
+          expect(settled).toBe(false);
+          expect(h.client.hierarchyObservationStreamSuppressions.has(primaryId)).toBe(true);
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          h.push("primary", primaryId);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("primary");
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          expect(h.backoff).toHaveBeenCalledTimes(1);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("legacy cache guards leave the oldest token for the next accepted idless frame", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          h.push("cached", null, 100);
+          const pending = h.request();
+          await flushMicrotasks();
+          h.pushes.mockClear();
+          h.backoff.mockClear();
+          h.push("older broadcast", null, 50);
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(1);
+          expect(h.pushes).toHaveBeenCalledTimes(0);
+          h.push("accepted legacy", null, 150);
+          h.timer.advanceTime(50);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("accepted legacy");
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          expect(h.pushes).toHaveBeenCalledTimes(0);
+          expect(h.backoff).toHaveBeenCalledTimes(0);
+        } finally {
+          await h.client.close();
+        }
+      });
+
+      test("an older correlated response consumes its token without replacing the live cache", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const pending = h.request();
+          await flushMicrotasks();
+          h.push("newer live", "foreign-request", 200);
+          h.push("older explicit", h.requestIds()[0]!, 100);
+          expect((await pending)?.hierarchy.hierarchy.text).toBe("older explicit");
+          expect(h.client.cachedHierarchy?.hierarchy.hierarchy.text).toBe("newer live");
+          expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
+          expect(h.timer.getPendingTimeouts()).not.toContain(1000);
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          expect(h.backoff).toHaveBeenCalledTimes(1);
+        } finally {
+          await h.client.close();
+        }
+      });
+    });
+
     test("tracks concurrent suppressed hierarchy syncs independently", async function () {
       const testTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
@@ -2385,12 +2811,7 @@ describe("AndroidCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      const suppressionCount = (): number =>
-        (
-          testClient as unknown as {
-            hierarchyObservationStreamSuppressions: Set<unknown>;
-          }
-        ).hierarchyObservationStreamSuppressions.size;
+      const suppressionCount = (): number => testClient.hierarchyObservationStreamSuppressions.size;
 
       try {
         const firstRequest = testClient.requestHierarchySyncWithoutObservationStreamPush(
@@ -5670,9 +6091,10 @@ describe("AndroidCtrlProxyClient", function () {
       // flag the screenshot would vouch for geometry the daemon has not seen — and the daemon
       // would stamp the PREVIOUS capture's id onto these fresh pixels, which is exactly the
       // mis-pairing the identity exists to prevent.
-      accessibilityServiceClient.hierarchyObservationStreamSuppressions.add({
-        timeoutHandle: fakeTimer.setTimeout(() => {}, 10_000),
-      });
+      accessibilityServiceClient.hierarchyObservationStreamSuppressions.set(
+        "legacy-request",
+        fakeTimer.setTimeout(() => {}, 10_000),
+      );
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(720, 1560));
       pushScreenshotThroughClient(pngFrame(720, 1560));
 
@@ -5735,9 +6157,10 @@ describe("AndroidCtrlProxyClient", function () {
 
       // Resolution changes; the hierarchy carrying the new geometry is suppressed, so the fresh
       // pixels must not be paired with the previous capture.
-      accessibilityServiceClient.hierarchyObservationStreamSuppressions.add({
-        timeoutHandle: fakeTimer.setTimeout(() => {}, 10_000),
-      });
+      accessibilityServiceClient.hierarchyObservationStreamSuppressions.set(
+        "legacy-request",
+        fakeTimer.setTimeout(() => {}, 10_000),
+      );
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(720, 1560));
       pushScreenshotThroughClient(pngFrame(720, 1560));
 

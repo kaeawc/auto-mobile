@@ -280,10 +280,6 @@ interface WsConnectedMessage extends WsMessageBase {
   supportedCommands?: string[];
 }
 
-interface ObservationStreamSuppression {
-  timeoutHandle: NodeJS.Timeout;
-}
-
 interface WsHierarchyUpdateMessage extends WsMessageBase {
   type: "hierarchy_update";
   data: AccessibilityHierarchy;
@@ -1591,7 +1587,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // null until a #4548-aware runner reports it. Nothing in current behavior reads it.
   private reportedScaleMetadata: ScreenScaleMetadata | null = null;
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
+  readonly hierarchyObservationStreamSuppressions = new Map<string, NodeJS.Timeout>();
   private readonly observerHierarchyRequestIds = new Set<string>();
   private readonly transientObserver: boolean;
   // Request ids whose screenshot responses must not be auto-pushed to the
@@ -2479,6 +2475,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.rejectedCommands.clear();
     this.lateCancelledScreenshotRequestIds.clear();
     this.observerHierarchyRequestIds.clear();
+    this.clearHierarchyObservationStreamSuppressions();
     this.cancelScreenshotBackoff();
     this._hierarchy?.rejectAllPendingHierarchy("WebSocket connection closed");
     // Issue #7540: the cache describes device UI state as of the closed connection, and the
@@ -2915,13 +2912,56 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     signal?: AbortSignal,
     timeoutMs: number = 10000,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
-    const suppression: ObservationStreamSuppression = {
-      timeoutHandle: this.timer.setTimeout(() => {
-        this.hierarchyObservationStreamSuppressions.delete(suppression);
-      }, timeoutMs),
-    };
-    this.hierarchyObservationStreamSuppressions.add(suppression);
-    return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+    const deadline = this.timer.now() + Math.max(0, timeoutMs);
+    let suppressedRequestId: string | undefined;
+    try {
+      return await this.hierarchy.requestHierarchySyncWithOptions({
+        perf,
+        disableAllFiltering,
+        signal,
+        timeoutMs,
+        observerMode: false,
+        onRequestId: (requestId) => {
+          // A failed WS send switches to the broadcast's sync_ id. Retire the old token first.
+          if (suppressedRequestId) {
+            this.removeHierarchyObservationStreamSuppression(suppressedRequestId);
+          }
+          if (this.closed || signal?.aborted) {
+            return;
+          }
+          suppressedRequestId = requestId;
+          this.hierarchyObservationStreamSuppressions.set(
+            requestId,
+            this.timer.setTimeout(
+              () => {
+                this.removeHierarchyObservationStreamSuppression(requestId);
+              },
+              Math.max(0, deadline - this.timer.now()),
+            ),
+          );
+        },
+      });
+    } finally {
+      if (suppressedRequestId) {
+        this.removeHierarchyObservationStreamSuppression(suppressedRequestId);
+      }
+    }
+  }
+
+  private removeHierarchyObservationStreamSuppression(requestId: string): boolean {
+    const timeout = this.hierarchyObservationStreamSuppressions.get(requestId);
+    if (timeout === undefined) {
+      return false;
+    }
+    this.hierarchyObservationStreamSuppressions.delete(requestId);
+    this.timer.clearTimeout(timeout);
+    return true;
+  }
+
+  private clearHierarchyObservationStreamSuppressions(): void {
+    for (const requestId of this.hierarchyObservationStreamSuppressions.keys()) {
+      this.removeHierarchyObservationStreamSuppression(requestId);
+    }
   }
 
   async requestHierarchySyncForObserver(
@@ -4506,6 +4546,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // through to captureScreenshotViaAdb("ctrlproxy_exception"). Setting the flag
     // first makes that leaked one-shot fallback short-circuit (#5493).
     this.closed = true;
+    this.clearHierarchyObservationStreamSuppressions();
     if (this.restartRearmTimeout) {
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
@@ -5669,7 +5710,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // A must-deliver correlated frame can leave the runner after a newer coalesced push.
     // Complete its own waiter, but do not regress the shared cache or observation stream.
     const observerResponse = !!requestId && this.observerHierarchyRequestIds.has(requestId);
-    this._hierarchy?.resolvePendingHierarchy(requestId, incomingHierarchy);
+    this.hierarchy.resolvePendingHierarchy(requestId, incomingHierarchy);
+    // Consume correlated responses even when too old for the shared cache or observer-only.
+    let suppressObservationStreamPush =
+      !!requestId && this.removeHierarchyObservationStreamSuppression(requestId);
     if (observerResponse) {
       this.observerHierarchyRequestIds.delete(requestId);
       if (
@@ -5717,11 +5761,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // Update cached screen dimensions
     this.updateCachedScreenDimensions(data);
 
-    const suppression = this.hierarchyObservationStreamSuppressions.values().next().value;
-    const suppressObservationStreamPush = suppression !== undefined;
-    if (suppression) {
-      this.hierarchyObservationStreamSuppressions.delete(suppression);
-      this.timer.clearTimeout(suppression.timeoutHandle);
+    // Old APKs have no echo capability advertisement. Until the first correlated frame on a
+    // fresh connection, an idless broadcast can still consume the oldest token (legacy behavior).
+    // Once ANY echoed id is seen, idless/foreign frames never consume another request's token.
+    // Keep legacy consumption after the cache/observer guards, exactly as the anonymous Set was.
+    if (!requestId && !this.hierarchy.hasSeenCorrelatedFrames()) {
+      const oldestId = this.hierarchyObservationStreamSuppressions.keys().next().value;
+      suppressObservationStreamPush =
+        oldestId !== undefined && this.removeHierarchyObservationStreamSuppression(oldestId);
     }
     if (!suppressObservationStreamPush) {
       // Push to observation stream

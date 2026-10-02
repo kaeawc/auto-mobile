@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ExecResult } from "../../../src/models";
+import type { HostCommandOptions } from "../../../src/utils/HostCommandExecutor";
+import { throwIfAborted } from "../../../src/utils/toolUtils";
 
 const execResult = (stdout = ""): ExecResult => ({
   stdout,
@@ -15,7 +17,7 @@ const execResult = (stdout = ""): ExecResult => ({
 
 interface Overrides {
   platform?: () => NodeJS.Platform;
-  execute?: (file: string, args: string[]) => Promise<ExecResult>;
+  execute?: (file: string, args: string[], options?: HostCommandOptions) => Promise<ExecResult>;
 }
 
 interface Harness {
@@ -92,6 +94,56 @@ describe("DeviceAppManager.isUrlLaunchAvailable", () => {
 });
 
 describe("DeviceAppManager.launchWithPayloadUrl", () => {
+  test("pre-aborted launch never executes devicectl", async () => {
+    const { inspector, commands } = makeInspector();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      inspector.launchWithPayloadUrl(
+        "udid",
+        "com.apple.mobilesafari",
+        "https://example.com",
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(commands).toEqual([]);
+  }, 100);
+
+  test("launch forwards host command cancellation without wrapping it", async () => {
+    const controller = new AbortController();
+    let received: HostCommandOptions | undefined;
+    const started = Promise.withResolvers<void>();
+    const failure = Promise.withResolvers<ExecResult>();
+    const { inspector } = makeInspector({
+      execute: async (_file, _args, options) => {
+        received = options;
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            try {
+              throwIfAborted(controller.signal);
+            } catch (error) {
+              failure.reject(error);
+            }
+          },
+          { once: true },
+        );
+        started.resolve();
+        return failure.promise;
+      },
+    });
+    const pending = inspector.launchWithPayloadUrl(
+      "udid",
+      "com.apple.mobilesafari",
+      "https://example.com",
+      controller.signal,
+    );
+    await started.promise;
+    controller.abort();
+    await expect(pending).rejects.toThrow(/^Operation cancelled$/);
+    expect(received?.signal).toBe(controller.signal);
+  }, 100);
+
   test("passes device, URL, and bundle id as argv", async () => {
     const { inspector, commands } = makeInspector();
     await inspector.launchWithPayloadUrl(

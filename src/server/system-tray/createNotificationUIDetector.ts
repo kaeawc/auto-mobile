@@ -32,14 +32,32 @@ export function createNotificationUIDetector(
       requestSwipe: (x1, y1, x2, y2, duration) => {
         throwIfAborted(signal);
         return awaitWhileRequestIsLive(
-          getIosClient(device, getDependencies).requestSwipe(x1, y1, x2, y2, duration),
+          getIosClient(device, getDependencies).requestSwipe(
+            x1,
+            y1,
+            x2,
+            y2,
+            duration,
+            undefined,
+            undefined,
+            undefined,
+            signal,
+          ),
           signal,
         );
       },
       requestTapCoordinates: (x, y) => {
         throwIfAborted(signal);
         return awaitWhileRequestIsLive(
-          getIosClient(device, getDependencies).requestTapCoordinates(x, y),
+          getIosClient(device, getDependencies).requestTapCoordinates(
+            x,
+            y,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            signal,
+          ),
           signal,
         );
       },

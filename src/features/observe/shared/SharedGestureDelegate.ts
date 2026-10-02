@@ -75,6 +75,7 @@ export class SharedGestureDelegate {
     perf?: PerformanceTracker,
     frameContext?: string,
     onDispatch?: () => void,
+    signal?: AbortSignal,
   ): Promise<GestureTimingResult> {
     const result = await sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "swipe",
@@ -92,6 +93,7 @@ export class SharedGestureDelegate {
       timeoutMs,
       perf,
       errorLabel: "Swipe",
+      abortSignal: signal,
       onDispatch,
     });
     if (this.config.includeSwipeTimeoutMs && result.perfTiming) {

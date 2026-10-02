@@ -162,7 +162,10 @@ export class Keyboard {
   private async executeIOS(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     throwIfAborted(signal);
-    const result = await awaitWhileRequestIsLive(client.requestKeyboard(action), signal);
+    const result = await awaitWhileRequestIsLive(
+      client.requestKeyboard(action, undefined, undefined, signal),
+      signal,
+    );
     throwIfAborted(signal);
     if (!result.success) {
       return this.iosFailure(action, result, client, signal);
@@ -216,7 +219,7 @@ export class Keyboard {
     try {
       throwIfAborted(signal);
       const detected = await awaitWhileRequestIsLive(
-        raceWithDeadline(client.requestKeyboard("detect", 2000), {
+        raceWithDeadline(client.requestKeyboard("detect", 2000, undefined, signal), {
           timer: this.timer,
           timeoutMs: 2000,
           label: "Keyboard close follow-up detect",

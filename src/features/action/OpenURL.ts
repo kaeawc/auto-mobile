@@ -402,7 +402,7 @@ export class OpenURL extends BaseVisualChange {
         : (IOSCtrlProxyManager.getExistingTargetBundleId(this.device) ?? SAFARI_BUNDLE_ID);
       throwIfAborted(signal);
       await awaitWhileRequestIsLive(
-        devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url),
+        devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url, signal),
         signal,
       );
       throwIfAborted(signal);

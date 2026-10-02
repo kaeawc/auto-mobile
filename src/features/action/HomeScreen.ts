@@ -49,7 +49,8 @@ export class HomeScreen extends BaseVisualChange {
     this.device = device;
   }
 
-  async execute(progress?: ProgressCallback): Promise<HomeScreenResult> {
+  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<HomeScreenResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("homeScreen");
 
@@ -57,10 +58,12 @@ export class HomeScreen extends BaseVisualChange {
       async () => {
         switch (this.device.platform) {
           case "android":
-            await perf.track("homeNavigation", () => this.executeAndroidHome());
+            await perf.track("homeNavigation", () => this.executeAndroidHome(signal));
             break;
           case "ios":
-            await perf.track("iOSHomeNavigation", () => this.executeIosHomeNavigation(perf));
+            await perf.track("iOSHomeNavigation", () =>
+              this.executeIosHomeNavigation(perf, undefined, undefined, signal),
+            );
             break;
           default:
             throw unsupportedPlatformError(this.device.platform, "return to the home screen");
@@ -76,16 +79,17 @@ export class HomeScreen extends BaseVisualChange {
         timeoutMs: 5000,
         progress,
         perf,
+        signal,
       },
     );
   }
 
-  private async executeAndroidHome(): Promise<void> {
+  private async executeAndroidHome(requestSignal?: AbortSignal): Promise<void> {
     // Combine (never replace) with the ambient MCP request signal so a cancelled
     // request aborts the ADB keyevent fallback and the verification reads. Passing
     // only a private signal would drop the ambient one AdbClient would otherwise
     // pick up (issue #6289).
-    const signal = combineWithAmbientAbort(undefined);
+    const signal = combineWithAmbientAbort(requestSignal);
 
     let globalActionSucceeded = false;
     try {

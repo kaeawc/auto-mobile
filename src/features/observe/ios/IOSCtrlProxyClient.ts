@@ -315,6 +315,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxySwipeResult>;
 
   requestTapCoordinates(
@@ -382,6 +383,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     action: "open" | "close" | "detect",
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyKeyboardResult>;
 
   requestPressKey(
@@ -3186,8 +3188,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxySwipeResult> {
-    return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
+    return this.gestures.requestSwipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      timeoutMs,
+      perf,
+      frameContext,
+      undefined,
+      signal,
+    );
   }
 
   async requestDrag(
@@ -3282,8 +3296,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     action: "open" | "close" | "detect",
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyKeyboardResult> {
-    return this.keyboard.requestKeyboard(action, timeoutMs, perf);
+    return this.keyboard.requestKeyboard(action, timeoutMs, perf, signal);
   }
 
   async requestPressKey(

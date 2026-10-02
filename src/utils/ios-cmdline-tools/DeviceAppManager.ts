@@ -10,13 +10,14 @@ import { isProcessAlreadyGoneError } from "./iosProcessErrors";
 import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
 import { normalizeIosDevicePath as normalizeDevicePath } from "./iosInstalledApp";
 import { logger } from "../logger";
-import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
+import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";
+import { throwIfAborted } from "../toolUtils";
 import type { Logger } from "../logger";
 import type { DevicectlVersionSource } from "./CoreDeviceCapabilityProbe";
 
 interface DeviceAppManagerDependencies {
   platform: () => NodeJS.Platform;
-  execute: (file: string, args: string[]) => Promise<ExecResult>;
+  execute: (file: string, args: string[], options?: HostCommandOptions) => Promise<ExecResult>;
   readFile: (path: string) => Promise<string>;
   mkdtemp: (prefix: string) => Promise<string>;
   rm: (path: string) => Promise<void>;
@@ -30,7 +31,8 @@ type LaunchPreconditionResult = { ok: true } | { ok: false; reason: "non-darwin"
 
 const defaultDependencies: DeviceAppManagerDependencies = {
   platform: () => process.platform,
-  execute: (file, args) => new DefaultHostCommandExecutor().executeCommand(file, args),
+  execute: (file, args, options) =>
+    new DefaultHostCommandExecutor().executeCommand(file, args, options),
   readFile: async (path) => fs.readFile(path, "utf-8"),
   mkdtemp: async (prefix) => fs.mkdtemp(prefix),
   rm: async (path) => fs.rm(path, { recursive: true, force: true }),
@@ -423,7 +425,12 @@ export interface DeviceUrlLauncher {
    * its launch payload. Throws with actionable context on failure (unsupported
    * host or an underlying devicectl error).
    */
-  launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void>;
+  launchWithPayloadUrl(
+    deviceUdid: string,
+    bundleId: string,
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
 }
 
 export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSource {
@@ -433,12 +440,12 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     this.deps = deps;
   }
 
-  private execute(file: string, args: string[]): Promise<ExecResult> {
+  private execute(file: string, args: string[], options?: HostCommandOptions): Promise<ExecResult> {
     // One span per command, named by stable subcommand tokens so app
     // identifiers, UDIDs, and artifact paths do not fragment timing aggregation.
     const spanArgs = args[0] === "simctl" ? args.slice(0, 2) : args.slice(0, 4);
     return trackAmbient(`${file} ${spanArgs.join(" ")}`.trimEnd(), () =>
-      this.deps.execute(file, args),
+      this.deps.execute(file, args, options),
     );
   }
 
@@ -489,7 +496,13 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
    * {@link launchApp}, differing only by the `--payload-url` flag; kept distinct
    * because it carries no PID-capture/JSON-output plumbing.
    */
-  async launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void> {
+  async launchWithPayloadUrl(
+    deviceUdid: string,
+    bundleId: string,
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
     const precondition = this.getLaunchPrecondition();
     if (!precondition.ok) {
       throw new ActionableError("Opening URLs on a physical iOS device requires macOS");
@@ -507,8 +520,9 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
       bundleId,
     ];
     try {
-      await this.execute("xcrun", args);
+      await this.execute("xcrun", args, { signal });
     } catch (error) {
+      throwIfAborted(signal);
       throw toActionableError(error, `Failed to open URL on physical iOS device ${bundleId}`);
     }
   }

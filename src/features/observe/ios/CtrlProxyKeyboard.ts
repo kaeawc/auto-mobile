@@ -34,6 +34,7 @@ export class CtrlProxyKeyboard {
     action: "open" | "close" | "detect",
     timeoutMs: number = action === "close" ? 8000 : 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyKeyboardResult> {
     return sendCommand<CtrlProxyKeyboardResult>(this.context, {
       idPrefix: "keyboard",
@@ -43,6 +44,7 @@ export class CtrlProxyKeyboard {
       timeoutMs,
       perf,
       errorLabel: "Keyboard",
+      abortSignal: signal,
       notConnectedError: () => ({
         success: false,
         open: false,

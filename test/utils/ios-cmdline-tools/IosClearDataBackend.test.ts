@@ -177,13 +177,14 @@ describe("iOS clear-data backends", () => {
     const action = new ClearAppData(
       { deviceId: simulatorId, name: "fake", platform: "ios" },
       undefined,
-      undefined,
-      h.reinstaller,
-      predicate,
-      (deviceId, deps, isSimulatorFn) => {
-        expect(deviceId).toBe(simulatorId);
-        expect(isSimulatorFn).toBe(predicate);
-        return resolveIosClearDataBackend(deviceId, { ...deps, simctl: h.simctl }, isSimulatorFn);
+      {
+        reinstaller: h.reinstaller,
+        isSimulatorFn: predicate,
+        backendResolver: (deviceId, deps, isSimulatorFn) => {
+          expect(deviceId).toBe(simulatorId);
+          expect(isSimulatorFn).toBe(predicate);
+          return resolveIosClearDataBackend(deviceId, { ...deps, simctl: h.simctl }, isSimulatorFn);
+        },
       },
     );
     expect(await action.execute(bundleId)).toEqual({ success: true, packageName: bundleId });

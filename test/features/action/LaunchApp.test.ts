@@ -41,6 +41,8 @@ import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager"
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
 import { logger } from "../../../src/utils/logger";
+import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -2981,6 +2983,8 @@ describe("LaunchApp", () => {
       launchResult?: { success: boolean; pid?: number; error?: string };
       clearResult?: { success: boolean; packageName: string; error?: string };
       terminateError?: Error;
+      cacheInvalidator?: FakeDeviceWindowCacheInvalidator;
+      useDefaultClearAppData?: boolean;
     }) {
       const iosDevice: BootedDevice = {
         name: "test-ios",
@@ -2999,6 +3003,16 @@ describe("LaunchApp", () => {
       const terminateCalls: Array<{ bundleId: string; deviceId: string | undefined }> = [];
       const simctlLaunchArguments: Array<string[] | undefined> = [];
       const fakeSimctl = {
+        executeCommandArgs: async () => {
+          simctlCalls.push("get_app_container");
+          return {
+            stdout: "",
+            stderr: "",
+            toString: () => "",
+            trim: () => "",
+            includes: () => false,
+          };
+        },
         launchApp: async (id: string, options?: { launchArguments?: string[] }) => {
           simctlCalls.push(`launch:${id}`);
           simctlLaunchArguments.push(options?.launchArguments);
@@ -3049,8 +3063,9 @@ describe("LaunchApp", () => {
         fakeTimer,
         {
           installedAppsProvider: installedApps,
+          cacheInvalidator: opts.cacheInvalidator,
           deviceAppLauncher,
-          clearAppDataFactory,
+          clearAppDataFactory: opts.useDefaultClearAppData ? undefined : clearAppDataFactory,
           performanceTrackerFactory: () => performanceTracker,
         },
       );
@@ -3147,6 +3162,78 @@ describe("LaunchApp", () => {
         ]);
       } finally {
         cleanup();
+      }
+    });
+
+    test.each([false, true])(
+      "simulator cold boot invalidates after termination (throws=%s)",
+      async (throws) => {
+        fakeTimer.enableAutoAdvance();
+        const invalidator = new FakeDeviceWindowCacheInvalidator(() => {
+          expect(h.simctlCalls).toEqual([`terminate:${userBundleId}`]);
+        });
+        const h = createDeviceHarness({
+          deviceId: simulatorUdid,
+          terminateError: throws ? new Error("not running") : undefined,
+          cacheInvalidator: invalidator,
+        });
+        try {
+          expect((await h.iosLaunchApp.execute(userBundleId, false, true)).success).toBe(true);
+          expect(invalidator.calls).toHaveLength(1);
+          expect(invalidator.calls[0]).toMatchObject({ deviceId: simulatorUdid, platform: "ios" });
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+
+    test("default iOS data-clear factory receives the launch invalidator", async () => {
+      fakeTimer.enableAutoAdvance();
+      const invalidator = new FakeDeviceWindowCacheInvalidator();
+      const h = createDeviceHarness({
+        deviceId: simulatorUdid,
+        cacheInvalidator: invalidator,
+        useDefaultClearAppData: true,
+      });
+      try {
+        const result = await h.iosLaunchApp.execute(userBundleId, true, true);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("data container");
+        expect(h.simctlCalls).toEqual([
+          `terminate:${userBundleId}`,
+          `terminate:${userBundleId}`,
+          "get_app_container",
+        ]);
+        expect(invalidator.calls).toHaveLength(2);
+        expect(invalidator.calls[0]).toBe(invalidator.calls[1]);
+        expect(invalidator.calls[1]?.deviceId).toBe(simulatorUdid);
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("simulator cold boot rejects a pre-restart put, while a no-op invalidator caches it", async () => {
+      fakeTimer.enableAutoAdvance();
+      for (const fence of [true, false]) {
+        const store = new FakeObserveCacheStore(fakeTimer);
+        const generation = store.currentGeneration(simulatorUdid);
+        const stale = { ...createObserveResult(userBundleId), updatedAt: fakeTimer.now() };
+        const invalidator = new FakeDeviceWindowCacheInvalidator((device) => {
+          if (fence) {
+            store.clear(device.deviceId);
+          }
+        });
+        const h = createDeviceHarness({ deviceId: simulatorUdid, cacheInvalidator: invalidator });
+        try {
+          expect((await h.iosLaunchApp.execute(userBundleId, false, true)).success).toBe(true);
+          await store.put(simulatorUdid, stale, generation);
+          expect(store.getRecentInMemoryForDevice(simulatorUdid)).toEqual(
+            fence ? undefined : stale,
+          );
+          expect(await store.getMostRecent(simulatorUdid)).toEqual(fence ? undefined : stale);
+        } finally {
+          h.cleanup();
+        }
       }
     });
 

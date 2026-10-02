@@ -47,6 +47,7 @@ class InstallApp extends ProductionInstallApp {
       physicalAppLister,
       timer,
       iosInstallBackendResolver,
+      cacheInvalidator,
     ] = args;
     super(
       device,
@@ -61,6 +62,7 @@ class InstallApp extends ProductionInstallApp {
       physicalAppLister,
       timer,
       iosInstallBackendResolver,
+      cacheInvalidator,
     );
   }
 }

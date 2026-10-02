@@ -29,6 +29,7 @@ count_paren_depth() {
 # Invalid/body-like groups fall back to emitting just the declaration.
 normalize_accessors() {
   local rest="$1" word attribute last_accessor="" waiting=false seen=false
+  local i depth ch
   accessor_list_valid=false
   accessor_text=""
   while [[ -n "$rest" ]]; do
@@ -42,14 +43,34 @@ normalize_accessors() {
       waiting=true
       continue
     fi
-    word="${rest%%[[:space:]]*}"
-    rest="${rest#"$word"}"
+    if [[ "$rest" == throws\(* ]]; then
+      # Keep the complete type verbatim, including spaces in generic arguments
+      # and nested parentheses, rather than splitting it into whitespace tokens.
+      i=6
+      depth=0
+      while (( i < ${#rest} )); do
+        ch="${rest:i:1}"
+        case "$ch" in
+          '(') depth=$((depth + 1)) ;;
+          ')') depth=$((depth - 1)) ;;
+        esac
+        i=$((i + 1))
+        (( depth > 0 )) || break
+      done
+      (( depth == 0 )) || return 0
+      word="${rest:0:i}"
+      rest="${rest:i}"
+      [[ -z "$rest" || "$rest" == [[:space:]]* ]] || return 0
+    else
+      word="${rest%%[[:space:]]*}"
+      rest="${rest#"$word"}"
+    fi
     accessor_text="${accessor_text:+$accessor_text }$word"
     case "$word" in
       mutating|nonmutating) waiting=true; last_accessor="" ;;
       get|set|_read|_modify|willSet|didSet)
         last_accessor="$word"; waiting=false; seen=true ;;
-      async|throws) [[ "$last_accessor" == get && "$waiting" == false ]] || return 0 ;;
+      async|throws|throws\(*\)) [[ "$last_accessor" == get && "$waiting" == false ]] || return 0 ;;
       *) return 0 ;;
     esac
   done
@@ -93,7 +114,12 @@ strip_body_brace() {
     # Protocol accessor requirements use the same normalization as collected
     # multi-line blocks; computed-property bodies remain declaration-only.
     if [[ "${2:-}" == protocol ]] && (( group_close_at > last_open_at )); then
-      normalize_accessors "${s:last_open_at+1:group_close_at-last_open_at-1}"
+      # Shadow the caller's scanner state: only this brace group's comments
+      # are removed, and strings in attributes retain their original contents.
+      local in_block_comment=false in_multiline_string=false
+      local scope_code="" signature_code=""
+      scan_scope_code "${s:last_open_at+1:group_close_at-last_open_at-1}"
+      normalize_accessors "$signature_code"
       if [[ "$accessor_list_valid" == true ]]; then
         stripped_signature="${stripped_signature%"${stripped_signature##*[![:space:]]}"} { $accessor_text }${s:group_close_at+1}"
       fi

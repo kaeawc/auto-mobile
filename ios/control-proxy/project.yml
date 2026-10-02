@@ -63,6 +63,8 @@ targets:
       # Share the self-contained SwiftPM loopback suite with the UI-test bundle.
       - path: Tests/CtrlProxyRewriteTests/WebSocketServerLoopbackTests.swift
       - path: Tests/CtrlProxyRewriteTests/WebSocketLoopbackClient.swift
+      # Share the pure caret-move classifier with the UI-test bundle.
+      - path: Tests/CtrlProxyRewriteTests/CaretMovePressClassification.swift
       # Compile the rewrite sources directly so XCTest/XCUIApplication are available to
       # the `@MainActor` UI domain (the `#if canImport(XCTest) && os(iOS)` bodies).
       - path: Sources/CtrlProxyRewrite

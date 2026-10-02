@@ -45,6 +45,9 @@ import {
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
 
+export const PINCH_DISTANCE_EXCLUSIVE_MIN = 0;
+export const PINCH_SCALE_EXCLUSIVE_MIN = 0;
+
 type PinchTarget = {
   bounds: Element["bounds"];
   targetType: "screen" | "container";
@@ -159,17 +162,20 @@ export class PinchOn extends BaseVisualChange {
       );
     }
 
-    if (options.scale !== undefined && options.scale <= 0) {
+    if (options.scale !== undefined && options.scale <= PINCH_SCALE_EXCLUSIVE_MIN) {
       perf.end();
       return this.createErrorResult("scale must be greater than 0", options);
     }
 
-    if (options.distanceStart !== undefined && options.distanceStart <= 0) {
+    if (
+      options.distanceStart !== undefined &&
+      options.distanceStart <= PINCH_DISTANCE_EXCLUSIVE_MIN
+    ) {
       perf.end();
       return this.createErrorResult("distanceStart must be greater than 0", options);
     }
 
-    if (options.distanceEnd !== undefined && options.distanceEnd <= 0) {
+    if (options.distanceEnd !== undefined && options.distanceEnd <= PINCH_DISTANCE_EXCLUSIVE_MIN) {
       perf.end();
       return this.createErrorResult("distanceEnd must be greater than 0", options);
     }

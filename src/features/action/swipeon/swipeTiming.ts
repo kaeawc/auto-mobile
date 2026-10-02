@@ -2,6 +2,9 @@ import type { SwipeOnOptions } from "../../../models";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { BoomerangConfig } from "./types";
 
+export const SWIPE_APEX_PAUSE_MIN_MS = 0;
+export const SWIPE_RETURN_SPEED_EXCLUSIVE_MIN = 0;
+
 type BoomerangOptions = Pick<SwipeOnOptions, "boomerang" | "apexPause" | "returnSpeed">;
 
 /** Keep the speed presets in geometry, including its unset-speed default. */
@@ -41,10 +44,13 @@ export function validateSwipeTimingOptions(
   ) {
     return "apexPause/returnSpeed require boomerang=true";
   }
-  if (options.apexPause !== undefined && options.apexPause < 0) {
+  if (options.apexPause !== undefined && options.apexPause < SWIPE_APEX_PAUSE_MIN_MS) {
     return "apexPause must be >= 0";
   }
-  if (options.returnSpeed !== undefined && options.returnSpeed <= 0) {
+  if (
+    options.returnSpeed !== undefined &&
+    options.returnSpeed <= SWIPE_RETURN_SPEED_EXCLUSIVE_MIN
+  ) {
     return "returnSpeed must be > 0";
   }
   return null;

@@ -79,6 +79,7 @@ create_real_git_fixture() {
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture_root}/scripts/swiftformat/swiftformat_version.sh"
   cp "${repo_root}/scripts/swiftlint/swiftlint_version.sh" "${fixture_root}/scripts/swiftlint/swiftlint_version.sh"
   cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${fixture_root}/scripts/ios/swift_test_counts.sh"
+  cp "${repo_root}/scripts/ios/xctestrunner_test_filter.sh" "${fixture_root}/scripts/ios/xctestrunner_test_filter.sh"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${fixture_root}/scripts/ios/api-dump.sh"
   for tool in swiftformat swiftlint swift; do
     cp "${mock_bin}/${tool}" "${fixture_bin}/${tool}"

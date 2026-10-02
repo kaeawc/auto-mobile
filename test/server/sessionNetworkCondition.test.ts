@@ -8,17 +8,96 @@ import { DeviceState, type DeviceStateResult } from "../../src/features/utility/
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import type {
+  DeviceSessionPersistence,
+  DeviceSessionRecord,
+} from "../../src/db/deviceSessionRepository";
 
 describe("runSessionNetworkMutation", () => {
-  const makeManager = (timer: FakeTimer, restored: string[]) =>
+  const makeManager = (
+    timer: FakeTimer,
+    restored: string[],
+    {
+      persistence = new FakeDeviceSessionPersistence(),
+    }: { persistence?: DeviceSessionPersistence } = {},
+  ) =>
     new SessionManager(
       timer,
-      new FakeDeviceSessionPersistence(),
+      persistence,
       () => new FakeDbWriteBarrier(),
       () => ({ restore: async () => {} }),
       () => ({ restore: async () => {} }),
       () => ({ restore: async (profile) => restored.push(profile) }),
     );
+
+  test("refused setup publishes nothing, mutates nothing, restores nothing", async () => {
+    class DeferredRebindPersistence extends FakeDeviceSessionPersistence {
+      readonly started = Promise.withResolvers<void>();
+      readonly finished = Promise.withResolvers<void>();
+
+      override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+        if (record.deviceId === "emulator-5556") {
+          this.started.resolve();
+          await this.finished.promise;
+        }
+        await super.upsertActiveSession(record);
+      }
+    }
+
+    const persistence = new DeferredRebindPersistence();
+    const restored: string[] = [];
+    const manager = makeManager(new FakeTimer(), restored, { persistence });
+    let mutationStarted = false;
+    let rebinding: Promise<unknown> | undefined;
+    try {
+      const session = await manager.createSession("net-refused", "emulator-5554", "android");
+      rebinding = manager.rebindSession("net-refused", "emulator-5556", "android");
+      await persistence.started.promise;
+      expect(manager.isAdmittedForAutomation(session)).toBe(true);
+      expect(manager.getDeviceForSession("net-refused")).toBe("emulator-5554");
+
+      await expect(
+        runSessionNetworkMutation(manager, "net-refused", "emulator-5554", true, async () => {
+          mutationStarted = true;
+        }),
+      ).rejects.toThrow("began releasing before the mutation started");
+
+      // Capture the slot before rebind restores and clears the old device's cache.
+      const restoreSlot = manager.getNetworkCondition("net-refused");
+      expect(mutationStarted).toBe(false);
+      persistence.finished.resolve();
+      await rebinding;
+      await manager.releaseSession("net-refused");
+
+      expect(restoreSlot).toBeUndefined();
+      expect(restored).toEqual([]);
+    } finally {
+      persistence.finished.resolve();
+      await rebinding;
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("admitted mutation that throws keeps the entry and restores on release", async () => {
+    const restored: string[] = [];
+    const manager = makeManager(new FakeTimer(), restored);
+    try {
+      await manager.createSession("net-throws", "emulator-5554", "android");
+      await expect(
+        runSessionNetworkMutation(manager, "net-throws", "emulator-5554", true, async () => {
+          expect(manager.getNetworkCondition("net-throws")).toEqual({ initialProfile: "none" });
+          throw new Error("mutation failed after partially shaping the device");
+        }),
+      ).rejects.toThrow("mutation failed after partially shaping the device");
+
+      expect(manager.getNetworkCondition("net-throws")).toEqual({ initialProfile: "none" });
+      expect(restored).toEqual([]);
+      await manager.releaseSession("net-throws");
+      expect(restored).toEqual(["none"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
 
   test("registers the restore slot before a tracked mutation and restores after release", async () => {
     const timer = new FakeTimer();

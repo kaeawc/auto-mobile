@@ -294,7 +294,9 @@ export class TakeScreenshot implements ScreenshotService {
     fileSystem: FileSystem = new DefaultFileSystem(),
     cacheDirResolver: () => string = () => TakeScreenshot.getCacheDir(),
     physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(
-      timer,
+      {
+        timer,
+      },
     ),
     cleanupOnCreate = true,
     private readonly pathProtection: ScreenshotPathProtection = screenshotPathProtection,

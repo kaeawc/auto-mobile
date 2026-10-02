@@ -3,6 +3,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
 import { ActionableError } from "../../../models/ActionableError";
+import { displayTransitions } from "../DisplayTransition";
 import {
   parseAndroidDisplayInfos,
   parseSurfaceFlingerDisplayIds,
@@ -67,26 +68,44 @@ export function decodePngBase64Output(output: string): Buffer {
 
 /**
  * Per-device display resolution cache. Single-display and unambiguous
- * multi-display results are cached; unavailable or ambiguous results are retried.
+ * multi-display results are cached for the host display revision; unavailable
+ * or ambiguous results are retried.
  */
 export class AndroidPhysicalDisplayIdResolver {
-  private readonly cache = new Map<string, { displayId: string | null; expiresAt: number }>();
+  private readonly cache = new Map<
+    string,
+    { displayId: string | null; expiresAt: number; revision: number }
+  >();
+  private readonly timer: Timer;
+  private readonly ttlMs: number;
+  private readonly displayRevision: (deviceId: string) => number;
 
   constructor(
-    private readonly timer: Timer = defaultTimer,
-    private readonly ttlMs: number = PHYSICAL_DISPLAY_ID_CACHE_TTL_MS,
-  ) {}
+    options: {
+      timer?: Timer;
+      ttlMs?: number;
+      displayRevision?: (deviceId: string) => number;
+    } = {},
+  ) {
+    this.timer = options.timer ?? defaultTimer;
+    this.ttlMs = options.ttlMs ?? PHYSICAL_DISPLAY_ID_CACHE_TTL_MS;
+    this.displayRevision =
+      options.displayRevision ?? ((deviceId) => displayTransitions.revision(deviceId));
+  }
 
   async resolve(adb: AdbExecutor, deviceId: string, signal?: AbortSignal): Promise<string | null> {
+    const revision = this.displayRevision(deviceId);
     const cached = this.cache.get(deviceId);
-    if (cached && cached.expiresAt > this.timer.now()) {
+    if (cached && cached.expiresAt > this.timer.now() && cached.revision === revision) {
       return cached.displayId;
     }
     this.cache.delete(deviceId);
     const result = await resolvePhysicalDisplay(adb, signal);
     if (result.kind === "single" || result.kind === "display") {
       const displayId = result.kind === "display" ? result.id : null;
-      this.cache.set(deviceId, { displayId, expiresAt: this.timer.now() + this.ttlMs });
+      // Keep the revision captured before discovery so a transition during
+      // the lookup prevents its result from serving a later caller.
+      this.cache.set(deviceId, { displayId, expiresAt: this.timer.now() + this.ttlMs, revision });
       return displayId;
     }
     return null;

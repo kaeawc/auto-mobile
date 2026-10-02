@@ -38,7 +38,11 @@ function configureDisplayFixtures(adb: FakeAdbExecutor): void {
   });
 }
 
-function createScreenshot(adb: FakeAdbExecutor, timer: FakeTimer): TakeScreenshot {
+function createScreenshot(
+  adb: FakeAdbExecutor,
+  timer: FakeTimer,
+  displayRevision: (deviceId: string) => number = () => 0,
+): TakeScreenshot {
   return new TakeScreenshot(
     androidDevice("display-test-device"),
     new FakeAdbClientFactory(adb),
@@ -47,6 +51,7 @@ function createScreenshot(adb: FakeAdbExecutor, timer: FakeTimer): TakeScreensho
     screenshotWriter,
     new FakeFileSystem(),
     () => "/screenshots/cache",
+    new AndroidPhysicalDisplayIdResolver({ timer, displayRevision }),
   );
 }
 
@@ -212,7 +217,7 @@ describe("TakeScreenshot Android physical display selection", function () {
     const adb = new FakeAdbExecutor();
     configureDisplayFixtures(adb);
     const timer = new FakeTimer();
-    const resolver = new AndroidPhysicalDisplayIdResolver(timer);
+    const resolver = new AndroidPhysicalDisplayIdResolver({ timer, displayRevision: () => 0 });
 
     expect(await resolver.resolve(adb, "display-test-device")).toBe(singleDisplayId);
     adb.clearHistory();
@@ -222,5 +227,105 @@ describe("TakeScreenshot Android physical display selection", function () {
     timer.advanceTime(10_001);
     expect(await resolver.resolve(adb, "display-test-device")).toBe(singleDisplayId);
     expect(adb.getExecutedCommands()).toHaveLength(2);
+  });
+
+  test("refreshes a resolved ID after a revision bump within the TTL", async function () {
+    const adb = new FakeAdbExecutor();
+    configureDisplayFixtures(adb);
+    let revision = 0;
+    const resolver = new AndroidPhysicalDisplayIdResolver({
+      timer: new FakeTimer(),
+      displayRevision: () => revision,
+    });
+
+    expect(await resolver.resolve(adb, "display-test-device")).toBe(singleDisplayId);
+    adb.clearHistory();
+    revision++;
+
+    expect(await resolver.resolve(adb, "display-test-device")).toBe(singleDisplayId);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell dumpsys SurfaceFlinger --display-id",
+      "shell cmd display get-displays",
+    ]);
+    adb.clearHistory();
+    expect(await resolver.resolve(adb, "display-test-device")).toBe(singleDisplayId);
+    expect(adb.getExecutedCommands()).toHaveLength(0);
+  });
+
+  test("does not cache an in-flight lookup across a revision bump", async function () {
+    const adb = new FakeAdbExecutor();
+    configureDisplayFixtures(adb);
+    let revision = 0;
+    const resolver = new AndroidPhysicalDisplayIdResolver({
+      timer: new FakeTimer(),
+      displayRevision: () => revision,
+    });
+
+    const lookup = resolver.resolve(adb, "display-test-device");
+    // Fake ADB records both commands synchronously; the resolver is still
+    // awaiting their promises when this transition happens.
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+    revision++;
+    expect(await lookup).toBe(singleDisplayId);
+    adb.clearHistory();
+
+    expect(await resolver.resolve(adb, "display-test-device")).toBe(singleDisplayId);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell dumpsys SurfaceFlinger --display-id",
+      "shell cmd display get-displays",
+    ]);
+  });
+
+  test("a device revision bump leaves other devices cached", async function () {
+    const adbA = new FakeAdbExecutor();
+    const adbB = new FakeAdbExecutor();
+    configureDisplayFixtures(adbA);
+    configureDisplayFixtures(adbB);
+    const revisions = new Map([
+      ["device-a", 0],
+      ["device-b", 0],
+    ]);
+    const resolver = new AndroidPhysicalDisplayIdResolver({
+      timer: new FakeTimer(),
+      displayRevision: (deviceId) => revisions.get(deviceId) ?? 0,
+    });
+
+    expect(await resolver.resolve(adbA, "device-a")).toBe(singleDisplayId);
+    expect(await resolver.resolve(adbB, "device-b")).toBe(singleDisplayId);
+    adbA.clearHistory();
+    adbB.clearHistory();
+    revisions.set("device-a", 1);
+
+    expect(await resolver.resolve(adbB, "device-b")).toBe(singleDisplayId);
+    expect(adbB.getExecutedCommands()).toHaveLength(0);
+    expect(await resolver.resolve(adbA, "device-a")).toBe(singleDisplayId);
+    expect(adbA.getExecutedCommands()).toEqual([
+      "shell dumpsys SurfaceFlinger --display-id",
+      "shell cmd display get-displays",
+    ]);
+  });
+
+  test("TakeScreenshot refreshes physical display discovery after a revision bump", async function () {
+    const adb = new FakeAdbExecutor();
+    configureDisplayFixtures(adb);
+    adb.setCommandResponse("screencap", { stdout: png.toString("base64"), stderr: "" });
+    let revision = 0;
+    const screenshot = createScreenshot(adb, new FakeTimer(), () => revision);
+
+    await captureBase64(screenshot, "/screenshots/before-transition.png");
+    adb.clearHistory();
+    revision++;
+    await captureBase64(screenshot, "/screenshots/after-transition.png");
+
+    const commands = adb.getExecutedCommands();
+    expect(commands.filter((command) => command.includes("dumpsys SurfaceFlinger"))).toHaveLength(
+      1,
+    );
+    expect(commands.filter((command) => command.includes("cmd display get-displays"))).toHaveLength(
+      1,
+    );
+    expect(commands.find((command) => command.includes("screencap"))).toContain(
+      `screencap -d ${singleDisplayId} -p`,
+    );
   });
 });

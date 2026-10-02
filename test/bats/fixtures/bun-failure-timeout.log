@@ -1,0 +1,9 @@
+bun test v1.3.14 (0d9b296a)
+
+scratch/bun-failure-timeout.repro.ts:
+(fail) captured timeout failure [105.02ms]
+  ^ this test timed out after 100ms.
+
+ 0 pass
+ 1 fail
+Ran 1 test across 1 file. [231.00ms]

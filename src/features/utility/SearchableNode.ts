@@ -244,7 +244,9 @@ function hoistSearchableLabels(entries: SearchableEntry[]): void {
   for (const [row, texts] of groups) {
     texts.sort((a, b) => a.bounds!.top - b.bounds!.top || a.bounds!.left - b.bounds!.left);
     const parts = [
-      ...new Set(texts.map((text) => text.label!).filter((label) => label !== row.label)),
+      ...new Set(
+        texts.map((text) => text.label!).filter((label) => label.trim() !== row.label?.trim()),
+      ),
     ];
     const folded = foldSearchableLabels(row, parts);
     row.displayedLabel = displayedSearchableLabel(folded.label);

@@ -4,9 +4,10 @@
  */
 
 import { errorMessage } from "../../utils/describeUnknownError";
+import type { BootedDevice } from "../../models";
 import { CheckResult } from "../types";
 import type { DoctorOptions, DoctorProbeOptions } from "../types";
-import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
+import { awaitDoctorProbe, DoctorDeadlineError, remainingDoctorProbe } from "../deadline";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { platform as getHostPlatform } from "node:os";
 import { DaemonManager } from "../../daemon/manager";
@@ -350,6 +351,99 @@ export async function checkDaemonBuildIdentity(
   }
 }
 
+/** Combine the bounded device entries without hiding failures or omitted devices. */
+function aggregateAndroidDoctorResults(
+  name: string,
+  results: CheckResult[],
+  deviceCount: number,
+): CheckResult {
+  const unchecked = deviceCount - results.length;
+  const messages = results.map((result) => result.message);
+  if (unchecked) {
+    messages.push(
+      `${unchecked} Android devices not checked (limit=${MAX_CTRL_PROXY_DOCTOR_DEVICES})`,
+    );
+  }
+  const recommendations = [
+    ...new Set(results.flatMap((result) => (result.recommendation ? [result.recommendation] : []))),
+  ];
+  return {
+    name,
+    status: results.some((result) => result.status === "fail")
+      ? "fail"
+      : unchecked || results.some((result) => result.status === "warn")
+        ? "warn"
+        : "pass",
+    message: messages.join(" | "),
+    recommendation: recommendations.length ? recommendations.join(" | ") : undefined,
+  };
+}
+
+async function checkDeviceCtrlProxy(
+  device: BootedDevice,
+  adbFactory: AdbClientFactory,
+  deviceProbe: DoctorProbeOptions,
+): Promise<CheckResult> {
+  const manager = AndroidCtrlProxyManager.createDetached(device, adbFactory);
+  const installed = await manager.isInstalled();
+  deviceProbe.signal?.throwIfAborted();
+  const enabled = await manager.isEnabled();
+  deviceProbe.signal?.throwIfAborted();
+  const version = await manager.inspectCompatibility(deviceProbe.signal);
+  deviceProbe.signal?.throwIfAborted();
+  const diagnostics = [
+    `platform=${device.platform}`,
+    `device=${device.deviceId}`,
+    `installed=${installed}`,
+    `enabled=${enabled}`,
+    `expectedSha256=${version.expectedSha256 || "n/a"}`,
+    `installedSha256=${version.installedSha256 || "unknown"} (${version.installedShaSource})`,
+    `versionStatus=${version.status}`,
+  ];
+  if (version.status === "mismatch") {
+    diagnostics.push("Installed CtrlProxy APK SHA differs from expected release checksum");
+    if (version.knownPinMismatch) {
+      diagnostics.push(`AUTOMOBILE_VERSION=${resolvePinnedVersion()}`);
+    }
+  }
+  const status = version.knownPinMismatch
+    ? "fail"
+    : installed && enabled && (version.status === "compatible" || version.status === "skipped")
+      ? "pass"
+      : "warn";
+  return {
+    name: "CtrlProxy",
+    status,
+    message: diagnostics.join("; "),
+    recommendation:
+      status === "pass"
+        ? undefined
+        : `${installed && !enabled ? "Enable CtrlProxy in device settings. " : ""}` +
+          `doctor does not install, update or enable CtrlProxy and does not reset running session state; run an AutoMobile device tool (for example observe) against ${device.deviceId} so readiness installs/updates it, or use the IDE plugin's update-service action.`,
+  };
+}
+
+function androidDoctorDeviceFailure(
+  name: string,
+  device: BootedDevice,
+  probe: DoctorProbeOptions,
+  log: Logger,
+  error: unknown,
+): CheckResult {
+  if (probe.signal?.aborted || error instanceof DoctorDeadlineError) {
+    throw error;
+  }
+  const description = name === "CtrlProxy" ? "CtrlProxy" : "Work profile accessibility";
+  log.warn(`${description} check failed for ${device.deviceId}: ${errorMessage(error)}`, error);
+  return {
+    name,
+    status: "warn",
+    message: `Could not check device=${device.deviceId}: ${errorMessage(error)}`,
+    recommendation:
+      "Re-run doctor and verify adb access to that device; doctor only reports status.",
+  };
+}
+
 /**
  * Check CtrlProxy status on connected devices
  */
@@ -399,68 +493,15 @@ export async function checkCtrlProxy(
       const results: CheckResult[] = [];
       for (const device of selected.slice(0, MAX_CTRL_PROXY_DOCTOR_DEVICES)) {
         currentProbe.signal?.throwIfAborted();
-        const manager = AndroidCtrlProxyManager.createDetached(device, adbFactory);
-        const installed = await manager.isInstalled();
-        currentProbe.signal?.throwIfAborted();
-        const enabled = await manager.isEnabled();
-        currentProbe.signal?.throwIfAborted();
-        const version = await manager.inspectCompatibility(currentProbe.signal);
-        currentProbe.signal?.throwIfAborted();
-        const diagnostics = [
-          `platform=${device.platform}`,
-          `device=${device.deviceId}`,
-          `installed=${installed}`,
-          `enabled=${enabled}`,
-          `expectedSha256=${version.expectedSha256 || "n/a"}`,
-          `installedSha256=${version.installedSha256 || "unknown"} (${version.installedShaSource})`,
-          `versionStatus=${version.status}`,
-        ];
-        if (version.status === "mismatch") {
-          diagnostics.push("Installed CtrlProxy APK SHA differs from expected release checksum");
-          if (version.knownPinMismatch) {
-            diagnostics.push(`AUTOMOBILE_VERSION=${resolvePinnedVersion()}`);
-          }
+        const deviceProbe = remainingDoctorProbe(currentProbe);
+        try {
+          results.push(await checkDeviceCtrlProxy(device, adbFactory, deviceProbe));
+        } catch (error) {
+          results.push(androidDoctorDeviceFailure("CtrlProxy", device, currentProbe, log, error));
         }
-        const status = version.knownPinMismatch
-          ? "fail"
-          : installed &&
-              enabled &&
-              (version.status === "compatible" || version.status === "skipped")
-            ? "pass"
-            : "warn";
-        results.push({
-          name: "CtrlProxy",
-          status,
-          message: diagnostics.join("; "),
-          recommendation:
-            status === "pass"
-              ? undefined
-              : `${installed && !enabled ? "Enable CtrlProxy in device settings. " : ""}` +
-                `doctor does not install, update or enable CtrlProxy and does not reset running session state; run an AutoMobile device tool (for example observe) against ${device.deviceId} so readiness installs/updates it, or use the IDE plugin's update-service action.`,
-        });
+        remainingDoctorProbe(currentProbe);
       }
-      const unchecked = selected.length - results.length;
-      const messages = results.map((result) => result.message);
-      if (unchecked) {
-        messages.push(
-          `${unchecked} Android devices not checked (limit=${MAX_CTRL_PROXY_DOCTOR_DEVICES})`,
-        );
-      }
-      const recommendations = [
-        ...new Set(
-          results.flatMap((result) => (result.recommendation ? [result.recommendation] : [])),
-        ),
-      ];
-      return {
-        name: "CtrlProxy",
-        status: results.some((result) => result.status === "fail")
-          ? "fail"
-          : unchecked || results.some((result) => result.status === "warn")
-            ? "warn"
-            : "pass",
-        message: messages.join(" | "),
-        recommendation: recommendations.length ? recommendations.join(" | ") : undefined,
-      };
+      return aggregateAndroidDoctorResults("CtrlProxy", results, selected.length);
     });
   } catch (error) {
     if (error instanceof ActionableError) {
@@ -478,6 +519,70 @@ export async function checkCtrlProxy(
       message: `Could not check: ${errorMessage(error)}`,
     };
   }
+}
+
+async function checkDeviceWorkProfileAccessibility(
+  device: BootedDevice,
+  adbFactory: AdbClientFactory,
+  currentProbe: DoctorProbeOptions,
+): Promise<CheckResult> {
+  const deviceAdb = adbFactory.create(device);
+  currentProbe.signal?.throwIfAborted();
+  const users = await deviceAdb.listUsers(currentProbe.signal);
+  remainingDoctorProbe(currentProbe);
+
+  // Filter to work profiles: userId > 0, running, and flags indicate managed profile (0x30 = 48)
+  // Work profiles have FLAG_MANAGED_PROFILE (0x20) in their flags
+  const workProfiles = users.filter(
+    (user) => user.userId > 0 && user.running && (user.flags & 0x20) !== 0,
+  );
+
+  if (workProfiles.length === 0) {
+    return {
+      name: "Work Profile Accessibility",
+      status: "pass",
+      message: `device=${device.deviceId}; No work profiles detected`,
+    };
+  }
+
+  // Check accessibility service status for each work profile
+  const profilesWithoutService: { userId: number; name: string }[] = [];
+
+  for (const profile of workProfiles) {
+    // Why: kept on ADB because Settings APIs from the accessibility service run as
+    // the service user only; the multi-user --user flag is required to query
+    // settings in each work profile, which the WebSocket settings_get API can't do.
+    const profileProbe = remainingDoctorProbe(currentProbe);
+    const result = await deviceAdb.executeCommand(
+      `shell settings --user ${profile.userId} get secure enabled_accessibility_services`,
+      profileProbe.timeoutMs,
+      undefined,
+      true,
+      profileProbe.signal,
+    );
+    remainingDoctorProbe(currentProbe);
+    const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
+    if (!isEnabled) {
+      profilesWithoutService.push({ userId: profile.userId, name: profile.name });
+    }
+  }
+
+  if (profilesWithoutService.length === 0) {
+    return {
+      name: "Work Profile Accessibility",
+      status: "pass",
+      message: `device=${device.deviceId}; Accessibility service enabled for ${workProfiles.length} work profile(s)`,
+    };
+  }
+
+  const profileList = profilesWithoutService.map((p) => `${p.name} (user ${p.userId})`).join(", ");
+
+  return {
+    name: "Work Profile Accessibility",
+    status: "warn",
+    message: `device=${device.deviceId}; Accessibility service not enabled for work profile(s): ${profileList}`,
+    recommendation: `The accessibility service needs to be enabled in each work profile for full app install tracking. Enable manually in Settings > Accessibility; doctor only reports status.`,
+  };
 }
 
 /**
@@ -504,63 +609,27 @@ export async function checkWorkProfileAccessibility(
       };
     }
 
-    // Check first connected device
-    const device = devices[0];
-    const deviceAdb = adbFactory.create(device);
-    const users = await deviceAdb.listUsers(currentProbe.signal);
-
-    // Filter to work profiles: userId > 0, running, and flags indicate managed profile (0x30 = 48)
-    // Work profiles have FLAG_MANAGED_PROFILE (0x20) in their flags
-    const workProfiles = users.filter(
-      (user) => user.userId > 0 && user.running && (user.flags & 0x20) !== 0,
-    );
-
-    if (workProfiles.length === 0) {
-      return {
-        name: "Work Profile Accessibility",
-        status: "pass",
-        message: "No work profiles detected",
-      };
-    }
-
-    // Check accessibility service status for each work profile
-    const profilesWithoutService: { userId: number; name: string }[] = [];
-
-    for (const profile of workProfiles) {
-      // Why: kept on ADB because Settings APIs from the accessibility service run as
-      // the service user only; the multi-user --user flag is required to query
-      // settings in each work profile, which the WebSocket settings_get API can't do.
-      const result = await deviceAdb.executeCommand(
-        `shell settings --user ${profile.userId} get secure enabled_accessibility_services`,
-        currentProbe.timeoutMs,
-        undefined,
-        true,
-        currentProbe.signal,
-      );
-      const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
-      if (!isEnabled) {
-        profilesWithoutService.push({ userId: profile.userId, name: profile.name });
+    currentProbe.signal?.throwIfAborted();
+    const results: CheckResult[] = [];
+    for (const device of devices.slice(0, MAX_CTRL_PROXY_DOCTOR_DEVICES)) {
+      currentProbe.signal?.throwIfAborted();
+      const deviceProbe = remainingDoctorProbe(currentProbe);
+      try {
+        results.push(await checkDeviceWorkProfileAccessibility(device, adbFactory, deviceProbe));
+      } catch (error) {
+        results.push(
+          androidDoctorDeviceFailure(
+            "Work Profile Accessibility",
+            device,
+            currentProbe,
+            logger,
+            error,
+          ),
+        );
       }
+      remainingDoctorProbe(currentProbe);
     }
-
-    if (profilesWithoutService.length === 0) {
-      return {
-        name: "Work Profile Accessibility",
-        status: "pass",
-        message: `Accessibility service enabled for ${workProfiles.length} work profile(s)`,
-      };
-    }
-
-    const profileList = profilesWithoutService
-      .map((p) => `${p.name} (user ${p.userId})`)
-      .join(", ");
-
-    return {
-      name: "Work Profile Accessibility",
-      status: "warn",
-      message: `Accessibility service not enabled for work profile(s): ${profileList}`,
-      recommendation: `The accessibility service needs to be enabled in each work profile for full app install tracking. Enable manually in Settings > Accessibility; doctor only reports status.`,
-    };
+    return aggregateAndroidDoctorResults("Work Profile Accessibility", results, devices.length);
   } catch (error) {
     logger.warn(`Work profile accessibility check failed: ${errorMessage(error)}`, error);
     return {

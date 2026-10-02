@@ -25,6 +25,8 @@ import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/Adb
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { logger } from "../../src/utils/logger";
+import { DoctorDeadlineError } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("checkDaemonVersion", () => {
@@ -801,6 +803,148 @@ describe("checkCtrlProxy", () => {
       expect(fakeAdb.getExecutedCommands()).toHaveLength(2);
     } finally {
       inspect.mockRestore();
+    }
+  });
+
+  test("isolates a CtrlProxy device query failure and continues", async () => {
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    fakeAdb.setDevices([device("one"), device("two")]);
+    configureInstalled(fakeAdb, "expected-sha");
+    const error = new Error("device query timed out");
+    const installed = spyOn(AndroidCtrlProxyManager.prototype, "isInstalled").mockRejectedValueOnce(
+      error,
+    );
+    const log = new FakeLogger();
+    try {
+      const result = await checkCtrlProxy(fakeFactory, { logger: log });
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("Could not check device=one: device query timed out");
+      expect(result.message).toContain("device=two; installed=true; enabled=true");
+      expect(result.recommendation).toContain("Re-run doctor");
+      expect(log.at("warn")).toContainEqual({
+        level: "warn",
+        message: "CtrlProxy check failed for one: device query timed out",
+        args: [error],
+      });
+    } finally {
+      installed.mockRestore();
+    }
+  });
+
+  test("work profile reports different results for every device", async () => {
+    fakeAdb.setDevices([device("one"), device("two")]);
+    const one = new FakeAdbExecutor();
+    one.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
+    const two = new FakeAdbExecutor();
+    const factory: AdbClientFactory = {
+      create: (target) => (target ? (target.deviceId === "one" ? one : two) : fakeAdb),
+    };
+    const result = await checkWorkProfileAccessibility(factory);
+    expect(result.status).toBe("warn");
+    expect(result.message).toBe(
+      "device=one; Accessibility service not enabled for work profile(s): Work (user 10) | device=two; No work profiles detected",
+    );
+    expect(result.recommendation).toContain("doctor only reports status");
+    expect(one.getExecutedCommands()).toEqual([
+      "shell settings --user 10 get secure enabled_accessibility_services",
+    ]);
+    expect(two.getExecutedCommands()).toEqual([]);
+  });
+
+  test("work profile isolates failed user and settings queries with a trace", async () => {
+    for (const method of ["listUsers", "executeCommand"] as const) {
+      fakeAdb.setDevices([device("one"), device("two")]);
+      const one = new FakeAdbExecutor();
+      one.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
+      const two = new FakeAdbExecutor();
+      const factory: AdbClientFactory = {
+        create: (target) => (target ? (target.deviceId === "one" ? one : two) : fakeAdb),
+      };
+      const error = new Error("adb access denied");
+      const query = spyOn(one, method).mockRejectedValue(error);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await checkWorkProfileAccessibility(factory);
+        expect(result.status).toBe("warn");
+        expect(result.message).toBe(
+          "Could not check device=one: adb access denied | device=two; No work profiles detected",
+        );
+        expect(result.recommendation).toContain("Re-run doctor");
+        expect(warn).toHaveBeenCalledWith(
+          "Work profile accessibility check failed for one: adb access denied",
+          error,
+        );
+      } finally {
+        query.mockRestore();
+        warn.mockRestore();
+      }
+    }
+  });
+
+  test("work profile preserves empty and single-device wording with device identity", async () => {
+    expect(await checkWorkProfileAccessibility(fakeFactory)).toEqual({
+      name: "Work Profile Accessibility",
+      status: "skip",
+      message: "No Android devices connected",
+    });
+    fakeAdb.setDevices([device("one")]);
+    expect((await checkWorkProfileAccessibility(fakeFactory)).message).toBe(
+      "device=one; No work profiles detected",
+    );
+    fakeAdb.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
+    fakeAdb.setCommandResponse("shell settings --user 10", {
+      stdout: AndroidCtrlProxyManager.PACKAGE,
+      stderr: "",
+    });
+    expect((await checkWorkProfileAccessibility(fakeFactory)).message).toBe(
+      "device=one; Accessibility service enabled for 1 work profile(s)",
+    );
+  });
+
+  test("work profile caps devices and deduplicates recommendations", async () => {
+    fakeAdb.setDevices(
+      Array.from({ length: MAX_CTRL_PROXY_DOCTOR_DEVICES + 2 }, (_, i) => device(String(i))),
+    );
+    fakeAdb.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
+    const users = spyOn(fakeAdb, "listUsers");
+    try {
+      const result = await checkWorkProfileAccessibility(fakeFactory);
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("2 Android devices not checked (limit=8)");
+      expect(result.message).not.toContain("device=8;");
+      expect(users).toHaveBeenCalledTimes(MAX_CTRL_PROXY_DOCTOR_DEVICES);
+      expect(result.recommendation?.split("doctor only reports status")).toHaveLength(2);
+    } finally {
+      users.mockRestore();
+    }
+  });
+
+  test("work profile abort and deadline during a device preserve outer cancellation handling", async () => {
+    for (const error of [new Error("cancelled"), new DoctorDeadlineError()]) {
+      fakeAdb.setDevices([device("one"), device("two")]);
+      const controller = new AbortController();
+      const users = spyOn(fakeAdb, "listUsers").mockImplementation(async () => {
+        if (!(error instanceof DoctorDeadlineError)) {
+          controller.abort(error);
+        }
+        throw error;
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await checkWorkProfileAccessibility(fakeFactory, {
+          signal: controller.signal,
+        });
+        expect(result.status).toBe("skip");
+        expect(result.message).toBe(`Could not check: ${error.message}`);
+        expect(users).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(
+          `Work profile accessibility check failed: ${error.message}`,
+          error,
+        );
+      } finally {
+        users.mockRestore();
+        warn.mockRestore();
+      }
     }
   });
 

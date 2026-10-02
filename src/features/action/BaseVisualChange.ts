@@ -123,6 +123,8 @@ interface ObservedChangeOptions {
   /** Bind pre/post captures to the panel prepared by the action. */
   display?: string;
   previousObservation?: ObserveResult;
+  /** Per-call capture seam for actions that must validate every post-action poll. */
+  postActionObserveScreen?: ObserveScreen;
   timeoutMs?: number;
   packageName?: string;
   progress?: ProgressCallback;
@@ -456,6 +458,7 @@ export class BaseVisualChange {
     const observed = await this.takeObservation(blockResult, previousObserveResult, {
       changeExpected: options.changeExpected,
       display: options.display,
+      postActionObserveScreen: options.postActionObserveScreen,
       tolerancePercent: options.tolerancePercent ?? DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
       queryOptions: options.queryOptions,
       gfxMetrics,
@@ -661,6 +664,7 @@ export class BaseVisualChange {
     options: {
       changeExpected: boolean;
       display?: string;
+      postActionObserveScreen?: ObserveScreen;
       tolerancePercent?: number;
       queryOptions?: ViewHierarchyQueryOptions;
       gfxMetrics?: GfxMetrics | null;
@@ -672,6 +676,7 @@ export class BaseVisualChange {
     },
   ): Promise<any> {
     const perf = options.perf ?? new NoOpPerformanceTracker();
+    const observeScreen = options.postActionObserveScreen ?? this.observeScreen;
 
     // Use actionStartTime as minTimestamp to ensure we get data captured after the action
     // This prevents returning stale cached data from before the action was executed
@@ -682,7 +687,7 @@ export class BaseVisualChange {
 
     perf.serial("finalObserve");
     // Capture fresh data that reflects the action that just completed.
-    let latestObservation = await this.observeScreen.execute({
+    let latestObservation = await observeScreen.execute({
       freshness: "fresh",
       display: options.display,
       queryOptions: options.queryOptions,
@@ -721,7 +726,7 @@ export class BaseVisualChange {
       );
       await this.timer.sleep(delayMs);
       perf.serial(`finalObserve_retry_${attempt + 1}`);
-      latestObservation = await this.observeScreen.execute({
+      latestObservation = await observeScreen.execute({
         freshness: "fresh",
         display: options.display,
         queryOptions: options.queryOptions,
@@ -754,7 +759,7 @@ export class BaseVisualChange {
       latestObservation.viewHierarchy &&
       !latestObservation.viewHierarchy.hierarchy.error
     ) {
-      const settled = await new RealSettleObserve(this.observeScreen, this.timer).execute({
+      const settled = await new RealSettleObserve(observeScreen, this.timer).execute({
         display: options.display,
         signal: options.signal,
         initialMinTimestampMs: hierarchyUpdatedAtToMillis(latestObservation.viewHierarchy),

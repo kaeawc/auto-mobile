@@ -22890,7 +22890,7 @@
           "type": "string"
         },
         "includeSystemInsets": {
-          "description": "Use full screen including status/nav bars",
+          "description": "Use full screen including status/nav bars; with display, requires the selected Android panel's own available insets",
           "type": "boolean"
         },
         "container": {
@@ -22943,7 +22943,7 @@
               "type": "string"
             }
           },
-          "description": "Element to look for during swipe",
+          "description": "Element to find by scrolling; with display, observes and swipes only the selected Android panel",
           "anyOf": [
             {
               "required": ["elementId"]

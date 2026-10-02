@@ -30,7 +30,13 @@ import {
 } from "../../src/utils/runnerReadinessConfig";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/utils/RunnerReadinessService";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import {
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleLease,
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import { DeviceBootService } from "../../src/devices/deviceBootService";
+import { getStructuredField, type StructuredToolResponse } from "../../src/utils/toolUtils";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -169,6 +175,122 @@ describe("startDevice handler", () => {
     osVersion: "17.2",
     formFactor: "phone",
   };
+
+  async function callStartDeviceWithEvidence(
+    args: Record<string, unknown>,
+    elapsedMs: number,
+    recovered = false,
+  ) {
+    const tool = ToolRegistry.getTool("startDevice")!;
+    const response: StructuredToolResponse<Record<string, unknown>> = await tool.handler(args);
+    expect(getStructuredField(response, "readiness")).toEqual({
+      level: "automationReady",
+      checks: ["bootCompleted", "runnerReady", "sessionBound"],
+      elapsedMs,
+      recovered,
+    });
+    expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
+    expect(tool.outputSchema).toBeDefined();
+    expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(
+      response.structuredContent,
+    );
+    return response.structuredContent;
+  }
+
+  for (const platform of ["android", "ios"] as const) {
+    for (const running of [true, false]) {
+      it(`reports readiness evidence for ${platform} ${running ? "adoption" : "launch"}`, async () => {
+        const device = platform === "android" ? androidDevice : iosDevice;
+        const image: DeviceInfo = { ...device, isRunning: running };
+        fakeDeviceUtils.setBootedDevices(platform, running ? [device] : []);
+        fakeDeviceUtils.setDeviceImages(platform, [image]);
+        fakeMatcher.setBootedResult(running ? device : null);
+        fakeMatcher.setImageResult(image);
+        const waitForDeviceReady = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
+        fakeDeviceUtils.waitForDeviceReady = async (...args) => {
+          bootTimer.advanceTime(11);
+          return waitForDeviceReady(...args);
+        };
+        setDeviceToolsDependencies({
+          ensureCtrlProxyReady: async () => {
+            bootTimer.advanceTime(26);
+          },
+        });
+        // A nonzero starting timestamp ensures elapsedMs is a delta, not now().
+        bootTimer.advanceTime(100);
+        const result = await callStartDeviceWithEvidence({ platform }, 37);
+        expect(result.acquisition).toBe(running ? "already-booted" : "cold-boot");
+        expect(fakeDeviceUtils.getCallCount("startDevice:")).toBe(running ? 0 : 1);
+        expect(fakeDeviceUtils.getCallCount("waitForDeviceReady:")).toBe(1);
+      });
+    }
+  }
+
+  it("reports readiness evidence after adopting another caller's launch at the lifecycle lease", async () => {
+    // Same external-lease gate as deviceBootService's merged concurrent-launch regression test.
+    const bindingStarted = Promise.withResolvers<void>();
+    const bindingGate = Promise.withResolvers<void>();
+    const ownerReadinessStarted = Promise.withResolvers<void>();
+    const ownerReadinessGate = Promise.withResolvers<void>();
+    const ownerLease: VirtualDeviceLifecycleLease = {
+      signal: new AbortController().signal,
+      identity: { kind: "selector", platform: "android", selector: "owner" },
+      bindCanonicalIdentity: async () => {},
+      transitionToTeardown: () => {},
+      release: () => {},
+    };
+    const adopterLease: VirtualDeviceLifecycleLease = {
+      ...ownerLease,
+      identity: { kind: "selector", platform: "android", selector: "adopter" },
+      bindCanonicalIdentity: async () => {
+        bindingStarted.resolve();
+        await bindingGate.promise;
+      },
+    };
+    const coordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async () => adopterLease,
+    };
+    const image = { ...androidImage, deviceId: androidDevice.deviceId };
+    fakeDeviceUtils.setDeviceImages("android", [image]);
+    fakeMatcher.setImageResult(image);
+    const ownerHandle = new FakeExitChildProcess();
+    fakeDeviceUtils.setMockChildProcess(image.name, ownerHandle as ChildProcess);
+    const waitForDeviceReady = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
+    fakeDeviceUtils.waitForDeviceReady = async (...args) => {
+      if (args[2] === ownerHandle) {
+        ownerReadinessStarted.resolve();
+        await ownerReadinessGate.promise;
+      } else {
+        bootTimer.advanceTime(11);
+      }
+      return waitForDeviceReady(...args);
+    };
+    const ownerBootService = new DeviceBootService({
+      deviceManager: fakeDeviceUtils,
+      deviceMatcher: fakeMatcher,
+      timer: bootTimer,
+      lifecycleCoordinator: coordinator,
+      lifecycleLease: ownerLease,
+      allowExternalLeaseAdoptionRecheck: true,
+    });
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: coordinator,
+      ensureCtrlProxyReady: async () => {
+        bootTimer.advanceTime(26);
+      },
+    });
+    const owner = ownerBootService.boot({ platform: "android", deviceId: image.name });
+    await ownerReadinessStarted.promise;
+    const adopter = callStartDeviceWithEvidence({ platform: "android" }, 50);
+    await bindingStarted.promise;
+    bootTimer.advanceTime(13);
+    ownerReadinessGate.resolve();
+    await owner;
+    bindingGate.resolve();
+    const result = await adopter;
+    expect(result.acquisition).toBe("already-booted");
+    expect(fakeDeviceUtils.getCallCount("startDevice:")).toBe(1);
+  });
 
   it("matches a booted device by criteria", async () => {
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
@@ -897,6 +1019,7 @@ describe("startDevice handler", () => {
       timer,
       ensureCtrlProxyReady: async () => {
         readinessAttempts++;
+        timer.advanceTime(17);
         if (readinessAttempts === 1) {
           throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
         }
@@ -904,12 +1027,12 @@ describe("startDevice handler", () => {
     });
     registerDeviceTools();
 
-    const result = await callStartDevice({ platform: "android" });
+    const result = await callStartDeviceWithEvidence({ platform: "android" }, 34, true);
 
     expect(result.runtime.deviceId).toBe("emulator-5556");
     expect(result.runtime.session.sessionUuid).toBe("owner-session");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:360000");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:359983");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
       sessionId: "owner-session",
       status: "busy",

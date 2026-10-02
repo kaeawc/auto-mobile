@@ -1,3 +1,4 @@
+import { deviceDescriptionSchema } from "./deviceDescription";
 import { deviceClockInputSchema } from "../features/utility/DeviceClock";
 import {
   biometricEnrollmentSchema,
@@ -15,6 +16,31 @@ const staleDisplaySchema = z.object({
   currentDisplayKey: z.string().optional(),
   retry: z.literal("observe"),
 });
+
+/** Evidence from the existing boot, runner setup, and session recording steps. */
+export const startDeviceReadinessSchema = z.object({
+  level: z.literal("automationReady"),
+  checks: z.array(z.enum(["bootCompleted", "runnerReady", "sessionBound"])),
+  elapsedMs: z.number().nonnegative(),
+  recovered: z.boolean().optional(),
+});
+
+export type StartDeviceReadiness = z.infer<typeof startDeviceReadinessSchema>;
+
+/** Shared acquisition description plus startDevice's successful structured result. */
+export const startDeviceOutputSchema = z
+  .object({
+    ...deviceDescriptionSchema.partial().shape,
+    message: z.string(),
+    deviceIdentity: z.unknown().optional(),
+    processId: z.number().nullable().optional(),
+    isReady: z.literal(true).optional(),
+    acquisition: z.enum(["already-booted", "cold-boot"]).optional(),
+    readiness: startDeviceReadinessSchema.optional(),
+    // PerformanceTracker emits nested arrays/records rather than a flat numeric map.
+    timing: z.unknown().optional(),
+  })
+  .passthrough();
 
 /** A successful openurl may still need a foreground confirmation before the next action. */
 export const openLinkResultSchema = z

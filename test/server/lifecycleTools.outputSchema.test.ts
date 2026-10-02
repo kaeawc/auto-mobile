@@ -25,6 +25,7 @@ import {
   setInstalledAppResourceRefresh,
   resetInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
+import { registerDeviceTools } from "../../src/server/deviceTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
@@ -208,3 +209,27 @@ for (const name of ["launchApp", "terminateApp"] as const) {
     ).rejects.toThrow("failed");
   });
 }
+
+test("hidden startDevice registers an output schema with closed readiness checks", () => {
+  registerDeviceTools();
+  const tool = ToolRegistry.getTool("startDevice")!;
+  expect(tool.hidden).toBe(true);
+  expect(tool.outputSchema).toBeDefined();
+  const readiness = {
+    level: "automationReady",
+    checks: ["bootCompleted", "runnerReady", "sessionBound"],
+    elapsedMs: 37,
+    recovered: false,
+  };
+  expect(tool.outputSchema!.safeParse({ message: "Ready", readiness }).success).toBe(true);
+  for (const invalid of [
+    { ...readiness, checks: ["unknownCheck"] },
+    { ...readiness, level: "bootReady" },
+    { ...readiness, elapsedMs: -1 },
+    { ...readiness, recovered: "yes" },
+  ]) {
+    expect(tool.outputSchema!.safeParse({ message: "Ready", readiness: invalid }).success).toBe(
+      false,
+    );
+  }
+});

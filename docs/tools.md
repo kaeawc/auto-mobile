@@ -1114,6 +1114,15 @@ content and `structuredContent`. Ordinary clients receive `structuredContent`
 unless `--tool-results-no-structured-content` is enabled. Each schema requires
 `message`; variant fields are optional, and additional fields are accepted.
 
+`startDevice` also declares an output schema. Its `readiness` evidence contains
+`level: "automationReady"`, `checks: ["bootCompleted", "runnerReady", "sessionBound"]`,
+`elapsedMs` measured with the injected clock from the start of boot preparation
+through session binding, and `recovered` indicating System UI ANR recovery.
+The older `acquisition` field remains for compatibility: `"already-booted"` means
+adopted and `"cold-boot"` means launched or restarted by this call. Evidence uses
+the existing readiness steps without extra device probes. The shared `getAndroid`
+and `getApple` result builder also emits this evidence.
+
 `wakeAndUnlock` reports `success`, `platform`, `wasAsleep`, `wasLocked`, and
 `unlocked`, with optional `secure`, `usedRecordedCredential`, `error`, and
 `warning`. Returned unlock failures do not set MCP `isError`; operational errors

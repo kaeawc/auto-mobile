@@ -81,6 +81,7 @@ final class CommandHandler: CommandHandling {
     private let voiceOverToggle: any VoiceOverToggling
     private let hingeAngleSetter: any HingeAngleSetting
     private let frameContext: FrameContext
+    private let rotationTimer: any ProxyTimer
 
     init(
         elementLocator: any ElementLocating,
@@ -95,7 +96,8 @@ final class CommandHandler: CommandHandling {
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
-        frameContext: FrameContext = FrameContext()
+        frameContext: FrameContext = FrameContext(),
+        rotationTimer: any ProxyTimer = SystemTimer()
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -110,6 +112,7 @@ final class CommandHandler: CommandHandling {
         self.voiceOverToggle = voiceOverToggle
         self.hingeAngleSetter = hingeAngleSetter
         self.frameContext = frameContext
+        self.rotationTimer = rotationTimer
     }
 
     /// Handle an incoming request and return a response.
@@ -1344,129 +1347,49 @@ final class CommandHandler: CommandHandling {
 
     // MARK: - Device Control
 
-    private func reportedOrientation(previous: String, afterSize: (Int, Int)) -> String {
-        let portraitDisplay = afterSize.0 < afterSize.1
-        switch previous {
-        case "portrait", "portrait_upside_down":
-            return portraitDisplay ? previous : "landscape_left"
-        case "landscape_left", "landscape_right":
-            return portraitDisplay ? "portrait" : previous
-        case "unknown":
-            return "unknown"
-        default:
-            return portraitDisplay ? "portrait" : "landscape_left"
+    private func readAppAxis() async -> AppAxis? {
+        // Hierarchy errors are safe: app axis is optional and XCUIDevice is the fallback.
+        guard let hierarchy = try? await elementLocator.getViewHierarchy(disableAllFiltering: false) else {
+            return nil
+        }
+        if let width = hierarchy.screenWidth, let height = hierarchy.screenHeight {
+            return AppAxis.from(width: width, height: height)
+        }
+        guard let bounds = hierarchy.hierarchy?.bounds else { return nil }
+        return AppAxis.from(width: bounds.width, height: bounds.height)
+    }
+
+    private func performRotation(_ target: RotateTarget) async throws -> RotateResult {
+        let appAxisBefore = await readAppAxis()
+        let deviceBefore = await gesturePerformer.getOrientation()
+        let decision = RotateDecision(target: target, appAxisBefore: appAxisBefore, deviceBefore: deviceBefore)
+        if let result = decision.initial().result { return result }
+        try await gesturePerformer.setOrientation(target.orientation)
+        let deadline = rotationTimer.now() + RotateDecision.timeoutMs
+        while true {
+            let appAxis = await readAppAxis()
+            let device = await gesturePerformer.getOrientation()
+            let now = rotationTimer.now()
+            let outcome = decision.poll(appAxis: appAxis, device: device, deadlineReached: now >= deadline)
+            if let result = outcome.result { return result }
+            await rotationTimer.wait(milliseconds: min(RotateDecision.pollIntervalMs, deadline - now))
         }
     }
 
     private func handleRotate(_ request: RequestRotate, startTime: Date) async throws -> RotateResponse {
-        let orientation = request.orientation
-
-        let previousOrientation = await gesturePerformer.getOrientation()
-        // The PNG header describes the display actually captured by XCUITest, even
-        // when XCUIDevice reports the orientation we just assigned on a fixed display.
-        func screenSize() async throws -> (Int, Int) {
-            let data = try await gesturePerformer.getScreenshotCapture().data
-            guard data.count >= 24 else { throw CommandError.invalidParameter("screenshot", "invalid PNG") }
-            let width = data[16 ..< 20].reduce(0) { ($0 << 8) | Int($1) }
-            let height = data[20 ..< 24].reduce(0) { ($0 << 8) | Int($1) }
-            return (width, height)
+        guard let target = RotateTarget(request.orientation) else {
+            throw CommandError.invalidParameter("orientation", request.orientation)
         }
-        let beforeSize = try await screenSize()
-
-        // Map "landscape" to "landscape_left" (standard rotation direction).
-        let iosOrientation: String
-        switch orientation.lowercased() {
-        case "portrait":
-            iosOrientation = "portrait"
-        case "landscape":
-            iosOrientation = "landscape_left"
-        case "portrait_upside_down", "portraitupsidedown":
-            iosOrientation = "portrait_upside_down"
-        case "landscape_left", "landscapeleft":
-            iosOrientation = "landscape_left"
-        case "landscape_right", "landscaperight":
-            iosOrientation = "landscape_right"
-        default:
-            throw CommandError.invalidParameter("orientation", orientation)
-        }
-
-        // Keep the coarse portrait/landscape summary in `value`.
-        let normalizedTarget = iosOrientation.hasPrefix("landscape") ? "landscape" : "portrait"
-        let value = normalizedTarget == "portrait" ? 0 : 1
-
-        // Check if already in the desired orientation.
-        if (
-            previousOrientation == iosOrientation &&
-                (beforeSize.0 < beforeSize.1) == (normalizedTarget == "portrait")
-        ) ||
-            (
-                iosOrientation == "portrait" && beforeSize.0 < beforeSize.1 &&
-                    (previousOrientation == "unknown" || previousOrientation.hasPrefix("landscape"))
-            ) ||
-            (previousOrientation == "unknown" && beforeSize.0 > beforeSize.1 && normalizedTarget == "landscape")
-        {
-            return RotateResponse(
-                requestId: request.requestId,
-                success: true,
-                totalTimeMs: totalTimeMs(from: startTime),
-                previousOrientation: previousOrientation,
-                currentOrientation: reportedOrientation(previous: previousOrientation, afterSize: beforeSize),
-                value: value,
-                rotationPerformed: false
-            )
-        }
-
-        try await gesturePerformer.setOrientation(iosOrientation)
-
-        var currentOrientation = await gesturePerformer.getOrientation()
-        var afterSize = try await screenSize()
-        let needsAxisSwap = (beforeSize.0 < beforeSize.1) != (normalizedTarget == "portrait")
-        for _ in 0 ..< 3 where needsAxisSwap &&
-            (beforeSize.0 < beforeSize.1) == (afterSize.0 < afterSize.1)
-        {
-            try await Task.sleep(for: .milliseconds(100))
-            currentOrientation = await gesturePerformer.getOrientation()
-            afterSize = try await screenSize()
-        }
-        if needsAxisSwap && (beforeSize.0 < beforeSize.1) == (afterSize.0 < afterSize.1) {
-            return RotateResponse(
-                requestId: request.requestId,
-                success: false,
-                totalTimeMs: totalTimeMs(from: startTime),
-                previousOrientation: previousOrientation,
-                currentOrientation: reportedOrientation(previous: previousOrientation, afterSize: afterSize),
-                value: beforeSize.0 < beforeSize.1 ? 0 : 1,
-                rotationPerformed: false,
-                error: "Rotation is not supported on this display (the screen size did not change)"
-            )
-        }
-        if !needsAxisSwap {
-            for _ in 0 ..< 3 where currentOrientation != iosOrientation {
-                try await Task.sleep(for: .milliseconds(100))
-                currentOrientation = await gesturePerformer.getOrientation()
-            }
-            if currentOrientation != iosOrientation {
-                return RotateResponse(
-                    requestId: request.requestId,
-                    success: false,
-                    totalTimeMs: totalTimeMs(from: startTime),
-                    previousOrientation: previousOrientation,
-                    currentOrientation: reportedOrientation(previous: previousOrientation, afterSize: afterSize),
-                    value: beforeSize.0 < beforeSize.1 ? 0 : 1,
-                    rotationPerformed: false,
-                    error: "Rotation to \(iosOrientation) is not supported on this display"
-                )
-            }
-        }
-
+        let result = try await performRotation(target)
         return RotateResponse(
             requestId: request.requestId,
-            success: true,
+            success: result.error == nil,
             totalTimeMs: totalTimeMs(from: startTime),
-            previousOrientation: previousOrientation,
-            currentOrientation: currentOrientation,
-            value: value,
-            rotationPerformed: true
+            previousOrientation: result.previousOrientation,
+            currentOrientation: result.currentOrientation,
+            value: result.value,
+            rotationPerformed: result.rotationPerformed,
+            error: result.error
         )
     }
 

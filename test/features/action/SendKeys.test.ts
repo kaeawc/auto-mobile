@@ -12,7 +12,6 @@ import {
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { DELETE_KEYEVENT_CHUNK_SIZE } from "../../../src/features/action/ClearText";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -1936,9 +1935,9 @@ describe("DefaultSendKeysCommandExecutor", () => {
         if (predicate()) {
           return;
         }
-        await defaultTimer.sleep(5);
+        await Promise.resolve();
       }
-      throw new Error("condition not met in time");
+      throw new Error("First IME commit was not reached within 200 microtask turns");
     };
 
     const first = makeExecutor().type({ action: "type", text: "first", mode: "ime" });
@@ -1947,9 +1946,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const snapshotAtBlock = [...events];
 
     const second = makeExecutor().type({ action: "type", text: "second", mode: "ime" });
-    // Give call 2 every chance to progress; the lock must keep it from doing anything.
-    for (let i = 0; i < 5; i++) {
-      await defaultTimer.sleep(5);
+    // Both executors use promise-only fakes. Drain the same budget that reached
+    // call 1: without the lock, call 2 must reach capture/commit within it.
+    for (let i = 0; i < 200; i++) {
+      await Promise.resolve();
     }
     expect(events).toEqual(snapshotAtBlock);
 

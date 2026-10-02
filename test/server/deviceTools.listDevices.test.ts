@@ -1,3 +1,4 @@
+import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import {
   DEVICECTL_LIST_FIXTURES,
   loadDevicectlListFixture,
@@ -115,10 +116,12 @@ describe("listDevices tool (#5870)", () => {
 
   const createAwaitingOwnerHarness = async () => {
     const timer = new FakeTimer();
+    const markers = new FakeDeviceHealthMarkers(timer);
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
         timer: timer,
+        deviceHealthMarkers: markers,
         installedAppsRepository: new FakeInstalledAppsRepository(),
         deviceManager: fakeDeviceUtils,
         retryExecutor: new DefaultRetryExecutor(timer),
@@ -136,6 +139,7 @@ describe("listDevices tool (#5870)", () => {
     return {
       sessionManager,
       pool,
+      markers,
       close: async () => {
         DaemonState.getInstance().reset();
         sessionManager.stopCleanupTimer();
@@ -183,6 +187,29 @@ describe("listDevices tool (#5870)", () => {
 
   afterAll(() => {
     resetDeviceToolsDependencies();
+  });
+
+  test("listDevices includes optional health reason and timestamp only for dirty devices", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [android]);
+    fakeDeviceUtils.setBootedDevices("ios", [ios]);
+    const h = await createAwaitingOwnerHarness();
+    try {
+      h.markers.mark(
+        android.deviceId,
+        h.pool.getDeviceIncarnation(android.deviceId)!,
+        "network-condition",
+      );
+      const payload = await callListDevices();
+      expect(
+        payload.devices.find((entry: { platform: string }) => entry.platform === "android")
+          .unhealthy,
+      ).toEqual({ reason: "network-condition", since: 0 });
+      expect(
+        payload.devices.find((entry: { platform: string }) => entry.platform === "ios"),
+      ).not.toHaveProperty("unhealthy");
+    } finally {
+      await h.close();
+    }
   });
 
   test("returns the actual booted devices instead of prose", async () => {

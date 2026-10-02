@@ -1,3 +1,5 @@
+import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
+import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
 import {
   AndroidDeviceClockAdapter,
@@ -73,6 +75,7 @@ export interface BiometricEnrollmentSessionState {
 
 /** What a pending restore must write, resolved before any await (see below). */
 interface BiometricRestoreTarget {
+  incarnation?: number;
   sessionId: string;
   deviceId: string;
   enrollment: BiometricEnrollment;
@@ -94,6 +97,7 @@ export interface NetworkConditionSessionState {
 
 /** What a pending network restore must write, resolved before any await. */
 interface NetworkConditionRestoreTarget {
+  incarnation?: number;
   sessionId: string;
   deviceId: string;
   profile: NetworkConditionProfile;
@@ -793,6 +797,114 @@ export class SessionManager {
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
   setObserverSessionRegistry(registry: Pick<ObserverSessionStore, "release">): void {
     this.observerSessions = registry;
+  }
+
+  private deviceHealth?: {
+    markers: DeviceHealthMarkers;
+    incarnation: (deviceId: string) => number | undefined;
+    canRecover: (deviceId: string) => boolean;
+    backoff: BackoffPolicy;
+  };
+  private readonly healthRecoveries = new Map<string, Promise<void>>();
+
+  /** Optional pool wiring, preserving existing positional constructors. */
+  setDeviceHealthMarkers(
+    markers: DeviceHealthMarkers,
+    incarnation: (deviceId: string) => number | undefined,
+    canRecover: (deviceId: string) => boolean,
+    backoff: BackoffPolicy = exponentialBackoff({ initialDelayMs: 1000 }),
+  ): void {
+    this.deviceHealth = { markers, incarnation, canRecover, backoff };
+  }
+
+  private restoreIncarnationIsCurrent(target: { deviceId: string; incarnation?: number }): boolean {
+    return (
+      target.incarnation === undefined ||
+      this.deviceHealth?.incarnation(target.deviceId) === target.incarnation
+    );
+  }
+
+  private clearRestoreHealth(
+    target: { deviceId: string; incarnation?: number },
+    reason: DeviceHealthReason,
+  ): void {
+    if (target.incarnation !== undefined && this.restoreIncarnationIsCurrent(target)) {
+      this.deviceHealth?.markers.clear(target.deviceId, target.incarnation, reason);
+    }
+  }
+
+  /**
+   * Release cleanup settles first: this bounded recovery is deliberately NOT
+   * pendingDeviceCleanup. Idle-but-marked devices cannot be allocated. Never
+   * restore against a live owner (including a TTL's owner) or a replacement.
+   */
+  private abandonRestore(
+    target: { deviceId: string; incarnation?: number },
+    reason: "biometric-enrollment" | "network-condition",
+    restore: () => Promise<void>,
+  ): void {
+    const health = this.deviceHealth;
+    if (target.incarnation === undefined) {
+      logger.warn(
+        `Gave up restoring state on ${target.deviceId} (${reason}); no health marker could be keyed because the device has no pool incarnation`,
+      );
+      return;
+    }
+    if (!health || !this.restoreIncarnationIsCurrent(target)) {
+      return;
+    }
+    const marker = health.markers.mark(target.deviceId, target.incarnation, reason);
+    const key = `${target.deviceId}#${target.incarnation}:${reason}`;
+    if (this.healthRecoveries.has(key)) {
+      return;
+    }
+    const recovery = (async () => {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await this.timer.sleep(health.backoff.delayForAttempt(attempt));
+        if (!this.restoreIncarnationIsCurrent(target)) {
+          return;
+        }
+        // A different unresolved reason may also exist; only clear our own.
+        // Release or a successful TTL restore may already have satisfied this one.
+        if (!health.markers.get(target.deviceId, target.incarnation!, reason)) {
+          return;
+        }
+        if (!health.canRecover(target.deviceId)) {
+          continue;
+        }
+        const timeout = new Error("Device health recovery timed out");
+        try {
+          await raceWithDeadline(restore(), {
+            timer: this.timer,
+            timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+            label: "Device health recovery",
+            timeoutError: () => timeout,
+          });
+          this.clearRestoreHealth(target, reason);
+          return;
+        } catch (error) {
+          logger.warn(
+            `Device health recovery ${attempt} failed on ${target.deviceId} (${marker.reason})`,
+            error,
+          );
+          // A timed-out command may still be running. Retain the marker and do
+          // not issue overlapping retries or let a new session race that command.
+          if (error === timeout) {
+            return;
+          }
+        }
+      }
+    })();
+    this.healthRecoveries.set(key, recovery);
+    void recovery
+      .catch((error: unknown) => {
+        logger.warn(`Device health recovery failed on ${target.deviceId}`, error);
+      })
+      .finally(() => {
+        if (this.healthRecoveries.get(key) === recovery) {
+          this.healthRecoveries.delete(key);
+        }
+      });
   }
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
@@ -2997,6 +3109,7 @@ export class SessionManager {
     return {
       sessionId: session.sessionId,
       deviceId: session.assignedDevice,
+      incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
       enrollment: state.initialEnrollment,
     };
   }
@@ -3007,7 +3120,11 @@ export class SessionManager {
       platform: "ios",
       deviceId: target.deviceId,
     };
+    if (!this.restoreIncarnationIsCurrent(target)) {
+      return;
+    }
     await this.biometricEnrollmentRestorerFactory(device).restore(target.enrollment);
+    this.clearRestoreHealth(target, "biometric-enrollment");
   }
 
   private async restoreBiometricEnrollmentBestEffort(
@@ -3072,6 +3189,9 @@ export class SessionManager {
     let lastError = initialError;
     for (let attempt = 1; attempt <= BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS; attempt++) {
       await this.timer.sleep(BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS);
+      if (!this.restoreIncarnationIsCurrent(target)) {
+        return;
+      }
       try {
         await this.restoreBiometricEnrollment(target);
         logger.info(
@@ -3090,6 +3210,9 @@ export class SessionManager {
       `Gave up restoring biometric enrollment for session ${target.sessionId} after ` +
         `${BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
         `may hold session-modified enrollment: ${lastError}`,
+    );
+    this.abandonRestore(target, "biometric-enrollment", () =>
+      this.restoreBiometricEnrollment(target),
     );
   }
 
@@ -3177,6 +3300,7 @@ export class SessionManager {
     deviceId: string,
     target: PendingClockRestore,
   ): Promise<{ pending: Promise<void> | null }> {
+    const healthTarget = { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) };
     const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
     const signal = defaultDeviceClockRestoreRegistry.signal(deviceId);
     const restore = () =>
@@ -3184,6 +3308,9 @@ export class SessionManager {
         deviceId,
         async () => {
           target.controller.signal.throwIfAborted();
+          if (!this.restoreIncarnationIsCurrent(healthTarget)) {
+            return;
+          }
           await this.clockRestorerFactory(device).restore(target.state, target.controller.signal);
           target.controller.signal.throwIfAborted();
           defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
@@ -3194,6 +3321,9 @@ export class SessionManager {
             if (targets.size === 0) {
               this.pendingClockRestores.delete(deviceId);
             }
+          }
+          if (!this.pendingClockRestores.has(deviceId)) {
+            this.clearRestoreHealth(healthTarget, "clock");
           }
         },
         undefined,
@@ -3219,6 +3349,19 @@ export class SessionManager {
       return { pending: null };
     }
     logger.warn(`Clock restore ${result.outcome}; quarantining ${device.deviceId}`);
+    if (healthTarget.incarnation === undefined) {
+      logger.warn(
+        `Failed to restore state on ${deviceId} (clock); no health marker could be keyed because the device has no pool incarnation`,
+      );
+    }
+    if (
+      healthTarget.incarnation !== undefined &&
+      this.restoreIncarnationIsCurrent(healthTarget) &&
+      !target.removed &&
+      this.pendingClockRestores.get(deviceId)?.has(target.state)
+    ) {
+      this.deviceHealth?.markers.mark(deviceId, healthTarget.incarnation, "clock");
+    }
     const pending = raceWithDeadline(
       this.retryClockRestore(device.deviceId, target, restoration, restore),
       {
@@ -3266,6 +3409,10 @@ export class SessionManager {
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
   retireClockRestoration(deviceId: string): void {
+    const incarnation = this.deviceHealth?.incarnation(deviceId);
+    if (incarnation !== undefined) {
+      this.deviceHealth?.markers.clear(deviceId, incarnation, "clock");
+    }
     defaultDeviceClockRestoreRegistry.retire(deviceId);
     const targets = this.pendingClockRestores.get(deviceId);
     this.clockRemovalGenerations.set(
@@ -3327,6 +3474,7 @@ export class SessionManager {
     return {
       sessionId: session.sessionId,
       deviceId: session.assignedDevice,
+      incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
       profile: state.initialProfile,
     };
   }
@@ -3337,7 +3485,11 @@ export class SessionManager {
       platform: "android",
       deviceId: target.deviceId,
     };
+    if (!this.restoreIncarnationIsCurrent(target)) {
+      return;
+    }
     await this.networkConditionRestorerFactory(device).restore(target.profile);
+    this.clearRestoreHealth(target, "network-condition");
   }
 
   /**
@@ -3423,6 +3575,9 @@ export class SessionManager {
     let lastError = initialError;
     for (let attempt = 1; attempt <= NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS; attempt++) {
       await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+      if (!this.restoreIncarnationIsCurrent(target)) {
+        return false;
+      }
       try {
         await this.restoreNetworkCondition(target);
         logger.info(
@@ -3442,6 +3597,7 @@ export class SessionManager {
         `${NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
         `may hold session-modified shaping: ${lastError}`,
     );
+    this.abandonRestore(target, "network-condition", () => this.restoreNetworkCondition(target));
     return false;
   }
 

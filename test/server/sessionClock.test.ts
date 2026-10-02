@@ -458,6 +458,7 @@ describe("session clock restoration", () => {
       expect(h.invalidations).toEqual([device.deviceId, device.deviceId]);
       expect(h.manager.getSession("clock-session")).toBeNull();
       expect(pool.getDevice(device.deviceId)).toBeNull();
+      expect(pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
     } finally {
       daemon.reset();
       h.manager.stopCleanupTimer();
@@ -635,6 +636,7 @@ describe("session clock restoration", () => {
       expect(h.manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();
       expect(session.cacheData.clock).toBeDefined();
       expect(pool.getDevice(device.deviceId)?.status).not.toBe("idle");
+      expect(pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("clock");
       for (let attempt = 0; attempt < 5; attempt++) {
         h.timer.advanceTime(250);
         await flush();
@@ -648,6 +650,7 @@ describe("session clock restoration", () => {
       await flush();
       expect(session.cacheData.clock).toBeUndefined();
       expect(pool.getDevice(device.deviceId)?.status).toBe("idle");
+      expect(pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
       expect(h.adapter.instantMs).toBe(Math.floor(h.timer.now() / 1000) * 1000);
     } finally {
       h.manager.stopCleanupTimer();
@@ -677,6 +680,7 @@ describe("session clock restoration", () => {
       await pending;
       expect(h.adapter.calls.filter((call) => call.startsWith("instant:"))).toHaveLength(writes);
       expect(pool.getDevice(device.deviceId)).toBeNull();
+      expect(pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
     } finally {
       h.manager.stopCleanupTimer();
     }

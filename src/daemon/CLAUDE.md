@@ -98,6 +98,10 @@ state without tightening memory. Rejection calls `onFlushed` once with
 `drain`, or a successful write callback leaving `writableLength` zero refreshes
 idle; write calls do not.
 
+## Device health marker
+
+Biometric/network restoration abandoned after bounded retries sets a device health marker; clock restoration sets it on its first failed attempt. Successful restoration/background recovery, device removal, or an incarnation change clears it. Idle selection skips marked devices, and exact-id requests refuse them with an actionable error naming the device and reason; pool status surfaces optional `unhealthy`. There is no automatic erase/reboot: the owner decides whether to use `killDevice`/`startDevice`. Markers do not persist across daemon restart and dirty state is not re-detected.
+
 ## Registration-only sessions
 
 `daemon/registerSession { sessionId, clientName }` validates a client UUID and a

@@ -1,3 +1,4 @@
+import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
@@ -253,6 +254,7 @@ interface PoolStatusSummary {
 }
 
 interface PoolDeviceInfo {
+  unhealthy?: DeviceHealthMarker;
   poolStatus: PoolDeviceStatus;
   assignedSession?: string;
   recoveryEligibility: DeviceRecoveryEligibility;
@@ -472,6 +474,7 @@ function toBootedDeviceInfo(
     kind: "booted",
     device,
     pooled: poolContext?.pooled,
+    unhealthy: poolContext?.poolInfo.unhealthy,
     configured,
     // Preserve the pool's already-published assignment in the canonical session
     // when the optional session-detail map is unavailable for this observation.
@@ -642,6 +645,7 @@ function resolvePoolDeviceContext(
   return {
     poolInfo: {
       poolStatus,
+      unhealthy: devicePool.getDeviceHealthMarker(device.deviceId),
       assignedSession: pooledDevice.sessionId || undefined,
       recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
       avdName: pooledDevice.avdName,
@@ -676,7 +680,9 @@ function summarizePoolStatus(
   // phantom (shut-down) pool entries are excluded.
   for (const device of discoveredDevices) {
     if (succeededPlatforms.has(device.platform)) {
-      tally(device.runtime.poolStatus ?? undefined);
+      if (!device.unhealthy || device.runtime.poolStatus !== "idle") {
+        tally(device.runtime.poolStatus ?? undefined);
+      }
     }
   }
 
@@ -684,7 +690,9 @@ function summarizePoolStatus(
   // tracked counts — we cannot confirm which of those entries are phantom.
   for (const pooled of devicePool.getAllDevices()) {
     if (!succeededPlatforms.has(pooled.platform)) {
-      tally(pooled.status === "busy" ? "assigned" : pooled.status);
+      if (!devicePool.getDeviceHealthMarker(pooled.id) || pooled.status !== "idle") {
+        tally(pooled.status === "busy" ? "assigned" : pooled.status);
+      }
     }
   }
 

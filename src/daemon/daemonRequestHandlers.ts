@@ -1,4 +1,5 @@
 import { isSessionReleasing } from "./sessionReleaseState";
+import type { DeviceHealthMarker } from "./deviceHealthMarkers";
 import { z } from "zod";
 import {
   MAX_OBSERVER_CLIENT_NAME_LENGTH,
@@ -74,6 +75,7 @@ export interface DaemonStateAccess {
     getAllDevices?(): PooledDevice[];
     isPooledIdentityUnresolved?(deviceId: string): boolean;
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
+    getDeviceHealthMarker?(deviceId: string): DeviceHealthMarker | undefined;
     getRecoveryEligibility?(deviceId: string): DeviceRecoveryEligibility;
     assertSessionReadyForAutomation?(sessionId: string): void;
     /**
@@ -111,6 +113,7 @@ export type DaemonMethodResult = {
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
 export interface ListedDeviceSessionRecord extends DeviceSessionRecord {
   identityUnresolved?: true;
+  unhealthy?: DeviceHealthMarker;
 }
 
 const registerSessionParams = z.object({
@@ -327,6 +330,9 @@ export async function handleDaemonRequest(
         deviceId: device.id,
         platform: device.platform,
         recoveryEligibility: pool.getRecoveryEligibility?.(device.id),
+        ...(pool.getDeviceHealthMarker?.(device.id)
+          ? { unhealthy: pool.getDeviceHealthMarker(device.id) }
+          : {}),
       }));
       return {
         success: true,
@@ -440,6 +446,9 @@ export async function handleDaemonRequest(
         deviceId: record.deviceId,
         platform: record.platform,
         epochStartedAt: record.epochStartedAt,
+        ...(pool.getDeviceHealthMarker?.(record.deviceId)
+          ? { unhealthy: pool.getDeviceHealthMarker(record.deviceId) }
+          : {}),
         ...(pool.isPooledIdentityUnresolved?.(record.deviceId) === true
           ? { identityUnresolved: true as const }
           : {}),

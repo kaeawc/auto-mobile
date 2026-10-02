@@ -27,7 +27,7 @@ import {
   type IosInstalledAppRecord,
 } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosAppListBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import {
   applyLauncherPackages,
   catalogFromPackageRecords,
@@ -209,6 +209,7 @@ interface ListInstalledAppsOptions {
   installedAppsRepository?: InstalledAppsStore;
   timer?: Timer;
   iosPhysicalAppLister?: IosPhysicalAppLister;
+  iosAppListBackendResolver?: typeof resolveIosAppListBackend;
   installedPackageSource?: AndroidInstalledPackageSource;
 }
 
@@ -220,6 +221,7 @@ export class ListInstalledApps {
   private cacheEnabled: boolean;
   private timer: Timer;
   private iosPhysicalAppLister: IosPhysicalAppLister | null;
+  private readonly iosAppListBackendResolver: typeof resolveIosAppListBackend;
   private installedPackageSource: AndroidInstalledPackageSource;
   /**
    * Create an ListInstalledApps instance
@@ -243,6 +245,7 @@ export class ListInstalledApps {
     this.cacheEnabled = options.cacheEnabled ?? defaultCacheEnabled;
     this.timer = options.timer ?? defaultTimer;
     this.iosPhysicalAppLister = options.iosPhysicalAppLister ?? null;
+    this.iosAppListBackendResolver = options.iosAppListBackendResolver ?? resolveIosAppListBackend;
     this.installedPackageSource =
       options.installedPackageSource ?? new CtrlProxyInstalledPackageSource(device);
   }
@@ -356,14 +359,10 @@ export class ListInstalledApps {
       // `listAppsOrThrow` (not `listApps`) so a simctl listing that failed
       // surfaces as successful:false instead of being collapsed into an empty
       // array, which callers would read as "the app is absent" (issue #5621).
-      //
-      // Only a positively physical-looking UDID routes to devicectl. Anything
-      // else (simulator UUID, or a non-UDID id) keeps the simctl path, so an
-      // unrecognized id degrades to today's behavior rather than shelling out
-      // to a tool that cannot serve it.
-      const apps = isIosPhysicalUdid(this.device.deviceId)
-        ? await this.getIosPhysicalAppLister().listInstalledApps(this.device.deviceId)
-        : await this.simctl.listAppsOrThrow(this.device.deviceId);
+      const apps = await this.iosAppListBackendResolver(this.device.deviceId, {
+        simctl: this.simctl,
+        getPhysicalAppLister: () => this.getIosPhysicalAppLister(),
+      }).listApps();
       const appsByBundleId = new Map<string, IosInstalledAppRecord>();
       for (const app of apps) {
         if (!app || typeof app !== "object" || Array.isArray(app)) {

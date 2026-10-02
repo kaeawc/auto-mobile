@@ -149,6 +149,11 @@ export class CtrlProxyHierarchy {
     }
   }
 
+  /** Connection-scoped evidence used by legacy idless-response consumers. */
+  hasSeenCorrelatedFrames(): boolean {
+    return this.correlatedFramesSeen;
+  }
+
   private matchesHierarchyRequest(
     hierarchy: CachedHierarchy,
     requestId?: string,
@@ -721,7 +726,7 @@ export class CtrlProxyHierarchy {
     });
   }
 
-  private async requestHierarchySyncWithOptions(options: {
+  async requestHierarchySyncWithOptions(options: {
     perf: PerformanceTracker;
     disableAllFiltering: boolean;
     signal?: AbortSignal;
@@ -729,6 +734,8 @@ export class CtrlProxyHierarchy {
     diagnostics?: HierarchySyncDiagnostics;
     displayId?: number;
     observerMode: boolean;
+    /** Synchronous registration before WS send or ADB broadcast; called again on fallback. */
+    onRequestId?: (requestId: string) => void;
   }): Promise<HierarchySyncResult> {
     const { perf, disableAllFiltering, signal, timeoutMs, diagnostics, displayId, observerMode } =
       options;
@@ -737,6 +744,21 @@ export class CtrlProxyHierarchy {
 
     try {
       throwIfAborted(signal);
+      if (options.onRequestId) {
+        // Suppression belongs to one caller and one wire response. Isolate these requests from
+        // shared flights in BOTH directions so an ordinary caller cannot lose its stream push.
+        return await awaitWhileRequestIsLive(
+          this.runHierarchySync(
+            perf,
+            disableAllFiltering,
+            signal ?? new AbortController().signal,
+            effectiveTimeoutMs,
+            diagnostics ?? {},
+            { startTime, displayId, observerMode, onRequestId: options.onRequestId },
+          ),
+          signal,
+        );
+      }
       // The wait accepts cache entries received at or after its dispatch floor. A flight with
       // an earlier floor could return data too old for this caller, so it cannot be joined.
       // Keep timeout budgets equal so joining does not shorten or extend either caller's wait.
@@ -809,7 +831,12 @@ export class CtrlProxyHierarchy {
     signal: AbortSignal,
     effectiveTimeoutMs: number,
     diagnostics: HierarchySyncDiagnostics,
-    request: { startTime: number; displayId?: number; observerMode: boolean },
+    request: {
+      startTime: number;
+      displayId?: number;
+      observerMode: boolean;
+      onRequestId?: (requestId: string) => void;
+    },
   ): Promise<HierarchySyncResult> {
     const { startTime, displayId, observerMode } = request;
     try {
@@ -831,7 +858,12 @@ export class CtrlProxyHierarchy {
       // runner type:"error" frame for this hierarchy request can reject the wait fast (issue #3032).
       const dispatchSocket = this.context.getWebSocket();
       const hierarchyRequestId = await perf.track("sendWsRequest", async () => {
-        return this.sendHierarchyRequest(disableAllFiltering, displayId, observerMode);
+        return this.sendHierarchyRequest({
+          disableAllFiltering,
+          displayId,
+          observerMode,
+          onRequestId: request.onRequestId,
+        });
       });
 
       // Fall back to ADB broadcast if WebSocket failed. The broadcast mints its own `sync_` uuid and
@@ -854,6 +886,7 @@ export class CtrlProxyHierarchy {
         logger.debug("[CTRL_PROXY] Falling back to ADB broadcast");
         const uuid = `sync_${this.context.timer.now()}_${generateSecureId()}`;
         broadcastRequestId = uuid;
+        request.onRequestId?.(uuid);
         await perf.track("sendBroadcast", async () => {
           await this.context.adb.executeCommand(
             `shell "am broadcast -a dev.jasonpearson.automobile.EXTRACT_HIERARCHY --es uuid ${uuid} --ez disableAllFiltering ${disableAllFiltering}"`,
@@ -885,7 +918,13 @@ export class CtrlProxyHierarchy {
             correlationRequestId,
             {
               dispatchSocket,
-              allowStaleResponse: !observerMode && !disableAllFiltering && displayId === undefined,
+              // A stale nudge has a separate id and stream push; it cannot finish a suppressed
+              // caller and release the primary response's token before that response arrives.
+              allowStaleResponse:
+                !request.onRequestId &&
+                !observerMode &&
+                !disableAllFiltering &&
+                displayId === undefined,
               observerMode,
               diagnostics,
             },
@@ -1352,11 +1391,13 @@ export class CtrlProxyHierarchy {
    *   send fails. Callers use the returned id to correlate a runner type:"error" frame back to this
    *   request's wait (issue #3032).
    */
-  private sendHierarchyRequest(
-    disableAllFiltering: boolean = false,
-    displayId?: number,
-    observerMode = false,
-  ): string | null {
+  private sendHierarchyRequest(options: {
+    disableAllFiltering: boolean;
+    displayId?: number;
+    observerMode: boolean;
+    onRequestId?: (requestId: string) => void;
+  }): string | null {
+    const { disableAllFiltering, displayId, observerMode, onRequestId } = options;
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       logger.warn("[CTRL_PROXY] Cannot send request - WebSocket not connected");
@@ -1365,6 +1406,7 @@ export class CtrlProxyHierarchy {
 
     const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
     try {
+      onRequestId?.(requestId);
       if (observerMode) {
         this.context.markObserverHierarchyRequest?.(requestId);
       }

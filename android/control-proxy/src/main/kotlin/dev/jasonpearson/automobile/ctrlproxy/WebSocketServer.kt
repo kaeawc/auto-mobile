@@ -219,18 +219,18 @@ class WebSocketServer(
   }
 
   internal fun supportedCommands(): List<String> = buildList {
-    add("discover_keystore")
-    add("set_hierarchy_interval")
+    // The handler dispatches exhaustively over this sealed hierarchy, so its serializer is the
+    // source of truth for every request type accepted by the wire decoder.
+    val requestDescriptor = ProtocolRequest.serializer().descriptor
+    val subtypeDescriptor =
+      requestDescriptor.getElementDescriptor(requestDescriptor.getElementIndex("value"))
+    for (index in 0 until subtypeDescriptor.elementsCount) {
+      add(subtypeDescriptor.getElementDescriptor(index).serialName)
+    }
     add("node_selector_actions")
-    add("request_activate_accessibility_link")
-    add("request_insert_text")
-    add("request_insert_text_state")
-    add("request_commit_text")
     add("ime_key_events_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
-    add("request_cancel_ime_commit")
-    add("request_set_keyboard_profile")
-    add("request_list_keyboard_profiles")
+    add("full_command_set_v1")
   }
 
   @Volatile private var server: EmbeddedServer<*, *>? = null

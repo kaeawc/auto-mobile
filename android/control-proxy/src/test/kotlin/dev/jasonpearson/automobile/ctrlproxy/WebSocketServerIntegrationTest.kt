@@ -122,6 +122,10 @@ class WebSocketServerIntegrationTest {
     waitFor(timeoutMs = SERVER_START_TIMEOUT_MS) { target.isRunning() }
   }
 
+  private suspend fun awaitClientsRegistered(target: WebSocketServer, count: Int) {
+    waitFor(timeoutMs = CLIENT_REGISTRATION_TIMEOUT_MS) { target.getConnectionCount() == count }
+  }
+
   private fun enqueueHighlightResponse(
     requestId: String?,
     success: Boolean,
@@ -171,10 +175,11 @@ class WebSocketServerIntegrationTest {
         path = "/ws",
       ) {
         incoming.receive() // Connection message
+        awaitClientsRegistered(server, 1)
         server.broadcast("""{"type":"probe","sequence":1}""")
-        val first = (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+        val first = (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
         server.broadcast("""{"type":"probe","sequence":2}""")
-        val second = (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+        val second = (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
 
         assertEquals("""{"type":"probe","sequence":1}""", first)
         assertEquals(
@@ -794,7 +799,7 @@ class WebSocketServerIntegrationTest {
             ownerReady.complete(Unit)
             sendOwnerMessage.await()
             send(Frame.Text("""{"type":"totally_unknown_command","requestId":"req-owner"}"""))
-            val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+            val responseFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
             ownerMessages.add(responseFrame.readText())
           }
         }
@@ -815,13 +820,14 @@ class WebSocketServerIntegrationTest {
             }
             bystanderCheckedErrorWindow.complete(Unit)
             sendProbeBroadcast.await()
-            val probeFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+            val probeFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
             bystanderMessages.add(probeFrame.readText())
           }
         }
 
         ownerReady.await()
         bystanderReady.await()
+        awaitClientsRegistered(server, 2)
         sendOwnerMessage.complete(Unit)
         ownerJob.join()
         bystanderCheckedErrorWindow.await()
@@ -956,7 +962,7 @@ class WebSocketServerIntegrationTest {
               ownerReady.complete(Unit)
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-throw-owner"}"""))
-              val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              val responseFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
               ownerMessages.add(responseFrame.readText())
             }
           }
@@ -977,13 +983,14 @@ class WebSocketServerIntegrationTest {
               }
               bystanderCheckedErrorWindow.complete(Unit)
               sendProbeBroadcast.await()
-              val probeFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              val probeFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
               bystanderMessages.add(probeFrame.readText())
             }
           }
 
           ownerReady.await()
           bystanderReady.await()
+          awaitClientsRegistered(throwingServer, 2)
           sendOwnerMessage.complete(Unit)
           ownerJob.join()
           bystanderCheckedErrorWindow.await()
@@ -1101,12 +1108,18 @@ class WebSocketServerIntegrationTest {
               ownerReady.complete(Unit)
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-raw-success"}"""))
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
               ownerReceivedRaw.complete(Unit)
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
               ownerReceivedProbe.complete(Unit)
               readLateSequence.await()
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
             }
           }
 
@@ -1121,18 +1134,19 @@ class WebSocketServerIntegrationTest {
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
               bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
               )
               bystanderReceivedProbe.complete(Unit)
               readLateSequence.await()
               bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
               )
             }
           }
 
           ownerReady.await()
           bystanderReady.await()
+          awaitClientsRegistered(rawSuccessServer, 2)
           sendOwnerMessage.complete(Unit)
           ownerReceivedRaw.await()
           rawSuccessServer.broadcast("""{"type":"probe","sequence":1}""")
@@ -1227,12 +1241,18 @@ class WebSocketServerIntegrationTest {
               ownerReady.complete(Unit)
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-typed-success"}"""))
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
               ownerReceivedTyped.complete(Unit)
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
               ownerReceivedProbe.complete(Unit)
               readLateSequence.await()
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
             }
           }
 
@@ -1247,18 +1267,19 @@ class WebSocketServerIntegrationTest {
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
               bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
               )
               bystanderReceivedProbe.complete(Unit)
               readLateSequence.await()
               bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
               )
             }
           }
 
           ownerReady.await()
           bystanderReady.await()
+          awaitClientsRegistered(typedSuccessServer, 2)
           sendOwnerMessage.complete(Unit)
           ownerReceivedTyped.await()
           typedSuccessServer.broadcast("""{"type":"probe","sequence":1}""")
@@ -1380,6 +1401,7 @@ class WebSocketServerIntegrationTest {
       ) {
         incoming.receive() // Connection message
 
+        awaitClientsRegistered(server, 1)
         server.broadcastExternallyCorrelatedResponse(
           ErrorResponse(
             timestamp = 1234,
@@ -1388,7 +1410,7 @@ class WebSocketServerIntegrationTest {
           )
         )
 
-        val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+        val responseFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
         val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
         assertEquals("error", responseJson["type"]?.jsonPrimitive?.content)
         assertEquals("sync_1234_external", responseJson["requestId"]?.jsonPrimitive?.content)
@@ -1442,7 +1464,7 @@ class WebSocketServerIntegrationTest {
               ownerReady.complete(Unit)
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-async-owner"}"""))
-              val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              val responseFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
               ownerMessages.add(responseFrame.readText())
             }
           }
@@ -1463,13 +1485,14 @@ class WebSocketServerIntegrationTest {
               }
               bystanderCheckedErrorWindow.complete(Unit)
               sendProbeBroadcast.await()
-              val probeFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              val probeFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
               bystanderMessages.add(probeFrame.readText())
             }
           }
 
           ownerReady.await()
           bystanderReady.await()
+          awaitClientsRegistered(asyncServer, 2)
           sendOwnerMessage.complete(Unit)
           ownerJob.join()
           bystanderCheckedErrorWindow.await()
@@ -1544,10 +1567,14 @@ class WebSocketServerIntegrationTest {
               ownerReady.complete(Unit)
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_hierarchy","requestId":"req-hierarchy"}"""))
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
               ownerReceivedUpdate.complete(Unit)
               readLateSequence.await()
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
             }
           }
 
@@ -1562,18 +1589,19 @@ class WebSocketServerIntegrationTest {
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
               bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
               )
               bystanderReceivedUpdate.complete(Unit)
               readLateSequence.await()
               bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
               )
             }
           }
 
           ownerReady.await()
           bystanderReady.await()
+          awaitClientsRegistered(hierarchyServer, 2)
           sendOwnerMessage.complete(Unit)
           ownerReceivedUpdate.await()
           bystanderReceivedUpdate.await()
@@ -1604,5 +1632,11 @@ class WebSocketServerIntegrationTest {
 
   private companion object {
     const val SERVER_START_TIMEOUT_MS = 10_000L
+
+    /** The greeting precedes registration; receiving it alone does not make a broadcast safe. */
+    const val CLIENT_REGISTRATION_TIMEOUT_MS = 5_000L
+
+    /** Real socket delivery may take over a second on a loaded runner. */
+    const val FRAME_TIMEOUT_MS = 5_000L
   }
 }

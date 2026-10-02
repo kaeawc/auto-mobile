@@ -1315,7 +1315,7 @@ describe("DevicePool", () => {
       await devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform);
       const originalAssignmentCount = devicePool.getDevice(device.deviceId)?.assignmentCount;
 
-      await sessionManager.releaseSession("session-1");
+      await sessionManager.releaseSession("session-1", "allocation-rollback");
       await devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform);
       const replacement = devicePool.getDevice(device.deviceId);
       expect(replacement?.assignmentCount).toBe((originalAssignmentCount ?? 0) + 1);
@@ -3495,7 +3495,7 @@ describe("DevicePool", () => {
         throw new Error("expected original session");
       }
 
-      await sessionManager.releaseSession("owner-session");
+      await sessionManager.releaseSession("owner-session", "allocation-rollback");
       await devicePool.releaseDevice(device.deviceId, "owner-session");
 
       const replacementPublished = Promise.withResolvers<void>();
@@ -3551,7 +3551,7 @@ describe("DevicePool", () => {
       if (!originalSession) {
         throw new Error("expected original session");
       }
-      await sessionManager.releaseSession("shared");
+      await sessionManager.releaseSession("shared", "allocation-rollback");
 
       persistence.deferNextUpsert();
       const replacementAssignment = sessionManager.getOrCreateSession("shared", pool, "android");
@@ -4878,7 +4878,7 @@ describe("DevicePool", () => {
         );
         sessionCreates++;
         if (sessionCreates === 1) {
-          await releaseSession(sessionId);
+          await releaseSession(sessionId, "allocation-rollback");
           await createSession(sessionId, deviceId, platform, timeoutMs, heartbeatTimeoutMs);
           fakeDeviceManager.failedPlatforms.add("ios");
         }
@@ -5057,7 +5057,7 @@ describe("DevicePool", () => {
       );
       await secondWriteStarted.promise;
 
-      await sessionManager.releaseSession("session-a");
+      await sessionManager.releaseSession("session-a", "allocation-rollback");
       await sessionManager.createSession("session-a", "emulator-5558", "android");
       secondWriteFinished.resolve();
 

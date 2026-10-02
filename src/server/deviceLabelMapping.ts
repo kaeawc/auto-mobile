@@ -2,7 +2,11 @@ import { DaemonState } from "../daemon/daemonState";
 import { ActionableError } from "../models";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import type { SessionOptions } from "./ToolExecutionContext";
-import type { DeviceLabelMap, SessionExecutionMetadata } from "../daemon/sessionManager";
+import {
+  PLAN_AUTO_RELEASE_REASON,
+  type DeviceLabelMap,
+  type SessionExecutionMetadata,
+} from "../daemon/sessionManager";
 import { logger } from "../utils/logger";
 import { combineAbortSignals } from "../utils/AbortContext";
 
@@ -235,7 +239,7 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
     // build-context/detector) completes BEFORE the device is returned to the pool and
     // possibly reassigned — otherwise hierarchy/nav broadcasts during the release get
     // recorded under the ended session's uuid. Mirrors the base-session path (#4984).
-    await sessionManager.releaseSession(sessionUuid);
+    await sessionManager.releaseSession(sessionUuid, PLAN_AUTO_RELEASE_REASON);
     await devicePool.releaseDevice(deviceId, sessionUuid);
     released.push(sessionUuid);
   }

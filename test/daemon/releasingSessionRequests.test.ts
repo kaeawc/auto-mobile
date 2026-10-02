@@ -6,6 +6,7 @@ import {
 import {
   SessionManager,
   TerminalSessionError,
+  PLAN_AUTO_RELEASE_REASON,
   type Session,
   type SessionReleaseSnapshot,
 } from "../../src/daemon/sessionManager";
@@ -283,7 +284,7 @@ describe("requests during device session release", () => {
         livenessOwnershipClaims: ["new-owner"],
       });
       expect((await persistence.getSession?.(sessionId))?.liveness_owner_token).toBeNull();
-      const replacement = await manager.createSession(sessionId, deviceId, "android");
+      const replacement = await manager.createSession("fresh-session", deviceId, "android");
       expect(replacement.livenessOwnerToken).toBeUndefined();
       expect(replacement.livenessOwnershipClaims).toBeUndefined();
     });
@@ -435,14 +436,7 @@ describe("requests during device session release", () => {
       finishRestore.resolve();
       await release;
       const error = await admission;
-      if (reason === "heartbeat-timeout") {
-        expect(error).toBeInstanceOf(TerminalSessionError);
-      } else {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain(
-          `Session ${sessionId} is not an active daemon session (not found)`,
-        );
-      }
+      expect(error).toBeInstanceOf(TerminalSessionError);
       expect(assignments).toBe(0);
       expect(await handleDaemonRequest(request("daemon/heartbeat"), state)).toEqual(notFound);
       expect(await handleDaemonRequest(request("daemon/releaseSession"), state)).toEqual(
@@ -451,15 +445,13 @@ describe("requests during device session release", () => {
       await expect(
         manager.getOrCreateSession(sessionId, undefined, undefined, undefined, true),
       ).rejects.toThrow(
-        reason === "heartbeat-timeout"
-          ? "is terminal after heartbeat-timeout"
-          : "not an active daemon session (not found)",
+        reason === "heartbeat-timeout" ? "is terminal after heartbeat-timeout" : "was released",
       );
     });
   }
 
-  test("persisted explicit-release admission waits then permits existing recovery", async () => {
-    const { release } = await beginPhaseA("explicit-release");
+  test("persisted internal release admission waits then permits existing recovery", async () => {
+    const { release } = await beginPhaseA(PLAN_AUTO_RELEASE_REASON);
     let assignments = 0;
     let settled = false;
     const admission = manager

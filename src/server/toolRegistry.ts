@@ -31,6 +31,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
+import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
@@ -1435,7 +1436,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
           // detector cleanup) complete — and any rejection is caught by this try —
           // before the device is freed (#4984).
-          await sessionManager.releaseSession(session.sessionId);
+          await sessionManager.releaseSession(session.sessionId, PLAN_AUTO_RELEASE_REASON);
           await devicePool.releaseDevice(deviceId, session.sessionId);
           NavigationGraphManager.releaseSession(releaseSessionUuid);
           // CtrlProxy client binding + detector cleanup for the released session is

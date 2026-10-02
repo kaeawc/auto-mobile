@@ -363,7 +363,9 @@ export class TerminalSessionError extends Error {
     readonly release: SessionReleaseSnapshot,
   ) {
     super(
-      `Session ${sessionUuid} is terminal after ${release.releaseReason} and cannot be reused. ` +
+      (release.releaseReason === "explicit-release"
+        ? `Session ${sessionUuid} was released and cannot be reused. `
+        : `Session ${sessionUuid} is terminal after ${release.releaseReason} and cannot be reused. `) +
         "Acquire a new device with getAndroid or getApple.",
     );
     this.name = "TerminalSessionError";
@@ -628,8 +630,12 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
   return shouldCommit !== undefined && shouldCommit() === false;
 }
 
+/** Plan cleanup frees devices while allowing the base and label UUIDs to be reused. */
+export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release";
+
 function isTerminalReleaseReason(releaseReason: string): boolean {
   return (
+    releaseReason === "explicit-release" ||
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
     releaseReason === "cli-idle-timeout" ||

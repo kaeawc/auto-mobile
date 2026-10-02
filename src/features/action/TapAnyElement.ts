@@ -1406,17 +1406,7 @@ export class TapAnyElement extends BaseVisualChange {
           }
 
           perf.end();
-          return {
-            success: true,
-            action,
-            element,
-            captureId: selectedCapture.captureId,
-            searchUntil: {
-              durationMs: Math.max(0, Math.round(this.timer.now() - startTime)),
-              requestCount,
-              changeCount,
-            },
-          };
+          return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
         },
         {
           changeExpected: false,
@@ -1455,5 +1445,25 @@ export class TapAnyElement extends BaseVisualChange {
         } as Element,
       };
     }
+  }
+
+  private createSuccessResult(
+    action: TapAnyElementOptions["action"],
+    target: CapturedTapTarget,
+    startTime: number,
+    requestCount: number,
+    changeCount: number,
+  ): TapAnyElementResult {
+    return {
+      success: true,
+      action,
+      element: target.element,
+      captureId: target.capture.captureId,
+      searchUntil: {
+        durationMs: Math.max(0, Math.round(this.timer.now() - startTime)),
+        requestCount,
+        changeCount,
+      },
+    };
   }
 }

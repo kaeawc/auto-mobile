@@ -306,9 +306,9 @@ final class CommandHandler: CommandHandling {
     // The rewrite's expression of the reference `PerfProvider.track` over the injected
     // `any PerfTracking` (`serial` opens the scope, `end` closes it in `defer`). `tracked`
     // is `@MainActor` because its only callers are the `@MainActor` gesture operations run
-    // inside `performContextCheckedGesture`; `trackedAsync` stays off-actor so a handler can
-    // wrap an `await` into a `@MainActor` collaborator (the task-local scope propagates
-    // across that hop, so the sub-tree nests exactly as the reference's single-threaded one).
+    // inside `performContextCheckedGesture`; `trackedAsync` inherits its caller's isolation
+    // so both off-actor handlers and main-actor gestures can wrap async work without sending
+    // their closures across isolation domains. The task-local scope propagates across awaits.
 
     @MainActor
     @discardableResult
@@ -319,7 +319,13 @@ final class CommandHandler: CommandHandling {
     }
 
     @discardableResult
-    private func trackedAsync<T>(_ name: String, _ block: () async throws -> T) async rethrows -> T {
+    private nonisolated(nonsending)
+    func trackedAsync<T>(
+        _ name: String,
+        _ block: nonisolated(nonsending)() async throws -> T
+    )
+        async rethrows -> T
+    {
         perf.serial(name)
         defer { perf.end() }
         return try await block()
@@ -654,6 +660,51 @@ final class CommandHandler: CommandHandling {
         }
     }
 
+    /// Async gestures retain the fresh perf scope and validate on the main actor immediately
+    /// before starting the operation. The server's serial command chain prevents another
+    /// command from interleaving while keyboard polling yields this actor. Awaiting directly
+    /// keeps cancellation and task-local diagnostics in the caller's task.
+    @discardableResult
+    private func performContextCheckedGestureAsync<T: Sendable>(
+        expected: String?,
+        beforeOperation: (@Sendable () throws -> Void)? = nil,
+        operation: @escaping @MainActor () async throws -> T
+    )
+        async throws -> T
+    {
+        let hierarchy: ViewHierarchy?
+        if expected != nil {
+            hierarchy = (try? await elementLocator.getViewHierarchy(disableAllFiltering: false))
+                .map(enrichWithCachedSdkHierarchy)
+        } else {
+            hierarchy = nil
+        }
+        try beforeOperation?()
+        return try await perf.withScope {
+            try await self.performAsyncGestureOnMainActor(
+                expected: expected,
+                hierarchy: hierarchy,
+                operation: operation
+            )
+        }
+    }
+
+    @MainActor
+    private func performAsyncGestureOnMainActor<T: Sendable>(
+        expected: String?,
+        hierarchy: ViewHierarchy?,
+        operation: @MainActor () async throws -> T
+    )
+        async throws -> T
+    {
+        if let expected {
+            guard let hierarchy, frameContext.context(for: hierarchy) == expected else {
+                throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+            }
+        }
+        return try await operation()
+    }
+
     // MARK: - Gestures
 
     /// Reject a non-finite gesture coordinate (`NaN` / `±Infinity`) at the handler boundary
@@ -827,10 +878,10 @@ final class CommandHandler: CommandHandling {
         defer { perf.end() }
 
         do {
-            try await performContextCheckedGesture(expected: request.frameContext) {
+            try await performContextCheckedGestureAsync(expected: request.frameContext) {
                 if let resourceId {
-                    try self.tracked("setText.byResourceId") {
-                        try self.gesturePerformer.setText(resourceId: resourceId, text: text)
+                    try await self.trackedAsync("setText.byResourceId") {
+                        try await self.gesturePerformer.setText(resourceId: resourceId, text: text)
                     }
                 } else {
                     try self.tracked("typeText") {
@@ -874,9 +925,9 @@ final class CommandHandler: CommandHandling {
         defer { perf.end() }
 
         do {
-            try await performContextCheckedGesture(expected: request.frameContext) {
-                try self.tracked("clearText") {
-                    try self.gesturePerformer.clearText(resourceId: resourceId)
+            try await performContextCheckedGestureAsync(expected: request.frameContext) {
+                try await self.trackedAsync("clearText") {
+                    try await self.gesturePerformer.clearText(resourceId: resourceId)
                 }
             }
         } catch {

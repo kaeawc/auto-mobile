@@ -151,6 +151,7 @@
 		B9D0FF5EAF0305D305032599 /* SdkDatabaseInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56C6FA94588951DADEB84C2 /* SdkDatabaseInfo.swift */; };
 		BA290F017F37A2042E0BAC39 /* RequestResetPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BF6E895F1F331333F86EFE5 /* RequestResetPermissions.swift */; };
 		BB8B8559621861C4D0DFA7B4 /* RequestGetTableData.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40FE00992971DF4071339CB /* RequestGetTableData.swift */; };
+		BBD0D85DB2DE1B68964ADC27 /* KeyboardWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C52DF2AC3D783B58A24273F /* KeyboardWait.swift */; };
 		BFA8AEF0A192A83AB712B535 /* VoiceOverToggling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 542D4AB842B818229F5C7B80 /* VoiceOverToggling.swift */; };
 		C0702528FE9F997DBA9E34B9 /* DefaultVoiceOverStateProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD92262189F3B0BAD4C3B31 /* DefaultVoiceOverStateProvider.swift */; };
 		C2650ABD84F60EEE62384D47 /* SdkCoreDataStoreRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B194AD52B54ACDACF3999C /* SdkCoreDataStoreRegistration.swift */; };
@@ -268,6 +269,7 @@
 		0A992C21EBABF539A2F7C333 /* StorageError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageError.swift; sourceTree = "<group>"; };
 		0B4AF05BB8592BAC9A569E2F /* ViewHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewHierarchy.swift; sourceTree = "<group>"; };
 		0B7202FD30E71BA78B33FAFF /* ByteChannelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByteChannelState.swift; sourceTree = "<group>"; };
+		0C52DF2AC3D783B58A24273F /* KeyboardWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardWait.swift; sourceTree = "<group>"; };
 		0CDD96577EB9823B5FCF2585 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets.xcassets; path = AutoMobileTest/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		0D5271665E4DA850CE98A15F /* HierarchyMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyMerger.swift; sourceTree = "<group>"; };
 		1183EB3E0EBDE3DC23A9500C /* DefaultStorageInspecting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultStorageInspecting.swift; sourceTree = "<group>"; };
@@ -513,6 +515,7 @@
 				20D2973D1552196510C60019 /* HingeAngleError.swift */,
 				7366D3444D35815F837642AA /* HingeAngleSetting.swift */,
 				6B0FF21979A287EB6DCB27FF /* HTTPRequesting.swift */,
+				0C52DF2AC3D783B58A24273F /* KeyboardWait.swift */,
 				5EE91327E1CDF30FE2822A6C /* MainThreadRunner.swift */,
 				45517B48E59B41FF3D502E97 /* MultiFingerSwipeDiagnostics.swift */,
 				25155DA16B0B4FAA517B15FF /* NWByteChannel.swift */,
@@ -953,6 +956,7 @@
 				48F32C0ABC2BB3CE87604F24 /* HingeAngleResponse.swift in Sources */,
 				4D62313547088F8C9BD70258 /* HingeAngleSetting.swift in Sources */,
 				1F00735008363BE2F7E28276 /* KeyboardResponse.swift in Sources */,
+				BBD0D85DB2DE1B68964ADC27 /* KeyboardWait.swift in Sources */,
 				8042BC14FFCE449CF774EB8B /* ListDatabasesResponse.swift in Sources */,
 				886D4873F0DAB203910923CF /* ListTablesResponse.swift in Sources */,
 				5E92E7A0DD1F3D051FF4B968 /* MainThreadRunner.swift in Sources */,

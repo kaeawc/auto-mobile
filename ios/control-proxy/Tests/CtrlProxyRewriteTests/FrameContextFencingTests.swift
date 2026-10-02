@@ -41,6 +41,7 @@ final class FrameContextFencingTests: XCTestCase {
         switch type {
         case .requestMultiFingerSwipe: gestures.multiFingerSwipeCalls
         case .requestPinch: gestures.pinchCalls
+        case .requestSetText: gestures.setTextCalls
         case .requestClearText: gestures.clearTextCalls
         case .requestImeAction: gestures.imeActionCalls
         case .requestSelectAll: gestures.selectAllCalls
@@ -93,6 +94,14 @@ final class FrameContextFencingTests: XCTestCase {
 
     func testPinchAcceptsCurrentContext() async throws {
         try await assertCurrent(.requestPinch, fields: pinchFields)
+    }
+
+    func testSetTextRejectsStaleContext() async throws {
+        try await assertStale(.requestSetText, fields: ["resourceId": "field", "text": "value"])
+    }
+
+    func testSetTextAcceptsCurrentContext() async throws {
+        try await assertCurrent(.requestSetText, fields: ["resourceId": "field", "text": "value"])
     }
 
     func testClearTextRejectsStaleContext() async throws {

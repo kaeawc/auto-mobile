@@ -122,7 +122,7 @@ final class HierarchyIntegrationTests: XCTestCase {
         XCTAssertEqual(secureNode?.password, "true")
     }
 
-    func testTypeUnicodeCorpusIntoTextFieldAndTextView() throws {
+    func testTypeUnicodeCorpusIntoTextFieldAndTextView() async throws {
         let app = XCUIApplication()
         app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"
         app.launch()
@@ -150,8 +150,8 @@ final class HierarchyIntegrationTests: XCTestCase {
             "한국어",
         ]
 
-        try assertUnicodeCorpus(corpus, typesInto: textField, gestures: gestures)
-        try assertUnicodeCorpus(corpus, typesInto: textView, gestures: gestures)
+        try await assertUnicodeCorpus(corpus, typesInto: textField, gestures: gestures)
+        try await assertUnicodeCorpus(corpus, typesInto: textView, gestures: gestures)
     }
 
     private func assertUnicodeCorpus(
@@ -159,7 +159,7 @@ final class HierarchyIntegrationTests: XCTestCase {
         typesInto element: XCUIElement,
         gestures: GesturePerformer
     )
-        throws
+        async throws
     {
         element.tap()
         guard waitForKeyboardFocusOrFail(element) else {
@@ -168,7 +168,7 @@ final class HierarchyIntegrationTests: XCTestCase {
 
         for (index, text) in corpus.enumerated() {
             if index > 0 {
-                try gestures.clearText()
+                try await gestures.clearText()
             }
 
             try gestures.typeText(text: text)

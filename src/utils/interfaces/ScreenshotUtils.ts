@@ -11,57 +11,11 @@ export interface ScreenshotUtils {
   getCachedScreenshot(filePath: string): Promise<{ buffer: Buffer; hash: string }>;
 
   /**
-   * Generate a perceptual hash from image buffer for fast similarity checking
-   * @param buffer Image buffer
-   * @returns Promise with perceptual hash string
-   */
-  generatePerceptualHash(buffer: Buffer): Promise<string>;
-
-  /**
-   * Calculate Hamming distance between two perceptual hashes
-   * @param hash1 First perceptual hash
-   * @param hash2 Second perceptual hash
-   * @returns Hamming distance (lower = more similar)
-   */
-  calculateHammingDistance(hash1: string, hash2: string): number;
-
-  /**
-   * Fast similarity check using perceptual hashes
-   * @param hash1 First perceptual hash
-   * @param hash2 Second perceptual hash
-   * @returns Similarity percentage (0-100)
-   */
-  getPerceptualSimilarity(hash1: string, hash2: string): number;
-
-  /**
-   * Check if a buffer contains PNG image data
-   * @param buffer Buffer to check
-   * @returns True if buffer appears to be PNG data
-   */
-  isPngBuffer(buffer: Buffer): boolean;
-
-  /**
-   * Convert image buffer to PNG format
-   * @param buffer Input image buffer
-   * @returns Promise with PNG buffer
-   */
-  convertToPng(buffer: Buffer): Promise<Buffer>;
-
-  /**
    * Get image dimensions from buffer
    * @param buffer Image buffer
    * @returns Promise with width and height
    */
   getImageDimensions(buffer: Buffer): Promise<{ width: number; height: number }>;
-
-  /**
-   * Resize image to match dimensions if needed
-   * @param buffer Image buffer to resize
-   * @param targetWidth Target width
-   * @param targetHeight Target height
-   * @returns Promise with resized buffer
-   */
-  resizeImageIfNeeded(buffer: Buffer, targetWidth: number, targetHeight: number): Promise<Buffer>;
 
   /**
    * Compare two image buffers and return detailed comparison result
@@ -82,27 +36,4 @@ export interface ScreenshotUtils {
     totalPixels: number;
     filePath?: string;
   }>;
-
-  /**
-   * Get all screenshot files from a directory
-   * @param cacheDir Cache directory path
-   * @returns Promise with array of screenshot file paths
-   */
-  getScreenshotFiles(cacheDir: string): Promise<string[]>;
-
-  /**
-   * Extract timestamp from screenshot filename
-   * Assumes filename format: screenshot_timestamp.extension or hierarchy_timestamp.json
-   * @param filePath Path to screenshot file
-   * @returns Timestamp portion of filename
-   * @throws Error if no timestamp is extractable from the filename
-   */
-  extractTimestampFromFilename(filePath: string): string;
-
-  /**
-   * Generate a simple hash from image buffer for fallback cache key
-   * @param buffer Image buffer
-   * @returns MD5 hash string
-   */
-  generateImageHash(buffer: Buffer): string;
 }

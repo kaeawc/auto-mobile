@@ -1,51 +1,17 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { ScreenshotUtils } from "../../src/utils/screenshot/ScreenshotUtils";
-import { promises as fsPromises } from "node:fs";
-import path from "path";
-import os from "os";
 import { Jimp, rgbaToInt } from "jimp";
 
 async function createTestImage(
   width: number,
   height: number,
   color: { r: number; g: number; b: number },
-  mime: "image/png" | "image/jpeg" = "image/png",
 ): Promise<Buffer> {
   const image = new Jimp({ width, height, color: rgbaToInt(color.r, color.g, color.b, 255) });
-  return image.getBuffer(mime);
+  return image.getBuffer("image/png");
 }
 
 describe("ScreenshotUtils", function () {
-  let testDir: string;
-
-  beforeEach(async function () {
-    testDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "test-screenshots-"));
-  });
-
-  afterEach(async function () {
-    // Clean up test directory
-    await fsPromises.rm(testDir, { recursive: true, force: true });
-  });
-
-  describe("Image Format Detection", function () {
-    test("should detect PNG buffers correctly", function () {
-      const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-      const notPng = Buffer.from([0xff, 0xd8, 0xff, 0xe0]); // JPEG header
-
-      expect(ScreenshotUtils.isPngBuffer(pngHeader)).toBe(true);
-      expect(ScreenshotUtils.isPngBuffer(notPng)).toBe(false);
-      expect(ScreenshotUtils.isPngBuffer(Buffer.alloc(4))).toBe(false);
-    });
-
-    test("should convert non-PNG images to PNG", async function () {
-      // Create a simple test image
-      const testImage = await createTestImage(100, 100, { r: 255, g: 0, b: 0 }, "image/jpeg");
-
-      const pngBuffer = await ScreenshotUtils.convertToPng(testImage);
-      expect(ScreenshotUtils.isPngBuffer(pngBuffer)).toBe(true);
-    });
-  });
-
   describe("Image Dimensions", function () {
     test("should get image dimensions correctly", async function () {
       const testImage = await createTestImage(200, 150, { r: 0, g: 255, b: 0 });
@@ -53,23 +19,6 @@ describe("ScreenshotUtils", function () {
       const dimensions = await ScreenshotUtils.getImageDimensions(testImage);
       expect(dimensions.width).toBe(200);
       expect(dimensions.height).toBe(150);
-    });
-
-    test("should resize images correctly", async function () {
-      const testImage = await createTestImage(400, 300, { r: 0, g: 0, b: 255 });
-
-      const resizedBuffer = await ScreenshotUtils.resizeImageIfNeeded(testImage, 200, 150);
-      const dimensions = await ScreenshotUtils.getImageDimensions(resizedBuffer);
-
-      expect(dimensions.width).toBe(200);
-      expect(dimensions.height).toBe(150);
-    });
-
-    test("should not resize images that already match target dimensions", async function () {
-      const testImage = await createTestImage(100, 100, { r: 128, g: 128, b: 128 });
-
-      const result = await ScreenshotUtils.resizeImageIfNeeded(testImage, 100, 100);
-      expect(result).toBe(testImage);
     });
   });
 
@@ -124,85 +73,12 @@ describe("ScreenshotUtils", function () {
     });
   });
 
-  describe("File Operations", function () {
-    test("should get screenshot files from directory", async function () {
-      // Create test files
-      await fsPromises.writeFile(path.join(testDir, "screenshot1.png"), Buffer.alloc(10));
-      await fsPromises.writeFile(path.join(testDir, "screenshot2.webp"), Buffer.alloc(10));
-      await fsPromises.writeFile(path.join(testDir, "not-screenshot.txt"), Buffer.alloc(10));
-
-      const files = await ScreenshotUtils.getScreenshotFiles(testDir);
-
-      expect(files).toHaveLength(2);
-      expect(files.some((f) => f.endsWith("screenshot1.png"))).toBe(true);
-      expect(files.some((f) => f.endsWith("screenshot2.webp"))).toBe(true);
-      expect(files.some((f) => f.endsWith("not-screenshot.txt"))).toBe(false);
-    });
-
-    test("should return empty array for non-existent directory", async function () {
-      const files = await ScreenshotUtils.getScreenshotFiles("/non/existent/path");
-      expect(files).toHaveLength(0);
-    });
-
-    test("should extract timestamp from filename correctly", function () {
-      const timestamp1 = ScreenshotUtils.extractTimestampFromFilename(
-        "/path/to/screenshot_1234567890.png",
-      );
-      const timestamp2 = ScreenshotUtils.extractTimestampFromFilename("hierarchy_9876543210.json");
-      const legacyTimestamp = ScreenshotUtils.extractTimestampFromFilename(
-        "old_format_hash_789.webp",
-      );
-
-      expect(timestamp1).toBe("1234567890");
-      expect(timestamp2).toBe("9876543210");
-      expect(legacyTimestamp).toBe("789");
-
-      // Test invalid filename
-      expect(() => {
-        ScreenshotUtils.extractTimestampFromFilename("notimestamp.png");
-      }).toThrow("Unable to extract timestamp from filename");
-    });
-
-    test("should generate image hash correctly", function () {
-      const buffer = Buffer.from("test image data");
-      const hash = ScreenshotUtils.generateImageHash(buffer);
-
-      expect(typeof hash).toBe("string");
-      expect(hash).toHaveLength(32); // MD5 hash length
-      expect(hash).toMatch(/^[a-f0-9]+$/); // Hex string
-    });
-  });
-
   describe("Error Handling", function () {
-    test("should handle image conversion errors gracefully", async function () {
-      const invalidBuffer = Buffer.from("definitely not an image");
-
-      try {
-        await ScreenshotUtils.convertToPng(invalidBuffer);
-        expect.fail("Should have thrown an error");
-      } catch (error) {
-        expect(error instanceof Error).toBe(true);
-        expect((error as Error).message).toContain("Failed to convert image to PNG");
-      }
-    });
-
     test("should handle dimension errors gracefully", async function () {
       const invalidBuffer = Buffer.from("not an image");
 
       try {
         await ScreenshotUtils.getImageDimensions(invalidBuffer);
-        expect.fail("Should have thrown an error");
-      } catch (error) {
-        expect(error instanceof Error).toBe(true);
-        expect((error as Error).message).toContain("Failed to get image dimensions");
-      }
-    });
-
-    test("should handle resize errors gracefully", async function () {
-      const invalidBuffer = Buffer.from("not an image");
-
-      try {
-        await ScreenshotUtils.resizeImageIfNeeded(invalidBuffer, 100, 100);
         expect.fail("Should have thrown an error");
       } catch (error) {
         expect(error instanceof Error).toBe(true);

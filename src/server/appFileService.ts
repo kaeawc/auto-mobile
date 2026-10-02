@@ -590,12 +590,20 @@ async function resolveAndroidAppFileUser(
         `Android user resolution failed for ${appId} on ${device.deviceId}: no users could be determined. Pass userId explicitly (resource query ?userId=N).`,
       );
     }
-    const candidates: number[] = [];
+    let candidates: number[] = [];
     for (const user of users) {
       if (await isPackageInstalledForUser(adb, appId, user.userId, undefined, signal)) {
         candidates.push(user.userId);
       }
     }
+    const runningCandidates = users
+      .filter((user) => user.running && candidates.includes(user.userId))
+      .map((user) => user.userId);
+    if (runningCandidates.length > 0) {
+      candidates = runningCandidates;
+    }
+    // With no running candidates, preserve selection: run-as behavior for stopped
+    // users is unverified and needs a device capture.
     if (candidates.length === 1) {
       return { userId: candidates[0]!, pinInResourceUri: candidates[0] !== 0 };
     }

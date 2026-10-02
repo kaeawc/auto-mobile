@@ -534,7 +534,11 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
       }
       this.logUnidentified(parsed.unidentified);
       if (parsed.unidentified.length > 0) {
-        return this.failedListing("failed", "listing contains unidentified records");
+        return this.failedListing(
+          "failed",
+          "listing contains unidentified records",
+          parsed.physical,
+        );
       }
       this.deps.logger.debug(
         `[DevicectlDeviceLister] dropped ${parsed.simulators.length} simulator record(s); simctl owns simulator discovery`,
@@ -579,6 +583,7 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   private failedListing(
     code: DevicectlListingErrorCode,
     detail: string,
+    recognized: BootedDevice[] = [],
   ): PhysicalIosDeviceDiscovery {
     const error = {
       code,
@@ -592,17 +597,20 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
       this.deps.logger.warn(message);
     }
     this.previousFailureCode = code;
-    return this.remember({ devices: [], complete: false, error });
+    return this.remember({ devices: [], complete: false, error }, recognized);
   }
 
-  private remember(discovery: PhysicalIosDeviceDiscovery): PhysicalIosDeviceDiscovery {
+  private remember(
+    discovery: PhysicalIosDeviceDiscovery,
+    recognized: BootedDevice[] = [],
+  ): PhysicalIosDeviceDiscovery {
     const now = this.deps.timer.now();
     const observedAt = this.deps.observationSequence.next();
     // A cache hit or retained result must retain when it was observed, rather
     // than appear newer merely because a later caller read it.
     const stamped = {
       ...discovery,
-      devices: discovery.devices.map((device) => ({
+      devices: [...discovery.devices, ...recognized].map((device) => ({
         ...device,
         observedAt: device.observedAt ?? observedAt,
       })),
@@ -611,7 +619,13 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     if (stamped.complete) {
       resolved = this.recordLastGood(stamped, now);
     } else {
-      resolved = { devices: this.retainedDevices(now), complete: false, error: stamped.error };
+      const devices = new Map(
+        [...this.retainedDevices(now), ...stamped.devices].map((device) => [
+          device.deviceId,
+          device,
+        ]),
+      );
+      resolved = { devices: [...devices.values()], complete: false, error: stamped.error };
     }
     this.cache = {
       discovery: resolved,

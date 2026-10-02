@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
@@ -138,3 +139,10 @@ describe("terminal persisted recovery MCP transport", () => {
     expect(assignments).toBe(1);
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -275,3 +276,10 @@ describe("Tool Registration Validation (Integration Tests)", () => {
   // methods" test (toHaveProperty + typeof on a method the suite already
   // calls) was a restatement removed as a tautology.
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

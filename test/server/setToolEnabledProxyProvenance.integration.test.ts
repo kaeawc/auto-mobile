@@ -1,5 +1,15 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+  beforeAll,
+  afterAll,
+} from "bun:test";
 import { z } from "zod/v4";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -367,3 +377,10 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
     expect(store.insertCalls).toEqual([mintedProfileUuid]);
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

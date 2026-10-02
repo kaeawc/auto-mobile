@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+  beforeAll,
+  afterAll,
+} from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod/v4";
@@ -265,3 +275,10 @@ describe("Android navigation graph workflow (#4459)", () => {
     expect(replayedArgs).toMatchObject({ text: "Settings", action: "tap", platform: "android" });
   }, 20_000);
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

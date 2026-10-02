@@ -297,16 +297,33 @@ Unit tests must inject process/device fakes instead of spawning real `adb`,
 and simple shell commands (including `;`, `&&`, `||`, and `|` segments).
 The guard unwraps `sh`/`bash`/`zsh`/`dash -c`, `cmd /c`, `env`, `exec`,
 `command`, `timeout`, `nice`, `nohup`, and leading `NAME=VALUE` assignments;
+shell tokenization preserves single/double quotes and backslash escapes, including
+quoted assignment values. `env` short clusters honor operand-taking options,
+including attached/separate `-S` split strings. Unbalanced quotes or command
+substitutions use a conservative scan for exact guarded executable tokens:
+`echo "adb"` is allowed, but `echo "$(adb devices)"` and `echo "unbalanced adb`
+are blocked. This fallback can reject inert arguments in unsupported syntax;
+it does not block substrings such as `myadb`.
 `which`/`where` lookups also detect guarded tools. It does not unwrap `stdbuf`,
 `setsid`, or `sudo`. `xcrun` is blocked directly. Swallowed
-errors still fail via `afterEach` and a final `afterAll` drain. The allow-list in
+errors during a test still fail that test via a scoped `afterEach` drain.
+Import/setup/late launches receive one synthetic `afterAll` failure per offending
+file; their reports do not fail subsequent tests. The allow-list in
 `scripts/unit-test-device-spawn-allowlist.txt` may only shrink; listed tests keep
 their existing process behavior. The list loads only on a blocked-tool hit.
 
-Use `--isolate` for reliable file attribution. Integration and stress tests are
-exempt; Windows is skipped because its unit runner drops isolation. `Bun.$`,
-functions captured from `Bun` before patching, grandchildren, complex shell
-syntax, and uppercase executable names are outside this guard. Windows `cmd`
+Shared-process runs (for example, `bun test test/server`) attribute each launch
+using a retained test-file stack frame, falling back to `Bun.main` read at launch
+time (Bun 1.3.14 updates it per file; `process.argv[1]` stays fixed). Isolation is
+still useful for unrelated singleton/module state and remains the CI default.
+Detached work with no retained test frame can only be attributed to the current
+runtime file; swallowed runtime-only violations use the once-per-file backstop
+rather than failing every subsequent test. Tests must await their work and
+install hermetic fixtures.
+Integration and stress files are classified per launch and exempt; Windows
+interception remains disabled until that process boundary is verified. `Bun.$`,
+functions captured from `Bun` before patching, grandchildren, shell syntax beyond
+the bounded tokenizer above, and uppercase executable names are outside this guard. Windows `cmd`
 classification is unit-tested but actual Windows process interception is unverified.
 
 ```bash

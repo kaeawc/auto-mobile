@@ -23,14 +23,18 @@ export interface Violation {
   testFile: string;
   tool: string;
   argv: readonly string[];
+  testScope?: object;
 }
 
 export interface SpawnGuardDependencies {
   target: SpawnTarget;
   testFile: string;
+  getTestFile?: () => string;
+  getTestScope?: (testFile: string) => object | undefined;
+  onViolation?: (violation: Violation) => void;
   loadAllowList: () => ReadonlySet<string>;
   mode: "enforce" | "census";
-  record?: (tool: string, argv: readonly string[]) => void;
+  record?: (tool: string, argv: readonly string[], testFile: string) => void;
   report: Violation[];
 }
 
@@ -44,22 +48,79 @@ export function isUnitTestPath(path: string): boolean {
   );
 }
 
+/** Prefer retained caller frames over the runner's current file for late async work. */
+export function testFileFromStack(stack: string | undefined): string | undefined {
+  for (const match of stack?.matchAll(/\((.+\.test\.ts):\d+:\d+\)/g) ?? []) {
+    return match[1].replaceAll("\\", "/");
+  }
+  return undefined;
+}
+
 function executableName(value: string): string {
   return (value.replaceAll("\\", "/").split("/").pop() ?? "").replace(/\.(exe|cmd|bat)$/i, "");
 }
 
-// Deliberately a bounded shell approximation, not a shell interpreter. Quotes
-// preserve spaces; operators split command segments (including quoted scripts).
-function shellWords(command: string): string[] {
-  return (command.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? []).map((word) =>
-    word.replace(/^(["'])(.*)\1$/, "$2"),
-  );
+// A bounded tokenizer, not a shell interpreter. The conservative pass ignores
+// quote grouping and splits substitution delimiters to find exact tool tokens.
+function tokenizeShellCommand(command: string, conservative = false) {
+  const segments: string[][] = [[]];
+  let word = "";
+  let started = false;
+  let quote: "'" | '"' | undefined;
+  let reliable = true;
+  const finishWord = () => {
+    if (started) {
+      segments[segments.length - 1].push(word);
+      word = "";
+      started = false;
+    }
+  };
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index];
+    const next = command[index + 1];
+    if (char === "\\" && quote !== "'") {
+      if (next === undefined) {
+        reliable = false;
+      } else if (!quote || conservative || '$`"\\\n'.includes(next)) {
+        index++;
+        if (next !== "\n") {
+          word += next;
+          started = true;
+        }
+        continue;
+      }
+    }
+    if (conservative && "'\"$()`".includes(char)) {
+      finishWord();
+    } else if (char === quote) {
+      quote = undefined;
+    } else if (!quote && (char === "'" || char === '"')) {
+      quote = char;
+      started = true;
+    } else if ((!quote || conservative) && /\s/.test(char)) {
+      finishWord();
+      if (char === "\n") {
+        segments.push([]);
+      }
+    } else if ((!quote || conservative) && ";&|()".includes(char)) {
+      finishWord();
+      segments.push([]);
+    } else {
+      if (quote !== "'" && (char === "`" || (char === "$" && next === "("))) {
+        reliable = false;
+      }
+      word += char;
+      started = true;
+    }
+  }
+  finishWord();
+  return { segments, reliable: reliable && quote === undefined };
 }
 
 // Bounded unwrapping: sh/bash/zsh/dash -c, cmd /c, which/where lookups,
 // env, exec, command, timeout, nice, nohup, and leading NAME=VALUE assignments.
-// stdbuf, setsid, sudo, shell functions/substitutions and other wrappers are not
-// unwrapped. xcrun is blocked directly, without inspecting its subcommand.
+// stdbuf, setsid, sudo, shell functions and other wrappers are not unwrapped.
+// Substitutions use a conservative token scan. xcrun is blocked directly.
 function isAssignment(value: string): boolean {
   return /^[A-Za-z_][A-Za-z_0-9]*=/.test(value);
 }
@@ -72,15 +133,21 @@ function blockedEnv(argv: readonly string[]): string | undefined {
       index++;
       break;
     }
-    if (["-S", "--split-string"].includes(option) || /^(-S.|--split-string=)/.test(option)) {
-      const separate = option === "-S" || option === "--split-string";
-      const value = separate
-        ? (argv[index + 1] ?? "")
-        : option.replace(/^(-S|--split-string=)/, "");
+    // A value-taking letter ends a short cluster: subsequent letters are its
+    // operand, not flags (e.g. -uS unsets S, while -iSadb splits adb).
+    const operandIndex =
+      option.startsWith("-") && !option.startsWith("--") ? option.slice(1).search(/[SuCa]/) + 1 : 0;
+    const splitIndex = operandIndex > 0 && option[operandIndex] === "S" ? operandIndex : 0;
+    if (splitIndex || option === "--split-string" || option.startsWith("--split-string=")) {
+      const attached = splitIndex
+        ? option.slice(splitIndex + 1)
+        : option.slice("--split-string".length).replace(/^=/, "");
+      const separate = splitIndex ? splitIndex === option.length - 1 : option === "--split-string";
+      const value = separate ? (argv[index + 1] ?? "") : attached;
       const rest = argv.slice(index + (separate ? 2 : 1));
       // Split strings can reintroduce env options. Conservatively block any
       // guarded executable word, even when it is behind those options.
-      const words = shellWords(value);
+      const words = tokenizeShellCommand(value).segments.flat();
       return (
         blockedShellCommand(value) ??
         blockedLookup(words) ??
@@ -94,7 +161,6 @@ function blockedEnv(argv: readonly string[]): string | undefined {
     } else if (option.startsWith("-")) {
       // The first value-taking letter consumes the cluster remainder, or the
       // following token when it is the final letter in the cluster.
-      const operandIndex = option.search(/[uCa]/);
       index += operandIndex === option.length - 1 && operandIndex > 0 ? 2 : 1;
     } else {
       break;
@@ -254,8 +320,15 @@ export function blockedToolForArgv(argv: readonly string[]): string | undefined 
 }
 
 function blockedShellCommand(command: string): string | undefined {
-  for (const segment of command.split(/;|&|\||\r?\n/)) {
-    const tool = blockedToolForArgv(shellWords(segment.trim()));
+  const { segments, reliable } = tokenizeShellCommand(command);
+  if (!reliable) {
+    // Exact tokens only: malformed/substitution syntax can reject echo adb,
+    // but never merely a substring such as echo myadb. Valid quoted arguments
+    // stay arguments and are checked only when they are in command position.
+    return blockedLookup(tokenizeShellCommand(command, true).segments.flat());
+  }
+  for (const segment of segments) {
+    const tool = blockedToolForArgv(segment);
     if (tool) {
       return tool;
     }
@@ -278,21 +351,28 @@ function violationMessage(violation: Violation): string {
     `real device tool spawned: ${violation.testFile}: ${violation.argv.join(" ")} (${violation.tool}). ` +
     "Inject FakeProcessExecutor / fake adb executor / FakeDisplayInventoryProvider / " +
     "PlatformDeviceManagerFactory.setInstance. Existing exceptions live in " +
-    "scripts/unit-test-device-spawn-allowlist.txt and may only shrink. " +
-    "Re-run with --isolate if you ran several files without it."
+    "scripts/unit-test-device-spawn-allowlist.txt and may only shrink."
   );
 }
 
 /** Fail even when child_process.spawnSync or the caller swallowed the error. */
-export function drainViolations(report: Violation[]): void {
-  const violations = report.splice(0);
+export function drainViolations(
+  report: Violation[],
+  matches: (violation: Violation) => boolean = () => true,
+): void {
+  const violations = report.filter(matches);
+  for (let index = report.length - 1; index >= 0; index--) {
+    if (matches(report[index])) {
+      report.splice(index, 1);
+    }
+  }
   if (violations.length) {
     throw new Error(violations.map(violationMessage).join("\n"));
   }
 }
 
 export function installRealDeviceToolSpawnGuard(deps: SpawnGuardDependencies): () => void {
-  if (!isUnitTestPath(deps.testFile)) {
+  if (!deps.getTestFile && !isUnitTestPath(deps.testFile)) {
     return () => {};
   }
   let allowList: ReadonlySet<string> | undefined;
@@ -313,18 +393,28 @@ export function installRealDeviceToolSpawnGuard(deps: SpawnGuardDependencies): (
         if (!tool) {
           return Reflect.apply(target, thisArg, args);
         }
+        const testFile = deps.getTestFile?.() ?? deps.testFile;
+        if (!isUnitTestPath(testFile)) {
+          return Reflect.apply(target, thisArg, args);
+        }
         if (deps.mode === "census") {
-          deps.record?.(tool, argv);
+          deps.record?.(tool, argv, testFile);
           throw Object.assign(new Error(`spawn ${tool} ENOENT (unit-test census blocked launch)`), {
             code: "ENOENT",
           });
         }
         allowList ??= deps.loadAllowList();
-        if (allowList.has(deps.testFile)) {
+        if (allowList.has(testFile)) {
           return Reflect.apply(target, thisArg, args);
         }
-        const violation = { testFile: deps.testFile, tool, argv: [...argv] };
+        const violation: Violation = {
+          testFile,
+          tool,
+          argv: [...argv],
+          testScope: deps.getTestScope?.(testFile),
+        };
         deps.report.push(violation);
+        deps.onViolation?.(violation);
         throw new Error(violationMessage(violation));
       },
     });

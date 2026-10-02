@@ -1,5 +1,6 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -337,3 +338,10 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
     }
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

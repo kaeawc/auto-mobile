@@ -1,3 +1,2 @@
 # AutoMobile unit-test device-spawn allow-list -- see test/setup/realDeviceToolSpawnGuardPreload.ts; may only shrink
 test/plan/planExecutorInternalNoDiffE2E.test.ts
-test/server/planExecutionLock.test.ts

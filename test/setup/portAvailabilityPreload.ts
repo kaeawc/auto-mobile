@@ -4,9 +4,8 @@
  * test setup. AndroidCtrlProxyClient allocates in its constructor, before the
  * readiness-driver fake can prevent socket access.
  *
- * Bun runs the canonical unit and integration lanes with --isolate, giving each
- * preload invocation the current test file in process.argv[1]. Only unit files
- * receive the fake. Integration files, including the iOS real-socket checker
+ * Read Bun.main at each hook, since argv stays fixed to one selected file in a
+ * shared process. Only the currently running unit file receives the fake. Isolated integration files, including the iOS real-socket checker
  * tests, retain real socket behavior. PortManager.test.ts can replace the fake
  * in its own beforeEach, and its direct BunPortAvailabilityChecker tests still
  * exercise the real class through an injected fake BunRuntime. Reinstalling the
@@ -16,29 +15,19 @@
 import { afterEach, beforeEach } from "bun:test";
 import { FakePortAvailabilityChecker } from "../fakes/FakePortAvailabilityChecker";
 import { PortManager } from "../../src/utils/PortManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { isUnitTestPath } from "./realDeviceToolSpawnGuard";
+import { clearCtrlProxyRegistries } from "./ctrlProxyRegistryCleanup";
 
-const testFile = (process.argv[1] ?? "").replaceAll("\\", "/");
-const isUnitTest =
-  testFile.endsWith(".test.ts") &&
-  !testFile.endsWith(".integration.test.ts") &&
-  !testFile.includes("/test/stress/");
-
-if (isUnitTest) {
-  const installFake = (): void => {
+const installFake = (): void => {
+  if (isUnitTestPath(Bun.main)) {
     PortManager.setPortAvailabilityCheckerForTesting(new FakePortAvailabilityChecker());
-  };
+  }
+};
 
-  installFake();
-  beforeEach(installFake);
-
-  // Clear only the singleton registries. The explicit test APIs avoid the
-  // fire-and-forget close() cleanup in resetInstances(), which can run real
-  // adb/socket work; Android resetInstances() also resets PortManager's clock
-  // and allocations configured by some files in beforeAll.
-  afterEach(() => {
-    AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
-    IOSCtrlProxyClient.clearInstanceRegistryForTesting();
-  });
-}
+installFake();
+beforeEach(installFake);
+afterEach(() => {
+  if (isUnitTestPath(Bun.main)) {
+    clearCtrlProxyRegistries();
+  }
+});

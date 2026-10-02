@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -120,3 +121,10 @@ describe("session-scoped resource binding", () => {
     });
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

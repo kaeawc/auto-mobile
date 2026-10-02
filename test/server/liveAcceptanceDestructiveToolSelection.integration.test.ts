@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -72,3 +73,10 @@ describe("live acceptance destructive tool selection", () => {
     expect(provisionCalls).toBe(1);
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

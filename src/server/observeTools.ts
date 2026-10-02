@@ -72,6 +72,12 @@ import {
   type MatchMode,
 } from "../features/utility/ElementResolver";
 import { SearchableHierarchy } from "../features/utility/SearchableNode";
+import {
+  isElementCenterOffScreen,
+  resolveElementScreenSize,
+} from "../features/utility/ElementGeometry";
+import type { ScreenSize } from "../models/ScreenSize";
+import { resolveActionableHierarchyScreenSize } from "../features/observe/HierarchyNormalization";
 import { normalizeQuotes } from "../features/utility/TextMatcher";
 import type { ResolverSelector } from "./elementSelectorSchemas";
 import type { ConditionResolver } from "../features/observe/ConditionPredicates";
@@ -957,23 +963,15 @@ const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSele
     : { text: waitFor.container.text, match: "contains" };
 };
 
-const isElementCenterOffScreen = (
-  element: Element,
+function resolveWaitForScreenSize(
   viewHierarchy: ViewHierarchyResult,
-): boolean => {
-  if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight || !element.bounds) {
-    return false;
-  }
-
-  const centerX = (element.bounds.left + element.bounds.right) / 2;
-  const centerY = (element.bounds.top + element.bounds.bottom) / 2;
-  return (
-    centerX < 0 ||
-    centerX > viewHierarchy.screenWidth ||
-    centerY < 0 ||
-    centerY > viewHierarchy.screenHeight
-  );
-};
+  iosMultiPanel: boolean,
+): ScreenSize | undefined {
+  return iosMultiPanel
+    ? (resolveActionableHierarchyScreenSize(viewHierarchy, true) ??
+        resolveElementScreenSize(viewHierarchy))
+    : resolveElementScreenSize(viewHierarchy);
+}
 
 function shouldRetryCompoundText(
   waitFor: ObserveWaitForOptions,
@@ -1005,10 +1003,29 @@ function retryCompoundText<T>(
 
 function isWaitSourceVisible(
   element: Element | undefined,
-  viewHierarchy: ViewHierarchyResult,
+  screenSize: ScreenSize | undefined,
   negative: boolean,
 ): boolean {
-  return element !== undefined && (negative || !isElementCenterOffScreen(element, viewHierarchy));
+  return (
+    element !== undefined && (negative || !isElementCenterOffScreen(element.bounds, screenSize))
+  );
+}
+
+interface WaitForElementOptions {
+  negative?: boolean;
+  screenSize?: ScreenSize;
+}
+
+function resolveWaitForElementOptions(
+  options: boolean | WaitForElementOptions,
+  viewHierarchy: ViewHierarchyResult,
+): { negative: boolean; screenSize: ScreenSize | undefined } {
+  const resolved = typeof options === "boolean" ? { negative: options } : options;
+  return {
+    negative: resolved.negative ?? false,
+    screenSize:
+      "screenSize" in resolved ? resolved.screenSize : resolveElementScreenSize(viewHierarchy),
+  };
 }
 
 export const findWaitForElement = (
@@ -1017,8 +1034,9 @@ export const findWaitForElement = (
   viewHierarchy: ViewHierarchyResult,
   platform?: BootedDevice["platform"],
   modes = new Map<string, MatchMode>(),
-  negative = false,
+  options: boolean | WaitForElementOptions = false,
 ): Element | null => {
+  const { negative, screenSize } = resolveWaitForElementOptions(options, viewHierarchy);
   const snapshot = {
     id: "wait",
     // Compound predicates describe one source node, not its hoisted display row.
@@ -1056,7 +1074,7 @@ export const findWaitForElement = (
       [
         ...new Set(resolution.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])),
       ].filter((node) => {
-        if (!isWaitSourceVisible(node.element, viewHierarchy, negative)) {
+        if (!isWaitSourceVisible(node.element, screenSize, negative)) {
           return false;
         }
         if (selector.text === undefined || selector.match !== "exact") {
@@ -1191,7 +1209,8 @@ const matchesAbsent = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform?: BootedDevice["platform"],
+  platform: BootedDevice["platform"] | undefined,
+  screenSize: ScreenSize | undefined,
 ): boolean => {
   if (!waitFor.absent) {
     return true;
@@ -1201,7 +1220,10 @@ const matchesAbsent = (
     container: waitFor.container,
   } as ObserveWaitForOptions;
   return (
-    findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform, new Map(), true) === null
+    findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform, new Map(), {
+      negative: true,
+      screenSize,
+    }) === null
   );
 };
 
@@ -1227,14 +1249,19 @@ const evaluateWaitForObservation = (
   observation: ObserveResult,
   platform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
-  modes: Map<string, MatchMode>,
+  { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
 ): { matched: boolean; awaitedElement?: Element } => {
+  const screenSize = observation.viewHierarchy
+    ? resolveWaitForScreenSize(observation.viewHierarchy, iosMultiPanel)
+    : undefined;
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
   const displayMatched = matchesDisplayStamp(observation, waitFor, displayInventory);
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement =
     needsElementMatch && observation.viewHierarchy
-      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, modes)
+      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, modes, {
+          screenSize,
+        })
       : null;
   // Without a hierarchy we cannot confirm the absent element is gone, so treat
   // an unconfirmed absence as unsatisfied (keep waiting).
@@ -1242,7 +1269,7 @@ const evaluateWaitForObservation = (
     waitFor.absent === undefined
       ? true
       : observation.viewHierarchy
-        ? matchesAbsent(finder, waitFor, observation.viewHierarchy, platform)
+        ? matchesAbsent(finder, waitFor, observation.viewHierarchy, platform, screenSize)
         : false;
 
   return {
@@ -1410,6 +1437,7 @@ export const waitForObservation = async (
   displayInventory: DisplayInventoryClassification = "unavailable",
   displayPanels: readonly Pick<DisplayPanel, "key" | "role">[] = [],
 ): Promise<WaitForObservationOutcome> => {
+  const iosMultiPanel = platform === "ios" && displayPanels.length > 1;
   const postureEvidence: DisplayWaitTimeoutEvidence = {
     lastObservedReason: 'last observed posture "unknown"',
     knownValueObserved: false,
@@ -1562,7 +1590,7 @@ export const waitForObservation = async (
     observation,
     platform,
     displayInventory,
-    modes,
+    { modes, iosMultiPanel },
   );
 
   if (waitEvaluation.matched && settleReady(observation)) {
@@ -1630,14 +1658,10 @@ export const waitForObservation = async (
     waitEvaluation =
       minTimestamp > 0 && (observedTimestamp === undefined || observedTimestamp < minTimestamp)
         ? { matched: false, awaitedElement: undefined }
-        : evaluateWaitForObservation(
-            finder,
-            waitFor,
-            observation,
-            platform,
-            displayInventory,
+        : evaluateWaitForObservation(finder, waitFor, observation, platform, displayInventory, {
             modes,
-          );
+            iosMultiPanel,
+          });
 
     if (waitEvaluation.matched) {
       if (settleReady(observation)) {

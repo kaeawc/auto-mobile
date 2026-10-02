@@ -1,4 +1,6 @@
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "../../../src/features/action/gestureTransportTimeout";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
@@ -62,6 +64,42 @@ describe("TapOnElement VoiceOver mode", () => {
       bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       "ios-accessibility-label": "Settings",
     } as any;
+
+    test.each(["tap", "doubleTap", "longPress"] as const)(
+      "%s coordinate transport uses the requested long-press timeout only",
+      async (action) => {
+        await wireCtrlProxy();
+        const request = spyOn(fakeIosClient, "requestTapCoordinates");
+        await tapOnElement["executeiOSTapWithCoordinates"](action, 50, 50, 500);
+        expect(request.mock.calls).toHaveLength(action === "doubleTap" ? 2 : 1);
+        for (const call of request.mock.calls) {
+          expect(call[2]).toBe(action === "longPress" ? 500 : 50);
+          expect(call[3]).toBe(
+            action === "longPress" ? DEFAULT_GESTURE_REQUEST_TIMEOUT_MS : undefined,
+          );
+        }
+      },
+    );
+
+    for (const duration of [500, 4000]) {
+      test.each(["tap", "doubleTap", "longPress"] as const)(
+        `%s VoiceOver transport sizes only long presses (${duration}ms)`,
+        async (action) => {
+          await wireCtrlProxy();
+          const request = spyOn(fakeIosClient, "requestVoiceOverActivate");
+          await tapOnElement["executeIOSTapWithVoiceOver"](action, element, 50, 50, duration);
+          expect(request.mock.calls[0][1]).toBe(action === "longPress" ? "long_press" : "activate");
+          expect(request.mock.calls[0][2]).toBe(
+            action === "longPress"
+              ? Math.max(
+                  DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+                  duration + LONG_PRESS_TIMEOUT_HEADROOM_MS,
+                )
+              : undefined,
+          );
+        },
+      );
+    }
 
     test("VoiceOver disabled + element records a coordinate tap only", async () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);

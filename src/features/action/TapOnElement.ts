@@ -1,3 +1,7 @@
+import {
+  resolveCoordinateTapCtrlProxyTimeoutMs,
+  resolveVoiceOverActivateCtrlProxyTimeoutMs,
+} from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
@@ -2788,7 +2792,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           x,
           y,
           duration,
-          duration > 3000 ? duration + 2000 : undefined,
+          resolveCoordinateTapCtrlProxyTimeoutMs(duration),
           undefined,
           undefined,
           undefined,
@@ -4032,7 +4036,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const result = await client.requestVoiceOverActivate(
       label,
       voiceOverAction,
-      undefined,
+      resolveVoiceOverActivateCtrlProxyTimeoutMs(voiceOverAction, durationMs),
       undefined,
       {
         bounds: element.bounds,

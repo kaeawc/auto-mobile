@@ -3,6 +3,13 @@ import {
   type DisplayFenceOption,
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../observe/shared/SharedGestureDelegate";
+import {
+  LONG_PRESS_TIMEOUT_HEADROOM_MS,
+  ORDINARY_TAP_DURATION_MS,
+  resolveGestureCtrlProxyTimeoutMs as resolveTapAnyCtrlProxyTimeoutMs,
+} from "./gestureTransportTimeout";
+export { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "./gestureTransportTimeout";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
@@ -105,46 +112,11 @@ interface CapturedTapTarget {
 }
 
 /**
- * Headroom added to a long-press duration when sizing the CtrlProxy request
- * timeout: CtrlProxy blocks its reply until the on-device press completes, so
- * a timeout shorter than (or barely covering) the press duration times out
- * before the gesture even finishes. Matches Shake's `duration + 2000` pattern.
- * Exported so the daemon's outer MCP timeout budgeting
- * (`TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS` in
- * `src/daemon/mcpRequestTimeout.ts`) shares this single value instead of
- * duplicating the literal and drifting out of sync (issue #6248 review, P2).
- */
-export const LONG_PRESS_TIMEOUT_HEADROOM_MS = 2000;
-
-/**
- * Build the INNER CtrlProxy request timeout for an iOS tap gesture from its
- * on-device press duration, clamped to `MAX_SETTIMEOUT_DELAY_MS`. `setTimeout`
- * (Node/Bun) silently normalizes any delay >= 2^31 to 1ms rather than
- * honoring it, so an unclamped `pressDuration + LONG_PRESS_TIMEOUT_HEADROOM_MS`
- * computed from a caller-supplied `duration` near/over that ceiling (e.g.
- * `tapAny({action:"longPress", duration:2147481648})`) would time the
- * CtrlProxy request out almost immediately instead of covering the intended
- * press (issue #6248 review, P2). The daemon's OUTER MCP deadline
- * (`resolveTapAnyLongPressBudgetMs` in `src/daemon/mcpRequestTimeout.ts`)
- * applies the same ceiling to the outer request -- both must be clamped.
- *
- * Originally sized only for `longPress` (hence the historical name in
- * callers' comments); now also sizes an explicit timeout for ordinary
- * `tap`/`doubleTap` gestures instead of leaving `timeoutMs: undefined` and
- * relying on `requestTapCoordinates`'s own generic default -- a
- * pathologically slow/uncached CtrlProxy could otherwise tie up a quick tap
- * for the full default budget before failing (issue #6276).
- */
-function resolveTapAnyCtrlProxyTimeoutMs(pressDurationMs: number): number {
-  return Math.min(pressDurationMs + LONG_PRESS_TIMEOUT_HEADROOM_MS, MAX_SETTIMEOUT_DELAY_MS);
-}
-
-/**
  * Established per-request default timeout that `SharedGestureDelegate.requestTapCoordinates`,
  * `CtrlProxyVoiceOver.requestAction`, and `CtrlProxyVoiceOver.requestVoiceOverActivate` each
  * apply when no `timeoutMs` is passed. An ordinary tap/doubleTap relied on this default before
  * `resolveTapAnyCtrlProxyTimeoutMs` started sizing an explicit timeout from the (short, 50ms)
- * fixed press duration -- which computes to ~2050ms, well BELOW this floor. Applying that
+ * fixed press duration -- whose unfloored duration + headroom is ~2050ms, below this floor. Applying that
  * shorter value unguarded shrinks, rather than merely budgets, the window an ordinary tap
  * already had for a slow-but-otherwise-healthy CtrlProxy round trip: XCTest performs element
  * lookup and `tap()`/activation before replying, so a device that legitimately takes 2.05-5s
@@ -153,7 +125,7 @@ function resolveTapAnyCtrlProxyTimeoutMs(pressDurationMs: number): number {
  * `resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs` below floors at this value so the tapAny-specific
  * budgeting stays additive/bounding on top of the established default, never below it.
  */
-export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS = 5000;
+export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS;
 
 /**
  * Build the INNER CtrlProxy request timeout for an ORDINARY (non-longPress) iOS tap/doubleTap
@@ -161,10 +133,8 @@ export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS = 5000;
  * clamped to `MAX_SETTIMEOUT_DELAY_MS`), floored at
  * `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS` so sizing an explicit timeout from the tap's
  * short fixed press duration never reduces the established default the underlying CtrlProxy
- * request methods already applied (issue #6306 review, P1). Deliberately NOT applied to
- * `longPress`, whose caller-supplied duration can legitimately exceed this floor already and
- * whose timeout must track that duration exactly (a floor there would just waste time on a
- * quick, deliberately short longPress).
+ * request methods already applied (issue #6306 review, P1). The shared formula also preserves
+ * this default for short long presses (issue #6327).
  */
 function resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(pressDurationMs: number): number {
   return Math.max(
@@ -218,7 +188,7 @@ export const TAP_ANY_SEARCH_UNTIL_MAX_MS = 12000;
  * (`resolveTapAnyOrdinaryTapBudgetMs` in `src/daemon/mcpRequestTimeout.ts`)
  * shares this single value instead of duplicating the literal (issue #6276).
  */
-export const TAP_ANY_ORDINARY_TAP_DURATION_MS = 50;
+export const TAP_ANY_ORDINARY_TAP_DURATION_MS = ORDINARY_TAP_DURATION_MS;
 
 /**
  * Fixed delay `executeIosTapWithCoordinates` sleeps between the two presses

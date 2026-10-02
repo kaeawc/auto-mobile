@@ -1,3 +1,4 @@
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import type WebSocket from "ws";
 import { CtrlProxyGestures } from "../../../src/features/observe/android/CtrlProxyGestures";
 import { RequestManager } from "../../../src/utils/RequestManager";
@@ -1670,9 +1671,16 @@ describe("CtrlProxy display-targeted action routing", () => {
                 expect(inputs).toEqual([]);
                 if (gesture === "longPressAt") {
                   expect(tap.mock.calls[0][2]).toBe(1000);
+                  expect(tap.mock.calls[0][3]).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
                 }
                 if (gesture === "longPressOn") {
                   expect(tap.mock.calls[0][2]).toBe(800);
+                  expect(tap.mock.calls[0][3]).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+                }
+                if (gesture === "tapAt" || gesture === "tapOn" || gesture === "doubleTapOn") {
+                  for (const call of tap.mock.calls) {
+                    expect(call[3]).toBeUndefined();
+                  }
                 }
                 if (gesture === "pinch") {
                   expect(pinch.mock.calls[0].slice(0, 2)).toEqual([100, 100]);

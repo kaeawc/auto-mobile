@@ -1,4 +1,5 @@
 import {
+  startDeviceOutputSchema,
   pressButtonResultSchema,
   wakeAndUnlockResultSchema,
   launchAppResultSchema,
@@ -655,6 +656,7 @@ describe("observation arms advertise observationId resource join keys", () => {
 });
 
 const lifecycleSchemas = [
+  startDeviceOutputSchema,
   pressButtonResultSchema,
   wakeAndUnlockResultSchema,
   launchAppResultSchema,

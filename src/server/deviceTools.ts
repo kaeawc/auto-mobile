@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { androidAvdConfigurationSchema } from "../models/AndroidAvdConfiguration";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { startDeviceOutputSchema } from "./toolOutputSchemas";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { enableToolsSchemaField } from "./toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
@@ -4666,6 +4667,7 @@ export function registerDeviceTools() {
   );
 
   ToolRegistry.register("startDevice", "Start device", startDeviceSchema, startDeviceHandler, {
+    outputSchema: startDeviceOutputSchema,
     defaultEnabled: true,
     supportsProgress: true,
     hidden: true,

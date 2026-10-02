@@ -31,6 +31,7 @@ import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { registerDirectSessionDevice } from "./directSessionDeviceRegistry";
 import { describeDevice, projectBootedDevice } from "./deviceDescription";
+import type { StartDeviceReadiness } from "./toolOutputSchemas";
 import { ProgressCallback } from "./toolRegistry";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
@@ -140,6 +141,9 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       };
     },
   ) => {
+    // Excludes pre-boot reservations; includes boot, runner recovery, and session binding.
+    const readinessStartedAtMs = deps.timer.now();
+    let recovered = false;
     const bootService = new DeviceBootService({
       deviceManager: deviceUtils,
       deviceMatcher,
@@ -339,6 +343,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       });
       try {
         state.boot = readinessResult.boot;
+        recovered = readinessResult.recovered;
         validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
         moveDeviceAcquisitionReadiness(
           acquisitionReadinessKey,
@@ -441,6 +446,12 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
 
     refreshResourcesAfterCommittedBoot(state.boot, deps);
     return buildBootedResponse(state.boot.device, state.boot.source, perf, sessionId, {
+      readiness: {
+        level: "automationReady",
+        checks: ["bootCompleted", "runnerReady", "sessionBound"],
+        elapsedMs: deps.timer.now() - readinessStartedAtMs,
+        recovered,
+      },
       processId: state.boot.processId,
       sourceImage: sourceImage,
       configuredImage: configuredImageForAcquiredDevice(state.boot.device, sourceImage),
@@ -651,16 +662,18 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     perf: ReturnType<typeof createPerformanceTracker>,
     sessionId: string,
     {
+      readiness,
       processId,
       sourceImage,
       configuredImage,
       achievedReadiness = "automationReady",
     }: {
+      readiness: StartDeviceReadiness;
       processId?: number;
       sourceImage?: DeviceInfo;
       configuredImage?: StableConfiguredDeviceImage;
       achievedReadiness?: DeviceReadinessLevel;
-    } = {},
+    },
   ) {
     perf.end();
     const timing = perf.getTimings();
@@ -685,6 +698,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       processId: processId ?? null,
       isReady: true,
       acquisition,
+      readiness,
       // TimingData's runtime shape is serialized as the legacy flat result.
       // oxlint-disable-next-line auto-mobile/no-unknown-cast
       timing: (timing ?? {}) as unknown as Record<string, number>,

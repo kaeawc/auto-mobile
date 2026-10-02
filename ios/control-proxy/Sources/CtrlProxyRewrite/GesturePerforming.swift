@@ -19,6 +19,9 @@ public struct PressKeyOutcome: Sendable {
 /// `Sendable` `CommandHandler` (Phase 6) `await` these from off the main actor.
 @MainActor
 public protocol GesturePerforming: Sendable {
+    /// Non-key commands break the consecutive verified-key sequence.
+    func invalidateCaretMemo()
+
     // MARK: - Tap Gestures
 
     /// Tap at coordinates with optional duration for long press
@@ -181,6 +184,8 @@ public protocol GesturePerforming: Sendable {
 }
 
 extension GesturePerforming {
+    public func invalidateCaretMemo() {}
+
     public func pressKeyOutcome(key: String, modifiers: [String]) async throws -> PressKeyOutcome {
         try await PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers))
     }

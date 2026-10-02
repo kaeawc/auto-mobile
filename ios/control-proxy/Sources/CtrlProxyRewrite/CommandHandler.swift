@@ -128,6 +128,10 @@ final class CommandHandler: CommandHandling {
     {
         let startTime = Date()
 
+        if request.requestType != .requestPressKey {
+            await gesturePerformer.invalidateCaretMemo()
+        }
+
         do {
             switch request {
             // View hierarchy commands
@@ -288,6 +292,10 @@ final class CommandHandler: CommandHandling {
                 return await handleGetTableStructure(payload, startTime: startTime)
             }
         } catch {
+            // Frame-context rejection can precede pressKeyOutcome's consume step.
+            if request.requestType == .requestPressKey {
+                await gesturePerformer.invalidateCaretMemo()
+            }
             if case CommandError.deadlineExceeded = error {
                 GesturePhaseDiagnostics.current?.markDeadlineExceeded()
             }

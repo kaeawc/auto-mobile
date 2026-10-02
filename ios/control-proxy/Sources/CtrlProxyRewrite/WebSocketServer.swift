@@ -436,6 +436,7 @@ final class WebSocketServer: @unchecked Sendable {
                 "request_tap_coordinates",
                 "request_drag",
                 "request_pinch",
+                "request_press_key",
             ]
             let diagnostics = gestureCommands.contains(request.typeString) ? GesturePhaseDiagnostics(
                 command: request.typeString, receivedAtMs: receivedAtMs ?? executionStartedAtMs,

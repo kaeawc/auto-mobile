@@ -35,7 +35,56 @@ import os
 @MainActor
 public final class GesturePerformer: GesturePerforming {
     private let keyboardClock: any Clock<Duration>
+    private var caretMemo: CaretMemo?
     private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "GesturePerformer")
+
+    nonisolated static let caretMemoTTL: Duration = .seconds(2)
+
+    /// Baseline only for non-destructive horizontal arrows. Age and text checks
+    /// cannot detect external caret movement: a memo only confirms an exact
+    /// one-step move and is never the basis for a retry or a no-effect/direction
+    /// verdict. Any mismatch is unverified. Forward delete always probes its
+    /// BEFORE caret independently.
+    struct CaretMemo: Sendable {
+        let bundleId: String
+        let value: String
+        let index: Int
+        private let age: @Sendable () -> Duration
+
+        nonisolated init<C: Clock>(bundleId: String, value: String, index: Int, clock: C)
+            where C.Duration == Duration
+        {
+            self.bundleId = bundleId
+            self.value = value
+            self.index = index
+            let recordedAt = clock.now
+            age = { recordedAt.duration(to: clock.now) }
+        }
+
+        nonisolated func caret(bundleId: String?, value: String?) -> Int? {
+            let elapsed = age()
+            guard bundleId == self.bundleId, value == self.value,
+                  elapsed >= .zero, elapsed < GesturePerformer.caretMemoTTL,
+                  index >= 0, index <= self.value.count
+            else { return nil }
+            return index
+        }
+    }
+
+    public func invalidateCaretMemo() { caretMemo = nil }
+
+    /// Clear before every key's validation/delivery; only plain horizontal arrows reuse the memo.
+    func consumeCaretMemo(key: String, modifiers: [String]) -> CaretMemo? {
+        let memo = caretMemo
+        caretMemo = nil
+        guard modifiers.isEmpty, ["arrow_left", "arrow_right"].contains(key.lowercased()) else { return nil }
+        return memo
+    }
+
+    func rememberCaret(bundleId: String?, value: String, index: Int) {
+        guard let bundleId, !bundleId.isEmpty else { return }
+        caretMemo = CaretMemo(bundleId: bundleId, value: value, index: index, clock: keyboardClock)
+    }
 
     nonisolated static func consumerUsage(for button: String) throws -> UInt32 {
         switch button {
@@ -334,7 +383,9 @@ public final class GesturePerformer: GesturePerforming {
         sendKey: () throws -> Void,
         retryKey: (Element) throws -> Void,
         readValue: (Element) throws -> String,
-        restoreValue: (Element, String) throws -> Void
+        restoreValue: (Element, String) throws -> Void,
+        knownCaret: (String) -> Int? = { _ in nil },
+        verifiedCaret: (String, Int) -> Void = { _, _ in }
     )
         throws -> Bool where C.Duration == Duration
     {
@@ -346,12 +397,19 @@ public final class GesturePerformer: GesturePerforming {
         let (element, original) = try resolveInput()
         _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
         let caretBefore: Int?
+        let baselineIsMemo: Bool
         let lastStep: String
-        if let element {
+        if let original, let known = knownCaret(original) {
+            caretBefore = known
+            baselineIsMemo = true
+            lastStep = "focus check"
+        } else if let element {
             caretBefore = try probeCaret(element, original)
+            baselineIsMemo = false
             lastStep = "caret probe"
         } else {
             caretBefore = nil
+            baselineIsMemo = false
             lastStep = "focus check"
         }
         _ = try budget.check(step: .appKey, consumedBy: lastStep)
@@ -360,10 +418,11 @@ public final class GesturePerformer: GesturePerforming {
 
         for attempt in 0 ... 1 {
             guard let outcome = try observeArrowOutcome(
-                key: key, original: original, caretBefore: caretBefore, budget: budget,
+                key: key, original: original, caretBefore: caretBefore, baselineIsMemo: baselineIsMemo, budget: budget,
                 readValue: { try readValue(element) },
                 probeCaret: { try probeCaret(element, original) },
-                restoreValue: { try restoreValue(element, original) }
+                restoreValue: { try restoreValue(element, original) },
+                verifiedCaret: { verifiedCaret(original, $0) }
             ) else { return false }
             switch outcome {
             case .moved, .boundaryNoOp: return true
@@ -382,11 +441,13 @@ public final class GesturePerformer: GesturePerforming {
         return false
     }
 
+    /// A memo baseline may be stale, so a mismatch cannot justify a retry or a caret verdict.
     private nonisolated static func observeArrowOutcome<C: Clock>(
-        key: String, original: String, caretBefore: Int?, budget: ArrowBudget<C>,
+        key: String, original: String, caretBefore: Int?, baselineIsMemo: Bool, budget: ArrowBudget<C>,
         readValue: () throws -> String,
         probeCaret: () throws -> Int?,
-        restoreValue: () throws -> Void
+        restoreValue: () throws -> Void,
+        verifiedCaret: (Int) -> Void
     )
         throws -> ArrowOutcome? where C.Duration == Duration
     {
@@ -402,7 +463,20 @@ public final class GesturePerformer: GesturePerforming {
         let caretAfter = try probeCaret()
         guard try budget.check(step: .completion), let caretAfter else { return nil }
         // probeCaretIndex already checked that deleting its marker restored original.
-        return arrowOutcome(key: key, original: original, observed: observed, before: caretBefore, after: caretAfter)
+        if baselineIsMemo {
+            guard caretAfter == caretBefore + (key == "arrow_left" ? -1 : 1) else { return nil }
+            verifiedCaret(caretAfter)
+            return .moved
+        }
+        let outcome = arrowOutcome(
+            key: key,
+            original: original,
+            observed: observed,
+            before: caretBefore,
+            after: caretAfter
+        )
+        if outcome == .moved || outcome == .boundaryNoOp { verifiedCaret(caretAfter) }
+        return outcome
     }
 
     nonisolated static func arrowOutcome(
@@ -723,12 +797,13 @@ public final class GesturePerformer: GesturePerforming {
             let queryStart = Date()
             let (hasFocus, strategy) = try detectKeyboardFocus(app: app, forKeyPress: forKeyPress)
             let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
-            let appLabel = catchingObjCExceptionNonThrowing({ app.label }, fallback: "unknown")
             print(
-                "[GesturePerformer] requireKeyboardFocus hasFocus=\(hasFocus) strategy=\(strategy) context=\"\(context)\" elapsedMs=\(elapsedMs) appLabel=\(appLabel)"
+                "[GesturePerformer] requireKeyboardFocus hasFocus=\(hasFocus) strategy=\(strategy) context=\"\(context)\" elapsedMs=\(elapsedMs)"
             )
 
             guard hasFocus else {
+                let appLabel = catchingObjCExceptionNonThrowing({ app.label }, fallback: "unknown")
+                print("[GesturePerformer] requireKeyboardFocus appLabel=\(appLabel)")
                 let diag = buildFocusDiagnostic(app: app, reason: "requireKeyboardFocus: \(context)")
                 print("[GesturePerformer] \(diag)")
                 throw GestureError.gestureFailed(
@@ -1442,12 +1517,14 @@ public final class GesturePerformer: GesturePerforming {
         }
 
         private func performPressKey(key: String, modifiers: [String], warning: inout String?) async throws -> Bool? {
+            let memo = consumeCaretMemo(key: key, modifiers: modifiers)
             let normalizedKey = key.lowercased()
             try GesturePerformer.validateDestructiveKeyModifiers(normalizedKey: normalizedKey, modifiers: modifiers)
 
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
+            let bundleId = elementLocator.foregroundBundleId
 
             let keyboardKey: XCUIKeyboardKey
             switch normalizedKey {
@@ -1496,46 +1573,63 @@ public final class GesturePerformer: GesturePerforming {
                 return try GesturePerformer.performHorizontalArrow(
                     clock: keyboardClock, key: normalizedKey,
                     requireFocus: {
+                        GesturePhaseDiagnostics.current?.begin("focusCheck")
                         try self.requireKeyboardFocus(
                             app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
                         )
                     },
                     resolveInput: {
+                        GesturePhaseDiagnostics.current?.begin("elementResolution")
                         let element = self.resolveFocusedTextElement(app: app)
+                        GesturePhaseDiagnostics.current?.begin("valueRead")
                         let original = try element.map { element in
                             try catchingObjCException { self.fieldText(element) }
                         }
                         return (element, original)
                     },
                     probeCaret: { element, original in
-                        try self.probeCaretIndex(app: app, focusedElement: element, original: original)
+                        GesturePhaseDiagnostics.current?.begin("caretProbe")
+                        return try self.probeCaretIndex(app: app, focusedElement: element, original: original)
                     },
-                    sendKey: { try catchingObjCException { app.typeKey(keyboardKey, modifierFlags: []) } },
+                    sendKey: {
+                        GesturePhaseDiagnostics.current?.begin("keyDelivery")
+                        try catchingObjCException { app.typeKey(keyboardKey, modifierFlags: []) }
+                    },
                     retryKey: { element in
+                        GesturePhaseDiagnostics.current?.begin("keyDelivery")
                         try catchingObjCException { element.typeKey(keyboardKey, modifierFlags: []) }
                     },
-                    readValue: { element in try catchingObjCException { self.fieldText(element) } },
+                    readValue: { element in
+                        GesturePhaseDiagnostics.current?.begin("outcomeConfirmation")
+                        return try catchingObjCException { self.fieldText(element) }
+                    },
                     restoreValue: { element, original in
                         try self.restoreForwardDeleteProbe(
                             app: app, focusedElement: element, original: original, marker: ""
                         )
-                    }
+                    },
+                    knownCaret: { memo?.caret(bundleId: bundleId, value: $0) },
+                    verifiedCaret: { self.rememberCaret(bundleId: bundleId, value: $0, index: $1) }
                 )
             }
 
+            GesturePhaseDiagnostics.current?.begin("focusCheck")
             try requireKeyboardFocus(
                 app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
             )
 
+            GesturePhaseDiagnostics.current?.begin("elementResolution")
             let focusedElement = isDestructiveKey ? resolveFocusedTextElement(app: app) : nil
             let focusedKind = try focusedElement.map { element in
                 try catchingObjCException { GesturePerformer.focusedElementKind(element.elementType) }
             }
+            GesturePhaseDiagnostics.current?.begin("valueRead")
             let valueBeforeKeyPress = try focusedElement.map { element in
                 try catchingObjCException { fieldText(element) }
             }
             let caretBefore: Int?
             if normalizedKey == "delete", let focusedElement {
+                GesturePhaseDiagnostics.current?.begin("caretProbe")
                 caretBefore = try probeCaretIndex(
                     app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
                 )
@@ -1567,6 +1661,7 @@ public final class GesturePerformer: GesturePerforming {
                 expectedForwardDelete = nil
             }
 
+            GesturePhaseDiagnostics.current?.begin("keyDelivery")
             try catchingObjCException {
                 if normalizedKey == "backspace" {
                     // Backspace uses text insertion on the focused field because app-level
@@ -1605,6 +1700,7 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             if normalizedKey == "delete" {
+                GesturePhaseDiagnostics.current?.begin("outcomeConfirmation")
                 let valueBeforeFallback = try catchingObjCException { fieldText(focusedElement) }
                 if valueBeforeFallback == expectedForwardDelete { return nil }
                 if valueBeforeFallback == valueBeforeKeyPress, let caretBefore {
@@ -1620,6 +1716,7 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             var valueAfterKeyPress = valueBeforeKeyPress
+            GesturePhaseDiagnostics.current?.begin("postCondition")
             let satisfied = try await KeyboardWait.destructivePostCondition(clock: keyboardClock) {
                 guard try catchingObjCException({ focusedElement.exists }) else {
                     if normalizedKey == "delete" {
@@ -1698,10 +1795,14 @@ public final class GesturePerformer: GesturePerforming {
         {
             // The native forward-delete key is a no-op on some simulator runtimes. Move
             // one character right and backspace only after observing that movement.
+            GesturePhaseDiagnostics.current?.begin("keyDelivery")
             try catchingObjCException { app.typeKey(.rightArrow, modifierFlags: []) }
+            GesturePhaseDiagnostics.current?.begin("caretProbe")
             var caretAfter = try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
             if caretAfter == caretBefore {
+                GesturePhaseDiagnostics.current?.begin("keyDelivery")
                 try catchingObjCException { focusedElement.typeKey(.rightArrow, modifierFlags: []) }
+                GesturePhaseDiagnostics.current?.begin("caretProbe")
                 caretAfter = try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
             }
             guard caretAfter == caretBefore + 1 else {
@@ -1709,6 +1810,7 @@ public final class GesturePerformer: GesturePerforming {
                     "Forward delete unavailable: Right Arrow did not move the caret one character; use text replacement instead"
                 )
             }
+            GesturePhaseDiagnostics.current?.begin("keyDelivery")
             try catchingObjCException { focusedElement.typeText(XCUIKeyboardKey.delete.rawValue) }
         }
 

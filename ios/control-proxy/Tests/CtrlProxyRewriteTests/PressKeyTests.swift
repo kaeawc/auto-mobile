@@ -42,12 +42,23 @@ private final class ArrowKeyScenario {
     var probes = 0
     var reads = 0
     var restorations = 0
+    var focusChecks = 0
+    var resolutions = 0
 
-    func run() throws -> Bool {
+    func run(
+        knownCaret: (String) -> Int? = { _ in nil },
+        verifiedCaret: (String, Int) -> Void = { _, _ in }
+    )
+        throws -> Bool
+    {
         try GesturePerformer.performHorizontalArrow(
             clock: clock, key: key,
-            requireFocus: { self.clock.advance(by: self.focusDuration) },
+            requireFocus: {
+                self.focusChecks += 1
+                self.clock.advance(by: self.focusDuration)
+            },
             resolveInput: {
+                self.resolutions += 1
                 self.clock.advance(by: self.lookupDuration)
                 return ("field", "abc")
             },
@@ -70,7 +81,8 @@ private final class ArrowKeyScenario {
                 self.clock.advance(by: self.readDuration)
                 return self.observedValue
             },
-            restoreValue: { _, _ in self.restorations += 1 }
+            restoreValue: { _, _ in self.restorations += 1 },
+            knownCaret: knownCaret, verifiedCaret: verifiedCaret
         )
     }
 }
@@ -438,7 +450,366 @@ final class PressKeyTests: XCTestCase {
 }
 
 @MainActor
+final class CaretMemoTests: XCTestCase {
+    private func performer(clock: ArrowTestClock) -> GesturePerformer {
+        GesturePerformer(elementLocator: RewriteFakeElementLocator(), keyboardClock: clock)
+    }
+
+    func testThreeLeftArrowsReuseBeforeProbeButConfirmEveryKey() throws {
+        let memoScenario = ArrowKeyScenario()
+        let baseline = ArrowKeyScenario()
+        memoScenario.caretPositions = [3, 2, 1, 0]
+        baseline.caretPositions = [3, 2, 2, 1, 1, 0]
+        for scenario in [memoScenario, baseline] {
+            scenario.lookupDuration = .milliseconds(100)
+            scenario.sendDuration = .milliseconds(100)
+            scenario.readDuration = .milliseconds(100)
+            scenario.probeDurations = Array(repeating: .milliseconds(200), count: 6)
+        }
+        let gestures = performer(clock: memoScenario.clock)
+        for _ in 0 ..< 3 {
+            let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
+            XCTAssertTrue(try memoScenario.run(
+                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertTrue(try baseline.run())
+        }
+        XCTAssertEqual(memoScenario.probes, 4) // One BEFORE + three AFTER probes.
+        XCTAssertEqual(baseline.probes, 6)
+        XCTAssertEqual(memoScenario.reads, 3)
+        XCTAssertEqual(memoScenario.sends, 3)
+        XCTAssertEqual(memoScenario.focusChecks, 3)
+        XCTAssertEqual(memoScenario.resolutions, 3)
+        XCTAssertEqual(memoScenario.clock.now.offset, .milliseconds(1700))
+        XCTAssertEqual(baseline.clock.now.offset, .milliseconds(2100))
+    }
+
+    func testMemoRejectsDifferentValueBundleAndExpiredTTL() {
+        let clock = ArrowTestClock()
+        let gestures = performer(clock: clock)
+        gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+        let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
+        XCTAssertEqual(memo?.caret(bundleId: "app", value: "abc"), 1)
+        XCTAssertNil(memo?.caret(bundleId: "app", value: "abd"))
+        XCTAssertNil(memo?.caret(bundleId: "other", value: "abc"))
+        XCTAssertNil(memo?.caret(bundleId: nil, value: "abc"))
+        clock.advance(by: GesturePerformer.caretMemoTTL)
+        XCTAssertNil(memo?.caret(bundleId: "app", value: "abc"))
+        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+    }
+
+    func testOtherKeysAndModifiersConsumeWithoutReusingMemo() {
+        let gestures = performer(clock: ArrowTestClock())
+        for (key, modifiers) in [
+            ("backspace", []), ("delete", []), ("enter", []), ("tab", []), ("escape", []),
+            ("arrow_up", []), ("arrow_down", []), ("unsupported", []),
+            ("arrow_left", ["shift"]), ("delete", ["meta"]),
+        ] {
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+            XCTAssertNil(gestures.consumeCaretMemo(key: key, modifiers: modifiers))
+            XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+        }
+    }
+
+    func testArrowMemoMissRunsBothProbes() throws {
+        for miss in ["value", "bundle", "expired"] {
+            let scenario = ArrowKeyScenario()
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: miss == "value" ? "old" : "abc", index: 1)
+            let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
+            if miss == "expired" { scenario.clock.advance(by: GesturePerformer.caretMemoTTL) }
+            XCTAssertTrue(try scenario.run(
+                knownCaret: { memo?.caret(bundleId: miss == "bundle" ? "other" : "app", value: $0) }
+            ))
+            XCTAssertEqual(scenario.probes, 2)
+            XCTAssertEqual(scenario.reads, 1)
+        }
+    }
+
+    func testExactOneStepAfterMemoHitRecordsFreshCaretOnlyWithinBudget() throws {
+        for (key, after) in [("arrow_left", 0), ("arrow_right", 2)] {
+            for exhausted in [false, true] {
+                let scenario = ArrowKeyScenario()
+                scenario.key = key
+                scenario.caretPositions = [after]
+                scenario.probeDurations = [exhausted ? .seconds(6) : .zero]
+                let gestures = performer(clock: scenario.clock)
+                gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+                let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+                XCTAssertEqual(try scenario.run(
+                    knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                    verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+                ), !exhausted)
+                XCTAssertEqual(scenario.sends, 1)
+                XCTAssertEqual(scenario.probes, 1)
+                let next = gestures.consumeCaretMemo(key: key, modifiers: [])
+                XCTAssertEqual(next?.caret(bundleId: "app", value: "abc"), exhausted ? nil : after)
+            }
+        }
+    }
+
+    func testMemoizedBoundaryIsUnverifiedAndLeavesMemoCleared() throws {
+        for (key, boundary) in [("arrow_left", 0), ("arrow_right", 3)] {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            scenario.caretPositions = [boundary]
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: boundary)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertFalse(try scenario.run(
+                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 1)
+            XCTAssertNil(gestures.consumeCaretMemo(key: key, modifiers: []))
+        }
+    }
+
+    func testFreshBaselineBoundaryVerifiesAndRecordsCaret() throws {
+        for (key, boundary) in [("arrow_left", 0), ("arrow_right", 3)] {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            scenario.caretPositions = [boundary, boundary]
+            let gestures = performer(clock: scenario.clock)
+            XCTAssertTrue(try scenario.run(
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 2)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertEqual(memo?.caret(bundleId: "app", value: "abc"), boundary)
+        }
+    }
+
+    func testExternallyMovedCaretMatchingMemoDoesNotRetry() throws {
+        for (key, retryAfter) in [("arrow_left", 0), ("arrow_right", 2)] {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            // External movement to 2 (left) or 0 (right); the first key returns to memo 1.
+            scenario.caretPositions = [1, retryAfter]
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertFalse(try scenario.run(
+                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 1)
+            XCTAssertNil(gestures.consumeCaretMemo(key: key, modifiers: []))
+        }
+    }
+
+    func testNoEffectAfterMemoHitIsUnverifiedAndLeavesMemoCleared() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1] // AFTER probes only; the retry must not run.
+        let gestures = performer(clock: scenario.clock)
+        gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+        let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
+        XCTAssertFalse(try scenario.run(
+            knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+            verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+        ))
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 1)
+        XCTAssertEqual(scenario.reads, 1)
+        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+    }
+
+    func testFreshBaselineNoEffectRetriesAndThrows() {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1, 1]
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case GesturePerformer.GestureError.arrowNoEffect = error else {
+                return XCTFail("Expected arrowNoEffect, got \(error)")
+            }
+        }
+        XCTAssertEqual(scenario.sends, 2)
+        XCTAssertEqual(scenario.probes, 3)
+        XCTAssertEqual(scenario.reads, 2)
+    }
+
+    func testStaleMemoWrongDirectionIsUnverifiedAndLeavesMemoCleared() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [2] // Stale memo says 1, but AFTER left is 2.
+        let gestures = performer(clock: scenario.clock)
+        gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+        let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
+        XCTAssertFalse(try scenario.run(
+            knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+            verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+        ))
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 1)
+        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+    }
+
+    func testFreshBaselineWrongDirectionStillThrows() {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 2]
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.gestureFailed(reason) = error else {
+                return XCTFail("Expected wrong-direction error, got \(error)")
+            }
+            XCTAssertEqual(reason, "arrow key moved the caret in the wrong direction")
+        }
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 2)
+    }
+
+    func testMultiStepOrMissingAfterMemoHitIsUnverifiedAndLeavesMemoCleared() throws {
+        let cases: [(String, Int, Int?)] = [("arrow_left", 2, 0), ("arrow_right", 1, 3), ("arrow_left", 1, nil)]
+        for (key, before, after) in cases {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            scenario.caretPositions = [after]
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: before)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertFalse(try scenario.run(
+                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 1)
+            XCTAssertNil(gestures.consumeCaretMemo(key: key, modifiers: []))
+        }
+    }
+
+    func testUnverifiedOrChangedValueAfterMemoHitLeavesMemoCleared() {
+        for changedValue in [false, true] {
+            let scenario = ArrowKeyScenario()
+            if changedValue {
+                scenario.observedValue = "changed"
+            } else {
+                scenario.sendDuration = .seconds(6)
+            }
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+            let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
+            do {
+                let verified = try scenario.run(
+                    knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                    verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+                )
+                XCTAssertFalse(changedValue)
+                XCTAssertFalse(verified)
+            } catch {
+                XCTAssertTrue(changedValue)
+                XCTAssertEqual(error.localizedDescription, "Gesture failed: arrow key changed the focused field value")
+                XCTAssertEqual(scenario.restorations, 1)
+            }
+            XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+        }
+    }
+
+    func testDeleteClearsMemoRecordedAndReusedByArrows() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [3, 2, 1, 1, 0]
+        scenario.probeDurations = Array(repeating: .zero, count: 5)
+        let gestures = performer(clock: scenario.clock)
+        XCTAssertTrue(try scenario.run(
+            verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+        ))
+        XCTAssertEqual(scenario.probes, 2)
+
+        let memo = try XCTUnwrap(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+        XCTAssertEqual(memo.caret(bundleId: "app", value: "abc"), 2)
+        XCTAssertTrue(try scenario.run(
+            knownCaret: { memo.caret(bundleId: "app", value: $0) },
+            verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+        ))
+        XCTAssertEqual(scenario.probes, 3) // The prior arrow's memo replaces the BEFORE probe.
+
+        XCTAssertNil(gestures.consumeCaretMemo(key: "delete", modifiers: []))
+        let afterDelete = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
+        XCTAssertNil(afterDelete)
+        XCTAssertTrue(try scenario.run(
+            knownCaret: { afterDelete?.caret(bundleId: "app", value: $0) }
+        ))
+        XCTAssertEqual(scenario.probes, 5) // Both probes run after delete clears the memo.
+        XCTAssertEqual(scenario.reads, 3)
+        XCTAssertEqual(scenario.sends, 3)
+    }
+
+    func testInterveningNonKeyCommandInvalidatesMemoThroughDispatch() async throws {
+        let gestures = performer(clock: ArrowTestClock())
+        gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(), gesturePerformer: gestures, perf: PerfProvider()
+        )
+        let request = try JSONDecoder().decode(WebSocketRequest.self, from: Data(
+            #"{"type":"request_screenshot","requestId":"between-keys"}"#.utf8
+        ))
+        _ = await handler.handle(request)
+        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+    }
+
+    func testRejectedPressKeyInvalidatesMemoBeforeRunnerInvocation() async throws {
+        let gestures = performer(clock: ArrowTestClock())
+        gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(), gesturePerformer: gestures, perf: PerfProvider()
+        )
+        let request = WebSocketRequest.pressKey(RequestPressKey(
+            requestId: "stale-frame", frameContext: "stale", key: "arrow_left", modifiers: []
+        ))
+        let result = await handler.handle(request)
+        let response = try XCTUnwrap(result as? WebSocketResponse)
+        XCTAssertEqual(response.success, false)
+        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+    }
+}
+
+@MainActor
 final class PressKeyDispatchTests: XCTestCase {
+    func testPressKeyRecordsPhasesThroughWebSocketDispatch() async throws {
+        let clock = FakeMonotonicClock()
+        let gestures = RewriteFakeGesturePerformer()
+        let sink = FakeGestureLogSink()
+        let phases = [
+            "focusCheck", "elementResolution", "valueRead", "caretProbe",
+            "keyDelivery", "outcomeConfirmation", "postCondition",
+        ]
+        gestures.onPressKey = {
+            for phase in phases {
+                GesturePhaseDiagnostics.current?.begin(phase)
+                clock.advance(by: 400)
+            }
+        }
+        let server = WebSocketServer(
+            commandHandler: CommandHandler(
+                elementLocator: RewriteFakeElementLocator(), gesturePerformer: gestures,
+                perf: FakePerfTracking(flushResult: nil)
+            ),
+            perf: FakePerfTracking(flushResult: [.timing("handleRequest:request_press_key", durationMs: 2800)]),
+            frameContext: FakeFrameContextRecording(token: nil),
+            monotonicNowMs: { clock.now() }, gestureLogSink: sink
+        )
+        let done = expectation(description: "press key response")
+        let responder = CapturingResponder(onEach: { done.fulfill() })
+        server.dispatchCommand(
+            Data(#"{"type":"request_press_key","requestId":"phases","key":"delete","modifiers":[]}"#.utf8),
+            responder: responder
+        )
+        await fulfillment(of: [done], timeout: 2)
+        let data = try XCTUnwrap(responder.captured.first)
+        let response = try JSONDecoder().decode(WebSocketResponse.self, from: data)
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(gestures.keyCalls.count, 1)
+        let timing = try XCTUnwrap(response.perfTiming?.children?.last)
+        XCTAssertEqual(timing.name, "gesturePhases")
+        XCTAssertEqual(timing.durationMs, 2800)
+        let children = try XCTUnwrap(timing.children)
+        XCTAssertEqual(Array(children.map(\.name).suffix(phases.count)), phases)
+        XCTAssertTrue(children.suffix(phases.count).allSatisfy { $0.durationMs == 400 })
+        XCTAssertEqual(sink.lines.count, 1)
+        XCTAssertTrue(sink.lines[0].contains("gesture_phases command=request_press_key"))
+        XCTAssertTrue(sink.lines[0].contains("caretProbeMs=400"))
+    }
+
     func testPressKeyForwardsModifiersAndPreservesFailure() async throws {
         let gestures = RewriteFakeGesturePerformer()
         let handler = CommandHandler(

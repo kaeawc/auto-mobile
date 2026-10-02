@@ -202,6 +202,7 @@ private fun CompareSide(
   LaunchedEffect(activeStream) {
     activeStream.deviceEvents.collect { event ->
       when (event) {
+        is DeviceStreamEvent.DeviceSessionSuperseded -> Unit
         // Device unplugged/offline: retire the snapshot so the diff shows "waiting" until a fresh
         // frame arrives, rather than diffing the live device against a dead one's stale tree.
         is DeviceStreamEvent.DeviceConnectionLost -> clearHierarchy()

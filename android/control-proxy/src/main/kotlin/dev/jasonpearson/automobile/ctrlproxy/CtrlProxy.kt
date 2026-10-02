@@ -32,6 +32,8 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
+import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
@@ -602,7 +604,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private class ImeCommitState {
     val cancelled = AtomicBoolean(false)
-    val finished = CompletableDeferred<Boolean>()
+    val finished = CompletableDeferred<ImeCommitResult>()
   }
 
   // Cancelled IDs remain tombstoned until service shutdown. Request IDs are UUIDs; retaining a
@@ -2227,24 +2229,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
     launchRequestScope(requestId) {
-      fun finish(partialApplication: Boolean) {
-        state?.finished?.complete(partialApplication)
+      fun finish(result: ImeCommitResult) {
+        state?.finished?.complete(result)
         if (state?.cancelled?.get() == false) imeCommitStates.remove(requestId, state)
       }
       // `ime set` can return before Android creates the InputMethodService. Give activation a
       // bounded window; the IME separately waits for its editor binding.
-      val readyDeadline = android.os.SystemClock.uptimeMillis() + 2_000L
-      var ime = CtrlProxyIme.current()
-      while (
-        ime == null &&
-          state?.cancelled?.get() != true &&
-          android.os.SystemClock.uptimeMillis() < readyDeadline
-      ) {
-        kotlinx.coroutines.delay(50L)
-        ime = CtrlProxyIme.current()
-      }
+      val ime =
+        awaitImeServiceReady(
+          nowMs = android.os.SystemClock::uptimeMillis,
+          delayMs = { kotlinx.coroutines.delay(it) },
+          probe = { CtrlProxyIme.current() },
+          isCancelled = { state?.cancelled?.get() == true },
+        )
       if (state?.cancelled?.get() == true) {
-        finish(false)
+        finish(ImeCommitResult(success = false, error = null))
         broadcastCommitTextResult(
           requestId,
           false,
@@ -2255,7 +2254,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         return@launchRequestScope
       }
       if (ime == null) {
-        finish(false)
+        finish(ImeCommitResult(success = false, error = null))
         broadcastCommitTextResult(
           requestId,
           false,
@@ -2266,7 +2265,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         return@launchRequestScope
       }
       ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery) { result ->
-        finish(result.partialApplication)
+        finish(result)
         launchRequestScope(requestId) {
           broadcastCommitTextResult(
             requestId,
@@ -2274,6 +2273,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             result.error,
             System.currentTimeMillis() - start,
             result.partialApplication,
+            result.committedUnits,
           )
         }
       }
@@ -2284,13 +2284,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val tombstone =
       ImeCommitState().apply {
         cancelled.set(true)
-        finished.complete(false)
+        finished.complete(ImeCommitResult(success = false, error = null))
       }
     val state = imeCommitStates.putIfAbsent(targetRequestId, tombstone) ?: tombstone
     state.cancelled.set(true)
     // An absent target is a tombstone: the original frame may still be queued on another socket.
     launchRequestScope(requestId) {
-      val partialApplication = state.finished.await()
+      val result = state.finished.await()
       resultBroadcaster.guard(requestId, "cancel_ime_commit_result") {
         webSocketServer.broadcastWithPerfSync { perfTiming ->
           webSocketFrameJson(
@@ -2300,7 +2300,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           ) {
             put("success", true)
             put("targetRequestId", targetRequestId)
-            put("partialApplication", partialApplication)
+            put("partialApplication", result.partialApplication)
+            if (result.committedUnits > 0) put("committedUnits", result.committedUnits)
           }
         }
       }
@@ -6705,6 +6706,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     error: String?,
     totalTimeMs: Long,
     partialApplication: Boolean,
+    committedUnits: Int = 0,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
@@ -6717,6 +6719,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("success", success)
           put("totalTimeMs", totalTimeMs)
           if (partialApplication) put("partialApplication", true)
+          if (committedUnits > 0) put("committedUnits", committedUnits)
           if (error != null) {
             put("error", error)
           }

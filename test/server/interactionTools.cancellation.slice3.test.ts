@@ -1,5 +1,9 @@
-import { cancellationHandlers, pausedSleep } from "../helpers/interactionCancellation";
-import { afterEach, expect, spyOn, test } from "bun:test";
+import {
+  cancellationHandlers,
+  cancellationTests,
+  pausedSleep,
+} from "../helpers/interactionCancellation";
+import { expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { Keyboard } from "../../src/features/action/Keyboard";
@@ -46,7 +50,7 @@ const observation: ObserveResult = {
 const restores: Array<() => void> = [];
 const handler = cancellationHandlers(["keyboard", "openLink", "systemTray"]);
 
-afterEach(() => {
+const test = cancellationTests(() => {
   for (const restore of restores.splice(0)) {
     restore();
   }

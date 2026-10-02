@@ -1,8 +1,50 @@
-import { afterEach, beforeAll, beforeEach, spyOn } from "bun:test";
+import { afterEach, beforeAll, beforeEach, spyOn, test as bunTest } from "bun:test";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { logger, LogLevel } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+/** Warm the exact fake-driven scenarios outside Bun's per-test timing budget. */
+export function cancellationTests(reset: () => void) {
+  type Scenario = () => void | Promise<unknown>;
+  const scenarios: Scenario[] = [];
+  beforeAll(async () => {
+    const previousLevel = logger.getLogLevel();
+    logger.setLogLevel(LogLevel.NONE);
+    try {
+      reset();
+      for (const scenario of scenarios) {
+        try {
+          await scenario();
+        } catch {
+          // Warm-up failures are deliberately ignored: the same callback and every
+          // assertion run again as a real test, where failures must surface normally.
+        } finally {
+          reset();
+        }
+      }
+    } finally {
+      logger.setLogLevel(previousLevel);
+    }
+  });
+  // Reuse the suite's teardown between warm-ups and after every measured test.
+  afterEach(reset);
+
+  function test(name: string, scenario: Scenario, timeout?: number) {
+    scenarios.push(scenario);
+    bunTest(name, scenario, timeout);
+  }
+  // These suites use single-value tables; let Bun retain its test-name formatting.
+  test.each = <T>(cases: readonly T[]) => {
+    return (name: string, scenario: (value: T) => void | Promise<unknown>, timeout?: number) => {
+      for (const value of cases) {
+        scenarios.push(() => scenario(value));
+      }
+      bunTest.each(cases)(name, scenario, timeout);
+    };
+  };
+  return test;
+}
 
 /** Register once, retaining real handler wiring even when another suite clears the registry. */
 export function cancellationHandlers(names: readonly string[]) {

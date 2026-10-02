@@ -1,5 +1,5 @@
-import { cancellationHandlers } from "../helpers/interactionCancellation";
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { cancellationHandlers, cancellationTests } from "../helpers/interactionCancellation";
+import { expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import type WebSocket from "ws";
 import type { BootedDevice, ObserveResult } from "../../src/models";
@@ -61,7 +61,7 @@ const observation: ObserveResult = {
 const restores: Array<() => void> = [];
 const handler = cancellationHandlers(["keyboard", "openLink", "systemTray", "homeScreen"]);
 
-afterEach(() => {
+const test = cancellationTests(() => {
   for (const restore of restores.splice(0)) {
     restore();
   }

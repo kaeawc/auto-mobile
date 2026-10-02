@@ -1,3 +1,4 @@
+import { isSessionReleasing } from "./sessionReleaseState";
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
@@ -981,6 +982,10 @@ export class DevicePool {
       completeJoinedEmulatorLossRecovery: (id, outcome, state) =>
         this.completeEmulatorLossRecovery(id, outcome, state),
       getSessionForDevice: (id) => this.sessionManager.getSessionForDevice(id),
+      waitForReleasingSession: (sessionId) =>
+        this.sessionManager.getReleasingSession(sessionId)
+          ? this.sessionManager.waitForSessionRelease(sessionId)
+          : undefined,
       getAndroidSessionPreservingRecoveryTarget: (id, expected) =>
         this.getAndroidSessionPreservingRecoveryTarget(id, expected),
       getSessionPreservingRecoveryTarget: (id, expected) =>
@@ -2537,7 +2542,9 @@ export class DevicePool {
     const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
     if (
       !attemptDeviceLossRecovery ||
+      !sessionId ||
       !session ||
+      isSessionReleasing(this.sessionManager, sessionId, session) ||
       !this.isSessionPreservingBinding(device, session)
     ) {
       return false;
@@ -2831,7 +2838,11 @@ export class DevicePool {
       return undefined;
     }
     const session = this.sessionManager.getSession(sessionId);
-    if (!session || !this.isEligibleSessionPreservingRecoveryTarget(device, session)) {
+    if (
+      !session ||
+      isSessionReleasing(this.sessionManager, sessionId, session) ||
+      !this.isEligibleSessionPreservingRecoveryTarget(device, session)
+    ) {
       return undefined;
     }
     return { device, session };

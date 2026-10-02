@@ -1032,7 +1032,13 @@ export class RealObserveScreen implements ObserveScreen {
       throwIfAborted(signal);
 
       const result = this.createBaseResult();
-      const transitionRevision = displayTransitions.revision(this.device.deviceId);
+      const captureStart = {
+        revision: displayTransitions.revision(this.device.deviceId),
+        identityRevision: displayTransitions.identityRevision(this.device.deviceId),
+      };
+      // Only synchronous reconciliation of this observation may advance its
+      // provenance. An intervening transition leaves it stale on either platform.
+      let recordProvenance = captureStart;
       const observedAndroid =
         this.device.platform === "android"
           ? await this.observedAndroidDisplayCache.resolve(this.device, this.adb, signal)
@@ -1172,13 +1178,20 @@ export class RealObserveScreen implements ObserveScreen {
       // before screenshot routing or transition fencing observes this result.
       if (this.device.platform === "ios") {
         result.display = observedIosDisplay(this.device, result.viewHierarchy);
-        if (!observerMode) {
+        if (
+          !observerMode &&
+          displayTransitions.revision(this.device.deviceId) === recordProvenance.revision
+        ) {
           reconcileIosDisplayTransition(
             this.device.deviceId,
             result,
             explicitlyRouted,
             (this.device.displays?.panels.length ?? 0) > 1,
           );
+          recordProvenance = {
+            revision: displayTransitions.revision(this.device.deviceId),
+            identityRevision: displayTransitions.identityRevision(this.device.deviceId),
+          };
         }
         const panel = resolveTargetDisplay(this.device.displays, displayRequest, {
           focusedPanelKey: result.display.key,
@@ -1245,8 +1258,16 @@ export class RealObserveScreen implements ObserveScreen {
             posture: result.display.posture,
           });
         result.display = { ...result.display, key: panel.key, role: panel.role };
-        if (!explicitlyRouted && !observerMode) {
+        if (
+          !explicitlyRouted &&
+          !observerMode &&
+          displayTransitions.revision(this.device.deviceId) === recordProvenance.revision
+        ) {
           displayTransitions.checkIdentity(this.device.deviceId, result.display);
+          recordProvenance = {
+            revision: displayTransitions.revision(this.device.deviceId),
+            identityRevision: displayTransitions.identityRevision(this.device.deviceId),
+          };
         }
       }
       const panels = this.device.displays?.panels;
@@ -1409,6 +1430,8 @@ export class RealObserveScreen implements ObserveScreen {
       if (observerMode && result.freshness.unavailableDetail) {
         result.freshness.warning += ` ${result.freshness.unavailableDetail}`;
       }
+      const staleDisplay =
+        displayTransitions.revision(this.device.deviceId) !== recordProvenance.revision;
       const geometryTransition =
         !observerMode &&
         !explicitlyRouted &&
@@ -1418,17 +1441,22 @@ export class RealObserveScreen implements ObserveScreen {
           this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
             ? "ios"
             : "android",
+          recordProvenance,
         );
-      // Canonical host-side generation, read after record; routed/observer reads never bump it.
-      result.display.generation = displayTransitions.identityRevision(this.device.deviceId);
-      result.displayRevision = displayTransitions.revision(this.device.deviceId);
+      // Stale coordinates retain their capture-start fence, never the active panel's generation.
+      result.display.generation = staleDisplay
+        ? captureStart.identityRevision
+        : displayTransitions.identityRevision(this.device.deviceId);
+      result.displayRevision = staleDisplay
+        ? captureStart.revision
+        : displayTransitions.revision(this.device.deviceId);
       if (geometryTransition) {
         cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
       }
       if (
         this.device.platform === "android" &&
         (geometryTransition ||
-          displayTransitions.revision(this.device.deviceId) !== transitionRevision)
+          displayTransitions.revision(this.device.deviceId) !== captureStart.revision)
       ) {
         // The ordinary lock sample may precede a fold discovered by the final hierarchy.
         delete result.deviceLock;
@@ -1440,7 +1468,12 @@ export class RealObserveScreen implements ObserveScreen {
       }
 
       // Polls defer their cache write until ObservePoll selects the returned result.
-      if (!observerMode && !options?.skipCache && !options?.skipRecompositionTracking) {
+      if (
+        !staleDisplay &&
+        !observerMode &&
+        !options?.skipCache &&
+        !options?.skipRecompositionTracking
+      ) {
         await perf.track("cacheResult", () =>
           getObserveCacheStore().put(this.device.deviceId, result, cacheGeneration),
         );
@@ -1752,6 +1785,12 @@ export class RealObserveScreen implements ObserveScreen {
     generation?: number,
     cachedAt?: number,
   ): Promise<void> {
+    if (
+      observeResult.displayRevision !== undefined &&
+      observeResult.displayRevision !== displayTransitions.revision(this.device.deviceId)
+    ) {
+      return;
+    }
     const cacheStore = getObserveCacheStore();
     const resolvedCachedAt = cachedAt ?? this.timer.now();
     const currentResult = cacheStore.getRecentInMemoryForDevice(this.device.deviceId);

@@ -48,6 +48,12 @@ export interface DisplayTransitionSink {
   notifyAndroidTransition(deviceId: string, event: PushedDisplayTransition): void;
 }
 
+/** Tracker provenance captured before asynchronous observation work starts. */
+export interface DisplayCaptureStart {
+  revision: number;
+  identityRevision: number;
+}
+
 function samePanelAndGeometry(
   current: PanelGeometry,
   previous: PanelGeometry,
@@ -68,7 +74,10 @@ function pushedPanelKey(event: PushedDisplayTransition): string | undefined {
     : event.panelUniqueId;
 }
 
-function samePushedPanel(event: PushedDisplayTransition, previous: PanelGeometry): boolean {
+function samePushedPanel(
+  event: PushedDisplayTransition,
+  previous: Pick<PanelGeometry, "key" | "width" | "height">,
+): boolean {
   const key = pushedPanelKey(event);
   return (
     (!key || key === previous.key) &&
@@ -86,7 +95,14 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
   private readonly revisions = new Map<string, number>();
   private readonly identityRevisions = new Map<string, number>();
   private readonly lastIdentityChangeRevisions = new Map<string, number>();
-  private readonly pendingPushes = new Map<string, number>();
+  private readonly pendingPushes = new Map<
+    string,
+    {
+      revision: number;
+      deviceState?: number;
+      panel?: Pick<PanelGeometry, "key" | "width" | "height">;
+    }
+  >();
   private readonly deviceStates = new Map<string, number>();
   private readonly listeners = new Map<
     string,
@@ -118,11 +134,15 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
 
   /** Most recent accepted observation stamp, unless a push has fenced it. */
   observedPanel(deviceId: string): Pick<DisplayRef, "key" | "role"> | undefined {
-    if (this.pendingPushes.get(deviceId) === this.revision(deviceId)) {
+    if (this.hasPendingPush(deviceId)) {
       return undefined;
     }
     const panel = this.panels.get(deviceId);
     return panel ? { key: panel.key, role: panel.role } : undefined;
+  }
+
+  private hasPendingPush(deviceId: string): boolean {
+    return this.pendingPushes.get(deviceId)?.revision === this.revision(deviceId);
   }
 
   /** A panel accepted by an observation after the latest transition fence. */
@@ -200,7 +220,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     if (!previous || samePanelIdentity(display, previous)) {
       return false;
     }
-    if (this.pendingPushes.get(deviceId) === this.revision(deviceId)) {
+    if (this.hasPendingPush(deviceId)) {
       return false;
     }
     this.panels.delete(deviceId);
@@ -227,10 +247,18 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     result: Pick<ObserveResult, "display" | "screenSize"> &
       Partial<Pick<ObserveResult, "observationId">>,
     platform: "ios" | "android" = "android",
+    captureStart: DisplayCaptureStart = {
+      revision: this.revision(deviceId),
+      identityRevision: this.identityRevision(deviceId),
+    },
   ): boolean {
-    // The first completed observation after a push consumes its fence, even if
+    // A pre-transition capture cannot reconcile the new panel or consume its fence.
+    if (captureStart.revision !== this.revision(deviceId)) {
+      return false;
+    }
+    // The first fresh observation after a push consumes its fence, even if
     // the stamp is unchanged or the observation has no usable geometry.
-    const pushedRevision = this.pendingPushes.get(deviceId);
+    const pushedFence = this.hasPendingPush(deviceId);
     this.pendingPushes.delete(deviceId);
     const { width, height } = result.screenSize;
     if (width <= 0 || height <= 0) {
@@ -244,23 +272,15 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
       height,
     };
     const previous = this.panels.get(deviceId);
-    const sameObservation =
-      result.observationId !== undefined &&
-      this.observationIds.get(deviceId) === result.observationId;
-    this.panels.set(deviceId, current);
-    if (result.observationId) {
-      this.observationIds.set(deviceId, result.observationId);
-    } else {
-      this.observationIds.delete(deviceId);
-    }
-    this.panelRevisions.set(deviceId, this.revision(deviceId));
-    const unchanged =
-      previous !== undefined && samePanelAndGeometry(current, previous, platform === "ios");
-    if (pushedRevision === this.revision(deviceId)) {
+    const sameObservation = this.recordPanel(deviceId, current, result.observationId);
+    if (pushedFence) {
       this.emitPanel(deviceId, current);
       return false;
     }
-    if (!previous || unchanged) {
+    if (!previous) {
+      return false;
+    }
+    if (samePanelAndGeometry(current, previous, platform === "ios")) {
       return false;
     }
     this.notifyObservedTransition(deviceId, current, previous, platform, sameObservation);
@@ -269,6 +289,19 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
       this.emitPanel(deviceId, current);
     }
     return true;
+  }
+
+  private recordPanel(deviceId: string, panel: PanelGeometry, observationId?: string): boolean {
+    const sameObservation =
+      observationId !== undefined && this.observationIds.get(deviceId) === observationId;
+    this.panels.set(deviceId, panel);
+    if (observationId) {
+      this.observationIds.set(deviceId, observationId);
+    } else {
+      this.observationIds.delete(deviceId);
+    }
+    this.panelRevisions.set(deviceId, this.revision(deviceId));
+    return sameObservation;
   }
 
   private notifyObservedTransition(
@@ -308,7 +341,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     if (event.change !== "device_state" && event.displayId !== 0) {
       return;
     }
-    const previous = this.panels.get(deviceId);
+    const previous = this.panelBeforePush(deviceId);
     if (event.change === "device_state") {
       if (
         event.deviceState === undefined ||
@@ -322,13 +355,62 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
         return;
       }
     }
-    if (this.pendingPushes.get(deviceId) === this.revision(deviceId)) {
+    if (this.reconcilePendingPush(deviceId, event)) {
       return;
     }
     this.notifyTransition(deviceId, `CtrlProxy ${event.change}`);
     const key = pushedPanelKey(event);
     this.emitPanel(deviceId, key ? { key, role: "unknown" } : undefined);
-    this.pendingPushes.set(deviceId, this.revision(deviceId));
+    this.pendingPushes.set(deviceId, {
+      revision: this.revision(deviceId),
+      deviceState: event.deviceState,
+      panel: this.panelFromPush(deviceId, event),
+    });
+  }
+
+  private panelBeforePush(
+    deviceId: string,
+  ): Pick<PanelGeometry, "key" | "width" | "height"> | undefined {
+    if (!this.hasPendingPush(deviceId)) {
+      return this.panels.get(deviceId);
+    }
+    return this.pendingPushes.get(deviceId)?.panel ?? this.panels.get(deviceId);
+  }
+
+  private panelFromPush(
+    deviceId: string,
+    event: PushedDisplayTransition,
+  ): Pick<PanelGeometry, "key" | "width" | "height"> | undefined {
+    const key = pushedPanelKey(event);
+    if (!key) {
+      return undefined;
+    }
+    const previous = this.panelBeforePush(deviceId);
+    return {
+      key,
+      width: event.width ?? previous?.width ?? 0,
+      height: event.height ?? previous?.height ?? 0,
+    };
+  }
+
+  private reconcilePendingPush(deviceId: string, event: PushedDisplayTransition): boolean {
+    const pending = this.pendingPushes.get(deviceId);
+    if (pending?.revision !== this.revision(deviceId)) {
+      return false;
+    }
+    if (event.change === "changed") {
+      const corroboratesState = pending.panel === undefined;
+      pending.panel = this.panelFromPush(deviceId, event);
+      return corroboratesState;
+    }
+    if (event.change !== "device_state") {
+      return true;
+    }
+    // The first state callback can corroborate a display callback for the same
+    // fold. A subsequent distinct state is another transition, not a duplicate.
+    const corroboratesDisplay = pending.deviceState === undefined;
+    pending.deviceState = event.deviceState;
+    return corroboratesDisplay;
   }
 
   reset(deviceId: string): void {

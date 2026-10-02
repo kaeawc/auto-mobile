@@ -9,6 +9,7 @@ import {
 } from "../../../src/features/observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { SafeAreaAuditor } from "../../../src/features/observe/audits/SafeAreaAuditor";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
@@ -108,21 +109,215 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
     });
   };
   panel("inner");
+  const cache = new FakeObserveCacheStore(timer);
   const screen = new RealObserveScreen(
     device,
     adbFactory,
     {
       viewHierarchy: hierarchy,
       hierarchyCapture: new FakeHierarchyCapture(() => hierarchy.getViewHierarchy(), platform),
-      cacheStore: new FakeObserveCacheStore(timer),
+      cacheStore: cache,
       // Explicit fake: no notifyutil/simulator operation, including the setPosture UDID test.
       iosLockStateProbe: { read: async () => undefined },
     },
     timer,
     ids,
   );
-  return { device, timer, adb, adbFactory, hierarchy, ids, client, panel, screen };
+  return { device, timer, adb, adbFactory, hierarchy, ids, client, panel, screen, cache };
 }
+
+test("a push after panel A capture preserves the stale generation and fences the next panel B observe", async () => {
+  const h = harness();
+  const cacheOptions = { ...options, skipRecompositionTracking: false };
+  const first = await h.screen.execute(cacheOptions);
+  const events: Array<{ key: string; role: DisplayRef["role"] } | undefined> = [];
+  restores.push(displayTransitions.subscribe(h.device.deviceId, (panel) => events.push(panel)));
+  const inspect = SafeAreaAuditor.prototype.inspect;
+  const audit = spyOn(SafeAreaAuditor.prototype, "inspect").mockImplementationOnce((result) => {
+    displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:cover",
+      width: 100,
+      height: 150,
+    });
+    return inspect.call(SafeAreaAuditor.prototype, result);
+  });
+  restores.push(() => audit.mockRestore());
+  const stale = await h.screen.execute(cacheOptions);
+  expect(stale.display.key).toBe("inner");
+  expect(stale.display.generation).toBe(first.display.generation);
+  expect(stale.displayRevision).toBe(first.displayRevision);
+  expect(displayTransitions.identityRevision(h.device.deviceId)).toBe(first.display.generation + 1);
+  expect(displayTransitions.observedPanel(h.device.deviceId)).toBeUndefined();
+  expect(displayTransitions.currentObservedPanel(h.device.deviceId)).toBeUndefined();
+  expect(events).toEqual([{ key: "cover", role: "unknown" }]);
+  expect(h.cache.getRecentInMemoryForDevice(h.device.deviceId)).toBeUndefined();
+  // A deferred poll must reject stale coordinates even with the current cache token.
+  await h.screen.cacheObserveResult(stale, h.cache.currentGeneration(h.device.deviceId));
+  expect(h.cache.getRecentInMemoryForDevice(h.device.deviceId)).toBeUndefined();
+  h.panel("cover");
+  const fresh = await h.screen.execute(cacheOptions);
+  expect(fresh.display).toMatchObject({ key: "cover", generation: first.display.generation + 1 });
+  expect(fresh.displayRevision).toBe(first.displayRevision! + 1);
+  expect(displayTransitions.currentObservedPanel(h.device.deviceId)).toEqual({
+    key: "cover",
+    role: "cover",
+  });
+  expect(h.cache.getRecentInMemoryForDevice(h.device.deviceId)).toBe(fresh);
+  expect((await h.screen.execute(cacheOptions)).display.generation).toBe(fresh.display.generation);
+});
+
+for (const platform of ["android", "ios"] as const) {
+  for (const timing of ["during capture", "after reconciliation"] as const) {
+    test(`${platform} rejects an intervening observation transition ${timing}`, async () => {
+      const h = harness(platform);
+      const first = await h.screen.execute(options);
+      const transition = () => {
+        displayTransitions.record(
+          h.device.deviceId,
+          {
+            observationId: "intervening-observation",
+            display: { key: "cover", role: "cover", posture: "closed", generation: 0 },
+            screenSize: { width: 100, height: 150 },
+          },
+          platform,
+        );
+      };
+      if (timing === "during capture") {
+        const read = h.hierarchy.getViewHierarchy.bind(h.hierarchy);
+        const capture = spyOn(h.hierarchy, "getViewHierarchy").mockImplementationOnce(async () => {
+          const hierarchy = await read();
+          transition();
+          return hierarchy;
+        });
+        restores.push(() => capture.mockRestore());
+      } else {
+        const inspect = SafeAreaAuditor.prototype.inspect;
+        const audit = spyOn(SafeAreaAuditor.prototype, "inspect").mockImplementationOnce(
+          (result) => {
+            transition();
+            return inspect.call(SafeAreaAuditor.prototype, result);
+          },
+        );
+        restores.push(() => audit.mockRestore());
+      }
+      const stale = await h.screen.execute(options);
+      expect(stale.display.generation).toBe(first.display.generation);
+      expect(stale.displayRevision).toBe(first.displayRevision);
+      expect(displayTransitions.identityRevision(h.device.deviceId)).toBe(
+        first.display.generation + 1,
+      );
+      expect(displayTransitions.currentObservedPanel(h.device.deviceId)).toEqual({
+        key: "cover",
+        role: "cover",
+      });
+      h.panel("cover");
+      expect((await h.screen.execute(options)).display.generation).toBe(
+        first.display.generation + 1,
+      );
+    });
+  }
+}
+
+test("a stale tracker record leaves the pushed fence and accepted observation untouched", () => {
+  const tracker = new DisplayTransitionTracker(() => {});
+  const id = "stale-tracker-record";
+  const inner = {
+    observationId: "accepted",
+    display: { key: "inner", role: "inner" as const, posture: "opened" as const, generation: 0 },
+    screenSize: { width: 200, height: 300 },
+  };
+  tracker.record(id, inner);
+  const captureStart = {
+    revision: tracker.revision(id),
+    identityRevision: tracker.identityRevision(id),
+  };
+  tracker.notifyAndroidTransition(id, { change: "device_state", displayId: 0, deviceState: 1 });
+  const events: Array<unknown> = [];
+  tracker.subscribe(id, (panel) => events.push(panel));
+  expect(
+    tracker.record(
+      id,
+      { ...inner, observationId: "stale", screenSize: { width: 210, height: 310 } },
+      "android",
+      captureStart,
+    ),
+  ).toBe(false);
+  expect(tracker.observedPanel(id)).toBeUndefined();
+  expect(tracker.geometryChanged(id, inner.screenSize)).toBe(false);
+  expect(events).toEqual([]);
+  const cover = {
+    display: { key: "cover", role: "cover" as const, posture: "closed" as const, generation: 1 },
+    screenSize: { width: 100, height: 150 },
+  };
+  expect(
+    tracker.record(id, cover, "android", {
+      revision: tracker.revision(id),
+      identityRevision: tracker.identityRevision(id),
+    }),
+  ).toBe(false);
+  expect(tracker.identityRevision(id)).toBe(captureStart.identityRevision + 1);
+  expect(tracker.currentObservedPanel(id)).toEqual({ key: "cover", role: "cover" });
+});
+
+test("two distinct pushed transitions between observations advance generation twice", async () => {
+  const h = harness();
+  const first = await h.screen.execute(options);
+  displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+    change: "device_state",
+    displayId: 0,
+    deviceState: 1,
+  });
+  displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+    change: "device_state",
+    displayId: 0,
+    deviceState: 5,
+  });
+  displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+    change: "device_state",
+    displayId: 0,
+    deviceState: 5,
+  });
+  expect(displayTransitions.identityRevision(h.device.deviceId)).toBe(first.display.generation + 2);
+  expect((await h.screen.execute(options)).display.generation).toBe(first.display.generation + 2);
+});
+
+test("display and state callbacks for one fold still count once before a fresh observation", async () => {
+  const h = harness();
+  const first = await h.screen.execute(options);
+  displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+    change: "changed",
+    displayId: 0,
+    panelUniqueId: "local:cover",
+    width: 100,
+    height: 150,
+  });
+  displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+    change: "device_state",
+    displayId: 0,
+    deviceState: 5,
+  });
+  expect(displayTransitions.identityRevision(h.device.deviceId)).toBe(first.display.generation + 1);
+  h.panel("cover");
+  expect((await h.screen.execute(options)).display.generation).toBe(first.display.generation + 1);
+});
+
+test("two physical-panel pushes before the next observation count both sides of a round trip", async () => {
+  const h = harness();
+  const first = await h.screen.execute(options);
+  for (const key of ["cover", "cover", "inner"] as const) {
+    displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: `local:${key}`,
+      width: key === "inner" ? 200 : 100,
+      height: key === "inner" ? 300 : 150,
+    });
+  }
+  expect(displayTransitions.identityRevision(h.device.deviceId)).toBe(first.display.generation + 2);
+  expect((await h.screen.execute(options)).display.generation).toBe(first.display.generation + 2);
+});
 
 test("fold increments surfaced generation once, unchanged observe keeps it, unfold increments again", async () => {
   const h = harness();

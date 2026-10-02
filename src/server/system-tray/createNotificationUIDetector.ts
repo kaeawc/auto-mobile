@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, BootedDevice } from "../../models";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import type {
@@ -28,10 +29,20 @@ export function createNotificationUIDetector(
 ): NotificationUIDetector {
   if (device.platform === "ios") {
     const deps: IosNotificationUIDetectorDeps = {
-      requestSwipe: (x1, y1, x2, y2, duration) =>
-        getIosClient(device, getDependencies).requestSwipe(x1, y1, x2, y2, duration),
-      requestTapCoordinates: (x, y) =>
-        getIosClient(device, getDependencies).requestTapCoordinates(x, y),
+      requestSwipe: (x1, y1, x2, y2, duration) => {
+        throwIfAborted(signal);
+        return awaitWhileRequestIsLive(
+          getIosClient(device, getDependencies).requestSwipe(x1, y1, x2, y2, duration),
+          signal,
+        );
+      },
+      requestTapCoordinates: (x, y) => {
+        throwIfAborted(signal);
+        return awaitWhileRequestIsLive(
+          getIosClient(device, getDependencies).requestTapCoordinates(x, y),
+          signal,
+        );
+      },
       now: () => getDependencies().timer.now(),
     };
     return new IosNotificationUIDetector(device, deps);
@@ -39,7 +50,7 @@ export function createNotificationUIDetector(
 
   const deps: AndroidNotificationUIDetectorDeps = {
     executeAdbCommand: (command) => {
-      signal?.throwIfAborted();
+      throwIfAborted(signal);
       return getAdb(device, getDependencies).executeCommand(
         command,
         undefined,
@@ -48,7 +59,13 @@ export function createNotificationUIDetector(
         signal,
       );
     },
-    getDeviceTimestampMs: () => getAdb(device, getDependencies).getDeviceTimestampMs(),
+    getDeviceTimestampMs: () => {
+      throwIfAborted(signal);
+      return awaitWhileRequestIsLive(
+        getAdb(device, getDependencies).getDeviceTimestampMs(),
+        signal,
+      );
+    },
   };
   return new AndroidNotificationUIDetector(device, deps);
 }

@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -133,8 +134,9 @@ export class Keyboard {
   }
 
   async execute(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult> {
+    throwIfAborted(signal);
     if (this.device.platform === "ios") {
-      return this.executeIOS(action);
+      return this.executeIOS(action, signal);
     }
 
     switch (action) {
@@ -157,11 +159,13 @@ export class Keyboard {
     }
   }
 
-  private async executeIOS(action: KeyboardAction): Promise<KeyboardResult> {
+  private async executeIOS(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestKeyboard(action);
+    throwIfAborted(signal);
+    const result = await awaitWhileRequestIsLive(client.requestKeyboard(action), signal);
+    throwIfAborted(signal);
     if (!result.success) {
-      return this.iosFailure(action, result, client);
+      return this.iosFailure(action, result, client, signal);
     }
 
     const success =
@@ -182,11 +186,12 @@ export class Keyboard {
     action: KeyboardAction,
     result: CtrlProxyKeyboardResult,
     client: IOSCtrlProxyClient,
+    signal?: AbortSignal,
   ): Promise<KeyboardResult> {
     if (
       action === "close" &&
       /^Keyboard timed out after \d+ms$/.test(result.error ?? "") &&
-      (await this.confirmIOSCloseAfterTimeout(client))
+      (await this.confirmIOSCloseAfterTimeout(client, signal))
     ) {
       return {
         success: true,
@@ -204,15 +209,23 @@ export class Keyboard {
     };
   }
 
-  private async confirmIOSCloseAfterTimeout(client: IOSCtrlProxyClient): Promise<boolean> {
+  private async confirmIOSCloseAfterTimeout(
+    client: IOSCtrlProxyClient,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     try {
-      const detected = await raceWithDeadline(client.requestKeyboard("detect", 2000), {
-        timer: this.timer,
-        timeoutMs: 2000,
-        label: "Keyboard close follow-up detect",
-      });
+      throwIfAborted(signal);
+      const detected = await awaitWhileRequestIsLive(
+        raceWithDeadline(client.requestKeyboard("detect", 2000), {
+          timer: this.timer,
+          timeoutMs: 2000,
+          label: "Keyboard close follow-up detect",
+        }),
+        signal,
+      );
       return detected.success && !detected.open;
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`Keyboard close timeout follow-up detect failed: ${String(error)}`, error);
       return false;
     }
@@ -346,11 +359,15 @@ export class Keyboard {
       };
     }
 
-    await this.adb.executeCommand(
-      "shell input keyevent KEYCODE_BACK",
-      undefined,
-      undefined,
-      undefined,
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.adb.executeCommand(
+        "shell input keyevent KEYCODE_BACK",
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      ),
       signal,
     );
 
@@ -389,12 +406,17 @@ export class Keyboard {
     let lastState = await this.readKeyboardStateBefore(deadline, signal);
     while (lastState.error || lastState.open !== expectedOpen) {
       const remainingMs = deadline - this.timer.now();
-      if (signal?.aborted || remainingMs <= 0) {
+      throwIfAborted(signal);
+      if (remainingMs <= 0) {
         break;
       }
 
-      await this.timer.sleep(Math.min(Keyboard.STATE_CONFIRMATION_POLL_INTERVAL_MS, remainingMs));
-      if (signal?.aborted || this.timer.now() >= deadline) {
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(Math.min(Keyboard.STATE_CONFIRMATION_POLL_INTERVAL_MS, remainingMs)),
+        signal,
+      );
+      throwIfAborted(signal);
+      if (this.timer.now() >= deadline) {
         break;
       }
 
@@ -424,7 +446,12 @@ export class Keyboard {
     signal?: AbortSignal,
     options?: KeyboardHierarchyReadOptions,
   ): Promise<{ hierarchy: ViewHierarchyResult | null; state: KeyboardDetection }> {
-    const hierarchy = await this.hierarchyProvider.getViewHierarchy(signal, options);
+    throwIfAborted(signal);
+    const hierarchy = await awaitWhileRequestIsLive(
+      this.hierarchyProvider.getViewHierarchy(signal, options),
+      signal,
+    );
+    throwIfAborted(signal);
     return { hierarchy, state: this.resolveKeyboardState(hierarchy) };
   }
 
@@ -541,11 +568,9 @@ export class Keyboard {
     const center = this.geometry.getElementCenter(element);
     const x = Math.round(center.x);
     const y = Math.round(center.y);
-    await this.adb.executeCommand(
-      `shell input tap ${x} ${y}`,
-      undefined,
-      undefined,
-      undefined,
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal),
       signal,
     );
   }

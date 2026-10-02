@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
 import { SearchableHierarchy } from "../features/utility/SearchableNode";
 /**
  * System tray helper functions for notification handling.
@@ -259,15 +260,19 @@ interface SystemTrayElementMatch {
 
 type NormalizedSearchText = { text: string; normalized: string };
 
-const getDetector = (device: BootedDevice): NotificationUIDetector => {
-  return createNotificationUIDetector(device, getSystemTrayDependencies);
+const getDetector = (device: BootedDevice, signal?: AbortSignal): NotificationUIDetector => {
+  throwIfAborted(signal);
+  return createNotificationUIDetector(device, getSystemTrayDependencies, signal);
 };
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-const sleep = (ms: number) => getSystemTrayDependencies().timer.sleep(ms);
+const sleep = (ms: number, signal?: AbortSignal) => {
+  throwIfAborted(signal);
+  return awaitWhileRequestIsLive(getSystemTrayDependencies().timer.sleep(ms), signal);
+};
 
 export const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => {
   const resolvedAwaitTimeout = awaitTimeout ?? DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS;
@@ -285,15 +290,20 @@ const observeSystemTray = (
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
   signal?: AbortSignal,
-): Promise<ObserveResult> =>
-  observeScreen.execute({
-    skipWaitForFresh: false,
-    minTimestamp,
-    skipScreenshot: true,
-    skipAccessibilityAudit: true,
-    skipPerformanceAudit: true,
+): Promise<ObserveResult> => {
+  throwIfAborted(signal);
+  return awaitWhileRequestIsLive(
+    observeScreen.execute({
+      skipWaitForFresh: false,
+      minTimestamp,
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+      skipPerformanceAudit: true,
+      signal,
+    }),
     signal,
-  });
+  );
+};
 
 export const observeSystemTrayAfterTap = async (
   device: BootedDevice,
@@ -343,7 +353,9 @@ export const observeSystemTrayAfterTap = async (
 export const captureSystemTrayTerminalEvidence = async (
   device: BootedDevice,
   observation: ObserveResult | undefined,
+  signal?: AbortSignal,
 ): Promise<void> => {
+  throwIfAborted(signal);
   if (!observation) {
     return;
   }
@@ -355,17 +367,25 @@ export const captureSystemTrayTerminalEvidence = async (
     serverConfig.isAccessibilityAuditEnabled() ||
     (getDeviceDataStreamServer()?.hasSubscriberForDevice(device.deviceId) ?? false);
   if (shouldCaptureScreenshot) {
-    await observeScreen.captureScreenshot?.(undefined, undefined, observation);
+    await awaitWhileRequestIsLive(
+      Promise.resolve(observeScreen.captureScreenshot?.(undefined, signal, observation)),
+      signal,
+    );
     return;
   }
-  await observeScreen.runAccessibilityAudit?.(observation);
+  await awaitWhileRequestIsLive(
+    Promise.resolve(observeScreen.runAccessibilityAudit?.(observation)),
+    signal,
+  );
 };
 
 const expandSystemTray = async (
   detector: NotificationUIDetector,
   observation?: ObserveResult,
+  signal?: AbortSignal,
 ): Promise<void> => {
-  await detector.expandTray(observation);
+  throwIfAborted(signal);
+  await awaitWhileRequestIsLive(detector.expandTray(observation), signal);
 };
 
 // Re-expand the shade while waiting for a notification, swallowing failures: a
@@ -374,10 +394,13 @@ const expandSystemTray = async (
 const reexpandSystemTrayBestEffort = async (
   detector: NotificationUIDetector,
   observation?: ObserveResult,
+  signal?: AbortSignal,
 ): Promise<void> => {
+  throwIfAborted(signal);
   try {
-    await expandSystemTray(detector, observation);
+    await expandSystemTray(detector, observation, signal);
   } catch (error) {
+    throwIfAborted(signal);
     logger.debug(`[systemTray] re-expand while waiting for notification failed: ${error}`);
   }
 };
@@ -385,8 +408,10 @@ const reexpandSystemTrayBestEffort = async (
 const collapseSystemTray = async (
   detector: NotificationUIDetector,
   observation?: ObserveResult,
+  signal?: AbortSignal,
 ): Promise<void> => {
-  await detector.collapseTray(observation);
+  throwIfAborted(signal);
+  await awaitWhileRequestIsLive(detector.collapseTray(observation), signal);
 };
 
 const parseAppLabelFromDumpsys = (stdout: string): string | null => {
@@ -429,7 +454,7 @@ export const resolveAppLabel = async (
   appId: string,
   signal?: AbortSignal,
 ): Promise<string | null> => {
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   if (device.platform !== "android") {
     return null;
   }
@@ -439,14 +464,18 @@ export const resolveAppLabel = async (
   // WebSocket call rather than a multi-KB ADB roundtrip.
   try {
     const a11y = AndroidCtrlProxyClient.getInstance(device);
-    const info = await a11y.requestPackageInfo(appId, { includePermissions: false }, 3000);
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
+    const info = await awaitWhileRequestIsLive(
+      a11y.requestPackageInfo(appId, { includePermissions: false }, 3000),
+      signal,
+    );
+    throwIfAborted(signal);
     if (info.success && info.applicationLabel) {
       return info.applicationLabel;
     }
   } catch (error) {
     // CtrlProxy package info is a fast path; dumpsys below is the fallback.
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     logger.debug(`CtrlProxy app label lookup failed for ${appId}: ${error}`, error);
   }
 
@@ -465,7 +494,7 @@ export const resolveAppLabel = async (
     // Both the CtrlProxy fast path and this dumpsys fallback failed (e.g. app
     // uninstalled mid-check); null lets the caller fall back to the package name.
     logger.debug(`src/server/systemTrayHelpers.ts dumpsys label lookup failed: ${error}`, error);
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     return null;
   }
 };
@@ -657,6 +686,7 @@ const findExpandButtonInGroup = (groupNode: ViewHierarchyNode): Element | null =
 export const expandNotificationGroup = async (
   device: BootedDevice,
   match: SystemTrayNotificationMatch,
+  signal?: AbortSignal,
 ): Promise<boolean> => {
   const groupNode = match.candidate.groupNode;
   if (!groupNode) {
@@ -675,7 +705,7 @@ export const expandNotificationGroup = async (
     `[systemTray] Expanding collapsed notification group ` +
       `(tap ${expandButton.bounds?.left},${expandButton.bounds?.top})`,
   );
-  await tapElement(device, expandButton);
+  await tapElement(device, expandButton, signal);
   return true;
 };
 
@@ -1448,16 +1478,16 @@ const waitForSystemTrayOpen = async (
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   let observation = await observeSystemTray(observeScreen, minTimestamp, signal);
 
   while (timer.now() - startTime < awaitTimeoutMs) {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     if (detector.isTrayOpen(observation.viewHierarchy)) {
       return observation;
     }
-    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    signal?.throwIfAborted();
+    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS, signal);
+    throwIfAborted(signal);
     observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   }
 
@@ -1469,17 +1499,18 @@ const waitForSystemTrayClosed = async (
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
   awaitTimeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeSystemTray(observeScreen, minTimestamp);
+  let observation = await observeSystemTray(observeScreen, minTimestamp, signal);
 
   while (timer.now() - startTime < awaitTimeoutMs) {
     if (!detector.isTrayOpen(observation.viewHierarchy)) {
       return observation;
     }
-    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeSystemTray(observeScreen, minTimestamp);
+    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS, signal);
+    observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   }
 
   return observation;
@@ -1489,6 +1520,7 @@ export const ensureSystemTrayOpen = async (
   device: BootedDevice,
   awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
   _progress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{
   observation?: ObserveResult;
   opened: boolean;
@@ -1496,23 +1528,24 @@ export const ensureSystemTrayOpen = async (
   minTimestamp: number;
 }> => {
   const { observeScreenFactory } = getSystemTrayDependencies();
-  const detector = getDetector(device);
+  const detector = getDetector(device, signal);
   const observeScreen = observeScreenFactory(device);
 
-  let minTimestamp = await detector.getObservationTimestamp();
-  const observation = await observeSystemTray(observeScreen, minTimestamp);
+  let minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
+  const observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   if (detector.isTrayOpen(observation.viewHierarchy)) {
     return { observation, opened: false, skipped: true, minTimestamp };
   }
 
-  await expandSystemTray(detector, observation);
-  minTimestamp = await detector.getObservationTimestamp();
+  await expandSystemTray(detector, observation, signal);
+  minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
 
   const awaitedObservation = await waitForSystemTrayOpen(
     detector,
     observeScreen,
     minTimestamp,
     awaitTimeoutMs,
+    signal,
   );
 
   return {
@@ -1527,6 +1560,7 @@ export const ensureSystemTrayClosed = async (
   device: BootedDevice,
   awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
   _progress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{
   observation?: ObserveResult;
   closed: boolean;
@@ -1534,23 +1568,24 @@ export const ensureSystemTrayClosed = async (
   minTimestamp: number;
 }> => {
   const { observeScreenFactory } = getSystemTrayDependencies();
-  const detector = getDetector(device);
+  const detector = getDetector(device, signal);
   const observeScreen = observeScreenFactory(device);
 
-  let minTimestamp = await detector.getObservationTimestamp();
-  const observation = await observeSystemTray(observeScreen, minTimestamp);
+  let minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
+  const observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   if (!detector.isTrayOpen(observation.viewHierarchy)) {
     return { observation, closed: false, skipped: true, minTimestamp };
   }
 
-  await collapseSystemTray(detector, observation);
-  minTimestamp = await detector.getObservationTimestamp();
+  await collapseSystemTray(detector, observation, signal);
+  minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
 
   const awaitedObservation = await waitForSystemTrayClosed(
     detector,
     observeScreen,
     minTimestamp,
     awaitTimeoutMs,
+    signal,
   );
 
   return {
@@ -1632,24 +1667,26 @@ export const waitForNotificationMatch = async (
   appMatchTexts: string[],
   awaitTimeoutMs: number,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
   const resolvedAwaitTimeoutMs = resolveSystemTrayAwaitTimeout(awaitTimeoutMs);
-  const detector = getDetector(device);
+  const detector = getDetector(device, signal);
   const observeScreen = observeScreenFactory(device);
   const deadlineMs = timer.now() + resolvedAwaitTimeoutMs;
   const remainingMs = Math.max(0, deadlineMs - timer.now());
-  const result = await ensureSystemTrayOpen(device, remainingMs, progress);
+  const result = await ensureSystemTrayOpen(device, remainingMs, progress, signal);
   let observation = result.observation;
   const minTimestamp = result.minTimestamp;
   if (!observation) {
-    observation = await observeSystemTray(observeScreen, minTimestamp);
+    observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   }
 
   let lastInfoDiagSignature = "";
   let lastDebugDiagSignature = "";
   let lastReexpandAtMs = timer.now();
   while (true) {
+    throwIfAborted(signal);
     const viewHierarchy = observation.viewHierarchy;
     if (viewHierarchy && detector.isTrayOpen(viewHierarchy)) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
@@ -1680,7 +1717,7 @@ export const waitForNotificationMatch = async (
       // Re-issue the expand, throttled, so a re-post can't leave the shade shut.
       if (timer.now() - lastReexpandAtMs >= SYSTEM_TRAY_REEXPAND_INTERVAL_MS) {
         lastReexpandAtMs = timer.now();
-        await reexpandSystemTrayBestEffort(detector, observation);
+        await reexpandSystemTrayBestEffort(detector, observation, signal);
       }
       // Diagnostic: the shade is NOT detected as open (no hierarchy, a heads-up
       // overlay, or the expand did not take). If this is all that appears for the
@@ -1699,8 +1736,8 @@ export const waitForNotificationMatch = async (
       return { observation, match: null };
     }
 
-    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeSystemTray(observeScreen, minTimestamp);
+    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS, signal);
+    observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   }
 };
 
@@ -1830,8 +1867,10 @@ export const expandAndRematchIfCollapsed = async (
   appMatchTexts: string[],
   deadlineMs: number,
   progress: ProgressCallback | undefined,
-  result: { observation: ObserveResult; match: SystemTrayNotificationMatch },
+  result: { observation: ObserveResult; match: SystemTrayNotificationMatch; signal?: AbortSignal },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch }> => {
+  const { signal } = result;
+  throwIfAborted(signal);
   let { observation, match } = result;
   const groupNode = match.candidate.groupNode;
   if (!groupNode || isNotificationGroupExpanded(groupNode)) {
@@ -1848,16 +1887,19 @@ export const expandAndRematchIfCollapsed = async (
 
   const groupIdentity = getNotificationGroupIdentity(groupNode);
   const originalRowNode = match.candidate.node;
-  await expandNotificationGroup(device, match);
+  await expandNotificationGroup(device, match, signal);
   // Start the separate settle-and-re-match phase after the tap so tap latency
   // cannot consume the full settle period plus one poll window.
   const expandPhaseDeadlineMs = Math.max(
     deadlineMs,
     timer.now() + EXPAND_GROUP_SETTLE_MS + SYSTEM_TRAY_POLL_INTERVAL_MS,
   );
-  await timer.sleep(
-    Math.min(EXPAND_GROUP_SETTLE_MS, Math.max(0, expandPhaseDeadlineMs - timer.now())),
+  throwIfAborted(signal);
+  await awaitWhileRequestIsLive(
+    timer.sleep(Math.min(EXPAND_GROUP_SETTLE_MS, Math.max(0, expandPhaseDeadlineMs - timer.now()))),
+    signal,
   );
+  throwIfAborted(signal);
   const remainingMs = Math.max(0, expandPhaseDeadlineMs - timer.now());
   if (remainingMs === 0) {
     throw new ActionableError(
@@ -1870,6 +1912,7 @@ export const expandAndRematchIfCollapsed = async (
     appMatchTexts,
     remainingMs,
     progress,
+    signal,
   );
   if (reMatch.match) {
     // A few legacy hierarchies promote a child out of its group after
@@ -2000,12 +2043,22 @@ export const resolveNotificationSwipeElement = (
   return null;
 };
 
-export const tapElement = async (device: BootedDevice, element: Element): Promise<void> => {
-  await getDetector(device).tapElement(element);
+export const tapElement = async (
+  device: BootedDevice,
+  element: Element,
+  signal?: AbortSignal,
+): Promise<void> => {
+  throwIfAborted(signal);
+  await awaitWhileRequestIsLive(getDetector(device, signal).tapElement(element), signal);
 };
 
-export const swipeElement = async (device: BootedDevice, element: Element): Promise<void> => {
-  await getDetector(device).swipeElement(element);
+export const swipeElement = async (
+  device: BootedDevice,
+  element: Element,
+  signal?: AbortSignal,
+): Promise<void> => {
+  throwIfAborted(signal);
+  await awaitWhileRequestIsLive(getDetector(device, signal).swipeElement(element), signal);
 };
 
 /** Which evidence class attributed a listed row to its app (#6875). */

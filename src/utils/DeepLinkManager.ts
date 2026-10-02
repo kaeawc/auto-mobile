@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "./toolUtils";
 import { errorMessage } from "./describeUnknownError";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "./HostCommandExecutor";
 import { logger } from "./logger";
@@ -119,18 +120,20 @@ export interface DeepLinkManager {
 
 /** Injected chooser label and fresh-hierarchy lookups used by paging and fallback matching. */
 export interface ChooserAppMetadata {
-  getLabel(device: BootedDevice, packageName: string): Promise<string | null>;
+  getLabel(device: BootedDevice, packageName: string, signal?: AbortSignal): Promise<string | null>;
   getActivityLabel?(
     device: BootedDevice,
     packageName: string,
     url: string,
     adb: AdbExecutor,
+    signal?: AbortSignal,
   ): Promise<ChooserActivityLabelResult>;
   getFreshHierarchy(
     device: BootedDevice,
     adbFactory: AdbClientFactory,
     minTimestamp: number,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<ViewHierarchyResult>;
 }
 
@@ -207,12 +210,21 @@ export async function resolveChooserActivityLabel(
   adb: AdbExecutor,
   packageName: string,
   url: string,
+  signal?: AbortSignal,
 ): Promise<ChooserActivityLabelResult> {
   // Match OpenURL's VIEW action and data; adding a category would change the
   // query from the intent that `am start -a VIEW -d <url>` actually launched.
   try {
-    const query = await adb.executeCommand(
-      `shell cmd package query-activities -a android.intent.action.VIEW -d ${shellQuote(url)}`,
+    throwIfAborted(signal);
+    const query = await awaitWhileRequestIsLive(
+      adb.executeCommand(
+        `shell cmd package query-activities -a android.intent.action.VIEW -d ${shellQuote(url)}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      ),
+      signal,
     );
     if (query.stderr.trim()) {
       return { kind: "none" };
@@ -229,6 +241,7 @@ export async function resolveChooserActivityLabel(
     }
     return activities[0]?.label ?? { kind: "none" };
   } catch (error) {
+    throwIfAborted(signal);
     // This optional ADB enrichment can be absent on older devices; use the
     // existing application-label lookup when the shell query is unavailable.
     logger.debug(`[DeepLinkManager] Activity-label probe unavailable: ${errorMessage(error)}`);
@@ -237,20 +250,21 @@ export async function resolveChooserActivityLabel(
 }
 
 const defaultChooserAppMetadata: ChooserAppMetadata = {
-  async getLabel(device, packageName) {
+  async getLabel(device, packageName, signal) {
     const { resolveAppLabel } = await import("../server/systemTrayHelpers");
-    return resolveAppLabel(device, packageName);
+    throwIfAborted(signal);
+    return resolveAppLabel(device, packageName, signal);
   },
-  async getActivityLabel(_device, packageName, url, adb) {
-    return resolveChooserActivityLabel(adb, packageName, url);
+  async getActivityLabel(_device, packageName, url, adb, signal) {
+    return resolveChooserActivityLabel(adb, packageName, url, signal);
   },
-  async getFreshHierarchy(device, adbFactory, minTimestamp, timeoutMs) {
+  async getFreshHierarchy(device, adbFactory, minTimestamp, timeoutMs, signal) {
     return new ViewHierarchy(device, adbFactory).getViewHierarchy(
       undefined,
       undefined,
       true,
       minTimestamp,
-      undefined,
+      signal,
       timeoutMs,
     );
   },
@@ -295,6 +309,8 @@ export class DeepLinkManager implements DeepLinkManager {
     appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
     private readonly chooserMetadata?: ChooserAppMetadata,
     private readonly timer: Timer = defaultTimer,
+    // HandleIntentChooser creates a manager per execution; never share a request signal across calls.
+    private readonly chooserSignal?: AbortSignal,
   ) {
     const adb = this.configureAdb(device, adbFactoryOrExecutor);
     this.adbFactory = adb.factory;
@@ -795,6 +811,7 @@ export class DeepLinkManager implements DeepLinkManager {
     customAppPackage?: string,
     url?: string,
   ): Promise<IntentChooserResult> {
+    throwIfAborted(this.chooserSignal);
     let chooserMatch: ChooserMatch | undefined;
     try {
       const detected = this.detectIntentChooser(viewHierarchy);
@@ -836,8 +853,16 @@ export class DeepLinkManager implements DeepLinkManager {
       if (targetElement) {
         // Simulate tap on the target element
         const center = this.geometry.getElementCenter(targetElement);
-        const tapResult = await this.adbUtils.executeCommand(
-          `shell input tap ${center.x} ${center.y}`,
+        throwIfAborted(this.chooserSignal);
+        const tapResult = await awaitWhileRequestIsLive(
+          this.adbUtils.executeCommand(
+            `shell input tap ${center.x} ${center.y}`,
+            undefined,
+            undefined,
+            undefined,
+            this.chooserSignal,
+          ),
+          this.chooserSignal,
         );
 
         // Check if tap command failed
@@ -898,6 +923,7 @@ export class DeepLinkManager implements DeepLinkManager {
         };
       }
     } catch (error) {
+      throwIfAborted(this.chooserSignal);
       logger.error(`[DeepLinkManager] Failed to handle intent chooser: ${error}`);
       return {
         success: false,
@@ -911,7 +937,11 @@ export class DeepLinkManager implements DeepLinkManager {
   private async getChooserTapFreshnessFloor(): Promise<
     { timestampMs: number; floor: number; deviceSeconds: boolean } | undefined
   > {
-    const timestampResult = await this.adbUtils.getDeviceTimestampMsWithSource();
+    throwIfAborted(this.chooserSignal);
+    const timestampResult = await awaitWhileRequestIsLive(
+      this.adbUtils.getDeviceTimestampMsWithSource(undefined, this.chooserSignal),
+      this.chooserSignal,
+    );
     if (timestampResult.source === "host") {
       return undefined;
     }
@@ -941,13 +971,19 @@ export class DeepLinkManager implements DeepLinkManager {
       }
       let observed: ViewHierarchyResult;
       try {
-        observed = await metadata.getFreshHierarchy(
-          this.device!,
-          this.adbFactory,
-          floor,
-          readBudget,
+        throwIfAborted(this.chooserSignal);
+        observed = await awaitWhileRequestIsLive(
+          metadata.getFreshHierarchy(
+            this.device!,
+            this.adbFactory,
+            floor,
+            readBudget,
+            this.chooserSignal,
+          ),
+          this.chooserSignal,
         );
       } catch (error) {
+        throwIfAborted(this.chooserSignal);
         logger.warn(`[DeepLinkManager] Post-tap chooser hierarchy read failed: ${error}`);
         return false;
       }
@@ -971,7 +1007,10 @@ export class DeepLinkManager implements DeepLinkManager {
       floor = deviceSeconds
         ? Math.max(floor, (observed.updatedAt ?? floor - 1) + 1)
         : Math.max(floor, observed.updatedAt ?? floor) + 1;
-      await this.timer.sleep(Math.min(POST_TAP_VERIFY_INTERVAL_MS, remaining));
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(Math.min(POST_TAP_VERIFY_INTERVAL_MS, remaining)),
+        this.chooserSignal,
+      );
     }
   }
 
@@ -1166,6 +1205,7 @@ export class DeepLinkManager implements DeepLinkManager {
         );
         matchingPage = page;
       } catch (error) {
+        throwIfAborted(this.chooserSignal);
         if (!(error instanceof ChooserRowMissingError)) {
           throw error;
         }
@@ -1374,6 +1414,7 @@ export class DeepLinkManager implements DeepLinkManager {
       }
       return { capturedAt: match.capturedAt };
     } catch (error) {
+      throwIfAborted(this.chooserSignal);
       if (!(error instanceof ChooserRowMissingError)) {
         throw error;
       }
@@ -1433,14 +1474,32 @@ export class DeepLinkManager implements DeepLinkManager {
     const lowerY = Math.round(list.bounds.bottom - height / 4);
     const upperY = Math.round(list.bounds.top + height / 4);
     const [fromY, toY] = direction === "up" ? [lowerY, upperY] : [upperY, lowerY];
-    const swipe = await this.adbUtils.executeCommand(
-      `shell input swipe ${centerX} ${fromY} ${centerX} ${toY} 350`,
+    throwIfAborted(this.chooserSignal);
+    const swipe = await awaitWhileRequestIsLive(
+      this.adbUtils.executeCommand(
+        `shell input swipe ${centerX} ${fromY} ${centerX} ${toY} 350`,
+        undefined,
+        undefined,
+        undefined,
+        this.chooserSignal,
+      ),
+      this.chooserSignal,
     );
     if (swipe.stderr?.trim()) {
       throw new Error(`Could not scroll chooser app list: ${swipe.stderr.trim()}`);
     }
     const nextTimestamp = Math.max(hierarchy.updatedAt ?? 0, capturedAt ?? 0) + 1;
-    const fresh = await metadata.getFreshHierarchy(this.device!, this.adbFactory, nextTimestamp);
+    throwIfAborted(this.chooserSignal);
+    const fresh = await awaitWhileRequestIsLive(
+      metadata.getFreshHierarchy(
+        this.device!,
+        this.adbFactory,
+        nextTimestamp,
+        undefined,
+        this.chooserSignal,
+      ),
+      this.chooserSignal,
+    );
     this.validateScrolledChooser(fresh, nextTimestamp, appPackage);
     return JSON.stringify(fresh.hierarchy) === JSON.stringify(hierarchy.hierarchy)
       ? null
@@ -1493,10 +1552,16 @@ export class DeepLinkManager implements DeepLinkManager {
       }
       const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
       const labels = await this.resolveChooserLabels(metadata, appPackage, url);
-      const freshHierarchy = await metadata.getFreshHierarchy(
-        this.device!,
-        this.adbFactory,
-        originalUpdatedAt + 1,
+      throwIfAborted(this.chooserSignal);
+      const freshHierarchy = await awaitWhileRequestIsLive(
+        metadata.getFreshHierarchy(
+          this.device!,
+          this.adbFactory,
+          originalUpdatedAt + 1,
+          undefined,
+          this.chooserSignal,
+        ),
+        this.chooserSignal,
       );
       if (freshHierarchy.updatedAt === undefined || freshHierarchy.updatedAt <= originalUpdatedAt) {
         throw new Error(`Chooser hierarchy did not refresh after resolving ${appPackage}.`);
@@ -1508,6 +1573,7 @@ export class DeepLinkManager implements DeepLinkManager {
         const match = await this.findChooserLabelCandidates(freshHierarchy, appPackage, labels);
         return { ...match, capturedAt: freshHierarchy.updatedAt };
       } catch (error) {
+        throwIfAborted(this.chooserSignal);
         if (error instanceof ChooserRowMissingError) {
           error.capturedAt = freshHierarchy.updatedAt;
         }
@@ -1533,6 +1599,7 @@ export class DeepLinkManager implements DeepLinkManager {
       try {
         return await this.findAppInChooser(roots, appPackage, hierarchy.packageName, label);
       } catch (error) {
+        throwIfAborted(this.chooserSignal);
         if (!(error instanceof ChooserRowMissingError)) {
           throw error;
         }
@@ -1553,8 +1620,19 @@ export class DeepLinkManager implements DeepLinkManager {
     let activity: ChooserActivityLabelResult = { kind: "none" };
     if (url && metadata.getActivityLabel) {
       try {
-        activity = await metadata.getActivityLabel(this.device!, appPackage, url, this.adbUtils);
+        throwIfAborted(this.chooserSignal);
+        activity = await awaitWhileRequestIsLive(
+          metadata.getActivityLabel(
+            this.device!,
+            appPackage,
+            url,
+            this.adbUtils,
+            this.chooserSignal,
+          ),
+          this.chooserSignal,
+        );
       } catch (error) {
+        throwIfAborted(this.chooserSignal);
         // Optional activity metadata may be unavailable; the application label
         // remains the established best-effort chooser fallback.
         logger.debug(`[DeepLinkManager] Activity label unavailable: ${errorMessage(error)}`);
@@ -1563,7 +1641,11 @@ export class DeepLinkManager implements DeepLinkManager {
     if (activity.kind === "resource") {
       return [];
     }
-    const application = await metadata.getLabel(this.device!, appPackage);
+    throwIfAborted(this.chooserSignal);
+    const application = await awaitWhileRequestIsLive(
+      metadata.getLabel(this.device!, appPackage, this.chooserSignal),
+      this.chooserSignal,
+    );
     const labels = activity.kind === "literal" ? [activity.label] : [];
     if (application) {
       labels.push(application);

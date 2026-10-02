@@ -485,8 +485,13 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     registerLocationRouteSessionCleanup(this.sessionManager);
-    this.sessionManager.onDeviceOwnershipChange((deviceId) => {
-      this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
+    this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
+      // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
+      if (frameInvalidation === "full") {
+        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
+      } else {
+        this.deviceDataStreamServer?.invalidateInitialDeviceFrames(deviceId);
+      }
     });
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
@@ -577,12 +582,15 @@ export class Daemon {
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryConfiguration.policy,
       onDeviceFramesInvalidated: (deviceId) =>
+        // Full: pool callbacks signal new incarnations or untrusted runtime identity.
         this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId),
       onDeviceRemoved: (deviceId, platform) => {
         stopLocationRouteForRemovedDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
+        // Full removal: prune AFTER epoch retirement, which also invalidates frames.
+        this.deviceDataStreamServer?.removeDeviceFrames(deviceId);
         if (platform === "ios") {
           const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
           void manager?.suspendForDeviceRemoval().catch((error) => {

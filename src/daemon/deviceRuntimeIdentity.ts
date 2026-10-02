@@ -389,6 +389,7 @@ export class DeviceRuntimeIdentity {
       return;
     }
     delete pooled.identityUnresolved;
+    // Full: quarantine hid an untrusted runtime; lifting it needs a fresh trusted screen.
     this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
     logger.info(
       `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
@@ -733,6 +734,7 @@ export class DeviceRuntimeIdentity {
       return;
     }
     pooled.identityUnresolved = true;
+    // Full: the serial may now identify another runtime, so its screen/context is untrusted.
     this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
     logger.warn(`[DevicePool] Quarantining ${pooled.id}: ${reason}`);
     const sessionId = pooled.sessionId;

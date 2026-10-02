@@ -270,6 +270,38 @@ describe("DeviceDataStreamSocketServer", () => {
     },
   ];
 
+  it("reading generations does not retain capture-only serials", () => {
+    const generations = (server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> })
+      .liveFrameGenerations;
+    const size = generations.size;
+    server.getLiveFrameGeneration("never-pushed-1");
+    server.getLiveFrameGeneration("never-pushed-2");
+    expect(generations.size).toBe(size);
+  });
+
+  it("resolver replacement fences a capture-only serial without retaining its generation", async () => {
+    const h = initialFrameHarness();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    h.setScreenshot(async () => {
+      started.resolve();
+      await finish.promise;
+    });
+    const pane = server.simulateSubscription({ deviceSessionUuid: null });
+    server.sessionResolver.bind("device-1", "session-device-1");
+    const first = h.request(pane.subscriptionId);
+    await started.promise;
+    server.setDeviceSessionResolver(server.sessionResolver);
+    finish.resolve();
+    await first;
+    expect(h.frames(pane.socket)).toEqual([]);
+    expect(
+      (
+        server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
+      ).liveFrameGenerations.has("device-1"),
+    ).toBe(false);
+  });
+
   for (const event of frameInvalidations) {
     it(`drops an in-flight initial frame after ${event.name} and recaptures without caching it`, async () => {
       const h = initialFrameHarness();
@@ -647,6 +679,62 @@ describe("DeviceDataStreamSocketServer", () => {
           ...(frameContext === undefined ? {} : { frameContext }),
         } as any,
       },
+    });
+
+    it("drops an explicit observation captured across connection loss", async () => {
+      const capture = Promise.withResolvers<RequestedObservation[]>();
+      const started = Promise.withResolvers<void>();
+      server.setOnObservationRequested(() => {
+        started.resolve();
+        return capture.promise;
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+      const request = server.processLineForTest(
+        socket,
+        JSON.stringify({ command: "request_observation", deviceId: "emulator-5554" }),
+      );
+      await started.promise;
+      server.onDeviceConnectionLost("emulator-5554");
+      capture.resolve([requestedObservation("emulator-5554", "pre-disconnect")]);
+      await request;
+      expect(server.getCurrentFrameContext("emulator-5554")).toBeUndefined();
+      expect(
+        socket.getWrittenMessages<{ type: string }>().filter((m) => m.type === "hierarchy_update"),
+      ).toEqual([]);
+    });
+
+    it("resolver replacement fences a first explicit observation without prior device frames", async () => {
+      const capture = Promise.withResolvers<RequestedObservation[]>();
+      const started = Promise.withResolvers<void>();
+      server.setOnObservationRequested(() => {
+        started.resolve();
+        return capture.promise;
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+      const request = server.processLineForTest(
+        socket,
+        JSON.stringify({ command: "request_observation", deviceId: "emulator-5554" }),
+      );
+      await started.promise;
+      server.setDeviceSessionResolver(server.sessionResolver);
+      capture.resolve([requestedObservation("emulator-5554", "pre-resolver")]);
+      await request;
+      expect(server.getCurrentFrameContext("emulator-5554")).toBeUndefined();
+      expect(
+        socket.getWrittenMessages<{ type: string }>().filter((m) => m.type === "hierarchy_update"),
+      ).toEqual([]);
+    });
+
+    it("resolver replacement clears input and diff state installed only by an initial frame", async () => {
+      const h = initialFrameHarness();
+      const pane = server.simulateSubscription({ deviceSessionUuid: null });
+      server.sessionResolver.bind("device-1", "session-device-1");
+      await h.request(pane.subscriptionId);
+      expect(server.getCurrentFrameContext("device-1")).toBe("ctx-a");
+      server.setDeviceSessionResolver(server.sessionResolver);
+      expect(server.getCurrentFrameContext("device-1")).toBeUndefined();
+      server.pushHierarchyUpdate("device-1", h.hierarchy("after-resolver"), "ctx-new");
+      expect(h.frames(pane.socket).at(-1)?.hierarchyDiff?.hasBaseline).toBe(false);
     });
 
     it("triggers callback, pushes hierarchy update, and acknowledges success", async () => {

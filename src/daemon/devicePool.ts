@@ -1285,6 +1285,7 @@ export class DevicePool {
     perf.startOperation("populatePool");
     for (const device of devices) {
       this.clearAutoStartSuppressionForBootedDevice(device);
+      // Full: init/reinit replaces the pooled entry and allocates a new incarnation.
       this.notifyDeviceFramesInvalidated(device.deviceId);
       this.devices.set(device.deviceId, {
         id: device.deviceId,
@@ -1501,6 +1502,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
@@ -5532,6 +5534,7 @@ export class DevicePool {
       return false;
     }
     device.incarnation = this.nextDeviceIncarnation();
+    // Full: a VM restore can replace the rendered screen even on the same connection/serial.
     this.notifyDeviceFramesInvalidated(deviceId);
     return true;
   }

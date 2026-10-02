@@ -114,7 +114,6 @@ test.each(["setProfile", "listProfiles"])(
     expect(client.set).not.toHaveBeenCalled();
     expect(client.list).not.toHaveBeenCalled();
   },
-  100,
 );
 
 test("keyboard setProfile cancelled behind the IME lock never flips the profile", async () => {
@@ -145,7 +144,7 @@ test("keyboard setProfile cancelled behind the IME lock never flips the profile"
   await lock;
   await expect(pending).rejects.toThrow("Operation cancelled");
   expect(client.set).not.toHaveBeenCalled();
-}, 100);
+});
 
 test.each(["setProfile", "listProfiles"])(
   "keyboard %s stops after capability negotiation cancels",
@@ -162,7 +161,6 @@ test.each(["setProfile", "listProfiles"])(
     expect(client.set).not.toHaveBeenCalled();
     expect(client.list).not.toHaveBeenCalled();
   },
-  100,
 );
 
 function delayedConnection() {
@@ -260,7 +258,6 @@ test.each(["open", "close", "detect", "close follow-up detect"] as const)(
     expect(h.sent).not.toHaveBeenCalled();
     expect(h.registered).not.toHaveBeenCalled();
   },
-  100,
 );
 
 class UnobservedOpenURL extends OpenURL {
@@ -287,7 +284,7 @@ test("physical iOS openLink forwards cancellation to devicectl", async () => {
     handler("openLink")(ios, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");
   expect(received).toBe(controller.signal);
-}, 100);
+});
 
 test.each(["tap", "dismiss"])(
   "iOS systemTray %s forwards the exact request signal",
@@ -348,7 +345,6 @@ test.each(["tap", "dismiss"])(
     expect(dispatches).toBe(1);
     expect(received).toBe(controller.signal);
   },
-  100,
 );
 
 test("iOS systemTray swipe never dispatches after a cancelled connection wait", async () => {
@@ -390,7 +386,7 @@ test("iOS systemTray swipe never dispatches after a cancelled connection wait", 
   await h.completed.promise;
   expect(h.sent).not.toHaveBeenCalled();
   expect(h.registered).not.toHaveBeenCalled();
-}, 100);
+});
 
 test("pre-aborted homeScreen dispatches nothing", async () => {
   let dispatches = 0;
@@ -405,7 +401,7 @@ test("pre-aborted homeScreen dispatches nothing", async () => {
     "Operation cancelled",
   );
   expect(dispatches).toBe(0);
-}, 100);
+});
 
 test("homeScreen cancels during iOS foreground verification", async () => {
   const h = delayedConnection();
@@ -442,4 +438,4 @@ test("homeScreen cancels during iOS foreground verification", async () => {
   await expect(pending).rejects.toThrow("Operation cancelled");
   expect(press).toHaveBeenCalledTimes(1);
   expect(hierarchy).toHaveBeenCalledTimes(1);
-}, 100);
+});

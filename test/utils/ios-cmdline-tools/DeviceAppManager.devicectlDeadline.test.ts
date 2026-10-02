@@ -84,7 +84,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
       expect(events[0]).not.toContain("private-udid");
       expect(events[0]).not.toContain("/private/App.ipa");
       expect(timer.getPendingTimeoutCount()).toBe(0);
-    }, 100);
+    });
   }
 
   for (const operation of [
@@ -117,7 +117,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
         },
       ]);
       expect(timer.getPendingTimeoutCount()).toBe(0);
-    }, 100);
+    });
   }
 
   test("public install, uninstall and payload launch use their class defaults", async () => {
@@ -131,7 +131,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
       { signal: undefined, timeoutMs: 60_000, killSignal: "SIGKILL" },
     ]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
-  }, 100);
+  });
 
   test("caller signal bypasses defaults and backstop, and still aborts", async () => {
     const controller = new AbortController();
@@ -155,7 +155,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
     controller.abort(reason);
     await expect(pending).rejects.toThrow("Operation cancelled");
     expect(events).toEqual([]);
-  }, 100);
+  });
 
   test("caller timeout wins, preserving its kill signal and failure", async () => {
     const failure = wrapCommandError(Object.assign(new Error("caller timeout"), { killed: true }), {
@@ -171,7 +171,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
     expect(calls[0]?.options).toBe(options);
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(events).toEqual([]);
-  }, 100);
+  });
 
   test("prompt normal result is unchanged and clears the backstop", async () => {
     const result = createExecResult("", "");
@@ -181,7 +181,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
     expect(await pending).toBe(result);
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(events).toEqual([]);
-  }, 100);
+  });
 
   for (const command of [
     { file: "xcrun", args: ["simctl", "uninstall", "udid", "com.example.app"] },
@@ -192,7 +192,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
       await manager["execute"](command.file, command.args);
       expect(calls[0]?.options).toBeUndefined();
       expect(timer.getPendingTimeoutCount()).toBe(0);
-    }, 100);
+    });
   }
 
   test("wrapped node timeout becomes an actionable deadline failure after warning", async () => {
@@ -225,7 +225,7 @@ describe("DeviceAppManager devicectl deadlines", () => {
     expect(events[0]).toContain("timed out");
     expect(events[1]).toBe("rejected");
     expect(timer.getPendingTimeoutCount()).toBe(0);
-  }, 100);
+  });
 
   test("non-timeout exec failure passes through unchanged", async () => {
     const original = Object.assign(new Error("permission denied"), {
@@ -239,5 +239,5 @@ describe("DeviceAppManager devicectl deadlines", () => {
     await expect(manager.getDevicectlVersion()).rejects.toBe(failure);
     expect(events).toEqual([]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
-  }, 100);
+  });
 });

@@ -427,22 +427,13 @@ export class TapAtCoordinate extends BaseVisualChange {
               );
               break;
             case "ios":
-              await this.iosCoordinateTap(
-                this.iosClient,
-                resolved.x,
-                resolved.y,
-                tapDurationMs(options, "ios"),
-                frameContext,
-              );
-              await this.dispatchSecondIosTap(
+              iosDispatchTimestamp = await this.dispatchIosTaps(
                 options,
                 resolved,
                 frameContext,
                 transitionRevision,
                 signal,
               );
-              iosDispatchTimestamp = this.timer.now();
-              this.invalidateIosCache();
               break;
             default:
               throw unsupportedPlatformError(this.device.platform, "tap at coordinates");
@@ -488,6 +479,36 @@ export class TapAtCoordinate extends BaseVisualChange {
       );
     } finally {
       perf.end();
+    }
+  }
+
+  private async dispatchIosTaps(
+    options: TapAtOptions,
+    point: { x: number; y: number },
+    frameContext: string | undefined,
+    transitionRevision: { revision: number; observedGeneration: number },
+    signal?: AbortSignal,
+  ): Promise<number> {
+    await this.iosCoordinateTap(
+      this.iosClient,
+      point.x,
+      point.y,
+      tapDurationMs(options, "ios"),
+      frameContext,
+    );
+    try {
+      await this.dispatchSecondIosTap(options, point, frameContext, transitionRevision, signal);
+      return this.timer.now();
+    } finally {
+      this.invalidateIosCacheSafely();
+    }
+  }
+
+  private invalidateIosCacheSafely(): void {
+    try {
+      this.invalidateIosCache();
+    } catch (error) {
+      logger.warn(`tapAt iOS cache invalidation failed: ${errorMessage(error)}`, error);
     }
   }
 
@@ -699,6 +720,17 @@ export class TapAtCoordinate extends BaseVisualChange {
       }
     };
     await dispatch(false);
+    if (this.device.platform === "ios") {
+      try {
+        if (action === "doubleTap") {
+          await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
+          await dispatch(true);
+        }
+      } finally {
+        this.invalidateIosCacheSafely();
+      }
+      return;
+    }
     if (action === "doubleTap") {
       await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
       await dispatch(true);

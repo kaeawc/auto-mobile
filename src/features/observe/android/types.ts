@@ -189,6 +189,9 @@ export interface HierarchySyncDiagnostics {
   /** The runner's structured error text when the sync failed fast on a correlated runner
    *  `type:"error"` frame; `undefined` on a plain timeout or a successful sync. */
   runnerError?: string;
+  /** Per-call failure detail, including connection/send failures, interrupted waits and timeout.
+   * A null sync result alone is not evidence that the hierarchy service is unreachable. */
+  failureReason?: string;
 }
 
 /**

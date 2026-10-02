@@ -101,6 +101,73 @@ describe("display read routing", () => {
     expect(result.hierarchy.displayId).toBe(2);
   });
 
+  test("cached-ok selected-display observation uses owner sync and preserves its failure", async () => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", {
+      stdout:
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+      stderr: "",
+    });
+    let syncReads = 0;
+    const signal = new AbortController().signal;
+    const capture = createDeviceHierarchyCapture(device, {
+      timer,
+      viewHierarchy: {
+        getViewHierarchy: async () => {
+          throw new Error("Unrouted cached reader must not read a selected display");
+        },
+      },
+      syncClientFactory: () => ({
+        requestHierarchySync: async (
+          _perf,
+          _raw,
+          actualSignal,
+          timeout,
+          diagnostics,
+          displayId,
+        ) => {
+          syncReads++;
+          expect(actualSignal).toBe(signal);
+          expect(timeout).toBe(750);
+          expect(displayId).toBe(2);
+          if (diagnostics) {
+            Object.assign(diagnostics, { runnerError: "selected panel extraction failed" });
+          }
+          return null;
+        },
+        requestHierarchySyncForObserver: async () => {
+          throw new Error("Owner read must not use observer mode");
+        },
+        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
+      }),
+    });
+    try {
+      const screen = new RealObserveScreen(
+        device,
+        new FakeAdbClientFactory(adb),
+        { hierarchyCapture: capture, cacheStore: new FakeObserveCacheStore(timer) },
+        timer,
+      );
+      await expect(
+        screen.execute({
+          ...readOptions,
+          display: "external",
+          freshness: "cached-ok",
+          timeoutMs: 750,
+          signal,
+        }),
+      ).rejects.toThrow(
+        'Unable to read selected display "external": Error: Device dual-display-test hierarchy service did not answer: runner error: selected panel extraction failed',
+      );
+      expect(syncReads).toBe(1);
+    } finally {
+      displayTransitions.reset(device.deviceId);
+      ObservedAndroidDisplayCache.release(device.deviceId);
+      resetObserveCacheStore();
+    }
+  });
+
   test("default Android observation stamps the focused window panel", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();

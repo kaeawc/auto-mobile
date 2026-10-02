@@ -8,7 +8,8 @@ import { linkWindowRoots } from "../linkWindowRoots";
 
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
-import { ActionableError } from "../../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../../models/ActionableError";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -781,6 +782,9 @@ export class CtrlProxyHierarchy {
         if (flight.diagnostics.runnerError && diagnostics) {
           diagnostics.runnerError = flight.diagnostics.runnerError;
         }
+        if (flight.diagnostics.failureReason && diagnostics) {
+          diagnostics.failureReason = flight.diagnostics.failureReason;
+        }
         return result;
       } finally {
         flight.waiters -= 1;
@@ -791,7 +795,10 @@ export class CtrlProxyHierarchy {
         }
       }
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Sync hierarchy caller stopped: ${error}`);
+      if (diagnostics) {
+        diagnostics.failureReason = errorMessage(signal?.aborted ? signal.reason : error);
+      }
+      logger.warn(`[CTRL_PROXY] Sync hierarchy caller stopped: ${errorMessage(error)}`, error);
       return null;
     }
   }
@@ -815,6 +822,7 @@ export class CtrlProxyHierarchy {
       const connected = await this.connectForHierarchySync(perf, signal, observerMode);
       throwIfAborted(signal);
       if (!connected) {
+        diagnostics.failureReason = "Failed to establish CtrlProxy WebSocket connection";
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection");
         return null;
       }
@@ -879,6 +887,7 @@ export class CtrlProxyHierarchy {
               dispatchSocket,
               allowStaleResponse: !observerMode && !disableAllFiltering && displayId === undefined,
               observerMode,
+              diagnostics,
             },
           ),
         );
@@ -898,17 +907,24 @@ export class CtrlProxyHierarchy {
         };
       }
 
-      logger.warn("[CTRL_PROXY] Timeout waiting for WebSocket push after request");
+      diagnostics.failureReason ??= "Hierarchy service did not answer the sync request";
+      logger.warn(`[CTRL_PROXY] Sync hierarchy read failed: ${diagnostics.failureReason}`);
       return null;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
       // A correlated runner type:"error" frame (issue #3032 / #3061) rejects the wait with a typed
       // HierarchyRunnerError. Surface its text on the caller-provided diagnostics so the caller can
       // tell this deterministic handler failure apart from a plain timeout `null` (issue #3062).
-      if (error instanceof HierarchyRunnerError && diagnostics) {
+      if (error instanceof HierarchyRunnerError) {
         diagnostics.runnerError = error.runnerError;
+        diagnostics.failureReason = `runner error: ${error.runnerError}`;
+      } else {
+        diagnostics.failureReason = errorMessage(error);
       }
-      logger.warn(`[CTRL_PROXY] Sync hierarchy request failed after ${duration}ms: ${error}`);
+      logger.warn(
+        `[CTRL_PROXY] Sync hierarchy request failed after ${duration}ms: ${errorMessage(error)}`,
+        error,
+      );
       return null;
     }
   }
@@ -1151,14 +1167,17 @@ export class CtrlProxyHierarchy {
       dispatchSocket?: WebSocket | null;
       allowStaleResponse: boolean;
       observerMode?: boolean;
+      diagnostics?: HierarchySyncDiagnostics;
     } = {
       allowStaleResponse: true,
     },
   ): Promise<CachedHierarchy | null> {
     const { dispatchSocket, allowStaleResponse, observerMode } = options;
+    const diagnostics = options.diagnostics ?? {};
     const combinedSignal = combineWithAmbientAbort(signal);
     // Reject dispatch on a socket that closed or was replaced during ADB fallback.
     if (!this.isDispatchSocketValid(dispatchSocket)) {
+      diagnostics.failureReason = "CtrlProxy WebSocket closed or changed before hierarchy wait";
       return null;
     }
     const waitSocket = dispatchSocket === undefined ? this.context.getWebSocket() : dispatchSocket;
@@ -1201,6 +1220,12 @@ export class CtrlProxyHierarchy {
         cleanup();
         resolve(value);
       };
+      const settleNoData = (reason: string): void => {
+        if (!settled) {
+          diagnostics.failureReason = reason;
+          settleResolve(null);
+        }
+      };
       const settleReject = (error: Error): void => {
         if (settled) {
           return;
@@ -1217,7 +1242,8 @@ export class CtrlProxyHierarchy {
             // Preserve runner errors for requestHierarchySync diagnostics.
             settleReject(new HierarchyRunnerError(error));
           },
-          disconnect: () => settleResolve(null),
+          disconnect: () =>
+            settleNoData("CtrlProxy WebSocket disconnected while waiting for hierarchy response"),
           resolve: resolveMatchingHierarchy,
         });
       };
@@ -1237,11 +1263,11 @@ export class CtrlProxyHierarchy {
 
       intervalId = this.context.timer.setInterval(() => {
         if (combinedSignal?.aborted) {
-          settleResolve(null);
+          settleNoData(errorMessage(combinedSignal.reason));
           return;
         }
         if (this.context.getWebSocket() !== waitSocket) {
-          settleResolve(null);
+          settleNoData("CtrlProxy WebSocket changed while waiting for hierarchy response");
           return;
         }
         const elapsed = this.context.timer.now() - startTime;
@@ -1275,20 +1301,13 @@ export class CtrlProxyHierarchy {
           screenCheckInProgress = true;
           lastScreenCheck = now;
 
-          this.context.adb
-            .isScreenOn(combinedSignal)
-            .then((isOn) => {
+          void this.checkScreenDuringHierarchyWait({
+            signal: combinedSignal,
+            onComplete: () => {
               screenCheckInProgress = false;
-              if (!isOn && !combinedSignal?.aborted) {
-                logger.warn(
-                  "[CTRL_PROXY] Screen is off - failing fast instead of waiting for timeout",
-                );
-                settleResolve(null);
-              }
-            })
-            .catch(() => {
-              screenCheckInProgress = false;
-            });
+            },
+            onScreenOff: () => settleNoData("Screen is off while waiting for hierarchy response"),
+          });
         }
 
         // Check if timeout exceeded
@@ -1299,10 +1318,32 @@ export class CtrlProxyHierarchy {
               ? `[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: cached receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, useDeviceTimestamp=${useDeviceTimestamp}`
               : `[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: no cached data, minTimestamp=${minTimestamp}`,
           );
-          settleResolve(null);
+          settleNoData(`Timed out waiting for hierarchy response after ${elapsed}ms`);
         }
       }, checkInterval);
     });
+  }
+
+  private async checkScreenDuringHierarchyWait(options: {
+    signal?: AbortSignal;
+    onComplete: () => void;
+    onScreenOff: () => void;
+  }): Promise<void> {
+    try {
+      const isOn = await this.context.adb.isScreenOn(options.signal);
+      if (!isOn && !options.signal?.aborted) {
+        logger.warn("[CTRL_PROXY] Screen is off - failing fast instead of waiting for timeout");
+        options.onScreenOff();
+      }
+    } catch (error) {
+      // Screen state is an optional early-exit probe; the bounded hierarchy wait remains authoritative.
+      logger.warn(
+        `[CTRL_PROXY] Could not check screen state during hierarchy wait: ${errorMessage(error)}`,
+        error,
+      );
+    } finally {
+      options.onComplete();
+    }
   }
 
   /**
@@ -1336,11 +1377,17 @@ export class CtrlProxyHierarchy {
       );
       return requestId;
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Failed to send WebSocket request: ${error}`);
       if (observerMode) {
         // A failed send cannot produce a correlated frame.
         this.context.unmarkObserverHierarchyRequest?.(requestId);
       }
+      if (displayId !== undefined) {
+        throw toActionableError(
+          error,
+          `Unable to request hierarchy for Android display ${displayId}`,
+        );
+      }
+      logger.warn(`[CTRL_PROXY] Failed to send WebSocket request: ${errorMessage(error)}`, error);
       return null;
     }
   }

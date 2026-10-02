@@ -6,6 +6,64 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 
+test("selected-display owner null reports no answer rather than service reachability", async () => {
+  let ownerReads = 0;
+  let observerReads = 0;
+  let observedDiagnostics: unknown;
+  const capture = createDeviceHierarchyCapture(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    {
+      timer: new FakeTimer(),
+      syncClientFactory: () => ({
+        requestHierarchySync: async (_perf, _raw, _signal, timeout, diagnostics, displayId) => {
+          ownerReads++;
+          expect(timeout).toBe(15000);
+          expect(displayId).toBe(2);
+          observedDiagnostics = diagnostics;
+          return null;
+        },
+        requestHierarchySyncForObserver: async () => {
+          observerReads++;
+          return null;
+        },
+        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
+      }),
+    },
+  );
+  await expect(capture.capture({ freshness: "fresh", displayId: 2 })).rejects.toThrow(
+    "Device fake hierarchy service did not answer",
+  );
+  expect(ownerReads).toBe(1);
+  expect(observerReads).toBe(0);
+  expect(observedDiagnostics).toEqual({});
+});
+
+test.each([
+  { runnerError: "selected panel extraction failed" },
+  { failureReason: "Timed out waiting for hierarchy response after 250ms" },
+  { failureReason: "Failed to establish CtrlProxy WebSocket connection" },
+])("selected-display owner capture surfaces per-call diagnostics %j", async (failure) => {
+  const capture = createDeviceHierarchyCapture(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    {
+      timer: new FakeTimer(),
+      syncClientFactory: () => ({
+        requestHierarchySync: async (_perf, _raw, _signal, timeout, diagnostics) => {
+          expect(timeout).toBe(250);
+          if (diagnostics) {
+            Object.assign(diagnostics, failure);
+          }
+          return null;
+        },
+        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
+      }),
+    },
+  );
+  await expect(
+    capture.capture({ freshness: "fresh", displayId: 2, timeoutMs: 250 }),
+  ).rejects.toThrow(Object.values(failure)[0]!);
+});
+
 function fixture(elapsed: number, incomplete = true, updatedAt?: number) {
   const timer = new FakeTimer();
   const adb = new FakeAdbClient();

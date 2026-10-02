@@ -137,7 +137,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     const started = deferred();
     const originalTransaction = repository.runInTransaction.bind(repository);
     let first = true;
-    spyOn(repository, "runInTransaction").mockImplementation(async (fn) => {
+    const transactionSpy = spyOn(repository, "runInTransaction").mockImplementation(async (fn) => {
       if (first) {
         first = false;
         started.resolve();
@@ -147,17 +147,22 @@ describe("NavigationGraphManager navigation write ordering", () => {
     });
     const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
 
-    const stuck = bounded.recordNavigationEvent({ destination: "Stuck", timestamp: 4000 });
-    void stuck.catch(() => undefined);
-    await started.promise;
-    const next = bounded.recordNavigationEvent({ destination: "Recovered", timestamp: 5000 });
-    timer.advanceTime(50);
-    await expect(stuck).rejects.toBeInstanceOf(ActionableError);
-    await expect(stuck).rejects.toThrow("Navigation write recordNavigationEvent timed out");
-    await next;
-    expect(bounded.getCurrentScreen()).toBe("Recovered");
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
+    try {
+      const stuck = bounded.recordNavigationEvent({ destination: "Stuck", timestamp: 4000 });
+      void stuck.catch(() => undefined);
+      await started.promise;
+      const next = bounded.recordNavigationEvent({ destination: "Recovered", timestamp: 5000 });
+      timer.advanceTime(50);
+      await expect(stuck).rejects.toBeInstanceOf(ActionableError);
+      await expect(stuck).rejects.toThrow("Navigation write recordNavigationEvent timed out");
+      await next;
+      expect(bounded.getCurrentScreen()).toBe("Recovered");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      warn.mockRestore();
+      transactionSpy.mockRestore();
+    }
   });
 
   test("late event completion cannot replace a newer screen", async () => {
@@ -212,10 +217,14 @@ describe("NavigationGraphManager navigation write ordering", () => {
       50,
     );
     const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
-    warn.mockClear();
-    await bounded.setCurrentApp(appId);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-    timer.advanceTime(50);
-    expect(warn).not.toHaveBeenCalled();
+    try {
+      warn.mockClear();
+      await bounded.setCurrentApp(appId);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      timer.advanceTime(50);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

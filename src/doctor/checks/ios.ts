@@ -150,8 +150,9 @@ interface IosRunnerManager {
  * set and (for throwaway probe clients) close the connection afterwards.
  */
 interface IosRunnerProbeClient {
-  getSupportedCommands(): Promise<string[] | null>;
-  getSupportedFeatures(): Promise<string[] | null>;
+  getRunnerIdentityForDiagnostics(
+    signal?: AbortSignal,
+  ): Promise<{ commands: string[] | null; features: string[] | null } | null>;
   close(): Promise<void>;
 }
 
@@ -177,7 +178,7 @@ function selectIosRunnerProbe(
 /** Minimal iOS runner client surface for the doctor observe round-trip check. */
 interface IosObserveRoundTripClient {
   getConnectionPortForDiagnostics(): number;
-  requestHierarchySync(
+  requestHierarchySyncForDiagnostics(
     perf?: unknown,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
@@ -208,8 +209,7 @@ export interface IosObserveRoundTripInspectorHooks {
 const defaultIosRunnerInspectorHooks: IosRunnerInspectorHooks = {
   getManager: (device) => IOSCtrlProxyManager.getInstance(device),
   getExistingClient: (deviceId) => IOSCtrlProxyClient.getExistingInstance(deviceId),
-  // Detached (not singleton-registered) so closing it leaves nothing for a later
-  // probe to rediscover and reconnect — see IOSCtrlProxyClient.createDetached.
+  // Detached clients delegate diagnostic dials to isolated transient observers.
   createClient: (device) => IOSCtrlProxyClient.createDetached(device),
 };
 
@@ -223,7 +223,10 @@ const defaultIosObserveRoundTripInspectorHooks: IosObserveRoundTripInspectorHook
 /**
  * Real inspector: for each booted simulator, read installed/running from the
  * CtrlProxy manager and the advertised command set from the runner's `connected`
- * handshake (connecting only when the runner is running).
+ * handshake. Open resident sockets serve reads directly; closed residents use
+ * isolated transient probes regardless of manager running state. Without a
+ * resident, probes are created only when the manager reports a running runner.
+ * Neither path sets up, starts or restarts a runner.
  */
 export function createIosCtrlProxyRunnerInspector(
   createSimctlClient: () => SimCtl,
@@ -278,19 +281,18 @@ export function createIosCtrlProxyRunnerInspector(
           // afterwards so doctor leaves no persistent runner connection or SDK
           // polling timer behind (especially for the one-shot CLI invocation).
           try {
-            supportedCommands = await awaitDoctorProbe(currentProbe, () =>
-              selectedProbe.client.getSupportedCommands(),
+            const identity = await awaitDoctorProbe(currentProbe, () =>
+              selectedProbe.client.getRunnerIdentityForDiagnostics(currentProbe.signal),
             );
-            currentProbe.signal?.throwIfAborted();
-            supportedFeatures = await awaitDoctorProbe(currentProbe, () =>
-              selectedProbe.client.getSupportedFeatures(),
-            );
+            const { commands, features } = identity ?? { commands: null, features: null };
+            supportedCommands = commands;
+            supportedFeatures = commands === null ? null : features;
             running = running || supportedCommands !== null;
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
             // failure: doctor still reports installed/running for the simulator.
             log.warn(
-              `iOS CtrlProxy runner command probe failed for ${simulator.deviceId}: ${errorMessage(error)}`,
+              `iOS CtrlProxy runner identity probe failed for ${simulator.deviceId}: ${errorMessage(error)}`,
               error,
             );
           } finally {
@@ -395,7 +397,7 @@ export function createIosObserveRoundTripInspector(
             const client = existing ?? hooks.createClient(device, runnerPort);
             try {
               clientPort = client.getConnectionPortForDiagnostics();
-              const response = await client.requestHierarchySync(
+              const response = await client.requestHierarchySyncForDiagnostics(
                 undefined,
                 false,
                 currentProbe.signal,
@@ -406,7 +408,7 @@ export function createIosObserveRoundTripInspector(
               runnerPort = reportedRunnerPort ?? clientPort;
               connected = response !== null;
               if (!response?.hierarchy) {
-                hierarchyError = "No iOS hierarchy returned from CtrlProxy runner";
+                hierarchyError = "iOS CtrlProxy runner is not running or unreachable";
               } else if (response.hierarchy.error) {
                 hierarchyError = response.hierarchy.error;
               } else {

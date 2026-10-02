@@ -479,6 +479,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     timer: Timer = defaultTimer,
     private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "observationStream",
+      { allowObserverSessions: true },
     ),
   ) {
     super(socketPath, timer, "DeviceDataStream");
@@ -1130,11 +1131,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     if (request.command === "subscribe") {
       let deviceSessionUuid: string | null;
       try {
+        this.authenticator.authorize({ sessionUuid: request.sessionUuid });
         // JSON parsing does not validate fields at runtime. Do it before the
         // base server creates a subscription so malformed keys cannot quietly
         // become all-device subscriptions.
         deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
       } catch (error) {
+        logger.warn(`Observation subscribe rejected: ${errorMessage(error)}`, error);
         const errorResponse: SubscriptionResponse = {
           id: request.id,
           type: "error",

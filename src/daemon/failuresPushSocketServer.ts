@@ -1,3 +1,7 @@
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
@@ -70,8 +74,20 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
   constructor(
     socketPath: string = getSocketPath(FAILURES_PUSH_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
+    options: { authenticator?: StreamSocketAuthenticator } = {},
   ) {
     super(socketPath, timer, "FailuresPush");
+    this.authenticator =
+      options.authenticator ??
+      createDefaultStreamSocketAuthenticator("failuresPush", { allowObserverSessions: true });
+  }
+
+  private readonly authenticator: StreamSocketAuthenticator;
+
+  protected override authorizeSubscription(request: Record<string, unknown>): void {
+    this.authenticator.authorize({
+      sessionUuid: typeof request.sessionUuid === "string" ? request.sessionUuid : undefined,
+    });
   }
 
   /** Wire the serial↔`deviceSessionUuid` resolver used to stamp pushed frames. */

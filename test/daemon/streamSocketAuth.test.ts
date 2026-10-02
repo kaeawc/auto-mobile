@@ -1,3 +1,6 @@
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";
 import {
   SessionScopedStreamAuthenticator,
@@ -258,5 +261,45 @@ describe("structured subscription identity (additive to authorize)", () => {
       ownsDevice: false,
     });
     expect(() => auth.authorize({})).not.toThrow();
+  });
+});
+
+describe("observer session admission is opt-in", () => {
+  test("admits observation requests but retains device scope and derived identity", () => {
+    const registry = new ObserverSessionRegistry(new FakeTimer());
+    registry.register("observer", "desktop");
+    const manager = sessionManager({
+      getDeviceLabels: (uuid) => (uuid === "observer" ? { label: "observer:label" } : undefined),
+      getSessionForDevice: (id) => (id === "owned" ? "other" : null),
+    });
+    const auth = new ObserverAdmittingStreamAuthenticator({
+      resolveSessionManager: () => manager,
+      resolveObserverRegistry: () => registry,
+      operation: "observationStream",
+      env: {},
+    });
+    expect(() => auth.authorize({ sessionUuid: "observer" })).not.toThrow();
+    expect(() =>
+      auth.authorize({ sessionUuid: "observer:label", deviceId: "unowned" }),
+    ).not.toThrow();
+    expect(() => auth.authorize({ sessionUuid: "observer", deviceId: "owned" })).toThrow(
+      /different daemon session/,
+    );
+    for (const operation of ["videoStream", "webrtcStream", "recording", "appearance", "config"]) {
+      expect(() =>
+        new SessionScopedStreamAuthenticator(() => manager, operation, {}).authorize({
+          sessionUuid: "observer",
+        }),
+      ).toThrow(/not an active daemon session/);
+    }
+  });
+  test("fails closed with an unavailable observer registry", () => {
+    const auth = new ObserverAdmittingStreamAuthenticator({
+      resolveSessionManager: () => sessionManager(),
+      resolveObserverRegistry: () => null,
+      operation: "observationStream",
+      env: {},
+    });
+    expect(() => auth.authorize({ sessionUuid: "observer" })).toThrow(/Register a session/);
   });
 });

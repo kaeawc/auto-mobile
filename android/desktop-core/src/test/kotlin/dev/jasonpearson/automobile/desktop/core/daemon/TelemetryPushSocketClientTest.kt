@@ -59,6 +59,66 @@ class TelemetryPushSocketClientTest {
     client.dispose()
   }
 
+  @Test
+  fun `subscribe includes provided session UUID and waits for readiness`() = runTest {
+    var registered = false
+    var opens = 0
+    val client =
+      TelemetryPushSocketClient(
+        {
+          opens++
+          FakeSocket()
+        },
+        FakeRetryDelay(),
+        backgroundScope,
+        { true },
+        options =
+          TelemetryPushSocketOptions(
+            sessionUuidProvider = { "desktop-session".takeIf { registered } }
+          ),
+      )
+    client.connect()
+    runCurrent()
+    assertEquals(0, opens)
+    registered = true
+    val frame =
+      DaemonJson.encodeToString(
+        dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryPushRequest.serializer(),
+        client.subscribeRequest(),
+      )
+    assertTrue(frame.contains("\"sessionUuid\":\"desktop-session\""))
+    client.dispose()
+  }
+
+  @Test
+  fun `session rejection is surfaced once and prevents reconnect`() = runTest {
+    val logger = RecordingLogger()
+    var opens = 0
+    val client =
+      TelemetryPushSocketClient(
+        {
+          opens++
+          FakeSocket()
+        },
+        {},
+        backgroundScope,
+        { true },
+        logger,
+      )
+    val error =
+      """{"type":"error","success":false,"error":"session missing is not an active daemon session"}"""
+    client.processMessage(error)
+    client.processMessage(error)
+    repeat(3) {
+      client.connect()
+      runCurrent()
+    }
+    assertEquals(0, opens)
+    assertEquals(1, logger.warnings.size)
+    client.connectionState.first { it is ConnectionState.Error }
+    client.dispose()
+  }
+
   private class FakeRetryDelay : TelemetryRetryDelay {
     val calls = mutableListOf<Long>()
 
@@ -284,15 +344,18 @@ class TelemetryPushSocketClientTest {
         { kotlinx.coroutines.awaitCancellation() },
         backgroundScope,
         { true },
-        beforeSocketPublish = {
-          if (beforePublishCalls++ == 0) {
-            client.disconnect()
-            client.connect()
-            // Publish B before the canceled A resumes past its earlier ensureActive check.
-            testScheduler.runCurrent()
-            assertEquals(1, replacement.writes)
-          }
-        },
+        options =
+          TelemetryPushSocketOptions(
+            beforeSocketPublish = {
+              if (beforePublishCalls++ == 0) {
+                client.disconnect()
+                client.connect()
+                // Publish B before the canceled A resumes past its earlier ensureActive check.
+                testScheduler.runCurrent()
+                assertEquals(1, replacement.writes)
+              }
+            }
+          ),
       )
 
     client.connect()

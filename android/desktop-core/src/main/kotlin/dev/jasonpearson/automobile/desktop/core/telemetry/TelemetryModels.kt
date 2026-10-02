@@ -24,6 +24,7 @@ data class TelemetryPushRequest(
   val category: String? = null,
   val deviceId: String? = null,
   val sessionId: String? = null,
+  val sessionUuid: String? = null,
 )
 
 /** Response envelope from the telemetry push socket server. */

@@ -38,12 +38,14 @@ import kotlinx.serialization.serializer
  *
  * Socket path: ~/.auto-mobile/failures-push.sock
  */
-class FailuresPushSocketClient {
+class FailuresPushSocketClient(private val sessionUuidProvider: (() -> String?)? = null) {
   companion object {
     private fun getSocketPath(): String = AutoMobileSocketPaths.socketPath("failures-push.sock")
   }
 
   private val log = LoggerFactory.getLogger(FailuresPushSocketClient::class.java)
+  @Volatile private var sessionRejected = false
+
   private val json = DaemonJson
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -84,6 +86,8 @@ class FailuresPushSocketClient {
    *   severities.
    */
   fun connect(type: String? = null, severity: String? = null) {
+    if (sessionRejected || (sessionUuidProvider != null && sessionUuidProvider.invoke() == null))
+      return
     if (_isConnected) {
       log.info("Already connected to failures push")
       return
@@ -143,7 +147,7 @@ class FailuresPushSocketClient {
 
         if (!_shouldReconnect) {
           log.info("Reconnection disabled, stopping connection attempts")
-          _state.update { ConnectionState.Disconnected("Disconnected") }
+          if (!sessionRejected) _state.update { ConnectionState.Disconnected("Disconnected") }
           return
         }
 
@@ -159,7 +163,7 @@ class FailuresPushSocketClient {
       }
     }
 
-    _state.update { ConnectionState.Disconnected("Stopped") }
+    if (!sessionRejected) _state.update { ConnectionState.Disconnected("Stopped") }
   }
 
   private fun calculateBackoff(attempt: Int): Long {
@@ -216,14 +220,17 @@ class FailuresPushSocketClient {
     scope.coroutineContext[Job]?.cancel()
   }
 
+  internal fun subscribeRequest(type: String?, severity: String?): FailuresPushRequest =
+    FailuresPushRequest(
+      id = UUID.randomUUID().toString(),
+      command = "subscribe",
+      type = type,
+      severity = severity,
+      sessionUuid = sessionUuidProvider?.invoke(),
+    )
+
   private fun subscribe(type: String?, severity: String?) {
-    val request =
-      FailuresPushRequest(
-        id = UUID.randomUUID().toString(),
-        command = "subscribe",
-        type = type,
-        severity = severity,
-      )
+    val request = subscribeRequest(type, severity)
 
     if (sendRequest(request)) {
       _state.update { current ->
@@ -295,7 +302,8 @@ class FailuresPushSocketClient {
       "subscription_response" -> {
         log.info("Failures push subscription response: success=${response.success}")
         if (response.success != true) {
-          log.warn("Subscription failed: ${response.error}")
+          rejectSession(response.error)
+          if (!sessionRejected) log.warn("Subscription failed: ${response.error}")
         }
       }
       "failure_push" -> {
@@ -310,11 +318,20 @@ class FailuresPushSocketClient {
         sendPong()
       }
       "error" -> {
-        log.warn("Failures push error: ${response.error}")
+        rejectSession(response.error)
+        if (!sessionRejected) log.warn("Failures push error: ${response.error}")
       }
       else -> {
         log.warn("Unknown message type: ${response.type}")
       }
+    }
+  }
+
+  private fun rejectSession(error: String?) {
+    if (!sessionRejected && isStreamSessionRejection(error)) {
+      sessionRejected = true
+      _state.value = ConnectionState.Error(error ?: "Session registration required")
+      log.warn("Subscription failed: $error")
     }
   }
 
@@ -334,6 +351,7 @@ data class FailuresPushRequest(
   val command: String,
   val type: String? = null,
   val severity: String? = null,
+  val sessionUuid: String? = null,
 )
 
 @Serializable

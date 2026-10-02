@@ -1,3 +1,6 @@
+import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
 import { Socket } from "node:net";
 import {
@@ -4369,5 +4372,98 @@ describe("DeviceDataStreamSocketServer control command authorization (#7950)", (
       expect(response).toMatchObject({ type: "subscription_response", success: true });
     }
     expect(calls).toEqual(["subscribe:device-1", "unsubscribe:device-1"]);
+  });
+});
+
+streamSubscribeAuthCases("observation-stream", (timer, authenticator) => {
+  const server = new TestableDeviceDataStreamSocketServer(timer, authenticator);
+  let connected = 0;
+  let cadence = 0;
+  server.setOnSubscriberConnected(() => {
+    connected++;
+  });
+  server.setOnScreenshotCadenceChanged(() => {
+    cadence++;
+  });
+  server.setOnHierarchyCadenceChanged(() => {
+    cadence++;
+  });
+  return {
+    receive: (socket, line) => server.processLineForTest(socket, line),
+    getSubscriberCount: () => server.getSubscriberCount(),
+    effects: () => {
+      expect(cadence).toBe(connected * 2);
+      return connected;
+    },
+  };
+});
+
+it("registered observer request_observation passes both auth layers while other-owned requests fail", async () => {
+  const timer = new FakeTimer();
+  const registry = new ObserverSessionRegistry(timer);
+  registry.register("desktop", "AutoMobile Desktop");
+  const options = {
+    operation: "observationStream",
+    env: {},
+    resolveObserverRegistry: () => registry,
+    resolveSessionManager: () => ({
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      getSessionForDevice: (id: string) => (id === "owned" ? "other" : null),
+    }),
+  };
+  const server = new TestableDeviceDataStreamSocketServer(
+    timer,
+    new ObserverAdmittingStreamAuthenticator(options),
+  );
+  let captures = 0;
+  server.setOnObservationRequested(async ({ sessionUuid, deviceId }) => {
+    new ObserverAdmittingStreamAuthenticator(options).authorize({
+      sessionUuid,
+      deviceId: deviceId ?? undefined,
+    });
+    captures++;
+    return [
+      {
+        deviceId: deviceId ?? "unowned",
+        observation: {
+          display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+          observationId: "auth-observation",
+          updatedAt: 1,
+          screenSize: { width: 100, height: 100 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: { hierarchy: {}, updatedAt: 1 },
+        },
+      },
+    ];
+  });
+  const socket = new FakeSocket();
+  await server.processLineForTest(
+    socket,
+    JSON.stringify({
+      id: "observe",
+      command: "request_observation",
+      deviceId: "unowned",
+      sessionUuid: "desktop",
+    }),
+  );
+  expect(socket.getWrittenMessages()).toEqual([
+    { id: "observe", type: "subscription_response", success: true },
+  ]);
+  expect(captures).toBe(1);
+  socket.resetWrittenData();
+  await server.processLineForTest(
+    socket,
+    JSON.stringify({
+      id: "refuse",
+      command: "request_observation",
+      deviceId: "owned",
+      sessionUuid: "desktop",
+    }),
+  );
+  expect(captures).toBe(1);
+  expect(socket.getWrittenMessages<{ error: string; type: string }>()[0]).toMatchObject({
+    type: "error",
+    error: expect.stringContaining("different daemon session"),
   });
 });

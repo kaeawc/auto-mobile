@@ -32,18 +32,24 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
+import dev.jasonpearson.automobile.desktop.core.daemon.StreamSessionRejectedException
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skia.Image as SkiaImage
@@ -151,9 +157,13 @@ fun DeviceThumbnail(
       screenshot = null
     }
   }
-  LaunchedEffect(device.id, screenshotSource, placeholder) {
+  LaunchedEffect(device.id, screenshotSource, placeholder, sessionUuidProvider) {
     if (placeholder == null && screenshotSource != null && screenshot == null) {
-      screenshot = captureScreenshotWithRetry(device.id, screenshotSource, sessionUuidProvider)
+      try {
+        screenshot = captureScreenshotWithRetry(device.id, screenshotSource, sessionUuidProvider)
+      } catch (_: StreamSessionRejectedException) {
+        // The stream surfaced the typed rejection once; keep the placeholder without retrying.
+      }
     }
   }
 
@@ -224,10 +234,12 @@ fun DeviceThumbnail(
 object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
   private const val CAPTURE_TIMEOUT_MS = 5_000L
 
+  @OptIn(ExperimentalCoroutinesApi::class)
   override suspend fun latest(
     deviceId: String,
     sessionUuidProvider: () -> String?,
   ): ImageBitmap? {
+    if (sessionUuidProvider() == null) return null
     val stream = ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
     return try {
       val base64 =
@@ -235,7 +247,15 @@ object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
           stream.connect(deviceId)
           stream.requestObservation(deviceId)
           withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
-            stream.screenshotUpdates.first { isThumbnailFrameFor(deviceId, it) }.screenshotBase64
+            merge(
+                stream.screenshotUpdates.map { update ->
+                  update.screenshotBase64.takeIf { isThumbnailFrameFor(deviceId, update) }
+                },
+                stream.connectionState.filterIsInstance<ConnectionState.Error>().map {
+                  throw StreamSessionRejectedException(it.message)
+                },
+              )
+              .first { it != null }
           }
         }
       base64?.let {
@@ -244,6 +264,8 @@ object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
           SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
         }
       }
+    } catch (rejection: StreamSessionRejectedException) {
+      throw rejection
     } catch (cancellation: CancellationException) {
       throw cancellation
     } catch (error: Exception) {

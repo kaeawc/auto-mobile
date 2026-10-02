@@ -52,6 +52,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
+internal fun createFailuresDashboardPushClient(sessionUuidProvider: (() -> String?)? = null) =
+  FailuresPushSocketClient(sessionUuidProvider = sessionUuidProvider)
+
 /** Main Failures dashboard showing crashes, ANRs, and tool call failures */
 @Composable
 fun FailuresDashboard(
@@ -70,6 +73,8 @@ fun FailuresDashboard(
   streamingDataSource: StreamingFailuresDataSourceInterface? = null,
   dataSourceMode: DataSourceMode = DataSourceMode.Fake,
   modifier: Modifier = Modifier,
+  // Null preserves legacy behavior; a supplied provider stays null until registered/after release.
+  sessionUuidProvider: (() -> String?)? = null,
   failuresPushClient: FailuresPushSocketClient? = null, // Shared client managed at app level
 ) {
   val scope = rememberCoroutineScope()
@@ -120,7 +125,14 @@ fun FailuresDashboard(
   var reconnectAttempt by remember { mutableIntStateOf(0) }
 
   // Push socket client for real-time updates - use provided or create local
-  val pushClient = failuresPushClient ?: remember { FailuresPushSocketClient() }
+  val sessionReady = sessionUuidProvider == null || sessionUuidProvider.invoke() != null
+  val pushClient =
+    failuresPushClient
+      ?: remember(dataSourceMode, sessionUuidProvider, sessionReady) {
+        if (dataSourceMode == DataSourceMode.Real && sessionReady) {
+          createFailuresDashboardPushClient(sessionUuidProvider = sessionUuidProvider)
+        } else null
+      }
   val isLocalPushClient = failuresPushClient == null
 
   // Load data when data source changes or retry is triggered
@@ -211,20 +223,18 @@ fun FailuresDashboard(
   }
 
   // Connect to push socket for real-time updates in real mode (only for local client)
-  LaunchedEffect(dataSourceMode, isLocalPushClient) {
-    if (isLocalPushClient) {
-      if (dataSourceMode == DataSourceMode.Real) {
-        pushClient.connect()
-      } else {
-        pushClient.disconnect()
-      }
+  DisposableEffect(pushClient, isLocalPushClient) {
+    if (isLocalPushClient) pushClient?.connect()
+    onDispose {
+      if (isLocalPushClient) pushClient?.dispose()
     }
   }
 
   // Listen for push notifications and refresh data
   LaunchedEffect(pushClient, currentDataSource, dataSourceMode) {
+    val connected = pushClient ?: return@LaunchedEffect
     if (dataSourceMode == DataSourceMode.Real) {
-      pushClient.failureNotifications.collectLatest {
+      connected.failureNotifications.collectLatest {
         // Refresh failure groups when we receive a push notification
         when (val result = currentDataSource.getFailureGroups()) {
           is Result.Success -> {
@@ -237,15 +247,6 @@ fun FailuresDashboard(
             /* keep current state */
           }
         }
-      }
-    }
-  }
-
-  // Cleanup on unmount (only for local client)
-  DisposableEffect(isLocalPushClient) {
-    onDispose {
-      if (isLocalPushClient) {
-        pushClient.disconnect()
       }
     }
   }

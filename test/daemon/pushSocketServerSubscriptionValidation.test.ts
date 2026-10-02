@@ -66,16 +66,30 @@ const servers: Array<{
 }> = [
   {
     name: "TelemetryPushSocketServer",
-    create: () => drivable(new TelemetryPushSocketServer("/fake/telemetry.sock", new FakeTimer())),
+    create: () =>
+      drivable(
+        new TelemetryPushSocketServer("/fake/telemetry.sock", new FakeTimer(), {
+          authenticator: { authorize: () => {} },
+        }),
+      ),
   },
   {
     name: "FailuresPushSocketServer",
-    create: () => drivable(new FailuresPushSocketServer("/fake/failures.sock", new FakeTimer())),
+    create: () =>
+      drivable(
+        new FailuresPushSocketServer("/fake/failures.sock", new FakeTimer(), {
+          authenticator: { authorize: () => {} },
+        }),
+      ),
   },
   {
     name: "PerformancePushSocketServer",
     create: () =>
-      drivable(new PerformancePushSocketServer("/fake/performance.sock", new FakeTimer())),
+      drivable(
+        new PerformancePushSocketServer("/fake/performance.sock", new FakeTimer(), {
+          authenticator: { authorize: () => {} },
+        }),
+      ),
   },
 ];
 

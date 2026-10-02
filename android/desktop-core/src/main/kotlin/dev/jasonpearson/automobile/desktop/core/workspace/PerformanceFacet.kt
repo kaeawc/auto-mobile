@@ -1,12 +1,16 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard
 import kotlinx.coroutines.delay
+
+internal fun createPerformanceObservationClient(sessionUuidProvider: (() -> String?)? = null) =
+  ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
 
 /**
  * Docked-facet body for [Tool.Performance]: the performance dashboard scoped to a single pane's
@@ -30,18 +34,27 @@ import kotlinx.coroutines.delay
 @Composable
 fun PerformanceFacet(
   column: DeviceColumn,
-  observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
+  // An omitted provider retains legacy behavior; a supplied provider gates registration/release.
+  sessionUuidProvider: (() -> String?)? = null,
+  observationStreamFactory: (String) -> ObservationStream = {
+    createPerformanceObservationClient(sessionUuidProvider = sessionUuidProvider)
+  },
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 ) {
   val graph = LocalAutoMobileGraph.current
+  val sessionUuid = sessionUuidProvider?.invoke()
   val observation =
-    rememberReconnectingObservationState(
-      deviceId = column.deviceId,
-      streamFactory = { observationStreamFactory(column.deviceId) },
-      backoffDelay = backoffDelay,
-      socketAvailable = socketAvailable,
-    )
+    key(sessionUuidProvider, sessionUuid) {
+      if (sessionUuidProvider == null || sessionUuid != null)
+        rememberReconnectingObservationState(
+          deviceId = column.deviceId,
+          streamFactory = { observationStreamFactory(column.deviceId) },
+          backoffDelay = backoffDelay,
+          socketAvailable = socketAvailable,
+        )
+      else ReconnectingObservationState(null, 0)
+    }
   PerformanceDashboard(
     dataSourceMode = DataSourceMode.Real,
     clientProvider = { graph.autoMobileClient },

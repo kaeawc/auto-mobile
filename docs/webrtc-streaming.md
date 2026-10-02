@@ -143,3 +143,5 @@ for one lease TTL, up to 256 entries; a later `start` can re-subscribe with a ne
 The optional response fields `subscriptionKind`, `reason`, and `errorCode` are additive
 and can be ignored by older clients. Auth disabled and legacy authenticators without
 an ownership resolver retain the previous stop and attach semantics.
+
+Observation-stream, telemetry-push, failures-push, and performance-push subscribe commands require a valid `sessionUuid` when stream authentication is enabled. Register one with `daemon/registerSession` (or acquire a device session) before subscribing. Older desktop apps are rejected at subscribe until they register and send their session UUID. `AUTOMOBILE_DAEMON_STREAM_AUTH=0` retains the existing opt-out behavior. Registration-only sessions are admitted only on observation and push paths; device-scoped observation requests retain their existing ownership checks.

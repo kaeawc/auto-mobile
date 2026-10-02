@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,6 +45,9 @@ private val LOG = LoggerFactory.getLogger("WorkspaceDeviceControl")
 // stream) and any open Layout facet refresh less often, which is a fine trade for a control pane.
 private const val CONTROL_SCREENSHOT_INTERVAL_MS = 5_000L
 private const val CONTROL_HIERARCHY_INTERVAL_MS = 5_000L
+
+internal fun createWorkspaceControlObservationClient(sessionUuidProvider: (() -> String?)? = null) =
+  ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
 
 /**
  * Per-column device-control holder for the workspace video pane.
@@ -87,7 +91,11 @@ fun rememberWorkspaceDeviceControl(
   column: DeviceColumn,
   clientProvider: () -> AutoMobileClient?,
   enabled: Boolean,
-  streamFactory: () -> ObservationStream = { ObservationStreamClient() },
+  // An omitted provider retains legacy behavior; a supplied provider gates registration/release.
+  sessionUuidProvider: (() -> String?)? = null,
+  streamFactory: () -> ObservationStream = {
+    createWorkspaceControlObservationClient(sessionUuidProvider = sessionUuidProvider)
+  },
 ): WorkspaceDeviceControlState {
   val scope = rememberCoroutineScope()
   val layoutState = remember(column.deviceId) { LayoutInspectorState() }
@@ -136,13 +144,16 @@ fun rememberWorkspaceDeviceControl(
     }
   LaunchedEffect(clientProvider) { session.reset() }
 
+  val sessionUuid = sessionUuidProvider?.invoke()
   val stream =
-    if (enabled)
-      rememberReconnectingObservationStream(
-        deviceId = column.deviceId,
-        streamFactory = streamFactory,
-      )
-    else null
+    key(sessionUuidProvider, sessionUuid) {
+      if (enabled && (sessionUuidProvider == null || sessionUuid != null))
+        rememberReconnectingObservationStream(
+          deviceId = column.deviceId,
+          streamFactory = streamFactory,
+        )
+      else null
+    }
 
   // Request a fast paired capture cadence while control is armed. The daemon's default is too slow
   // (~3s screenshots), so after a tap the retained snapshot ages out before a superseding pair

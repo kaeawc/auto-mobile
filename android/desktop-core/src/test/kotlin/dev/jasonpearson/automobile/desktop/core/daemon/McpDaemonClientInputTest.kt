@@ -151,6 +151,9 @@ class McpDaemonClientInputTest {
     TestDaemonSocket(
         responses =
           listOf(
+            SocketResponse(
+              resultJson = "{\"accepted\":true,\"heartbeatTimeoutMs\":10000,\"expiresAtMs\":10000}"
+            ),
             SocketResponse(resultJson = "{\"heartbeat\":true}"),
             SocketResponse(resultJson = "{\"released\":true}"),
           )
@@ -165,6 +168,8 @@ class McpDaemonClientInputTest {
           )
 
         assertEquals("desktop-session", session.sessionUuid)
+        assertNull(session.sessionUuidProvider())
+        session.ensureRegistered()
         assertEquals("desktop-session", session.sessionUuidProvider())
         session.heartbeat()
         session.release()
@@ -173,12 +178,12 @@ class McpDaemonClientInputTest {
 
         val requests = server.awaitRequests()
         assertEquals(
-          listOf("daemon/heartbeat", "daemon/releaseSession"),
+          listOf("daemon/registerSession", "daemon/heartbeat", "daemon/releaseSession"),
           requests.map { it.method },
         )
         assertEquals(
           "desktop-session",
-          requests[1].params["sessionId"]?.jsonPrimitive?.content,
+          requests[2].params["sessionId"]?.jsonPrimitive?.content,
         )
       }
   }

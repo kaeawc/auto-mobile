@@ -1100,22 +1100,6 @@ describe("explicit action display", () => {
     expect(fakeAdb.getAllCommands()).toEqual([]);
   });
 
-  test("dragAndDrop rejects press and hold durations with display", async () => {
-    const fakeAdb = new FakeAdbClient();
-    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer());
-    for (const extra of [{ pressDurationMs: 700 }, { holdDurationMs: 200 }]) {
-      const result = await action.execute({
-        source: { text: "Source" },
-        target: { text: "Target" },
-        display: "external",
-        ...extra,
-      });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("not supported with `display` yet");
-    }
-    expect(fakeAdb.getAllCommands()).toEqual([]);
-  });
-
   test("coordinates observed on display 0 cannot target external", async () => {
     const executor = adb();
     const observe = new FakeObserveScreen();

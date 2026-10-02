@@ -137,6 +137,11 @@ export class DragAndDrop extends BaseVisualChange {
         throw new ActionableError(result.error ?? "Android drag failed");
       }
     } else {
+      if (options.pressDurationMs !== undefined || options.holdDurationMs !== undefined) {
+        throw new ActionableError(
+          `pressDurationMs and holdDurationMs require the CtrlProxy gesture route on display ${target.displayId} (capability gesture_display_id_v1); adb draganddrop cannot express press or hold durations`,
+        );
+      }
       await executeTouchscreenInput(
         this.adb,
         `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
@@ -158,12 +163,6 @@ export class DragAndDrop extends BaseVisualChange {
   ): Promise<DragAndDropResult | undefined> {
     if (options.display !== undefined) {
       try {
-        if (options.pressDurationMs !== undefined) {
-          throw new ActionableError("pressDurationMs is not supported with `display` yet");
-        }
-        if (options.holdDurationMs !== undefined) {
-          throw new ActionableError("holdDurationMs is not supported with `display` yet");
-        }
         const target = await prepareTargetDisplayAction(
           this.device,
           options.display,

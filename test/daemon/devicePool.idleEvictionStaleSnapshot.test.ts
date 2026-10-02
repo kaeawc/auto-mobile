@@ -2,6 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import type { IosLivenessSnapshot } from "../../src/daemon/idleDeviceReaper";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
@@ -86,7 +87,15 @@ describe("idle eviction with a stale discovery snapshot", () => {
       await pool.initializeWithDevices([sim]);
       const original = pool.getDevice(udid)!;
       const internals = pool as unknown as {
-        selectAssignableIdleDevice(candidates: PooledDevice[]): Promise<unknown>;
+        idleDeviceReaper: { getIosLivenessSnapshot(): Promise<IosLivenessSnapshot> };
+        assignmentMutex: { runExclusive<T>(operation: () => Promise<T>): Promise<T> };
+        selectAssignableIdleDevice(
+          candidates: PooledDevice[],
+          snapshots: {
+            capturedEntries: ReadonlySet<PooledDevice>;
+            iosLiveness: IosLivenessSnapshot;
+          },
+        ): Promise<unknown>;
         pruneStaleIdleIosDevices(candidates: PooledDevice[]): Promise<number>;
         assertIdleDeviceAssignable(device: PooledDevice, message: string): Promise<void>;
       };
@@ -95,7 +104,14 @@ describe("idle eviction with a stale discovery snapshot", () => {
       deviceManager.parkNext = "ios";
       const operation =
         path === "select"
-          ? internals.selectAssignableIdleDevice([original])
+          ? internals.idleDeviceReaper.getIosLivenessSnapshot().then((iosLiveness) =>
+              internals.assignmentMutex.runExclusive(() =>
+                internals.selectAssignableIdleDevice([original], {
+                  capturedEntries: new Set([original]),
+                  iosLiveness,
+                }),
+              ),
+            )
           : path === "prune"
             ? internals.pruneStaleIdleIosDevices([original])
             : internals
@@ -118,6 +134,12 @@ describe("idle eviction with a stale discovery snapshot", () => {
       try {
         deviceManager.parked[0].resolve();
         const result = await operation;
+        if (path === "select") {
+          expect(staleRemovalCalls).toBe(0);
+          expect(pool.getDevice(udid)).toBe(original);
+          expect(result).toMatchObject({ snapshotStale: true });
+          return;
+        }
         expect(staleRemovalCalls).toBe(1);
         expect(replacement?.incarnation).not.toBe(original.incarnation);
         expect(pool.getDevice(udid)).toBe(replacement);

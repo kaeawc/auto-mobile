@@ -4369,7 +4369,7 @@ describe("DevicePool", () => {
       expect(device1).toBe(device2);
     });
 
-    test("evicts a released iOS simulator that is no longer booted before reassignment", async () => {
+    test("skips a released iOS simulator and leaves eviction to confirmed refresh misses", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("sim-old", "ios", "iPhone 15"),
         createBootedDevice("sim-new", "ios", "iPhone 16"),
@@ -4387,8 +4387,12 @@ describe("DevicePool", () => {
       const secondDevice = await devicePool.assignDeviceToSession("session-2", "ios");
 
       expect(secondDevice).toBe("sim-new");
-      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getDevice("sim-old")?.sessionId).toBeNull();
       expect(devicePool.getDevice("sim-new")?.sessionId).toBe("session-2");
+      for (let miss = 0; miss < 3; miss++) {
+        await devicePool.refreshDevices();
+      }
+      expect(devicePool.getDevice("sim-old")).toBeNull();
     });
 
     // A handset serial is unique, so it never needs the emulator's identity
@@ -4400,6 +4404,7 @@ describe("DevicePool", () => {
       ]);
       fakeDeviceManager.bootedDevices = [];
 
+      fakeTimer.enableAutoAdvance();
       await expect(devicePool.assignDeviceToSession("session-1", "android")).rejects.toThrow();
 
       expect(devicePool.getDevice("R5CT10ABCDE")).toBeNull();
@@ -4441,7 +4446,7 @@ describe("DevicePool", () => {
       const deviceId = await devicePool.assignDeviceToSession("session-1", "ios");
 
       expect(deviceId).toBe("sim-live");
-      expect(devicePool.getDevice("sim-stale")).toBeNull();
+      expect(devicePool.getDevice("sim-stale")?.sessionId).toBeNull();
       expect(countingDeviceManager.detailedBootedCalls).toBe(1);
     });
 
@@ -4451,6 +4456,7 @@ describe("DevicePool", () => {
       ]);
       fakeDeviceManager.bootedDevices = [];
 
+      fakeTimer.enableAutoAdvance();
       await expect(devicePool.assignDeviceToSession("session-1", "android")).rejects.toThrow(
         /No healthy android devices|No devices in pool/,
       );
@@ -4459,7 +4465,7 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
-    test("evicts stale idle Android emulator and assigns the next live candidate", async () => {
+    test("skips stale idle Android emulator and assigns the next live candidate", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Pixel 8"),
         createBootedDevice("emulator-5556", "android", "Pixel 9"),
@@ -4469,8 +4475,12 @@ describe("DevicePool", () => {
       const deviceId = await devicePool.assignDeviceToSession("session-1", "android");
 
       expect(deviceId).toBe("emulator-5556");
-      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
       expect(devicePool.getDevice("emulator-5556")?.sessionId).toBe("session-1");
+      for (let miss = 0; miss < 3; miss++) {
+        await devicePool.refreshDevices();
+      }
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
     });
 
     test("assigns an unrelated healthy emulator while stale-device recovery is pending", async () => {
@@ -4498,6 +4508,11 @@ describe("DevicePool", () => {
           source: "local",
         });
         await devicePool.addDevice(healthy);
+        // Missing recovery is owned by the refresh threshold, not allocation's
+        // pre-lock snapshot. The detached reboot must still leave allocation free.
+        for (let miss = 0; miss < 3; miss++) {
+          await devicePool.refreshDevices();
+        }
 
         await expect(devicePool.assignDeviceToSession("session-1", "android")).resolves.toBe(
           "emulator-5556",

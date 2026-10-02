@@ -199,10 +199,7 @@ export class DevicePoolRefresh {
 
       return {
         addedCount,
-        completeness: {
-          succeededPlatforms: discovery.succeededPlatforms,
-          succeededSources: discovery.succeededSources,
-        },
+        completeness: this.currentRefreshCompleteness(discovery, refreshGeneration),
       };
     } catch (error) {
       const elapsed = this.pool.getTimer().now() - startTime;
@@ -215,6 +212,20 @@ export class DevicePoolRefresh {
       this.inFlightRefreshFloors.delete(refreshGeneration);
       this.pruneDeviceRemovalStamps();
     }
+  }
+
+  private currentRefreshCompleteness(
+    discovery: BootedDeviceDiscovery,
+    refreshGeneration: number,
+  ): DiscoveryCompleteness | undefined {
+    // A newer generation may have started between individual pool updates.
+    // Partial/superseded updates never provide authoritative absence evidence.
+    return refreshGeneration === this.refreshGeneration
+      ? {
+          succeededPlatforms: discovery.succeededPlatforms,
+          succeededSources: discovery.succeededSources,
+        }
+      : undefined;
   }
 
   private pruneDeviceRemovalStamps(): void {

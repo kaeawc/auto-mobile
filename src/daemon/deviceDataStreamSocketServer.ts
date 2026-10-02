@@ -14,8 +14,13 @@ import {
   type DeviceSessionResolver,
   nullDeviceSessionResolver,
   SuspendedDeviceRoutingLog,
+  deviceSessionErrorFields,
 } from "./deviceSessionResolver";
-import type { DeviceSessionRecord } from "./deviceSessionRegistry";
+import type {
+  DeviceSessionRecord,
+  DeviceSessionEndOptions,
+  DeviceSessionRetireReason,
+} from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import {
   createDefaultStreamSocketAuthenticator,
@@ -116,6 +121,7 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
   deviceSessionUuid?: string | null;
   /** New epoch's uuid when a `device_session_ended` frame represents replacement. */
   successorSessionUuid?: string;
+  reason?: DeviceSessionRetireReason;
   /** Device platform. Carried on `device_session_started`/`device_session_ended` frames. */
   platform?: Platform;
   timestamp?: number;
@@ -437,7 +443,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return this.frameContextGenerations.get(deviceId) ?? this.untrackedLiveFrameGeneration;
   }
 
-  private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  protected override deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
   private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
   private readonly initialFrameWaiters = new Map<string, AbortController>();
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
@@ -828,22 +834,22 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     this.pushDeviceSessionLifecycle("device_session_started", record);
   }
 
-  pushDeviceSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
+  pushDeviceSessionEnded(record: DeviceSessionRecord, options?: DeviceSessionEndOptions): void {
     // Full: epoch retirement/replacement ends trust in this connection/incarnation.
     this.invalidateDeviceFrames(record.deviceId);
-    this.pushDeviceSessionLifecycle("device_session_ended", record, successorSessionUuid);
+    this.pushDeviceSessionLifecycle("device_session_ended", record, options);
   }
 
   private pushDeviceSessionLifecycle(
     type: "device_session_started" | "device_session_ended",
     record: DeviceSessionRecord,
-    successorSessionUuid?: string,
+    options?: DeviceSessionEndOptions,
   ): void {
     const message: DeviceDataStreamMessage = {
       type,
       deviceId: record.deviceId,
       deviceSessionUuid: record.deviceSessionUuid,
-      ...(successorSessionUuid === undefined ? {} : { successorSessionUuid }),
+      ...options,
       platform: record.platform,
       timestamp: this.timer.now(),
     };
@@ -1067,9 +1073,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
             ? undefined
             : (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined);
         if (deviceSessionUuid !== null && deviceId === undefined) {
-          throw new Error(
-            `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
-          );
+          throw this.deviceSessionResolver.getSessionError(deviceSessionUuid);
         }
         this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
         if (!this.onNavigationGraphRequested) {
@@ -1108,6 +1112,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           type: "error",
           success: false,
           error: errorMessage(error),
+          ...deviceSessionErrorFields(error),
         };
         this.sendJson(socket, errorResponse);
       }
@@ -1135,6 +1140,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           type: "error",
           success: false,
           error: errorMessage(error),
+          ...deviceSessionErrorFields(error),
         };
         this.sendJson(socket, errorResponse);
         return;
@@ -1149,7 +1155,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           id: request.id,
           type: "error",
           success: false,
-          error: `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+          error: this.deviceSessionResolver.getSessionError(deviceSessionUuid).message,
+          ...deviceSessionErrorFields(
+            this.deviceSessionResolver.getSessionError(deviceSessionUuid),
+          ),
         };
         this.sendJson(socket, errorResponse);
         return;
@@ -1665,6 +1674,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...deviceSessionErrorFields(error),
       } satisfies SubscriptionResponse);
       return;
     }
@@ -1695,6 +1705,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...deviceSessionErrorFields(error),
       } satisfies SubscriptionResponse);
       return;
     }
@@ -1736,9 +1747,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         ? (request.deviceId ?? null)
         : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
     if (deviceSessionUuid !== null && deviceId === null) {
-      throw new Error(
-        `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
-      );
+      throw this.deviceSessionResolver.getSessionError(deviceSessionUuid);
     }
     if (subscribe && deviceId !== null) {
       this.deviceSessionResolver.assertDeviceActionable(deviceId, "to watch stored values");
@@ -1757,9 +1766,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           ? request.deviceId
           : (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined);
       if (deviceSessionUuid !== null && deviceId === undefined) {
-        throw new Error(
-          `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
-        );
+        throw this.deviceSessionResolver.getSessionError(deviceSessionUuid);
       }
       this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
       if (!this.onObservationRequested) {
@@ -1817,6 +1824,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...deviceSessionErrorFields(error),
       };
       this.sendJson(socket, errorResponse);
     }

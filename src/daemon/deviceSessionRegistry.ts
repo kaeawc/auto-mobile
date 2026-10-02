@@ -37,7 +37,23 @@ interface DeviceConnectedInput {
   deviceId: string;
   platform: Platform;
   incarnation: number;
+  retireReason?: DeviceSessionRetireReason;
 }
+
+export type DeviceSessionRetireReason = "superseded-by-restore";
+
+export interface DeviceSessionEndOptions {
+  successorSessionUuid?: string;
+  reason?: DeviceSessionRetireReason;
+}
+
+export interface RetiredDeviceSession {
+  deviceId: string;
+  successorSessionUuid: string;
+  reason: DeviceSessionRetireReason;
+}
+
+const MAX_RESTORE_TOMBSTONES = 256;
 
 interface LiveEntry {
   record: DeviceSessionRecord;
@@ -55,7 +71,7 @@ interface LiveEntry {
  */
 export interface DeviceSessionLifecycleListener {
   onSessionStarted(record: DeviceSessionRecord): void;
-  onSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void;
+  onSessionEnded(record: DeviceSessionRecord, options?: DeviceSessionEndOptions): void;
 }
 
 /**
@@ -69,6 +85,7 @@ export class DeviceSessionRegistry {
   private readonly idGenerator: IdGenerator;
   private readonly byDeviceId = new Map<string, LiveEntry>();
   private readonly uuidToDeviceId = new Map<string, string>();
+  private readonly retiredByUuid = new Map<string, RetiredDeviceSession>();
   private lifecycleListener: DeviceSessionLifecycleListener | null = null;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
@@ -94,9 +111,9 @@ export class DeviceSessionRegistry {
     }
   }
 
-  private emitEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
+  private emitEnded(record: DeviceSessionRecord, options?: DeviceSessionEndOptions): void {
     try {
-      this.lifecycleListener?.onSessionEnded(record, successorSessionUuid);
+      this.lifecycleListener?.onSessionEnded(record, options);
     } catch (error) {
       // See emitStarted: preserve registry bookkeeping and surface delivery faults.
       logger.warn(`[DeviceSessionRegistry] onSessionEnded listener threw: ${error}`);
@@ -107,13 +124,13 @@ export class DeviceSessionRegistry {
    * Mint (or return the existing) device-session record for a connected device.
    *
    * Idempotent within an epoch: a repeated connect carrying the same
-   * `incarnation` returns the existing record without minting. A changed
-   * `incarnation` (reconnect, whether or not a disconnect was observed) retires
-   * the superseded epoch and mints a fresh uuid.
+   * `incarnation` returns the existing record without minting. Older readiness
+   * inputs cannot move identity backwards. A newer incarnation (reconnect or
+   * restore) retires the superseded epoch and mints a fresh uuid.
    */
   onDeviceConnected(input: DeviceConnectedInput): DeviceSessionRecord {
     const existing = this.byDeviceId.get(input.deviceId);
-    if (existing && existing.incarnation === input.incarnation) {
+    if (existing && existing.incarnation >= input.incarnation) {
       return existing.record;
     }
     const record: DeviceSessionRecord = {
@@ -127,16 +144,42 @@ export class DeviceSessionRegistry {
       // so a stale reference cannot resolve to the reincarnated device, and
       // surface the boundary as an end of the old epoch before the new one starts.
       this.uuidToDeviceId.delete(existing.record.deviceSessionUuid);
-      this.emitEnded(existing.record, record.deviceSessionUuid);
+      if (input.retireReason) {
+        this.retiredByUuid.set(existing.record.deviceSessionUuid, {
+          deviceId: input.deviceId,
+          successorSessionUuid: record.deviceSessionUuid,
+          reason: input.retireReason,
+        });
+      }
     }
+    if (this.retiredByUuid.size > MAX_RESTORE_TOMBSTONES) {
+      const oldest = this.retiredByUuid.keys().next().value;
+      if (oldest !== undefined) {
+        this.retiredByUuid.delete(oldest);
+      }
+    }
+    // Publish the successor before notifying observers: reentrant readiness
+    // callbacks must see this incarnation rather than minting it a second time.
     this.byDeviceId.set(input.deviceId, { record, incarnation: input.incarnation });
     this.uuidToDeviceId.set(record.deviceSessionUuid, input.deviceId);
+    if (existing) {
+      this.emitEnded(existing.record, {
+        successorSessionUuid: record.deviceSessionUuid,
+        ...(input.retireReason === undefined ? {} : { reason: input.retireReason }),
+      });
+    }
     this.emitStarted(record);
     return record;
   }
 
   /** Retire the live epoch for a disconnected device, if any. */
   onDeviceDisconnected(deviceId: string): void {
+    // Restore recovery advice is useful only while this serial remains connected.
+    for (const [uuid, retired] of this.retiredByUuid) {
+      if (retired.deviceId === deviceId) {
+        this.retiredByUuid.delete(uuid);
+      }
+    }
     const existing = this.byDeviceId.get(deviceId);
     if (!existing) {
       return;
@@ -148,6 +191,10 @@ export class DeviceSessionRegistry {
 
   getByDeviceId(deviceId: string): DeviceSessionRecord | undefined {
     return this.byDeviceId.get(deviceId)?.record;
+  }
+
+  getRetiredByUuid(deviceSessionUuid: string): RetiredDeviceSession | undefined {
+    return this.retiredByUuid.get(deviceSessionUuid);
   }
 
   getByUuid(deviceSessionUuid: string): DeviceSessionRecord | undefined {

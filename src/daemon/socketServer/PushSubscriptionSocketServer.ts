@@ -3,6 +3,7 @@ import { Socket } from "node:net";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { BaseSocketServer } from "./BaseSocketServer";
+import { deviceSessionErrorFields, type DeviceSessionResolver } from "../deviceSessionResolver";
 import {
   Subscriber,
   SubscriptionCommand,
@@ -20,7 +21,7 @@ export interface SubscriptionResponse {
   error?: string;
   timestamp?: number;
   subscriptionId?: string;
-  code?: "BACKFILL_QUEUE_OVERFLOW";
+  code?: "BACKFILL_QUEUE_OVERFLOW" | "DEVICE_SESSION_SUPERSEDED_BY_RESTORE";
 }
 
 const MAX_BACKFILL_QUEUE = 1_000;
@@ -46,6 +47,9 @@ interface ConnectionState {
  */
 export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends BaseSocketServer {
   protected subscribers: Map<string, Subscriber<TFilter>> = new Map();
+  // Standalone base-server tests need no registry; concrete device push servers
+  // install their resolver and reject restore tombstones through this parser.
+  protected deviceSessionResolver: DeviceSessionResolver | null = null;
   private connections: Map<Socket, ConnectionState> = new Map();
   private readonly backfills = new Map<string, BackfillState<TPushData>>();
   private subscriptionCounter = 0;
@@ -200,6 +204,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         type: "error",
         success: false,
         error: errorMessage(error),
+        ...deviceSessionErrorFields(error),
       };
       this.sendJson(socket, errorResponse);
     }
@@ -625,6 +630,10 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     const trimmed = value.trim();
     if (trimmed.length === 0) {
       throw new Error("deviceSessionUuid must not be blank");
+    }
+    const restoreError = this.deviceSessionResolver?.getRestoreSupersededError(trimmed);
+    if (restoreError) {
+      throw restoreError;
     }
     // Return the trimmed key, never the raw one: filters compare by exact equality,
     // so a padded `" uuid-a "` would ack success and then match nothing - the same

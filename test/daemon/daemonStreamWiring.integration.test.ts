@@ -19,6 +19,7 @@ import {
 } from "../../src/daemon/observationRequestBatch";
 import type {
   DeviceSessionRecord,
+  DeviceSessionEndOptions,
   DeviceSessionRegistry,
 } from "../../src/daemon/deviceSessionRegistry";
 import type { DeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
@@ -156,10 +157,10 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.started.push(record);
   }
 
-  pushDeviceSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
+  pushDeviceSessionEnded(record: DeviceSessionRecord, options?: DeviceSessionEndOptions): void {
     this.ended.push({
       record,
-      ...(successorSessionUuid === undefined ? {} : { successorSessionUuid }),
+      ...options,
     });
   }
 

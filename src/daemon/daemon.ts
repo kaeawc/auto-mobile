@@ -1674,8 +1674,8 @@ export class Daemon {
     if (deviceDataStream) {
       this.deviceSessionRegistry.setLifecycleListener({
         onSessionStarted: (record) => deviceDataStream.pushDeviceSessionStarted(record),
-        onSessionEnded: (record, successorSessionUuid) =>
-          deviceDataStream.pushDeviceSessionEnded(record, successorSessionUuid),
+        onSessionEnded: (record, options) =>
+          deviceDataStream.pushDeviceSessionEnded(record, options),
       });
     }
   }

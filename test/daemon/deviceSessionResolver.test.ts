@@ -13,6 +13,24 @@ function makeRegistry(scripted?: string[]): DeviceSessionRegistry {
 }
 
 describe("createRegistryDeviceSessionResolver", () => {
+  it("returns a typed restore retirement error with new-id recovery instructions", () => {
+    const registry = makeRegistry(["old", "new"]);
+    registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 1 });
+    registry.onDeviceConnected({
+      deviceId: "d",
+      platform: "android",
+      incarnation: 2,
+      retireReason: "superseded-by-restore",
+    });
+    const error = createRegistryDeviceSessionResolver(registry).getSessionError("old");
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toMatchObject({ code: "DEVICE_SESSION_SUPERSEDED_BY_RESTORE" });
+    expect(error.message).toContain("snapshot restore");
+    expect(error.message).toContain("deviceSnapshot");
+    expect(error.message).toContain("device_session_started");
+    expect(error.message).toContain("daemon/listDeviceSessions");
+    expect(error.message).toContain("runtime.deviceSessionUuid");
+  });
   it("resolves both directions for a live epoch", () => {
     const registry = makeRegistry(["uuid-a"]);
     registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });

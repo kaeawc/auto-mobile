@@ -110,7 +110,7 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
   PerformanceFilter,
   LivePerformanceData
 > {
-  private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  protected override deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
   private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
 
   constructor(

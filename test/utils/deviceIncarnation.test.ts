@@ -124,7 +124,7 @@ describe("deviceIncarnationToken", () => {
     const unregister = registerDeviceIncarnationListener(listener);
     setDeviceIncarnationResolver(undefined);
 
-    expect(advanceDeviceIncarnation("emulator-5554")).toBe("1");
+    expect(advanceDeviceIncarnation("emulator-5554")).toEqual({ incarnation: "1" });
     await listener.onDeviceIncarnationChanged("emulator-5554");
     expect(calls).toEqual(["emulator-5554"]);
     unregister();

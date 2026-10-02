@@ -74,7 +74,23 @@ export class DaemonState implements DaemonStateLike {
       onDeviceIncarnationChanged: (deviceId) =>
         sessionManager.resetDeviceReadinessForDevice(deviceId),
     });
-    setDeviceIncarnationBumper((deviceId) => devicePool.bumpDeviceIncarnation(deviceId));
+    setDeviceIncarnationBumper((deviceId) => {
+      if (!devicePool.bumpDeviceIncarnation(deviceId)) {
+        return false;
+      }
+      const device = devicePool.getDevice(deviceId);
+      // Restore does not establish a connection that readiness never registered.
+      if (!device || !deviceSessionRegistry.getByDeviceId(deviceId)) {
+        return {};
+      }
+      const record = deviceSessionRegistry.onDeviceConnected({
+        deviceId,
+        platform: device.platform,
+        incarnation: device.incarnation,
+        retireReason: "superseded-by-restore",
+      });
+      return { deviceSessionUuid: record.deviceSessionUuid };
+    });
   }
 
   getObserverSessionRegistry(): ObserverSessionStore | undefined {

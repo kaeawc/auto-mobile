@@ -21,6 +21,9 @@ import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import {
   SessionScopedStreamAuthenticator,
   type StreamSocketAuthenticator,
@@ -342,7 +345,7 @@ describe("DeviceDataStreamSocketServer", () => {
             platform: "android",
             epochStartedAt: 0,
           },
-          "successor-session",
+          { successorSessionUuid: "successor-session" },
         );
         server.pushDeviceSessionStarted({
           deviceId: "device-1",
@@ -3301,6 +3304,91 @@ describe("DeviceDataStreamSocketServer", () => {
           platform: "android",
         });
         expect(f[0]).not.toHaveProperty("successorSessionUuid");
+        expect(f[0]).not.toHaveProperty("reason");
+      });
+
+      it("restore boundary carries reason and restored pushes use the new UUID", () => {
+        const registry = new DeviceSessionRegistry(
+          timer,
+          new FakeIdGenerator(["session-old", "session-new"]),
+        );
+        registry.onDeviceConnected({ deviceId: "device-a", platform: "android", incarnation: 1 });
+        const scoped = server.simulateSubscription({
+          deviceId: "device-a",
+          deviceSessionUuid: "session-old",
+        });
+        const all = server.simulateSubscription({});
+        server.setDeviceSessionResolver(createRegistryDeviceSessionResolver(registry));
+        registry.setLifecycleListener({
+          onSessionEnded: (record, options) => server.pushDeviceSessionEnded(record, options),
+          onSessionStarted: (record) => server.pushDeviceSessionStarted(record),
+        });
+        registry.onDeviceConnected({
+          deviceId: "device-a",
+          platform: "android",
+          incarnation: 2,
+          retireReason: "superseded-by-restore",
+        });
+        server.pushPerformanceUpdate("device-a", {
+          fps: 60,
+          frameTimeMs: 16,
+          jankFrames: 0,
+          droppedFrames: 0,
+          memoryUsageMb: 1,
+          cpuUsagePercent: 1,
+          touchLatencyMs: null,
+          timeToInteractiveMs: null,
+          screenName: null,
+          isResponsive: true,
+          recompositionCount: null,
+          recompositionRate: null,
+        });
+        expect(
+          frames(scoped.socket).find((frame) => frame.type === "device_session_ended"),
+        ).toMatchObject({ successorSessionUuid: "session-new", reason: "superseded-by-restore" });
+        expect(frames(all.socket).map((frame) => [frame.type, frame.deviceSessionUuid])).toEqual([
+          ["device_session_ended", "session-old"],
+          ["device_session_started", "session-new"],
+          ["performance_update", "session-new"],
+        ]);
+        expect(frames(scoped.socket).some((frame) => frame.type === "performance_update")).toBe(
+          false,
+        );
+      });
+
+      it.each([
+        "subscribe",
+        "request_observation",
+        "request_navigation_graph",
+        "subscribe_storage",
+      ])("restore-retired id fails %s with typed recovery instructions", async (command) => {
+        const registry = new DeviceSessionRegistry(timer, new FakeIdGenerator(["old", "new"]));
+        registry.onDeviceConnected({ deviceId: "device-a", platform: "android", incarnation: 1 });
+        registry.onDeviceConnected({
+          deviceId: "device-a",
+          platform: "android",
+          incarnation: 2,
+          retireReason: "superseded-by-restore",
+        });
+        server.setDeviceSessionResolver(createRegistryDeviceSessionResolver(registry));
+        const socket = new FakeSocket();
+        await server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id: "restore-request",
+            command,
+            deviceSessionUuid: "old",
+            packageName: "app",
+            fileName: "prefs",
+          }),
+        );
+        const response = frames(socket).find((frame) => frame.id === "restore-request");
+        expect(response).toMatchObject({
+          success: false,
+          code: "DEVICE_SESSION_SUPERSEDED_BY_RESTORE",
+        });
+        expect(response?.error).toContain("snapshot restore");
+        expect(response?.error).toContain("deviceSnapshot");
       });
 
       it("names the successor on the old epoch's ended frame without widening data routing", () => {
@@ -3311,7 +3399,9 @@ describe("DeviceDataStreamSocketServer", () => {
           hierarchyIntervalMs: 500,
         });
         server.sessionResolver.retire("device-a");
-        server.pushDeviceSessionEnded(record({ deviceSessionUuid: "session-a" }), "session-b");
+        server.pushDeviceSessionEnded(record({ deviceSessionUuid: "session-a" }), {
+          successorSessionUuid: "session-b",
+        });
         server.sessionResolver.bind("device-a", "session-b");
         server.pushDeviceSessionStarted(record({ deviceSessionUuid: "session-b" }));
 

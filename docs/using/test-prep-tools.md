@@ -125,6 +125,17 @@ For an iOS settings-only capture, set `includeAppData` to `false`. Physical
 Android devices restore settings only. Restore with `action: "restore"` and the
 same `snapshotName`.
 
+An Android VM restore in daemon mode returns a new `deviceSessionUuid` when
+the device has a live registry epoch. The owning tool `sessionUuid` survives.
+The old device-session UUID is superseded by the restore: subscribers receive
+`device_session_ended` with `successorSessionUuid` and
+`reason: "superseded-by-restore"`, followed by `device_session_started` for the
+new epoch. Subscribe again with the returned UUID. You can also discover it
+from `daemon/listDeviceSessions` or the device description's
+`runtime.deviceSessionUuid`. Direct mode, settings-only restores, and devices
+without a live epoch omit this field. A definitive pre-load rejection preserves
+the epoch; a VM load followed by readiness failure still retires it.
+
 ### Archive size, eviction, and reclaim
 
 The archive resource `automobile:deviceSnapshots/archive` reports what the

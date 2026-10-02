@@ -163,6 +163,7 @@
 		D0E2B4A8A7E46884FCC660FF /* EdgeInsetsInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9B478AC5BE61D24B25FC307 /* EdgeInsetsInfo.swift */; };
 		D158003FB90660819C190CF0 /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1183EB3E0EBDE3DC23A9500C /* DefaultStorageInspecting.swift */; };
 		D39C809BD864B81140DACDEA /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15ABE6E93844614BC85C368 /* SdkHierarchyClient.swift */; };
+		D3D41A65A38C755BA37C4660 /* WebSocketLoopbackClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94DC33C72AAFF1DF8616D385 /* WebSocketLoopbackClient.swift */; };
 		D480EDB71EC1CCDBF8287976 /* SdkHierarchyCaching.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E7F1D60628FFE452F918F0 /* SdkHierarchyCaching.swift */; };
 		D5A531020329DB24EF380253 /* HierarchyDebouncing.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCB8F3CBE9F59194D59D6D75 /* HierarchyDebouncing.swift */; };
 		D5F848B6EF05467488BF266A /* BundleId.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F8A0CC4855579D12DEB7BFA /* BundleId.swift */; };
@@ -203,6 +204,7 @@
 		F9E2475C6F9FCC93791E5E68 /* RequestSetVoiceOverState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F370A04437F4561A96089B /* RequestSetVoiceOverState.swift */; };
 		FC624DC19EBC78A21DDA1273 /* SdkViewNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = B084E428AAE58F95B68D767D /* SdkViewNode.swift */; };
 		FD5572AE62EC8753E10C303D /* RequestSwipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FDC4CB9F9745BB1BF5B4641 /* RequestSwipe.swift */; };
+		FD7D4B0C94D5E03D56F0FD31 /* WebSocketServerLoopbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE082F641352BEE72B8837D5 /* WebSocketServerLoopbackTests.swift */; };
 		FDE8DFD325AF94C838839E56 /* SdkHighlightOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF6BFF065F9DB523A393ACB /* SdkHighlightOutcome.swift */; };
 		FE946F379A2863607B9B209F /* SdkCapabilitiesResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E32A6E418A2A1CC37E9FAE0 /* SdkCapabilitiesResponse.swift */; };
 /* End PBXBuildFile section */
@@ -374,6 +376,7 @@
 		9083871ABBD1451244ACB5DD /* VoiceOverSetResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverSetResponse.swift; sourceTree = "<group>"; };
 		915298B310D89499E3D4EDBC /* RequestImeAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestImeAction.swift; sourceTree = "<group>"; };
 		929A3A8D39F74FF457388031 /* ListDatabasesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDatabasesResponse.swift; sourceTree = "<group>"; };
+		94DC33C72AAFF1DF8616D385 /* WebSocketLoopbackClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketLoopbackClient.swift; sourceTree = "<group>"; };
 		9629554D2EF790BD3B14B59D /* ListTablesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListTablesResponse.swift; sourceTree = "<group>"; };
 		99EFC8B8B00E931A14BC129D /* VoiceOverDefaultsReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverDefaultsReading.swift; sourceTree = "<group>"; };
 		9B34989E4CACB49594D44192 /* SdkHierarchyServerInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyServerInfo.swift; sourceTree = "<group>"; };
@@ -401,6 +404,7 @@
 		BAB48ED8BEEB4FA1826D320F /* RotateResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotateResponse.swift; sourceTree = "<group>"; };
 		BB467F65E0BF2262A446FAC5 /* SdkEdgeInsets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkEdgeInsets.swift; sourceTree = "<group>"; };
 		BCB8F3CBE9F59194D59D6D75 /* HierarchyDebouncing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncing.swift; sourceTree = "<group>"; };
+		BE082F641352BEE72B8837D5 /* WebSocketServerLoopbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServerLoopbackTests.swift; sourceTree = "<group>"; };
 		C38A7234C20C5AE0671BD0AA /* RotationOrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationOrientationTests.swift; sourceTree = "<group>"; };
 		C4F91CACFEF2EA1DE401CC68 /* VoiceOverToggleError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverToggleError.swift; sourceTree = "<group>"; };
 		C6857A73BC6AAAE5D1B811D6 /* ObjCExceptionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridge.swift; sourceTree = "<group>"; };
@@ -702,6 +706,7 @@
 				8567FE617B1D3E23C2822A16 /* AutoMobileTest */,
 				1CDEF48286EEE403E65B2062 /* Configurations */,
 				12F2825A0330711946388EC8 /* CtrlProxyRewrite */,
+				EF573BC4A9F7E4306B45C402 /* CtrlProxyRewriteTests */,
 				7570CCD895BDD26847716F63 /* CtrlProxyUITests */,
 				C45CCD2AAA0E6F7D596C0A82 /* include */,
 				9D1EF7437AFF55F9346E7A05 /* ObjCExceptionCatcher */,
@@ -759,6 +764,16 @@
 				FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		EF573BC4A9F7E4306B45C402 /* CtrlProxyRewriteTests */ = {
+			isa = PBXGroup;
+			children = (
+				94DC33C72AAFF1DF8616D385 /* WebSocketLoopbackClient.swift */,
+				BE082F641352BEE72B8837D5 /* WebSocketServerLoopbackTests.swift */,
+			);
+			name = CtrlProxyRewriteTests;
+			path = Tests/CtrlProxyRewriteTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1092,11 +1107,13 @@
 				BFA8AEF0A192A83AB712B535 /* VoiceOverToggling.swift in Sources */,
 				44D4EE9FF17CB7B16BCDB626 /* WebSocketConnection.swift in Sources */,
 				813129680961E4CBB914D944 /* WebSocketFraming.swift in Sources */,
+				D3D41A65A38C755BA37C4660 /* WebSocketLoopbackClient.swift in Sources */,
 				4502CAA5B22FAA56436436E7 /* WebSocketRequest.swift in Sources */,
 				73F557098D9FC3077A8BAC0F /* WebSocketResponding.swift in Sources */,
 				5991D8066DB5DE253A239900 /* WebSocketResponse.swift in Sources */,
 				AD5B431598474DCAD1489058 /* WebSocketResponsePayload.swift in Sources */,
 				D847B2F9A22C5FF67696252F /* WebSocketServer.swift in Sources */,
+				FD7D4B0C94D5E03D56F0FD31 /* WebSocketServerLoopbackTests.swift in Sources */,
 				C6FCA7F0906FAAFF8B08864B /* WindowInfo.swift in Sources */,
 				59A5A86AEBC4573A6CD96DFE /* WireError.swift in Sources */,
 			);

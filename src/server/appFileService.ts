@@ -1270,14 +1270,31 @@ class IosSimulatorAppFileProvider
   ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<void> {
-    const appTarget = requireAppContainersTarget(request.target);
-    const target = await this.resolvePath(
-      request.device,
-      appTarget.appId,
-      appTarget.container,
-      request.destinationPath,
-      "putFile",
-    );
+    await this.putFiles([request]);
+  }
+
+  async putFiles(requests: PutAppFileProviderRequest[]): Promise<void[]> {
+    const roots = new Map<string, string>();
+    const targets: string[] = [];
+    for (const request of requests) {
+      const appTarget = requireAppContainersTarget(request.target);
+      const key = JSON.stringify([request.device.deviceId, appTarget.appId, appTarget.container]);
+      let root = roots.get(key);
+      if (root === undefined) {
+        root = await this.resolveContainerRoot(
+          request.device,
+          appTarget.appId,
+          appTarget.container,
+          "putFile",
+        );
+        roots.set(key, root);
+      }
+      targets.push(join(root, normalizeAppFileRelativePath(request.destinationPath)));
+    }
+    return Promise.all(requests.map((request, index) => this.writeFile(request, targets[index]!)));
+  }
+
+  private async writeFile(request: PutAppFileProviderRequest, target: string): Promise<void> {
     const previous = this.pendingWrites.get(target);
     const write = previous
       ? previous.then(
@@ -1370,6 +1387,18 @@ class IosSimulatorAppFileProvider
     path: string | undefined,
     operation: string,
   ): Promise<string> {
+    const containerRoot = await this.resolveContainerRoot(device, appId, container, operation);
+    return path === undefined
+      ? containerRoot
+      : join(containerRoot, normalizeAppFileRelativePath(path));
+  }
+
+  private async resolveContainerRoot(
+    device: BootedDevice,
+    appId: string,
+    container: AppFileContainer,
+    operation: string,
+  ): Promise<string> {
     if (container === "externalFiles") {
       throw unsupportedAppFileOperation(
         operation,
@@ -1401,13 +1430,7 @@ class IosSimulatorAppFileProvider
       );
     }
 
-    const containerRoot = join(
-      dataRoot,
-      iosContainerRelativePath(container, operation, appId, device.platform),
-    );
-    return path === undefined
-      ? containerRoot
-      : join(containerRoot, normalizeAppFileRelativePath(path));
+    return join(dataRoot, iosContainerRelativePath(container, operation, appId, device.platform));
   }
 }
 

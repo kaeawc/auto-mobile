@@ -30,6 +30,7 @@ type FakeSimCtlClientContract = Pick<
 
 export class FakeSimCtlClient implements FakeSimCtlClientContract {
   private deviceInfo = new Map<string, AppleDevice | null>();
+  private deviceInfoError: Error | null = null;
   private runtimes: AppleDeviceRuntime[] = [];
   private deviceTypes: AppleDeviceType[] = [];
   private runtimesError: Error | null = null;
@@ -65,6 +66,10 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   setDeviceInfo(udid: string, info: AppleDevice | null): void {
     this.deviceInfo.set(udid, info);
+  }
+
+  setDeviceInfoError(error: Error | null): void {
+    this.deviceInfoError = error;
   }
 
   setRuntimes(runtimes: AppleDeviceRuntime[]): void {
@@ -238,6 +243,9 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   async getDeviceInfo(udid: string): Promise<AppleDevice | null> {
     this.recordCall("getDeviceInfo", { udid });
+    if (this.deviceInfoError) {
+      throw this.deviceInfoError;
+    }
     return this.deviceInfo.get(udid) ?? null;
   }
 

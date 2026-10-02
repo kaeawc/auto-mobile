@@ -11,6 +11,8 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
 import { optionalInteger } from "./queryParamValidation";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import { ActionableError } from "../models/ActionableError";
+import { iosStorageErrorMessage } from "./storageSdkErrors";
 import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
 
 // Resource URI templates
@@ -112,6 +114,19 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
   return findBootedDeviceForResource(deviceId, "DatabaseResources");
 }
 
+/** Preserve unrelated resource errors; retain the original cause when adding storage guidance. */
+async function iosStorageRequest<T>(request: () => Promise<T>): Promise<T> {
+  try {
+    return await request();
+  } catch (error) {
+    const message = iosStorageErrorMessage(error);
+    if (message) {
+      throw new ActionableError(message, { cause: error });
+    }
+    throw error;
+  }
+}
+
 function createDatabaseClient(device: BootedDevice): AppDatabaseClient {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
@@ -121,12 +136,15 @@ function createDatabaseClient(device: BootedDevice): AppDatabaseClient {
   if (device.platform === "ios") {
     const client = IOSCtrlProxyClient.getInstance(device);
     return {
-      listDatabases: async (appId) => client.listDatabasesForIos(appId),
-      listTables: async (appId, databasePath) => client.listTablesForIos(appId, databasePath),
+      listDatabases: async (appId) => iosStorageRequest(() => client.listDatabasesForIos(appId)),
+      listTables: async (appId, databasePath) =>
+        iosStorageRequest(() => client.listTablesForIos(appId, databasePath)),
       getTableData: async (_appId, databasePath, table, limit, offset) =>
-        client.getTableDataForIos(_appId, databasePath, table, limit, offset),
+        iosStorageRequest(() =>
+          client.getTableDataForIos(_appId, databasePath, table, limit, offset),
+        ),
       getTableStructure: async (appId, databasePath, table) =>
-        client.getTableStructureForIos(appId, databasePath, table),
+        iosStorageRequest(() => client.getTableStructureForIos(appId, databasePath, table)),
     };
   }
 

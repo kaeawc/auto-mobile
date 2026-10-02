@@ -679,6 +679,20 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
     }
   });
 
+  // CommandHandler.preferenceClient foreground gate and SDK app_not_active code.
+  test.each([
+    "iOS key-value storage requires com.app to be the foreground app",
+    "iOS key-value storage failed: app_not_active",
+  ])("maps preference foreground failure as an ActionableError: %s", async (message) => {
+    const promise = storage.listPreferenceFiles("com.app");
+    await flush();
+    h.resolveLast({ success: false, totalTimeMs: 1, error: message });
+    await expect(promise).rejects.toBeInstanceOf(ActionableError);
+    await expect(promise).rejects.toMatchObject({
+      message: "The target app is not in the foreground; bring it to the foreground and retry.",
+    });
+  });
+
   for (const [operation, action] of [
     ["setPreference", "set"],
     ["removePreference", "remove"],

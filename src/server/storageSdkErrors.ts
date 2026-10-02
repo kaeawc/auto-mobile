@@ -3,6 +3,33 @@ import { errorMessage } from "../utils/describeUnknownError";
 const SDK_UNAVAILABLE_PREFIX =
   "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)";
 
+export const IOS_STORAGE_NOT_FOREGROUND_MESSAGE =
+  "The target app is not in the foreground; bring it to the foreground and retry.";
+
+const IOS_DATABASE_CAPABILITY_UNAVAILABLE_MESSAGE =
+  "Failed to execute SQL on iOS. The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).";
+
+// Match only CtrlProxy's two storage foreground gates, including the complete app id slot.
+const IOS_STORAGE_FOREGROUND_GATE_PATTERN =
+  /^(?:Database inspection requires requested appId|iOS key-value storage requires) \S+ to be the foreground app$/;
+
+/** Map identifiable foreground failures and the ambiguous database capability gate. */
+export function iosStorageErrorMessage(error: unknown): string | null {
+  const message = errorMessage(error);
+  if (
+    sdkErrorCode(message) === "app_not_active" ||
+    IOS_STORAGE_FOREGROUND_GATE_PATTERN.test(message)
+  ) {
+    return IOS_STORAGE_NOT_FOREGROUND_MESSAGE;
+  }
+  if (
+    message === "The foreground iOS app does not expose the AutoMobile SDK capability database."
+  ) {
+    return IOS_DATABASE_CAPABILITY_UNAVAILABLE_MESSAGE;
+  }
+  return null;
+}
+
 /** Keep mutation guidance shared by iOS storage writes and sqlQuery. */
 export const IOS_STORAGE_MUTATION_AUTHORIZATION_HINT =
   "in a DEBUG build, configure StorageInspectionConfiguration(allowMutations: true), call DatabaseInspector.shared.authorizeHostMutations(true), and require a launch-scoped mutation token or authorize the current SDK session with DatabaseInspector.shared.authorizeSessionMutations(sessionId:).";
@@ -14,6 +41,7 @@ type StorageSdkErrorContext = {
 };
 
 type StorageSdkErrorCode =
+  | "app_not_active"
   | "db_inspection_disabled"
   | "bad_request"
   | "unknown_database_path"
@@ -27,6 +55,7 @@ type StorageSdkErrorCode =
 
 const SDK_ERROR_MESSAGES: Record<StorageSdkErrorCode, (context: StorageSdkErrorContext) => string> =
   {
+    app_not_active: () => IOS_STORAGE_NOT_FOREGROUND_MESSAGE,
     db_inspection_disabled: () => iosSdkSetupAdvice(),
     bad_request: () =>
       "The iOS SDK rejected the SQL request as bad_request. Check the database path and SQL query.",
@@ -59,6 +88,7 @@ const SDK_ERROR_MESSAGES: Record<StorageSdkErrorCode, (context: StorageSdkErrorC
   };
 
 const STORAGE_ERROR_CODES = new Set<StorageSdkErrorCode>([
+  "app_not_active",
   "mutation_not_authorized",
   "invalid_store_name",
   "write_verification_failed",
@@ -79,6 +109,10 @@ function sdkErrorCode(message: string): StorageSdkErrorCode | null {
 
 /** Maps SDK storage errors using one code table for SQL and storage write paths. */
 export function mapStorageSdkError(error: unknown, context: StorageSdkErrorContext): string | null {
+  const mapped = iosStorageErrorMessage(error);
+  if (mapped) {
+    return mapped;
+  }
   const message = errorMessage(error);
   const code =
     context.operation === "storage" && message.includes("mutation_not_authorized")
@@ -96,6 +130,10 @@ function iosSdkSetupAdvice(): string {
 
 /** Converts an iOS SQL failure into a user message without double-wrapping SDK refusals. */
 export function iosSqlErrorMessage(error: unknown, databasePath: string): string {
+  const mapped = iosStorageErrorMessage(error);
+  if (mapped) {
+    return mapped;
+  }
   const message = errorMessage(error);
   const prefix = `${SDK_UNAVAILABLE_PREFIX}: `;
   if (message.startsWith(prefix)) {
@@ -110,10 +148,7 @@ export function iosSqlErrorMessage(error: unknown, databasePath: string): string
     return `The iOS SDK rejected the SQL request with an unrecognized error code: ${UNKNOWN_SDK_ERROR_CODE_PATTERN.exec(detail)?.[1] ?? detail}.`;
   }
 
-  if (
-    message === "Failed to connect to CtrlProxy" ||
-    message.includes("does not expose the AutoMobile SDK capability database")
-  ) {
+  if (message === "Failed to connect to CtrlProxy") {
     return iosSdkSetupAdvice();
   }
 

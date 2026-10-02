@@ -182,10 +182,6 @@ describe("iOS database inspection server integration", function () {
     ],
     ["HTTP status without route code", `${SDK_UNAVAILABLE_PREFIX}: HTTP 503`],
     ["CtrlProxy connection failure", "Failed to connect to CtrlProxy"],
-    [
-      "unverified SDK capability",
-      "The foreground iOS app does not expose the AutoMobile SDK capability database.",
-    ],
   ] as const)("sqlQuery keeps setup advice for %s", async (_label, detail) => {
     IOSCtrlProxyClient.getInstance = mock(() => ({
       executeSQLForIos: mock(async () => {
@@ -204,6 +200,85 @@ describe("iOS database inspection server integration", function () {
     ).rejects.toMatchObject({
       message:
         "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build and calls DatabaseInspector.shared.setEnabled(true).",
+    });
+  });
+
+  test.each([
+    [
+      `${SDK_UNAVAILABLE_PREFIX}: app_not_active`,
+      "The target app is not in the foreground; bring it to the foreground and retry.",
+    ],
+    [
+      "Database inspection requires requested appId com.example.app to be the foreground app",
+      "The target app is not in the foreground; bring it to the foreground and retry.",
+    ],
+    [
+      "iOS key-value storage requires com.example.app to be the foreground app",
+      "The target app is not in the foreground; bring it to the foreground and retry.",
+    ],
+  ])("sqlQuery reports definite foreground failure: %s", async (detail, message) => {
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      executeSQLForIos: mock(async () => {
+        throw new Error(detail);
+      }),
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    registerDatabaseTools();
+    await expect(
+      ToolRegistry.getTool("sqlQuery")!.deviceAwareHandler!(iosDevice, {
+        appId: "com.example.app",
+        databasePath: "/app/Documents/app.db",
+        query: "SELECT 1",
+      }),
+    ).rejects.toMatchObject({ message });
+  });
+
+  test("sqlQuery explains the ambiguous unverified SDK capability", async () => {
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      executeSQLForIos: mock(async () => {
+        throw new Error(
+          "The foreground iOS app does not expose the AutoMobile SDK capability database.",
+        );
+      }),
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    registerDatabaseTools();
+    await expect(
+      ToolRegistry.getTool("sqlQuery")!.deviceAwareHandler!(iosDevice, {
+        appId: "com.example.app",
+        databasePath: "/app/Documents/app.db",
+        query: "SELECT 1",
+      }),
+    ).rejects.toMatchObject({
+      message:
+        "Failed to execute SQL on iOS. The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).",
+    });
+  });
+
+  test.each([
+    [
+      "Database inspection requires requested appId com.example.app to be the foreground app",
+      "The target app is not in the foreground; bring it to the foreground and retry.",
+    ],
+    [
+      "The foreground iOS app does not expose the AutoMobile SDK capability database.",
+      "Failed to execute SQL on iOS. The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).",
+    ],
+    ["unrelated failure", "unrelated failure"],
+  ])("database listing preserves its error shape with guidance: %s", async (detail, message) => {
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      listDatabasesForIos: mock(async () => {
+        throw new Error(detail);
+      }),
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance({
+      getBootedDevices: mock(async () => [iosDevice]),
+    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    registerDatabaseResources();
+    const match = ResourceRegistry.matchTemplate(
+      "automobile:devices/ios-1/databases?appId=com.example.app",
+    )!;
+    const content = await match.template.handler(match.params);
+    expect(JSON.parse(content.text!)).toEqual({
+      error: `Failed to list databases: Error: ${message}`,
     });
   });
 

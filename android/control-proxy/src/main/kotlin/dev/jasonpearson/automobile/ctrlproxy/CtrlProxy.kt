@@ -1527,11 +1527,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
       try {
+        val queuedHandler = queuedMessageHandler()
         webSocketServer =
           WebSocketServer(
             port = 8765,
             scope = serviceScope,
-            messageHandler = queuedMessageHandler(),
+            messageHandler = queuedHandler,
+            onClientDisconnected = queuedHandler::disconnect,
             onPermanentStartFailure = { disableSelf() },
           )
         webSocketLifecycle.replace(webSocketServer)
@@ -1739,9 +1741,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       CtrlProxyMessageHandler(actions = this, log = { Log.w(TAG, it) }),
     scope: CoroutineScope = serviceScope,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    capacity: Int = INBOUND_COMMAND_CAPACITY,
   ): QueuedWebSocketMessageHandler {
     val commands =
-      ConnectionCommandQueue<Job>(
+      ConnectionCommandQueue(
         scope = scope,
         dispatcher = dispatcher,
         delegate = delegate,
@@ -1754,16 +1757,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         logError = { message, error -> Log.e(TAG, message, error) },
         logWarning = { message -> Log.w(TAG, message) },
         logDebug = { message -> Log.d(TAG, message) },
+        capacity = capacity,
       )
     return QueuedWebSocketMessageHandler(delegate, commands)
   }
 
   /**
-   * Ownership policy is fixed at enqueue time, never inferred after a terminal reply/disconnect.
-   * Unowned handler errors and busy rejections must currently use the external broadcast fallback:
-   * follow-up: pass the originating client into dispatch so sendErrorResponse targets only it.
-   * Non-null successful unowned results retain the inline server's broadcast(response) behavior
-   * (including dropping an orphaned correlation ID), rather than using the error fallback.
+   * Ownership policy is supplied by the server before enqueue, never inferred after disconnect.
+   * Owned replies use atomic owner routing; unowned errors are sent through the origin context.
+   * Successful unowned results retain broadcast(response) behavior, including dropping an orphaned
+   * correlation ID. Hierarchy frames without a correlation remain intentionally broadcast.
    */
   internal suspend fun replyToQueuedCommand(
     requestId: String?,
@@ -1771,19 +1774,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     routing: QueuedReplyRouting,
   ) {
     if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-      if (routing == QueuedReplyRouting.EXTERNAL_ERROR) {
-        webSocketServer.broadcastExternallyCorrelatedResponse(response)
-      } else {
-        if (
-          routing == QueuedReplyRouting.OWNER &&
-            requestId != null &&
-            !webSocketServer.hasRequestOwner(requestId)
-        ) {
-          Log.d(TAG, "Dropping queued reply for disconnected or completed request $requestId")
-        }
-        // Always use atomic owner routing for owned replies, even if the owner just vanished.
-        webSocketServer.broadcast(response)
+      if (
+        routing == QueuedReplyRouting.OWNER &&
+          requestId != null &&
+          !webSocketServer.hasRequestOwner(requestId)
+      ) {
+        Log.d(TAG, "Dropping queued reply for disconnected or completed request $requestId")
       }
+      // Always use atomic owner routing for owned replies, even if the owner just vanished.
+      webSocketServer.broadcast(response)
     }
   }
 

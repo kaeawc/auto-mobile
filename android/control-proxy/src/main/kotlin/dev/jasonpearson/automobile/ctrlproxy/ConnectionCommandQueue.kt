@@ -1,11 +1,14 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -19,11 +22,24 @@ import kotlinx.coroutines.supervisorScope
 // Mirrors #8166's outbound ceiling: absorb gesture-move bursts behind a slow command, with a bound.
 internal const val INBOUND_COMMAND_CAPACITY = 256
 
-/** Successful unowned results retain ordinary server routing; only unowned failures fall back. */
+/** Owned results use atomic owner routing; successful unowned results use ordinary broadcasting. */
 internal enum class QueuedReplyRouting {
   OWNER,
   STANDARD,
-  EXTERNAL_ERROR,
+}
+
+/** Per-request dispatch facts supplied by the server, without changing the protocol handler. */
+internal interface QueuedCommandOrigin {
+  val client: WebSocketServer.ConnectedClient
+  val lifetime: Job
+  val ownerRecorded: Boolean
+
+  suspend fun sendError(response: ErrorResponse)
+}
+
+internal class CommandOriginContext(val origin: QueuedCommandOrigin) :
+  AbstractCoroutineContextElement(Key) {
+  companion object Key : CoroutineContext.Key<CommandOriginContext>
 }
 
 /**
@@ -33,12 +49,11 @@ internal enum class QueuedReplyRouting {
  * requirements. Workers run concurrently; a child job isolates command cancellation from the loop.
  * Cancellation is cooperative: a blocking Android API must return before the worker can advance.
  *
- * [K] is independent of the connection's lifetime job so the key source can later change without
- * changing execution. Completion of the lifetime drops pending work and cancels the active child.
- * Delegate actions that launch service jobs retain their existing asynchronous completion
- * semantics.
+ * Disconnect immediately drops pending work and cancels the active child. Lifetime completion
+ * provides the same cleanup if the read loop exits first. Delegate actions that launch service jobs
+ * retain their existing asynchronous completion semantics.
  */
-internal class ConnectionCommandQueue<K : Any>(
+internal class ConnectionCommandQueue(
   private val scope: CoroutineScope,
   private val dispatcher: CoroutineDispatcher,
   private val delegate: WebSocketMessageHandler,
@@ -53,7 +68,7 @@ internal class ConnectionCommandQueue<K : Any>(
     require(capacity > 0) { "Command capacity must be positive" }
   }
 
-  private data class QueuedCommand(val request: WebSocketRequest, val ownerRecorded: Boolean)
+  private data class QueuedCommand(val request: WebSocketRequest, val origin: QueuedCommandOrigin)
 
   private class Connection(val lifetime: Job, capacity: Int) {
     val pending = Channel<QueuedCommand>(capacity)
@@ -61,20 +76,16 @@ internal class ConnectionCommandQueue<K : Any>(
     lateinit var worker: Job
   }
 
-  private val connections = ConcurrentHashMap<K, Connection>()
+  private val connections = ConcurrentHashMap<WebSocketServer.ConnectedClient, Connection>()
   private val ownedErrors =
     CorrelatedErrorReporter(
       broadcastError = { reply(it.requestId, it, QueuedReplyRouting.OWNER) },
       logError = logError,
     )
-  private val unownedErrors =
-    CorrelatedErrorReporter(
-      broadcastError = { reply(it.requestId, it, QueuedReplyRouting.EXTERNAL_ERROR) },
-      logError = logError,
-    )
 
   private fun errorsFor(command: QueuedCommand): CorrelatedErrorReporter =
-    if (command.ownerRecorded) ownedErrors else unownedErrors
+    if (command.origin.ownerRecorded) ownedErrors
+    else CorrelatedErrorReporter(command.origin::sendError, logError)
 
   internal val connectionCount: Int
     get() = connections.size
@@ -82,14 +93,17 @@ internal class ConnectionCommandQueue<K : Any>(
   /**
    * Never waits for queue space or for a command; the reply sink must also enqueue without waiting.
    */
-  suspend fun enqueue(key: K, lifetime: Job, request: WebSocketRequest) {
-    if (!lifetime.isActive) return
-    // handleClientMessage registers ownership before dispatch. Snapshot here instead of copying
-    // WebSocketServer.recordsRequestOwner's private type list. A disconnect between registration
-    // and this snapshot can clear the owner and misclassify an owned request; passing the origin
-    // and ownership policy into dispatch is the follow-up that closes this tiny race window.
-    val command = QueuedCommand(request, request.requestId?.let(hasRequestOwner) == true)
-    val connection = connections.computeIfAbsent(key) { createConnection(lifetime) }
+  suspend fun enqueue(origin: QueuedCommandOrigin, request: WebSocketRequest) {
+    val key = origin.client
+    val lifetime = origin.lifetime
+    if (!key.isConnected || !lifetime.isActive) return
+    val command = QueuedCommand(request, origin)
+    // Serialize creation with disconnect's map removal. The client flag is a permanent tombstone,
+    // so a late read-loop dispatch cannot recreate a worker even while its Job remains active.
+    val connection =
+      connections.compute(key) { _, existing ->
+        existing ?: if (key.isConnected && lifetime.isActive) createConnection(lifetime) else null
+      } ?: return
     startConnection(key, lifetime, connection)
     val result = connection.pending.trySend(command)
     if (result.isFailure && !result.isClosed) {
@@ -98,6 +112,15 @@ internal class ConnectionCommandQueue<K : Any>(
       request.requestId?.let { requestId ->
         errorsFor(command).emit(requestId, message) { "Failed to report full command queue" }
       }
+    }
+  }
+
+  /** Non-blocking and idempotent with lifetime/worker completion, in either order. */
+  fun disconnect(key: WebSocketServer.ConnectedClient) {
+    key.isConnected = false
+    connections.remove(key)?.let { connection ->
+      connection.pending.cancel()
+      connection.worker.cancel()
     }
   }
 
@@ -110,14 +133,14 @@ internal class ConnectionCommandQueue<K : Any>(
     return connection
   }
 
-  private fun startConnection(key: K, lifetime: Job, connection: Connection) {
+  private fun startConnection(
+    key: WebSocketServer.ConnectedClient,
+    lifetime: Job,
+    connection: Connection,
+  ) {
     if (!connection.started.compareAndSet(false, true)) return
     // Install after map insertion: an already completed job invokes this callback immediately.
-    val completion = lifetime.invokeOnCompletion {
-      connection.pending.cancel()
-      connection.worker.cancel()
-      connections.remove(key, connection)
-    }
+    val completion = lifetime.invokeOnCompletion { disconnect(key) }
     connection.worker.invokeOnCompletion {
       completion.dispose()
       connection.pending.cancel()
@@ -131,12 +154,12 @@ internal class ConnectionCommandQueue<K : Any>(
     // the child, immediately before dispatch, even if lifetime completion has not run its hook.
     launch {
       currentCoroutineContext().ensureActive()
-      if (!connection.lifetime.isActive) {
+      if (!command.origin.client.isConnected || !connection.lifetime.isActive) {
         logDebug("Skipping command for inactive connection: ${command.request.requestId}")
         return@launch
       }
       val requestId = command.request.requestId
-      if (command.ownerRecorded && requestId != null && !hasRequestOwner(requestId)) {
+      if (command.origin.ownerRecorded && requestId != null && !hasRequestOwner(requestId)) {
         logDebug("Skipping command for disconnected owner: $requestId")
         return@launch
       }
@@ -157,7 +180,8 @@ internal class ConnectionCommandQueue<K : Any>(
       currentCoroutineContext().ensureActive()
       if (response != null) {
         val routing =
-          if (command.ownerRecorded) QueuedReplyRouting.OWNER else QueuedReplyRouting.STANDARD
+          if (command.origin.ownerRecorded) QueuedReplyRouting.OWNER
+          else QueuedReplyRouting.STANDARD
         reply(request.requestId, response, routing)
       }
     }
@@ -165,26 +189,33 @@ internal class ConnectionCommandQueue<K : Any>(
 }
 
 /**
- * Ktor's read-loop coroutine has a stable, unique Job per connection. This deliberate key-source
- * limitation is imposed by the current WebSocketMessageHandler contract: it receives no client. A
- * follow-up allowed to edit WebSocketServer need only replace this key source. A missing Job
- * retains inline behavior. IME cancellation bypasses ordering only to set the delegate's tombstone/
+ * The server supplies a client and immutable ownership decision through [CommandOriginContext].
+ * Calls without an origin are programming errors: inline execution would bypass ordering and
+ * targeted error delivery. IME cancellation bypasses ordering only to set the delegate's tombstone/
  * flag; it never cancels the command job or replies for the commit. The delegate owns the single
  * commit result and its partial-application counts. Gesture-end cancellation remains queued.
  */
 internal class QueuedWebSocketMessageHandler(
   private val delegate: WebSocketMessageHandler,
-  private val commands: ConnectionCommandQueue<Job>,
+  private val commands: ConnectionCommandQueue,
 ) : WebSocketMessageHandler {
   internal val connectionCount: Int
     get() = commands.connectionCount
 
+  fun disconnect(client: WebSocketServer.ConnectedClient) = commands.disconnect(client)
+
   override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-    val connection = currentCoroutineContext()[Job] ?: return delegate.handleMessage(request)
+    val origin =
+      checkNotNull(currentCoroutineContext()[CommandOriginContext]) {
+          "Queued WebSocket dispatch requires an originating client"
+        }
+        .origin
+    if (!origin.client.isConnected || !origin.lifetime.isActive) return null
     if (request is RequestCancelImeCommit) {
-      return delegate.handleMessage(request)
+      delegate.handleMessage(request)
+      return null
     }
-    commands.enqueue(connection, connection, request)
+    commands.enqueue(origin, request)
     return null
   }
 }

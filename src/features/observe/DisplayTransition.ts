@@ -2,12 +2,17 @@ import type { BootedDevice, DisplayRef, ObserveResult } from "../../models";
 import { POSTURE_PANEL_ROLES } from "../../models/DisplayPanel";
 import { DaemonState } from "../../daemon/daemonState";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import { ObservedAndroidDisplayCache } from "./ObservationDisplay";
 import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
 import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
+import {
+  observationStreamFrameInvalidator,
+  type ObservationFrameInvalidator,
+} from "./ObservationFrameInvalidator";
 
 interface PanelGeometry {
   key: string;
@@ -480,32 +485,46 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   }
 }
 
-export function invalidateDisplayCaches(deviceId: string, reason: string): void {
-  logger.info(`[DisplayTransition] ${deviceId}: ${reason}; clearing panel-scoped state`);
-  getObserveCacheStore().clear(deviceId);
-  getScreenshotStateStore().clear(deviceId);
-  ScreenshotJobTracker.cancelJob(deviceId);
-  ObservedAndroidDisplayCache.clear(deviceId);
-  const android = AndroidCtrlProxyClient.getExistingInstance(deviceId);
-  if (android) {
-    android.screenGeometry.clear();
-    android.invalidateCache();
-  }
-  const ios = IOSCtrlProxyClient.getExistingInstance(deviceId);
-  if (ios) {
-    ios.clearDisplayProvenance();
-  }
-  const daemon = DaemonState.getInstance();
-  if (daemon.isInitialized()) {
-    const sessions = daemon.getSessionManager();
-    const sessionId = sessions.getSessionForDevice(deviceId);
-    if (sessionId) {
-      sessions.clearSessionCache(sessionId, "lastHierarchy");
-      sessions.clearSessionCache(sessionId, "lastObserveTime");
-      sessions.clearSessionCache(sessionId, "lastRenderedObservation");
+export function createDisplayCacheInvalidator(
+  frameInvalidator: ObservationFrameInvalidator = observationStreamFrameInvalidator,
+): (deviceId: string, reason: string) => void {
+  return (deviceId, reason) => {
+    logger.info(`[DisplayTransition] ${deviceId}: ${reason}; clearing panel-scoped state`);
+    try {
+      frameInvalidator.invalidateDeviceFrames(deviceId);
+    } catch (error) {
+      logger.warn(
+        `[DisplayTransition] Failed to invalidate observation frames for ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
     }
-  }
+    getObserveCacheStore().clear(deviceId);
+    getScreenshotStateStore().clear(deviceId);
+    ScreenshotJobTracker.cancelJob(deviceId);
+    ObservedAndroidDisplayCache.clear(deviceId);
+    const android = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    if (android) {
+      android.screenGeometry.clear();
+      android.invalidateCache();
+    }
+    const ios = IOSCtrlProxyClient.getExistingInstance(deviceId);
+    if (ios) {
+      ios.clearDisplayProvenance();
+    }
+    const daemon = DaemonState.getInstance();
+    if (daemon.isInitialized()) {
+      const sessions = daemon.getSessionManager();
+      const sessionId = sessions.getSessionForDevice(deviceId);
+      if (sessionId) {
+        sessions.clearSessionCache(sessionId, "lastHierarchy");
+        sessions.clearSessionCache(sessionId, "lastObserveTime");
+        sessions.clearSessionCache(sessionId, "lastRenderedObservation");
+      }
+    }
+  };
 }
+
+export const invalidateDisplayCaches = createDisplayCacheInvalidator();
 
 export const displayTransitions: DisplayTransitionTracker = new DisplayTransitionTracker(
   invalidateDisplayCaches,

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DisplayTransitionTracker,
+  createDisplayCacheInvalidator,
   displayTransitions,
 } from "../../../src/features/observe/DisplayTransition";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -27,6 +28,25 @@ import { resetObserveCacheStore } from "../../../src/features/observe/cache/Obse
 import { setObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  getDeviceDataStreamServer,
+  installDeviceDataStreamSocketServerForTesting,
+} from "../../../src/daemon/deviceDataStreamSocketServer";
+import {
+  observationStreamFrameInvalidator,
+  type ObservationFrameInvalidator,
+} from "../../../src/features/observe/ObservationFrameInvalidator";
+import { logger } from "../../../src/utils/logger";
+
+class FakeObservationFrameInvalidator implements ObservationFrameInvalidator {
+  readonly deviceIds: string[] = [];
+  onInvalidate: (deviceId: string) => void = () => {};
+
+  invalidateDeviceFrames(deviceId: string): void {
+    this.deviceIds.push(deviceId);
+    this.onInvalidate(deviceId);
+  }
+}
 
 const deviceStateFixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
@@ -58,12 +78,59 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  installDeviceDataStreamSocketServerForTesting(null);
   displayTransitions.reset(device.deviceId);
   displayTransitions.reset("same-size-panels");
   resetObserveCacheStore();
 });
 
 describe("display transitions", () => {
+  test("display transition invokes the injected frame invalidator only for the affected device", () => {
+    const frames = new FakeObservationFrameInvalidator();
+    const tracker = new DisplayTransitionTracker(createDisplayCacheInvalidator(frames));
+    tracker.notifyTransition(device.deviceId, "fold to cover");
+    expect(frames.deviceIds).toEqual([device.deviceId]);
+  });
+
+  test("display transition delegates harmlessly when no stream server is registered", () => {
+    installDeviceDataStreamSocketServerForTesting(null);
+    expect(getDeviceDataStreamServer()).toBeNull();
+    const frames = new FakeObservationFrameInvalidator();
+    frames.onInvalidate = (deviceId) =>
+      observationStreamFrameInvalidator.invalidateDeviceFrames(deviceId);
+    const tracker = new DisplayTransitionTracker(createDisplayCacheInvalidator(frames));
+    expect(() => tracker.notifyTransition(device.deviceId, "fold to cover")).not.toThrow();
+    expect(frames.deviceIds).toEqual([device.deviceId]);
+    expect(() => displayTransitions.notifyTransition(device.deviceId, "unfold")).not.toThrow();
+    expect(displayTransitions.revision(device.deviceId)).toBe(1);
+  });
+
+  test("display transition logs a failed frame invalidation and still clears observe caches", async () => {
+    const frames = new FakeObservationFrameInvalidator();
+    const failure = new Error("stream invalidation failed");
+    frames.onInvalidate = () => {
+      throw failure;
+    };
+    const cache = new FakeObserveCacheStore(new FakeTimer());
+    setObserveCacheStore(cache);
+    const observation = { display: { key: "inner" } } as ObserveResult;
+    await cache.put(device.deviceId, observation);
+    await cache.put("other-device", observation);
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const tracker = new DisplayTransitionTracker(createDisplayCacheInvalidator(frames));
+      expect(() => tracker.notifyTransition(device.deviceId, "fold to cover")).not.toThrow();
+      expect(warning).toHaveBeenCalledWith(
+        `[DisplayTransition] Failed to invalidate observation frames for ${device.deviceId}: stream invalidation failed`,
+        failure,
+      );
+      expect(cache.getRecentInMemoryForDevice(device.deviceId)).toBeUndefined();
+      expect(cache.getRecentInMemoryForDevice("other-device")).toBe(observation);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   test("same-observation panel correction preserves the action fence; a later rotation and posture change fence", () => {
     const tracker = new DisplayTransitionTracker(() => {});
     const inner = {

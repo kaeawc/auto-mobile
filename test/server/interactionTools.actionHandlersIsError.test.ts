@@ -233,6 +233,32 @@ describe("rotateHandler (registered handler wiring)", () => {
     expect(parsePayload(response).message).toContain(
       "Failed to rotate device: Rotated to portrait",
     );
+    expect(response).toHaveProperty("structuredContent.success", false);
+  });
+
+  test("returns structured content for a successful orientation no-op", async () => {
+    const observation = {
+      updatedAt: 1,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: {} },
+    };
+    const result = fakeResult({
+      success: true,
+      currentOrientation: "portrait",
+      previousOrientation: "portrait",
+      rotationPerformed: false,
+      orientationLockState: "unlocked",
+      observation,
+      message: "Device is already in portrait orientation",
+    });
+    setRotateFactory(() => ({ execute: async () => result }));
+
+    const response = await rotateHandler(fakeDevice, { orientation: "portrait" });
+
+    expect(response.isError).toBeUndefined();
+    expect(response.structuredContent).toEqual(result);
+    expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
   });
 
   test("forwards lockOrientation to the rotate implementation", async () => {

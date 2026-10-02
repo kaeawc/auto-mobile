@@ -217,6 +217,75 @@ describe("Rotate", () => {
   });
 
   describe("execute", () => {
+    test("already portrait succeeds without visual change or settings writes", async () => {
+      fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() => ({
+        ...createObserveResult(),
+        viewHierarchy: { hierarchy: {} },
+      }));
+      Object.assign(rotate, { observeScreen: fakeObserveScreen });
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=0"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(false);
+      expect(result.orientation).toBe("portrait");
+      expect(result.currentOrientation).toBe("portrait");
+      expect(result.previousOrientation).toBe("portrait");
+      expect(result.orientationLockState).toBe("unlocked");
+      expect(result.observation?.viewHierarchy).toEqual({ hierarchy: {} });
+      expect(fakeObserveScreen.getExecuteOptions().at(-1)?.freshness).toBe("fresh");
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("settings put system")),
+      ).toEqual([]);
+    });
+
+    test("performed rotation still fails without visual change", async () => {
+      fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() => ({
+        ...createObserveResult(),
+        viewHierarchy: { hierarchy: {} },
+      }));
+      Object.assign(rotate, { observeScreen: fakeObserveScreen });
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=0"),
+        createExecResult("mRotation=1"),
+      ]);
+
+      const result = await rotate.execute("landscape");
+
+      expect(result.success).toBe(false);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.error).toBe("No visual change observed");
+    });
+
+    test("an unconfirmed lock remains a failure when orientation and hierarchy are unchanged", async () => {
+      fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() => ({
+        ...createObserveResult(),
+        viewHierarchy: { hierarchy: {} },
+      }));
+      Object.assign(rotate, { observeScreen: fakeObserveScreen });
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=0"),
+      );
+
+      const result = await rotate.execute("portrait", undefined, true);
+
+      expect(result.success).toBe(false);
+      expect(result.rotationPerformed).toBe(false);
+      expect(result.orientationLockState).toBe("unlocked");
+      expect(result.error).toBe(
+        "Device was already in portrait orientation, but its exact locked rotation could not be confirmed (auto-rotate is unlocked).",
+      );
+    });
+
     test("should skip rotation when already in desired orientation", async () => {
       // Setup: device is already in portrait orientation
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
@@ -607,6 +676,12 @@ describe("Rotate", () => {
     });
 
     test("reports a lock-only request without claiming a rotation (#6350)", async () => {
+      fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() => ({
+        ...createObserveResult(),
+        viewHierarchy: { hierarchy: {} },
+      }));
+      Object.assign(rotate, { observeScreen: fakeObserveScreen });
       // The display is already landscape, but auto-rotate must still be
       // disabled to make that orientation persistent.
       fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
@@ -710,6 +785,12 @@ describe("Rotate", () => {
     });
 
     test("explicitly restores automatic rotation after a persistent request (#6350)", async () => {
+      fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() => ({
+        ...createObserveResult(),
+        viewHierarchy: { hierarchy: {} },
+      }));
+      Object.assign(rotate, { observeScreen: fakeObserveScreen });
       // This is the documented inverse of lockOrientation: true. The desired
       // orientation is already applied, so the operation must still re-enable
       // automatic rotation rather than taking the existing no-op return path.
@@ -1302,6 +1383,11 @@ describe("Rotate", () => {
     });
 
     test("accepts a portrait no-op without a visual change", async () => {
+      fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() => ({
+        ...createObserveResult(),
+        viewHierarchy: { hierarchy: {} },
+      }));
       const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
       Object.assign(iosRotate, {
         observeScreen: fakeObserveScreen,
@@ -1312,6 +1398,12 @@ describe("Rotate", () => {
         const result = await iosRotate.execute("portrait");
         expect(result.success).toBe(true);
         expect(result.rotationPerformed).toBe(false);
+        expect(result.error).toBeUndefined();
+        expect(result.orientation).toBe("portrait");
+        expect(result.currentOrientation).toBe("portrait");
+        expect(result.previousOrientation).toBe("portrait");
+        expect(result.observation?.viewHierarchy).toEqual({ hierarchy: {} });
+        expect(fakeObserveScreen.getExecuteOptions().at(-1)?.freshness).toBe("fresh");
       } finally {
         getInstanceSpy.mockRestore();
       }

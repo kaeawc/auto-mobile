@@ -10,6 +10,7 @@ import { FakeDiscoveryObservationSequence } from "../../fakes/FakeDiscoveryObser
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { join } from "path";
 import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
+import { loadDerivedDevicectlListing } from "../../helpers/devicectlListFixtures";
 
 const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 const LEGACY_UDID = "a".repeat(40);
@@ -156,7 +157,7 @@ describe("parseDevicectlDeviceList (constructed records)", () => {
     );
   });
 
-  test("classifies simulator shapes and unidentifiable entries without failing the listing", () => {
+  test("UDID shape alone is insufficient simulator evidence", () => {
     const discovery = parseListing(
       devicectlPayload([
         { hardwareProperties: { udid: SIMULATOR_UDID } },
@@ -166,8 +167,8 @@ describe("parseDevicectlDeviceList (constructed records)", () => {
       ]),
     );
     expect(discovery.physical).toEqual([]);
-    expect(discovery.notAvailable).toEqual([{ reason: "not-booted" }]);
-    expect(discovery.unidentified).toHaveLength(3);
+    expect(discovery.notAvailable).toEqual([]);
+    expect(discovery.unidentified).toHaveLength(4);
   });
 
   test("falls back through name sources when deviceProperties has no name", () => {
@@ -202,7 +203,7 @@ describe("parseDevicectlDeviceList (constructed records)", () => {
     }
   });
 
-  test("unidentifiable records leave a successful listing authoritative", () => {
+  test("unidentifiable records are reported separately from parsed devices", () => {
     for (const entry of [
       { hardwareProperties: { platform: "iOS" } },
       { hardwareProperties: { udid: 42 } },
@@ -324,7 +325,7 @@ describe("DevicectlDeviceLister", () => {
     expect(options?.signal).toBeUndefined();
   });
 
-  test("a partially unreadable sweep still surfaces the devices it did resolve", async () => {
+  test("a partially unreadable sweep without last-good inventory is incomplete and empty", async () => {
     const lister = makeLister({
       readFile: async () =>
         JSON.stringify(
@@ -334,8 +335,8 @@ describe("DevicectlDeviceLister", () => {
 
     const discovery = await lister.listConnectedDevices();
 
-    expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
-    expect(discovery.complete).toBe(true);
+    expect(discovery.devices).toEqual([]);
+    expect(discovery).toMatchObject({ complete: false, error: { code: "failed" } });
   });
 
   test("retains the last good listing across a failing sweep, then lets it go stale", async () => {
@@ -650,11 +651,12 @@ describe("constructed modern and legacy field combinations", () => {
       },
     ]);
     expect(parsed.physical).toHaveLength(3);
-    expect(parsed.simulators).toHaveLength(1);
-    expect(parsed.notAvailable).toEqual([{ reason: "unreachable" }]);
+    expect(parsed.simulators).toHaveLength(0);
+    expect(parsed.notAvailable).toEqual([]);
+    expect(parsed.unidentified).toHaveLength(2);
   });
 
-  test("constructed unavailable records without UDIDs are silently filtered", () => {
+  test("availability alone does not identify constructed records without UDIDs", () => {
     const parsed = parseListing([
       { connectionProperties: { tunnelState: "disconnected" } },
       { properties: { connection: { state: "unavailable" } } },
@@ -668,13 +670,9 @@ describe("constructed modern and legacy field combinations", () => {
       },
       { properties: { hardware: { reality: "physical" }, state: { bootState: "shutdown" } } },
     ]);
-    expect(parsed.notAvailable).toEqual([
-      { reason: "unreachable" },
-      { reason: "unreachable" },
-      { reason: "not-booted" },
-      { reason: "unreachable" },
-    ]);
-    expect(parsed.unidentified).toEqual(["no udid"]);
+    expect(parsed.notAvailable).toEqual([]);
+    expect(parsed.unidentified).toHaveLength(5);
+    expect(parsed.unidentified.every((reason) => reason.includes("udid-shape=missing"))).toBe(true);
   });
 });
 
@@ -798,10 +796,13 @@ describe("devicectl invocation failures (constructed errors)", () => {
     const timer = new FakeTimer();
     const warnings: string[] = [];
     const debug: string[] = [];
-    let records: unknown[] = [{ notADevice: true }];
+    // DERIVED from the captured listing: remove reality from one connected simulator.
+    const listing = loadDerivedDevicectlListing();
+    const record = listing.result.devices[0];
+    delete record.properties.hardware.reality;
     const lister = makeLister({
       timer,
-      readFile: async () => JSON.stringify(records),
+      readFile: async () => JSON.stringify(listing),
       logger: {
         warn: (message) => {
           warnings.push(message);
@@ -811,27 +812,42 @@ describe("devicectl invocation failures (constructed errors)", () => {
         },
       },
     });
-    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: true });
+    expect(await lister.listConnectedDevices()).toMatchObject({
+      devices: [],
+      complete: false,
+      error: { code: "failed" },
+    });
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
-    expect(warnings).toEqual([
-      "[DevicectlDeviceLister] 1 devicectl record(s) could not be identified: no udid",
-    ]);
+    const unidentifiedWarnings = () =>
+      warnings.filter((message) => message.includes("could not be identified"));
+    expect(unidentifiedWarnings()).toHaveLength(1);
+    expect(unidentifiedWarnings()[0]).toContain(
+      "platform=ios, reality=missing, udid-shape=simulator",
+    );
+    expect(unidentifiedWarnings()[0]).toContain("connection-state=connected");
     expect(debug.filter((message) => message.includes("could not be identified"))).toHaveLength(2);
-    records = [{ notADevice: true }, { anotherUnidentifiedDevice: true }];
+    // DERIVED unknown values may contain identifiers; diagnostics must only report fixed labels.
+    record.properties.hardware.reality = record.identifier;
+    record.properties.hardware.platform = record.identifier;
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
-    expect(warnings).toHaveLength(2);
-    expect(warnings[1]).toContain("2 devicectl record(s)");
-    records = [];
+    expect(unidentifiedWarnings()).toHaveLength(2);
+    expect(unidentifiedWarnings()[1]).toContain("platform=unknown, reality=unknown");
+    for (const message of [...warnings, ...debug]) {
+      expect(message).not.toContain(record.identifier);
+      expect(message).not.toContain(String(record.properties.hardware.udid));
+      expect(message).not.toContain("iPhone 17");
+    }
+    listing.result.devices = [];
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
-    records = [{ notADevice: true }];
+    listing.result.devices = [record];
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
-    expect(warnings).toHaveLength(3);
+    expect(unidentifiedWarnings()).toHaveLength(3);
   });
 
   test("failure transitions warn, repeats debug, and recovery resets suppression", async () => {

@@ -19,6 +19,19 @@ physical, available simulator, not-available, and unidentified counts, expected
 discovery completeness, and optional sorted physical/simulator UDIDs. A row may
 declare `sameStateAs` to require identical classification to another capture.
 
+`complete: true` requires a recognized successful envelope and positive
+classification of every record: a physical iOS device, a simulator, or an
+explicitly known unavailable/non-iOS device. Unidentified records make the
+listing incomplete and replay retained last-good physical devices instead of
+clearing them. Both captures remain complete with zero unidentified records.
+
+All captured simulators have an iOS platform, `reality: "simulated"`, and a
+simulator-shaped hardware UDID. These three fields identify simulators before
+availability filtering, including shutdown/disconnected simulators. A generic
+CoreDevice `identifier` UUID or a simulator-shaped UDID alone is insufficient.
+Tests label in-memory mutations as DERIVED; physical-shaped variants change
+only reality/udid/platform and are not physical-device capture evidence.
+
 To add a physical or mixed capture, drop its untouched `list-devices-*.json` file
 here and add its expectation row to the manifest; no loader or test code changes
 are needed. The loader enumerates every matching capture and fails for zero

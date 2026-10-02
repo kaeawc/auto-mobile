@@ -12,6 +12,14 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { IdleDeviceReaper } from "../../src/daemon/idleDeviceReaper";
+import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { FakeDiscoveryObservationSequence } from "../fakes/FakeDiscoveryObservationSequence";
+import { createExecResult } from "../../src/utils/execResult";
+import {
+  loadDerivedDevicectlListing,
+  derivePhysicalDevicectlRecord,
+} from "../helpers/devicectlListFixtures";
 
 /**
  * Issue #5683: iOS has two independent discovery sources behind one platform
@@ -250,9 +258,58 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     expect(devicePool.getDevice(SIMULATOR_UDID)).toBeDefined();
   });
 
-  test("a failing devicectl sweep does not prune the iPhone it could not list", async () => {
+  test("an unidentified devicectl record replays the idle iPhone without pruning it", async () => {
     await pool([PHYSICAL, SIMULATOR]);
+    const timer = new FakeTimer();
+    // DERIVED mixed inventory: only reality/udid/platform change on a captured simulator.
+    const listing = loadDerivedDevicectlListing();
+    const phone = derivePhysicalDevicectlRecord(listing.result.devices[0], PHYSICAL_UDID);
+    listing.result.devices.push(phone);
+    const lister = new DevicectlDeviceLister({
+      platform: () => "darwin",
+      timer,
+      observationSequence: new FakeDiscoveryObservationSequence(),
+      execute: async () => createExecResult("", ""),
+      readFile: async () => JSON.stringify(listing),
+      mkdtemp: async () => "/fake/devicectl",
+      rm: async () => {},
+      tmpdir: () => "/fake",
+      logger: { warn: () => {}, debug: () => {} },
+    });
+    const manager = new MultiPlatformDeviceManager(
+      null,
+      new FakeBootedSimctl([SIMULATOR]) as unknown as SimCtlClient,
+      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      undefined,
+      undefined,
+      lister,
+    );
+    expect((await lister.listConnectedDevices()).complete).toBe(true);
+    // DERIVED schema drift in the physical record while the phone remains connected.
+    phone.properties.hardware.reality = "future";
+    timer.advanceTime(3_000);
+    const discovery = await manager.getBootedDevicesDetailed("ios");
+    expect(discovery.devices.map((device) => device.deviceId)).toContain(PHYSICAL_UDID);
+    expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
+    expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(false);
+    expect(discovery.sourceErrors?.["ios-physical"]?.code).toBe("failed");
+    const reaper = new IdleDeviceReaper(
+      {
+        getDevice: (id) => devicePool.getDevice(id),
+        removeDevice: (id, cleanup, expected) => devicePool.removeDevice(id, cleanup, expected),
+        withAssignmentLock: async (operation) => await operation(),
+      },
+      manager,
+    );
+    const device = devicePool.getDevice(PHYSICAL_UDID)!;
+    const snapshot = await reaper.getIosLivenessSnapshot();
+    expect(reaper.getIdleDeviceLivenessStatus(device, snapshot)).toBe("unknown");
+    expect(await reaper.pruneStaleIdleIosDevices([device])).toBe(0);
+
+    // Feed the same incomplete contract into the pool's existing fake manager.
+    deviceManager.bootedDevices = discovery.devices;
     deviceManager.failedSources.add("ios-physical");
+    deviceManager.retainedSources.add("ios-physical");
 
     await expect(
       devicePool.bindOrReuseDeviceSession("session-d", PHYSICAL_UDID, "ios"),

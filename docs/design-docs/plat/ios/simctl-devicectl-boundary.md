@@ -21,6 +21,19 @@ The tool capability claims below are per #8347. “Current code status” descri
 
 `SimCtlClient.ts` is the simulator command runner and implements simulator discovery, lifecycle, app operations, push, appearance, and simulator display enumeration. `DevicectlDeviceLister.ts` classifies simulator records and drops them at the lister boundary; simctl remains the simulator source of truth. It lists connected physical devices; `DeviceAppManager.ts` implements physical-device app operations. `discoverySource.ts` keeps simulator and physical-device discovery as separate sources, and `DeviceDetection.ts` identifies iOS device IDs for routing.
 
+A devicectl listing is complete only when every record is positively classified.
+Simulator records require an iOS/iPadOS platform, `reality: "simulated"`, and a
+simulator-shaped hardware UDID, as present in both captured listings under
+`test/fixtures/ios-devicectl/`. The same evidence is required before filtering a
+simulator as not booted or unreachable. Known Watch/TV/Vision platforms are
+excluded explicitly; unknown platforms or conflicting/missing simulator kind
+evidence are unidentified. Such records make discovery incomplete with a
+`failed` error and replay the bounded last-good physical inventory. The manager
+does not mark that physical source successful or its replayed IDs fresh, so the
+idle-device reaper cannot infer that a connected phone disappeared. Unidentified
+field diagnostics warn on changed sets and log repeats at debug, using only
+fixed labels without device identifiers or names.
+
 `InstallApp.ts`, `UninstallApp.ts`, `LaunchApp.ts`, `TerminateApp.ts`, `OpenURL.ts`, and `ClearAppData.ts` branch between simulator `simctl` operations and physical-device `devicectl` operations where applicable. Simulator app-container lookup is in `iosAppContainer.ts`. Simulator privacy and keychain operations are in `IosSimulatorPermissions.ts` and `ResetKeychain.ts`.
 
 `DeviceState.ts` routes simulator location and appearance operations through `SimCtlClient.ts`; its simulator biometric path uses `notifyutil.ts` through `simctl spawn`. `HybridVideoCaptureBackend.ts` selects simulator recording and physical-device capture paths. `IosPhysicalVideoCaptureBackend.ts` documents that `devicectl` has no screen-recording operation. iOS clipboard currently routes through `IOSCtrlProxyClient` in `Clipboard.ts`. Host-tool availability checks in `DevicectlDeviceLister.ts` and `hostToolchainResources.ts` report whether devicectl is available; they do not probe CoreDevice version for feature gating.

@@ -76,7 +76,7 @@ export interface DevicectlListingError {
   message: string;
 }
 
-/** Only invocation/envelope failures are incomplete; their devices are retention replays. */
+/** Invocation, envelope, or unidentified-record failures replay retained devices as incomplete. */
 export type PhysicalIosDeviceDiscovery =
   | { devices: BootedDevice[]; complete: true }
   | { devices: BootedDevice[]; complete: false; error: DevicectlListingError };
@@ -111,11 +111,13 @@ const UNREACHABLE_TUNNEL_STATES = new Set(["unavailable", "disconnected"]);
  * apart. Without this gate they would be published as `platform: "ios"` and
  * route iOS operations to hardware that cannot serve them.
  *
- * A record with NO platform field is still accepted, keeping the same
+ * A physical record with NO platform field is still accepted, keeping the same
  * degrade-toward-inclusion policy as {@link UNREACHABLE_TUNNEL_STATES}: older
  * devicectl payloads that omit the field must not lose their iPhones.
  */
 const IOS_PLATFORM_VALUES = new Set(["ios", "ipados"]);
+// These CoreDevice platforms are explicitly outside this iOS inventory; unknown values are drift.
+const NON_IOS_PLATFORM_VALUES = new Set(["watchos", "tvos", "xros", "visionos"]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -188,6 +190,7 @@ function readDeviceFields(record: Record<string, unknown>) {
   return {
     platform: hardwareString("platform")?.toLowerCase(),
     udid: hardwareString("udid") ?? asString(record.identifier),
+    hardwareUdid: hardwareString("udid"),
     reality: hardwareString("reality"),
     productType: hardwareString("productType"),
     name: stateString("name") ?? hardwareString("marketingName") ?? hardwareString("deviceType"),
@@ -197,30 +200,40 @@ function readDeviceFields(record: Record<string, unknown>) {
   };
 }
 
+/** All three fields are present on booted and shutdown records in both host captures. */
+function isRecognizedSimulator(fields: ReturnType<typeof readDeviceFields>): boolean {
+  return (
+    fields.platform !== undefined &&
+    IOS_PLATFORM_VALUES.has(fields.platform) &&
+    fields.reality === "simulated" &&
+    fields.hardwareUdid !== undefined &&
+    isIosSimulatorUdid(fields.hardwareUdid)
+  );
+}
+
 function deviceKind(
-  udid: string,
-  reality: string | undefined,
+  fields: ReturnType<typeof readDeviceFields>,
 ): "physical" | "simulator" | undefined {
-  const shape = isIosPhysicalUdid(udid)
-    ? "physical"
-    : isIosSimulatorUdid(udid)
-      ? "simulator"
-      : undefined;
-  if (reality === undefined) {
-    return shape;
+  if (isRecognizedSimulator(fields)) {
+    return "simulator";
   }
-  const kind =
-    reality === "physical" ? "physical" : reality === "simulated" ? "simulator" : undefined;
-  return kind === shape ? kind : undefined;
+  // Preserve tested older physical payloads with no reality/platform field.
+  if (
+    fields.udid &&
+    isIosPhysicalUdid(fields.udid) &&
+    (fields.reality === undefined || fields.reality === "physical")
+  ) {
+    return "physical";
+  }
+  return undefined;
 }
 
 function unavailableReason(
   fields: ReturnType<typeof readDeviceFields>,
+  kind: "physical" | "simulator",
 ): NotAvailableReason | undefined {
-  const simulated =
-    fields.reality === "simulated" ||
-    (fields.reality === undefined && fields.udid && isIosSimulatorUdid(fields.udid));
-  if (simulated) {
+  // Availability never substitutes for positive kind evidence.
+  if (kind === "simulator") {
     if (fields.bootState !== "booted") {
       return "not-booted";
     }
@@ -233,26 +246,60 @@ function unavailableReason(
   return undefined;
 }
 
-/** Total classification never changes the authority of a successful listing. */
+function udidShape(udid: string | undefined): string {
+  if (!udid) {
+    return "missing";
+  }
+  if (isIosPhysicalUdid(udid)) {
+    return "physical";
+  }
+  return isIosSimulatorUdid(udid) ? "simulator" : "unrecognized";
+}
+
+/** Only fixed labels leave this reader: never log names, UDIDs, or unknown raw field values. */
+function unidentifiedFields(fields: ReturnType<typeof readDeviceFields>): string {
+  const platform =
+    fields.platform === undefined
+      ? "missing"
+      : IOS_PLATFORM_VALUES.has(fields.platform)
+        ? "ios"
+        : "unknown";
+  const reality =
+    fields.reality === undefined
+      ? "missing"
+      : fields.reality === "physical" || fields.reality === "simulated"
+        ? fields.reality
+        : "unknown";
+  const connection =
+    fields.connectionState === undefined
+      ? "missing"
+      : fields.connectionState === "connected" ||
+          UNREACHABLE_TUNNEL_STATES.has(fields.connectionState)
+        ? fields.connectionState
+        : "unknown";
+  return `platform=${platform}, reality=${reality}, udid-shape=${udidShape(fields.udid)}, hardware-udid-shape=${udidShape(fields.hardwareUdid)}, connection-state=${connection}`;
+}
+
+/** Every record needs positive classification before the listing can be authoritative. */
 function classifyDeviceEntry(entry: unknown): DevicectlRecordOutcome {
   const record = asRecord(entry);
   if (!record) {
     return { kind: "unidentifiable", reason: "entry is not an object" };
   }
   const fields = readDeviceFields(record);
-  if (fields.platform && !IOS_PLATFORM_VALUES.has(fields.platform)) {
+  if (fields.platform && NON_IOS_PLATFORM_VALUES.has(fields.platform)) {
     return { kind: "not-available", reason: "non-ios" };
   }
-  const reason = unavailableReason(fields);
+  if (fields.platform && !IOS_PLATFORM_VALUES.has(fields.platform)) {
+    return { kind: "unidentifiable", reason: unidentifiedFields(fields) };
+  }
+  const kind = deviceKind(fields);
+  if (!kind || !fields.udid) {
+    return { kind: "unidentifiable", reason: unidentifiedFields(fields) };
+  }
+  const reason = unavailableReason(fields, kind);
   if (reason) {
     return { kind: "not-available", reason };
-  }
-  if (!fields.udid) {
-    return { kind: "unidentifiable", reason: "no udid" };
-  }
-  const kind = deviceKind(fields.udid, fields.reality);
-  if (!kind) {
-    return { kind: "unidentifiable", reason: "reality/udid mismatch or unrecognized udid" };
   }
   const formFactor = inferIosFormFactor(fields.productType);
   return {
@@ -418,7 +465,7 @@ const defaultDependencies: DevicectlDeviceListerDependencies = {
 /**
  * Lists connected physical iOS devices via `xcrun devicectl list devices`.
  *
- * macOS-only and best-effort: invocation failures log and replay last-good
+ * macOS-only and best-effort: incomplete listings log and replay last-good
  * physical devices for a bounded window; non-darwin hosts return a complete empty
  * list. Physical-device discovery is additive to the simulator list, so a
  * failure here must degrade iOS discovery to "simulators only" rather than
@@ -486,6 +533,9 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
         return this.failedListing("failed", parsed.reason);
       }
       this.logUnidentified(parsed.unidentified);
+      if (parsed.unidentified.length > 0) {
+        return this.failedListing("failed", "listing contains unidentified records");
+      }
       this.deps.logger.debug(
         `[DevicectlDeviceLister] dropped ${parsed.simulators.length} simulator record(s); simctl owns simulator discovery`,
       );
@@ -517,7 +567,7 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     if (reasons.length > 0) {
       const message = `[DevicectlDeviceLister] ${reasons.length} devicectl record(s) could not be identified: ${reasons.join("; ")}`;
       if (key === this.previousUnidentifiedKey) {
-        // The same unidentified set is expected on recurring discovery sweeps.
+        // Persistent drift follows failedListing's repeated-failure debug convention.
         this.deps.logger.debug(message);
       } else {
         this.deps.logger.warn(message);

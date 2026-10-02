@@ -10,6 +10,7 @@ export interface DevicectlFixtureExpectation {
   availableSimulators: number;
   notAvailable: number;
   unidentified: number;
+  /** True only if the envelope and every record are positively classified. */
   complete: boolean;
   physicalUdids?: string[];
   simulatorUdids?: string[];
@@ -52,4 +53,32 @@ export const DEVICECTL_LIST_FIXTURES = DEVICECTL_FIXTURE_MANIFEST.map((row) => r
 /** Verbatim host captures; later hardware captures use the same loader. */
 export function loadDevicectlListFixture(name: string): string {
   return readFileSync(join(FIXTURE_DIRECTORY, name), "utf8");
+}
+
+interface DerivedDevicectlRecord {
+  identifier: string;
+  properties: {
+    hardware: Record<string, unknown>;
+    state: { bootState: string };
+    connection: { state: string };
+  };
+  hardwareProperties?: Record<string, unknown>;
+}
+
+/** DERIVED in memory from a capture; never represents additional host evidence. */
+export function loadDerivedDevicectlListing(
+  name = "list-devices-simulators-only-omit-deprecated.json",
+): { result: { devices: DerivedDevicectlRecord[] } } {
+  return JSON.parse(loadDevicectlListFixture(name));
+}
+
+/** DERIVED physical shape: change only reality/udid/platform on a captured record. */
+export function derivePhysicalDevicectlRecord(record: DerivedDevicectlRecord, udid: string) {
+  const derived = structuredClone(record);
+  for (const hardware of [derived.properties.hardware, derived.hardwareProperties]) {
+    if (hardware) {
+      Object.assign(hardware, { reality: "physical", udid, platform: "iOS" });
+    }
+  }
+  return derived;
 }

@@ -3199,7 +3199,7 @@ describe("LaunchApp", () => {
       }
     });
 
-    test("cold boot on a simulator terminates once without a device argument", async () => {
+    test("cold boot on a simulator terminates once on the selected device", async () => {
       fakeTimer.enableAutoAdvance();
       const { iosLaunchApp, terminateCalls, cleanup } = createDeviceHarness({
         deviceId: simulatorUdid,
@@ -3207,7 +3207,7 @@ describe("LaunchApp", () => {
       try {
         const result = await iosLaunchApp.execute(userBundleId, false, true);
         expect(result.success).toBe(true);
-        expect(terminateCalls).toEqual([{ bundleId: userBundleId, deviceId: undefined }]);
+        expect(terminateCalls).toEqual([{ bundleId: userBundleId, deviceId: simulatorUdid }]);
       } finally {
         cleanup();
       }

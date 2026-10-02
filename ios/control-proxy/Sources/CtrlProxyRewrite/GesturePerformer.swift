@@ -26,9 +26,13 @@ import os
 /// `scopedLinkCandidates`, the privacy-resource name maps) are `nonisolated static` so the
 /// macOS test host can call them off the main actor.
 ///
-/// PHASE 8 FIXUP: keyboard-focus and keyboard-visibility polling use `KeyboardWait`
-/// with an injected monotonic clock. Async sleeps yield the main actor, preserve the
-/// original probe cadence and timeout results, and propagate cancellation in the caller's task.
+/// PHASE 8 FIXUP (partially resolved): only `tapAndAwaitKeyboardFocus` and
+/// `waitForKeyboardVisibility` now await `KeyboardWait` with an injected monotonic `Clock`,
+/// yielding the main actor between probes, with a final re-probe at the focus deadline.
+/// `waitForKeyboardClose` still uses `RunLoop.current.run(until:)` and systemUptime;
+/// the destructive-key post-condition loop still uses `RunLoop.current.run`. Both remain unchanged follow-ups.
+/// The waits honour task cancellation via `CancellationError`, but WebSocketServer's serial
+/// command-chain tasks are unstructured and never cancelled, so cancellation is currently unreachable in production.
 @MainActor
 public final class GesturePerformer: GesturePerforming {
     private let keyboardClock: any Clock<Duration>

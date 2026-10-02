@@ -26,8 +26,13 @@ private final class KeyboardTestClock: Clock, Sendable {
 
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let manual: Bool
+    private let sleepOvershoot: Duration
 
-    init(manual: Bool = false) { self.manual = manual }
+    init(manual: Bool = false, sleepOvershoot: Duration = .zero) {
+        self.manual = manual
+        self.sleepOvershoot = sleepOvershoot
+    }
+
     var now: Instant { state.withLock { $0.now } }
     var minimumResolution: Duration { .nanoseconds(1) }
     var sleeps: [Duration] { state.withLock { $0.sleeps } }
@@ -56,7 +61,7 @@ private final class KeyboardTestClock: Clock, Sendable {
                         $0.pending = continuation
                         $0.deadline = deadline
                     } else {
-                        $0.now = deadline
+                        $0.now = deadline.advanced(by: sleepOvershoot)
                         continuation.resume()
                     }
                     for observer in $0.observers {
@@ -117,7 +122,7 @@ final class KeyboardWaitTests: XCTestCase {
         XCTAssertEqual(result.elapsedMs, 175)
     }
 
-    func testFocusTimeoutMatchesOldLoopIncludingPostTapBudget() async throws {
+    func testFocusTimeoutIncludesFinalProbeAndPostTapBudget() async throws {
         let clock = KeyboardTestClock()
         var probes = 0
         let result = try await KeyboardWait.focus(clock: clock, tap: {
@@ -135,11 +140,43 @@ final class KeyboardWaitTests: XCTestCase {
             oldElapsed += .milliseconds(50)
         }
         XCTAssertFalse(result.hasFocus)
-        XCTAssertEqual(result.iterations, oldIterations)
-        XCTAssertEqual(result.strategy, "strategy-\(oldIterations)")
-        XCTAssertEqual(result.iterations, 10)
+        XCTAssertEqual(result.iterations, oldIterations + 1)
+        XCTAssertEqual(result.strategy, "strategy-\(oldIterations + 1)")
+        XCTAssertEqual(result.iterations, 11)
         XCTAssertEqual(clock.sleeps, Array(repeating: .milliseconds(50), count: oldIterations))
         XCTAssertEqual(result.elapsedMs, 2500)
+    }
+
+    func testFocusArrivesDuringSleepThatOverrunsDeadline() async throws {
+        // Model a main-actor hierarchy walk delaying the first 50ms sleep until 600ms.
+        let clock = KeyboardTestClock(sleepOvershoot: .milliseconds(550))
+        let result = try await KeyboardWait.focus(clock: clock, tap: {}, probe: {
+            let hasFocus = clock.elapsedMs >= 100
+            if hasFocus { clock.advance(by: .milliseconds(25)) }
+            return (hasFocus, hasFocus ? "final-snapshot" : "none")
+        })
+
+        XCTAssertTrue(result.hasFocus)
+        XCTAssertEqual(result.strategy, "final-snapshot")
+        XCTAssertEqual(result.iterations, 2)
+        XCTAssertEqual(clock.sleeps, [.milliseconds(50)])
+        XCTAssertEqual(result.elapsedMs, 625, "Elapsed time includes the final probe")
+    }
+
+    func testFocusNeverArrivesDuringSleepThatOverrunsDeadline() async throws {
+        let clock = KeyboardTestClock(sleepOvershoot: .milliseconds(550))
+        var probes = 0
+        let result = try await KeyboardWait.focus(clock: clock, tap: {}, probe: {
+            probes += 1
+            return (false, "strategy-\(probes)")
+        })
+
+        XCTAssertFalse(result.hasFocus)
+        XCTAssertEqual(result.strategy, "strategy-2")
+        XCTAssertEqual(result.iterations, 2)
+        XCTAssertEqual(probes, 2)
+        XCTAssertEqual(clock.sleeps, [.milliseconds(50)])
+        XCTAssertEqual(result.elapsedMs, 600)
     }
 
     func testVisibilityTimeoutReturnsLastObservation() async throws {
@@ -241,11 +278,12 @@ final class KeyboardWaitTests: XCTestCase {
         XCTAssertEqual(result.iterations, 2)
     }
 
-    func testTaskLocalDiagnosticsIncludeSleptTime() async throws {
+    func testTaskLocalSurvivesAwaitedKeyboardWait() async throws {
+        // Guards a task-local surviving an await in general, not production setText coverage.
         let clock = KeyboardTestClock()
         let sink = FakeGestureLogSink()
         let diagnostics = GesturePhaseDiagnostics(
-            command: "request_set_text",
+            command: "request_swipe",
             receivedAtMs: 0,
             deadlineMs: nil,
             now: { clock.elapsedMs },

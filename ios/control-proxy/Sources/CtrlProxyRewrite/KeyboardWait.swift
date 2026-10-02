@@ -1,7 +1,8 @@
 import Foundation
 
 /// Keyboard polling stays in the caller's task and yields the main actor between probes.
-/// The two cadences intentionally preserve their different deadline-edge behavior.
+/// Both waits retain their polling cadence and probe at the deadline edge before reporting failure.
+/// A hierarchy poll can interleave during the sleep, so the focus deadline edge re-probes.
 @MainActor
 enum KeyboardWait {
     struct FocusResult: Sendable {
@@ -37,6 +38,11 @@ enum KeyboardWait {
                 try Task.checkCancellation()
             }
         }
+        if !hasFocus {
+            try Task.checkCancellation()
+            (hasFocus, strategy) = try probe()
+            iterations += 1
+        }
         let elapsed = start.duration(to: clock.now).components
         return FocusResult(
             hasFocus: hasFocus,
@@ -61,7 +67,7 @@ enum KeyboardWait {
         while visible != expected, clock.now < deadline {
             try await clock.sleep(for: interval)
             try Task.checkCancellation()
-            // Unlike focus, visibility probes even if the sleep reaches the deadline.
+            // Probe even if the sleep reaches or passes the deadline.
             visible = try probe()
         }
         return visible

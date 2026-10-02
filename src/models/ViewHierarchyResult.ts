@@ -191,6 +191,8 @@ export interface ViewHierarchyWindowInfo {
   windowLayer?: number;
   packageName?: string;
   hierarchy?: ViewHierarchyNode;
+  /** Per-window truncation attribution; absent from older runners and complete windows. */
+  truncationReasons?: string[] | null;
 }
 
 // Define types for the view hierarchy structure

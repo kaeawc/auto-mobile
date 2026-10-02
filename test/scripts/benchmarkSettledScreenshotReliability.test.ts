@@ -185,7 +185,7 @@ describe("benchmark namespace isolation", () => {
         expect(isAbsolute(withinRun)).toBe(false);
         const withinResident = relative(residentDir, value);
         expect(withinResident.startsWith("..") || isAbsolute(withinResident)).toBe(true);
-        expect(value.startsWith("/tmp/auto-mobile-daemon-")).toBe(false);
+        expect(value.startsWith(resolve("/tmp/auto-mobile-daemon-"))).toBe(false);
         expect(value).not.toBe(parent[key]);
         expect(value).not.toBe(parent.AUTOMOBILE_COORDINATION_DIR);
       }

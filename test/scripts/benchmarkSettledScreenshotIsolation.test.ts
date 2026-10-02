@@ -261,8 +261,8 @@ describe("private namespace and argv guard", () => {
       AUTOMOBILE_DAEMON_PID_FILE_PATH: "/fake/scratch/gate-ns/d.pid",
       AUTOMOBILE_DAEMON_LOCK_FILE_PATH: "/fake/scratch/gate-ns/d.lock",
     };
-    const configured = buildLaunchSafety(configuredEnv, "/fake/home", builtInPaths);
-    const unset = buildLaunchSafety({}, "/fake/home", builtInPaths);
+    const configured = buildLaunchSafety(configuredEnv, safety.homeDir, builtInPaths);
+    const unset = buildLaunchSafety({}, safety.homeDir, builtInPaths);
     expect(configured).toEqual(safety);
     expect(unset.effectiveDaemonPaths).toEqual(builtInPaths);
     for (const guard of [safety, configured, unset]) {
@@ -327,8 +327,8 @@ describe("private namespace and argv guard", () => {
       builtInPaths,
     );
     expect(guard.effectiveDaemonPaths).toEqual([
-      "/fake/launch/canonical.sock",
-      "/fake/launch/alias.pid",
+      resolve("/fake/launch", "canonical.sock"),
+      resolve("/fake/launch", "alias.pid"),
       "/fake/default.lock",
     ]);
     expect(() => assertPrivateBenchmarkRunDir("/fake/default.lock", guard)).toThrow(

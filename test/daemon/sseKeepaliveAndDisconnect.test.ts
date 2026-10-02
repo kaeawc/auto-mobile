@@ -1,5 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import type { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
+import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
+import { getPerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
+import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
+import { serverConfig } from "../../src/utils/ServerConfig";
+import { logger } from "../../src/utils/logger";
+import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import {
   evaluateDeviceDisconnects,
   recordingCandidateIncarnations,
@@ -9,7 +18,374 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
-const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
+const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
+const PLAN_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
+
+interface PlanDisconnectMonitorSurface {
+  deviceDisconnectMonitor: SingleFlightInterval;
+  deviceDisconnectMisses: Map<string, number>;
+  confirmedDisconnectedDeviceIds: Set<string>;
+  offlineRecoveryAttemptedDeviceIds: Set<string>;
+  offlineRecoveryAttemptedIncarnations: Map<string, number | string>;
+  startDeviceDisconnectMonitor(
+    manager: Pick<
+      MultiPlatformDeviceManager,
+      "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
+    >,
+    listRecordings: () => Promise<VideoRecordingRecord[]>,
+  ): void;
+}
+
+function planDisconnectMonitorHarness() {
+  const timer = new FakeTimer();
+  const actions: string[] = [];
+  const device = {
+    id: "emulator-5554",
+    platform: "android" as const,
+    incarnation: 1,
+    assignmentCount: 1,
+    sessionId: "plan-session",
+    status: "busy" as const,
+    avdName: "Pixel",
+    androidImage: {},
+  };
+  let pooled = true;
+  let sessionActive = true;
+  const session = {
+    sessionId: device.sessionId,
+    assignedDevice: device.id,
+    platform: device.platform,
+  };
+  const devices = [device];
+  class PlanDeviceManager extends FakeDeviceManager {
+    discoveryCalls = 0;
+    offlineProbeCalls = 0;
+    offlineDeviceIds = new Set<string>();
+    onDiscovery = () => {};
+    onRecovery = () => {};
+    async getBootedDevicesDetailed(
+      platform: Parameters<FakeDeviceManager["getBootedDevicesDetailed"]>[0],
+    ) {
+      this.discoveryCalls++;
+      const discovery = await super.getBootedDevicesDetailed(platform);
+      this.onDiscovery();
+      return discovery;
+    }
+    async getAndroidOfflineDeviceIds() {
+      this.offlineProbeCalls++;
+      return this.offlineDeviceIds;
+    }
+    async recoverAndroidOfflineDevices() {
+      actions.push("offline-reconnect");
+      this.onRecovery();
+    }
+  }
+  const manager = new PlanDeviceManager();
+  const recordings: VideoRecordingRecord[] = [
+    {
+      recordingId: "plan-recording",
+      deviceId: device.id,
+      platform: device.platform,
+      status: "recording",
+      fileName: "plan-recording.mp4",
+      filePath: "plan-recording.mp4",
+      format: "mp4",
+      sizeBytes: 0,
+      createdAt: "2026-10-02T00:00:00Z",
+      startedAt: "2026-10-02T00:00:00Z",
+      lastAccessedAt: "2026-10-02T00:00:00Z",
+      config: DEFAULT_VIDEO_RECORDING_CONFIG,
+    },
+  ];
+  // Exercise the real daemon tick with only its dependencies replaced, without
+  // constructing the daemon's unrelated database/socket/process services.
+  const daemon = Object.assign(Object.create(Daemon.prototype), {
+    timer,
+    deviceDisconnectMonitor: null,
+    deviceDisconnectMisses: new Map<string, number>(),
+    deviceDisconnectMissIncarnations: new Map(),
+    confirmedDisconnectedDeviceIds: new Set<string>(),
+    forceDisconnectedDeviceIds: new Set<string>(),
+    forceDisconnectedDeviceGenerations: new Map(),
+    offlineRecoveryAttemptedDeviceIds: new Set(),
+    offlineRecoveryAttemptedIncarnations: new Map(),
+    deferredSessionRecoverySweeps: new Set(),
+    devicePool: {
+      retryDueDeferredSessionRecoveries: async () => {
+        actions.push("deferred-recovery");
+      },
+      reconcileDiscoveryObservation: async () => {
+        actions.push("reconcile");
+      },
+      getAllDevices: () => (pooled ? devices : []),
+      getDevice: (id: string) => (pooled && id === device.id ? device : null),
+      isDeviceLeasedForAndroidStartup: () => false,
+      detachAdbServerResetCohort: async () => {
+        actions.push("detach-reset-cohort");
+        return { devices: [], deferred: false };
+      },
+      releaseAdbServerResetCohortReservations: async () => {
+        actions.push("release-reset-cohort");
+      },
+      removeDisconnectedDevice: async (id: string) => {
+        actions.push(`remove:${id}`);
+        pooled = false;
+      },
+    },
+    sessionManager: {
+      getAllSessions: () => (sessionActive ? [session] : []),
+      getSessionForDevice: () => (sessionActive ? session.sessionId : null),
+      getSession: () => (sessionActive ? session : null),
+    },
+    shouldSkipStaleDisconnectCleanup: async () => false,
+    recordAndTryRecoverCapturedDisconnect: async () => {
+      actions.push("device-loss-recovery");
+      return { incidentId: undefined, handled: false };
+    },
+    cancelAndReleaseSession: async (id: string) => {
+      actions.push(`cancel:${id}`);
+      sessionActive = false;
+    },
+    stopRecordingAfterDeviceDisconnect: async () => {
+      actions.push("stop-recording");
+      return true;
+    },
+  }) as PlanDisconnectMonitorSurface;
+  const recordingsReader = {
+    calls: 0,
+    async list() {
+      this.calls++;
+      return recordings;
+    },
+  };
+  daemon.startDeviceDisconnectMonitor(manager, () => recordingsReader.list());
+  return {
+    daemon,
+    manager,
+    device,
+    devices,
+    actions,
+    recordingsReader,
+    async tick() {
+      timer.advanceTime(DEVICE_DISCONNECT_POLL_INTERVAL_MS);
+      // run() joins the tick just fired by FakeTimer; it does not start another.
+      await daemon.deviceDisconnectMonitor.run();
+    },
+  };
+}
+
+describe("disconnect monitor during plan execution", () => {
+  test("defers the whole tick when the plan ends during discovery, then reconciles before cleanup", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    const planActive = spyOn(serverConfig, "isPlanExecutionActive");
+    const stopMonitoring = spyOn(getPerformanceMonitor(), "stopMonitoring").mockImplementation(
+      () => {},
+    );
+    try {
+      serverConfig.setPlanExecutionActive(true);
+      h.daemon.deviceDisconnectMisses.set(h.device.id, DEVICE_DISCONNECT_MISS_THRESHOLD - 1);
+      h.manager.onDiscovery = () => serverConfig.setPlanExecutionActive(false);
+      await h.tick();
+      expect(h.actions).toEqual([]);
+      expect(planActive).toHaveBeenCalledTimes(1);
+      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.recordingsReader.calls).toBe(0);
+      expect(h.manager.offlineProbeCalls).toBe(0);
+      expect(stopMonitoring).not.toHaveBeenCalled();
+      await h.tick();
+      expect(h.actions).toEqual(["deferred-recovery", "reconcile"]);
+      expect(planActive).toHaveBeenCalledTimes(2);
+      await h.tick();
+      expect(h.actions).toContain("cancel:plan-session");
+      expect(h.actions).toContain(`remove:${h.device.id}`);
+      expect(h.actions).toContain("stop-recording");
+      expect(h.actions.indexOf("reconcile")).toBeLessThan(
+        h.actions.indexOf("device-loss-recovery"),
+      );
+      expect(planActive).toHaveBeenCalledTimes(3);
+    } finally {
+      serverConfig.setPlanExecutionActive(previous);
+      planActive.mockRestore();
+      stopMonitoring.mockRestore();
+    }
+  });
+
+  test("keeps the inactive snapshot for reconciliation after offline recovery", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    const planActive = spyOn(serverConfig, "isPlanExecutionActive");
+    try {
+      serverConfig.setPlanExecutionActive(false);
+      h.manager.offlineDeviceIds.add(h.device.id);
+      h.manager.onRecovery = () => {
+        serverConfig.setPlanExecutionActive(true);
+        h.manager.bootedDevices = [{ deviceId: h.device.id, name: "Pixel", platform: "android" }];
+      };
+      await h.tick();
+      expect(h.actions).toEqual([
+        "deferred-recovery",
+        "reconcile",
+        "offline-reconnect",
+        "reconcile",
+      ]);
+      expect(planActive).toHaveBeenCalledTimes(1);
+      expect(h.daemon.deviceDisconnectMisses.size).toBe(0);
+    } finally {
+      serverConfig.setPlanExecutionActive(previous);
+      planActive.mockRestore();
+    }
+  });
+
+  test("skips deferred-action reads and preserves offline attempts while logging the cap once", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const attempted = h.daemon.offlineRecoveryAttemptedDeviceIds;
+    const incarnations = h.daemon.offlineRecoveryAttemptedIncarnations;
+    attempted.add(h.device.id);
+    incarnations.set(h.device.id, h.device.incarnation);
+    try {
+      serverConfig.setPlanExecutionActive(true);
+      for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD + 1; i++) {
+        await h.tick();
+      }
+      expect(h.recordingsReader.calls).toBe(0);
+      expect(h.manager.offlineProbeCalls).toBe(0);
+      expect(h.daemon.offlineRecoveryAttemptedDeviceIds).toBe(attempted);
+      expect([...attempted]).toEqual([h.device.id]);
+      expect(h.daemon.offlineRecoveryAttemptedIncarnations).toBe(incarnations);
+      expect(incarnations.get(h.device.id)).toBe(h.device.incarnation);
+      const missMessage = `[DisconnectMonitor] Device ${h.device.id} not in booted list (absent, miss ${PLAN_DISCONNECT_MISS_CAP}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=0)`;
+      expect(info.mock.calls.filter(([message]) => message === missMessage)).toHaveLength(1);
+      expect(debug.mock.calls.filter(([message]) => message === missMessage)).toHaveLength(
+        DEVICE_DISCONNECT_MISS_THRESHOLD,
+      );
+      expect(h.actions).toEqual([]);
+    } finally {
+      serverConfig.setPlanExecutionActive(previous);
+      info.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
+  test("caps plan-time absence and cancels the lost session on the second inactive tick", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    const stopMonitoring = spyOn(getPerformanceMonitor(), "stopMonitoring").mockImplementation(
+      () => {},
+    );
+    try {
+      serverConfig.setPlanExecutionActive(true);
+      for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD + 1; i++) {
+        await h.tick();
+        expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(
+          Math.min(i + 1, PLAN_DISCONNECT_MISS_CAP),
+        );
+        expect(h.actions).toEqual([]);
+        expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      }
+      expect(h.manager.discoveryCalls).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD + 1);
+      expect(stopMonitoring).not.toHaveBeenCalled();
+      serverConfig.setPlanExecutionActive(false);
+      await h.tick();
+      expect(h.actions).toEqual(["deferred-recovery", "reconcile"]);
+      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(
+        DEVICE_DISCONNECT_MISS_THRESHOLD - 1,
+      );
+      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(stopMonitoring).not.toHaveBeenCalled();
+      await h.tick();
+      expect(h.actions).toContain("cancel:plan-session");
+      expect(h.actions).toContain(`remove:${h.device.id}`);
+      expect(h.actions).toContain("stop-recording");
+      expect(h.daemon.confirmedDisconnectedDeviceIds.has(h.device.id)).toBe(true);
+      expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
+      expect(stopMonitoring).toHaveBeenCalledWith(h.device.id);
+    } finally {
+      serverConfig.setPlanExecutionActive(previous);
+      stopMonitoring.mockRestore();
+    }
+  });
+
+  test("counts a newly booting device without reaping it and clears misses when boot completes", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    try {
+      serverConfig.setPlanExecutionActive(true);
+      for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
+        await h.tick();
+      }
+      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.actions).toEqual([]);
+      expect(h.device.status).toBe("busy");
+      expect(h.device.sessionId).toBe("plan-session");
+      h.manager.bootedDevices = [{ deviceId: h.device.id, name: "Pixel", platform: "android" }];
+      // Present observations clear the accumulated absence even during allocation.
+      await h.tick();
+      expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
+      expect(h.actions).toEqual([]);
+      h.manager.bootedDevices = [];
+      for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
+        await h.tick();
+      }
+      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      h.manager.bootedDevices = [{ deviceId: h.device.id, name: "Pixel", platform: "android" }];
+      serverConfig.setPlanExecutionActive(false);
+      await h.tick();
+      expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
+      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.actions).not.toContain("cancel:plan-session");
+      expect(h.actions).not.toContain(`remove:${h.device.id}`);
+      for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
+        await h.tick();
+      }
+      expect(h.actions).not.toContain("cancel:plan-session");
+      expect(h.actions).not.toContain(`remove:${h.device.id}`);
+      expect(h.actions).not.toContain("stop-recording");
+    } finally {
+      serverConfig.setPlanExecutionActive(previous);
+    }
+  });
+
+  test("counts misses while deferring offline reconnect and ADB reset cohort actions", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    try {
+      h.devices.push({ ...h.device, id: "emulator-5556", avdName: "Pixel_2" });
+      Object.assign(h.daemon, { forceDisconnectedDeviceIds: new Set([h.device.id]) });
+      h.manager.offlineDeviceIds.add(h.device.id);
+      serverConfig.setPlanExecutionActive(true);
+      for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
+        await h.tick();
+      }
+      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.deviceDisconnectMisses.get("emulator-5556")).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.actions).toEqual([]);
+      expect(h.daemon.offlineRecoveryAttemptedDeviceIds.size).toBe(0);
+      h.manager.onRecovery = () => {
+        h.manager.bootedDevices = [
+          { deviceId: h.device.id, name: "Pixel", platform: "android" },
+          { deviceId: "emulator-5556", name: "Pixel_2", platform: "android" },
+        ];
+      };
+      serverConfig.setPlanExecutionActive(false);
+      await h.tick();
+      expect(h.daemon.deviceDisconnectMisses.size).toBe(0);
+      expect(h.actions).toEqual([
+        "deferred-recovery",
+        "reconcile",
+        "offline-reconnect",
+        "reconcile",
+      ]);
+    } finally {
+      serverConfig.setPlanExecutionActive(previous);
+    }
+  });
+});
 
 class FakeResponse {
   headersSent = true;

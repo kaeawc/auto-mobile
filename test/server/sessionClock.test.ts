@@ -71,6 +71,29 @@ describe("session clock restoration", () => {
   beforeEach(() => defaultDeviceClockRestoreRegistry.retire(device.deviceId));
   afterEach(() => defaultDeviceClockRestoreRegistry.retire(device.deviceId));
 
+  test("old device restore preserves the rebound session's replacement clock baseline", async () => {
+    const h = harness();
+    try {
+      const session = await h.manager.createSession("clock-session", device.deviceId, "android");
+      await h.state.setState({ clock: set });
+      const original = session.cacheData.clock!;
+      defaultDeviceClockRestoreRegistry.restored(device.deviceId, original);
+      expect(session.cacheData.clock).toBeUndefined();
+
+      await h.state.setState({ clock: { mode: "advance", byMs: 1000 } });
+      const oldBaseline = session.cacheData.clock!;
+      const replacement = { ...oldBaseline, initialAutomaticTime: 1 as const };
+      // Rebind preserves the Session object while replacing its device cache.
+      session.assignedDevice = "emulator-5556";
+      session.cacheData = { clock: replacement };
+      // The old device's timed-out restore succeeds after the replacement records its baseline.
+      defaultDeviceClockRestoreRegistry.restored(device.deviceId, oldBaseline);
+      expect(session.cacheData.clock).toBe(replacement);
+    } finally {
+      h.manager.stopCleanupTimer();
+    }
+  });
+
   test.each(["sessionless", "mixed", "two sessions"])(
     "device queue adds concurrent advances across %s callers",
     async (callers) => {

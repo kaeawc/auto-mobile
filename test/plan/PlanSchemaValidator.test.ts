@@ -53,6 +53,11 @@ describe("PlanSchemaValidator", () => {
         ["2100-01-01T00:00:00.0001Z", false],
         ["2100-01-01T01:00:00.0001+01:00", false],
         ["1999-12-31T23:00:00.0001-01:00", true],
+        ["2030-01-01T00:00:00.1234567890Z", true],
+        ["2100-01-01T00:00:00.0000000000Z", true],
+        ["2100-01-01T00:00:00.0000000000001Z", false],
+        ["2000-01-01T00:00:00.0000000000001Z", true],
+        ["1999-12-31T23:59:59.9999999999Z", false],
       ] as const) {
         const clock = { mode: "set", instant };
         const fields = form === "inline" ? { clock } : { params: { clock } };

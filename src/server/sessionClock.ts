@@ -1,5 +1,8 @@
 import type { SessionManager } from "../daemon/sessionManager";
-import type { DeviceClockRestoreSlot } from "../features/utility/DeviceClock";
+import type {
+  DeviceClockRestoreSlot,
+  DeviceClockRestoreState,
+} from "../features/utility/DeviceClock";
 import { ActionableError } from "../models/ActionableError";
 
 /** Track setup before DeviceState takes the shared device clock lock; teardown drains setup first. */
@@ -26,13 +29,20 @@ export async function runSessionClockMutation<T>(
     let completed = false;
     let result!: T;
     await manager.trackClockSessionSetup(session, async () => {
+      let ownedState: DeviceClockRestoreState | undefined;
       result = await mutation({
-        get: () => session.cacheData.clock,
+        get: () => {
+          ownedState = session.cacheData.clock;
+          return ownedState;
+        },
         record: (value) => {
           manager.setClock(session, value);
+          ownedState = session.cacheData.clock;
         },
         clear: () => {
-          delete session.cacheData.clock;
+          if (ownedState && session.cacheData.clock === ownedState) {
+            delete session.cacheData.clock;
+          }
         },
       });
       completed = true;

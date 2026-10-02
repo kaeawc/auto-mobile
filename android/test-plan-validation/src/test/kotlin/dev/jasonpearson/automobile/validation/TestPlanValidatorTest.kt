@@ -43,6 +43,40 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `clock instant window accepts arbitrary fractional precision`() {
+    val cases =
+      listOf(
+        "2030-01-01T00:00:00.1234567890Z" to true,
+        "2100-01-01T00:00:00.0000000000Z" to true,
+        "2100-01-01T00:00:00.0000000000001Z" to false,
+        "2000-01-01T00:00:00.0000000000001Z" to true,
+        "1999-12-31T23:59:59.9999999999Z" to false,
+      )
+    for (params in listOf(false, true)) {
+      for ((instant, valid) in cases) {
+        val clock = "\"clock\":{\"mode\":\"set\",\"instant\":\"$instant\"}"
+        val fields = if (params) "\"params\":{$clock}" else clock
+        val result =
+          TestPlanValidator.validateYaml(
+            "{\"name\":\"clock-fraction\",\"steps\":[{\"tool\":\"setDeviceState\",$fields}]}"
+          )
+        assertEquals(valid, result.valid, "$instant params=$params")
+        if (!valid) {
+          val field = if (params) "steps[0].params.clock.instant" else "steps[0].clock.instant"
+          assertTrue(
+            result.errors.any {
+              it.field == field &&
+                it.message ==
+                  "Clock instant must be within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive, after offset normalization)." &&
+                it.severity == ValidationSeverity.ERROR
+            }
+          )
+        }
+      }
+    }
+  }
+
+  @Test
   fun `clock window uses params override in both directions`() {
     val cases =
       listOf(

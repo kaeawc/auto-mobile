@@ -5,7 +5,8 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
-import { displayTransitions } from "../observe/DisplayTransition";
+import { staleDisplayError } from "../../models/StaleDisplayError";
+import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { Window } from "../observe/Window";
 import {
@@ -62,10 +63,23 @@ const COORDINATE_ACTIONS = new Set([
   "pinchOn",
 ]);
 
-export const STALE_DISPLAY_COORDINATES_ERROR =
-  "Display changed since these coordinates were chosen. Re-observe the active panel and choose a new point before retrying.";
-
 export type RenderedDisplayRevisionReader = (deviceId: string) => number | undefined;
+
+export interface DisplayFenceDependencies {
+  displayTransitions?: DisplayTransitionReader;
+  renderedDisplayRevision?: RenderedDisplayRevisionReader;
+  renderedDisplayGeneration?: RenderedDisplayRevisionReader;
+}
+
+export function sessionRenderedDisplayGeneration(deviceId: string): number | undefined {
+  const daemon = DaemonState.getInstance();
+  if (!daemon.isInitialized()) {
+    return undefined;
+  }
+  const sessions = daemon.getSessionManager();
+  const sessionId = sessions.getSessionForDevice(deviceId);
+  return sessionId ? sessions.getLastRenderedDisplayGeneration(sessionId) : undefined;
+}
 
 function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
   const daemon = DaemonState.getInstance();
@@ -122,6 +136,8 @@ export class BaseVisualChange {
     (observation: ObserveResult) => Promise<void>
   >();
   protected timer: Timer;
+  protected readonly displayTransitionReader: DisplayTransitionReader;
+  protected readonly renderedDisplayGeneration: RenderedDisplayRevisionReader;
   protected readonly renderedDisplayRevision: RenderedDisplayRevisionReader;
 
   protected shouldCapturePostActionScreenshot(): boolean {
@@ -145,6 +161,7 @@ export class BaseVisualChange {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
     renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
+    displayFence: DisplayFenceDependencies = {},
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
@@ -173,7 +190,18 @@ export class BaseVisualChange {
     this.window = new Window(device, this.adbFactory, timer);
     this.predictionAnalyzer = new PredictionAnalyzer();
     this.timer = timer;
-    this.renderedDisplayRevision = renderedDisplayRevision;
+    this.renderedDisplayRevision = displayFence.renderedDisplayRevision ?? renderedDisplayRevision;
+    this.displayTransitionReader = displayFence.displayTransitions ?? displayTransitions;
+    this.renderedDisplayGeneration =
+      displayFence.renderedDisplayGeneration ?? sessionRenderedDisplayGeneration;
+  }
+
+  protected staleDisplay(observedGeneration: number) {
+    return staleDisplayError(
+      observedGeneration,
+      this.displayTransitionReader.identityRevision(this.device.deviceId),
+      this.displayTransitionReader.currentObservedPanel(this.device.deviceId)?.key,
+    );
   }
 
   /**
@@ -189,18 +217,24 @@ export class BaseVisualChange {
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
     const actionDisplayRevision = (): number =>
-      displayTransitions.identityRevision(this.device.deviceId);
+      this.displayTransitionReader.identityRevision(this.device.deviceId);
     const displayRevision = actionDisplayRevision();
+    // Without a stored caller stamp, in-flight fences use the action-start identity generation.
+    const observedGeneration =
+      this.renderedDisplayGeneration(this.device.deviceId) ?? displayRevision;
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
     if (
       !options.skipCallerDisplayFence &&
       COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
       callerDisplayRevision !== undefined &&
       (this.device.platform === "ios"
-        ? !displayTransitions.sameIdentitySince(this.device.deviceId, callerDisplayRevision)
-        : callerDisplayRevision !== displayTransitions.revision(this.device.deviceId))
+        ? !this.displayTransitionReader.sameIdentitySince(
+            this.device.deviceId,
+            callerDisplayRevision,
+          )
+        : callerDisplayRevision !== this.displayTransitionReader.revision(this.device.deviceId))
     ) {
-      throw new ActionableError(STALE_DISPLAY_COORDINATES_ERROR);
+      throw this.staleDisplay(observedGeneration);
     }
 
     if (progress) {
@@ -234,7 +268,8 @@ export class BaseVisualChange {
           }
           return cached;
         });
-      } catch {
+      } catch (error) {
+        logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
             freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
@@ -252,9 +287,7 @@ export class BaseVisualChange {
 
     const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
     if (coordinateAction && actionDisplayRevision() !== displayRevision) {
-      throw new ActionableError(
-        "Display changed while preparing this action. Re-observe the active panel and choose the target again.",
-      );
+      throw this.staleDisplay(observedGeneration);
     }
 
     // Record the action start time (device time if available) to ensure fresh data
@@ -271,9 +304,7 @@ export class BaseVisualChange {
     const blockResult = await perf.track("executeBlock", async () => {
       throwIfAborted(options.signal);
       if (coordinateAction && actionDisplayRevision() !== displayRevision) {
-        throw new ActionableError(
-          "Display changed before dispatch. Re-observe the active panel and choose the target again.",
-        );
+        throw this.staleDisplay(observedGeneration);
       }
       return block(previousObserveResult!);
     });

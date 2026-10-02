@@ -1,3 +1,5 @@
+import type { DisplayFenceDependencies } from "./BaseVisualChange";
+import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
   ElementResolver,
@@ -13,7 +15,11 @@ import {
 } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { displayTransitions } from "../observe/DisplayTransition";
+import {
+  displayTransitions,
+  type DisplayTransitionReader,
+  type DisplayTransitionTracker,
+} from "../observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import {
   ActionableError,
@@ -174,7 +180,9 @@ function findTapTargetNode(
 /**
  * Dependencies for TapOnElement that can be injected for testing.
  */
-interface TapOnElementDependencies {
+interface TapOnElementDependencies extends DisplayFenceDependencies {
+  displayTransitions?: DisplayTransitionReader &
+    Pick<DisplayTransitionTracker, "checkIdentity" | "record">;
   lastRenderedObservation?: RenderedObservationReader;
   hierarchyCapture?: HierarchyCapture;
   visionConfig?: VisionFallbackConfig;
@@ -246,6 +254,10 @@ export interface TapPreTapStabilitySeam {
  * Command to tap on UI element containing specified text
  */
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
+  private readonly refreshedDisplayTransitions: Pick<
+    DisplayTransitionTracker,
+    "checkIdentity" | "record"
+  >;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private finder: ElementFinder;
   private geometry: ElementGeometry;
@@ -336,7 +348,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     adb: AdbExecutor | null = null,
     options: TapOnElementDependencies = {},
   ) {
-    super(device, adb, options.timer);
+    super(device, adb, options.timer, options.renderedDisplayRevision, options);
+    this.refreshedDisplayTransitions = options.displayTransitions ?? displayTransitions;
     this.lastRenderedObservation = options.lastRenderedObservation;
     this.waitForCondition =
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
@@ -1891,6 +1904,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (timeoutMs <= 0) {
       return null;
     }
+    const observedGeneration =
+      this.renderedDisplayGeneration(this.device.deviceId) ??
+      this.displayTransitionReader.identityRevision(this.device.deviceId);
     let captured: ViewHierarchyResult;
     try {
       captured = (
@@ -1907,7 +1923,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return null;
     }
     if (screenSize && this.device.platform === "android") {
-      await this.checkRefreshedDisplay(captured, screenSize, signal);
+      await this.checkRefreshedDisplay(captured, screenSize, observedGeneration, signal);
     }
     return captured;
   }
@@ -1915,6 +1931,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private async checkRefreshedDisplay(
     captured: ViewHierarchyResult,
     screenSize: ObserveResult["screenSize"],
+    observedGeneration: number,
     signal?: AbortSignal,
   ): Promise<void> {
     const freshSize = this.getScreenSizeFromHierarchy(captured);
@@ -1927,15 +1944,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return;
     }
     const display = await this.refreshedDisplay(captured, signal);
-    const identityChanged = displayTransitions.checkIdentity(this.device.deviceId, display);
-    const geometryTransition = displayTransitions.record(this.device.deviceId, {
+    const identityChanged = this.refreshedDisplayTransitions.checkIdentity(
+      this.device.deviceId,
+      display,
+    );
+    const geometryTransition = this.refreshedDisplayTransitions.record(this.device.deviceId, {
       display,
       screenSize: freshSize,
     });
     if (identityChanged || geometryTransition) {
-      throw new ActionableError(
-        "Display changed during tap preparation. Re-observe the active panel and choose the target again.",
-      );
+      throw this.staleDisplay(observedGeneration);
     }
   }
 
@@ -2890,13 +2908,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           this.adb,
           this.lastRenderedObservation,
           signal,
+          this.displayTransitionReader,
         );
         if (this.device.platform === "android") {
           return await this.executeOnAndroidDisplay(options, target, signal);
         }
       } catch (error) {
         logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
-        return this.createErrorResult(options.action, errorMessage(error));
+        return withStaleDisplay(this.createErrorResult(options.action, errorMessage(error)), error);
       }
     }
     return undefined;
@@ -3359,6 +3378,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return result;
     } catch (error) {
       perf.end();
+
+      logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
+      if (error instanceof StaleDisplayError) {
+        return withStaleDisplay(this.createErrorResult(options.action, error.message), error);
+      }
 
       // Build debug context if debug mode is enabled
       const debugContext = await buildElementSearchDebugContext(this.device, {

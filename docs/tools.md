@@ -28,7 +28,10 @@ simulator panel can be observed.
 `tapOn`, `tapAt`, `swipeOn`, `pinchOn`, `dragAndDrop`, and `sendKeys` accept the
 same optional `display` selector. First observe the target panel, then pass the
 same panel to the action. An explicit action rejects coordinates from another
-panel and asks you to re-observe the target. Android single-finger input uses
+panel and asks you to re-observe the target. A display-transition refusal carries
+`staleDisplay: { observedGeneration, currentGeneration, currentDisplayKey?, retry: "observe" }`
+on the failure result (and in MCP `structuredContent`), with the same generations
+and re-observe instruction in `error`. Android single-finger input uses
 the selected panel's logical display ID. The current Android CtrlProxy APK does
 not expose per-display two-finger gesture dispatch, so `pinchOn` on an explicitly
 selected Android panel reports that limitation. iOS accepts only its live panel.
@@ -71,6 +74,14 @@ Set `action: "longPress"` or `"doubleTap"` for another coordinate gesture.
 Long press defaults to 1000 ms and accepts `durationMs` from 500 to 10000;
 `durationMs` is valid only for long press. Double tap uses two native taps
 200 ms apart. The result includes `action`. All variants accept `display`.
+
+`tapAt`, `tapOn`, `tapAny`, `swipeOn`, `dragAndDrop`, and `pinchOn` fence
+coordinates when the display transitions after the caller's observation or while
+the action is preparing or dispatching. These failures include `staleDisplay`
+with the observed and current identity generations and `retry: "observe"`.
+Observe again and choose the target from the new panel before retrying. A caller
+without a prior observation skips the entry fence; in-flight transitions still
+reject stale work.
 
 This is separate from the daemon observation-stream's
 [canonical-pixel mapping](design-docs/mcp/daemon/screen-control-mapping.md).
@@ -669,6 +680,17 @@ If inventory was unavailable and posture was never known, it ends with
 
 `display.generation` is the host tracker’s `identityRevision`.
 Generation advances on notifyTransition calls for panel key, role, or posture changes, Android non-swap size changes and accepted pushed display_transition events (changed with a different panel key or non-swap size, added, removed, or device_state changes), iOS multi-panel rotation, and iOS setPosture hinge, observed identity, and settled notifications (potentially several increments per request), but not on captures, Android pure width/height swaps, or iOS same-observation geometry corrections.
+`staleDisplay.observedGeneration` is the `display.generation` stamp from the
+caller's last rendered observation, persisted even when a transition clears the
+cached hierarchy. A capture that straddles a transition retains its capture-start
+generation, and refusals report that stamp rather than its full internal revision.
+`currentGeneration` is the identity generation at the fence; `currentDisplayKey`
+is included only when a panel has been accepted after the latest transition.
+Without a stored stamp, in-flight fences use the action-start identity generation.
+Without a prior rendered revision, entry fences do not reject the action; in-flight
+transitions still do. Explicit display targeting still requires a prior observation
+of that panel and keeps its existing missing-observation error.
+
 Generation is comparable only within one session: it restarts at 0 when the device is released or the session ends, and on daemon restart.
 
 An action-observation diff includes `displayChanged: { from, to }` when the

@@ -180,7 +180,7 @@ describe("BaseVisualChange post-action observation", () => {
           predictionContext: { toolName: "swipeOn", toolArgs: {} },
         },
       ),
-    ).rejects.toThrow("Display changed while preparing this action");
+    ).rejects.toThrow("Display changed since these coordinates were chosen");
     expect(ran).toBe(false);
   });
 
@@ -286,7 +286,7 @@ describe("BaseVisualChange post-action observation", () => {
         },
         predictionContext: { toolName: "tapOn", toolArgs: {} },
       }),
-    ).rejects.toThrow("Display changed while preparing this action");
+    ).rejects.toThrow("Display changed since these coordinates were chosen");
   });
 
   test("identified panel rotation from a later observation rejects coordinates", async () => {
@@ -318,7 +318,7 @@ describe("BaseVisualChange post-action observation", () => {
         },
         predictionContext: { toolName: "tapOn", toolArgs: {} },
       }),
-    ).rejects.toThrow("Display changed while preparing this action");
+    ).rejects.toThrow("Display changed since these coordinates were chosen");
   });
 
   test("rejects coordinates when the display folds during the initial progress callback", async () => {

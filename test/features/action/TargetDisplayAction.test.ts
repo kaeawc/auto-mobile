@@ -145,8 +145,8 @@ describe("explicit action display", () => {
           get: (uuid) => manager.getLastRenderedObservation(uuid),
           set: (uuid, result, revision) =>
             manager.setLastRenderedObservation(uuid, result, revision),
-          setDisplayRevision: (uuid, revision, key) =>
-            manager.setLastRenderedDisplayRevision(uuid, revision, key),
+          setDisplayRevision: (uuid, revision, key, generation) =>
+            manager.setLastRenderedDisplayRevision(uuid, revision, key, generation),
         },
       });
       expect(sessionRenderedObservation(android.deviceId)?.display.key).toBe("external");
@@ -888,7 +888,13 @@ describe("explicit action display", () => {
     action.observeScreen = observe;
     const result = await action.execute({ x: 40, y: 50, display: "external" });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Re-observe display "external"');
+    expect(result.error).toContain("observed generation 1, current generation 1");
+    expect(result.error).toContain("Re-observe the active panel");
+    expect(result.staleDisplay).toEqual({
+      observedGeneration: 1,
+      currentGeneration: 1,
+      retry: "observe",
+    });
     expect(executor.getExecutedCommands()).toEqual([]);
   });
 

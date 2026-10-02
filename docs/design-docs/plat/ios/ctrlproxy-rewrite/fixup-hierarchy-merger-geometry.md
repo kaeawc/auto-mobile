@@ -1,6 +1,8 @@
 # Fixup: HierarchyMerger geometry-key matching
 
-**Status:** designed, deferred to Phase 8 (post-concurrency fixups).
+**Status:** Phase 8 ±tol half implemented: nearest L∞ distance, then document order.
+Golden-replay validation of real hierarchy pairs is pending a live runner.
+Containment interval trees remain deferred.
 **Scope:** pure logic in `HierarchyMerger` (`Sources/CtrlProxy*/HierarchyMerger.swift`).
 Decoupled from the concurrency migration — can land as its own PR.
 

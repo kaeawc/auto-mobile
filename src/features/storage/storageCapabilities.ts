@@ -14,6 +14,14 @@
  * metadata support; iOS Keychain / Core Data policy remains owned by #5161.
  */
 
+import {
+  describeDefaultAppFileProviderCoverage,
+  type AppFileProviderCoverage,
+} from "../../server/appFileService";
+import {
+  describeDefaultSharedStorageReadCoverage,
+  type SharedStorageReadCoverage,
+} from "../../server/sharedStorageReadService";
 import type { KeystoreDiscoveryState } from "./keystoreDiscovery";
 
 /** Payload schema version. Bump when the report shape changes incompatibly. */
@@ -59,6 +67,10 @@ export type StorageDeviceType = "emulator" | "simulator" | "physical";
  * `undefined` means "unverified at descriptor time" and yields `partial`.
  */
 export interface StorageCapabilityContext {
+  /** Omission uses metadata from the production provider set; [] means no providers. */
+  providerCoverage?: readonly AppFileProviderCoverage[];
+  /** Bounded user-files reads belong to SharedStorageReadService, not app-file providers. */
+  sharedStorageReadCoverage?: SharedStorageReadCoverage;
   platform: "android" | "ios";
   deviceType: StorageDeviceType;
   /** AutoMobile SDK embedded with storage inspection enabled. */
@@ -260,7 +272,7 @@ function appContainersDomain(ctx: StorageCapabilityContext): DomainCapability {
     domain: "app_containers",
     portable: true,
     platformScope: "cross-platform",
-    note: "Direct app-sandbox file access. Fully available on simulators/emulators; qualified on physical devices.",
+    note: "putAppFile target.domain app_containers. Canonical resources: automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}[/{path}]{?userId}; compatibility aliases: automobile:devices/{deviceId}/apps/{appId}/files/{container}[/{path}]{?userId}. Fully available on simulators/emulators; qualified on physical devices.",
     operations: operations.map(buildOp),
   };
 }
@@ -274,16 +286,16 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
       portable: false,
       platformScope: "android",
       note: reason,
-      operations: (["list", "read", "write"] as StorageOperation[]).map((operation) =>
-        deriveOperation(operation, reason, []),
-      ),
+      operations: (
+        ["list", "read", "write", "namespace_reset", "media_indexing"] as StorageOperation[]
+      ).map((operation) => deriveOperation(operation, reason, [])),
     };
   }
   return {
     domain: "user_files",
     portable: false,
     platformScope: "android",
-    note: 'Android user-visible shared storage. putAppFile user_files and stageSharedStorage write bounded Downloads namespaces; the "Downloads Namespace Files" and "Downloads Namespace File" MCP resources expose listing and reading at automobile:devices/{deviceId}/downloads/{namespace}[/{path}].',
+    note: 'Android user-visible shared storage. putAppFile target.domain user_files writes, resets one namespace, and optionally indexes media in bounded Downloads namespaces; canonical resources: automobile:devices/{deviceId}/storage-domains/user_files/{namespace}[/{path}]; compatibility aliases: the "Downloads Namespace Files" and "Downloads Namespace File" MCP resources expose listing and reading at automobile:devices/{deviceId}/downloads/{namespace}[/{path}].',
     operations: [
       deriveOperation(
         "list",
@@ -298,6 +310,18 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
         'Exposed by the "Downloads Namespace File" MCP resource template.',
       ),
       deriveOperation("write", undefined, [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)]),
+      deriveOperation(
+        "namespace_reset",
+        undefined,
+        [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)],
+        "Resets only the declared user_files namespace.",
+      ),
+      deriveOperation(
+        "media_indexing",
+        undefined,
+        [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)],
+        "Requested with putAppFile target.indexMedia.",
+      ),
     ],
   };
 }
@@ -305,7 +329,7 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
 function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
   // No AutoMobile tool browses or reads the media library on either platform.
   // Android writes are intentionally bounded and report MediaStore verification
-  // as part of putAppFile; iOS has no equivalent provider yet.
+  // as part of putAppFile; iOS Simulator imports do not expose MediaScanner indexing.
   const androidWrite = deriveOperation("write", undefined, [
     req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile),
   ]);
@@ -432,6 +456,54 @@ function extensionPoints(): StorageExtensionPoint[] {
   ];
 }
 
+function absentProviderDescription(domain: StorageDomain, operation: StorageOperation): string {
+  if (domain === "user_files" && (operation === "list" || operation === "read")) {
+    return `SharedStorageReadService ${operation} provider`;
+  }
+  return operation === "namespace_reset" || operation === "media_indexing"
+    ? `write provider declaring ${operation}`
+    : `${operation} provider`;
+}
+
+/** Provider absence never advertises support; device restrictions remain authoritative. */
+function applyProviderCoverage(
+  ctx: StorageCapabilityContext,
+  domain: DomainCapability,
+): DomainCapability {
+  const providers = ctx.providerCoverage ?? describeDefaultAppFileProviderCoverage();
+  const provider = providers.find(
+    (entry) => entry.platform === ctx.platform && entry.domain === domain.domain,
+  ) ?? { write: false, list: false, read: false, namespaceReset: false, mediaIndexing: false };
+  const coverage: Partial<Record<StorageOperation, boolean>> = {
+    write: provider.write,
+    list: provider.list,
+    read: provider.read,
+    namespace_reset: provider.write && provider.namespaceReset,
+    media_indexing: provider.write && provider.mediaIndexing,
+  };
+  if (domain.domain === "user_files") {
+    const sharedRead =
+      ctx.sharedStorageReadCoverage ?? describeDefaultSharedStorageReadCoverage(ctx.platform);
+    coverage.list = sharedRead.list;
+    coverage.read = sharedRead.read;
+  }
+  return {
+    ...domain,
+    operations: domain.operations.map((capability) => {
+      const operation = capability.operation;
+      if (coverage[operation]) {
+        return capability;
+      }
+      const absent = absentProviderDescription(domain.domain, operation);
+      return {
+        ...capability,
+        state: capability.state === "unsupported" ? "unsupported" : "unavailable",
+        reason: `${capability.reason ? `${capability.reason} ` : ""}No ${absent} is registered for ${ctx.platform}:${domain.domain}.`,
+      };
+    }),
+  };
+}
+
 /**
  * Compute the storage capability report for a resolved device/app context.
  * Pure and deterministic — the same context always yields the same report.
@@ -453,9 +525,9 @@ export function computeStorageCapabilities(
       iosFileIntegration: ctx.iosFileIntegration,
     },
     domains: [
-      appContainersDomain(ctx),
-      userFilesDomain(ctx),
-      mediaLibraryDomain(ctx),
+      applyProviderCoverage(ctx, appContainersDomain(ctx)),
+      applyProviderCoverage(ctx, userFilesDomain(ctx)),
+      applyProviderCoverage(ctx, mediaLibraryDomain(ctx)),
       keyValueDomain(ctx),
       databasesDomain(ctx),
       secureStateDomain(ctx),

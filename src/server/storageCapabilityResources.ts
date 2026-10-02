@@ -1,3 +1,13 @@
+import {
+  getAppFileService,
+  describeDefaultAppFileProviderCoverage,
+  type AppFileProviderCoverageReader,
+} from "./appFileService";
+import {
+  getSharedStorageReadService,
+  type SharedStorageReadCoverage,
+} from "./sharedStorageReadService";
+import type { Platform } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import type {
   KeystoreDiscovery,
@@ -56,6 +66,8 @@ export interface StorageCapabilityUserResolver {
 }
 
 export interface StorageCapabilityDependencies {
+  appFileCoverage?: AppFileProviderCoverageReader;
+  sharedStorageReadCoverage?: (platform: Platform) => SharedStorageReadCoverage;
   adbFactory?: AdbClientFactory;
   createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
   createUserResolver?: (adb: AdbExecutor) => StorageCapabilityUserResolver;
@@ -136,6 +148,22 @@ function buildUri(deviceId: string, appId?: string): string {
   return appId ? `${base}?appId=${encodeURIComponent(appId)}` : base;
 }
 
+function resolveProviderCoverage(dependencies: StorageCapabilityDependencies) {
+  return dependencies.appFileCoverage
+    ? dependencies.appFileCoverage.describeProviderCoverage()
+    : (getAppFileService().describeProviderCoverage?.() ??
+        describeDefaultAppFileProviderCoverage());
+}
+
+function resolveSharedReadCoverage(
+  dependencies: StorageCapabilityDependencies,
+  platform: Platform,
+) {
+  return dependencies.sharedStorageReadCoverage
+    ? dependencies.sharedStorageReadCoverage(platform)
+    : getSharedStorageReadService().describeReadCoverage?.(platform);
+}
+
 /**
  * Storage-capabilities resource handler.
  */
@@ -170,6 +198,8 @@ export async function getStorageCapabilitiesResource(
 
     const activeUserProfile = await resolveActiveUserProfile(device, dependencies);
     const context = resolveStorageCapabilityContext(device, appId, activeUserProfile);
+    context.providerCoverage = resolveProviderCoverage(dependencies);
+    context.sharedStorageReadCoverage = resolveSharedReadCoverage(dependencies, device.platform);
     if (device.platform === "android" && appId && context.embeddedSdk) {
       context.keystore = await resolveKeystoreDiscovery(device, appId, dependencies);
     }

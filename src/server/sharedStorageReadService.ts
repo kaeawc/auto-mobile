@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { TextDecoder } from "node:util";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, Platform } from "../models";
 import { ActionableError } from "../models";
 import {
   defaultAdbClientFactory,
@@ -44,7 +44,20 @@ export interface ReadSharedStorageRequest extends ListSharedStorageRequest {
   path: string;
 }
 
+export interface SharedStorageReadCoverage {
+  readonly list: boolean;
+  readonly read: boolean;
+}
+
+/** Separate from app-file providers: bounded Downloads reads are Android-only. */
+export function describeDefaultSharedStorageReadCoverage(
+  platform: Platform,
+): SharedStorageReadCoverage {
+  return { list: platform === "android", read: platform === "android" };
+}
+
 export interface SharedStorageReadService {
+  describeReadCoverage?(platform: Platform): SharedStorageReadCoverage;
   list(request: ListSharedStorageRequest): Promise<SharedStorageNamespaceListing>;
   read(request: ReadSharedStorageRequest): Promise<SharedStorageFileReadResult>;
 }
@@ -109,6 +122,10 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
 }
 
 class DefaultSharedStorageReadService implements SharedStorageReadService {
+  describeReadCoverage(platform: Platform): SharedStorageReadCoverage {
+    return describeDefaultSharedStorageReadCoverage(platform);
+  }
+
   constructor(
     private readonly adbFactory: AdbClientFactory,
     private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver,
@@ -135,7 +152,7 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
       };
     }
     base.platform = device.platform;
-    if (device.platform !== "android") {
+    if (!this.describeReadCoverage(device.platform).list) {
       return { ...base, observation: "unsupported", reason: unsupportedReason(device.platform) };
     }
 
@@ -218,7 +235,7 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
       };
     }
     base.platform = device.platform;
-    if (device.platform !== "android") {
+    if (!this.describeReadCoverage(device.platform).read) {
       return { ...base, observation: "unsupported", reason: unsupportedReason(device.platform) };
     }
 

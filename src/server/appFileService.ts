@@ -85,9 +85,24 @@ export interface AppFileProviderReadRequest extends AppFileReadRequest {
   userId?: number;
 }
 
+export interface AppFileProviderCoverage {
+  readonly platform: Platform;
+  readonly domain: StorageDomain;
+  readonly write: boolean;
+  readonly list: boolean;
+  readonly read: boolean;
+  readonly namespaceReset: boolean;
+  readonly mediaIndexing: boolean;
+}
+
+export interface AppFileProviderCoverageReader {
+  describeProviderCoverage(): readonly AppFileProviderCoverage[];
+}
+
 export interface AppFileWriteProvider {
   readonly platform: Platform;
   readonly domain: StorageDomain;
+  readonly features?: Readonly<{ namespaceReset?: boolean; mediaIndexing?: boolean }>;
   putFile(request: PutAppFileProviderRequest): Promise<void | AppFileProviderWriteResult>;
   /**
    * Optional batch path for providers whose device operation must use one
@@ -118,6 +133,7 @@ export interface AppFileReadProvider {
 export type AppFileProvider = AppFileWriteProvider | AppFileListProvider | AppFileReadProvider;
 
 export interface AppFileService {
+  describeProviderCoverage?(): readonly AppFileProviderCoverage[];
   putFile(request: PutAppFileRequest): Promise<PutAppFileBatchResult>;
   putFile(request: LegacyPutAppFileRequest): Promise<PutAppFileResult>;
   listFiles(request: AppFileListRequest): Promise<AppFileListResult>;
@@ -246,7 +262,7 @@ export function createAppFileServiceForTesting(
 function createDefaultProviders(
   deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">>,
   idGenerator: IdGenerator = defaultIdGenerator,
-  sharedStorageService: SharedStorageService = getSharedStorageService(),
+  sharedStorageService: SharedStorageService | undefined = undefined,
   iosSimulatorMediaClient: IosSimulatorMediaClient = new SimctlIosSimulatorMediaClient(
     deps.simctlFactory,
   ),
@@ -259,6 +275,43 @@ function createDefaultProviders(
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
     new IosSimulatorMediaLibraryProvider(iosSimulatorMediaClient, deps.fileSystem),
   ];
+}
+
+/** Pure coverage view; last registration wins independently for each operation, like routing. */
+export function describeProviderCoverage(
+  providers: readonly AppFileProvider[],
+): AppFileProviderCoverage[] {
+  const coverage = new Map<string, AppFileProviderCoverage>();
+  for (const provider of providers) {
+    const key = providerKey(provider.platform, provider.domain);
+    const previous = coverage.get(key) ?? {
+      platform: provider.platform,
+      domain: provider.domain,
+      write: false,
+      list: false,
+      read: false,
+      namespaceReset: false,
+      mediaIndexing: false,
+    };
+    coverage.set(key, {
+      ...previous,
+      ...("putFile" in provider
+        ? {
+            write: true,
+            namespaceReset: provider.features?.namespaceReset === true,
+            mediaIndexing: provider.features?.mediaIndexing === true,
+          }
+        : {}),
+      ...("listFiles" in provider ? { list: true } : {}),
+      ...("readFile" in provider ? { read: true } : {}),
+    });
+  }
+  return [...coverage.values()];
+}
+
+/** Metadata only: constructing production providers does not perform device or filesystem I/O. */
+export function describeDefaultAppFileProviderCoverage(): readonly AppFileProviderCoverage[] {
+  return describeProviderCoverage(createDefaultProviders(defaultDependencies));
 }
 
 function providerKey(platform: Platform, domain: StorageDomain): string {
@@ -393,6 +446,14 @@ class DefaultAppFileService implements AppFileService {
         this.readProviders.set(providerKey(provider.platform, provider.domain), provider);
       }
     }
+  }
+
+  describeProviderCoverage(): readonly AppFileProviderCoverage[] {
+    return describeProviderCoverage([
+      ...this.listProviders.values(),
+      ...this.readProviders.values(),
+      ...this.writeProviders.values(),
+    ]);
   }
 
   async putFile(request: PutAppFileRequest): Promise<PutAppFileBatchResult>;
@@ -1011,8 +1072,10 @@ const ANDROID_MEDIA_LIBRARY_NAMESPACE = "automobile-media";
 class AndroidUserFilesProvider implements AppFileWriteProvider {
   readonly platform = "android" as const;
   readonly domain = "user_files" as const;
+  readonly features = { namespaceReset: true, mediaIndexing: true } as const;
 
-  constructor(private readonly sharedStorageService: SharedStorageService) {}
+  // Resolve the shared service only for a write; metadata queries remain pure.
+  constructor(private readonly sharedStorageService?: SharedStorageService) {}
 
   async putFile(request: PutAppFileProviderRequest) {
     return (await this.putFiles([request]))[0];
@@ -1028,7 +1091,7 @@ class AndroidUserFilesProvider implements AppFileWriteProvider {
         `Android user-files provider received unsupported target domain: ${request.target.domain}`,
       );
     }
-    const result = await this.sharedStorageService.stage({
+    const result = await (this.sharedStorageService ?? getSharedStorageService()).stage({
       device: request.device,
       ...(request.userId === undefined ? {} : { explicitUserId: request.userId }),
       namespace: request.target.namespace,
@@ -1064,8 +1127,10 @@ class AndroidUserFilesProvider implements AppFileWriteProvider {
 class AndroidMediaLibraryProvider implements AppFileWriteProvider {
   readonly platform = "android" as const;
   readonly domain = "media_library" as const;
+  readonly features = { mediaIndexing: true } as const;
 
-  constructor(private readonly sharedStorageService: SharedStorageService) {}
+  // Resolve the shared service only for a write; metadata queries remain pure.
+  constructor(private readonly sharedStorageService?: SharedStorageService) {}
 
   async putFile(request: PutAppFileProviderRequest) {
     return (await this.putFiles([request]))[0];
@@ -1093,7 +1158,7 @@ class AndroidMediaLibraryProvider implements AppFileWriteProvider {
         );
       }
     }
-    const result = await this.sharedStorageService.stage({
+    const result = await (this.sharedStorageService ?? getSharedStorageService()).stage({
       device: request.device,
       ...(request.userId === undefined ? {} : { explicitUserId: request.userId }),
       namespace: ANDROID_MEDIA_LIBRARY_NAMESPACE,

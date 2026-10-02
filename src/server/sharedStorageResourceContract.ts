@@ -14,6 +14,11 @@ export const SHARED_STORAGE_RESOURCE_TEMPLATES = {
   FILE: "automobile:devices/{deviceId}/downloads/{namespace}/{path}",
 } as const;
 
+export const CANONICAL_USER_FILES_RESOURCE_TEMPLATES = {
+  NAMESPACE: "automobile:devices/{deviceId}/storage-domains/user_files/{namespace}",
+  FILE: "automobile:devices/{deviceId}/storage-domains/user_files/{namespace}/{path}",
+} as const;
+
 /** How completely a namespace or file could be observed on the device. */
 export type SharedStorageObservation = "complete" | "missing" | "unavailable" | "unsupported";
 
@@ -70,10 +75,18 @@ function encodePathSegments(path: string): string {
 }
 
 export function buildSharedStorageResourceUri(parts: SharedStorageResourceParts): string {
+  return buildUserFilesUri(parts, false);
+}
+
+export function buildCanonicalUserFilesResourceUri(parts: SharedStorageResourceParts): string {
+  return buildUserFilesUri(parts, true);
+}
+
+function buildUserFilesUri(parts: SharedStorageResourceParts, canonical: boolean): string {
   const namespace = normalizeSharedStorageNamespace(parts.namespace);
   const base =
     `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
-    `/downloads/${encodeURIComponent(namespace)}`;
+    `/${canonical ? "storage-domains/user_files" : "downloads"}/${encodeURIComponent(namespace)}`;
   return parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
 }
 

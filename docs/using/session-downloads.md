@@ -1,5 +1,11 @@
 # Session Downloads fixtures
 
+`stageSessionDownloads` is a deprecated session-bound alias of `putAppFile`
+`target.domain: "user_files"`. It remains available with unchanged defaults,
+schemas, and session ownership checks until equivalent workflows are device-verified.
+See [the unified call shape and target policy](../tools.md). Its stored overrides
+remain attached to this exact name; it does not grant unified private writes.
+
 Stage the files a system picker (documents, gallery, media) would open from the
 device's shared **Downloads** tree, bound to the caller's device session. The
 `stageSessionDownloads` tool is the session-scoped companion to

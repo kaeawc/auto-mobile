@@ -487,10 +487,11 @@ a plain pinch. Android and iOS share this convention.
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 content into an app container.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded Android user_files, or platform-qualified media_library. Opt-in discovery; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                            |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 📥 <code>stageSharedStorage</code>                                                               | Stages host-file, UTF-8, or base64 fixtures into a bounded Android Downloads namespace for system pickers (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 📁 <code>stageSessionDownloads</code>                                                            | Stages fixtures into one bounded child directory of the session device's shared Downloads tree, with optional reset and per-file media indexing (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 📥 <code>stageSharedStorage</code>                                                               | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 📥 <code>stageSharedStorageFixtures</code>                                                       | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 📁 <code>stageSessionDownloads</code>                                                            | Deprecated session-bound alias of putAppFile target.domain user_files (Android Downloads); retains session ownership checks and remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults. On iOS, requires `appId` and selects the store with `suite` (not `name`/`fileName`); omitted/`Standard` uses the default store. Uses an already connected embedded SDK, with simulator plist fallback when permitted.                                                                                                                                                                                                                                                                                  |
 | 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file. For iOS, an empty `name`, "standard" (any case), or the app bundle id selects standard UserDefaults; other names select a valid suite. Names must have no leading or trailing whitespace. Android uses a SharedPreferences file name without `.xml`. iOS write results include `resolvedStore` when supported by the SDK and runner. `setKeyValue` returns `effectiveValueDiffers: true` and appends a warning when the write persisted but the app reads a different effective value due to an override; remove/clear never produce this warning. |
 | 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -518,27 +519,120 @@ merely command dispatch or process disappearance.
 </details>
 
 <details class="example" markdown="1">
-<summary>Copy a fixture into an app container</summary>
+<summary>putAppFile canonical call shape and platform-qualified examples</summary>
+
+Every target uses `target` plus a non-empty `files` array. Each file has a
+normalized relative `destinationPath` and exactly one of `sourcePath`,
+`contentText`, or `contentBase64`. Device selection uses the existing `platform`,
+`deviceId`, or `sessionUuid` fields. Optional `userId` selects an Android profile.
+
+Android app containers (private containers require a debuggable app):
 
 ```json
 {
-  "tool": "putAppFile",
-  "params": {
+  "name": "putAppFile",
+  "arguments": {
+    "platform": "android",
+    "target": { "domain": "app_containers", "appId": "com.example.app", "container": "documents" },
+    "files": [{ "destinationPath": "fixtures/settings.json", "contentText": "{\"enabled\":true}" }]
+  }
+}
+```
+
+iOS Simulator app containers (`documents`, `library`, `cache`, or `tmp`):
+
+```json
+{
+  "name": "putAppFile",
+  "arguments": {
     "platform": "ios",
-    "target": {
-      "domain": "app_containers",
-      "appId": "com.example.app",
-      "container": "documents"
-    },
+    "deviceId": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    "target": { "domain": "app_containers", "appId": "com.example.app", "container": "documents" },
     "files": [
-      {
-        "sourcePath": "/Users/me/fixtures/welcome.png",
-        "destinationPath": "fixtures/welcome.png"
-      }
+      { "destinationPath": "fixtures/welcome.png", "sourcePath": "/Users/me/fixtures/welcome.png" }
     ]
   }
 }
 ```
+
+Android user files (reset removes only this declared Downloads namespace;
+`indexMedia` requests indexing and defaults to false on the unified surface):
+
+```json
+{
+  "name": "putAppFile",
+  "arguments": {
+    "platform": "android",
+    "target": {
+      "domain": "user_files",
+      "namespace": "picker-fixtures",
+      "reset": true,
+      "indexMedia": true
+    },
+    "files": [{ "destinationPath": "photo.png", "sourcePath": "/Users/me/fixtures/photo.png" }]
+  }
+}
+```
+
+Android media library (image, video, or audio filenames supported by MediaStore;
+indexing is required and discovery is verified by the provider):
+
+```json
+{
+  "name": "putAppFile",
+  "arguments": {
+    "platform": "android",
+    "target": { "domain": "media_library" },
+    "files": [{ "destinationPath": "photo.png", "sourcePath": "/Users/me/fixtures/photo.png" }]
+  }
+}
+```
+
+iOS Simulator media library (supported image/video files only; imports through
+`simctl addmedia`, returns `media_import` with picker visibility unverified):
+
+```json
+{
+  "name": "putAppFile",
+  "arguments": {
+    "platform": "ios",
+    "deviceId": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    "target": { "domain": "media_library" },
+    "files": [{ "destinationPath": "photo.png", "sourcePath": "/Users/me/fixtures/photo.png" }]
+  }
+}
+```
+
+Physical iOS has no production `putAppFile` app-container or media-library
+provider; user_files is Android-only. Media libraries have no list/read resource.
+Use `storage/capabilities` for provider-derived operations and prerequisite states;
+inspect structured per-file `effects` for indexing/import/discoverability outcomes.
+These provider contracts do not establish device verification of legacy replacement.
+
+Canonical read-only resources are:
+
+- `automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}{?userId}` (list), with `/{path}` before the query for read.
+- `automobile:devices/{deviceId}/storage-domains/user_files/{namespace}` (list), with `/{path}` for read (bounded Android Downloads only).
+
+Compatibility aliases remain readable during the transition until device
+verification permits retirement: `automobile:devices/{deviceId}/apps/{appId}/files/{container}[/{path}]{?userId}`
+and `automobile:devices/{deviceId}/downloads/{namespace}[/{path}]`.
+Returned write/list file URIs continue to use these aliases. Paths are normalized,
+percent-encoded by segment, and cannot traverse out of the target.
+
+Session enablement currently controls MCP discovery only; an unlisted tool stays
+callable. `putAppFile` stays default-disabled; the legacy defaults stay unchanged
+(`stageSharedStorage` true, `stageSharedStorageFixtures` and `stageSessionDownloads` false).
+The target policy resolves each exact tool name as session override, then startup
+default, then its registration default, and OR-combines effective names:
+app_containers and media_library use only `putAppFile`; user_files uses
+`putAppFile`, `stageSharedStorage`, or `stageSharedStorageFixtures`. Disabling an
+alias suppresses its default; disabling `putAppFile` does not veto an enabled alias.
+A default session therefore enables only the user_files target policy. Legacy
+enablement never enables private writes or lists `putAppFile` in discovery.
+Stored overrides on legacy names are honored in place, read without migration or
+deletion. `stageSessionDownloads` retains its separate session-bound policy and
+is not a grant in the unified target resolver. No new MCP call gate is introduced.
 
 </details>
 

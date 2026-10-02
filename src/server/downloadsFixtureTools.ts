@@ -28,7 +28,7 @@ export function registerDownloadsFixtureTools(
   // nonDeviceHandler; the deviceAwareHandler below is never invoked.
   ToolRegistry.registerDeviceAware(
     "stageSessionDownloads",
-    "Stage host-file, UTF-8, or base64 fixtures into one bounded child directory of the " +
+    'Deprecated alias of putAppFile with target.domain "user_files"; retained until device verification. Stage host-file, UTF-8, or base64 fixtures into one bounded child directory of the ' +
       "shared Downloads tree on the device owned by the caller's session, optionally resetting " +
       "that directory first and requesting Android media indexing (Android only).",
     stageSessionDownloadsSchema,

@@ -2954,6 +2954,25 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return "127.0.0.1";
   }
 
+  private logTapDiagnostics(message: WebSocketMessage, hasDecodedResult: boolean): void {
+    if (message.type !== "tap_coordinates_result" || message.tapDiagnostics === undefined) {
+      return;
+    }
+    // Native JSON.stringify preserves the optional wire payload, including malformed values.
+    logger.debug(`[CTRLPROXY_TAP_DIAG] ${JSON.stringify(message.tapDiagnostics)}`);
+    const diagnostics = message.tapDiagnostics;
+    if (
+      hasDecodedResult &&
+      diagnostics &&
+      typeof diagnostics === "object" &&
+      diagnostics.deliveryWarning === "eventDisplayMismatch"
+    ) {
+      logger.warn(
+        `[CTRLPROXY_TAP_DIAG] deliveryWarning=eventDisplayMismatch route=${diagnostics.route ?? "unknown"} targetDisplayId=${diagnostics.targetDisplayId ?? "nil"} requestId=${message.requestId}`,
+      );
+    }
+  }
+
   private processMessage(message: WebSocketMessage): void {
     const { type, requestId } = message;
     if (
@@ -3051,12 +3070,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           logger.debug(line);
         }
       }
-      if (type === "tap_coordinates_result" && message.tapDiagnostics !== undefined) {
-        // Wire values came from JSON.parse, so native JSON.stringify preserves arrays
-        // without cycles. The logger's existing 1,000-character line bound still applies.
-        logger.debug(`[CTRLPROXY_TAP_DIAG] ${JSON.stringify(message.tapDiagnostics)}`);
-      }
       const decoded = decodeCtrlProxyMessage(message);
+      this.logTapDiagnostics(message, decoded?.result !== undefined);
       if (decoded) {
         if (decoded.runnerBusy && decoded.errorMessage !== undefined) {
           this.requestManager.reject(decoded.requestId, new ActionableError(decoded.errorMessage));

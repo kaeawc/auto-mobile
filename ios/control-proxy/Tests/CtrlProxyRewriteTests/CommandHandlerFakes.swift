@@ -255,3 +255,54 @@ final class FakeTapDiagnosticsSampler: TapDiagnosticsSampling {
         return result
     }
 }
+
+@MainActor
+final class FakeDisplayGestureProvider: DisplayGestureProviding {
+    var cachedGeometry: GestureCoordinateGeometry?
+    var inventory = GestureDisplayInventory(screens: [], applicationDisplayId: nil, isPhoneIdiom: true)
+    var inventoryReads = 0
+    var geometryReads = 0
+    var touches: [DisplayTouch] = []
+    var selections: [GestureCoordinateSelection] = []
+    var actions: [String] = []
+    var symbolsAvailable = true
+    var synthesisError: Error?
+
+    init(geometry: GestureCoordinateGeometry?) { cachedGeometry = geometry }
+
+    func geometry() throws -> GestureCoordinateGeometry? {
+        geometryReads += 1
+        return cachedGeometry
+    }
+
+    func displayInventory() -> GestureDisplayInventory {
+        inventoryReads += 1
+        return inventory
+    }
+
+    func synthesize(_ touch: DisplayTouch) throws -> Bool {
+        touches.append(touch)
+        if let synthesisError { throw synthesisError }
+        return symbolsAvailable
+    }
+
+    func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection {
+        selections.append(selection)
+        return selection
+    }
+
+    func tap(_: GestureCoordinateSelection, duration: TimeInterval) throws {
+        actions.append(duration > 0 ? "tapPress" : "tap")
+    }
+
+    func doubleTap(_: GestureCoordinateSelection) throws { actions.append("doubleTap") }
+    func press(_: GestureCoordinateSelection, duration _: TimeInterval) throws { actions.append("longPress") }
+    func drag(
+        _: GestureCoordinateSelection, to _: GestureCoordinateSelection,
+        press _: TimeInterval, velocity _: Double?, hold _: TimeInterval
+    )
+        throws
+    {
+        actions.append("drag")
+    }
+}

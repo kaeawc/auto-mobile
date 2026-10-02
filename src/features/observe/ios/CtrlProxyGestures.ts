@@ -36,7 +36,11 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       return {};
     }
     const strategy = this.environment.getEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY");
-    return strategy === "legacy" || strategy === "appRelative" || strategy === "appRelativeObserved"
+    return strategy === "legacy" ||
+      strategy === "appRelative" ||
+      strategy === "appRelativeObserved" ||
+      strategy === "displayTargeted" ||
+      strategy === "displayTargetedObserved"
       ? { diagnostics: true, tapStrategy: strategy }
       : { diagnostics: true };
   }

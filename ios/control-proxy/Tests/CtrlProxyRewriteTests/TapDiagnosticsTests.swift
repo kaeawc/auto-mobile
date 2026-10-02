@@ -44,6 +44,61 @@ final class TapDiagnosticsTests: XCTestCase {
         )
     }
 
+    func testDisplayRoutingFieldsRoundTripAndLogLine() throws {
+        var diagnostics = fixture
+        diagnostics.strategy = "displayTargeted"
+        diagnostics.route = .displayTargetedRecord
+        diagnostics.targetDisplayId = 2
+        diagnostics.targetDisplayReason = "soleNonMainScreen"
+        diagnostics.deviceIdiom = "phone"
+        diagnostics.mainDisplayId = 1
+        diagnostics.applicationDisplayId = 1
+        diagnostics.screens = [.init(displayId: 1, isMain: true), .init(displayId: 2, isMain: false)]
+        diagnostics.synthesizedPoint = .init(x: 202, y: 508)
+        diagnostics.synthesizedInterfaceOrientation = 1
+        XCTAssertEqual(
+            try JSONDecoder().decode(TapDiagnostics.self, from: Data(encoded(diagnostics).utf8)), diagnostics
+        )
+        let line = diagnostics.logLine()
+        for field in [
+            "route=displayTargetedRecord", "targetDisplayId=2", "targetDisplayReason=soleNonMainScreen",
+            "deviceIdiom=phone", "mainDisplayId=1", "applicationDisplayId=1", "screens=",
+            "synthesizedPoint=(202.0,508.0)",
+            "synthesizedInterfaceOrientation=1", "fallbackFrom=nil", "deliveryWarning=nil",
+        ] {
+            XCTAssertTrue(line.contains(field), field)
+        }
+        diagnostics.route = .xcuiCoordinate
+        diagnostics.synthesizedPoint = nil
+        diagnostics.synthesizedInterfaceOrientation = nil
+        diagnostics.fallbackFrom = "displayTargeted"
+        diagnostics.deliveryWarning = .eventDisplayMismatch
+        XCTAssertTrue(
+            diagnostics.logLine()
+                .contains("fallbackFrom=displayTargeted deliveryWarning=eventDisplayMismatch")
+        )
+        XCTAssertFalse(try encoded(fixture).contains("targetDisplayId"))
+        XCTAssertFalse(try encoded(fixture).contains("deviceIdiom"))
+        XCTAssertFalse(try encoded(fixture).contains("deliveryWarning"))
+        XCTAssertTrue(diagnostics.logLine(gesture: "swipe").hasPrefix("tap_diagnostics gesture=swipe "))
+    }
+
+    func testSamplerOmitsCoordinatePointsForDisplayRecordWithoutErrors() throws {
+        let sample = fixture
+        let application = try XCTUnwrap(sample.application)
+        let screen = try XCTUnwrap(sample.screen)
+        let device = try XCTUnwrap(sample.orientation?.device)
+        let interface = try XCTUnwrap(sample.orientation?.interface)
+        let result = DefaultTapDiagnosticsSampler().sample(requested: sample.requested, reads: TapDiagnosticReads(
+            baseScreenPoint: { nil }, resolvedScreenPoint: { nil },
+            application: { application }, screen: { screen },
+            deviceOrientation: { device }, interfaceOrientation: { interface }
+        ))
+        XCTAssertNil(result.baseScreenPoint)
+        XCTAssertNil(result.resolvedScreenPoint)
+        XCTAssertTrue(result.sampleErrors.isEmpty)
+    }
+
     func testPartiallyFailedPayloadOmitsNilFields() throws {
         let partial = TapDiagnostics(
             requested: .init(x: 443, y: 202, durationMs: 0),
@@ -73,7 +128,15 @@ final class TapDiagnosticsTests: XCTestCase {
     }
 
     func testRequestStrategyAbsentKnownAndUnknownRemainDecodable() throws {
-        for strategy in [String?.none, "legacy", "appRelative", "appRelativeObserved", "unknown"] {
+        for strategy in [
+            String?.none,
+            "legacy",
+            "appRelative",
+            "appRelativeObserved",
+            "displayTargeted",
+            "displayTargetedObserved",
+            "unknown",
+        ] {
             let suffix = strategy.map { ",\"tapStrategy\":\"\($0)\"" } ?? ""
             let request = try JSONDecoder().decode(
                 RequestTapCoordinates.self, from: Data("{\"x\":443,\"y\":202\(suffix)}".utf8)

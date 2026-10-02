@@ -71,31 +71,34 @@ function gestureHarness(environment = new FakeSystemDetection()) {
 }
 
 describe("iOS opt-in tap diagnostics", () => {
-  test.each(["legacy", "appRelative", "appRelativeObserved"])(
-    "debug-only environment override sends %s without changing coordinates",
-    async (strategy) => {
-      const debug = spyOn(logger, "debug").mockImplementation(() => {});
-      try {
-        const environment = new FakeSystemDetection();
-        environment.setEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY", strategy);
-        const { sent, gestures } = gestureHarness(environment);
-        logger.setLogLevel(LogLevel.INFO);
-        await gestures.requestTapCoordinates(443, 202);
-        expect(JSON.parse(sent[0])).not.toHaveProperty("tapStrategy");
-        expect(JSON.parse(sent[0])).not.toHaveProperty("diagnostics");
-        logger.setLogLevel(LogLevel.DEBUG);
-        await gestures.requestTapCoordinates(443, 202);
-        expect(JSON.parse(sent[1])).toMatchObject({
-          diagnostics: true,
-          tapStrategy: strategy,
-          x: 443,
-          y: 202,
-        });
-      } finally {
-        debug.mockRestore();
-      }
-    },
-  );
+  test.each([
+    "legacy",
+    "appRelative",
+    "appRelativeObserved",
+    "displayTargeted",
+    "displayTargetedObserved",
+  ])("debug-only environment override sends %s without changing coordinates", async (strategy) => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const environment = new FakeSystemDetection();
+      environment.setEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY", strategy);
+      const { sent, gestures } = gestureHarness(environment);
+      logger.setLogLevel(LogLevel.INFO);
+      await gestures.requestTapCoordinates(443, 202);
+      expect(JSON.parse(sent[0])).not.toHaveProperty("tapStrategy");
+      expect(JSON.parse(sent[0])).not.toHaveProperty("diagnostics");
+      logger.setLogLevel(LogLevel.DEBUG);
+      await gestures.requestTapCoordinates(443, 202);
+      expect(JSON.parse(sent[1])).toMatchObject({
+        diagnostics: true,
+        tapStrategy: strategy,
+        x: 443,
+        y: 202,
+      });
+    } finally {
+      debug.mockRestore();
+    }
+  });
 
   test("unknown override is omitted and debug-off never reads the environment", async () => {
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
@@ -176,6 +179,58 @@ describe("iOS opt-in tap diagnostics", () => {
       { requested: { x: 443, y: 202 }, sampleErrors: ["application.frame: unavailable"] },
     ],
     ["malformed", "unexpected runner payload"],
+    ["null", null],
+    [
+      "display-targeted",
+      {
+        requested: { x: 443, y: 202 },
+        strategy: "displayTargetedObserved",
+        route: "displayTargetedRecord",
+        targetDisplayId: 2,
+        targetDisplayReason: "appDisplay",
+        deviceIdiom: "phone",
+        mainDisplayId: 1,
+        applicationDisplayId: 2,
+        screens: [
+          { displayId: 1, isMain: true },
+          { displayId: 2, isMain: false },
+        ],
+        synthesizedPoint: { x: 443, y: 202 },
+        synthesizedInterfaceOrientation: 4,
+      },
+    ],
+    [
+      "non-phone",
+      {
+        route: "xcuiCoordinate",
+        targetDisplayReason: "nonPhoneIdiom",
+        deviceIdiom: "other",
+        deliveryWarning: "eventDisplayMismatch",
+        mainDisplayId: 1,
+        applicationDisplayId: 1,
+        screens: [
+          { displayId: 1, isMain: true },
+          { displayId: 2, isMain: false },
+        ],
+      },
+    ],
+    [
+      "not-sampled",
+      {
+        strategy: "legacy",
+        route: "xcuiCoordinate",
+        targetDisplayReason: "notSampled",
+      },
+    ],
+    [
+      "warning",
+      {
+        route: "xcuiCoordinate",
+        targetDisplayId: 2,
+        fallbackFrom: "displayTargeted",
+        deliveryWarning: "eventDisplayMismatch",
+      },
+    ],
   ])("%s payload is logged once and never changes tap success", async (_name, payload) => {
     const timer = new FakeTimer();
     const client = IOSCtrlProxyClient.createForTesting(
@@ -189,7 +244,9 @@ describe("iOS opt-in tap diagnostics", () => {
       processMessage(message: WebSocketMessage): void;
     };
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
+      logger.setLogLevel(LogLevel.INFO);
       const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000);
       // Model JSON from an untrusted runner, including a malformed optional value.
       const message: WebSocketMessage = JSON.parse(
@@ -206,6 +263,16 @@ describe("iOS opt-in tap diagnostics", () => {
         .map(([line]) => line)
         .filter((line) => line.startsWith("[CTRLPROXY_TAP_DIAG]"));
       expect(lines).toEqual([`[CTRLPROXY_TAP_DIAG] ${JSON.stringify(payload)}`]);
+      const warnings = warn.mock.calls
+        .map(([line]) => line)
+        .filter((line) => line.startsWith("[CTRLPROXY_TAP_DIAG]"));
+      expect(warnings).toEqual(
+        _name === "warning" || _name === "non-phone"
+          ? [
+              `[CTRLPROXY_TAP_DIAG] deliveryWarning=eventDisplayMismatch route=xcuiCoordinate targetDisplayId=${_name === "warning" ? "2" : "nil"} requestId=tap`,
+            ]
+          : [],
+      );
       // The full #8379 reading fits the logger's existing line-size bound.
       expect(lines[0].length).toBeLessThanOrEqual(1000);
       debug.mockClear();
@@ -219,6 +286,7 @@ describe("iOS opt-in tap diagnostics", () => {
       );
     } finally {
       debug.mockRestore();
+      warn.mockRestore();
       await client.close();
     }
   });

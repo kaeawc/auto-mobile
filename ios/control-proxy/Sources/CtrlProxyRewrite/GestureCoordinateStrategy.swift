@@ -27,6 +27,10 @@ enum TapCoordinateStrategy: String, Equatable, Sendable {
     case legacy
     case appRelative
     case appRelativeObserved
+    case displayTargeted
+    case displayTargetedObserved
+
+    var targetsDisplay: Bool { self == .displayTargeted || self == .displayTargetedObserved }
 }
 
 enum GestureCoordinateAnchor: Equatable, Sendable {
@@ -74,10 +78,12 @@ struct GestureCoordinateSelection: Equatable, Sendable {
         switch strategy {
         case .legacy:
             return nil
-        case .appRelativeObserved:
+        case .appRelativeObserved, .displayTargetedObserved:
             mapped = GesturePoint(
                 x: point.x / geometry.observation.width, y: point.y / geometry.observation.height
             )
+        case .displayTargeted:
+            return displayTargetedOffset(point: point, geometry: geometry)
         case .appRelative:
             // Only the portrait app frame / transposed landscape observation hypothesis is defined.
             guard abs(geometry.app.width - geometry.observation.height) <= 1,
@@ -102,6 +108,19 @@ struct GestureCoordinateSelection: Equatable, Sendable {
               mapped.x >= -tolerance, mapped.x <= 1 + tolerance,
               mapped.y >= -tolerance, mapped.y <= 1 + tolerance else { return nil }
         return GesturePoint(x: min(1, max(0, mapped.x)), y: min(1, max(0, mapped.y)))
+    }
+
+    private nonisolated static func displayTargetedOffset(
+        point: GesturePoint, geometry: GestureCoordinateGeometry
+    )
+        -> GesturePoint?
+    {
+        guard geometry.rotation == 0 else {
+            return mappedOffset(point: point, geometry: geometry, strategy: .appRelative)
+        }
+        guard abs(geometry.app.width - geometry.observation.width) <= 1,
+              abs(geometry.app.height - geometry.observation.height) <= 1 else { return nil }
+        return mappedOffset(point: point, geometry: geometry, strategy: .appRelativeObserved)
     }
 
     nonisolated static func choose(

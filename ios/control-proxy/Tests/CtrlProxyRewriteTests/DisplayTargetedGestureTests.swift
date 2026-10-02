@@ -1,0 +1,373 @@
+@testable import CtrlProxyRewrite
+import Foundation
+import XCTest
+
+@MainActor
+final class DisplayTargetedGestureTests: XCTestCase {
+    private let unfolded = GestureCoordinateGeometry(
+        app: GestureSize(width: 669, height: 951), screen: GestureSize(width: 466, height: 678),
+        observation: GestureSize(width: 951, height: 669), rotation: 1
+    )
+    private let folded = GestureCoordinateGeometry(
+        app: GestureSize(width: 466, height: 678), screen: GestureSize(width: 466, height: 678),
+        observation: GestureSize(width: 466, height: 678), rotation: 0
+    )
+    private let point = GesturePoint(x: 443, y: 202)
+    private let main = TapDiagnostics.DisplayScreen(displayId: 1, isMain: true)
+    private let inner = TapDiagnostics.DisplayScreen(displayId: 2, isMain: false)
+
+    private func provider(geometry: GestureCoordinateGeometry? = nil) -> FakeDisplayGestureProvider {
+        let provider = FakeDisplayGestureProvider(geometry: geometry ?? unfolded)
+        provider.inventory = GestureDisplayInventory(
+            screens: [main, inner], applicationDisplayId: nil, isPhoneIdiom: true
+        )
+        return provider
+    }
+
+    func testDisplayChoiceRules() {
+        for (screens, app, isPhoneIdiom, expected) in [
+            ([main, inner], UInt64(3), true, (UInt64(3), "appDisplay")),
+            ([main, inner], UInt64(1), true, (UInt64(2), "soleNonMainScreen")),
+            ([main, inner], UInt64(0), true, (UInt64(2), "soleNonMainScreen")),
+            ([main, inner], nil, true, (UInt64(2), "soleNonMainScreen")),
+            ([], nil, true, (nil, "noScreens")),
+            ([], UInt64(3), true, (nil, "noScreens")),
+            ([main], nil, true, (nil, "noNonMainScreen")),
+            ([main, inner, .init(displayId: 3, isMain: false)], nil, true, (nil, "ambiguousNonMainScreens")),
+            ([main, inner, .init(displayId: 3, isMain: false)], UInt64(3), true, (UInt64(3), "appDisplay")),
+            ([inner], UInt64(3), true, (UInt64(2), "soleNonMainScreen")),
+            ([main, inner], UInt64(3), false, (UInt64(3), "appDisplay")),
+            ([main, inner], UInt64(1), false, (nil, "nonPhoneIdiom")),
+            ([main, inner], UInt64(0), false, (nil, "nonPhoneIdiom")),
+            ([main, inner], nil, false, (nil, "nonPhoneIdiom")),
+            ([], nil, false, (nil, "noScreens")),
+            ([main], nil, false, (nil, "noNonMainScreen")),
+            ([main, inner, .init(displayId: 3, isMain: false)], nil, false, (nil, "ambiguousNonMainScreens")),
+        ] as [([TapDiagnostics.DisplayScreen], UInt64?, Bool, (UInt64?, String))] {
+            let inventory = GestureDisplayInventory(
+                screens: screens, applicationDisplayId: app, isPhoneIdiom: isPhoneIdiom
+            )
+            XCTAssertEqual(inventory.target.displayId, expected.0)
+            XCTAssertEqual(inventory.target.reason, expected.1)
+        }
+    }
+
+    func testFoldedAndOrdinaryLandscapeStayLegacyWithZeroInventoryReads() throws {
+        let landscape = GestureCoordinateGeometry(
+            app: GestureSize(width: 678, height: 466), screen: folded.screen,
+            observation: GestureSize(width: 678, height: 466), rotation: 1
+        )
+        for geometry in [folded, landscape] {
+            let provider = provider(geometry: geometry)
+            let factory = try DisplayGestureFactory(provider: provider)
+            let requested = GesturePoint(x: 201, y: 222)
+            let delivery = try factory.deliver(start: requested, press: 0)
+            XCTAssertEqual(delivery.selection, GestureCoordinateSelection(
+                strategy: .legacy, reason: "singlePanel", normalized: .zero, offset: requested
+            ))
+            XCTAssertEqual(provider.inventoryReads, 0)
+            XCTAssertEqual(provider.actions, ["tap"])
+            XCTAssertTrue(provider.touches.isEmpty)
+            XCTAssertEqual(provider.selections, [delivery.selection])
+        }
+    }
+
+    func testFoldedDiagnosticsInventoryDoesNotSelectDisplayRoute() throws {
+        let provider = provider(geometry: folded)
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(start: GesturePoint(x: 201, y: 222), press: 0)
+        var diagnostics = TapDiagnostics(requested: .init(x: 201, y: 222, durationMs: 0))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(provider.inventoryReads, 0)
+        XCTAssertEqual(delivery.selection.strategy, .legacy)
+        XCTAssertEqual(delivery.selection.reason, "singlePanel")
+        XCTAssertEqual(provider.actions, ["tap"])
+        XCTAssertTrue(provider.touches.isEmpty)
+        XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+        XCTAssertEqual(diagnostics.targetDisplayReason, "notSampled")
+        XCTAssertNil(diagnostics.targetDisplayId)
+        XCTAssertNil(diagnostics.mainDisplayId)
+        XCTAssertNil(diagnostics.applicationDisplayId)
+        XCTAssertNil(diagnostics.screens)
+        XCTAssertNil(diagnostics.deviceIdiom)
+        XCTAssertNil(diagnostics.deliveryWarning)
+        XCTAssertTrue(
+            diagnostics.logLine()
+                .contains(
+                    "route=xcuiCoordinate targetDisplayId=nil targetDisplayReason=notSampled deviceIdiom=nil mainDisplayId=nil applicationDisplayId=nil"
+                )
+        )
+    }
+
+    func testMismatchInventoryIsReadOnceAcrossDeliveryAndAnnotation() throws {
+        for end in [nil, GesturePoint(x: 500, y: 250)] as [GesturePoint?] {
+            let provider = provider()
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: point, end: end, press: 0.05, move: 0.3)
+            var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 50))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertEqual(provider.inventoryReads, 1)
+            XCTAssertEqual(delivery.route, .displayTargetedRecord)
+            XCTAssertEqual(provider.touches.count, 1)
+            XCTAssertEqual(diagnostics.targetDisplayId, 2)
+            XCTAssertEqual(diagnostics.targetDisplayReason, "soleNonMainScreen")
+            XCTAssertEqual(diagnostics.mainDisplayId, 1)
+            XCTAssertNil(diagnostics.applicationDisplayId)
+            XCTAssertEqual(diagnostics.screens, [main, inner])
+            XCTAssertEqual(diagnostics.deviceIdiom, "phone")
+        }
+    }
+
+    func testBeforeActionRunsAfterBothCoordinatesForDirectTapAndSwipe() throws {
+        for end in [nil, GesturePoint(x: 500, y: 250)] as [GesturePoint?] {
+            let provider = provider(geometry: folded)
+            let factory = try DisplayGestureFactory(provider: provider)
+            _ = try factory.deliver(start: point, end: end, press: 0) { delivery in
+                XCTAssertEqual(delivery.route, .xcuiCoordinate)
+                XCTAssertEqual(provider.selections.count, end == nil ? 1 : 2)
+                XCTAssertTrue(provider.actions.isEmpty)
+                provider.actions.append("beforeAction")
+            }
+            XCTAssertEqual(provider.actions, ["beforeAction", end == nil ? "tap" : "drag"])
+            XCTAssertTrue(provider.touches.isEmpty)
+        }
+    }
+
+    func testBeforeActionRunsOnceForSynthesisAndTwiceForUnavailableSymbolsFallback() throws {
+        for available in [true, false] {
+            for end in [nil, GesturePoint(x: 500, y: 250)] as [GesturePoint?] {
+                let provider = provider()
+                provider.symbolsAvailable = available
+                let factory = try DisplayGestureFactory(provider: provider)
+                _ = try factory.deliver(start: point, end: end, press: 0) { delivery in
+                    if delivery.route == .displayTargetedRecord {
+                        XCTAssertTrue(provider.touches.isEmpty)
+                        XCTAssertTrue(provider.selections.isEmpty)
+                        XCTAssertTrue(provider.actions.isEmpty)
+                        provider.actions.append("beforeSynthesis")
+                    } else {
+                        XCTAssertEqual(provider.touches.count, 1)
+                        XCTAssertEqual(provider.selections.count, end == nil ? 1 : 2)
+                        XCTAssertEqual(provider.actions, ["beforeSynthesis"])
+                        provider.actions.append("beforeCoordinate")
+                    }
+                }
+                XCTAssertEqual(provider.touches.count, 1)
+                XCTAssertEqual(provider.actions, available ? ["beforeSynthesis"] : [
+                    "beforeSynthesis", "beforeCoordinate", end == nil ? "tap" : "drag",
+                ])
+            }
+        }
+    }
+
+    func testUnfoldedTargetsInnerPortraitPointAndPressDuration() throws {
+        let provider = provider()
+        provider.inventory = GestureDisplayInventory(
+            screens: [main, inner], applicationDisplayId: 1, isPhoneIdiom: true
+        )
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(start: point, press: 0.2)
+        XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+        XCTAssertEqual(delivery.selection.reason, "multiPanelMismatch")
+        let touch = try XCTUnwrap(provider.touches.first)
+        XCTAssertEqual(touch.start.x, 202, accuracy: 1e-9)
+        XCTAssertEqual(touch.start.y, 508, accuracy: 1e-9)
+        XCTAssertEqual(touch.end, touch.start)
+        XCTAssertEqual(touch.pressDuration, 0.2)
+        XCTAssertEqual(touch.moveDuration, 0)
+        XCTAssertEqual(touch.displayId, 2)
+        XCTAssertEqual(touch.interfaceOrientation, 1)
+        XCTAssertEqual(delivery.route, .displayTargetedRecord)
+        XCTAssertEqual(provider.inventoryReads, 1)
+        XCTAssertTrue(provider.selections.isEmpty)
+        XCTAssertTrue(provider.actions.isEmpty)
+        var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 200))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(diagnostics.targetDisplayReason, "soleNonMainScreen")
+        XCTAssertEqual(diagnostics.deviceIdiom, "phone")
+    }
+
+    func testPadMainDisplayKeepsAppRelativeAndWarnsWithoutTargetedSynthesis() throws {
+        let provider = provider()
+        provider.inventory = GestureDisplayInventory(
+            screens: [main, inner], applicationDisplayId: 1, isPhoneIdiom: false
+        )
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(start: point, press: 0)
+        XCTAssertEqual(delivery.route, .xcuiCoordinate)
+        XCTAssertEqual(delivery.selection.strategy, .appRelative)
+        XCTAssertEqual(delivery.selection.reason, "multiPanelMismatch")
+        XCTAssertEqual(provider.selections, [delivery.selection])
+        XCTAssertEqual(delivery.coordinate, delivery.selection)
+        XCTAssertEqual(provider.actions, ["tap"])
+        XCTAssertTrue(provider.touches.isEmpty)
+        var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 0))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+        XCTAssertNil(diagnostics.targetDisplayId)
+        XCTAssertEqual(diagnostics.targetDisplayReason, "nonPhoneIdiom")
+        XCTAssertEqual(diagnostics.deviceIdiom, "other")
+        XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+    }
+
+    func testUnresolvedDisplayKeepsAppRelativeAndWarns() throws {
+        let provider = provider()
+        provider.inventory = GestureDisplayInventory(screens: [main], applicationDisplayId: 1, isPhoneIdiom: true)
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(start: point, press: 0)
+        XCTAssertEqual(delivery.selection.strategy, .appRelative)
+        XCTAssertEqual(provider.actions, ["tap"])
+        var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 0))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+        XCTAssertEqual(diagnostics.targetDisplayReason, "noNonMainScreen")
+        XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+    }
+
+    func testForcedVariantsAndLegacyUsesOnlyCachedGeometry() throws {
+        for forced in [
+            TapCoordinateStrategy.legacy,
+            .appRelative,
+            .appRelativeObserved,
+            .displayTargeted,
+            .displayTargetedObserved,
+        ] {
+            let provider = provider()
+            let factory = try DisplayGestureFactory(provider: provider, forced: forced)
+            let delivery = try factory.deliver(start: point, press: 0, forced: forced)
+            XCTAssertEqual(delivery.selection.strategy, forced)
+            XCTAssertEqual(delivery.selection.reason, "forced")
+            if forced == .legacy {
+                XCTAssertEqual(provider.geometryReads, 0)
+                XCTAssertEqual(delivery.coordinate?.offset, point)
+                var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 0))
+                factory.annotate(&diagnostics, delivery: delivery)
+                XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+            }
+            if forced == .displayTargetedObserved {
+                XCTAssertEqual(provider.touches.first?.start, point)
+                XCTAssertEqual(provider.touches.first?.interfaceOrientation, 4)
+            }
+        }
+    }
+
+    func testForcedDisplayOnFoldedAndPortraitAndMirrorMappings() throws {
+        let foldedProvider = provider(geometry: folded)
+        let portrait = try DisplayGestureFactory(provider: foldedProvider, forced: .displayTargeted)
+        let point = GesturePoint(x: 201, y: 222)
+        _ = try portrait.deliver(start: point, press: 0, forced: .displayTargeted)
+        let touch = try XCTUnwrap(foldedProvider.touches.first)
+        XCTAssertEqual(touch.start.x, point.x, accuracy: 1e-9)
+        XCTAssertEqual(touch.start.y, point.y, accuracy: 1e-9)
+        XCTAssertEqual(foldedProvider.inventoryReads, 1)
+        let mirrorGeometry = GestureCoordinateGeometry(
+            app: unfolded.app, screen: unfolded.screen, observation: unfolded.observation, rotation: 3
+        )
+        let mirrorProvider = provider(geometry: mirrorGeometry)
+        let mirror = try DisplayGestureFactory(provider: mirrorProvider)
+        _ = try mirror.deliver(start: self.point, press: 0)
+        let mirrored = try XCTUnwrap(mirrorProvider.touches.first)
+        XCTAssertEqual(mirrored.start.x, 467, accuracy: 1e-9)
+        XCTAssertEqual(mirrored.start.y, 443, accuracy: 1e-9)
+        XCTAssertEqual(DeviceRotation.gestureInterfaceOrientationRawValue(rotation: 3), 3)
+    }
+
+    func testUndefinedMappingKeepsPreviousAutomaticReason() throws {
+        let provider = provider(geometry: GestureCoordinateGeometry(
+            app: unfolded.app, screen: unfolded.screen, observation: unfolded.observation, rotation: 2
+        ))
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(start: point, press: 0)
+        XCTAssertEqual(delivery.selection.strategy, .legacy)
+        XCTAssertTrue(delivery.selection.reason.hasPrefix("mappingUndefined(rotation=2"))
+        XCTAssertTrue(provider.touches.isEmpty)
+    }
+
+    func testUnavailableSymbolsFallBackFromBothDisplayVariants() throws {
+        for forced in [TapCoordinateStrategy?.none, .displayTargetedObserved] {
+            let provider = provider()
+            provider.symbolsAvailable = false
+            let factory = try DisplayGestureFactory(provider: provider, forced: forced)
+            let delivery = try factory.deliver(start: point, press: 0.05, forced: forced)
+            XCTAssertEqual(delivery.selection.strategy, .appRelative)
+            XCTAssertEqual(delivery.fallbackFrom, forced ?? .displayTargeted)
+            XCTAssertEqual(provider.actions, ["tapPress"])
+            var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 50))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+            XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+            XCTAssertNil(diagnostics.synthesizedPoint)
+            XCTAssertEqual(diagnostics.fallbackFrom, (forced ?? .displayTargeted).rawValue)
+        }
+    }
+
+    func testSynthesisFailurePropagatesWithoutCoordinateFallback() throws {
+        for error in [
+            GesturePerformer.GestureError.gestureFailed("synthesizeWithError returned NO"),
+            ObjCExceptionError(name: "synthesis", reason: "exception"),
+        ] as [Error] {
+            let provider = provider()
+            provider.synthesisError = error
+            let factory = try DisplayGestureFactory(provider: provider)
+            XCTAssertThrowsError(try factory.deliver(start: point, press: 0) { _ in
+                XCTAssertTrue(provider.touches.isEmpty)
+                provider.actions.append("beforeSynthesis")
+            }) { caught in
+                XCTAssertEqual(caught.localizedDescription, error.localizedDescription)
+            }
+            XCTAssertEqual(provider.actions, ["beforeSynthesis"])
+            XCTAssertTrue(provider.selections.isEmpty)
+        }
+    }
+
+    func testFoldedSwipeRetainsLegacyDragAndZeroInventoryReads() throws {
+        let provider = provider(geometry: folded)
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(
+            start: GesturePoint(x: 201, y: 222), end: GesturePoint(x: 250, y: 300),
+            press: 0.05, move: 0.3, velocity: 300
+        )
+        XCTAssertEqual(delivery.selection.strategy, .legacy)
+        XCTAssertEqual(delivery.selection.reason, "singlePanel")
+        XCTAssertEqual(provider.inventoryReads, 0)
+        XCTAssertEqual(provider.actions, ["drag"])
+        XCTAssertEqual(provider.selections.map(\.offset), [GesturePoint(x: 201, y: 222), GesturePoint(x: 250, y: 300)])
+        XCTAssertTrue(provider.touches.isEmpty)
+    }
+
+    func testForcedDisplayWithoutTargetOrDefinedOrientationFallsBack() throws {
+        for forced in [TapCoordinateStrategy.displayTargeted, .displayTargetedObserved] {
+            let provider = provider()
+            provider.inventory = GestureDisplayInventory(screens: [], applicationDisplayId: nil, isPhoneIdiom: true)
+            let factory = try DisplayGestureFactory(provider: provider, forced: forced)
+            XCTAssertEqual(try factory.deliver(start: point, press: 0, forced: forced).selection.strategy, .appRelative)
+            XCTAssertTrue(provider.touches.isEmpty)
+            XCTAssertEqual(provider.inventoryReads, 1)
+        }
+        let provider = provider(geometry: GestureCoordinateGeometry(
+            app: unfolded.app, screen: unfolded.screen, observation: unfolded.observation, rotation: nil
+        ))
+        let factory = try DisplayGestureFactory(provider: provider, forced: .displayTargetedObserved)
+        let delivery = try factory.deliver(start: point, press: 0, forced: .displayTargetedObserved)
+        XCTAssertEqual(delivery.selection.strategy, .legacy)
+        XCTAssertTrue(provider.touches.isEmpty)
+    }
+
+    func testSwipeTargetsBothEndpointsAndUnavailableSymbolsUseDrag() throws {
+        for available in [true, false] {
+            let provider = provider()
+            provider.symbolsAvailable = available
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(
+                start: point, end: GesturePoint(x: 500, y: 250), press: 0.05, move: 0.3, velocity: 300
+            )
+            let touch = try XCTUnwrap(provider.touches.first)
+            XCTAssertEqual(touch.end.x, 250, accuracy: 1e-9)
+            XCTAssertEqual(touch.end.y, 451, accuracy: 1e-9)
+            XCTAssertEqual(touch.pressDuration, 0.05)
+            XCTAssertEqual(touch.moveDuration, 0.3)
+            XCTAssertEqual(provider.actions, available ? [] : ["drag"])
+            XCTAssertEqual(delivery.route, available ? .displayTargetedRecord : .xcuiCoordinate)
+        }
+    }
+}

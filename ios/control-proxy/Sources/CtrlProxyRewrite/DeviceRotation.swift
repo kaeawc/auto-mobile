@@ -28,6 +28,17 @@ enum DeviceRotation {
         }
     }
 
+    /// UIInterfaceOrientation raw values, matching gestureInterfaceOrientation's device fallback.
+    nonisolated static func gestureInterfaceOrientationRawValue(rotation: Int?) -> Int? {
+        switch rotation {
+        case 0: return 1
+        case 1: return 4
+        case 2: return 2
+        case 3: return 3
+        default: return nil
+        }
+    }
+
     #if canImport(XCTest) && os(iOS)
         /// `@unchecked Sendable`: `observer` is written once (in `startObserving`, which
         /// the monitor's `init` calls exactly once) and read only in `deinit`; the

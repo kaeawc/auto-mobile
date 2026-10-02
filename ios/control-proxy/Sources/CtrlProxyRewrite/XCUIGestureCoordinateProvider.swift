@@ -1,4 +1,5 @@
 import Foundation
+import ObjCExceptionCatcher
 import os
 #if canImport(XCTest) && os(iOS)
     import UIKit
@@ -7,7 +8,7 @@ import os
     /// The legacy anchor stays exactly as supplied. Only a relative selection anchors on
     /// the observed application, since the legacy application's owner may be SpringBoard.
     @MainActor
-    final class XCUIGestureCoordinateProvider: GestureCoordinateProviding {
+    final class XCUIGestureCoordinateProvider: DisplayGestureProviding {
         struct Coordinate {
             let base: XCUICoordinate
             let resolved: XCUICoordinate
@@ -22,6 +23,42 @@ import os
         init(app: XCUIApplication, locator: any ElementLocating) {
             self.app = app
             self.locator = locator
+        }
+
+        var cachedGeometry: GestureCoordinateGeometry? { locator.gestureCoordinateGeometry }
+
+        var observedApplication: XCUIApplication {
+            relativeApp ?? locator.foregroundBundleId.map { XCUIApplication(bundleIdentifier: $0) } ?? app
+        }
+
+        func displayInventory() -> GestureDisplayInventory {
+            let screens = (ObjCExceptionCatcher_displayInventory() ?? [])
+                .compactMap { entry -> TapDiagnostics.DisplayScreen? in
+                    guard let displayId = entry["displayId"], let isMain = entry["isMain"] else { return nil }
+                    return .init(displayId: displayId.uint64Value, isMain: isMain.boolValue)
+                }
+            // The observed app may differ from the legacy SpringBoard anchor.
+            let target = observedApplication
+            return GestureDisplayInventory(
+                screens: screens, applicationDisplayId: ObjCExceptionCatcher_displayID(target)?.uint64Value,
+                isPhoneIdiom: UIDevice.current.userInterfaceIdiom == .phone
+            )
+        }
+
+        func synthesize(_ touch: DisplayTouch) throws -> Bool {
+            var unavailable: ObjCBool = false
+            var message: NSString?
+            let succeeded = ObjCExceptionCatcher_synthesizeDisplayTouch(
+                CGFloat(touch.start.x), CGFloat(touch.start.y), CGFloat(touch.end.x), CGFloat(touch.end.y),
+                touch.pressDuration, touch.moveDuration, touch.displayId, touch.interfaceOrientation,
+                &unavailable, &message
+            )
+            if succeeded { return true }
+            guard unavailable.boolValue else {
+                throw GesturePerformer.GestureError
+                    .gestureFailed(message as String? ?? "display-targeted touch synthesis failed")
+            }
+            return false
         }
 
         func geometry() throws -> GestureCoordinateGeometry? {

@@ -19,6 +19,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface XCSynthesizedEventRecord : NSObject
 - (instancetype)initWithName:(NSString *)name interfaceOrientation:(UIInterfaceOrientation)orientation;
+- (instancetype)initWithName:(NSString *)name displayID:(unsigned long long)displayID interfaceOrientation:(UIInterfaceOrientation)orientation;
 - (void)addPointerEventPath:(XCPointerEventPath *)path;
 - (BOOL)synthesizeWithError:(NSError **)error;
 @end
@@ -114,5 +115,17 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizePinch(
     BOOL *_Nullable symbolsUnavailable,
     NSString *_Nullable *_Nullable errorMessage
 );
+
+/// Single touch on an explicit display; unavailable symbols permit a public-coordinate fallback.
+FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
+    CGFloat startX, CGFloat startY, CGFloat endX, CGFloat endY,
+    NSTimeInterval pressDuration, NSTimeInterval moveDuration,
+    unsigned long long displayID, NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
+);
+
+/// Runtime-only reads: this target does not link XCTest. Missing/throwing reads return nil.
+FOUNDATION_EXPORT NSArray<NSDictionary<NSString *, NSNumber *> *> *_Nullable ObjCExceptionCatcher_displayInventory(void);
+FOUNDATION_EXPORT NSNumber *_Nullable ObjCExceptionCatcher_displayID(NSObject *object);
 
 NS_ASSUME_NONNULL_END

@@ -62,6 +62,7 @@
 		48F32C0ABC2BB3CE87604F24 /* HingeAngleResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5FC3F0B87E9AA971D1F979 /* HingeAngleResponse.swift */; };
 		4A99C099F2E5C6589CC24FB8 /* RequestClearText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F1048EB07A1C40FEE1C6E8 /* RequestClearText.swift */; };
 		4D62313547088F8C9BD70258 /* HingeAngleSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7366D3444D35815F837642AA /* HingeAngleSetting.swift */; };
+		4D8DDC63179B6DD8B112A3F2 /* DisplayTargetedGesture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B65FC27015169FCB3C9030A /* DisplayTargetedGesture.swift */; };
 		51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		51FEF589F67C8A78E299A91A /* HierarchyIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */; };
 		543CE5608AD59EF3C64CE382 /* RequestGetPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5F8F7BAAAAC5FEA95C9792 /* RequestGetPreference.swift */; };
@@ -301,6 +302,7 @@
 		259652401D400F3259B0DF5C /* RequestListDatabases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestListDatabases.swift; sourceTree = "<group>"; };
 		265B28E26CC26E14AFAF3099 /* PerfProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProvider.swift; sourceTree = "<group>"; };
 		28A1CE333BCB168F784CAB21 /* ElementLocating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocating.swift; sourceTree = "<group>"; };
+		2B65FC27015169FCB3C9030A /* DisplayTargetedGesture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayTargetedGesture.swift; sourceTree = "<group>"; };
 		2CB2A539D17E4F7310DC27AA /* SemanticLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLink.swift; sourceTree = "<group>"; };
 		2D080A36B99C83DCA108ABE3 /* RequestRemovePreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestRemovePreference.swift; sourceTree = "<group>"; };
 		3240EAF1FF9AF78B790635AA /* SdkHierarchyExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyExtractor.swift; sourceTree = "<group>"; };
@@ -517,6 +519,7 @@
 				68D923F1DE4BB230AC35A73B /* DefaultVoiceOverToggle.swift */,
 				06F95688CD75045850929012 /* DeviceRotation.swift */,
 				057109D870A95BFD61146C25 /* DisplayLinkFPSMonitor.swift */,
+				2B65FC27015169FCB3C9030A /* DisplayTargetedGesture.swift */,
 				28A1CE333BCB168F784CAB21 /* ElementLocating.swift */,
 				84ADB05144552602BFFBCBE9 /* ElementLocator.swift */,
 				22D3D6DA7D1F2F9F1299000D /* ErrorResponse.swift */,
@@ -969,6 +972,7 @@
 				AE32144D36D3EE9EDBFED10F /* DeviceRotation.swift in Sources */,
 				0FED37B31F43D67424810FE3 /* DisplayCutoutInfo.swift in Sources */,
 				32BDADA8312454B31B84F83F /* DisplayLinkFPSMonitor.swift in Sources */,
+				4D8DDC63179B6DD8B112A3F2 /* DisplayTargetedGesture.swift in Sources */,
 				D0E2B4A8A7E46884FCC660FF /* EdgeInsetsInfo.swift in Sources */,
 				A55702F1ADF5FF826415D20B /* ElementBounds.swift in Sources */,
 				B1DA303C1E3F303539C17A25 /* ElementLocating.swift in Sources */,

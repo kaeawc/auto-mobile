@@ -701,107 +701,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return hierarchyFingerprint(viewHierarchy);
   }
 
-  private compareScreenIdentity(
-    previousObservation: ObserveResult,
-    currentObservation: ObserveResult,
-  ): TapOnElementResult["effect"] | undefined {
-    const previous = previousObservation.screenIdentity;
-    const current = currentObservation.screenIdentity;
-    if (!previous || !current || previous.platform !== current.platform) {
-      return undefined;
-    }
-    const changed = previous.key !== current.key;
-    return {
-      screenChanged: changed,
-      basis: changed ? "screenIdentity changed" : "screenIdentity unchanged",
-    };
-  }
-
-  private compareActiveWindow(
-    previousObservation: ObserveResult,
-    currentObservation: ObserveResult,
-  ): TapOnElementResult["effect"] | undefined {
-    const previous = previousObservation.activeWindow;
-    const current = currentObservation.activeWindow;
-    if (!this.hasCompleteActiveWindow(previous) || !this.hasCompleteActiveWindow(current)) {
-      return undefined;
-    }
-    // layoutSeqSum comes from dumpsys, while hierarchy-derived windows use 0.
-    // Even two non-zero samples do not establish a visible change on their own;
-    // the hierarchy comparison below supplies that evidence for the same activity.
-    const changed =
-      previous.appId !== current.appId || previous.activityName !== current.activityName;
-    return {
-      screenChanged: changed,
-      basis: changed ? "activeWindow changed" : "activeWindow unchanged",
-    };
-  }
-
-  private hasCompleteActiveWindow(
-    activeWindow: ObserveResult["activeWindow"],
-  ): activeWindow is NonNullable<ObserveResult["activeWindow"]> {
-    return Boolean(
-      activeWindow?.appId &&
-      activeWindow.activityName &&
-      Number.isInteger(activeWindow.layoutSeqSum),
-    );
-  }
-
-  private compareViewHierarchy(
-    previousObservation: ObserveResult,
-    currentObservation: ObserveResult,
-  ): TapOnElementResult["effect"] | undefined {
-    const previousHash = this.hashViewHierarchy(previousObservation.viewHierarchy ?? null);
-    const currentHash = this.hashViewHierarchy(currentObservation.viewHierarchy ?? null);
-    if (!previousHash || !currentHash) {
-      return undefined;
-    }
-    const changed = previousHash !== currentHash;
-    return {
-      screenChanged: changed,
-      basis: changed ? "viewHierarchy changed" : "viewHierarchy unchanged",
-    };
-  }
-
-  /**
-   * Issue #6258: a basis that resolves to "unchanged" must not stop the chain
-   * — it must fall through to the next basis rather than being taken as final
-   * proof nothing changed. A dialog open (e.g. the Material time picker) is
-   * the known dialog-window gap (#6151): `activeWindow` never reflects the new
-   * dialog window, so it resolves "unchanged" even though the hierarchy
-   * clearly changed. The old `??` chain stopped at the first *defined* result
-   * regardless of its `screenChanged` value, so `activeWindow unchanged`
-   * masked a real `viewHierarchy changed`. Priority order (screenIdentity,
-   * then activeWindow, then viewHierarchy) is preserved for a basis that DOES
-   * report a change; when none report a change, the highest-priority
-   * available basis is returned (matching prior "all unchanged" behavior).
-   */
   private deriveTapEffect(
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult | undefined,
   ): TapOnElementResult["effect"] | undefined {
-    if (!previousObservation || !currentObservation) {
-      return undefined;
-    }
-    const hierarchyResult = this.compareViewHierarchy(previousObservation, currentObservation);
-    const results = [
-      this.compareScreenIdentity(previousObservation, currentObservation),
-      this.compareActiveWindow(previousObservation, currentObservation),
-      hierarchyResult,
-    ].filter((result): result is NonNullable<typeof result> => result !== undefined);
-
-    // A matching pair of device trees rules out a visible screen change even
-    // when side-channel identity metadata was sampled from different moments.
-    if (hierarchyResult && !hierarchyResult.screenChanged) {
-      return results.find((result) => !result.screenChanged) ?? hierarchyResult;
-    }
-
-    const changedResult = results.find((result) => result.screenChanged);
-    if (changedResult) {
-      return changedResult;
-    }
-
-    return results[0] ?? { screenChanged: false, basis: "insufficient observation data" };
+    return this.deriveInteractionEffect(previousObservation, currentObservation);
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
@@ -2834,17 +2738,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         await executeTouchscreenInput(this.adb, tap, target.displayId, signal);
       }
     }
-    const after = await this.observeScreen.execute({
-      display: options.display,
-      freshness: "fresh",
-      signal,
-    });
     return {
       success: true,
       action: options.action,
       element,
       selectedElement: this.buildSelectedElementMetadata(selection),
-      observation: after,
     };
   }
 
@@ -2911,7 +2809,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           this.displayTransitionReader,
         );
         if (this.device.platform === "android") {
-          return await this.executeOnAndroidDisplay(options, target, signal);
+          return await this.observedInteraction(
+            () => this.executeOnAndroidDisplay(options, target, signal),
+            {
+              changeExpected: false,
+              display: target.observation.display.key,
+              previousObservation: target.observation,
+              signal,
+            },
+          );
         }
       } catch (error) {
         logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
@@ -3298,6 +3204,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             containerElementId: options.container?.elementId,
           },
           changeExpected: false,
+          display: options.display,
           timeoutMs: 800, // Reduce timeout for faster execution
           progress,
           perf,

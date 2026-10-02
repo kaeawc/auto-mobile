@@ -6,6 +6,8 @@ import type { ObserveResult } from "../../../models";
  * never hang on an animation that never stops.
  */
 export interface SettleOptions {
+  /** Physical panel for every capture in this poll. */
+  display?: string;
   /** Hard budget in ms — the mandatory timeout fallback (default 2500). */
   timeoutMs?: number;
   /** Poll interval in ms between observations (default 150, matches waitForScrollIdle). */

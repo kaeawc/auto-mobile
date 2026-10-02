@@ -3,6 +3,11 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
+import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
+import { RealSettleObserve } from "../observe/SettleObserve";
+import type { TapEffect } from "../../models/TapOnElementResult";
 import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { staleDisplayError } from "../../models/StaleDisplayError";
@@ -100,6 +105,9 @@ export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
 
 interface ObservedChangeOptions {
   changeExpected: boolean;
+  /** Bind pre/post captures to the panel prepared by the action. */
+  display?: string;
+  previousObservation?: ObserveResult;
   timeoutMs?: number;
   packageName?: string;
   progress?: ProgressCallback;
@@ -243,17 +251,19 @@ export class BaseVisualChange {
     throwIfAborted(options.signal);
 
     // Fetch cached view hierarchy (skip if we just terminated/cleared the app)
-    let previousObserveResult: ObserveResult | null = null;
+    let previousObserveResult: ObserveResult | null = options.previousObservation ?? null;
     const predictionContext = this.buildPredictionContext(options.predictionContext);
     if (options.skipPreviousObserve) {
       logger.info("[BaseVisualChange] Skipping previous observe (app was terminated/cleared)");
-    } else {
+    } else if (!previousObserveResult) {
       try {
         if (progress) {
           await progress(10, 100, "Getting previous view hierarchy...");
         }
         previousObserveResult = await perf.track("getPreviousObserve", async () => {
-          const cached = await this.observeScreen.getMostRecentCachedObserveResult();
+          const cached = options.display
+            ? undefined
+            : await this.observeScreen.getMostRecentCachedObserveResult();
           if (
             !cached?.viewHierarchy ||
             cached.viewHierarchy.hierarchy.error ||
@@ -261,6 +271,7 @@ export class BaseVisualChange {
           ) {
             return this.observeScreen.execute({
               freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+              display: options.display,
               queryOptions: options.queryOptions,
               perf,
               signal: options.signal,
@@ -273,6 +284,7 @@ export class BaseVisualChange {
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
             freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+            display: options.display,
             queryOptions: options.queryOptions,
             perf,
             signal: options.signal,
@@ -309,6 +321,17 @@ export class BaseVisualChange {
       return block(previousObserveResult!);
     });
 
+    if (options.display !== undefined) {
+      // ADB input bypasses CtrlProxy's gesture debouncer. Clear its tree before
+      // the shared post-action capture; this also works with CtrlProxy dispatch.
+      if (this.device.platform === "android") {
+        AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+      } else if (this.device.platform === "ios") {
+        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+      }
+      throwIfAborted(options.signal);
+    }
+
     let observationStartTime = actionStartTime;
     const observationTimestampOverride = options.observationTimestampProvider?.();
     if (
@@ -338,7 +361,7 @@ export class BaseVisualChange {
     }
 
     // Fall back to cached active window if no packageName from hierarchy
-    if (!packageName) {
+    if (!packageName && options.display === undefined) {
       const cachedPackageName = (await this.window.getCachedActiveWindow())?.appId;
       if (cachedPackageName) {
         packageName = cachedPackageName;
@@ -397,6 +420,7 @@ export class BaseVisualChange {
 
     const observed = await this.takeObservation(blockResult, previousObserveResult, {
       changeExpected: options.changeExpected,
+      display: options.display,
       tolerancePercent: options.tolerancePercent ?? DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
       queryOptions: options.queryOptions,
       gfxMetrics,
@@ -414,6 +438,9 @@ export class BaseVisualChange {
           predictionContext,
         );
       });
+    }
+    if (options.display !== undefined) {
+      observed.effect = this.deriveInteractionEffect(previousObserveResult, observed.observation);
     }
     this.annotateDeviceLock(observed, previousObserveResult);
     return observed;
@@ -490,11 +517,115 @@ export class BaseVisualChange {
     return `${preamble} Unlock or dismiss the keyguard before continuing.`;
   }
 
+  private compareScreenIdentity(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+  ): TapEffect | undefined {
+    const previous = previousObservation.screenIdentity;
+    const current = currentObservation.screenIdentity;
+    if (!previous || !current || previous.platform !== current.platform) {
+      return undefined;
+    }
+    const changed = previous.key !== current.key;
+    return {
+      screenChanged: changed,
+      basis: changed ? "screenIdentity changed" : "screenIdentity unchanged",
+    };
+  }
+
+  protected compareActiveWindow(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+  ): TapEffect | undefined {
+    const previous = previousObservation.activeWindow;
+    const current = currentObservation.activeWindow;
+    if (!this.hasCompleteActiveWindow(previous) || !this.hasCompleteActiveWindow(current)) {
+      return undefined;
+    }
+    // layoutSeqSum comes from dumpsys, while hierarchy-derived windows use 0.
+    // Even two non-zero samples do not establish a visible change on their own;
+    // the hierarchy comparison below supplies that evidence for the same activity.
+    const changed =
+      previous.appId !== current.appId || previous.activityName !== current.activityName;
+    return {
+      screenChanged: changed,
+      basis: changed ? "activeWindow changed" : "activeWindow unchanged",
+    };
+  }
+
+  private hasCompleteActiveWindow(
+    activeWindow: ObserveResult["activeWindow"],
+  ): activeWindow is NonNullable<ObserveResult["activeWindow"]> {
+    return Boolean(
+      activeWindow?.appId &&
+      activeWindow.activityName &&
+      Number.isInteger(activeWindow.layoutSeqSum),
+    );
+  }
+
+  private compareViewHierarchy(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+  ): TapEffect | undefined {
+    const previousHash = hierarchyFingerprint(previousObservation.viewHierarchy ?? null);
+    const currentHash = hierarchyFingerprint(currentObservation.viewHierarchy ?? null);
+    if (!previousHash || !currentHash) {
+      return undefined;
+    }
+    const changed = previousHash !== currentHash;
+    return {
+      screenChanged: changed,
+      basis: changed ? "viewHierarchy changed" : "viewHierarchy unchanged",
+    };
+  }
+
+  /**
+   * Issue #6258: a basis that resolves to "unchanged" must not stop the chain
+   * — it must fall through to the next basis rather than being taken as final
+   * proof nothing changed. A dialog open (e.g. the Material time picker) is
+   * the known dialog-window gap (#6151): `activeWindow` never reflects the new
+   * dialog window, so it resolves "unchanged" even though the hierarchy
+   * clearly changed. The old `??` chain stopped at the first *defined* result
+   * regardless of its `screenChanged` value, so `activeWindow unchanged`
+   * masked a real `viewHierarchy changed`. Priority order (screenIdentity,
+   * then activeWindow, then viewHierarchy) is preserved for a basis that DOES
+   * report a change; when none report a change, the highest-priority
+   * available basis is returned (matching prior "all unchanged" behavior).
+   */
+  protected deriveInteractionEffect(
+    previousObservation: ObserveResult | null,
+    currentObservation: ObserveResult | undefined,
+  ): TapEffect | undefined {
+    if (!previousObservation || !currentObservation) {
+      return undefined;
+    }
+    const hierarchyResult = this.compareViewHierarchy(previousObservation, currentObservation);
+    const results = [
+      this.compareScreenIdentity(previousObservation, currentObservation),
+      this.compareActiveWindow(previousObservation, currentObservation),
+      hierarchyResult,
+    ].filter((result): result is NonNullable<typeof result> => result !== undefined);
+
+    // A matching pair of device trees rules out a visible screen change even
+    // when side-channel identity metadata was sampled from different moments.
+    if (hierarchyResult && !hierarchyResult.screenChanged) {
+      return results.find((result) => !result.screenChanged) ?? hierarchyResult;
+    }
+
+    const changedResult = results.find((result) => result.screenChanged);
+    if (changedResult) {
+      return changedResult;
+    }
+
+    return results[0] ?? { screenChanged: false, basis: "insufficient observation data" };
+  }
+
   private async takeObservation(
     blockResult: any,
     previousObserveResult: ObserveResult | null,
     options: {
       changeExpected: boolean;
+      display?: string;
       tolerancePercent?: number;
       queryOptions?: ViewHierarchyQueryOptions;
       gfxMetrics?: GfxMetrics | null;
@@ -518,6 +649,7 @@ export class BaseVisualChange {
     // Capture fresh data that reflects the action that just completed.
     let latestObservation = await this.observeScreen.execute({
       freshness: "fresh",
+      display: options.display,
       queryOptions: options.queryOptions,
       perf,
       minTimestamp,
@@ -556,6 +688,7 @@ export class BaseVisualChange {
       perf.serial(`finalObserve_retry_${attempt + 1}`);
       latestObservation = await this.observeScreen.execute({
         freshness: "fresh",
+        display: options.display,
         queryOptions: options.queryOptions,
         perf,
         minTimestamp,
@@ -579,6 +712,21 @@ export class BaseVisualChange {
         ? { ...latestObservation.freshness, warning }
         : { isFresh: false, warning };
       logger.warn(`[BaseVisualChange] ${warning}`);
+    }
+
+    if (
+      options.display !== undefined &&
+      latestObservation.viewHierarchy &&
+      !latestObservation.viewHierarchy.hierarchy.error
+    ) {
+      const settled = await new RealSettleObserve(this.observeScreen, this.timer).execute({
+        display: options.display,
+        signal: options.signal,
+        initialMinTimestampMs: hierarchyUpdatedAtToMillis(latestObservation.viewHierarchy),
+        skipPerformanceAudit: true,
+        skipRecompositionTracking: true,
+      });
+      latestObservation = settled.observation;
     }
 
     if (!options.deferPostActionScreenshot) {

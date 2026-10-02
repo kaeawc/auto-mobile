@@ -1,3 +1,4 @@
+import type { TapEffect } from "./TapOnElementResult";
 import type { StaleDisplayDetails } from "./StaleDisplayError";
 import { ObserveResult } from "./ObserveResult";
 
@@ -11,6 +12,7 @@ import { ObserveResult } from "./ObserveResult";
 export interface BaseActionResult {
   success: boolean;
   observation?: ObserveResult;
+  effect?: TapEffect;
   error?: string;
   staleDisplay?: StaleDisplayDetails;
   /**

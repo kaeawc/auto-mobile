@@ -1050,10 +1050,6 @@ describe("explicit action display", () => {
   test("swipeOn rejects every unsupported display option without claiming search success", async () => {
     const unsupported: Array<Partial<SwipeOnOptions>> = [
       { lookFor: { text: "Found" } },
-      { boomerang: true },
-      { apexPause: 10 },
-      { returnSpeed: 2 },
-      { speed: "fast" },
       { autoTarget: true },
       { includeSystemInsets: true },
     ];

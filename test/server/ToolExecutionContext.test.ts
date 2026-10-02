@@ -1,5 +1,6 @@
+import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createToolExecutionContext } from "../../src/server/ToolExecutionContext";
@@ -30,8 +31,8 @@ describe("ToolExecutionContext", () => {
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeTimer: FakeTimer;
   let fakeDeviceManager: FakeDeviceManager;
-  let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
-  let originalClientGetInstance: typeof AndroidCtrlProxyClient.getInstance;
+  const originalGetInstance = AndroidCtrlProxyManager.getInstance;
+  const originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
   const sessionOptions = { keepScreenAwake: false };
   const createBootedDevice = (deviceId: string): BootedDevice => ({
     name: deviceId,
@@ -39,7 +40,7 @@ describe("ToolExecutionContext", () => {
     deviceId,
   });
 
-  beforeEach(async () => {
+  const setup = async () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
@@ -56,8 +57,6 @@ describe("ToolExecutionContext", () => {
     // re-proved present before it is assigned, handsets included.
     fakeDeviceManager.bootedDevices = [createBootedDevice("device-1")];
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
-    originalGetInstance = AndroidCtrlProxyManager.getInstance;
-    originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
 
     // These tests exercise the real `ensureAccessibilityServiceReady` path and
     // stub setup via the `AndroidCtrlProxyManager`/`AndroidCtrlProxyClient`
@@ -69,15 +68,24 @@ describe("ToolExecutionContext", () => {
 
     // Reset AndroidCtrlProxyClient instances for clean test state
     AndroidCtrlProxyClient.resetInstances();
-  });
+  };
 
-  afterEach(() => {
-    sessionManager.stopCleanupTimer();
+  function cleanup() {
+    sessionManager?.stopCleanupTimer();
     AndroidCtrlProxyManager.getInstance = originalGetInstance;
     AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
     AndroidCtrlProxyClient.resetInstances();
     installNoOpReadinessDriver();
-  });
+  }
+
+  const reset = async () => {
+    cleanup();
+    await setup();
+  };
+  const test = warmedTests(reset);
+  beforeEach(reset);
+  afterEach(cleanup);
+  afterAll(cleanup);
 
   test("should run accessibility setup when creating a new session", async () => {
     let setupCalls = 0;

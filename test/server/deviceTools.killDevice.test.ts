@@ -1,5 +1,6 @@
+import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
@@ -653,7 +654,7 @@ describe("killDevice handler", () => {
   let runtimeAvdNames: Map<string, string | undefined>;
   let runtimeAvdNameProbes: string[];
 
-  beforeEach(async () => {
+  const setup = async () => {
     runtimeAvdNames = new Map();
     runtimeAvdNameProbes = [];
     process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
@@ -681,9 +682,9 @@ describe("killDevice handler", () => {
       },
     });
     registerDeviceTools();
-  });
+  };
 
-  afterEach(() => {
+  const cleanup = () => {
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
     resetDeviceToolsDependencies();
@@ -701,7 +702,16 @@ describe("killDevice handler", () => {
     } else {
       process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH = originalAlias;
     }
-  });
+    ToolRegistry.clearTools();
+  };
+
+  const reset = async () => {
+    cleanup();
+    await setup();
+  };
+  beforeEach(reset);
+  afterEach(cleanup);
+  afterAll(cleanup);
 
   /**
    * The pooled AVD name is a host-side label, not proof of identity: a different
@@ -710,6 +720,7 @@ describe("killDevice handler", () => {
    * so the runtime is asked to confirm the name first (#6863 review).
    */
   describe("pooled AVD name verification before a kill", () => {
+    const test = warmedTests(reset);
     async function poolWithUnknownRuntime(
       booted: BootedDevice,
       pooledAvdName: string,

@@ -1,5 +1,6 @@
+import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect } from "bun:test";
 import { z } from "zod/v4";
 import {
   provisionDeviceSchema,
@@ -622,7 +623,7 @@ describe("provisionDevice handler", () => {
   let teardownOperationStore: FakeDeviceTeardownOperationStore;
   let restorePipelineOverrides: (() => void) | undefined;
 
-  beforeEach(() => {
+  const setup = () => {
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
@@ -640,15 +641,24 @@ describe("provisionDevice handler", () => {
       clearInstalledAppsForDevice: async () => {},
     });
     registerDeviceTools();
-  });
+  };
 
-  afterEach(() => {
+  const cleanup = () => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     resetDeviceToolsDependencies();
     resetProvisionedDeviceTransportFenceForTests();
     DaemonState.getInstance().reset();
-  });
+  };
+
+  const reset = () => {
+    cleanup();
+    setup();
+  };
+  const test = warmedTests(reset);
+  beforeEach(reset);
+  afterEach(cleanup);
+  afterAll(cleanup);
 
   test("resource settings require booting and reject profiles and raw daemon labels", () => {
     const args = provisionTestArgs("ios", "resource-schema");

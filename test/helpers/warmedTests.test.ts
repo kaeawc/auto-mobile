@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { logger, LogLevel } from "../../src/utils/logger";
 import { cancellationTests, warmedTests } from "./interactionCancellation";
 
@@ -98,6 +98,36 @@ describe("warmedTests.each", () => {
       ["tuple", 7],
     ]);
     expect(values).toEqual([value, value]);
+    expect(dirty).toBe(false);
+  });
+});
+
+describe("warmedTests async reset", () => {
+  let dirty = true;
+  let calls = 0;
+  let resets = 0;
+  const warmed = warmedTests(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    dirty = false;
+    resets++;
+  });
+
+  warmed.each([1, 2])("awaits reset before scenario %i", () => {
+    expect(dirty).toBe(false);
+    expect(resets).toBe(calls + 1);
+    calls++;
+    dirty = true;
+  });
+
+  beforeAll(() => {
+    expect(calls).toBe(2);
+    expect(resets).toBe(3);
+    expect(dirty).toBe(false);
+  });
+
+  afterEach(() => {
+    expect(resets).toBe(calls + 1);
     expect(dirty).toBe(false);
   });
 });

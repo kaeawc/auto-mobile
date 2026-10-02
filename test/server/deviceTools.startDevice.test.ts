@@ -1,5 +1,6 @@
+import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterAll, describe, expect, beforeEach, afterEach } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
 import {
@@ -65,7 +66,7 @@ describe("startDevice handler", () => {
   let daemonSessionManager: SessionManager | undefined;
   let bootTimer: FakeTimer;
 
-  beforeEach(() => {
+  const setup = () => {
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeMatcher = new FakeDeviceMatcher();
     daemonSessionManager = undefined;
@@ -93,9 +94,9 @@ describe("startDevice handler", () => {
     setDeviceManager(fakeDeviceUtils);
 
     registerDeviceTools();
-  });
+  };
 
-  afterEach(() => {
+  const cleanup = () => {
     resetDeviceToolsDependencies();
     clearAutolockEnv();
     clearDirectSessionDevices();
@@ -103,7 +104,16 @@ describe("startDevice handler", () => {
     daemonSessionManager?.stopCleanupTimer();
     PlatformDeviceManagerFactory.reset();
     AndroidAvdProvenanceCache.resetForTests();
-  });
+  };
+
+  const reset = () => {
+    cleanup();
+    setup();
+  };
+  const it = warmedTests(reset);
+  beforeEach(reset);
+  afterEach(cleanup);
+  afterAll(cleanup);
 
   async function callStartDevice(
     args: Record<string, unknown>,

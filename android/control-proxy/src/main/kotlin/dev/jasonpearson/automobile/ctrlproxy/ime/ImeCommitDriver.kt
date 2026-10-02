@@ -44,6 +44,8 @@ data class ImeCommitResult(
   val success: Boolean,
   val error: String?,
   val partialApplication: Boolean = false,
+  // Incremented before dispatch: the final unit may only have been partially applied.
+  val committedUnits: Int = 0,
 )
 
 class ImeCommitDriver(private val sink: ImeCommitSink) {
@@ -70,7 +72,7 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
         result.copy(partialApplication = true)
       else result
     restoreIfNeeded(restoreId)
-    completion?.invoke(outcome)
+    completion?.invoke(outcome.copy(committedUnits = committedUnits))
   }
 
   /**
@@ -227,18 +229,6 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
 
   private data class Segment(val text: String, val trailingSpan: String?)
 
-  private fun splitInlineFormatSpans(text: String): List<Segment> {
-    val segments = mutableListOf<Segment>()
-    var previousCut = 0
-    for (match in INLINE_FORMAT_SPAN.findAll(text)) {
-      val end = match.range.last + 1
-      segments.add(Segment(text.substring(previousCut, end), match.value))
-      previousCut = end
-    }
-    if (previousCut < text.length) segments.add(Segment(text.substring(previousCut), null))
-    return segments.ifEmpty { listOf(Segment(text, null)) }
-  }
-
   private fun isPasswordInputType(inputType: Int): Boolean {
     val variation = inputType and InputType.TYPE_MASK_VARIATION
     val inputClass = inputType and InputType.TYPE_MASK_CLASS
@@ -259,8 +249,22 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
   private fun failure(error: String) =
     ImeCommitResult(success = false, error = error, partialApplication = committedUnits > 0)
 
-  private companion object {
-    val INLINE_FORMAT_SPAN =
+  internal companion object {
+    internal fun segmentCount(text: String): Int = splitInlineFormatSpans(text).size
+
+    private fun splitInlineFormatSpans(text: String): List<Segment> {
+      val segments = mutableListOf<Segment>()
+      var previousCut = 0
+      for (match in INLINE_FORMAT_SPAN.findAll(text)) {
+        val end = match.range.last + 1
+        segments.add(Segment(text.substring(previousCut, end), match.value))
+        previousCut = end
+      }
+      if (previousCut < text.length) segments.add(Segment(text.substring(previousCut), null))
+      return segments.ifEmpty { listOf(Segment(text, null)) }
+    }
+
+    private val INLINE_FORMAT_SPAN =
       Regex("```|`[^`\n]+`|\\*\\*[^*\n]+\\*\\*|~~[^~\n]+~~|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")
     const val POLL_INTERVAL_MS = 40L
     const val MAX_POLL_ATTEMPTS = 12

@@ -14,7 +14,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { imeCommitSegmentCount } from "../observe/android/CtrlProxyText";
+import { imeCommitSegmentCount, imeCommitUnitFields } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
@@ -161,6 +161,8 @@ export interface SendKeysCommandResult extends BaseActionResult {
   modifiers?: InputKeyModifier[];
   partialApplication?: boolean;
   committedGraphemes?: number;
+  /** Device upper bound; this is not the verified committedGraphemes count. */
+  committedUnits?: number;
   error?: string;
   retryable?: boolean;
   verified?: boolean;
@@ -244,6 +246,8 @@ export type TextActionResult = {
   error?: string;
   partialApplication?: boolean;
   committedGraphemes?: number;
+  /** Device upper bound; this is not the verified committedGraphemes count. */
+  committedUnits?: number;
   sessionUnsafe?: boolean;
 };
 
@@ -377,6 +381,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ...this.textWarningFields(result),
         ...(result.partialApplication ? { partialApplication: true } : {}),
         committedGraphemes: result.committedGraphemes,
+        ...imeCommitUnitFields(result),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
       };
@@ -858,9 +863,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         if (committedText !== undefined && !committedText.endsWith(text)) {
           return {
             outcome: {
-              success: false,
-              partialApplication: true,
-              error: "IME partial commit: the focused field does not end with the requested text",
+              ...this.describeImeCommitFailure({
+                success: false,
+                partialApplication: true,
+                ...imeCommitUnitFields(result),
+                error: "IME partial commit: the focused field does not end with the requested text",
+              }),
               resolvedMode: mode,
             },
             safeToRestore,
@@ -869,7 +877,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
       return {
         outcome: {
-          ...(operation === "replace" ? markPartialAfterMutation(result) : result),
+          ...this.describeImeCommitFailure(
+            operation === "replace" ? markPartialAfterMutation(result) : result,
+          ),
           resolvedMode: mode,
         },
         safeToRestore,
@@ -877,6 +887,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     } catch (error) {
       return { failure: error, safeToRestore };
     }
+  }
+
+  private describeImeCommitFailure(result: TextActionResult): TextActionResult {
+    if (result.success || (result.committedUnits ?? 0) <= 0) {
+      return result;
+    }
+    return {
+      ...result,
+      error: `${result.error ?? "IME commit failed"}; up to ${result.committedUnits} editing units were dispatched before the commit stopped`,
+    };
   }
 
   private readFocusedText(observation: ObserveResult): string | undefined {
@@ -1705,6 +1725,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(result.error ? { error: result.error } : {}),
             ...(result.partialApplication ? { partialApplication: true } : {}),
             ...(result.sessionUnsafe ? { sessionUnsafe: true } : {}),
+            ...imeCommitUnitFields(result),
           };
         },
       };

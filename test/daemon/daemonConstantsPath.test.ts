@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -20,6 +20,25 @@ describe("daemon state path constants", () => {
       `../../src/daemon/constants.ts?daemon-state-path-test=${Date.now()}-${Math.random()}`
     );
   }
+
+  beforeAll(async () => {
+    const warmupDir = mkdtempSync(join(tmpdir(), "daemon-constants-warmup-"));
+    try {
+      // Warm the first import from outside the checkout, as the tests do.
+      process.chdir(warmupDir);
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+      process.env.AUTOMOBILE_DAEMON_SOCKET_PATH = join(warmupDir, "daemon.sock");
+      process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH = join(warmupDir, "daemon.pid");
+      process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = join(warmupDir, "daemon.lock");
+      process.env.AUTOMOBILE_LOG_DIR = join(warmupDir, "logs");
+      process.env.AUTOMOBILE_DATA_DIR = join(warmupDir, "data");
+      await importFreshConstants();
+    } finally {
+      process.chdir(originalCwd);
+      process.env = { ...originalEnv };
+      rmSync(warmupDir, { recursive: true, force: true });
+    }
+  });
 
   afterEach(() => {
     process.chdir(originalCwd);

@@ -1,0 +1,52 @@
+OVERVIEW: Capture a screenshot from the device.
+
+Captures a screenshot from the device and saves it as a PNG file to the
+specified destination.
+
+Use 'devicectl device info displays' to list available displays and their
+unique IDs.
+
+USAGE: devicectl device capture screenshot --device <uuid|ecid|serial_number|udid|name|dns_name> --destination <path> [--display-unique-id <unique-id>] [--verbose] [--quiet] [--timeout <seconds>] [--json-output <path>] [--omit-deprecated-fields-in-json] [--log-output <path>]
+
+DEVICE OPTIONS:
+  -d, --device <uuid|ecid|serial_number|udid|name|dns_name>
+                          The identifier, ECID, serial number, UDID,
+                          user-provided name, or DNS name of the device.
+
+COMMAND OPTIONS:
+  --destination <path>    The file path where the screenshot will be saved
+                          (must be a .png file).
+  --display-unique-id <unique-id>
+                          The unique ID of the display to capture. If not
+                          specified, captures the primary display. Use
+                          'devicectl device info displays' to see available
+                          displays.
+
+OUTPUT OPTIONS:
+  -v, --verbose           If given, provide more logging output than normal.
+  -q, --quiet             If given, output will include only errors.
+  -t, --timeout <seconds> The overall command timeout in seconds. If this limit
+                          is exceeded the command is abandoned as a failure.
+  -j, --json-output <path>
+                          An optional path to write a JSON file with command
+                          results. Pass '-' (or '/dev/stdout' / '/dev/fd/1') to
+                          write the JSON to stdout instead of a file.
+        For a file path, both absolute and working-directory-relative forms are
+        accepted; existing files are overwritten. Any of '-', '/dev/stdout',
+        and '/dev/fd/1' selects stdout. When the JSON document is on stdout,
+        human-readable output (progress, status, log lines) is routed to stderr
+        instead. A few commands write non-JSON content to stdout themselves
+        (binary payloads, bridged remote stdout, legal notices) and will reject
+        stdout-selecting values at validation time — see each command's help
+        for details.
+  --omit-deprecated-fields-in-json
+                          Omit deprecated fields from JSON output.
+        When set, fields that have been deprecated are omitted from
+        --json-output.
+  -l, --log-output <path> An optional path to write all logging otherwise
+                          passed to stdout/stderr.
+
+OPTIONS:
+  --version               Show the version.
+  -h, --help              Show help information.
+

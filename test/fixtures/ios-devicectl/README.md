@@ -52,7 +52,15 @@ Not captured (needs hardware):
 
 Not captured (needs a targeted simulator):
 
+- `device info displays --json-output` JSON for a booted simulator.
+- A successful and a failed `device capture screenshot` run, including the failure envelope.
+- The CoreDevice minimum version for simulator `device capture screenshot`.
 - `booting` / `shuttingDown` simulator records (tests use DERIVED in-memory variants).
 - Real failed-command envelopes for CoreDeviceError 1000 and 1001: a captured
   `--device <duplicate name>` failure and a shut-down `device info apps` failure.
   Tests use constructed minimal objects, not captured output.
+
+Captured 2026-10-02 (Xcode 26.6 / CoreDevice 651.13.4; host-only help, no device targeted):
+
+- `capture-screenshot-help.txt`: `xcrun devicectl help device capture screenshot`
+- `info-displays-help.txt`: `xcrun devicectl help device info displays`

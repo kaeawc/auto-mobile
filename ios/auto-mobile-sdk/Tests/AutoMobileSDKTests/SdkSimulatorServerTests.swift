@@ -60,10 +60,11 @@ final class SdkSimulatorServerTests: XCTestCase {
         XCTAssertEqual(ports.count, 3, "stop cannot be undone by a late failure")
     }
 
-    func testAllFailedStatesExhaustWindowAndWarnWithSimulatorIdentity() {
+    func testAllFailedStatesExhaustWindowAndLogErrorWithSimulatorIdentity() {
         let tracker = Tracker()
         var primary: [Listener] = []
         var warnings: [String] = []
+        var errors: [String] = []
         let server = SdkHierarchyServer(
             tracker: tracker,
             identity: SdkSimulatorIdentity(environment: ["SIMULATOR_UDID": udid]),
@@ -72,7 +73,8 @@ final class SdkSimulatorServerTests: XCTestCase {
                 if port != 8766 { primary.append(listener) }
                 return listener
             },
-            warning: { warnings.append($0) }
+            warning: { warnings.append($0) },
+            error: { errors.append($0) }
         )
         server.start()
         for attempt in 0 ..< SdkSimulatorPort.probeCount {
@@ -80,9 +82,10 @@ final class SdkSimulatorServerTests: XCTestCase {
             primary[attempt].fail()
         }
         XCTAssertEqual(primary.count, SdkSimulatorPort.probeCount)
-        XCTAssertEqual(warnings.count, 1)
-        XCTAssertTrue(warnings[0].contains(udid))
-        XCTAssertTrue(warnings[0].contains("unavailable on this device"))
+        XCTAssertTrue(warnings.isEmpty)
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertTrue(errors.first?.contains(udid) == true)
+        XCTAssertTrue(errors.first?.contains(SdkHierarchyServer.bindFailureLogPrefix) == true)
         server.stop()
     }
 

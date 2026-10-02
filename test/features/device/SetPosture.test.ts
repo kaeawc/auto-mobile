@@ -1,4 +1,8 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
+import { setPostureResultSchema } from "../../../src/server/toolOutputSchemas";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, Posture } from "../../../src/models";
 import { classifyIosPostureObservation, SetPosture } from "../../../src/features/device/SetPosture";
 import type { DisplayPanel } from "../../../src/models/DisplayPanel";
@@ -1247,3 +1251,33 @@ for (const platform of ["android", "ios"] as const) {
     });
   });
 }
+
+// Run the actual fake-backed feature branch results through the declared contract.
+const executeForOutputSchema = SetPosture.prototype.execute;
+let outputSchemaSpy: ReturnType<typeof spyOn>;
+beforeEach(() => {
+  outputSchemaSpy = spyOn(SetPosture.prototype, "execute").mockImplementation(async function (
+    this: SetPosture,
+    ...args: Parameters<SetPosture["execute"]>
+  ) {
+    const result = await executeForOutputSchema.apply(this, args);
+    expect(
+      setPostureResultSchema.parse({
+        ...result,
+        message: "status" in result ? result.message : `Set device posture to ${result.posture}`,
+      }),
+    ).toBeDefined();
+    const payload = {
+      ...result,
+      message: "status" in result ? result.message : `Set device posture to ${result.posture}`,
+    };
+    const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+      name: "setPosture",
+      outputSchema: setPostureResultSchema,
+      artifactWriter: new FakeArtifactWriter(),
+    });
+    expect(setPostureResultSchema.parse(finalized.structuredContent)).toBeDefined();
+    return result;
+  });
+});
+afterEach(() => outputSchemaSpy.mockRestore());

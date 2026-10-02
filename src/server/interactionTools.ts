@@ -111,6 +111,8 @@ import {
 import {
   keyboardResultSchema,
   openLinkResultSchema,
+  rotateResultSchema,
+  setPostureResultSchema,
   sendKeysResultSchema,
   tapOnResultSchema,
 } from "./toolOutputSchemas";
@@ -2226,7 +2228,7 @@ export async function setPostureHandler(
       signal,
     );
     const message = "status" in result ? result.message : `Set device posture to ${result.posture}`;
-    return createJSONToolResponse({ message, ...result });
+    return createStructuredToolResponse({ message, ...result });
   } catch (error) {
     throw toActionableError(error, "Failed to set device posture");
   }
@@ -3299,7 +3301,7 @@ export function registerInteractionTools() {
     "Rotate device orientation",
     rotateSchema,
     rotateHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, outputSchema: rotateResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3307,7 +3309,7 @@ export function registerInteractionTools() {
     "Set Android device posture or iPhone Duo simulator hinge posture, and optionally the Resizable Android emulator display preset",
     setPostureSchema,
     setPostureHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: setPostureResultSchema },
   );
 
   // Register the clipboard tool

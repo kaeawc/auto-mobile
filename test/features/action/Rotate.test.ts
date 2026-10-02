@@ -1,3 +1,9 @@
+import { withEpilogueWarning } from "../../../src/utils/bestEffortEpilogue";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
+import { formatRotateMessage } from "../../../src/server/interactionTools";
+import { rotateResultSchema } from "../../../src/server/toolOutputSchemas";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -85,6 +91,34 @@ describe("Rotate", () => {
     (rotate as any).awaitIdle = fakeAwaitIdle;
     (rotate as any).observeScreen = fakeObserveScreen;
     (rotate as any).window = fakeWindow;
+  });
+
+  test("output schema accepts optional base metadata on a real no-op result", async () => {
+    const result = await rotate.execute("portrait");
+    expect(result.rotationPerformed).toBe(false);
+    const { observation, ...withoutObservation } = result;
+    expect(observation).toBeDefined();
+    const payload = {
+      ...withEpilogueWarning(withoutObservation, "Re-observe before acting."),
+      message: formatRotateMessage(result),
+    };
+    expect(rotateResultSchema.parse(payload)).toEqual(payload);
+    expect(
+      rotateResultSchema.safeParse({ ...payload, orientationLockState: "enabled" }).success,
+    ).toBe(false);
+    expect(rotateResultSchema.safeParse({ ...payload, warnings: [1] }).success).toBe(false);
+  });
+
+  test("stale post-rotation observation still conforms after finalization", async () => {
+    fakeAdb.setDeviceTimestampMs(1000);
+    fakeObserveScreen.setObserveResult(() => ({
+      ...createObserveResult(),
+      freshness: { isFresh: false },
+    }));
+    const result = await rotate.execute("landscape");
+    expect(result.observation?.freshness?.warning).toBe(
+      "Observation may be stale after interaction",
+    );
   });
 
   describe("getCurrentOrientation", () => {
@@ -1458,3 +1492,27 @@ describe("Rotate", () => {
     });
   });
 });
+
+// Run the actual fake-backed feature branch results through the declared contract.
+const executeForOutputSchema = Rotate.prototype.execute;
+let outputSchemaSpy: ReturnType<typeof spyOn>;
+beforeEach(() => {
+  outputSchemaSpy = spyOn(Rotate.prototype, "execute").mockImplementation(async function (
+    this: Rotate,
+    ...args: Parameters<Rotate["execute"]>
+  ) {
+    const result = await executeForOutputSchema.apply(this, args);
+    expect(
+      rotateResultSchema.parse({ ...result, message: formatRotateMessage(result) }),
+    ).toBeDefined();
+    const payload = { ...result, message: formatRotateMessage(result) };
+    const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+      name: "rotate",
+      outputSchema: rotateResultSchema,
+      artifactWriter: new FakeArtifactWriter(),
+    });
+    expect(rotateResultSchema.parse(finalized.structuredContent)).toBeDefined();
+    return result;
+  });
+});
+afterEach(() => outputSchemaSpy.mockRestore());

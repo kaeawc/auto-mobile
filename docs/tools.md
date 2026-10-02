@@ -582,6 +582,22 @@ follows the final observation; freshness is checked before that notification.
 Only a fresh final observation can remember the requested iOS posture for later
 `display.posture` reads, including `half_opened` on the inner panel.
 
+Both `rotate` and `setPosture` declare output schemas and return the same JSON
+payload in text content and `structuredContent`. Ordinary clients receive
+`structuredContent` unless `--tool-results-no-structured-content` is enabled.
+
+`setPosture` returns `message`, the requested `posture`, and `display` (key, role,
+posture, generation), with optional `locked` and `warnings`. Unsupported iOS
+requests return `{ "status": "unsupported", "message": "..." }`; operational
+failures throw actionable errors.
+
+`rotate` returns `success`, `orientation`, `value`, and `message`. Optional fields
+include `currentOrientation`, `previousOrientation`, `rotationPerformed`,
+`orientationLockHandled`, `orientationLockState`, `warning`, `warnings`, `error`,
+`staleDisplay`, `effect`, and a finalized `observation`/`observationDiff`.
+Successful no-ops report `rotationPerformed: false`. Returned failures retain
+the structured result with `success: false` and set the MCP `isError` flag.
+
 ### Keeping an Android orientation locked
 
 `rotate` preserves its existing behavior when `lockOrientation` is omitted: it

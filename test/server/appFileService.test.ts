@@ -1075,6 +1075,250 @@ describe("AppFileService", () => {
     expect(await fileSystem.readdir(dirname(target))).toEqual([{ name: "value.txt" }]);
   });
 
+  describe("iOS batch writes", () => {
+    const dataRoot = "/simulators/SIM-1/data";
+    const command = `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`;
+
+    class BatchFileSystem extends TestAppFileFileSystem {
+      readonly writes: string[] = [];
+      readonly createdDirectories: string[] = [];
+
+      override async mkdir(path: string): Promise<void> {
+        this.createdDirectories.push(path);
+        await super.mkdir(path);
+      }
+
+      override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+        this.writes.push(`copy:start:${destinationPath}`.replaceAll("\\", "/"));
+        await Promise.resolve();
+        await super.copyFile(sourcePath, destinationPath);
+        this.writes.push(`copy:end:${destinationPath}`.replaceAll("\\", "/"));
+      }
+
+      override async rename(oldPath: string, newPath: string): Promise<void> {
+        this.writes.push(`rename:${oldPath}:${newPath}`.replaceAll("\\", "/"));
+        await super.rename(oldPath, newPath);
+      }
+    }
+
+    function createBatchHarness() {
+      const fileSystem = new BatchFileSystem();
+      const simctl = new FakeSimCtlClient();
+      simctl.setCommandResult(command, dataRoot);
+      const service = createAppFileServiceForTesting({
+        simctlFactory: () => simctl as unknown as SimCtlClient,
+        fileSystem,
+      });
+      // The service rejects duplicate destinations and accepts only one target per batch.
+      // Reach the private provider to exercise its batch contract without exporting it.
+      const { writeProviders } = service as unknown as {
+        writeProviders: Map<string, AppFileWriteProvider>;
+      };
+      const provider = [...writeProviders.values()].find(
+        (entry) => entry.platform === "ios" && entry.domain === "app_containers",
+      )!;
+      const putFiles = (requests: PutAppFileProviderRequest[]) =>
+        provider.putFiles
+          ? provider.putFiles(requests)
+          : Promise.all(requests.map((request) => provider.putFile(request)));
+      const request = (sourcePath: string): PutAppFileProviderRequest => ({
+        device: iosSimulatorDevice,
+        target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+        sourcePath,
+        destinationPath: "fixtures/value.txt",
+        byteCount: 5,
+      });
+      return { fileSystem, simctl, service, provider, putFiles, request };
+    }
+
+    test("resolves one iOS container for a three-file service batch and writes atomically", async () => {
+      const { fileSystem, simctl, service } = createBatchHarness();
+      const files = ["one", "two", "three"].map((contentText) => ({
+        contentText,
+        destinationPath: `fixtures/${contentText}.txt`,
+      }));
+
+      const result = await service.putFile({
+        device: iosSimulatorDevice,
+        target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+        files,
+      });
+
+      expect(simctl.getMethodCalls("executeCommand")).toEqual([{ command, timeoutMs: undefined }]);
+      expect(result.files).toHaveLength(3);
+      for (const [index, file] of files.entries()) {
+        const target = join(dataRoot, "Documents", file.destinationPath).replaceAll("\\", "/");
+        const temporary = join(
+          dirname(target),
+          `.${file.contentText}.txt.${index + 1}.tmp`,
+        ).replaceAll("\\", "/");
+        expect(await fileSystem.readText(target)).toBe(file.contentText);
+        expect(fileSystem.writes).toContain(`copy:start:${temporary}`);
+        expect(fileSystem.writes).toContain(`rename:${temporary}:${target}`);
+      }
+      expect(fileSystem.writes).toHaveLength(9);
+      expect(fileSystem.writes.slice(0, 3).every((write) => write.startsWith("copy:start:"))).toBe(
+        true,
+      );
+      expect(await fileSystem.readdir(join(dataRoot, "Documents", "fixtures"))).toEqual([
+        { name: "one.txt" },
+        { name: "three.txt" },
+        { name: "two.txt" },
+      ]);
+    });
+
+    test("resolves an iOS single-file put once and refreshes the root on the next call", async () => {
+      const { fileSystem, simctl, service, provider, request } = createBatchHarness();
+      await service.putFile({
+        device: iosSimulatorDevice,
+        appId: "com.example.app",
+        container: "documents",
+        contentText: "first",
+        destinationPath: "fixtures/value.txt",
+      });
+      expect(simctl.getMethodCalls("executeCommand")).toHaveLength(1);
+
+      const newRoot = "/simulators/SIM-1/reinstalled-data";
+      simctl.setCommandResult(command, newRoot);
+      await fileSystem.writeFileBuffer("/fixtures/second.txt", Buffer.from("second"));
+      await provider.putFile(request("/fixtures/second.txt"));
+
+      expect(simctl.getMethodCalls("executeCommand")).toHaveLength(2);
+      expect(await fileSystem.readText(join(dataRoot, "Documents", "fixtures/value.txt"))).toBe(
+        "first",
+      );
+      expect(await fileSystem.readText(join(newRoot, "Documents", "fixtures/value.txt"))).toBe(
+        "second",
+      );
+    });
+
+    for (const failure of ["empty", "missing"] as const) {
+      test(`resolves a failing ${failure} iOS batch once without container writes`, async () => {
+        const { fileSystem, simctl, service } = createBatchHarness();
+        if (failure === "empty") {
+          simctl.setCommandResult(command, "  \n");
+        } else {
+          simctl.setCommandError(command, new Error("The application is not installed."));
+        }
+        await expect(
+          service.putFile({
+            device: iosSimulatorDevice,
+            target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+            files: ["one", "two", "three"].map((contentText) => ({
+              contentText,
+              destinationPath: `${contentText}.txt`,
+            })),
+          }),
+        ).rejects.toThrow(
+          failure === "empty"
+            ? `Unable to resolve iOS simulator app data container for com.example.app on ${iosSimulatorDevice.deviceId}. Confirm the simulator is booted and the app is installed.`
+            : `iOS app com.example.app is not installed on simulator ${iosSimulatorDevice.deviceId}`,
+        );
+
+        expect(fileSystem.createdDirectories).toEqual([]);
+        expect(fileSystem.writes).toEqual([]);
+        expect(simctl.getMethodCalls("executeCommand")).toHaveLength(1);
+      });
+    }
+
+    test("resolves once and serializes same-target duplicates within an iOS provider batch", async () => {
+      const { fileSystem, simctl, putFiles, request } = createBatchHarness();
+      await fileSystem.writeFileBuffer("/fixtures/first.txt", Buffer.from("first"));
+      await fileSystem.writeFileBuffer("/fixtures/second.txt", Buffer.from("second"));
+      await putFiles([request("/fixtures/first.txt"), request("/fixtures/second.txt")]);
+
+      expect(simctl.getMethodCalls("executeCommand")).toHaveLength(1);
+      expect(fileSystem.writes).toHaveLength(6);
+      expect(fileSystem.writes[0]).toStartWith("copy:start:");
+      expect(fileSystem.writes[1]).toBe(fileSystem.writes[0]!.replace("copy:start:", "copy:end:"));
+      expect(fileSystem.writes[2]).toStartWith("rename:");
+      expect(fileSystem.writes[3]).toStartWith("copy:start:");
+      expect(fileSystem.writes[4]).toBe(fileSystem.writes[3]!.replace("copy:start:", "copy:end:"));
+      expect(fileSystem.writes[5]).toStartWith("rename:");
+      expect(await fileSystem.readText(join(dataRoot, "Documents", "fixtures/value.txt"))).toBe(
+        "second",
+      );
+      expect(await fileSystem.readdir(join(dataRoot, "Documents", "fixtures"))).toEqual([
+        { name: "value.txt" },
+      ]);
+    });
+
+    test("resolves each distinct iOS batch key before any write starts", async () => {
+      const { fileSystem, simctl, putFiles, request } = createBatchHarness();
+      await fileSystem.writeFileBuffer("/fixtures/value.txt", Buffer.from("value"));
+      const otherDevice = {
+        ...iosSimulatorDevice,
+        deviceId: "FFFFFFFF-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      };
+      const otherDeviceCommand = `get_app_container '${otherDevice.deviceId}' 'com.example.app' data`;
+      const otherAppCommand = `get_app_container '${iosSimulatorDevice.deviceId}' 'com.other.app' data`;
+      const execute = spyOn(simctl, "executeCommand").mockImplementation(async (command) => {
+        expect(fileSystem.createdDirectories).toEqual([]);
+        expect(fileSystem.writes).toEqual([]);
+        return execResult(
+          command === otherDeviceCommand
+            ? "/simulators/SIM-2/data"
+            : command === otherAppCommand
+              ? "/simulators/SIM-1/other-data"
+              : dataRoot,
+        );
+      });
+      const base = request("/fixtures/value.txt");
+      const requests: PutAppFileProviderRequest[] = [
+        base,
+        { ...base, destinationPath: "fixtures/second.txt" },
+        { ...base, device: otherDevice },
+        {
+          ...base,
+          target: { domain: "app_containers", appId: "com.other.app", container: "documents" },
+        },
+        {
+          ...base,
+          target: { domain: "app_containers", appId: "com.example.app", container: "cache" },
+        },
+      ];
+      try {
+        await putFiles(requests);
+        expect(execute.mock.calls.map(([command]) => command)).toEqual([
+          command,
+          otherDeviceCommand,
+          otherAppCommand,
+          command,
+        ]);
+        for (const target of [
+          join(dataRoot, "Documents", "fixtures/value.txt"),
+          join(dataRoot, "Documents", "fixtures/second.txt"),
+          "/simulators/SIM-2/data/Documents/fixtures/value.txt",
+          "/simulators/SIM-1/other-data/Documents/fixtures/value.txt",
+          join(dataRoot, "Library", "Caches", "fixtures/value.txt"),
+        ]) {
+          expect(await fileSystem.readText(target)).toBe("value");
+        }
+      } finally {
+        execute.mockRestore();
+      }
+    });
+
+    test("writes nothing when a later iOS batch key fails resolution", async () => {
+      const { fileSystem, simctl, putFiles, request } = createBatchHarness();
+      await fileSystem.writeFileBuffer("/fixtures/value.txt", Buffer.from("value"));
+      const base = request("/fixtures/value.txt");
+      await expect(
+        putFiles([
+          base,
+          {
+            ...base,
+            target: { domain: "app_containers", appId: "com.missing.app", container: "documents" },
+          },
+        ]),
+      ).rejects.toThrow("Unable to resolve iOS simulator app data container for com.missing.app");
+
+      expect(simctl.getMethodCalls("executeCommand")).toHaveLength(2);
+      expect(fileSystem.createdDirectories).toEqual([]);
+      expect(fileSystem.writes).toEqual([]);
+    });
+  });
+
   test("maps iOS logical containers to simulator data container folders", async () => {
     const fileSystem = new TestAppFileFileSystem();
     const dataRoot = "/simulators/SIM-1/data";

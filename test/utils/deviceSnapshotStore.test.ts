@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
+import {
+  DeviceSnapshotStore,
+  findReservedSnapshotNameReason,
+  isReservedSnapshotName,
+  SNAPSHOT_REPLACING_SUFFIX,
+  SNAPSHOT_IOS_SCOPE_ROOT,
+  SNAPSHOT_ANDROID_SCOPE_ROOT,
+} from "../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -8,6 +15,43 @@ import {
   noOpSnapshotDirectorySync,
   noOpSnapshotFileSync,
 } from "../helpers/deviceSnapshotStoreSync";
+
+describe("reserved snapshot names", () => {
+  for (const snapshotName of [
+    ".replacing",
+    ".REPLACING",
+    ".Replacing",
+    "x.journal.replacing",
+    "x.JOURNAL.REPLACING",
+    "x.journal.tmp.replacing",
+    "android",
+    "ANDROID",
+    "Ios",
+  ]) {
+    it(`reserves ${snapshotName} case-insensitively`, () => {
+      expect(isReservedSnapshotName(snapshotName)).toBe(true);
+      expect(findReservedSnapshotNameReason(snapshotName)).toEqual(
+        snapshotName.toLowerCase().endsWith(SNAPSHOT_REPLACING_SUFFIX)
+          ? { kind: "suffix", suffix: SNAPSHOT_REPLACING_SUFFIX }
+          : { kind: "scope-root", name: snapshotName.toLowerCase() },
+      );
+    });
+  }
+
+  for (const snapshotName of [
+    "x.journal",
+    "x.tmp",
+    "a.journal.b",
+    "a.replacing.b",
+    "androidx",
+    "my-ios",
+  ]) {
+    it(`allows ordinary name ${snapshotName}`, () => {
+      expect(isReservedSnapshotName(snapshotName)).toBe(false);
+      expect(findReservedSnapshotNameReason(snapshotName)).toBeUndefined();
+    });
+  }
+});
 
 describe("DeviceSnapshotStore", () => {
   let store: DeviceSnapshotStore;
@@ -142,6 +186,50 @@ describe("DeviceSnapshotStore", () => {
   describe("replaceSnapshotData (#5713)", () => {
     const journal = (dest: string) => `${dest}.journal.replacing`;
     const tempJournal = (dest: string) => `${dest}.journal.tmp.replacing`;
+
+    it("reserves the real journal, temp journal, aside, and scope-root path names", async () => {
+      const originalRename = fs.rename.bind(fs);
+      const renameSpy = spyOn(fs, "rename").mockImplementation(async (source, destination) => {
+        expect(isReservedSnapshotName(path.basename(String(destination)))).toBe(true);
+        if (String(source).endsWith(".journal.tmp.replacing")) {
+          // Observe the actual temp journal before the store renames it.
+          expect(["pending-existing", "committed"]).toContain(await fs.readFile(source, "utf-8"));
+          expect(isReservedSnapshotName(path.basename(String(source)))).toBe(true);
+        }
+        await originalRename(source, destination);
+      });
+      try {
+        for (const snapshotName of ["normal", "x.journal", "Mixed"]) {
+          const dest = store.getSnapshotPath(snapshotName);
+          await fs.mkdir(dest);
+          await store.replaceSnapshotData(snapshotName, undefined, async () => {
+            const entries = await fs.readdir(testBasePath);
+            const bookkeepingNames = entries.filter((entry) => entry !== snapshotName);
+            expect(bookkeepingNames).toContain(path.basename(journal(dest)));
+            expect(bookkeepingNames).toContain(path.basename(`${dest}.replacing`));
+            expect(isReservedSnapshotName(path.basename(journal(dest)))).toBe(true);
+            expect(isReservedSnapshotName(path.basename(`${dest}.replacing`))).toBe(true);
+            await fs.mkdir(dest);
+          });
+          await fs.rm(dest, { recursive: true });
+        }
+        expect(renameSpy).toHaveBeenCalledTimes(9);
+      } finally {
+        renameSpy.mockRestore();
+      }
+
+      for (const options of [
+        { platform: "ios" as const, deviceId: "device" },
+        { platform: "android" as const, avdName: "avd" },
+      ]) {
+        const scopedPath = store.getSnapshotPathWithOptions("normal", options);
+        const rootName = path.basename(path.dirname(path.dirname(scopedPath)));
+        expect(rootName).toBe(
+          options.platform === "ios" ? SNAPSHOT_IOS_SCOPE_ROOT : SNAPSHOT_ANDROID_SCOPE_ROOT,
+        );
+        expect(isReservedSnapshotName(rootName)).toBe(true);
+      }
+    });
 
     it("replaces existing contents so no stale files survive", async () => {
       const snapshotName = "replace-me";

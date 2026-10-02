@@ -1387,12 +1387,68 @@ describe("deviceSnapshotManager", () => {
     // The atomic overwrite uses a sibling `<name>.replacing` dir; a snapshot
     // literally named `<x>.replacing` would let one capture's set-aside path
     // collide with — and delete — this real snapshot's directory.
-    await expect(
-      captureDeviceSnapshot(TEST_DEVICE, { snapshotName: "foo.replacing" }),
-    ).rejects.toThrow(/reserved/i);
+    for (const snapshotName of [
+      "foo.replacing",
+      "foo.REPLACING",
+      "foo.Journal.Replacing",
+      "Android",
+      "IOS",
+    ]) {
+      await expect(captureDeviceSnapshot(TEST_DEVICE, { snapshotName })).rejects.toThrow(
+        /reserved/i,
+      );
+      expect(captureCalls).toEqual([]);
+    }
     // The capture provider must never run for a rejected name.
     expect(captureCalls).toEqual([]);
   });
+
+  for (const snapshotName of ["foo.journal", "foo.tmp", "a.journal.b"]) {
+    test(`captureDeviceSnapshot accepts ordinary name ${snapshotName}`, async () => {
+      const { result } = await captureDeviceSnapshot(TEST_DEVICE, { snapshotName });
+      expect(result.snapshotName).toBe(snapshotName);
+      expect(captureCalls).toHaveLength(1);
+      expect(await repository.getSnapshot(snapshotName)).not.toBeNull();
+    });
+  }
+
+  for (const snapshotName of ["Foo.REPLACING", "Android"]) {
+    test(`existing reserved name ${snapshotName} remains restorable and deletable`, async () => {
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp,
+        deviceId: TEST_DEVICE.deviceId,
+        deviceName: TEST_DEVICE.name,
+        platform: TEST_DEVICE.platform,
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        ...manifest,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 2 * 1024 * 1024,
+        manifest,
+      });
+      store.setSnapshotExists(snapshotName, true);
+      store.setSnapshotSize(snapshotName, 2 * 1024 * 1024);
+
+      const restored = await restoreDeviceSnapshot(TEST_DEVICE, { snapshotName });
+      expect(restored.manifest).toEqual(manifest);
+      expect(restoreCalls).toHaveLength(1);
+      expect((await listDeviceSnapshots()).snapshots).toEqual([
+        expect.objectContaining({ snapshotName }),
+      ]);
+
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+      expect(evictedSnapshotNames).toContain(snapshotName);
+      expect(await repository.getSnapshot(snapshotName)).toBeNull();
+      expect(store.getDeletedSnapshots()).toContain(snapshotName);
+      expect(await store.snapshotDirectoryExists(snapshotName)).toBe(false);
+    });
+  }
 
   test("FakeDeviceSnapshotStore distinguishes an explicit unknown size from an absent size", async () => {
     store.setSnapshotSize("unknown", null);

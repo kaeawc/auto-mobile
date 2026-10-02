@@ -14,6 +14,37 @@ import type { Platform } from "../models";
  * can never collide with — or be re-imported as — a real user snapshot (issue #5713).
  */
 export const SNAPSHOT_REPLACING_SUFFIX = ".replacing";
+export const SNAPSHOT_IOS_SCOPE_ROOT = "ios";
+export const SNAPSHOT_ANDROID_SCOPE_ROOT = "android";
+
+export type ReservedSnapshotNameReason =
+  | {
+      kind: "scope-root";
+      name: typeof SNAPSHOT_IOS_SCOPE_ROOT | typeof SNAPSHOT_ANDROID_SCOPE_ROOT;
+    }
+  | { kind: "suffix"; suffix: typeof SNAPSHOT_REPLACING_SUFFIX };
+
+export function findReservedSnapshotNameReason(
+  snapshotName: string,
+): ReservedSnapshotNameReason | undefined {
+  // Archives are portable: fold case on every host to prevent collisions on
+  // case-insensitive macOS/Windows filesystems without probing the host filesystem.
+  const normalizedName = snapshotName.toLowerCase();
+  if (
+    normalizedName === SNAPSHOT_IOS_SCOPE_ROOT ||
+    normalizedName === SNAPSHOT_ANDROID_SCOPE_ROOT
+  ) {
+    return { kind: "scope-root", name: normalizedName };
+  }
+  if (normalizedName.endsWith(SNAPSHOT_REPLACING_SUFFIX)) {
+    return { kind: "suffix", suffix: SNAPSHOT_REPLACING_SUFFIX };
+  }
+  return undefined;
+}
+
+export function isReservedSnapshotName(snapshotName: string): boolean {
+  return findReservedSnapshotNameReason(snapshotName) !== undefined;
+}
 
 type SnapshotJournalState = "pending-existing" | "pending-new" | "committed";
 
@@ -78,7 +109,7 @@ export class DeviceSnapshotStore {
       // separator can otherwise resolve the scoped path outside the
       // snapshots directory entirely (issue #6493).
       assertSafePathSegment("iOS device id", options.deviceId);
-      return path.join(this.basePath, "ios", options.deviceId, snapshotName);
+      return path.join(this.basePath, SNAPSHOT_IOS_SCOPE_ROOT, options.deviceId, snapshotName);
     }
 
     // Android emulators scope by AVD name so the same snapshot name can be
@@ -88,7 +119,7 @@ export class DeviceSnapshotStore {
       // line), not from a validated caller-supplied name. Same containment
       // rule as above (issue #6493).
       assertSafePathSegment("Android AVD name", options.avdName);
-      return path.join(this.basePath, "android", options.avdName, snapshotName);
+      return path.join(this.basePath, SNAPSHOT_ANDROID_SCOPE_ROOT, options.avdName, snapshotName);
     }
 
     return this.getSnapshotPath(snapshotName);

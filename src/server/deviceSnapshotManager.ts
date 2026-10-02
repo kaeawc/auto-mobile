@@ -20,6 +20,9 @@ import {
 import {
   DeviceSnapshotStore,
   SNAPSHOT_REPLACING_SUFFIX,
+  SNAPSHOT_IOS_SCOPE_ROOT,
+  SNAPSHOT_ANDROID_SCOPE_ROOT,
+  findReservedSnapshotNameReason,
   type SnapshotPathOptions,
 } from "../utils/DeviceSnapshotStore";
 import { assertSafeSnapshotName } from "../utils/snapshotNameValidation";
@@ -1142,7 +1145,8 @@ async function notifySnapshotResources(): Promise<void> {
 function assertSnapshotNameWritable(snapshotName: string): void {
   // "android"/"ios" are the platform scope roots under the snapshots dir. An
   // unscoped (physical / fallback) snapshot with one of those names would take
-  // the scope directory itself, so deleting it later would recursively remove
+  // the scope directory itself (also with different casing on case-insensitive
+  // filesystems), so deleting it later would recursively remove
   // every scoped snapshot nested under it. Reject the collision at the source
   // (#5707); broader snapshotName sanitization is tracked in #5705.
   //
@@ -1152,7 +1156,8 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   // name lock, and the record is replaced (not duplicated) by the repository
   // upsert — so the old check-then-create existence probe (a TOCTOU window) is
   // gone.
-  if (isReservedScopeSegment(snapshotName)) {
+  const reservedReason = findReservedSnapshotNameReason(snapshotName);
+  if (reservedReason?.kind === "scope-root") {
     throw new ActionableError(
       `Snapshot name '${snapshotName}' is reserved. Please choose a different name.`,
     );
@@ -1161,11 +1166,12 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   // The atomic overwrite moves the existing snapshot into a sibling
   // `<name>${SNAPSHOT_REPLACING_SUFFIX}` directory. Allowing a snapshot to BE
   // named with that suffix would let one capture's set-aside path collide with
-  // another real snapshot's directory and delete it. Reserve the suffix (#5713).
-  if (snapshotName.endsWith(SNAPSHOT_REPLACING_SUFFIX)) {
+  // another real snapshot's directory and delete it, including case variants on
+  // case-insensitive filesystems. Reserve the suffix (#5713).
+  if (reservedReason?.kind === "suffix") {
     throw new ActionableError(
       `Snapshot name '${snapshotName}' ends with the reserved '${SNAPSHOT_REPLACING_SUFFIX}' ` +
-        "suffix. Please choose a different name.",
+        "suffix (case-insensitively). Please choose a different name.",
     );
   }
 }
@@ -1377,7 +1383,7 @@ async function removeSnapshotArchiveData(
 // root, so the legacy flat-path cleanup must skip it to avoid deleting the whole
 // scope tree.
 function isReservedScopeSegment(snapshotName: string): boolean {
-  return snapshotName === "android" || snapshotName === "ios";
+  return snapshotName === SNAPSHOT_ANDROID_SCOPE_ROOT || snapshotName === SNAPSHOT_IOS_SCOPE_ROOT;
 }
 
 /**

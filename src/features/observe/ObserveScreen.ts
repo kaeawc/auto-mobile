@@ -1587,7 +1587,11 @@ export class RealObserveScreen implements ObserveScreen {
         freshness,
         this.timer,
         this.idGenerator,
-        result.observationId,
+        {
+          captureId: result.observationId,
+          iosMultiPanel:
+            this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+        },
       );
     }
   }

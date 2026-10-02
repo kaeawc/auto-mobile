@@ -399,7 +399,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         screenshotCapturer: this.screenshotCapturer,
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
-    this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
+    this.elementSelector =
+      options.elementSelector ??
+      new ResolverElementSelector(undefined, undefined, {
+        iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
+      });
     this.talkBackDriverFactory =
       options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
     this.talkBackStrategy =

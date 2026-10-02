@@ -16,6 +16,9 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
 import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import { NavigationScreenshotManager } from "../../../src/features/navigation/NavigationScreenshotManager";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -56,6 +59,26 @@ import type { ExecResult } from "../../../src/models";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const flushMicrotasks = async (): Promise<void> => {
+  for (let turn = 0; turn < 30; turn++) {
+    await Promise.resolve();
+  }
+};
 
 describe("AndroidCtrlProxyClient", function () {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -1888,6 +1911,282 @@ describe("AndroidCtrlProxyClient", function () {
 
     afterAll(async () => {
       await navHarness.dispose();
+    });
+
+    describe("inbound handler close lifecycle (#6588)", () => {
+      let socket: CapturingWebSocket;
+      let navWrite: ReturnType<typeof deferred<void>>;
+      let capture: ReturnType<typeof spyOn<NavigationScreenshotManager, "captureAndStore">>;
+      let screenshotUpdate: ReturnType<
+        typeof spyOn<NavigationGraphManager, "updateNodeScreenshot">
+      >;
+      let pkgInfo: ReturnType<typeof spyOn<AndroidCtrlProxyClient, "requestPackageInfo">>;
+      let restoreSpies: () => void;
+
+      beforeEach(async () => {
+        await accessibilityServiceClient.close();
+        fakeTimer = new FakeTimer();
+        const sockets = createCapturingWebSocketFactory(fakeTimer);
+        accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+          testDevice,
+          fakeAdb,
+          sockets.factory,
+          fakeTimer,
+        );
+        pkgInfo = spyOn(accessibilityServiceClient, "requestPackageInfo").mockResolvedValue(
+          packageInfoResult(false),
+        );
+        navWrite = deferred<void>();
+        const record = spyOn(navHarness.manager, "recordNavigationEvent").mockImplementation(
+          () => navWrite.promise,
+        );
+        const screenshots = NavigationScreenshotManager.createForTesting({
+          screenshotDir: "/navigation-screenshots",
+          fileSystem: new FakeFileSystem(),
+          timer: fakeTimer,
+        });
+        const getScreenshots = spyOn(NavigationScreenshotManager, "getInstance").mockReturnValue(
+          screenshots,
+        );
+        capture = spyOn(screenshots, "captureAndStore").mockResolvedValue("screen.webp");
+        screenshotUpdate = spyOn(navHarness.manager, "updateNodeScreenshot").mockResolvedValue(
+          undefined,
+        );
+        const enabled = spyOn(serverConfig, "isNavigationScreenshotsEnabled").mockReturnValue(true);
+        restoreSpies = () => {
+          pkgInfo.mockRestore();
+          record.mockRestore();
+          capture.mockRestore();
+          screenshotUpdate.mockRestore();
+          getScreenshots.mockRestore();
+          enabled.mockRestore();
+        };
+        expect(await accessibilityServiceClient.ensureConnected()).toBe(true);
+        socket = sockets.getSocket()!;
+      });
+
+      afterEach(async () => {
+        navWrite.resolve();
+        await flushMicrotasks();
+        const closing = accessibilityServiceClient.close();
+        await flushMicrotasks();
+        fakeTimer.advanceTime(2000);
+        await closing;
+        restoreSpies();
+        resetDbWriteBarrier();
+      });
+
+      const sendNavigation = () => {
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "navigation_event",
+            event: {
+              destination: "SdkHome",
+              source: "SdkStart",
+              arguments: {},
+              metadata: {},
+              timestamp: fakeTimer.now(),
+              sequenceNumber: 1,
+              applicationId: "com.example.app",
+            },
+          }),
+        );
+      };
+
+      test("skips capture and screenshot update when a nav write resumes after close", async () => {
+        sendNavigation();
+        await flushMicrotasks();
+        const closing = accessibilityServiceClient.close();
+        await flushMicrotasks();
+        fakeTimer.advanceTime(2000);
+        await closing;
+        navWrite.resolve();
+        await flushMicrotasks();
+        expect(capture).not.toHaveBeenCalled();
+        expect(screenshotUpdate).not.toHaveBeenCalled();
+      });
+
+      test("close waits for a parked handler that settles before the deadline", async () => {
+        sendNavigation();
+        await flushMicrotasks();
+        let closed = false;
+        const closing = accessibilityServiceClient.close().then(() => {
+          closed = true;
+        });
+        await flushMicrotasks();
+        fakeTimer.advanceTime(1999);
+        await flushMicrotasks();
+        expect(closed).toBe(false);
+        navWrite.resolve();
+        await closing;
+        expect(closed).toBe(true);
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      });
+
+      test("close bounds a never-settling handler and warns once at the deadline", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          sendNavigation();
+          await flushMicrotasks();
+          let closed = false;
+          const closing = accessibilityServiceClient.close().then(() => {
+            closed = true;
+          });
+          await flushMicrotasks();
+          fakeTimer.advanceTime(1999);
+          await flushMicrotasks();
+          expect(closed).toBe(false);
+          fakeTimer.advanceTime(1);
+          await closing;
+          expect(closed).toBe(true);
+          expect(
+            warn.mock.calls.filter(([message]) =>
+              String(message).includes("Inbound handler drain"),
+            ),
+          ).toEqual([
+            ["[CTRL_PROXY] Inbound handler drain timed out after 2000ms; continuing cleanup"],
+          ]);
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      test("tracked navigation does not delay a following frame's synchronous prefix", async () => {
+        const seen: string[] = [];
+        const unsubscribe = accessibilityServiceClient.onInteraction((event) =>
+          seen.push(event.type),
+        );
+        try {
+          sendNavigation();
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "interaction_event",
+              event: { type: "tap", packageName: "com.example.app", timestamp: fakeTimer.now() },
+            }),
+          );
+          expect(seen).toEqual(["tap"]);
+          expect(accessibilityServiceClient["lastInteractionByApp"].has("com.example.app")).toBe(
+            true,
+          );
+          await flushMicrotasks();
+          expect(capture).not.toHaveBeenCalled();
+          expect(accessibilityServiceClient["inFlightMessageHandlers"]?.size).toBe(1);
+          navWrite.resolve();
+          await flushMicrotasks();
+          expect(accessibilityServiceClient["inFlightMessageHandlers"]?.size).toBe(0);
+        } finally {
+          unsubscribe();
+        }
+      });
+
+      test("handler rejection uses the existing warning path and leaves no tracked promise", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          sendNavigation();
+          await flushMicrotasks();
+          const tracked = accessibilityServiceClient["inFlightMessageHandlers"]?.size;
+          navWrite.reject(new Error("nav write rejected"));
+          await flushMicrotasks();
+          expect(warn).toHaveBeenCalledWith(
+            "[CTRL_PROXY] Error handling WebSocket message: Error: nav write rejected",
+          );
+          expect(tracked).toBe(1);
+          expect(accessibilityServiceClient["inFlightMessageHandlers"]?.size).toBe(0);
+          await accessibilityServiceClient.close();
+          fakeTimer.advanceTime(0);
+          await flushMicrotasks();
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      test("owns a pending screenshot and skips its DB update after close", async () => {
+        const screenshot = deferred<string | null>();
+        capture.mockImplementation(() => screenshot.promise);
+        try {
+          sendNavigation();
+          navWrite.resolve();
+          await flushMicrotasks();
+          expect(capture).toHaveBeenCalledTimes(1);
+          let closed = false;
+          const closing = accessibilityServiceClient.close().then(() => {
+            closed = true;
+          });
+          await flushMicrotasks();
+          expect(closed).toBe(false);
+          screenshot.resolve("screen.webp");
+          await closing;
+          await flushMicrotasks();
+          expect(screenshotUpdate).not.toHaveBeenCalled();
+        } finally {
+          screenshot.resolve(null);
+        }
+      });
+
+      test("owns the screenshot DB update until it settles", async () => {
+        const update = deferred<void>();
+        screenshotUpdate.mockImplementation(() => update.promise);
+        try {
+          sendNavigation();
+          navWrite.resolve();
+          await flushMicrotasks();
+          expect(screenshotUpdate).toHaveBeenCalledWith(
+            "com.example.app",
+            "SdkHome",
+            "screen.webp",
+          );
+          let closed = false;
+          const closing = accessibilityServiceClient.close().then(() => {
+            closed = true;
+          });
+          await flushMicrotasks();
+          expect(closed).toBe(false);
+          update.resolve();
+          await closing;
+          expect(accessibilityServiceClient["inFlightMessageHandlers"]?.size).toBe(0);
+        } finally {
+          update.resolve();
+        }
+      });
+
+      test("skips a deferred provenance request that starts after close", async () => {
+        sendNavigation();
+        navWrite.resolve();
+        await flushMicrotasks();
+        await accessibilityServiceClient.close();
+        fakeTimer.advanceTime(0);
+        await flushMicrotasks();
+        expect(pkgInfo).not.toHaveBeenCalled();
+      });
+
+      test("skips the ADB content-hash probe when package info resumes after close", async () => {
+        const info = deferred<A11yPackageInfoResult>();
+        pkgInfo.mockImplementation(() => info.promise);
+        let probes = 0;
+        accessibilityServiceClient["contentHashProvider"] = {
+          resolveContentHash: async () => {
+            probes++;
+            return null;
+          },
+          invalidate: () => {},
+        };
+        try {
+          sendNavigation();
+          navWrite.resolve();
+          await flushMicrotasks();
+          fakeTimer.advanceTime(0);
+          expect(pkgInfo).toHaveBeenCalledTimes(1);
+          await accessibilityServiceClient.close();
+          info.resolve(packageInfoResult(true, 42));
+          await flushMicrotasks();
+          expect(probes).toBe(0);
+        } finally {
+          info.resolve(packageInfoResult(false));
+          await flushMicrotasks();
+        }
+      });
     });
 
     test("should return hierarchy data when WebSocket receives fresh data", async function () {

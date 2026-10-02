@@ -1,3 +1,4 @@
+import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
 import {
@@ -362,6 +363,7 @@ export class Daemon {
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
   private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
   private stoppingRecordings: Set<string> = new Set();
+  private observerSessionRegistry: ObserverSessionRegistry;
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
   private deviceSessionRegistry: DeviceSessionRegistry;
@@ -484,6 +486,7 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.observerSessionRegistry = new ObserverSessionRegistry(this.timer);
     registerLocationRouteSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
@@ -615,6 +618,7 @@ export class Daemon {
       this.sessionManager,
       this.devicePool,
       this.deviceSessionRegistry,
+      this.observerSessionRegistry,
     );
 
     // Apply CLI flags to serverConfig so daemon tools respect them
@@ -3255,7 +3259,10 @@ export class Daemon {
           // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
           // and hit the just-closed connection (issue #2912; #2792 safety window).
           name: "session cleanup timer",
-          run: () => this.sessionManager.stopCleanupTimer(),
+          run: () => {
+            this.sessionManager.stopCleanupTimer();
+            this.observerSessionRegistry.dispose();
+          },
         },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },

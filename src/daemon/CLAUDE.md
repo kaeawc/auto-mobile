@@ -86,3 +86,37 @@ const server = new MySocketServer(socketPath, fakeTimer);
 // Advance time without waiting
 fakeTimer.advance(10000);
 ```
+
+## Registration-only sessions
+
+`daemon/registerSession { sessionId, clientName }` validates a client UUID and a
+non-blank client name (128-character caps). It returns the usual success envelope
+with `{ accepted, heartbeatTimeoutMs, expiresAtMs }`, or `success: false, error`
+with an actionable quota message. It stays on the per-socket request queue;
+`daemon/heartbeat` retains its existing out-of-band dispatch.
+
+`ObserverSessionRegistry` is a separate in-memory registry, never a `Session`
+and never persisted. Defaults pending owner confirmation: cap 32
+(`MAX_OBSERVER_SESSIONS`), the existing default heartbeat timeout of 10 seconds
+(including its environment override), and unowned-device-only scope via
+`observerMaySeeDeviceOwner`. Every registry operation lazily purges expiry using
+the injected Timer; there are no background timers. `dispose()` closes and clears
+it. Registration is idempotent and refreshes TTL; expired entries free quota.
+Heartbeat and release consult it only when no device session exists, without
+assigning or releasing a pool device. Device-session publication removes the
+observer entry synchronously before publishing, including rehydration. Releasing
+that device session does not restore an observer entry. Device-tool admission
+continues to consult SessionManager alone.
+
+Open owner questions:
+
+1. May the desktop watch a device owned by another session while an agent drives
+   it? That requires a read-only observer grant, not designed here.
+2. Is non-persistence acceptable? Clients must register again after daemon restart.
+
+The follow-up enforcement lane must make stream authentication consult
+`resolveObserverScope`, enforce it on observation-stream/push sockets, rebase on
+PR #8649's `onSubscribed` hook, and re-verify per-device scoping with coalesced
+fan-out. Desktop startup must call `registerSession` with a null device binding
+and re-register on heartbeat failure. This prerequisite wires neither stream
+enforcement nor desktop composition.

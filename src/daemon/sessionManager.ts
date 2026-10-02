@@ -6,6 +6,7 @@ import {
   type DeviceClockRestoreState,
 } from "../features/utility/DeviceClock";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { getAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -787,6 +788,13 @@ export class SessionManager {
   >();
   private readonly clockRemovalGenerations = new Map<string, number>();
   private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
+  private observerSessions?: Pick<ObserverSessionStore, "release">;
+
+  /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
+  setObserverSessionRegistry(registry: Pick<ObserverSessionStore, "release">): void {
+    this.observerSessions = registry;
+  }
+
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
   // Session timeout: 30 minutes
@@ -1124,6 +1132,7 @@ export class SessionManager {
     }
     this.invalidateFinalizedSessionIdentity(session.sessionId);
     this.pendingNonTerminalReleaseSnapshots.delete(session.sessionId);
+    this.observerSessions?.release(session.sessionId, "promotion");
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);

@@ -2,7 +2,7 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  SCRIPT="$REPO_ROOT/scripts/android/prepare-foldable-emulator.sh"
+  SCRIPT="${FOLDABLE_TEST_SCRIPT:-$REPO_ROOT/scripts/android/prepare-foldable-emulator.sh}"
   NIGHTLY="$REPO_ROOT/.github/workflows/nightly.yml"
   export GITHUB_WORKSPACE="$BATS_TEST_TMPDIR/workspace"
   export FOLDABLE_SDK_ROOT="$BATS_TEST_TMPDIR/sdk"
@@ -75,6 +75,114 @@ FAKE
   export FOLDABLE_APT_GET="$BATS_TEST_TMPDIR/bin/apt-get"
   export FOLDABLE_LDD="$BATS_TEST_TMPDIR/bin/ldd"
   SUMMARY="$GITHUB_WORKSPACE/scratch/foldable-lane/sdk-diagnostics.txt"
+}
+
+# Exercise SDK directory resolution, including sdkmanager's real side-install shape.
+setup_side_install() {
+  unset FOLDABLE_SDKMANAGER FOLDABLE_AVDMANAGER
+  export FAKE_SIDE_REVISION=23.0
+  cat > "$FOLDABLE_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  --version) cat "$(dirname "$0")/../source.properties" ;;
+  --licenses) read -r reply ;;
+  --install)
+    if [[ -n "${FAKE_CURRENT_REVISION:-}" ]]; then
+      printf 'Pkg.Revision=%s\n' "$FAKE_CURRENT_REVISION" > "$FOLDABLE_SDK_ROOT/cmdline-tools/latest/source.properties"
+    fi
+    side="$FOLDABLE_SDK_ROOT/cmdline-tools/latest-2"
+    mkdir -p "$side/bin"
+    printf 'Pkg.Revision=%s\n' "$FAKE_SIDE_REVISION" > "$side/source.properties"
+    cp "$0" "$side/bin/sdkmanager"
+    cp "$FAKE_NEW_AVDMANAGER" "$side/bin/avdmanager"
+    echo "Warning: Observed package id 'cmdline-tools;latest' in inconsistent location '/usr/local/lib/android/sdk/cmdline-tools/latest-2' (Expected '/usr/local/lib/android/sdk/cmdline-tools/latest')"
+    ;;
+esac
+FAKE
+  export FAKE_NEW_AVDMANAGER="$BATS_TEST_TMPDIR/bin/new-avdmanager"
+  printf '#!/usr/bin/env bash\ncat "$FAKE_AFTER_DEVICES"\n' > "$FAKE_NEW_AVDMANAGER"
+  printf '#!/usr/bin/env bash\ncat "$FAKE_BEFORE_DEVICES"\n' > "$FOLDABLE_SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+  chmod +x "$FAKE_NEW_AVDMANAGER" "$FOLDABLE_SDK_ROOT/cmdline-tools/latest/bin/"*
+}
+
+@test "side install promotion uses the newer default tools and parks the old install outside cmdline-tools" {
+  setup_side_install
+  run bash "$SCRIPT" pixel_10_pro_fold
+  [ "$status" -eq 0 ]
+  grep -Fxq 'Pkg.Revision=23.0' "$FOLDABLE_SDK_ROOT/cmdline-tools/latest/source.properties"
+  [ ! -d "$FOLDABLE_SDK_ROOT/cmdline-tools/latest-2" ]
+  [ "$(find "$FOLDABLE_SDK_ROOT/cmdline-tools" -name 'latest-*' -type d | wc -l | tr -d ' ')" -eq 0 ]
+  grep -Fxq 'Pkg.Revision=22.0' "$FOLDABLE_SDK_ROOT/.foldable-cmdline-tools-previous/latest-22.0/source.properties"
+  grep -Fxq 'cmdline_tools_promoted_from=latest-2' "$SUMMARY"
+  grep -Fxq 'cmdline_tools_promoted=true' "$SUMMARY"
+  grep -Fxq 'cmdline_tools_revision_after=23.0' "$SUMMARY"
+  grep -Fxq 'profile_found=true' "$SUMMARY"
+}
+
+@test "side install selection compares dotted revisions numerically" {
+  setup_side_install
+  mkdir -p "$FOLDABLE_SDK_ROOT/cmdline-tools/latest-3/bin"
+  cp "$FAKE_NEW_AVDMANAGER" "$FOLDABLE_SDK_ROOT/cmdline-tools/latest-3/bin/avdmanager"
+  printf 'Pkg.Revision=9.0\n' > "$FOLDABLE_SDK_ROOT/cmdline-tools/latest-3/source.properties"
+  run bash "$SCRIPT" pixel_10_pro_fold
+  [ "$status" -eq 0 ]
+  grep -Fxq 'cmdline_tools_promoted_from=latest-2' "$SUMMARY"
+  grep -Fxq 'cmdline_tools_revision_after=23.0' "$SUMMARY"
+}
+
+@test "side install that is not newer preserves latest and the exact profile failure" {
+  setup_side_install
+  export FAKE_SIDE_REVISION=22.0
+  run bash "$SCRIPT" pixel_10_pro_fold
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'no fallback is permitted'* ]]
+  grep -Fxq 'Pkg.Revision=22.0' "$FOLDABLE_SDK_ROOT/cmdline-tools/latest/source.properties"
+  [ -d "$FOLDABLE_SDK_ROOT/cmdline-tools/latest-2" ]
+  grep -Fxq 'cmdline_tools_promoted=false' "$SUMMARY"
+}
+
+@test "side install comparison uses the latest revision after sdkmanager finishes" {
+  setup_side_install
+  export FAKE_CURRENT_REVISION=23.10 FAKE_SIDE_REVISION=23.9
+  run bash "$SCRIPT" pixel_10_pro_fold
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'no fallback is permitted'* ]]
+  grep -Fxq 'cmdline_tools_revision_after=23.10' "$SUMMARY"
+  grep -Fxq 'cmdline_tools_promoted=false' "$SUMMARY"
+}
+
+@test "side install move failures preserve latest and report the exact profile failure" {
+  setup_side_install
+  export FOLDABLE_MV="$BATS_TEST_TMPDIR/bin/failing-mv"
+  cat > "$FOLDABLE_MV" <<'FAKE'
+#!/usr/bin/env bash
+# Fail either forward move, but leave restoration to the real mv command.
+if [[ "$1" == *"/$FAKE_FAIL_MOVE" ]]; then exit 7; fi
+exec mv "$@"
+FAKE
+  chmod +x "$FOLDABLE_MV"
+  for FAKE_FAIL_MOVE in latest latest-2; do
+    export FAKE_FAIL_MOVE
+    run bash "$SCRIPT" pixel_10_pro_fold
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'warning:'* ]]
+    [[ "$output" == *'no fallback is permitted'* ]]
+    grep -Fxq 'Pkg.Revision=22.0' "$FOLDABLE_SDK_ROOT/cmdline-tools/latest/source.properties"
+    grep -Fxq 'cmdline_tools_promoted=false' "$SUMMARY"
+  done
+}
+
+@test "side install promotion replaces a leftover previous install on rerun" {
+  setup_side_install
+  previous="$FOLDABLE_SDK_ROOT/.foldable-cmdline-tools-previous/latest-22.0"
+  mkdir -p "$previous"
+  touch "$previous/leftover"
+  run bash "$SCRIPT" pixel_10_pro_fold
+  [ "$status" -eq 0 ]
+  [ ! -e "$previous/leftover" ]
+  grep -Fxq 'Pkg.Revision=22.0' "$previous/source.properties"
+  [ ! -d "$FOLDABLE_SDK_ROOT/cmdline-tools/latest-2" ]
+  grep -Fxq 'cmdline_tools_promoted=true' "$SUMMARY"
 }
 
 wiring_requires_yq() {

@@ -4,6 +4,7 @@ import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android
 import {
   CtrlProxyText,
   imeCommitSegmentCount,
+  imeCommitSuffixMatches,
   imeCommitTimeoutMs,
 } from "../../../../src/features/observe/android/CtrlProxyText";
 import type { DelegateContext } from "../../../../src/features/observe/android/types";
@@ -53,6 +54,42 @@ async function waitForSent(sent: Record<string, unknown>[], count: number): Prom
 }
 
 describe("Android CtrlProxyText", () => {
+  test.each([
+    ["prefix one *bold* two `code` tail", true],
+    ["prefix one bold two code tail", true],
+    ["prefix one bold two `code` tail", true],
+    ["prefix one *bold* two `code` tai", false],
+    ["prefix one bold two `code` tai", false],
+    ["prefix one bold two code tai", false],
+    ["one bold two code tail suffix", false],
+    ["", false],
+  ])("checks literal and projected IME suffixes: %s", (fieldText, matches) => {
+    expect(imeCommitSuffixMatches(fieldText, "one *bold* two `code` tail")).toBe(matches);
+  });
+
+  test.each(["*x*", "**x**", "_x_", "~x~", "~~x~~", "`x`", "```x```"])(
+    "projects the inline-format marker set: %s",
+    (span) => {
+      expect(imeCommitSuffixMatches("prefix x tail", `${span} tail`)).toBe(true);
+      expect(imeCommitSuffixMatches(`prefix ${span} tail`, "x tail")).toBe(true);
+      expect(imeCommitSuffixMatches("prefix x tai", `${span} tail`)).toBe(false);
+    },
+  );
+
+  test.each(["", "```", "``````", "*_~`"])(
+    "reports marker-only IME suffixes as unverifiable: %s",
+    (text) => {
+      expect(imeCommitSuffixMatches("prefix", text)).toBeUndefined();
+      expect(imeCommitSuffixMatches(`prefix${text}`, text)).toBeUndefined();
+    },
+  );
+
+  test("preserves non-marker suffix characters and whitespace", () => {
+    expect(imeCommitSuffixMatches("prefix x # [] ", "*x* # [] ")).toBe(true);
+    expect(imeCommitSuffixMatches("prefix x # []", "*x* # [] ")).toBe(false);
+    expect(imeCommitSuffixMatches("prefix x  ", "*x* # [] ")).toBe(false);
+  });
+
   test("scales commit timeout by spans and characters within the tool budget", async () => {
     const timer = new FakeTimer();
     const socket = new CapturingWebSocket("ws://localhost", "none", 0, timer);

@@ -1237,7 +1237,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
   test.each([
     ["prefix one *bold* two `code` tail", true, false],
+    ["prefix one bold two code tail", true, false],
+    ["prefix one bold two `code` tail", true, false],
     ["prefix one *bold* two `code` tai", false, false],
+    ["prefix one bold two `code` tai", false, false],
+    ["prefix one bold two code tai", false, false],
     ["", true, true],
     [null, true, false],
   ])("checks multi-span IME suffix when readable: %s", async (fieldText, success, secure) => {
@@ -1271,6 +1275,31 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
+
+  test.each(["```", "``````"])(
+    "skips IME suffix verification for marker-only text: %s",
+    async (text) => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+        { stdout: priorImeId, stderr: "" },
+        { stdout: commitImeId, stderr: "" },
+      ]);
+      const textClient = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation("prefix", {}, timer.now())),
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text, mode: "ime" });
+      expect(result.success).toBe(true);
+      expect(result.partialApplication).toBeUndefined();
+      expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
 
   test("ime mode preserves a companion keyboard that was already enabled", async () => {
     const adb = new FakeAdbExecutor();

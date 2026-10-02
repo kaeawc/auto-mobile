@@ -14,7 +14,11 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { imeCommitSegmentCount, imeCommitUnitFields } from "../observe/android/CtrlProxyText";
+import {
+  imeCommitSegmentCount,
+  imeCommitSuffixMatches,
+  imeCommitUnitFields,
+} from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
@@ -860,7 +864,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (result.success && mode === "ime" && imeCommitSegmentCount(text) > 1) {
         const observation = await this.observer.execute({ signal, freshness: "fresh" });
         const committedText = this.readFocusedText(observation);
-        if (committedText !== undefined && !committedText.endsWith(text)) {
+        if (committedText !== undefined && imeCommitSuffixMatches(committedText, text) === false) {
           return {
             outcome: {
               ...this.describeImeCommitFailure({

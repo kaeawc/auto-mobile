@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import {
   calculateMetrics,
   formatReportJson,
@@ -126,7 +127,7 @@ describe("benchmark-settled-screenshot pure logic", () => {
       write: () => {},
       serverExists: () => true,
       stopPrivateDaemon: async () => {},
-      makeRunDir: () => "/tmp/fake-aux",
+      makeRunDir: () => resolve("/tmp/fake-aux"),
       removeRunDir: () => {},
     };
     const report = await runBenchmark(

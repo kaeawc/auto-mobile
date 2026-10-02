@@ -1,27 +1,30 @@
-import { isAbsolute, join, resolve } from "node:path";
+import nodePath, { type posix } from "node:path";
+
+type BenchmarkPathApi = Pick<typeof posix, "isAbsolute" | "join" | "resolve">;
 
 export type BenchmarkChildEnv = Record<string, string | undefined>;
 
-function privatePaths(runDir: string): Record<string, string> {
-  if (!isAbsolute(runDir) || resolve(runDir) === resolve(runDir, "..")) {
+function privatePaths(runDir: string, pathApi: BenchmarkPathApi): Record<string, string> {
+  // Resolve both sides with the same flavour; drive-absolute win32 roots are cwd-independent.
+  if (!pathApi.isAbsolute(runDir) || pathApi.resolve(runDir) === pathApi.resolve(runDir, "..")) {
     throw new Error("Benchmark run directory must be an absolute, non-root path.");
   }
   // Include the longest auxiliary socket basename, not just d.sock and w.sock.
-  const longestSocket = join(runDir, "observation-stream.sock");
+  const longestSocket = pathApi.join(runDir, "observation-stream.sock");
   if (Buffer.byteLength(longestSocket, "utf8") >= 100) {
     throw new Error(
       "Benchmark socket paths must be shorter than 100 bytes; use a shorter run directory.",
     );
   }
   return {
-    AUTOMOBILE_DAEMON_SOCKET_PATH: join(runDir, "d.sock"),
-    AUTOMOBILE_DAEMON_PID_FILE_PATH: join(runDir, "d.pid"),
-    AUTOMOBILE_DAEMON_LOCK_FILE_PATH: join(runDir, "d.lock"),
+    AUTOMOBILE_DAEMON_SOCKET_PATH: pathApi.join(runDir, "d.sock"),
+    AUTOMOBILE_DAEMON_PID_FILE_PATH: pathApi.join(runDir, "d.pid"),
+    AUTOMOBILE_DAEMON_LOCK_FILE_PATH: pathApi.join(runDir, "d.lock"),
     AUTOMOBILE_AUX_SOCKET_DIR: runDir,
-    AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: join(runDir, "w.sock"),
-    AUTOMOBILE_DATA_DIR: join(runDir, "data"),
-    AUTOMOBILE_LOG_DIR: join(runDir, "logs"),
-    AUTOMOBILE_DB_PATH: join(runDir, "auto-mobile.db"),
+    AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: pathApi.join(runDir, "w.sock"),
+    AUTOMOBILE_DATA_DIR: pathApi.join(runDir, "data"),
+    AUTOMOBILE_LOG_DIR: pathApi.join(runDir, "logs"),
+    AUTOMOBILE_DB_PATH: pathApi.join(runDir, "auto-mobile.db"),
     AUTOMOBILE_DAEMON_LAUNCH_CWD: runDir,
   };
 }
@@ -36,8 +39,9 @@ function legacyKeys(paths: Record<string, string>): string[] {
 export function buildBenchmarkChildEnv(
   parentEnv: BenchmarkChildEnv,
   runDir: string,
+  pathApi: BenchmarkPathApi = nodePath,
 ): BenchmarkChildEnv {
-  const paths = privatePaths(runDir);
+  const paths = privatePaths(runDir, pathApi);
   const env = { ...parentEnv, ...paths };
   delete env.AUTOMOBILE_DB_DIR;
   for (const key of legacyKeys(paths)) {
@@ -47,8 +51,12 @@ export function buildBenchmarkChildEnv(
 }
 
 /** Require the exact private paths, preventing even accidental within-directory retargeting. */
-export function assertPrivateDaemonNamespace(env: BenchmarkChildEnv, runDir: string): void {
-  const paths = privatePaths(runDir);
+export function assertPrivateDaemonNamespace(
+  env: BenchmarkChildEnv,
+  runDir: string,
+  pathApi: BenchmarkPathApi = nodePath,
+): void {
+  const paths = privatePaths(runDir, pathApi);
   for (const [key, expected] of Object.entries(paths)) {
     if (env[key] !== expected) {
       throw new Error(`Refusing benchmark child launch: ${key} must be ${expected}.`);

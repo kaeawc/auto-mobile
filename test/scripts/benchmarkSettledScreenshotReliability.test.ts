@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join, posix, resolve, win32 } from "node:path";
 import { runBenchmark, type BenchmarkDeps } from "../../scripts/benchmark-settled-screenshot";
 import {
   assertPrivateDaemonNamespace,
@@ -21,16 +22,16 @@ import {
   type BenchmarkReport,
 } from "../../scripts/benchmarkSettledScreenshotReport";
 
-const runDir = "/tmp/am-bench-fake";
+const runDir = resolve("/tmp/am-bench-fake");
 const expectedPaths: Record<string, string> = {
-  AUTOMOBILE_DAEMON_SOCKET_PATH: `${runDir}/d.sock`,
-  AUTOMOBILE_DAEMON_PID_FILE_PATH: `${runDir}/d.pid`,
-  AUTOMOBILE_DAEMON_LOCK_FILE_PATH: `${runDir}/d.lock`,
+  AUTOMOBILE_DAEMON_SOCKET_PATH: join(runDir, "d.sock"),
+  AUTOMOBILE_DAEMON_PID_FILE_PATH: join(runDir, "d.pid"),
+  AUTOMOBILE_DAEMON_LOCK_FILE_PATH: join(runDir, "d.lock"),
   AUTOMOBILE_AUX_SOCKET_DIR: runDir,
-  AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: `${runDir}/w.sock`,
-  AUTOMOBILE_DATA_DIR: `${runDir}/data`,
-  AUTOMOBILE_LOG_DIR: `${runDir}/logs`,
-  AUTOMOBILE_DB_PATH: `${runDir}/auto-mobile.db`,
+  AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: join(runDir, "w.sock"),
+  AUTOMOBILE_DATA_DIR: join(runDir, "data"),
+  AUTOMOBILE_LOG_DIR: join(runDir, "logs"),
+  AUTOMOBILE_DB_PATH: join(runDir, "auto-mobile.db"),
   AUTOMOBILE_DAEMON_LAUNCH_CWD: runDir,
 };
 const success = { structuredContent: { success: true, observation: { platform: "ios" } } };
@@ -66,7 +67,7 @@ function harness(
       return `${runDir}-${dirs}`;
     },
     createClient: async (server, env) => {
-      expect(server).toBe("/fake/server.js");
+      expect(server).toBe(resolve("/fake/server.js"));
       assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
       events.push("create");
       envs.push(env);
@@ -81,7 +82,7 @@ function harness(
       };
     },
     stopPrivateDaemon: async (server, env) => {
-      expect(server).toBe("/fake/server.js");
+      expect(server).toBe(resolve("/fake/server.js"));
       assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
       expect(env).toBe(envs.at(-1));
       events.push("stop");
@@ -151,14 +152,14 @@ describe("benchmark namespace isolation", () => {
     for (const key of Object.keys(expectedPaths)) {
       expect(first[key]).not.toBe(second[key]);
     }
-    expect(() => buildBenchmarkChildEnv({}, `/tmp/${"a".repeat(80)}`)).toThrow(
+    expect(() => buildBenchmarkChildEnv({}, join(runDir, "a".repeat(80)))).toThrow(
       "shorter than 100 bytes",
     );
-    expect(() => buildBenchmarkChildEnv({}, `/tmp/${"é".repeat(40)}`)).toThrow(
+    expect(() => buildBenchmarkChildEnv({}, join(runDir, "é".repeat(40)))).toThrow(
       "shorter than 100 bytes",
     );
     expect(() => buildBenchmarkChildEnv({}, "relative")).toThrow("absolute");
-    expect(() => buildBenchmarkChildEnv({}, "/")).toThrow("non-root");
+    expect(() => buildBenchmarkChildEnv({}, resolve("/"))).toThrow("non-root");
   });
 
   test("namespace assertion rejects every missing, escaped or resident selector and legacy alias", () => {
@@ -171,7 +172,7 @@ describe("benchmark namespace isolation", () => {
         assertPrivateDaemonNamespace({ ...env, [key]: "/tmp/auto-mobile-daemon-501.sock" }, runDir),
       ).toThrow(key);
       expect(() =>
-        assertPrivateDaemonNamespace({ ...env, [key]: `${runDir}/../resident` }, runDir),
+        assertPrivateDaemonNamespace({ ...env, [key]: resolve(runDir, "..", "resident") }, runDir),
       ).toThrow(key);
       const alias = key.replace("AUTOMOBILE_", "AUTO_MOBILE_");
       expect(() => assertPrivateDaemonNamespace({ ...env, [alias]: "" }, runDir)).toThrow(alias);
@@ -180,6 +181,67 @@ describe("benchmark namespace isolation", () => {
       expect(() => assertPrivateDaemonNamespace({ ...env, [key]: undefined }, runDir)).toThrow(key);
     }
   });
+});
+
+describe("benchmark path flavours", () => {
+  for (const { name, flavour, directory, root, wrongFlavour } of [
+    {
+      name: "posix",
+      flavour: posix,
+      directory: "/tmp/am-bench-fake",
+      root: "/",
+      wrongFlavour: "C:\\Temp\\am-bench-fake",
+    },
+    {
+      name: "win32",
+      flavour: win32,
+      directory: "C:\\Temp\\am-bench-fake",
+      root: "C:\\",
+      wrongFlavour: "tmp/am-bench-fake",
+    },
+  ]) {
+    test(`${name} builds and validates exact private selectors`, () => {
+      const env = buildBenchmarkChildEnv({}, directory, flavour);
+      expect(env).toEqual({
+        AUTOMOBILE_DAEMON_SOCKET_PATH: flavour.join(directory, "d.sock"),
+        AUTOMOBILE_DAEMON_PID_FILE_PATH: flavour.join(directory, "d.pid"),
+        AUTOMOBILE_DAEMON_LOCK_FILE_PATH: flavour.join(directory, "d.lock"),
+        AUTOMOBILE_AUX_SOCKET_DIR: directory,
+        AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: flavour.join(directory, "w.sock"),
+        AUTOMOBILE_DATA_DIR: flavour.join(directory, "data"),
+        AUTOMOBILE_LOG_DIR: flavour.join(directory, "logs"),
+        AUTOMOBILE_DB_PATH: flavour.join(directory, "auto-mobile.db"),
+        AUTOMOBILE_DAEMON_LAUNCH_CWD: directory,
+      });
+      expect(() => assertPrivateDaemonNamespace(env, directory, flavour)).not.toThrow();
+    });
+
+    test(`${name} rejects relative or wrong-flavour directories and roots`, () => {
+      for (const invalid of ["relative", wrongFlavour]) {
+        expect(() => buildBenchmarkChildEnv({}, invalid, flavour)).toThrow("absolute");
+        expect(() => assertPrivateDaemonNamespace({}, invalid, flavour)).toThrow("absolute");
+      }
+      expect(() => buildBenchmarkChildEnv({}, root, flavour)).toThrow("non-root");
+      expect(() => assertPrivateDaemonNamespace({}, root, flavour)).toThrow("non-root");
+    });
+
+    test(`${name} enforces the observation-stream socket UTF-8 byte boundary`, () => {
+      const basename = "observation-stream.sock";
+      const padding = 99 - Buffer.byteLength(flavour.join(directory, basename), "utf8");
+      // Multibyte padding proves this is a byte limit, not a character limit.
+      const at99 = directory + "é".repeat(Math.floor(padding / 2)) + "a".repeat(padding % 2);
+      const at100 = at99 + "a";
+      expect(Buffer.byteLength(flavour.join(at99, basename), "utf8")).toBe(99);
+      expect(Buffer.byteLength(flavour.join(at100, basename), "utf8")).toBe(100);
+      expect(Buffer.byteLength(flavour.join(at100, "d.sock"), "utf8")).toBeLessThan(100);
+      const env = buildBenchmarkChildEnv({}, at99, flavour);
+      expect(() => assertPrivateDaemonNamespace(env, at99, flavour)).not.toThrow();
+      expect(() => buildBenchmarkChildEnv({}, at100, flavour)).toThrow("shorter than 100 bytes");
+      expect(() => assertPrivateDaemonNamespace({}, at100, flavour)).toThrow(
+        "shorter than 100 bytes",
+      );
+    });
+  }
 });
 
 describe("benchmark injectable lifecycle", () => {

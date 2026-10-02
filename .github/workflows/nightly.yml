@@ -604,6 +604,7 @@ jobs:
       AUTOMOBILE_FOLDABLE_PROFILE: ${{ matrix.profile }}
       AUTOMOBILE_FOLDABLE_DEVICE_ID: emulator-5554
       AUTOMOBILE_DATA_DIR: ${{ github.workspace }}/scratch/foldable-lane/data
+      AUTOMOBILE_DB_DIR: ${{ github.workspace }}/scratch/foldable-lane/db
       AUTOMOBILE_LOG_DIR: ${{ github.workspace }}/scratch/foldable-lane/logs
     steps:
       - name: "Git Checkout"

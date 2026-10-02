@@ -432,8 +432,7 @@ describe("AppFileService", () => {
     });
     const service = createAppFileServiceForTesting({ sharedStorageService });
     const warnings: string[] = [];
-    const originalWarn = logger.warn;
-    logger.warn = (message) => warnings.push(message);
+    const warnSpy = spyOn(logger, "warn").mockImplementation((message) => warnings.push(message));
 
     try {
       await expect(
@@ -449,11 +448,14 @@ describe("AppFileService", () => {
         "Rollback failures: second.png: Android shared-storage operation failed: device unavailable",
       );
     } finally {
-      logger.warn = originalWarn;
+      warnSpy.mockRestore();
     }
 
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("Failed to roll back staged media file second.png");
+    const rollbackWarnings = warnings.filter((message) =>
+      message.includes("[SharedStorage] Failed to roll back staged media file"),
+    );
+    expect(rollbackWarnings).toHaveLength(1);
+    expect(rollbackWarnings[0]).toContain("second.png");
   });
 
   test("imports iOS Simulator media through an injected argv-safe client and preserves filenames", async () => {
@@ -1934,6 +1936,13 @@ describe("Android app-file running candidates", () => {
 
 for (const operation of ["put", "list", "read"] as const) {
   describe(`Android app-file user targeting: ${operation}`, () => {
+    const debugSpies: Array<{ mockRestore: () => void }> = [];
+    afterEach(() => {
+      for (const debugSpy of debugSpies.splice(0)) {
+        debugSpy.mockRestore();
+      }
+    });
+
     test.each(appFileUserCases)("$name (exact commands)", async (scenario) => {
       for (const container of ["documents", "cache", "tmp", "externalFiles"] as const) {
         const adb = new AppFileUserAdb();
@@ -1962,6 +1971,9 @@ for (const operation of ["put", "list", "read"] as const) {
         const debug = scenario.foregroundError
           ? spyOn(logger, "debug").mockImplementation(() => {})
           : undefined;
+        if (debug) {
+          debugSpies.push(debug);
+        }
         const { service, fileSystem } = appFileUserService(adb, foreground);
         await fileSystem.writeFileBuffer("/fixtures/welcome.txt", Buffer.from("hello"));
         const common = {
@@ -2021,7 +2033,10 @@ for (const operation of ["put", "list", "read"] as const) {
             scenario.foregroundError,
           );
         }
-        debug?.mockRestore();
+        if (debug) {
+          debugSpies.splice(debugSpies.indexOf(debug), 1);
+          debug.mockRestore();
+        }
       }
     });
 

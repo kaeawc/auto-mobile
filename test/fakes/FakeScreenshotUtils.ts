@@ -7,13 +7,7 @@ import { ScreenshotUtils } from "../../src/utils/interfaces/ScreenshotUtils";
 export class FakeScreenshotUtils implements ScreenshotUtils {
   // Configuration state
   private cachedScreenshots: Map<string, { buffer: Buffer; hash: string }> = new Map();
-  private perceptualHashes: Map<string, string> = new Map();
-  private pngDetectionResult: boolean = true;
-  private convertToPngResult: Buffer = Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  ]);
   private imageDimensions: { width: number; height: number } = { width: 1080, height: 2400 };
-  private resizeImageResult: Buffer | null = null;
   private compareImagesResult: {
     similarity: number;
     pixelDifference: number;
@@ -23,9 +17,6 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     pixelDifference: 0,
     totalPixels: 2592000, // 1080 * 2400
   };
-  private screenshotFiles: string[] = [];
-  private extractTimestampResult: string = "1234567890";
-  private generateImageHashResult: string = "abcdef0123456789abcdef0123456789";
 
   // Call tracking
   private methodCalls: Map<string, Array<Record<string, unknown>>> = new Map();
@@ -38,38 +29,10 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   }
 
   /**
-   * Configure perceptual hash for a buffer
-   */
-  setPerceptualHash(bufferId: string, hash: string): void {
-    this.perceptualHashes.set(bufferId, hash);
-  }
-
-  /**
-   * Configure PNG detection result
-   */
-  setPngDetectionResult(result: boolean): void {
-    this.pngDetectionResult = result;
-  }
-
-  /**
-   * Configure PNG conversion result
-   */
-  setConvertToPngResult(buffer: Buffer): void {
-    this.convertToPngResult = buffer;
-  }
-
-  /**
    * Configure image dimensions
    */
   setImageDimensions(width: number, height: number): void {
     this.imageDimensions = { width, height };
-  }
-
-  /**
-   * Configure resize result
-   */
-  setResizeImageResult(buffer: Buffer): void {
-    this.resizeImageResult = buffer;
   }
 
   /**
@@ -81,27 +44,6 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     totalPixels: number;
   }): void {
     this.compareImagesResult = result;
-  }
-
-  /**
-   * Configure screenshot files list
-   */
-  setScreenshotFiles(files: string[]): void {
-    this.screenshotFiles = files;
-  }
-
-  /**
-   * Configure extract timestamp result
-   */
-  setExtractTimestampResult(timestamp: string): void {
-    this.extractTimestampResult = timestamp;
-  }
-
-  /**
-   * Configure generate image hash result
-   */
-  setGenerateImageHashResult(hash: string): void {
-    this.generateImageHashResult = hash;
   }
 
   /**
@@ -159,75 +101,9 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     };
   }
 
-  async generatePerceptualHash(buffer: Buffer): Promise<string> {
-    const bufferId = buffer.toString("hex").slice(0, 16);
-    this.recordCall("generatePerceptualHash", { bufferLength: buffer.length });
-
-    const cached = this.perceptualHashes.get(bufferId);
-    if (cached) {
-      return cached;
-    }
-    // Default: return a valid 64-character hash
-    return "1111111111111111111111111111111111111111111111111111111111111111";
-  }
-
-  calculateHammingDistance(hash1: string, hash2: string): number {
-    this.recordCall("calculateHammingDistance", {
-      hash1Length: hash1.length,
-      hash2Length: hash2.length,
-    });
-    if (hash1.length !== hash2.length) {
-      return Math.max(hash1.length, hash2.length);
-    }
-    let distance = 0;
-    for (let i = 0; i < hash1.length; i++) {
-      if (hash1[i] !== hash2[i]) {
-        distance++;
-      }
-    }
-    return distance;
-  }
-
-  getPerceptualSimilarity(hash1: string, hash2: string): number {
-    this.recordCall("getPerceptualSimilarity", {
-      hash1Length: hash1.length,
-      hash2Length: hash2.length,
-    });
-    const distance = this.calculateHammingDistance(hash1, hash2);
-    const maxDistance = Math.max(hash1.length, hash2.length);
-    return ((maxDistance - distance) / maxDistance) * 100;
-  }
-
-  isPngBuffer(buffer: Buffer): boolean {
-    this.recordCall("isPngBuffer", { bufferLength: buffer.length });
-    return this.pngDetectionResult;
-  }
-
-  async convertToPng(buffer: Buffer): Promise<Buffer> {
-    this.recordCall("convertToPng", { bufferLength: buffer.length });
-    return this.convertToPngResult;
-  }
-
   async getImageDimensions(buffer: Buffer): Promise<{ width: number; height: number }> {
     this.recordCall("getImageDimensions", { bufferLength: buffer.length });
     return this.imageDimensions;
-  }
-
-  async resizeImageIfNeeded(
-    buffer: Buffer,
-    targetWidth: number,
-    targetHeight: number,
-  ): Promise<Buffer> {
-    this.recordCall("resizeImageIfNeeded", {
-      bufferLength: buffer.length,
-      targetWidth,
-      targetHeight,
-    });
-    if (this.resizeImageResult) {
-      return this.resizeImageResult;
-    }
-    // Default: return original buffer if no custom result set
-    return buffer;
   }
 
   async compareImages(
@@ -248,20 +124,5 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
       fastMode,
     });
     return this.compareImagesResult;
-  }
-
-  async getScreenshotFiles(cacheDir: string): Promise<string[]> {
-    this.recordCall("getScreenshotFiles", { cacheDir });
-    return this.screenshotFiles;
-  }
-
-  extractTimestampFromFilename(filePath: string): string {
-    this.recordCall("extractTimestampFromFilename", { filePath });
-    return this.extractTimestampResult;
-  }
-
-  generateImageHash(buffer: Buffer): string {
-    this.recordCall("generateImageHash", { bufferLength: buffer.length });
-    return this.generateImageHashResult;
   }
 }

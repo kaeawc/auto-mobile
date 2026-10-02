@@ -1705,14 +1705,14 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
         executePlanResponses.append(MCPToolResponse(text: text))
     }
 
-    private func initializeResult(timeout _: TimeInterval) throws {}
+    func initialize(timeout _: TimeInterval) async throws {}
 
-    private func callToolResult(
+    func callTool(
         name: String,
         arguments: [String: Any],
         timeout _: TimeInterval
     )
-        throws -> MCPToolResponse
+        async throws -> MCPToolResponse
     {
         calls.append(Call(name: name, arguments: arguments))
         if name == "setToolEnabled" {
@@ -1730,26 +1730,8 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
         return MCPToolResponse(text: toolResponseText)
     }
 
-    private func readResourceResult(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
+    func readResource(uri _: String, timeout _: TimeInterval) async throws -> MCPResourceResponse {
         MCPResourceResponse(text: flagResourceText)
-    }
-
-    func initialize(timeout: TimeInterval) throws { try initializeResult(timeout: timeout) }
-    func initialize(timeout: TimeInterval) async throws { try initializeResult(timeout: timeout) }
-    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
-        try callToolResult(name: name, arguments: arguments, timeout: timeout)
-    }
-
-    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> MCPToolResponse {
-        try callToolResult(name: name, arguments: arguments, timeout: timeout)
-    }
-
-    func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
-        try readResourceResult(uri: uri, timeout: timeout)
-    }
-
-    func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
-        try readResourceResult(uri: uri, timeout: timeout)
     }
 
     func resetSession() {}

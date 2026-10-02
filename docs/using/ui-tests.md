@@ -147,8 +147,8 @@ final class RemindersTests: AutoMobileTestCase {
         "test-plans/launch-reminders-app.yaml"
     }
 
-    func testLaunchReminders() throws {
-        let result = try executePlan()
+    func testLaunchReminders() async throws {
+        let result = try await executePlan()
         XCTAssertTrue(result.success, result.error ?? "AutoMobile plan failed")
     }
 }

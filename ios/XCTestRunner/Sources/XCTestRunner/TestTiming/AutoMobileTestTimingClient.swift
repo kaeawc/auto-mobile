@@ -2,7 +2,7 @@ import Foundation
 
 /// Thin wrapper that picks the same transport the executor uses (StreamableHTTP if an MCP URL is set,
 /// else the daemon socket) and reads a resource. Used by `TestTimingCache` to fetch timing data.
-final class AutoMobileTestTimingClient {
+final class AutoMobileTestTimingClient: Sendable {
     private let mcpClient: AutoMobileMCPClient
 
     init(environment: AutoMobileEnvironment) throws {
@@ -25,8 +25,8 @@ final class AutoMobileTestTimingClient {
         }
     }
 
-    func readResource(uri: String, timeout: TimeInterval) throws -> String {
-        let response = try mcpClient.readResource(uri: uri, timeout: timeout)
+    func readResource(uri: String, timeout: TimeInterval) async throws -> String {
+        let response = try await mcpClient.readResource(uri: uri, timeout: timeout)
         return response.text
     }
 }

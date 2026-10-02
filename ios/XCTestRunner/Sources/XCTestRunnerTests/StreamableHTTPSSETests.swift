@@ -1,79 +1,47 @@
 // swiftlint:disable force_unwrapping - fail-fast on bad fixtures is idiomatic in tests.
 import Foundation
-import os
 import XCTest
 @testable import XCTestRunner
 
-/// Stubs the HTTP half of `StreamableHTTPMCPClient` through its injected `URLSession` seam, so the
-/// response-decoding contract is pinned without a daemon (#6633). Responses are queued and consumed
-/// in request order, because `callTool` sends `initialize` before the tool call.
-final class StubURLProtocol: URLProtocol {
-    struct Stub: Sendable {
-        var statusCode = 200
-        var headers: [String: String] = [:]
-        var body: Data = .init()
+/// Response fixtures are delivered through the async performer, without URLSession or real timers.
+private struct HTTPResponseFixture: Sendable {
+    let headers: [String: String]
+    let body: Data
 
-        static func eventStream(_ text: String, sessionId: String = "s1") -> Stub {
-            Stub(
-                statusCode: 200,
-                headers: ["Content-Type": "text/event-stream", "mcp-session-id": sessionId],
-                body: Data(text.utf8)
-            )
-        }
-
-        static func json(_ text: String, sessionId: String = "s1") -> Stub {
-            Stub(
-                statusCode: 200,
-                headers: ["Content-Type": "application/json", "mcp-session-id": sessionId],
-                body: Data(text.utf8)
-            )
-        }
+    static func eventStream(_ text: String, sessionId: String = "s1") -> HTTPResponseFixture {
+        HTTPResponseFixture(
+            headers: ["Content-Type": "text/event-stream", "mcp-session-id": sessionId], body: Data(text.utf8)
+        )
     }
 
-    private static let queue = OSAllocatedUnfairLock<[Stub]>(initialState: [])
-
-    static func enqueue(_ stubs: [Stub]) {
-        queue.withLock { $0 = stubs }
+    static func json(_ text: String, sessionId: String = "s1") -> HTTPResponseFixture {
+        HTTPResponseFixture(
+            headers: ["Content-Type": "application/json", "mcp-session-id": sessionId], body: Data(text.utf8)
+        )
     }
-
-    static var remaining: Int {
-        queue.withLock { $0.count }
-    }
-
-    static func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [StubURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
-
-    override static func canInit(with _: URLRequest) -> Bool { true }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        let next = Self.queue.withLock { stubs -> Stub? in
-            stubs.isEmpty ? nil : stubs.removeFirst()
-        }
-        guard let stub = next, let url = request.url else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        let response = HTTPURLResponse(
-            url: url, statusCode: stub.statusCode, httpVersion: "HTTP/1.1", headerFields: stub.headers
-        )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: stub.body)
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
 }
 
+@MainActor
 final class StreamableHTTPSSETests: XCTestCase {
-    private let endpoint = URL(string: "http://127.0.0.1:9000/auto-mobile/streamable")!
+    private func makeClient(_ performer: AsyncFakeHTTPPerformer) throws -> StreamableHTTPMCPClient {
+        try StreamableHTTPMCPClient(
+            endpoint: URL(string: "http://unused/auto-mobile/streamable")!, performer: performer,
+            options: .init(scheduler: VirtualDeadlineScheduler())
+        )
+    }
 
-    private func makeClient() throws -> StreamableHTTPMCPClient {
-        try StreamableHTTPMCPClient(endpoint: endpoint, session: StubURLProtocol.makeSession())
+    private func respond<Value: Sendable>(
+        _ performer: AsyncFakeHTTPPerformer, with fixtures: [HTTPResponseFixture],
+        operation: @escaping @Sendable () async throws -> Value
+    )
+        async throws -> Value
+    {
+        let task = Task { try await operation() }
+        for (index, fixture) in fixtures.enumerated() {
+            try await performer.requests.wait(for: index + 1)
+            performer.reply(index, data: fixture.body, headers: fixture.headers)
+        }
+        return try await task.value
     }
 
     private static func okResult(id: Int) -> String {
@@ -81,80 +49,97 @@ final class StreamableHTTPSSETests: XCTestCase {
     }
 
     /// The daemon interleaves `:keepalive` comment lines into the POST stream for long tool calls.
-    func testCallToolParsesSSEBodyWithKeepaliveComments() throws {
-        StubURLProtocol.enqueue([
+    func testCallToolParsesSSEBodyWithKeepaliveComments() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream(":keepalive\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"),
             .eventStream(":keepalive\n\n:keepalive\n\nevent: message\ndata: \(Self.okResult(id: 2))\n\n"),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        let response = try client.callTool(name: "observe", arguments: [:], timeout: 5)
+        let response = try await respond(performer, with: fixtures) {
+            try await client.callTool(name: "observe", arguments: [:], timeout: 5)
+        }
 
         XCTAssertEqual(response.text, "ok")
         // Exactly two requests: the captured `mcp-session-id` stopped a second `initialize`.
-        XCTAssertEqual(StubURLProtocol.remaining, 0)
+        XCTAssertEqual(performer.requests.count, 2)
     }
 
-    func testSSEMultiLineDataPayloadIsJoined() throws {
-        StubURLProtocol.enqueue([
+    func testSSEMultiLineDataPayloadIsJoined() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream(
                 "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\n"
                     + "data: \"result\":{\"ok\":true}}\n\n"
             ),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        XCTAssertNoThrow(try client.initialize(timeout: 5))
+        try await respond(performer, with: fixtures) {
+            try await client.initialize(timeout: 5)
+        }
     }
 
-    func testFrameMatchingRequestIdIsSelected() throws {
+    func testFrameMatchingRequestIdIsSelected() async throws {
         let unrelated = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}"
         let mismatched =
             "{\"jsonrpc\":\"2.0\",\"id\":99,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"stale\"}]}}"
-        StubURLProtocol.enqueue([
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"),
             .eventStream(
                 "event: message\ndata: \(unrelated)\n\nevent: message\ndata: \(mismatched)\n\n"
                     + "event: message\ndata: \(Self.okResult(id: 2))\n\n"
             ),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        let response = try client.callTool(name: "observe", arguments: [:], timeout: 5)
+        let response = try await respond(performer, with: fixtures) {
+            try await client.callTool(name: "observe", arguments: [:], timeout: 5)
+        }
 
         XCTAssertEqual(response.text, "ok")
     }
 
     /// A JSON-RPC id is matched by type AND value. `"2"` and `2.5` are different ids from `2`;
     /// adopting either would return an unrelated frame's result to this request.
-    func testStringAndFractionalIdFramesAreNotMatched() throws {
+    func testStringAndFractionalIdFramesAreNotMatched() async throws {
         let stringId =
             "{\"jsonrpc\":\"2.0\",\"id\":\"2\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"string\"}]}}"
         let fractionalId =
             "{\"jsonrpc\":\"2.0\",\"id\":2.5,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"fraction\"}]}}"
-        StubURLProtocol.enqueue([
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"),
             .eventStream(
                 "event: message\ndata: \(stringId)\n\nevent: message\ndata: \(fractionalId)\n\n"
                     + "event: message\ndata: \(Self.okResult(id: 2))\n\n"
             ),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        let response = try client.callTool(name: "observe", arguments: [:], timeout: 5)
+        let response = try await respond(performer, with: fixtures) {
+            try await client.callTool(name: "observe", arguments: [:], timeout: 5)
+        }
 
         XCTAssertEqual(response.text, "ok")
     }
 
     /// Foundation bridges JSON `true` to an `NSNumber` whose `int64Value` is 1, so a boolean id
     /// must be rejected explicitly rather than read as the numeric id 1.
-    func testBooleanIdFrameIsNotMatched() throws {
-        StubURLProtocol.enqueue([
+    func testBooleanIdFrameIsNotMatched() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":true,\"result\":{}}\n\n"),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+        await assertAsyncThrowsError {
+            try await respond(performer, with: fixtures) {
+                try await client.initialize(timeout: 5)
+            }
+        } verify: { error in
             guard case let .invalidResponse(message)? = error as? MCPClientError else {
                 XCTFail("Expected MCPClientError.invalidResponse, got \(error)")
                 return
@@ -163,43 +148,56 @@ final class StreamableHTTPSSETests: XCTestCase {
         }
     }
 
-    func testJSONContentTypeStillParsed() throws {
-        StubURLProtocol.enqueue([
+    func testJSONContentTypeStillParsed() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .json("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"),
             .json(Self.okResult(id: 2)),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        let response = try client.callTool(name: "observe", arguments: [:], timeout: 5)
+        let response = try await respond(performer, with: fixtures) {
+            try await client.callTool(name: "observe", arguments: [:], timeout: 5)
+        }
 
         XCTAssertEqual(response.text, "ok")
     }
 
-    func testSSEErrorFrameSurfacesServerError() throws {
-        StubURLProtocol.enqueue([
+    func testSSEErrorFrameSurfacesServerError() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream(
                 "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"boom\"}}\n\n"
             ),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+        await assertAsyncThrowsError {
+            try await respond(performer, with: fixtures) {
+                try await client.initialize(timeout: 5)
+            }
+        } verify: { error in
             XCTAssertEqual(error as? MCPClientError, .serverError("boom"))
         }
     }
 
     /// An error belonging to a different request must not fail this one: the fallback is only for
     /// JSON-RPC errors whose id is absent or null.
-    func testErrorFrameForAnotherRequestIdIsIgnored() throws {
-        StubURLProtocol.enqueue([
+    func testErrorFrameForAnotherRequestIdIsIgnored() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream(
                 "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":99,"
                     + "\"error\":{\"code\":-32000,\"message\":\"stale boom\"}}\n\n"
             ),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+        await assertAsyncThrowsError {
+            try await respond(performer, with: fixtures) {
+                try await client.initialize(timeout: 5)
+            }
+        } verify: { error in
             guard case let .invalidResponse(message)? = error as? MCPClientError else {
                 XCTFail("Expected MCPClientError.invalidResponse, got \(error)")
                 return
@@ -208,27 +206,37 @@ final class StreamableHTTPSSETests: XCTestCase {
         }
     }
 
-    func testErrorFrameWithNullIdSurfacesServerError() throws {
-        StubURLProtocol.enqueue([
+    func testErrorFrameWithNullIdSurfacesServerError() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream(
                 "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":null,"
                     + "\"error\":{\"code\":-32700,\"message\":\"parse error\"}}\n\n"
             ),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+        await assertAsyncThrowsError {
+            try await respond(performer, with: fixtures) {
+                try await client.initialize(timeout: 5)
+            }
+        } verify: { error in
             XCTAssertEqual(error as? MCPClientError, .serverError("parse error"))
         }
     }
 
-    func testMalformedSSEFrameThrowsInvalidResponse() throws {
-        StubURLProtocol.enqueue([
+    func testMalformedSSEFrameThrowsInvalidResponse() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .eventStream("event: message\ndata: not-json-at-all\n\n"),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+        await assertAsyncThrowsError {
+            try await respond(performer, with: fixtures) {
+                try await client.initialize(timeout: 5)
+            }
+        } verify: { error in
             guard case let .invalidResponse(message)? = error as? MCPClientError else {
                 XCTFail("Expected MCPClientError.invalidResponse, got \(error)")
                 return
@@ -237,13 +245,18 @@ final class StreamableHTTPSSETests: XCTestCase {
         }
     }
 
-    func testMalformedJSONBodyThrowsInvalidResponse() throws {
-        StubURLProtocol.enqueue([
+    func testMalformedJSONBodyThrowsInvalidResponse() async throws {
+        let fixtures: [HTTPResponseFixture] = [
             .json("<html>nope</html>"),
-        ])
-        let client = try makeClient()
+        ]
+        let performer = AsyncFakeHTTPPerformer()
+        let client = try makeClient(performer)
 
-        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+        await assertAsyncThrowsError {
+            try await respond(performer, with: fixtures) {
+                try await client.initialize(timeout: 5)
+            }
+        } verify: { error in
             guard case let .invalidResponse(message)? = error as? MCPClientError else {
                 XCTFail("Expected MCPClientError.invalidResponse, got \(error)")
                 return

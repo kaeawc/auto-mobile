@@ -239,11 +239,11 @@ final class AsyncHTTPTransportTests: XCTestCase {
         XCTAssertEqual(performer.requests.count, 0)
     }
 
-    func testSyncWrapperSuccessOverNativeAsyncSeam() async throws {
+    func testNativeAsyncSuccess() async throws {
         let performer = AsyncFakeHTTPPerformer()
         let client = try makeClient(performer)
         let task = Task {
-            try await runSyncTransportTest { try client.callTool(name: "observe", arguments: [:], timeout: 5) }
+            try await client.callTool(name: "observe", arguments: [:], timeout: 5)
         }
         try await performer.requests.wait(for: 1)
         performer.reply(0)
@@ -253,11 +253,11 @@ final class AsyncHTTPTransportTests: XCTestCase {
         XCTAssertEqual(response.text, "ok")
     }
 
-    func testSyncWrapperDeadlineUsesOnlyVirtualTime() async throws {
+    func testNativeAsyncDeadlineUsesOnlyVirtualTime() async throws {
         let performer = AsyncFakeHTTPPerformer()
         let scheduler = VirtualDeadlineScheduler()
         let client = try makeClient(performer, scheduler: scheduler)
-        let task = Task { try await runSyncTransportTest { try client.initialize(timeout: 5) } }
+        let task = Task { try await client.initialize(timeout: 5) }
         try await performer.requests.wait(for: 1)
         try await scheduler.registered.wait(for: 1)
         scheduler.advance(by: 5)

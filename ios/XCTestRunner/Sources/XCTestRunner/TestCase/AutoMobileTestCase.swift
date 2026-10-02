@@ -10,10 +10,9 @@ private let _moduleLoadLog: Void = {
 
 /// Base XCTestCase for executing AutoMobile YAML automation plans via MCP.
 ///
-/// Concurrency: `nonisolated` — NOT `@MainActor`. `defaultTestSuite` overrides a `nonisolated`
-/// XCTestCase member (a `@MainActor` override would be rejected), and the execute path is synchronous
-/// and semaphore-blocking (hopping it onto the main actor would risk blocking it). The class holds no
-/// global mutable state.
+/// Concurrency: nonisolated XCTest lifecycle hooks prepare an executor synchronously; executePlan
+/// awaits it directly and propagates cancellation. Session identity is an explicit value generated
+/// once per execution, independent of which thread runs the async body.
 open class AutoMobileTestCase: XCTestCase {
     override open class var defaultTestSuite: XCTestSuite {
         // Ensure module load logging is triggered
@@ -27,7 +26,7 @@ open class AutoMobileTestCase: XCTestCase {
         _ = AutoMobileTestObserver.registerIfNeeded()
 
         let orderingSelection = resolveTimingOrderingSelection()
-        let timingAvailable = TestTimingCache.shared.hasTimings()
+        let timingAvailable = TestTimingCache.shared.hasTimings(sessionUuid: timingSessionIdGenerator())
         logTimingOrdering(selection: orderingSelection, timingAvailable: timingAvailable)
 
         let timingOrderingActive = orderingSelection.resolved != .none && timingAvailable
@@ -126,6 +125,16 @@ open class AutoMobileTestCase: XCTestCase {
     open func setUpAutoMobile() throws {}
     open func tearDownAutoMobile() throws {}
 
+    /// Internal construction and identity seams keep hermetic tests on the public execution path.
+    var executorFactory: (AutoMobilePlanExecutor.Configuration) -> AutoMobilePlanExecutor = {
+        AutoMobilePlanExecutor(configuration: $0)
+    }
+
+    var idGenerator: @Sendable () -> String = { UUID().uuidString }
+
+    /// Suite construction precedes test execution, so prefetch needs its own explicit filter value.
+    class var timingSessionIdGenerator: @Sendable () -> String { { UUID().uuidString } }
+
     private var executor: AutoMobilePlanExecutor?
     private let environment = AutoMobileEnvironment()
 
@@ -142,7 +151,7 @@ open class AutoMobileTestCase: XCTestCase {
         }
         PerfTimer.log("Configuration: planPath=\(config.planPath), transport=\(config.transport)")
         executor = PerfTimer.measure("createExecutor") {
-            AutoMobilePlanExecutor(configuration: config)
+            executorFactory(config)
         }
         PerfTimer.log("setUpWithError END for \(name)")
     }
@@ -156,7 +165,7 @@ open class AutoMobileTestCase: XCTestCase {
         print("[AutoMobileTestCase] tearDownWithError complete")
     }
 
-    public func executePlan() throws -> AutoMobilePlanExecutor.ExecutePlanResult {
+    public func executePlan() async throws -> AutoMobilePlanExecutor.ExecutePlanResult {
         PerfTimer.log("executePlan START")
         guard let executor = executor else {
             PerfTimer.log("ERROR: executor is nil")
@@ -166,15 +175,9 @@ open class AutoMobileTestCase: XCTestCase {
             buildTestMetadata()
         }
         PerfTimer.log("Executing with metadata: testClass=\(metadata.testClass), testMethod=\(metadata.testMethod)")
-        // Synchronous XCTest bodies normally run on the main thread. This blocking bridge is safe
-        // only while the awaited runner path never hops to the main actor or main queue; awaiting
-        // that work while blocking the main thread would deadlock. Keep that invariant and never
-        // call this bridge from the cooperative pool or main-actor async code. Capture identity here.
-        let sessionUuid = AutoMobileSession.currentSessionUuid()
-        let result = try PerfTimer.measure("executor.execute") {
-            try BlockingAsyncCall.run {
-                try await executor.execute(testMetadata: metadata, sessionUuid: sessionUuid)
-            }
+        let sessionUuid = idGenerator()
+        let result = try await PerfTimer.measureAsync("executor.execute") {
+            try await executor.execute(testMetadata: metadata, sessionUuid: sessionUuid)
         }
         PerfTimer.log("executePlan END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)")
         return result

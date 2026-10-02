@@ -11,18 +11,6 @@ final class FailingMCPClient: AutoMobileMCPClient {
         self.error = error
     }
 
-    func initialize(timeout _: TimeInterval) throws {
-        throw error
-    }
-
-    func callTool(name _: String, arguments _: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
-        throw error
-    }
-
-    func readResource(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
-        throw error
-    }
-
     func initialize(timeout _: TimeInterval) async throws { throw error }
 
     func callTool(name _: String, arguments _: [String: Any], timeout _: TimeInterval) async throws -> MCPToolResponse {

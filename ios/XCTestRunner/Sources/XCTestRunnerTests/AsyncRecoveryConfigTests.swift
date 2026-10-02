@@ -110,16 +110,5 @@ private final class ConfigResourceClient: AutoMobileMCPClient {
         throw MCPClientError.requestFailed("unexpected tool")
     }
 
-    func initialize(timeout _: TimeInterval) throws { XCTFail("Unexpected synchronous initialize") }
-    func readResource(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
-        XCTFail("Unexpected synchronous resource read")
-        throw MCPClientError.requestFailed("unexpected sync resource")
-    }
-
-    func callTool(name _: String, arguments _: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
-        XCTFail("Unexpected synchronous tool call")
-        throw MCPClientError.requestFailed("unexpected sync tool")
-    }
-
     func resetSession() {}
 }

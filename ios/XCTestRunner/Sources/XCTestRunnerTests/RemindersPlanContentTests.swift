@@ -210,7 +210,10 @@ final class RemindersPlanContentTests: XCTestCase {
         let source = try loadRepositoryFile("ios/XCTestRunner/Sources/XCTestRunner/TestCase/AutoMobileTestCase.swift")
         let body = classBody(named: "AutoMobileTestCase", in: source)
 
-        guard let timingAvailableRange = body.range(of: "let timingAvailable = TestTimingCache.shared.hasTimings()")
+        guard let timingAvailableRange = body
+            .range(
+                of: "let timingAvailable = TestTimingCache.shared.hasTimings(sessionUuid: timingSessionIdGenerator())"
+            )
         else {
             XCTFail("AutoMobileTestCase.defaultTestSuite should check timing availability")
             return

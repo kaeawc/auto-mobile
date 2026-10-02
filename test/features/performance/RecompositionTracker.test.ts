@@ -1,13 +1,15 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { RecompositionTracker } from "../../../src/features/performance/RecompositionTracker";
 import type { BootedDevice, ObserveResult, RecompositionNodeInfo } from "../../../src/models";
+import { createTestDatabase } from "../../db/testDbHelper";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**
- * These tests deliberately omit any package name (no activeWindow.appId and no
+ * Summary-math tests deliberately omit any package name (no activeWindow.appId and no
  * viewHierarchy.packageName), so processObservation computes and attaches the
  * summary but storeEntries returns before it ever calls getDatabase() — keeping
- * the whole suite DB-free (issue #3067) while still exercising the summary math.
+ * those tests DB-free (issue #3067) while still exercising the summary math.
+ * Per-device tests inject an in-memory database through the lazy provider.
  */
 
 const device: BootedDevice = { deviceId: "device-1" } as BootedDevice;
@@ -190,5 +192,81 @@ describe("RecompositionTracker", () => {
     await tracker.processObservation(result, device);
 
     expect(result.recompositionSummary?.totalRecompositions).toBe(7);
+  });
+  describe("per-device incarnation state", () => {
+    let db: Awaited<ReturnType<typeof createTestDatabase>>;
+    beforeAll(async () => {
+      db = await createTestDatabase();
+    });
+    afterAll(async () => {
+      await db.destroy();
+    });
+
+    function packageObservation(total: number, at: number): ObserveResult {
+      const result = observation([node({ id: "shared-node", total, rolling1sAverage: 0 })], at);
+      result.activeWindow = { appId: "com.example" } as ObserveResult["activeWindow"];
+      return result;
+    }
+
+    it("resets one device's summaries and baselines without changing another device", async () => {
+      const timer = new FakeTimer();
+      const tracker = new RecompositionTracker(timer, () => db);
+      const otherDevice: BootedDevice = {
+        deviceId: "device-2",
+        name: "Other",
+        platform: "android",
+      };
+      await tracker.processObservation(packageObservation(100, 1000), device);
+      tracker.recordInteraction(device.deviceId);
+      await tracker.processObservation(packageObservation(40, 2000), otherDevice);
+      tracker.recordInteraction(otherDevice.deviceId);
+      const otherSummary = tracker.getLatestSummary(otherDevice.deviceId, "com.example");
+
+      tracker.resetDeviceState(device.deviceId);
+
+      expect(tracker.getLatestSummary(device.deviceId, "com.example")).toBeUndefined();
+      expect(tracker.getLatestSummary(otherDevice.deviceId, "com.example")).toBe(otherSummary);
+      const restored = packageObservation(5, 3000);
+      await tracker.processObservation(restored, device);
+      expect(restored.recompositionSummary?.totalRecompositions).toBe(5);
+      expect(restored.recompositionSummary?.averagePerSecond).toBe(0);
+      const restoredNode = restored.viewHierarchy?.hierarchy as {
+        node: {
+          recompositionMetrics: { sinceLastObservation: number; sinceLastInteraction: number };
+        }[];
+      };
+      expect(restoredNode.node[0].recompositionMetrics.sinceLastObservation).toBe(5);
+      expect(restoredNode.node[0].recompositionMetrics.sinceLastInteraction).toBe(5);
+      const other = packageObservation(50, 4000);
+      await tracker.processObservation(other, otherDevice);
+      expect(other.recompositionSummary?.totalRecompositions).toBe(10);
+      expect(other.recompositionSummary?.averagePerSecond).toBe(5);
+      const metricsNode = other.viewHierarchy?.hierarchy as {
+        node: { recompositionMetrics: { sinceLastInteraction: number } }[];
+      };
+      expect(metricsNode.node[0].recompositionMetrics.sinceLastInteraction).toBe(10);
+    });
+
+    it("keeps interactions and timestamps scoped to their device", async () => {
+      const tracker = new RecompositionTracker(new FakeTimer(), () => db);
+      const otherDevice: BootedDevice = {
+        deviceId: "device-2",
+        name: "Other",
+        platform: "android",
+      };
+      await tracker.processObservation(packageObservation(10, 1000), device);
+      tracker.recordInteraction(device.deviceId);
+      await tracker.processObservation(packageObservation(30, 2000), device);
+      await tracker.processObservation(packageObservation(80, 1000), otherDevice);
+      tracker.recordInteraction(otherDevice.deviceId);
+      const result = packageObservation(40, 3000);
+      await tracker.processObservation(result, device);
+      const metricsNode = result.viewHierarchy?.hierarchy as {
+        node: { recompositionMetrics: { sinceLastInteraction: number } }[];
+      };
+      expect(metricsNode.node[0].recompositionMetrics.sinceLastInteraction).toBe(30);
+      expect(result.recompositionSummary?.totalRecompositions).toBe(10);
+      expect(result.recompositionSummary?.averagePerSecond).toBe(10);
+    });
   });
 });

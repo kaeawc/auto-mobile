@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   PerformanceMonitor,
   _resetPerformanceMonitor,
@@ -10,6 +10,7 @@ import {
   setLastTtiMs,
   getLastStartupTimingMs,
 } from "../../../src/features/performance/PerformanceMonitor";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
 import { PerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
 import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
@@ -1609,20 +1610,55 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
   });
 
   describe("getLastStartupTimingMs", () => {
+    let clock: ReturnType<typeof spyOn>;
+    beforeEach(() => {
+      clock = spyOn(defaultTimer, "now").mockImplementation(() => fakeTimer.now());
+    });
+    afterEach(() => {
+      clock.mockRestore();
+    });
+
+    it("clears only the restored device's timing for the same package", () => {
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      const pkg = "com.example.startup.restore";
+      setLastTtiMs("device-A", pkg, 100);
+      setLastTtiMs("device-B", pkg, 200);
+      expect(getLastStartupTimingMs("device-A", pkg)?.displayedMs).toBe(100);
+      expect(getLastStartupTimingMs("device-B", pkg)?.displayedMs).toBe(200);
+      monitor.resetDeviceState("device-A");
+      expect(getLastStartupTimingMs("device-A", pkg)).toBeNull();
+      expect(getLastStartupTimingMs("device-B", pkg)?.displayedMs).toBe(200);
+      monitor.resetDeviceState("device-B");
+    });
+
+    it("expires startup timing using the clock without disturbing another device", () => {
+      const pkg = "com.example.startup.expiry";
+      setLastTtiMs("device-A", pkg, 100);
+      fakeTimer.advanceTime(5 * 60 * 1000);
+      setLastTtiMs("device-B", pkg, 200);
+      expect(getLastStartupTimingMs("device-A", pkg)?.ageMs).toBe(5 * 60 * 1000);
+      fakeTimer.advanceTime(1);
+      expect(getLastStartupTimingMs("device-A", pkg)).toBeNull();
+      expect(getLastStartupTimingMs("device-B", pkg)).toEqual({ displayedMs: 200, ageMs: 1 });
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.resetDeviceState("device-A");
+      monitor.resetDeviceState("device-B");
+    });
     it("returns the last recorded launch displayed time with a fresh age", () => {
       // Unique package so the module-global store does not leak across tests.
       const pkg = "com.example.startup.fresh";
-      setLastTtiMs(pkg, 742);
+      setLastTtiMs("startup-device", pkg, 742);
 
-      const startup = getLastStartupTimingMs(pkg);
+      const startup = getLastStartupTimingMs("startup-device", pkg);
       expect(startup).not.toBeNull();
       expect(startup!.displayedMs).toBe(742);
-      expect(startup!.ageMs).toBeGreaterThanOrEqual(0);
-      expect(startup!.ageMs).toBeLessThan(60000);
+      expect(startup!.ageMs).toBe(0);
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.resetDeviceState("startup-device");
     });
 
     it("returns null for a package with no recorded launch", () => {
-      expect(getLastStartupTimingMs("com.example.startup.never")).toBeNull();
+      expect(getLastStartupTimingMs("startup-device", "com.example.startup.never")).toBeNull();
     });
   });
 });

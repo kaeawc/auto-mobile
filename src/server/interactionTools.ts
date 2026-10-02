@@ -1360,7 +1360,7 @@ export async function swipeOnHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ): Promise<StructuredToolResponse<SwipeOnToolPayload> & { isError?: true }> {
-  RecompositionTracker.getInstance().recordInteraction();
+  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const swipeOn = swipeOnFactory(device);
   const resolvedDirection = resolveSwipeDirection({
     direction: args.direction,
@@ -1430,7 +1430,7 @@ export async function pinchOnHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  RecompositionTracker.getInstance().recordInteraction();
+  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const pinchOn = pinchOnFactory(device);
   const result = await pinchOn.execute(
     {
@@ -1862,7 +1862,7 @@ export async function tapOnHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  RecompositionTracker.getInstance().recordInteraction();
+  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const tapOnTextCommand = tapOnElementFactory(device);
   const result = await tapOnTextCommand.execute(
     {
@@ -1911,7 +1911,7 @@ export async function tapAtHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  RecompositionTracker.getInstance().recordInteraction();
+  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const result = await tapAtElementFactory(device).execute(
     {
       x: args.x,
@@ -1998,7 +1998,7 @@ export async function tapAnyHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  RecompositionTracker.getInstance().recordInteraction();
+  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const tapAnyCommand = tapAnyElementFactory(device);
   const result = await tapAnyCommand.execute(
     {
@@ -2051,7 +2051,7 @@ export async function dragAndDropHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  RecompositionTracker.getInstance().recordInteraction();
+  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const dragAndDrop = dragAndDropFactory(device);
   const result: DragAndDropResult = await dragAndDrop.execute(
     {
@@ -2141,7 +2141,7 @@ export async function pressButtonHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  RecompositionTracker.getInstance().recordInteraction();
+  RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   try {
     const pressButton = pressButtonFactory(device);
     const result: PressButtonResult = await pressButton.execute(args.button, progress, signal);
@@ -2863,7 +2863,7 @@ export function registerInteractionTools() {
     signal?: AbortSignal,
   ) => {
     await assertSendKeysRunnerCompatible(device);
-    RecompositionTracker.getInstance().recordInteraction();
+    RecompositionTracker.getInstance().recordInteraction(device.deviceId);
     const sendKeys = sendKeysFactory(device);
     const result = await sendKeys.execute(
       args.commands,

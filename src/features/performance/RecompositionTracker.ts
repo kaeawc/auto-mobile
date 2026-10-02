@@ -10,6 +10,7 @@ import {
   TopRecompositionEntry,
   ViewHierarchyResult,
 } from "../../models";
+import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -39,18 +40,25 @@ interface RecompositionEntryMetrics extends RecompositionEntryInput {
   recompositionsPerSecond: number;
 }
 
+interface RecompositionDeviceState {
+  lastObservationTotals: Map<string, number>;
+  lastInteractionTotals: Map<string, number>;
+  latestTotals: Map<string, number>;
+  lastObservationAt: number | null;
+  lastInteractionAt: number | null;
+  latestSummaryByPackage: Map<string, RecompositionSummary>;
+}
+
 export class RecompositionTracker {
   private static instance: RecompositionTracker;
-  private lastObservationTotals = new Map<string, number>();
-  private lastInteractionTotals = new Map<string, number>();
-  private latestTotals = new Map<string, number>();
-  private lastObservationAt: number | null = null;
-  private lastInteractionAt: number | null = null;
-  private latestSummaryByDevice = new Map<string, RecompositionSummary>();
+  private readonly stateByDevice = new Map<string, RecompositionDeviceState>();
   private readonly parser = new DefaultElementParser();
   private timer: Timer;
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(
+    timer: Timer = defaultTimer,
+    private readonly database: () => ReturnType<typeof getDatabase> = getDatabase,
+  ) {
     this.timer = timer;
   }
 
@@ -62,12 +70,34 @@ export class RecompositionTracker {
   }
 
   getLatestSummary(deviceId: string, packageName: string): RecompositionSummary | undefined {
-    return this.latestSummaryByDevice.get(`${deviceId}:${packageName}`);
+    return this.stateByDevice.get(deviceId)?.latestSummaryByPackage.get(packageName);
   }
 
-  recordInteraction(): void {
-    this.lastInteractionTotals = new Map(this.latestTotals);
-    this.lastInteractionAt = this.timer.now();
+  /** Drop only the restored guest's summaries and counter/timestamp baselines. */
+  resetDeviceState(deviceId: string): void {
+    this.stateByDevice.delete(deviceId);
+  }
+
+  recordInteraction(deviceId: string): void {
+    const state = this.getDeviceState(deviceId);
+    state.lastInteractionTotals = new Map(state.latestTotals);
+    state.lastInteractionAt = this.timer.now();
+  }
+
+  private getDeviceState(deviceId: string): RecompositionDeviceState {
+    let state = this.stateByDevice.get(deviceId);
+    if (!state) {
+      state = {
+        lastObservationTotals: new Map(),
+        lastInteractionTotals: new Map(),
+        latestTotals: new Map(),
+        lastObservationAt: null,
+        lastInteractionAt: null,
+        latestSummaryByPackage: new Map(),
+      };
+      this.stateByDevice.set(deviceId, state);
+    }
+    return state;
   }
 
   async processObservation(result: ObserveResult, device: BootedDevice): Promise<void> {
@@ -82,20 +112,21 @@ export class RecompositionTracker {
       return;
     }
 
-    const metrics = this.computeMetrics(entries, observationTimestamp);
+    const state = this.getDeviceState(device.deviceId);
+    const metrics = this.computeMetrics(entries, observationTimestamp, state);
     this.attachMetricsToNodes(metrics);
 
-    const summary = this.buildSummary(metrics, observationTimestamp);
+    const summary = this.buildSummary(metrics, observationTimestamp, state);
     result.recompositionSummary = summary;
 
     const packageName = result.activeWindow?.appId ?? result.viewHierarchy?.packageName;
     if (packageName) {
-      this.latestSummaryByDevice.set(`${device.deviceId}:${packageName}`, summary);
+      state.latestSummaryByPackage.set(packageName, summary);
     }
 
-    this.latestTotals = new Map(metrics.map((entry) => [entry.id, entry.total]));
-    this.lastObservationTotals = new Map(this.latestTotals);
-    this.lastObservationAt = observationTimestamp;
+    state.latestTotals = new Map(metrics.map((entry) => [entry.id, entry.total]));
+    state.lastObservationTotals = new Map(state.latestTotals);
+    state.lastObservationAt = observationTimestamp;
 
     await this.storeEntries(metrics, result, device, observationTimestamp);
   }
@@ -169,14 +200,15 @@ export class RecompositionTracker {
   private computeMetrics(
     entries: RecompositionEntryInput[],
     observationTimestamp: number,
+    state: RecompositionDeviceState,
   ): RecompositionEntryMetrics[] {
-    const deltaSeconds = this.lastObservationAt
-      ? Math.max(0, (observationTimestamp - this.lastObservationAt) / 1000)
+    const deltaSeconds = state.lastObservationAt
+      ? Math.max(0, (observationTimestamp - state.lastObservationAt) / 1000)
       : 0;
 
     return entries.map((entry) => {
-      const lastTotal = this.lastObservationTotals.get(entry.id) ?? 0;
-      const lastInteractionTotal = this.lastInteractionTotals.get(entry.id) ?? lastTotal;
+      const lastTotal = state.lastObservationTotals.get(entry.id) ?? 0;
+      const lastInteractionTotal = state.lastInteractionTotals.get(entry.id) ?? lastTotal;
       const sinceLastObservation = Math.max(0, entry.total - lastTotal);
       const sinceLastInteraction = Math.max(0, entry.total - lastInteractionTotal);
       const recompositionsPerSecond =
@@ -213,6 +245,7 @@ export class RecompositionTracker {
   private buildSummary(
     entries: RecompositionEntryMetrics[],
     observationTimestamp: number,
+    state: RecompositionDeviceState,
   ): RecompositionSummary {
     const totalRecompositions = entries.reduce((sum, entry) => sum + entry.sinceLastObservation, 0);
     const durationValues = entries
@@ -222,8 +255,8 @@ export class RecompositionTracker {
       durationValues.length > 0
         ? durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length
         : undefined;
-    const deltaSeconds = this.lastObservationAt
-      ? Math.max(0, (observationTimestamp - this.lastObservationAt) / 1000)
+    const deltaSeconds = state.lastObservationAt
+      ? Math.max(0, (observationTimestamp - state.lastObservationAt) / 1000)
       : 0;
     const averagePerSecond = deltaSeconds > 0 ? totalRecompositions / deltaSeconds : 0;
 
@@ -267,7 +300,7 @@ export class RecompositionTracker {
       return;
     }
 
-    const db = getDatabase();
+    const db = this.database();
     const sessionId = new Date(this.timer.now()).toISOString().split("T")[0];
     const timestamp = new Date(observationTimestamp).toISOString();
 
@@ -373,3 +406,9 @@ export class RecompositionTracker {
     return null;
   }
 }
+
+registerDeviceIncarnationListener({
+  name: "recomposition-tracker",
+  onDeviceIncarnationChanged: (deviceId) =>
+    RecompositionTracker.getInstance().resetDeviceState(deviceId),
+});

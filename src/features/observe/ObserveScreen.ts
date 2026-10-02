@@ -1759,7 +1759,7 @@ export class RealObserveScreen implements ObserveScreen {
       );
       // Startup timing is package-keyed and event-based, so it is not in the
       // sample ring; fill it from the launch cache (an in-memory read).
-      snapshot.startup = getLastStartupTimingMs(appId);
+      snapshot.startup = getLastStartupTimingMs(this.device.deviceId, appId);
       result.perfSnapshot = snapshot;
     } catch (error) {
       // Best-effort: an audit/snapshot failure should not pollute observation.

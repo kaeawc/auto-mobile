@@ -97,6 +97,7 @@ describe("settleEmbeddedObservation (#6866)", () => {
       obs(AIRPLANE_ROW_INFLATED, 40),
     ]);
 
+    fake.setDeferredBackStack({ depth: 0, activities: [], tasks: [], capturedAt: 999 });
     const halfInflated = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
     const outcome = await settleEmbeddedObservation({
       actionClass: "navigation",
@@ -104,6 +105,9 @@ describe("settleEmbeddedObservation (#6866)", () => {
       settleObserve: settleFor(fake, timer),
     });
 
+    expect(fake.getExecuteOptions().every((o) => o.skipBackStack === true)).toBe(true);
+    expect(fake.getCollectDeferredBackStackCallCount()).toBe(1);
+    expect(outcome.observation.backStack?.capturedAt).toBe(999);
     expect(outcome.settled).toBe(true);
     // The switch child — the only carrier of toggle/checked — is now present.
     const children = (outcome.observation.viewHierarchy!.hierarchy.node as any).node.node;

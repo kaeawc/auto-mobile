@@ -311,6 +311,7 @@ describe("waitForObservation DSL branch", () => {
       true,
       timer,
     );
+    expect(observeScreen.getCollectDeferredBackStackCallCount()).toBe(0);
     expect(observeScreen.getExecuteOptions().length).toBeGreaterThan(0);
     expect(
       observeScreen.getExecuteOptions().every((options) => options.skipBackStack === true),

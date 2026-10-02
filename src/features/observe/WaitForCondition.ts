@@ -44,6 +44,7 @@ export class RealWaitForCondition implements WaitForCondition {
         pollMs,
         signal: options.signal,
         initialMinTimestampMs: options.initialMinTimestampMs,
+        readBackStackEachPoll: options.readBackStackEachPoll,
       },
       (observation) => {
         lastEvaluation = predicate(observation);

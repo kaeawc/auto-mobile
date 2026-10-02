@@ -793,6 +793,7 @@ const runWaitForConditionDsl = async (
   const startTime = timer.now();
   const timeoutMs =
     waitFor.timeout ?? waitFor.timeoutMs ?? (waitFor.for === "stable" ? 2500 : 5000);
+  // Omit collectDeferredBackStack here: explicit skipBackStack opts out of terminal reads too.
   const pollingScreen: ObserveScreen = skipBackStack
     ? {
         execute: (options?: ObserveScreenExecuteOptions) =>

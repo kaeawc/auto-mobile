@@ -83,6 +83,12 @@ export interface ObserveScreen {
    */
   processRecomposition?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 
+  /** Attach a skipped Android back stack; true requests one full poll to reconcile activity attribution. */
+  collectDeferredBackStack?(
+    observation: ObserveResult,
+    options?: { signal?: AbortSignal },
+  ): Promise<boolean | void>;
+
   /** Capture the cache generation at poll start for the deferred write's stale-write fence. */
   captureCacheGeneration?(): number;
 

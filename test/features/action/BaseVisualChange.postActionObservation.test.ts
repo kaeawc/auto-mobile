@@ -140,6 +140,42 @@ describe("BaseVisualChange post-action observation", () => {
     ).rejects.toThrow("Display changed");
   });
 
+  test("post-action display settle skips intermediate back stacks and adopts the terminal one", async () => {
+    fakeObserveScreen.setObserveResult((i) =>
+      makeObserve({
+        updatedAt: (i + 1) * 10,
+        viewHierarchy: {
+          packageName: "com.example.app",
+          hierarchy: { node: {} },
+          updatedAt: (i + 1) * 10,
+        },
+      }),
+    );
+    fakeObserveScreen.setDeferredBackStack({
+      depth: 0,
+      activities: [],
+      tasks: [],
+      capturedAt: 999,
+    });
+    const result = await createVisualChange("android").observedInteraction(
+      async () => ({ success: true }),
+      {
+        changeExpected: false,
+        skipPreviousObserve: true,
+        display: "active",
+      },
+    );
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(3);
+    expect(
+      fakeObserveScreen
+        .getExecuteOptions()
+        .slice(1)
+        .map((o) => o.skipBackStack),
+    ).toEqual([true, true]);
+    expect(fakeObserveScreen.getCollectDeferredBackStackCallCount()).toBe(1);
+    expect(result.observation.backStack?.capturedAt).toBe(999);
+  });
+
   test("internal swipe skips a stale caller fence", async () => {
     fakeObserveScreen.setObserveResult(makeObserve());
     displayTransitions.notifyTransition("device-123", "test");

@@ -799,6 +799,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         matched: this.deriveTapEffect(previousObservation, observation)?.screenChanged === true,
       }),
       {
+        // The predicate reads activeWindow, which needs per-poll back-stack reconciliation.
+        readBackStackEachPoll: true,
         timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
         pollMs: POST_TAP_EFFECT_POLL_MS,
         signal,
@@ -892,6 +894,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         return { matched: now - quietSinceMs >= POST_TAP_SETTLE_QUIET_PERIOD_MS };
       },
       {
+        // The predicate reads activeWindow, which needs per-poll back-stack reconciliation.
+        readBackStackEachPoll: true,
         timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
         pollMs: POST_TAP_EFFECT_POLL_MS,
         signal,

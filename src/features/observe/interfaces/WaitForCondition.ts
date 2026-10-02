@@ -38,6 +38,8 @@ export interface WaitForConditionOptions {
    * same domain the device freshness gate compares against. Never a host clock.
    */
   initialMinTimestampMs?: number;
+  /** Keep per-poll back-stack reconciliation when the predicate reads activeWindow. */
+  readBackStackEachPoll?: boolean;
 }
 
 /**

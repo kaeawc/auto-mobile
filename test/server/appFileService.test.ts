@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  type ForegroundAppLookup,
   type AppFileFileSystem,
   type AppFileStats,
   createAppFileServiceForTesting,
@@ -1737,18 +1738,73 @@ class AppFileUserAdb extends FakeAdbExecutor {
   }
 }
 
+class FakeForegroundAppLookup implements ForegroundAppLookup {
+  calls = 0;
+  app: { packageName: string; userId: number } | null = null;
+  error?: Error;
+  onLookup?: (signal?: AbortSignal) => void;
+
+  async getForegroundApp(signal?: AbortSignal) {
+    this.calls += 1;
+    this.onLookup?.(signal);
+    if (this.error) {
+      throw this.error;
+    }
+    return this.app;
+  }
+}
+
 const appFileUserDevice: BootedDevice = {
   deviceId: "fake-device",
   name: "Fake",
   platform: "android",
 };
 const appFileUserCases = [
+  {
+    name: "foreground work app with parent current user",
+    users: [0, 10],
+    installed: [0, 10],
+    current: 0,
+    resolved: 10,
+    foreground: { packageName: "com.example.app", userId: 10 },
+  },
+  {
+    name: "different foreground package",
+    users: [0, 10],
+    installed: [0, 10],
+    current: 0,
+    resolved: 0,
+    foreground: { packageName: "com.other.app", userId: 10 },
+  },
+  {
+    name: "foreground user outside candidates",
+    users: [0, 10],
+    installed: [0, 10],
+    current: 0,
+    resolved: 0,
+    foreground: { packageName: "com.example.app", userId: 11 },
+  },
+  {
+    name: "null foreground",
+    users: [0, 10],
+    installed: [0, 10],
+    current: 0,
+    resolved: 0,
+  },
+  {
+    name: "failed foreground",
+    users: [0, 10],
+    installed: [0, 10],
+    current: 0,
+    resolved: 0,
+    foregroundError: new Error("foreground unavailable"),
+  },
   { name: "explicit work profile", explicit: 10, users: [0, 10], installed: [], resolved: 10 },
   { name: "explicit primary user", explicit: 0, users: [0, 10], installed: [], resolved: 0 },
   { name: "sole primary installation", users: [0], installed: [0], resolved: 0 },
   { name: "sole work-profile installation", users: [0, 10], installed: [10], resolved: 10 },
   {
-    name: "several installations, foreground installed",
+    name: "secondary full user via current-user fallback",
     users: [0, 10],
     installed: [0, 10],
     current: 10,
@@ -1770,12 +1826,16 @@ const appFileUserCases = [
   { name: "unknown user list", users: [], installed: [], error: "user resolution failed" },
 ];
 
-function appFileUserService(adb: AppFileUserAdb) {
+function appFileUserService(
+  adb: AppFileUserAdb,
+  foregroundAppLookup: ForegroundAppLookup | null = new FakeForegroundAppLookup(),
+) {
   const fileSystem = new TestAppFileFileSystem();
   return {
     fileSystem,
     service: createAppFileServiceForTesting({
       adbFactory: new FakeAdbClientFactory(adb),
+      foregroundAppLookup: foregroundAppLookup ?? undefined,
       idGenerator: new CountingIdGenerator("tmp"),
       deviceResolver: async () => appFileUserDevice,
       fileSystem,
@@ -1840,10 +1900,16 @@ for (const operation of ["put", "list", "read"] as const) {
           );
         }
         if (scenario.current !== undefined) {
-          // Constructed, not captured from a device: foreground-user number.
+          // Constructed, not captured from a device: current full-user number.
           adb.setCommandResponse("shell am get-current-user", execResult(`${scenario.current}\n`));
         }
-        const { service, fileSystem } = appFileUserService(adb);
+        const foreground = new FakeForegroundAppLookup();
+        foreground.app = scenario.foreground ?? null;
+        foreground.error = scenario.foregroundError;
+        const debug = scenario.foregroundError
+          ? spyOn(logger, "debug").mockImplementation(() => {})
+          : undefined;
+        const { service, fileSystem } = appFileUserService(adb, foreground);
         await fileSystem.writeFileBuffer("/fixtures/welcome.txt", Buffer.from("hello"));
         const common = {
           deviceId: appFileUserDevice.deviceId,
@@ -1866,7 +1932,13 @@ for (const operation of ["put", "list", "read"] as const) {
           scenario.explicit !== undefined
             ? []
             : scenario.users.map((id) => `shell pm list packages --user ${id}`);
-        if (scenario.current !== undefined) {
+        if (
+          scenario.current !== undefined &&
+          !(
+            scenario.foreground?.packageName === "com.example.app" &&
+            scenario.installed.includes(scenario.foreground.userId)
+          )
+        ) {
           resolution.push("shell am get-current-user");
         }
         if (scenario.error) {
@@ -1887,6 +1959,16 @@ for (const operation of ["put", "list", "read"] as const) {
         // Single-user omitted ID costs one listUsers + one pm list, no current-user read.
         // Explicit IDs cost zero resolution reads; every other operation lists users once.
         expect(adb.listUsersCalls).toBe(scenario.explicit === undefined ? 1 : 0);
+        expect(foreground.calls).toBe(
+          scenario.explicit === undefined && scenario.installed.length > 1 ? 1 : 0,
+        );
+        if (scenario.foregroundError) {
+          expect(debug).toHaveBeenCalledWith(
+            "Android app-file foreground lookup failed",
+            scenario.foregroundError,
+          );
+        }
+        debug?.mockRestore();
       }
     });
 
@@ -1942,7 +2024,15 @@ describe("Android app-file resource user round trips", () => {
       query: "?userId=10",
     },
     { name: "sole work installation", installed: [10], user: 10, query: "?userId=10" },
-    { name: "foreground work", installed: [0, 10], current: 10, user: 10, query: "?userId=10" },
+    {
+      name: "foreground work",
+      installed: [0, 10],
+      current: 0,
+      user: 10,
+      query: "?userId=10",
+      foreground: { packageName: "com.example.app", userId: 10 },
+    },
+    { name: "secondary full user", installed: [0, 10], current: 10, user: 10, query: "?userId=10" },
     { name: "foreground primary", installed: [0, 10], current: 0, user: 0, query: "?userId=0" },
     { name: "single primary user", users: [0], installed: [0], user: 0, query: "" },
     { name: "sole primary installation with other users", installed: [0], user: 0, query: "" },
@@ -1975,7 +2065,9 @@ describe("Android app-file resource user round trips", () => {
         );
         const readCommand = appFileOperationCommands("read", container, scenario.user)[0]!;
         adb.setCommandResponse(readCommand, execResult(Buffer.from("hello").toString("base64")));
-        const { service, fileSystem } = appFileUserService(adb);
+        const foreground = new FakeForegroundAppLookup();
+        foreground.app = scenario.foreground ?? null;
+        const { service, fileSystem } = appFileUserService(adb, foreground);
         await fileSystem.writeFileBuffer("/fixtures/welcome.txt", Buffer.from("hello"));
         const common = {
           deviceId: appFileUserDevice.deviceId,
@@ -2001,7 +2093,11 @@ describe("Android app-file resource user round trips", () => {
           scenario.explicit === undefined
             ? users.map((id) => `shell pm list packages --user ${id}`)
             : [];
-        if (scenario.explicit === undefined && scenario.installed.length > 1) {
+        if (
+          scenario.explicit === undefined &&
+          scenario.installed.length > 1 &&
+          !scenario.foreground
+        ) {
           resolution.push("shell am get-current-user");
         }
         expect(adb.getExecutedCommands()).toEqual([...resolution, ...commands]);
@@ -2019,8 +2115,10 @@ describe("Android app-file resource user round trips", () => {
         const parts = parseAppFileResourceParams(match!.params);
         expect(parts.userId).toBe(scenario.query ? scenario.user : undefined);
         const discoveryCalls = adb.listUsersCalls;
+        const foregroundCalls = foreground.calls;
         adb.clearHistory();
-        // Change foreground state after generating the URI: pinned reads must not drift.
+        // Change constructed foreground/current state: pinned reads must not drift.
+        foreground.app = { packageName: "com.example.app", userId: scenario.user === 0 ? 10 : 0 };
         adb.setCommandResponse(
           "shell am get-current-user",
           execResult(`${scenario.user === 0 ? 10 : 0}\n`),
@@ -2032,12 +2130,65 @@ describe("Android app-file resource user round trips", () => {
           readCommand,
         ]);
         expect(adb.listUsersCalls).toBe(discoveryCalls + (scenario.query ? 0 : 1));
+        expect(foreground.calls).toBe(foregroundCalls);
       });
     }
   }
 });
 
 describe("Android app-file profile details", () => {
+  test("default foreground lookup delegates to the operation's adb client", async () => {
+    const adb = new AppFileUserAdb();
+    adb.setUsers([
+      { userId: 0, name: "Owner" },
+      { userId: 10, name: "Work" },
+    ]);
+    // Constructed, not captured from a device: work app resumed, parent remains current.
+    adb.setForegroundApp({ packageName: "com.example.app", userId: 10 });
+    adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
+    adb.setCommandResponse("shell am get-current-user", execResult("0\n"));
+    const { service } = appFileUserService(adb, null);
+    const result = await service.putFile({
+      device: appFileUserDevice,
+      target: { domain: "app_containers", appId: "com.example.app", container: "externalFiles" },
+      files: [{ contentText: "hello", destinationPath: "welcome.txt" }],
+    });
+    expect(result.files[0]!.resourceUri).toEndWith("?userId=10");
+    expect(adb.wasCommandExecuted("shell am get-current-user")).toBe(false);
+  });
+
+  test("foreground lookup abort propagates without current-user fallback", async () => {
+    const adb = new AppFileUserAdb();
+    adb.setUsers([
+      { userId: 0, name: "Owner" },
+      { userId: 10, name: "Work" },
+    ]);
+    // Constructed, not captured from a device: both users have the package.
+    adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
+    const foreground = new FakeForegroundAppLookup();
+    const controller = new AbortController();
+    const abort = new Error("lookup aborted");
+    foreground.onLookup = (signal) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort(abort);
+    };
+    foreground.error = abort;
+    const { service } = appFileUserService(adb, foreground);
+    await expect(
+      service.putFile({
+        device: appFileUserDevice,
+        target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+        files: [{ contentText: "hello", destinationPath: "welcome.txt" }],
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(abort);
+    expect(foreground.calls).toBe(1);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell pm list packages --user 0",
+      "shell pm list packages --user 10",
+    ]);
+  });
+
   test("resolveAndroidTarget keeps primary paths and substitutes secondary storage roots", () => {
     expect(resolveAndroidTarget("com.example.app", "externalFiles", "a.txt")).toEqual({
       kind: "external",

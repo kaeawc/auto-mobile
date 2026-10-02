@@ -148,7 +148,12 @@ export interface AppFileFileSystem {
   rm(path: string): Promise<void>;
 }
 
+export interface ForegroundAppLookup {
+  getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null>;
+}
+
 export interface AppFileServiceDependencies {
+  foregroundAppLookup?: ForegroundAppLookup;
   adbFactory?: AdbClientFactory;
   simctlFactory?: (device: BootedDevice) => SimCtlClient;
   fileSystem?: AppFileFileSystem;
@@ -231,6 +236,7 @@ export function createAppFileServiceForTesting(
         deps.sharedStorageService ?? getSharedStorageService(),
         deps.iosSimulatorMediaClient ??
           new SimctlIosSimulatorMediaClient(resolvedDeps.simctlFactory),
+        deps.foregroundAppLookup,
       ),
     resolvedDeps.deviceResolver,
     resolvedDeps.fileSystem,
@@ -244,9 +250,10 @@ function createDefaultProviders(
   iosSimulatorMediaClient: IosSimulatorMediaClient = new SimctlIosSimulatorMediaClient(
     deps.simctlFactory,
   ),
+  foregroundAppLookup?: ForegroundAppLookup,
 ): AppFileProvider[] {
   return [
-    new AndroidAppFileProvider(deps.adbFactory, idGenerator),
+    new AndroidAppFileProvider(deps.adbFactory, idGenerator, foregroundAppLookup),
     new AndroidUserFilesProvider(sharedStorageService),
     new AndroidMediaLibraryProvider(sharedStorageService),
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
@@ -557,6 +564,7 @@ interface AndroidAppFileUser {
 // its existing query-free URI. Nonzero resolved users are always pinned.
 async function resolveAndroidAppFileUser(
   adb: AdbExecutor,
+  foregroundAppLookup: ForegroundAppLookup,
   device: BootedDevice,
   appId: string,
   userId?: number,
@@ -575,7 +583,7 @@ async function resolveAndroidAppFileUser(
 
   try {
     // Once per operation/batch: listUsers + one pm list per user. A user-0-only
-    // device needs just those two reads; get-current-user is only for ambiguity.
+    // device needs just those two reads; foreground/current probes are only for ambiguity.
     const users = await adb.listUsers(signal);
     if (users.length === 0) {
       throw new ActionableError(
@@ -596,19 +604,48 @@ async function resolveAndroidAppFileUser(
         `Android app ${appId} is not installed for any user on ${device.deviceId}. Install the app for the intended user.`,
       );
     }
-    const current = await resolver.resolve({ currentUser: true, signal });
-    if (current.source === "currentUser" && candidates.includes(current.userId)) {
-      return { userId: current.userId, pinInResourceUri: true };
-    }
-    throw new ActionableError(
-      `Android app ${appId} on ${device.deviceId} is installed for candidate users ${candidates.join(", ")}, but no installed foreground user could be selected. Pass userId explicitly (resource query ?userId=N).`,
+    return await resolveAmbiguousAndroidAppFileUser(
+      adb,
+      foregroundAppLookup,
+      device,
+      appId,
+      candidates,
+      signal,
     );
   } catch (error) {
+    signal?.throwIfAborted();
     throw toActionableError(
       error,
       `Android user resolution failed for ${appId} on ${device.deviceId}. Pass userId explicitly (resource query ?userId=N)`,
     );
   }
+}
+
+async function resolveAmbiguousAndroidAppFileUser(
+  adb: AdbExecutor,
+  foregroundAppLookup: ForegroundAppLookup,
+  device: BootedDevice,
+  appId: string,
+  candidates: number[],
+  signal?: AbortSignal,
+): Promise<AndroidAppFileUser> {
+  try {
+    const foreground = await foregroundAppLookup.getForegroundApp(signal);
+    if (foreground?.packageName === appId && candidates.includes(foreground.userId)) {
+      return { userId: foreground.userId, pinInResourceUri: true };
+    }
+  } catch (error) {
+    signal?.throwIfAborted();
+    // Foreground lookup is an optional refinement; current-user resolution remains available.
+    logger.debug("Android app-file foreground lookup failed", error);
+  }
+  const current = await new AndroidUserTargetResolver(adb).resolve({ currentUser: true, signal });
+  if (current.source === "currentUser" && candidates.includes(current.userId)) {
+    return { userId: current.userId, pinInResourceUri: true };
+  }
+  throw new ActionableError(
+    `Android app ${appId} on ${device.deviceId} is installed for candidate users ${candidates.join(", ")}, but no installed foreground user could be selected. Pass userId explicitly (resource query ?userId=N).`,
+  );
 }
 
 function androidRunAsPrefix(appId: string, userId: number): string {
@@ -625,6 +662,7 @@ class AndroidAppFileProvider
   constructor(
     private readonly adbFactory: AdbClientFactory,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
+    private readonly foregroundAppLookup?: ForegroundAppLookup,
   ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<AppFileProviderWriteResult> {
@@ -654,6 +692,7 @@ class AndroidAppFileProvider
     const adb = this.adbFactory.create(request.device);
     const { userId, pinInResourceUri } = await resolveAndroidAppFileUser(
       adb,
+      this.foregroundAppLookup ?? adb,
       request.device,
       appTarget.appId,
       request.userId,
@@ -783,6 +822,7 @@ class AndroidAppFileProvider
 
     const { userId, pinInResourceUri } = await resolveAndroidAppFileUser(
       adb,
+      this.foregroundAppLookup ?? adb,
       request.device,
       request.appId,
       request.userId,
@@ -887,6 +927,7 @@ class AndroidAppFileProvider
 
     const { userId } = await resolveAndroidAppFileUser(
       adb,
+      this.foregroundAppLookup ?? adb,
       request.device,
       request.appId,
       request.userId,

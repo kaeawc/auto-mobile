@@ -1,15 +1,18 @@
 import { expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import {
   SimCtlClient,
   SimctlScreenshotError,
+  type SimCtlFileSystem,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../../src/utils/logger";
 import { captureIosPanelScreenshot } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
 import type { BootedDevice } from "../../../src/models";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
+import { isAbsolute, join, resolve, sep } from "node:path";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   parseSimulatorDisplays,
@@ -37,87 +40,498 @@ function png(width: number, height: number): Buffer {
   return buffer;
 }
 
-test("simctl screenshot passes the selected display as one argv token and preserves PNG bytes", async () => {
+function fakeCaptureDir(n: number): string {
+  return resolve("fake", `capture-${n}`);
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 40; turn++) {
+    await Promise.resolve();
+  }
+}
+
+function captureHarness(
+  options: {
+    mkdtemp?: () => Promise<string>;
+    cleanup?: () => Promise<void>;
+    frame?: Buffer;
+    readError?: Error;
+    read?: () => Promise<Buffer>;
+    exitCode?: number;
+    stderr?: string;
+    manual?: boolean;
+    cleanupError?: Error;
+    abortOnError?: boolean;
+    spawnError?: Error;
+  } = {},
+) {
+  const timer = new FakeTimer();
   const calls: string[][] = [];
-  const frame = png(2853, 2007);
-  const spawn = (_file: string, args: string[]): ChildProcess => {
-    calls.push(args);
-    const child = new EventEmitter() as ChildProcess;
-    const stdout = new PassThrough();
-    const stderr = new PassThrough();
-    Object.assign(child, { stdout, stderr });
-    queueMicrotask(() => {
-      stdout.end(frame);
-      stderr.end();
-      child.emit("close", 0);
-    });
-    return child;
-  };
-  const simctl = new SimCtlClient(device, null, new FakeTimer(), "darwin", spawn);
-  expect(await simctl.screenshot(udid, "primary-1")).toEqual(frame);
-  expect(calls).toEqual([["simctl", "io", udid, "screenshot", "--display=primary-1", "-"]]);
-});
-
-test("simctl screenshot reports empty successful output as a typed failure", async () => {
-  const spawn = (): ChildProcess => {
-    const child = new EventEmitter() as ChildProcess;
-    const stdout = new PassThrough();
-    const stderr = new PassThrough();
-    Object.assign(child, { stdout, stderr });
-    queueMicrotask(() => {
-      stdout.end();
-      stderr.end();
-      child.emit("close", 0);
-    });
-    return child;
-  };
-  const simctl = new SimCtlClient(device, null, new FakeTimer(), "darwin", spawn);
-  await expect(simctl.screenshot(udid, "primary-1")).rejects.toMatchObject({
-    name: "SimctlScreenshotError",
-    reason: "empty-output",
-    exitCode: 0,
-    byteLength: 0,
+  const files = new Map<string, Buffer>();
+  const removed: string[] = [];
+  const events: string[] = [];
+  const children: ChildProcess[] = [];
+  let count = 0;
+  let notifyStarted: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    notifyStarted = resolve;
   });
+  const fileSystem: SimCtlFileSystem = {
+    mkdtemp: async (prefix) => {
+      expect(isAbsolute(prefix)).toBe(true);
+      return options.mkdtemp ? options.mkdtemp() : fakeCaptureDir(++count);
+    },
+    writeFile: async () => {},
+    readFile: async () => "",
+    readFileBuffer: async (path) => {
+      events.push("read");
+      if (options.read) {
+        return options.read();
+      }
+      if (options.readError) {
+        throw options.readError;
+      }
+      const bytes = files.get(path);
+      if (!bytes) {
+        throw Object.assign(new Error("file missing"), { code: "ENOENT" });
+      }
+      return bytes;
+    },
+    rm: async (path, rmOptions) => {
+      expect(rmOptions).toEqual({ recursive: true, force: true });
+      events.push("cleanup");
+      removed.push(path);
+      if (options.cleanupError) {
+        throw options.cleanupError;
+      }
+      if (options.cleanup) {
+        await options.cleanup();
+      }
+      for (const key of files.keys()) {
+        if (key.startsWith(path + sep)) {
+          files.delete(key);
+        }
+      }
+    },
+  };
+  const simctl = new SimCtlClient(
+    device,
+    null,
+    timer,
+    "darwin",
+    (_file, args, spawnOptions) => {
+      calls.push(args);
+      if (options.spawnError) {
+        throw options.spawnError;
+      }
+      const child = new EventEmitter() as ChildProcess;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      Object.assign(child, { stdout, stderr });
+      children.push(child);
+      spawnOptions?.signal?.addEventListener(
+        "abort",
+        () => {
+          if (options.abortOnError === false) {
+            return;
+          }
+          events.push("error");
+          child.emit(
+            "error",
+            Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+          );
+        },
+        { once: true },
+      );
+      if (!options.manual) {
+        queueMicrotask(() => {
+          if (options.frame !== undefined) {
+            files.set(args.at(-1)!, options.frame);
+          }
+          // stdout is diagnostic noise, never the screenshot bytes.
+          stdout.end("not the image");
+          stderr.end(options.stderr ?? "Wrote screenshot to file");
+          events.push("close");
+          child.emit("close", options.exitCode ?? 0);
+        });
+      }
+      notifyStarted();
+      return child;
+    },
+    fileSystem,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    new CountingIdGenerator("capture"),
+  );
+  return { simctl, timer, calls, files, removed, events, started, children };
+}
+
+for (const cancellation of ["caller", "timeout"] as const) {
+  test(`pending mkdtemp honors ${cancellation} cancellation and cleans its late directory`, async () => {
+    let release: (dir: string) => void = () => {};
+    const directory = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const h = captureHarness({ mkdtemp: () => directory });
+    const caller = new AbortController();
+    const cause = new Error("setup cancelled");
+    let outcome: unknown;
+    const pending = h.simctl.screenshot(udid, "primary-1", caller.signal).then(
+      (value) => {
+        outcome = value;
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+    h.timer.advanceTime(cancellation === "timeout" ? 10_000 : 25);
+    if (cancellation === "caller") {
+      caller.abort(cause);
+    }
+    await flushMicrotasks();
+    expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+    expect(outcome).toMatchObject({
+      reason: cancellation === "caller" ? "aborted-by-caller" : "aborted-by-timeout",
+      message:
+        cancellation === "caller"
+          ? "simctl screenshot cancelled by the caller after 25ms: setup cancelled"
+          : "simctl screenshot timed out after 10000ms",
+    });
+    expect((outcome as Error).cause).toBeInstanceOf(Error);
+    if (cancellation === "caller") {
+      expect((outcome as Error).cause).toBe(cause);
+    }
+    expect(h.calls).toEqual([]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    release(fakeCaptureDir(1));
+    await flushMicrotasks();
+    expect(h.removed).toEqual([fakeCaptureDir(1)]);
+    expect(h.calls).toEqual([]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    await pending;
+  });
+}
+
+for (const failed of [false, true]) {
+  test(`stalled cleanup preserves ${failed ? "typed failure" : "PNG success"} after its bound`, async () => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const frame = png(2853, 2007);
+    const h = captureHarness({
+      frame,
+      exitCode: failed ? 17 : 0,
+      cleanup: () => new Promise<void>(() => {}),
+    });
+    let outcome: unknown;
+    const pending = h.simctl.screenshot(udid, "primary-1").then(
+      (value) => {
+        outcome = value;
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+    try {
+      await flushMicrotasks();
+      expect(h.removed).toEqual([fakeCaptureDir(1)]);
+      h.timer.advanceTime(1_000);
+      await flushMicrotasks();
+      if (failed) {
+        expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+        expect(outcome).toMatchObject({ reason: "non-zero-exit", exitCode: 17 });
+      } else {
+        expect(outcome).toEqual(frame);
+      }
+      expect(debug.mock.calls.some((call) => String(call[0]).includes("cleanup"))).toBe(true);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      await pending;
+    } finally {
+      debug.mockRestore();
+    }
+  });
+}
+
+test("stalled child settlement preserves caller abort after its bound", async () => {
+  const debug = spyOn(logger, "debug").mockImplementation(() => {});
+  const h = captureHarness({ manual: true, abortOnError: false });
+  const caller = new AbortController();
+  const cause = new Error("child cancelled");
+  let outcome: unknown;
+  const pending = h.simctl.screenshot(udid, "primary-1", caller.signal).then(
+    (value) => {
+      outcome = value;
+    },
+    (error: unknown) => {
+      outcome = error;
+    },
+  );
+  try {
+    await h.started;
+    h.timer.advanceTime(25);
+    caller.abort(cause);
+    await flushMicrotasks();
+    expect(h.removed).toEqual([]);
+    h.timer.advanceTime(1_000);
+    await flushMicrotasks();
+    expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+    expect(outcome).toMatchObject({
+      reason: "aborted-by-caller",
+      cause,
+      message: "simctl screenshot cancelled by the caller after 25ms: child cancelled",
+    });
+    expect(h.removed).toEqual([fakeCaptureDir(1)]);
+    expect(debug.mock.calls.some((call) => String(call[0]).includes("cleanup"))).toBe(true);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    await pending;
+  } finally {
+    debug.mockRestore();
+  }
 });
 
-test("simctl screenshot truncates stderr on typed non-zero exit while preserving its message", async () => {
-  const stderrText = "simctl diagnostic ".padEnd(340, "x");
-  const spawn = (): ChildProcess => {
-    const child = new EventEmitter() as ChildProcess;
-    const stdout = new PassThrough();
-    const stderr = new PassThrough();
-    Object.assign(child, { stdout, stderr });
-    queueMicrotask(() => {
-      stderr.end(stderrText);
-      child.emit("close", 17);
+test("mkdtemp failure before abort remains a typed read failure", async () => {
+  const cause = new Error("setup denied");
+  const h = captureHarness({
+    mkdtemp: async () => {
+      throw cause;
+    },
+  });
+  await expect(h.simctl.screenshot(udid, "primary-1")).rejects.toMatchObject({
+    reason: "read-failure",
+    cause,
+    message: "Unable to prepare simctl screenshot temp directory",
+  });
+  expect(h.calls).toEqual([]);
+  expect(h.removed).toEqual([]);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("simctl screenshot reads PNG bytes from an absolute private temp path and removes it", async () => {
+  const frame = png(2853, 2007);
+  const h = captureHarness({ frame });
+  expect(await h.simctl.screenshot(udid, "primary-1")).toEqual(frame);
+  const path = h.calls[0]!.at(-1)!;
+  expect(isAbsolute(path)).toBe(true);
+  expect(path).toBe(join(h.removed[0]!, "screenshot-capture-1.png"));
+  expect(h.calls).toEqual([["simctl", "io", udid, "screenshot", "--display=primary-1", path]]);
+  expect(h.calls[0]).not.toContain("-");
+  expect(h.files.size).toBe(0);
+  expect(h.events).toEqual(["close", "read", "cleanup"]);
+});
+
+for (const cancellation of ["caller", "timeout"] as const) {
+  for (const lateRead of ["resolve", "reject"] as const) {
+    test(`simctl screenshot abandons pending read on ${cancellation} cancellation with late ${lateRead}`, async () => {
+      const caller = new AbortController();
+      const cause = new Error("pending read cancelled");
+      let release: (buffer: Buffer) => void = () => {};
+      let rejectRead: (error: Error) => void = () => {};
+      const read = new Promise<Buffer>((resolve, reject) => {
+        release = resolve;
+        rejectRead = reject;
+      });
+      let notifyRead: () => void = () => {};
+      const readStarted = new Promise<void>((resolve) => {
+        notifyRead = resolve;
+      });
+      const h = captureHarness({
+        manual: true,
+        read: () => {
+          notifyRead();
+          return read;
+        },
+      });
+      let outcome: unknown;
+      const screenshot = h.simctl.screenshot(udid, "primary-1", caller.signal).then(
+        (buffer) => {
+          outcome = buffer;
+        },
+        (error: unknown) => {
+          outcome = error;
+        },
+      );
+      await h.started;
+      h.timer.advanceTime(4_000);
+      h.children[0]!.emit("close", 0);
+      await readStarted;
+      h.timer.advanceTime(cancellation === "timeout" ? 6_000 : 25);
+      if (cancellation === "caller") {
+        caller.abort(cause);
+      }
+      // Flush promise continuations without waiting for the deliberately pending read.
+      for (let turn = 0; turn < 20; turn++) {
+        await Promise.resolve();
+      }
+      try {
+        expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+        expect(outcome).toMatchObject({
+          reason: cancellation === "caller" ? "aborted-by-caller" : "aborted-by-timeout",
+          exitCode: 0,
+          message:
+            cancellation === "caller"
+              ? "simctl screenshot cancelled by the caller after 4025ms: pending read cancelled"
+              : "simctl screenshot timed out after 10000ms",
+          ...(cancellation === "caller" ? { cause } : {}),
+        });
+        expect(h.removed).toEqual([fakeCaptureDir(1)]);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        if (lateRead === "resolve") {
+          release(png(2853, 2007));
+        } else {
+          rejectRead(new Error("late read failure"));
+        }
+        await screenshot;
+      }
+      const cancelled = outcome;
+      for (let turn = 0; turn < 20; turn++) {
+        await Promise.resolve();
+      }
+      expect(outcome).toBe(cancelled);
+      expect(h.removed).toHaveLength(1);
     });
-    return child;
-  };
-  const simctl = new SimCtlClient(device, null, new FakeTimer(), "darwin", spawn);
-  const failure = simctl.screenshot(udid, "primary-1");
-  await expect(failure).rejects.toBeInstanceOf(SimctlScreenshotError);
-  const error = await failure.catch((caught: unknown) => caught);
+  }
+}
+
+test("simctl screenshot honors caller abort between close and read", async () => {
+  const caller = new AbortController();
+  const cause = new Error("cancelled after close");
+  const h = captureHarness({ manual: true });
+  const screenshot = h.simctl.screenshot(udid, "primary-1", caller.signal);
+  await h.started;
+  h.files.set(h.calls[0]!.at(-1)!, png(2853, 2007));
+  h.children[0]!.emit("close", 0);
+  caller.abort(cause);
+  await expect(screenshot).rejects.toMatchObject({ reason: "aborted-by-caller", cause });
+  expect(h.events).not.toContain("read");
+  expect(h.removed).toEqual([fakeCaptureDir(1)]);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+for (const scenario of [
+  { reason: "missing-output-file", options: {}, byteLength: 0 },
+  { reason: "empty-output", options: { frame: Buffer.alloc(0) }, byteLength: 0 },
+  { reason: "non-image-output", options: { frame: Buffer.from("not PNG") }, byteLength: 7 },
+  {
+    reason: "read-failure",
+    options: { readError: Object.assign(new Error("permission denied"), { code: "EACCES" }) },
+    byteLength: 0,
+  },
+]) {
+  test(`simctl screenshot reports ${scenario.reason} with cleanup and diagnostics`, async () => {
+    const h = captureHarness(scenario.options);
+    const error = await h.simctl.screenshot(udid, "primary-1").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SimctlScreenshotError);
+    expect(error).toMatchObject({
+      reason: scenario.reason,
+      exitCode: 0,
+      byteLength: scenario.byteLength,
+      stderrExcerpt: "Wrote screenshot to file",
+    });
+    if ("readError" in scenario.options) {
+      expect((error as Error).cause).toBe(scenario.options.readError);
+    }
+    expect(h.removed).toHaveLength(1);
+  });
+}
+
+test("simctl screenshot truncates stderr on non-zero exit and cleans up", async () => {
+  const stderr = "simctl diagnostic ".padEnd(340, "x");
+  const h = captureHarness({ exitCode: 17, stderr });
+  const error = await h.simctl.screenshot(udid, "primary-1").catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(SimctlScreenshotError);
   expect(error).toMatchObject({
     reason: "non-zero-exit",
     exitCode: 17,
-    stderrExcerpt: stderrText.slice(0, 300),
+    stderrExcerpt: stderr.slice(0, 300),
   });
   expect((error as Error).message.startsWith("simctl screenshot failed:")).toBe(true);
+  expect(h.events).toEqual(["close", "cleanup"]);
 });
 
-test("simctl screenshot rejects a late successful close after caller abort", async () => {
-  const controller = new AbortController();
-  let child: ChildProcess | undefined;
-  const spawn = (): ChildProcess => {
-    child = new EventEmitter() as ChildProcess;
-    Object.assign(child, { stdout: new PassThrough(), stderr: new PassThrough() });
-    return child;
-  };
-  const simctl = new SimCtlClient(device, null, new FakeTimer(), "darwin", spawn);
-  const pending = simctl.screenshot(udid, "primary-1", controller.signal);
-  controller.abort(new Error("capture cancelled"));
-  child?.emit("close", 0);
-  await expect(pending).rejects.toThrow("capture cancelled");
+for (const failed of [false, true]) {
+  test(`cleanup failure preserves ${failed ? "the original capture failure" : "a successful capture"}`, async () => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const frame = png(2853, 2007);
+    const h = captureHarness({
+      frame,
+      exitCode: failed ? 17 : 0,
+      cleanupError: new Error("cleanup denied"),
+    });
+    try {
+      const pending = h.simctl.screenshot(udid, "primary-1");
+      if (failed) {
+        await expect(pending).rejects.toMatchObject({ reason: "non-zero-exit", exitCode: 17 });
+      } else {
+        expect(await pending).toEqual(frame);
+      }
+      expect(h.removed).toHaveLength(1);
+      expect(debug.mock.calls.some((call) => String(call[0]).includes("cleanup"))).toBe(true);
+    } finally {
+      debug.mockRestore();
+    }
+  });
+}
+
+test("concurrent captures use different output paths and clean up both directories", async () => {
+  const h = captureHarness({ frame: png(2853, 2007) });
+  await Promise.all([
+    h.simctl.screenshot(udid, "primary-1"),
+    h.simctl.screenshot(udid, "primary-0"),
+  ]);
+  expect(new Set(h.calls.map((args) => args.at(-1))).size).toBe(2);
+  expect(new Set(h.removed).size).toBe(2);
+  expect(h.files.size).toBe(0);
+});
+
+test("missing output file still falls back to runner with its typed warning", async () => {
+  const h = captureHarness();
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  let fallback = 0;
+  try {
+    const result = await captureIosPanelScreenshot(
+      device,
+      { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
+      h.simctl,
+      async () => {
+        fallback++;
+        return { success: true, data: "runner" };
+      },
+    );
+    expect(result.data).toBe("runner");
+    expect(fallback).toBe(1);
+    expect(warn.mock.calls).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("reason=missing-output-file exit=0");
+    expect(h.removed).toHaveLength(1);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("spawn failure remains typed and removes the private directory", async () => {
+  const cause = new Error("spawn failed");
+  const h = captureHarness({ spawnError: cause });
+  await expect(h.simctl.screenshot(udid, "primary-1")).rejects.toMatchObject({
+    reason: "non-zero-exit",
+    cause,
+  });
+  expect(h.removed).toHaveLength(1);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("pre-aborted caller never spawns and still removes its private directory", async () => {
+  const caller = new AbortController();
+  const cause = new Error("already cancelled");
+  caller.abort(cause);
+  const h = captureHarness();
+  await expect(h.simctl.screenshot(udid, "primary-1", caller.signal)).rejects.toMatchObject({
+    reason: "aborted-by-caller",
+    cause,
+  });
+  expect(h.calls).toHaveLength(0);
+  expect(h.removed).toHaveLength(1);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
 });
 
 test("multi-panel screenshot falls back with a warning when simctl returns cover dimensions", async () => {
@@ -180,69 +594,50 @@ test("inner panel rejects a cover-sized PNG despite matching hierarchy points at
   expect(result.data).toBe("runner");
 });
 
-function abortingSpawn(
-  _file: string,
-  _args: readonly string[],
-  options?: SpawnOptions,
-): ChildProcess {
-  const child = new EventEmitter() as ChildProcess;
-  Object.assign(child, { stdout: new PassThrough(), stderr: new PassThrough() });
-  options?.signal?.addEventListener(
-    "abort",
-    () => {
-      child.emit(
-        "error",
-        Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
-      );
-    },
-    { once: true },
-  );
-  return child;
-}
-
-test("simctl screenshot reports its 10s timeout, not a bare AbortError", async () => {
-  const timer = new FakeTimer();
-  const simctl = new SimCtlClient(device, null, timer, "darwin", abortingSpawn);
-  const screenshot = simctl.screenshot(udid, "primary-1");
-  timer.advanceTime(10_000);
+test("simctl screenshot reports its 10s timeout and cleans up after process error", async () => {
+  const h = captureHarness({ manual: true });
+  const screenshot = h.simctl.screenshot(udid, "primary-1");
+  await h.started;
+  h.timer.advanceTime(10_000);
   await expect(screenshot).rejects.toThrow("simctl screenshot timed out after 10000ms");
   await expect(screenshot).rejects.toMatchObject({ reason: "aborted-by-timeout" });
-  expect(timer.getPendingTimeoutCount()).toBe(0);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  expect(h.events).toEqual(["error", "cleanup"]);
 });
 
-test("simctl screenshot reports a caller cancellation", async () => {
-  const timer = new FakeTimer();
+test("simctl screenshot reports caller cancellation and cleans up after process error", async () => {
   const caller = new AbortController();
-  const simctl = new SimCtlClient(device, null, timer, "darwin", abortingSpawn);
-  const screenshot = simctl.screenshot(udid, "primary-1", caller.signal);
-  timer.advanceTime(25);
+  const h = captureHarness({ manual: true });
+  const screenshot = h.simctl.screenshot(udid, "primary-1", caller.signal);
+  await h.started;
+  h.timer.advanceTime(25);
   caller.abort(new Error("distinct caller reason"));
   await expect(screenshot).rejects.toThrow(
     "simctl screenshot cancelled by the caller after 25ms: distinct caller reason",
   );
-  expect(timer.getPendingTimeoutCount()).toBe(0);
+  await expect(screenshot).rejects.toMatchObject({ reason: "aborted-by-caller" });
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  expect(h.events).toEqual(["error", "cleanup"]);
 });
 
-test("simctl screenshot close after caller abort carries typed attribution and cause", async () => {
+test("simctl screenshot late close after caller abort preserves attribution and cause", async () => {
   const caller = new AbortController();
-  let child: ChildProcess | undefined;
-  const spawn = (): ChildProcess => {
-    child = new EventEmitter() as ChildProcess;
-    Object.assign(child, { stdout: new PassThrough(), stderr: new PassThrough() });
-    return child;
-  };
-  const simctl = new SimCtlClient(device, null, new FakeTimer(), "darwin", spawn);
-  const pending = simctl.screenshot(udid, "primary-1", caller.signal);
+  const h = captureHarness({ manual: true, abortOnError: false });
+  const pending = h.simctl.screenshot(udid, "primary-1", caller.signal);
+  await h.started;
   const reason = new Error("capture cancelled");
   caller.abort(reason);
-  child?.emit("close", 0);
+  expect(h.removed).toHaveLength(0);
+  // Cleanup must wait for process settlement, even after cancellation.
+  h.children[0]?.emit("close", 0);
   const error = await pending.catch((caught: unknown) => caught);
   expect(error).toBeInstanceOf(SimctlScreenshotError);
   expect(error).toMatchObject({
     reason: "aborted-by-caller",
     message: expect.stringContaining("capture cancelled"),
   });
-  expect((error as SimctlScreenshotError).cause).toBe(reason);
+  expect((error as Error).cause).toBe(reason);
+  expect(h.removed).toHaveLength(1);
 });
 
 test("panel capture failure falls back to the runner and the warning names the caller-signal state", async () => {

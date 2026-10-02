@@ -232,10 +232,10 @@ public enum HierarchyMerger {
             return false
         }
         let sdkBounds = sdkNode.bounds
-        return abs(bounds.left - sdkBounds.left) <= boundsTolerance &&
-            abs(bounds.top - sdkBounds.top) <= boundsTolerance &&
-            abs(bounds.right - sdkBounds.right) <= boundsTolerance &&
-            abs(bounds.bottom - sdkBounds.bottom) <= boundsTolerance
+        return coordinateDistance(bounds.left, sdkBounds.left) <= boundsTolerance &&
+            coordinateDistance(bounds.top, sdkBounds.top) <= boundsTolerance &&
+            coordinateDistance(bounds.right, sdkBounds.right) <= boundsTolerance &&
+            coordinateDistance(bounds.bottom, sdkBounds.bottom) <= boundsTolerance
     }
 
     private static func isRepresented(_ sdkNode: SdkViewNode, by index: [String: [UIElementInfo]]) -> Bool {
@@ -342,11 +342,37 @@ public enum HierarchyMerger {
         return queries.map { index.smallestEnclosingID(bounds: $0) }
     }
 
+    /// L-infinity distance, also a test seam for arithmetic that nearest's windows
+    /// normally exclude. Unrepresentable absolute differences saturate to Int.max:
+    /// they are never within tolerance and cannot become a nearest candidate.
+    static func boundsDistance(_ sdkBounds: SdkBounds, _ bounds: ElementBounds) -> Int {
+        max(
+            max(coordinateDistance(sdkBounds.left, bounds.left), coordinateDistance(sdkBounds.top, bounds.top)),
+            max(coordinateDistance(sdkBounds.right, bounds.right), coordinateDistance(sdkBounds.bottom, bounds.bottom))
+        )
+    }
+
+    private static func coordinateDistance(_ lhs: Int, _ rhs: Int) -> Int {
+        let (difference, overflow) = lhs.subtractingReportingOverflow(rhs)
+        guard !overflow else { return Int.max }
+        // magnitude is safe even for Int.min, whose positive value Int cannot hold.
+        return Int(clamping: difference.magnitude)
+    }
+
+    private static func toleranceRange(around coordinate: Int) -> ClosedRange<Int> {
+        let tol = boundsTolerance
+        // Clip only overflowing endpoints; these windows are exactly the Int
+        // coordinates whose mathematical absolute difference is at most tol.
+        let lower = coordinate < Int.min + tol ? Int.min : coordinate - tol
+        let upper = coordinate > Int.max - tol ? Int.max : coordinate + tol
+        return lower ... upper
+    }
+
+    /// Signed dimensions saturate first, then an overflowing product saturates
+    /// by sign. Inverted bounds retain their existing signed-area ordering.
     static func saturatingSignedArea(of bounds: SdkBounds) -> Int {
-        let (width, widthOverflow) = bounds.right.subtractingReportingOverflow(bounds.left)
-        let signedWidth = widthOverflow ? (bounds.right < 0 ? Int.min : Int.max) : width
-        let (height, heightOverflow) = bounds.bottom.subtractingReportingOverflow(bounds.top)
-        let signedHeight = heightOverflow ? (bounds.bottom < 0 ? Int.min : Int.max) : height
+        let signedWidth = bounds.width
+        let signedHeight = bounds.height
         let (area, areaOverflow) = signedWidth.multipliedReportingOverflow(by: signedHeight)
         guard areaOverflow else { return area }
         return (signedWidth < 0) == (signedHeight < 0) ? Int.max : Int.min
@@ -443,11 +469,10 @@ public enum HierarchyMerger {
         /// All compatible candidates, including duplicates and exact bounds, compete
         /// by (L-infinity distance, NodeID), regardless of coordinate traversal order.
         func nearest(bounds: ElementBounds, accept: (SdkViewNode) -> Bool) -> SdkViewNode? {
-            let tol = boundsTolerance
-            let leftRange = (bounds.left - tol) ... (bounds.left + tol)
-            let topRange = (bounds.top - tol) ... (bounds.top + tol)
-            let rightRange = (bounds.right - tol) ... (bounds.right + tol)
-            let bottomRange = (bounds.bottom - tol) ... (bounds.bottom + tol)
+            let leftRange = toleranceRange(around: bounds.left)
+            let topRange = toleranceRange(around: bounds.top)
+            let rightRange = toleranceRange(around: bounds.right)
+            let bottomRange = toleranceRange(around: bounds.bottom)
             let windows = [
                 left.window(inRange: leftRange),
                 top.window(inRange: topRange),
@@ -464,10 +489,8 @@ public enum HierarchyMerger {
                       rightRange.contains(nb.right), bottomRange.contains(nb.bottom),
                       accept(node)
                 else { continue }
-                let distance = max(
-                    max(abs(nb.left - bounds.left), abs(nb.top - bounds.top)),
-                    max(abs(nb.right - bounds.right), abs(nb.bottom - bounds.bottom))
-                )
+                let distance = boundsDistance(nb, bounds)
+                guard distance <= boundsTolerance else { continue }
                 if distance < bestDistance || (distance == bestDistance && entry.id < (bestID ?? Int.max)) {
                     bestID = entry.id
                     bestDistance = distance

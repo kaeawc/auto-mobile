@@ -14,6 +14,7 @@ public struct SdkBounds: Codable, Sendable, Hashable {
         self.bottom = bottom
     }
 
-    public var width: Int { right - left }
-    public var height: Int { bottom - top }
+    /// Signed extents saturate by sign on overflow, retaining inverted bounds.
+    public var width: Int { BoundsArithmetic.signedDifference(right, left) }
+    public var height: Int { BoundsArithmetic.signedDifference(bottom, top) }
 }

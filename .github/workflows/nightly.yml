@@ -634,6 +634,9 @@ jobs:
           test -S /tmp/.X11-unix/X99
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
 
+      - name: "Prepare foldable emulator SDK and libraries"
+        run: bash scripts/android/prepare-foldable-emulator.sh "$AUTOMOBILE_FOLDABLE_PROFILE"
+
       - uses: ./.github/actions/android-emulator
         with:
           api_level: "36"
@@ -654,6 +657,11 @@ jobs:
               cat scratch/foldable-lane/test.log
               exit 1
             fi
+
+      - name: "Diagnose foldable emulator shared libraries"
+        if: always()
+        continue-on-error: true
+        run: bash scripts/android/prepare-foldable-emulator.sh --check-emulator-libs
 
       - name: "Upload foldable diagnostics and screenshots"
         if: failure()

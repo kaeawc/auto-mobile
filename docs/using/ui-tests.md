@@ -295,3 +295,19 @@ emulator does not support `resize-display` in headless mode. Generic foldable
 AVD profiles model hinge posture only and cannot emulate a cover screen.
 Samsung FlexWindow and Razr external displays cannot be emulated by these
 profiles.
+
+Before creating either AVD, the lane prints cmdline-tools/emulator versions and
+`avdmanager list device -c`, updates `cmdline-tools;latest`, then checks the
+device list again. A missing requested profile fails early with the available
+fold profiles. There is no silent fallback: the test requires the exact profile
+and its panel sizes.
+
+Resizable's windowed emulator also needs `libpulse0` and related X11/Qt runtime
+libraries. The Ubuntu 24.04 runner lacked `libpulse.so.0` in nightly run
+36807944824, causing the windowed qemu process to exit before boot. The prepare
+step installs these libraries; an always-running diagnostic checks qemu and
+the Qt xcb plugin with `ldd`. The failure artifact includes
+`scratch/foldable-lane/sdk-diagnostics.txt` with versions and full device lists.
+The lane remains advisory. The next nightly must confirm the exact profiles
+exist, all windowed libraries resolve, and both AVDs boot and pass their posture
+round trips.

@@ -14,6 +14,8 @@ import { DELETE_KEYEVENT_CHUNK_SIZE } from "../../../src/features/action/ClearTe
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeWebSocket } from "../../fakes/FakeWebSocket";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
   clearAndroidImeQuarantine,
   withAndroidImeLock,
@@ -98,6 +100,7 @@ function createTextClient(
       error?: string;
       partialApplication?: boolean;
       sessionUnsafe?: boolean;
+      committedUnits?: number;
     }>;
   } = {},
 ) {
@@ -897,29 +900,62 @@ describe("DefaultSendKeysCommandExecutor", () => {
     }
   });
 
-  test("auto IME falls back to the previous delivery modes when commit is unavailable", async () => {
+  test("auto IME falls back when an old APK advertises commit but no cancellation", async () => {
     for (const [operation, mode] of [
       ["insert", "eventAll"],
       ["replace", "a11y"],
     ] as const) {
       const adb = new FakeAdbExecutor();
-      const textClient = createTextClient({ supportsImeCommit: false });
+      const timer = new FakeTimer();
+      const device = { ...androidDevice, deviceId: `old-apk-no-cancel-${operation}` };
+      const client = AndroidCtrlProxyClient.createForTesting(
+        device,
+        adb,
+        (url) => new FakeWebSocket(url, "none", 0, timer),
+        timer,
+      );
+      const capabilities: string[] = [];
+      const calls: string[] = [];
+      client.supportsCommand = async (command) => {
+        capabilities.push(command);
+        return command === "request_commit_text";
+      };
+      client.requestSetText = async (text) => {
+        calls.push(`replace:${text}`);
+        return { success: true };
+      };
+      client.requestInsertText = async (text) => {
+        calls.push(`insert:${text}`);
+        return { success: true };
+      };
+      client.requestInsertTextState = async () => ({ success: false });
+      client.commitViaIme = async () => {
+        calls.push("commit");
+        return { success: true };
+      };
+      AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
       const executor = new DefaultSendKeysCommandExecutor(
-        androidDevice,
+        device,
         createAdbFactory(adb),
         createObserver(focusedAndroidObservation()),
-        { textClient: textClient.client },
+        { timer },
       );
+      try {
+        const result = await executor.type({ action: "type", text: "note `x`", operation });
+        expect(capabilities).toContain("request_commit_text");
+        expect(capabilities).toContain("request_cancel_ime_commit");
 
-      const result = await executor.type({ action: "type", text: "note `x`", operation });
-
-      expect(result).toMatchObject({ success: true, resolvedMode: mode });
-      expect(result.backend).toBeUndefined();
-      expect(textClient.commitViaImeCalls).toEqual([]);
-      if (mode === "eventAll") {
-        expect(adb.getExecutedCommands().length).toBeGreaterThan(0);
-      } else {
-        expect(textClient.calls).toContain("replace:note `x`");
+        expect(result).toMatchObject({ success: true, resolvedMode: mode });
+        expect(result.backend).toBeUndefined();
+        expect(calls).not.toContain("commit");
+        if (mode === "eventAll") {
+          expect(adb.getExecutedCommands().length).toBeGreaterThan(0);
+        } else {
+          expect(calls).toContain("replace:note `x`");
+        }
+      } finally {
+        await client.close();
+        AndroidCtrlProxyClient.removeInstanceIfCurrent(device.deviceId, client);
       }
     }
   });
@@ -1552,6 +1588,93 @@ describe("DefaultSendKeysCommandExecutor", () => {
       events.indexOf(`adb:shell ime disable ${commitImeId}`),
     );
   });
+
+  test.each([undefined, 0, 2])(
+    "IME failure reports only device-provided nonzero units: %s",
+    async (committedUnits) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+        { stdout: priorImeId, stderr: "" },
+        { stdout: commitImeId, stderr: "" },
+      ]);
+      const textClient = createTextClient({
+        commitViaIme: async () => ({
+          success: false,
+          partialApplication: true,
+          error: "commit stopped",
+          committedUnits,
+        }),
+      });
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(),
+        { textClient: textClient.client },
+      );
+      const result = await executor.type({ action: "type", text: "👨‍👩‍👧value", mode: "ime" });
+      expect(result.error).toBe(
+        committedUnits
+          ? "commit stopped; up to 2 editing units were dispatched before the commit stopped"
+          : "commit stopped",
+      );
+      expect(result.committedUnits).toBe(committedUnits || undefined);
+    },
+  );
+
+  test.each(["timeout", "abort"])(
+    "IME restore waits until outstanding %s commit settles",
+    async (outcome) => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+        { stdout: priorImeId, stderr: "" },
+        { stdout: commitImeId, stderr: "" },
+      ]);
+      const controller = new AbortController();
+      let started!: () => void;
+      const dispatched = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let outstanding = true;
+      let restoredWhileOutstanding = false;
+      const execute = adb.executeCommand.bind(adb);
+      adb.executeCommand = async (command, ...options) => {
+        if (command === `shell ime set ${priorImeId}`) {
+          restoredWhileOutstanding ||= outstanding;
+        }
+        return execute(command, ...options);
+      };
+      const textClient = createTextClient({
+        commitViaIme: async () => {
+          started();
+          await timer.sleep(2_000);
+          outstanding = false;
+          return { success: false, partialApplication: true, error: outcome };
+        },
+      });
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(),
+        { textClient: textClient.client, timer },
+      );
+      const pending = executor.type(
+        { action: "type", text: "value", mode: "ime" },
+        controller.signal,
+      );
+      await dispatched;
+      if (outcome === "abort") {
+        controller.abort();
+      }
+      timer.advanceTime(1_999);
+      await Promise.resolve();
+      expect(adb.getExecutedCommands()).not.toContain(`shell ime set ${priorImeId}`);
+      timer.advanceTime(1);
+      expect(await pending).toMatchObject({ success: false, partialApplication: true });
+      expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
+      expect(restoredWhileOutstanding).toBe(false);
+    },
+  );
 
   test("ime mode restores the selected subtype after the original component", async () => {
     const adb = new FakeAdbExecutor();

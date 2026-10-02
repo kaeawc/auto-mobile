@@ -40,6 +40,7 @@ class ImeCommitDriverTest {
     val outcome = requireNotNull(result)
     assertFalse(outcome.success)
     assertFalse(outcome.partialApplication)
+    assertEquals(0, outcome.committedUnits)
     assertTrue(sink.sentKeyUnits.isEmpty())
   }
 
@@ -60,6 +61,7 @@ class ImeCommitDriverTest {
 
     assertEquals(listOf("a"), sink.sentKeyUnits)
     assertTrue(result!!.partialApplication)
+    assertEquals(1, result!!.committedUnits)
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 
@@ -71,6 +73,7 @@ class ImeCommitDriverTest {
     driver.commit("`a` after", PRIOR_IME_ID) { result ->
       sink.events.add("complete")
       assertTrue(result.partialApplication)
+      assertEquals(3, result.committedUnits)
     }
     assertEquals(listOf("char", "char", "char", "finish", "read"), sink.events)
 
@@ -141,6 +144,7 @@ class ImeCommitDriverTest {
     assertTrue(result.success)
     assertEquals(listOf("A", "😀", "e\u0301", family, flag, "B"), sink.committedChars)
     assertEquals(text, sink.committedChars.joinToString(""))
+    assertEquals(6, result.committedUnits)
   }
 
   @Test
@@ -401,6 +405,7 @@ class ImeCommitDriverTest {
 
     assertFalse(result.success)
     assertEquals("Input connection lost during commit", result.error)
+    assertEquals(2, result.committedUnits) // The failed second dispatch is conservatively included.
     assertEquals(listOf("a"), sink.committedChars)
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }

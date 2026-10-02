@@ -10,6 +10,7 @@ const moduleInitOwners: Readonly<Record<string, string>> = {
   "src/features/action/TerminateApp.ts": "observe-window-cache",
   "src/server/appResources.ts": "installed-apps",
   "src/server/videoRecordingIncarnationListener.ts": "recordings",
+  "src/server/webrtcStreamIncarnationListener.ts": "webrtc-streams",
   "src/features/performance/PerformanceMonitor.ts": "performance-monitoring",
   "src/features/performance/RecompositionTracker.ts": "recomposition-tracker",
 };

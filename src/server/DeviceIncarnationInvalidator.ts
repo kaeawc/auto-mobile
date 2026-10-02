@@ -16,6 +16,7 @@ import "../features/performance/RecompositionTracker";
 import "../ctrlProxy/CtrlProxyManager";
 import "./appResources";
 import "./videoRecordingIncarnationListener";
+import "./webrtcStreamIncarnationListener";
 
 /** Invalidates host-side state that belongs to one physical device incarnation. */
 export interface DeviceIncarnationInvalidator {

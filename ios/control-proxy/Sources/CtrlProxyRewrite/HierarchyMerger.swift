@@ -342,6 +342,16 @@ public enum HierarchyMerger {
         return queries.map { index.smallestEnclosingID(bounds: $0) }
     }
 
+    static func saturatingSignedArea(of bounds: SdkBounds) -> Int {
+        let (width, widthOverflow) = bounds.right.subtractingReportingOverflow(bounds.left)
+        let signedWidth = widthOverflow ? (bounds.right < 0 ? Int.min : Int.max) : width
+        let (height, heightOverflow) = bounds.bottom.subtractingReportingOverflow(bounds.top)
+        let signedHeight = heightOverflow ? (bounds.bottom < 0 ? Int.min : Int.max) : height
+        let (area, areaOverflow) = signedWidth.multipliedReportingOverflow(by: signedHeight)
+        guard areaOverflow else { return area }
+        return (signedWidth < 0) == (signedHeight < 0) ? Int.max : Int.min
+    }
+
     /// Built once per merge in O(n log n) time and O(n) space.
     private struct GeometryIndex {
         let allNodes: [SdkViewNode]
@@ -365,12 +375,14 @@ public enum HierarchyMerger {
             bottom = CoordinateIndex(entries: allNodes.enumerated().map {
                 (value: $0.element.bounds.bottom, id: $0.offset)
             })
-            // Keep signed areas (including inverted bounds), with the old stable
-            // sort's pre-order tie-break made explicit. Compute each area only once.
+            // A lone node is trivially rank zero, so avoid evaluating its area.
             var areas: [(area: Int, id: NodeID)] = []
-            for (id, node) in allNodes.enumerated() {
-                let area: Int = node.bounds.width * node.bounds.height
-                areas.append((area: area, id: id))
+            if allNodes.count >= 2 {
+                // Keep signed areas (including inverted bounds), with the old stable
+                // sort's pre-order tie-break made explicit. Compute each area once.
+                for (id, node) in allNodes.enumerated() {
+                    areas.append((area: saturatingSignedArea(of: node.bounds), id: id))
+                }
             }
             let ordered: [(area: Int, id: NodeID)] = areas.sorted { lhs, rhs in
                 if lhs.area == rhs.area {

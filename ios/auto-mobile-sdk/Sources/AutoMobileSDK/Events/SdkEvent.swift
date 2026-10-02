@@ -269,7 +269,7 @@ public struct SdkNetworkRequestEvent: SdkEvent {
         self.contentType = contentType
     }
 
-    private enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case eventType, schemaVersion, timestamp, url, method, requestId, connectionId, direction, protocolName
         case metadata, sequenceNumber, requestHeaders, requestBodySize, statusCode, responseHeaders
         case responseBodySize, durationMs, error, host, path, requestBody, responseBody, contentType

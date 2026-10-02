@@ -50,6 +50,47 @@ final class HierarchyMergerEnclosingMatchTests: XCTestCase {
         XCTAssertEqual(enclosingID(nodes, query: bounds(4, 2, 2, 8)), 1)
     }
 
+    func testSingleExtremeNodeDoesNotComputeItsArea() {
+        let node = sdkBounds(Int.min, Int.min, Int.max, Int.max)
+        XCTAssertEqual(
+            HierarchyMerger.smallestEnclosingIDs(nodeBounds: [node], queries: [bounds(0, 0, 1, 1)]),
+            [0]
+        )
+    }
+
+    func testExtremeAreasSaturateAndKeepAreaThenNodeIDOrdering() {
+        let nodes: [SdkBounds] = [
+            sdkBounds(Int.min, Int.min, Int.max, Int.max), // Positive saturated area.
+            sdkBounds(Int.max, 0, Int.min, 10), // Negative width overflow.
+            sdkBounds(0, Int.min, 10, Int.max), // Positive height overflow.
+            sdkBounds(0, 0, 4_000_000_000, 4_000_000_000), // Positive product overflow.
+            sdkBounds(0, 4_000_000_000, 4_000_000_000, 0), // Negative product overflow.
+        ]
+        let queries: [ElementBounds] = [
+            bounds(Int.max, 0, Int.min, 10),
+            bounds(0, Int.min, 10, Int.max),
+            bounds(0, 0, 4_000_000_000, 4_000_000_000),
+            bounds(0, 4_000_000_000, 4_000_000_000, 0),
+        ]
+        let expected: [Int?] = [1, 0, 0, 4]
+        let reference = ReferenceScan(nodeBounds: nodes)
+
+        XCTAssertEqual(HierarchyMerger.smallestEnclosingIDs(nodeBounds: nodes, queries: queries), expected)
+        XCTAssertEqual(queries.map { reference.enclosingID(query: $0) }, expected)
+    }
+
+    func testSaturatingSignedArea() {
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(0, 0, 10, 20)), 200)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(4, 0, 2, 10)), -20)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(4, 0, 4, 10)), 0)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(Int.min, 0, Int.max, 1)), Int.max)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(Int.max, 0, Int.min, 1)), Int.min)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(0, Int.min, 1, Int.max)), Int.max)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(0, Int.max, 1, Int.min)), Int.min)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(0, 0, 4_000_000_000, 4_000_000_000)), Int.max)
+        XCTAssertEqual(HierarchyMerger.saturatingSignedArea(of: sdkBounds(0, 4_000_000_000, 4_000_000_000, 0)), Int.min)
+    }
+
     func testQueryExtremesDoNotOverflowToleranceThresholds() {
         let nodes: [SdkBounds] = [sdkBounds(0, 0, 10, 10)]
         let queries: [ElementBounds] = [
@@ -152,11 +193,10 @@ final class HierarchyMergerEnclosingMatchTests: XCTestCase {
 
         init(nodeBounds: [SdkBounds]) {
             let entries: [(offset: Int, element: SdkBounds)] = Array(nodeBounds.enumerated())
-            // Compare signed area only: stable sorting preserves document order for ties.
             sortedByArea = entries.sorted { lhs, rhs in
-                let lhsArea: Int = lhs.element.width * lhs.element.height
-                let rhsArea: Int = rhs.element.width * rhs.element.height
-                return lhsArea < rhsArea
+                let lhsArea = HierarchyMerger.saturatingSignedArea(of: lhs.element)
+                let rhsArea = HierarchyMerger.saturatingSignedArea(of: rhs.element)
+                return lhsArea == rhsArea ? lhs.offset < rhs.offset : lhsArea < rhsArea
             }
         }
 
@@ -164,10 +204,14 @@ final class HierarchyMergerEnclosingMatchTests: XCTestCase {
             let tol = 2
             for node in sortedByArea {
                 let nodeBounds = node.element
-                if nodeBounds.left - tol <= query.left,
-                   nodeBounds.top - tol <= query.top,
-                   nodeBounds.right + tol >= query.right,
-                   nodeBounds.bottom + tol >= query.bottom
+                let (left, leftOverflow) = nodeBounds.left.subtractingReportingOverflow(tol)
+                let (top, topOverflow) = nodeBounds.top.subtractingReportingOverflow(tol)
+                let (right, rightOverflow) = nodeBounds.right.addingReportingOverflow(tol)
+                let (bottom, bottomOverflow) = nodeBounds.bottom.addingReportingOverflow(tol)
+                if leftOverflow || left <= query.left,
+                   topOverflow || top <= query.top,
+                   rightOverflow || right >= query.right,
+                   bottomOverflow || bottom >= query.bottom
                 {
                     return node.offset
                 }

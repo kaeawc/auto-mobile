@@ -35,7 +35,7 @@ import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createTestDatabase } from "../../../db/testDbHelper";
 
-// Explicit column map: any new serialized Swift key requires a mapping decision here.
+// Swift contract-keys.json is the source of truth; every field needs a mapping decision here.
 // Control fields select the route/version; they are not network row columns.
 const columns = {
   eventType: "routing control",
@@ -64,8 +64,12 @@ const columns = {
 } as const;
 
 const directory = join(import.meta.dir, "../../../fixtures/ios-sdk-network");
+const contractKeysFilename = "contract-keys.json";
+const contractKeys = JSON.parse(
+  readFileSync(join(directory, contractKeysFilename), "utf8"),
+) as string[];
 const fixtures = readdirSync(directory)
-  .filter((name) => name.endsWith(".json"))
+  .filter((name) => name.endsWith(".json") && name !== contractKeysFilename)
   .sort()
   .map((name) => ({
     name,
@@ -250,6 +254,10 @@ test("serialized fixtures exercise every Swift field with non-null values", () =
   expect([...keys].sort()).toEqual(Object.keys(columns).sort());
   expect(fixtures.map(({ name }) => name)).toContain("urlsession-full.json");
   expect(fixtures.map(({ name }) => name)).toContain("urlsession-error.json");
+});
+
+test("column map covers every Swift CodingKey", () => {
+  expect(Object.keys(columns).sort()).toEqual(contractKeys.sort());
 });
 
 const realPayload = decodeSdkEventBatches([fixtures[0].batch], () => 123).events[0].payload;

@@ -749,6 +749,83 @@ export const ANDROID_CAPABILITY_FLAGS = [
 /** The supportedCommands list is authoritative for every request when this marker is present. */
 export const ANDROID_FULL_COMMAND_SET_CAPABILITY = "full_command_set_v1";
 
+/** Requests carrying requestId receive responses echoing that ID, including hierarchy replies. */
+export const ANDROID_REQUEST_ID_ECHO_CAPABILITY = "request_id_echo_v1";
+
+/** Result handlers that settle RequestManager waiters and therefore require an echoed ID. */
+export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
+  "screenshot",
+  "screenshot_error",
+  "swipe_result",
+  "tap_coordinates_result",
+  "drag_result",
+  "pinch_result",
+  "set_text_result",
+  "commit_text_result",
+  "cancel_ime_commit_result",
+  "set_keyboard_profile_result",
+  "keyboard_profiles_result",
+  "insert_text_state_result",
+  "insert_text_result",
+  "ime_action_result",
+  "select_all_result",
+  "action_result",
+  "clipboard_result",
+  "settings_get_result",
+  "settings_put_result",
+  "settings_list_result",
+  "installed_packages_result",
+  "package_info_result",
+  "launch_intent_result",
+  "ca_cert_result",
+  "device_owner_status_result",
+  "permission_result",
+  "current_focus_result",
+  "traversal_order_result",
+  "highlight_response",
+  "global_action_result",
+  "frame_context_validation_result",
+  "device_info_result",
+  "keystore_discovery",
+  "preference_files",
+  "preferences",
+  "subscribe_storage_result",
+  "unsubscribe_storage_result",
+  "get_preference_result",
+  "set_preference_result",
+  "remove_preference_result",
+  "clear_preferences_result",
+]);
+
+/** Push/handshake handlers; hierarchy pushes and uncorrelatable protocol errors may omit IDs. */
+export const ANDROID_ID_LESS_MESSAGE_TYPES: ReadonlySet<string> = new Set([
+  "connected",
+  "error",
+  "hierarchy_update",
+  "display_transition",
+  "navigation_event",
+  "package_event",
+  "interaction_event",
+  "handled_exception_event",
+  "crash_event",
+  "anr_event",
+  "frame_metrics_event",
+  "storage_changed",
+  "network_event",
+  "websocket_frame_event",
+  "log_event",
+  "broadcast_event",
+  "lifecycle_event",
+]);
+
+export type CtrlProxyMissingRequestIdError =
+  `Android service advertised request_id_echo_v1 but sent ${string} without a requestId`;
+
+/** Stable protocol diagnostic; an id-less result cannot safely be assigned to any waiter. */
+export function ctrlProxyMissingRequestIdError(type: string): CtrlProxyMissingRequestIdError {
+  return `Android service advertised request_id_echo_v1 but sent ${type} without a requestId`;
+}
+
 export const ANDROID_CAPABILITY_GATED_COMMANDS: ReadonlySet<string> = new Set([
   ...ANDROID_CAPABILITY_REQUEST_TYPES,
   ...ANDROID_CAPABILITY_FLAGS,

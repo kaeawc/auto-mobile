@@ -118,6 +118,9 @@ import { buildNetworkMockRules } from "../../../server/networkMockRules";
 import {
   ANDROID_CAPABILITY_GATED_COMMANDS,
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
+  ANDROID_REQUEST_ID_ECHO_CAPABILITY,
+  ANDROID_REQUEST_ID_RESPONSE_TYPES,
+  ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
@@ -4922,6 +4925,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.supportedCommands = Array.isArray(message.supportedCommands)
         ? new Set(message.supportedCommands)
         : null;
+      if (this.supportedCommands?.has(ANDROID_REQUEST_ID_ECHO_CAPABILITY)) {
+        this.hierarchy.markRequestIdEchoAdvertised();
+      }
       logger.debug(`[CTRL_PROXY] Received connection confirmation`);
       this.refreshObservationStreamHierarchyCadence();
     },
@@ -5669,6 +5675,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const message = parseCtrlProxyJson<WebSocketMessage>(data.toString());
       const type = (message as { type: string }).type;
       if (this.transientObserver && !["connected", "hierarchy_update", "error"].includes(type)) {
+        return;
+      }
+      if (
+        this.supportedCommands?.has(ANDROID_REQUEST_ID_ECHO_CAPABILITY) &&
+        ANDROID_REQUEST_ID_RESPONSE_TYPES.has(type) &&
+        !("requestId" in message && message.requestId)
+      ) {
+        logger.warn(ctrlProxyMissingRequestIdError(type));
         return;
       }
       if (Object.hasOwn(this.webSocketMessageHandlers, type)) {

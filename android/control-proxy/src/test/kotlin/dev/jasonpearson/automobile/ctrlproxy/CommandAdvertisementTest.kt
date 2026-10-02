@@ -25,6 +25,7 @@ class CommandAdvertisementTest {
       "ime_key_events_v1",
       "gesture_display_id_v1",
       "full_command_set_v1",
+      "request_id_echo_v1",
     )
 
   @After
@@ -38,6 +39,7 @@ class CommandAdvertisementTest {
       val commands = WebSocketServer(port = 0, scope = scope, sdkInt = { sdk }).supportedCommands()
       assertTrue("All sealed requests on API $sdk", commands.containsAll(sealedRequestTypes))
       assertTrue(commands.contains("full_command_set_v1"))
+      assertTrue("Request ID echo on API $sdk", commands.contains("request_id_echo_v1"))
       assertTrue(commands.contains("node_selector_actions"))
       assertTrue(commands.contains("ime_key_events_v1"))
       assertEquals(commands.size, commands.toSet().size)

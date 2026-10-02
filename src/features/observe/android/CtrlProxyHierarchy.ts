@@ -126,6 +126,11 @@ export class CtrlProxyHierarchy {
     this.context = context;
   }
 
+  /** The echo advertisement is connection-scoped evidence equivalent to a correlated frame. */
+  markRequestIdEchoAdvertised(): void {
+    this.correlatedFramesSeen = true;
+  }
+
   /**
    * Reject an in-flight hierarchy wait whose requestId matches a runner type:"error" frame,
    * surfacing the runner's error text so the caller fails fast instead of hanging to the

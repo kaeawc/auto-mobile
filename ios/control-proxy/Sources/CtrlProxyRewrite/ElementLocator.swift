@@ -585,8 +585,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         ScreenMetrics(
                             scale: Float(UIScreen.main.scale),
                             nativeScale: Double(UIScreen.main.nativeScale),
-                            fallbackWidth: Int(capture.value.3.width),
-                            fallbackHeight: Int(capture.value.3.height),
+                            fallbackWidth: ElementBounds.clampedInt(capture.value.3.width),
+                            fallbackHeight: ElementBounds.clampedInt(capture.value.3.height),
                             rotation: capture.rotation
                         )
                     )
@@ -644,12 +644,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 type: 1, // Application window
                 isActive: true,
                 isFocused: true,
-                bounds: ElementBounds(
-                    left: Int(frame.origin.x),
-                    top: Int(frame.origin.y),
-                    right: Int(frame.origin.x + frame.width),
-                    bottom: Int(frame.origin.y + frame.height)
-                )
+                bounds: ElementBounds(clamping: frame)
             )
 
             // Check for system alerts from multiple sources:
@@ -703,8 +698,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         ScreenMetrics(
                             scale: scale,
                             nativeScale: nativeScale,
-                            fallbackWidth: Int(bounds.width),
-                            fallbackHeight: Int(bounds.height),
+                            fallbackWidth: ElementBounds.clampedInt(bounds.width),
+                            fallbackHeight: ElementBounds.clampedInt(bounds.height),
                             rotation: captureSample.rotation
                         ),
                         captureSample
@@ -926,7 +921,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         private func hasNonZeroAreaDescendant(_ snapshot: XCUIElementSnapshot) -> Bool {
             snapshot.children.contains { child in
                 let frame = child.frame
-                return (frame.width > 0 && frame.height > 0) || hasNonZeroAreaDescendant(child)
+                return !Self.hasZeroArea(frame) || hasNonZeroAreaDescendant(child)
             }
         }
 
@@ -954,14 +949,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             let frame = resolved.frame
 
             // Skip zero-area elements
-            let hasZeroArea = frame.width <= 0 || frame.height <= 0
+            let hasZeroArea = Self.hasZeroArea(frame)
 
-            let bounds = ElementBounds(
-                left: Int(frame.origin.x),
-                top: Int(frame.origin.y),
-                right: Int(frame.origin.x + frame.width),
-                bottom: Int(frame.origin.y + frame.height)
-            )
+            let bounds = ElementBounds(clamping: frame)
 
             // Get identifier
             let identifier = snapshot.identifier
@@ -1000,7 +990,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                             coordinateOffset: resolved.offset
                         ).frame
 
-                        if childFrame.width <= 0 || childFrame.height <= 0 {
+                        if Self.hasZeroArea(childFrame) {
                             // A zero-area wrapper can still contain on-screen descendants.
                             guard Self.shouldKeepZeroAreaChild(
                                 hasNonZeroAreaDescendant: hasNonZeroAreaDescendant(child)
@@ -1658,6 +1648,13 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         )
     }
 
+    /// Treat invalid snapshot frames as zero-area so only usable descendants keep their wrappers.
+    nonisolated static func hasZeroArea(_ frame: CGRect) -> Bool {
+        frame.width <= 0 || frame.height <= 0 || frame.isInfinite
+            || !frame.origin.x.isFinite || !frame.origin.y.isFinite
+            || !frame.size.width.isFinite || !frame.size.height.isFinite
+    }
+
     /// Keep zero-area wrappers only when their subtree contains a usable frame.
     nonisolated static func shouldKeepZeroAreaChild(hasNonZeroAreaDescendant: Bool) -> Bool {
         return hasNonZeroAreaDescendant
@@ -2240,7 +2237,12 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     }
 
     nonisolated static func elementBounds(_ frame: CGRect) -> ElementBounds {
-        ElementBounds(left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY))
+        ElementBounds(
+            left: ElementBounds.clampedInt(frame.minX),
+            top: ElementBounds.clampedInt(frame.minY),
+            right: ElementBounds.clampedInt(frame.maxX),
+            bottom: ElementBounds.clampedInt(frame.maxY)
+        )
     }
 
     nonisolated static func matchingLiveIndex(

@@ -917,7 +917,7 @@ public final class GesturePerformer: GesturePerforming {
                     for (index, entry) in (summary.entries[name] ?? []).enumerated() {
                         let frame = entry.frame
                         parts.append(
-                            "\(name)[\(index)]={id=\"\(entry.identifier)\",hasKeyboardFocus=unknown,hasFocus=\(entry.hasFocus),isSelected=\(entry.isSelected),isHittable=unknown,value.len=\(entry.valueLength),frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))}"
+                            "\(name)[\(index)]={id=\"\(entry.identifier)\",hasKeyboardFocus=unknown,hasFocus=\(entry.hasFocus),isSelected=\(entry.isSelected),isHittable=unknown,value.len=\(entry.valueLength),frame=\(ElementBounds.clampedInt(frame.origin.x)),\(ElementBounds.clampedInt(frame.origin.y)),\(ElementBounds.clampedInt(frame.size.width)),\(ElementBounds.clampedInt(frame.size.height))}"
                         )
                     }
                 }
@@ -2237,8 +2237,8 @@ public final class GesturePerformer: GesturePerforming {
             let frame = springboard.frame
             let nativeScale = UIScreen.main.nativeScale
             var target = (
-                width: Int((frame.width * nativeScale).rounded()),
-                height: Int((frame.height * nativeScale).rounded())
+                width: ElementBounds.clampedInt((frame.width * nativeScale).rounded()),
+                height: ElementBounds.clampedInt((frame.height * nativeScale).rounded())
             )
             guard target.width > 0, target.height > 0 else {
                 return original

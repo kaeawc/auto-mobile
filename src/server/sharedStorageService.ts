@@ -293,9 +293,22 @@ class DefaultSharedStorageService implements SharedStorageService {
         ? Buffer.from(file.contentText ?? "", "utf8")
         : Buffer.from(file.contentBase64, "base64");
     const directory = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-shared-storage-"));
-    const path = join(directory, "content");
-    await this.fileSystem.writeFileBuffer(path, buffer);
-    return { path, byteCount: buffer.byteLength, cleanup: () => this.fileSystem.rm(directory) };
+    try {
+      const path = join(directory, "content");
+      await this.fileSystem.writeFileBuffer(path, buffer);
+      return { path, byteCount: buffer.byteLength, cleanup: () => this.fileSystem.rm(directory) };
+    } catch (error) {
+      try {
+        await this.fileSystem.rm(directory);
+      } catch (cleanupError) {
+        // Cleanup failure must not mask the original preparation error.
+        logger.warn(
+          `Failed to remove inline shared-storage directory: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      throw error;
+    }
   }
 }
 

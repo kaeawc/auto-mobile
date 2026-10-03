@@ -1,3 +1,4 @@
+import { resolveIosLenientAppListBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   BootedDevice,
@@ -694,7 +695,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
   private async getInstalledIosBundleIds(): Promise<Set<string>> {
     try {
-      const apps = await this.simctl.listApps(this.device.deviceId);
+      const apps = await resolveIosLenientAppListBackend(this.device.deviceId, {
+        simctl: this.simctl,
+      }).listApps();
       const bundleIds = apps
         .map((app: any) => app.bundleId || app.CFBundleIdentifier)
         .filter((value: string | undefined) => typeof value === "string" && value.length > 0);

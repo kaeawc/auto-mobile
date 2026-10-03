@@ -1,7 +1,10 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import { SwipeDirection } from "../../src/models";
-import { resolveSwipeDirection, SCROLL_TO_FINGER_DIRECTION } from "../../src/utils/swipeOnUtils";
+import { SwipeDirection } from "../../../../src/models";
+import {
+  resolveSwipeDirection,
+  SCROLL_TO_FINGER_DIRECTION,
+} from "../../../../src/features/action/swipeon/swipeOnUtils";
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;

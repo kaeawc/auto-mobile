@@ -16,7 +16,7 @@ import {
   promoteClickableAncestor,
 } from "../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
-import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import {
   DefaultHierarchyCapture,
   getHierarchySnapshot,
@@ -94,7 +94,7 @@ import {
   getToggleContentDescription,
   hasAccessibilityAction,
   isTruthyFlag,
-} from "../../utils/elementProperties";
+} from "../utility/elementProperties";
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,

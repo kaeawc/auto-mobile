@@ -1,4 +1,4 @@
-import { isCollectionElementProperties } from "../../utils/elementProperties";
+import { isCollectionElementProperties } from "./elementProperties";
 import { Element } from "../../models/Element";
 import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { nodeBounds as rawNodeBounds } from "../../models/ViewHierarchyResult";
@@ -12,7 +12,7 @@ import {
   ANDROID_INPUT_CLASSES,
   isClickableElementProperties,
   isEditableElementProperties,
-} from "../../utils/elementProperties";
+} from "./elementProperties";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_PREFIX,

@@ -1,5 +1,5 @@
-import type { ViewHierarchyResult } from "../models";
-import { serverConfig } from "./ServerConfig";
+import type { ViewHierarchyResult } from "../../models";
+import { serverConfig } from "../../utils/ServerConfig";
 
 const RAW_VIEW_HIERARCHY_SYMBOL = Symbol.for("automobile.rawViewHierarchy");
 

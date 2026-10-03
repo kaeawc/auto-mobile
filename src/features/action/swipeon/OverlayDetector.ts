@@ -12,7 +12,7 @@ import { SwipeInterval, OverlayCandidate, OverlayAnalyzer } from "./types";
 import { toSearchable } from "../../utility/SearchableNode";
 import { boundsArea, boundsEqual, clamp } from "../../../utils/bounds";
 import { nodeBounds } from "../../../models/ViewHierarchyResult";
-import { isTruthyFlag, buildContainerFromElement } from "../../../utils/elementProperties";
+import { isTruthyFlag, buildContainerFromElement } from "../../utility/elementProperties";
 
 export class OverlayDetector implements OverlayAnalyzer {
   private static readonly OVERLAY_PADDING = 8;

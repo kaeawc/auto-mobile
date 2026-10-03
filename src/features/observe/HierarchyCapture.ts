@@ -5,7 +5,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
-import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 
 export interface HierarchyCaptureRequest {
   /** Suppress all owner-visible effects of a session-free hierarchy request. */

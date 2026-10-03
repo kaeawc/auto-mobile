@@ -10,7 +10,7 @@ import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
-import { isEditableElementProperties } from "../../utils/elementProperties";
+import { isEditableElementProperties } from "./elementProperties";
 import type { Element } from "../../models/Element";
 import { compareSelectionRank } from "./selectionRank";
 import { isElementCenterOffScreen } from "./ElementGeometry";

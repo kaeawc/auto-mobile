@@ -56,7 +56,7 @@ import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
-import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
+import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
@@ -72,7 +72,7 @@ import {
   stableNodeSelectorForElement,
   TalkBackTapStrategy,
 } from "../talkback/TalkBackTapStrategy";
-import { hasAccessibilityAction } from "../../utils/elementProperties";
+import { hasAccessibilityAction } from "../utility/elementProperties";
 import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
 import {
   DefaultTalkBackNavigationDriverFactory,

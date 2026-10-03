@@ -3,7 +3,7 @@ import {
   getToggleContentDescription,
   isClickableElementProperties,
   isEditableElementProperties,
-} from "../../../utils/elementProperties";
+} from "../../utility/elementProperties";
 
 /**
  * Capture-layer stable node identity for id-less Android nodes (issue #3228).

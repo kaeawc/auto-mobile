@@ -17,7 +17,7 @@ import {
   type ScreenSizeForOffscreenCheckOptions,
 } from "./ElementGeometry";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
-import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
+import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 
 interface SelectionOptions {
   container?: { elementId?: string; text?: string } | null;

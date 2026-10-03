@@ -18,7 +18,7 @@ import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
-import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
+import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import {

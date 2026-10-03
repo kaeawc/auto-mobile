@@ -11,7 +11,7 @@ import { isTruthy } from "../../../models/Element";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
-} from "../../../utils/elementProperties";
+} from "../../utility/elementProperties";
 import { serverConfig } from "../../../utils/ServerConfig";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import {

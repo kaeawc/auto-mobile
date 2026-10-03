@@ -1,7 +1,7 @@
 import { Element } from "../../models/Element";
 import { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { nodeAttributes, nodeBounds } from "../../models/ViewHierarchyResult";
-import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
+import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { parseBounds } from "../../utils/bounds";
 import { setHierarchyNodeSource } from "../observe/output/elementProvenance";

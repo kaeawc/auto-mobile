@@ -32,7 +32,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { boundsArea, clamp } from "../../utils/bounds";
-import { buildContainerFromElement, isTruthyFlag } from "../../utils/elementProperties";
+import { buildContainerFromElement, isTruthyFlag } from "../utility/elementProperties";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../utils/screenBounds";
 import {
   DEFAULT_VISION_CONFIG,

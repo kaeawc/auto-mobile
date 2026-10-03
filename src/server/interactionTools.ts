@@ -117,7 +117,7 @@ import {
   createStructuredToolResponse,
   StructuredToolResponse,
 } from "../utils/toolUtils";
-import { resolveSwipeDirection } from "../utils/swipeOnUtils";
+import { resolveSwipeDirection } from "../features/action/swipeon/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import {
   addDeviceTargetingToSchema,
@@ -129,7 +129,7 @@ import {
   compactExclusiveSelectorProperties,
   responseShapeControlFields,
 } from "./toolSchemaHelpers";
-import { isTruthyFlag } from "../utils/elementProperties";
+import { isTruthyFlag } from "../features/utility/elementProperties";
 import {
   createElementIdTextSelectorSchema,
   elementContainerSchema,

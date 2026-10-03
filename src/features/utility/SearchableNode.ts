@@ -18,7 +18,7 @@ import {
   isClickableElementProperties,
   isCollectionElementProperties,
   isEditableElementProperties,
-} from "../../utils/elementProperties";
+} from "./elementProperties";
 
 /** Capture fields shared by observation and resolution; promotion is action-dependent. */
 export interface SearchableNode {

@@ -18,7 +18,7 @@ import { iosProjectionFixture } from "../../fixtures/iosProjectionFixture";
 import { normalizeIosHierarchy } from "../../../src/features/observe/HierarchyNormalization";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { serverConfig } from "../../../src/utils/ServerConfig";
-import { resolveViewHierarchyForSearch } from "../../../src/utils/viewHierarchySearch";
+import { resolveViewHierarchyForSearch } from "../../../src/features/utility/viewHierarchySearch";
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {

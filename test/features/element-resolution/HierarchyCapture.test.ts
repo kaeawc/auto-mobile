@@ -16,7 +16,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   attachRawViewHierarchy,
   resolveViewHierarchyForSearch,
-} from "../../../src/utils/viewHierarchySearch";
+} from "../../../src/features/utility/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 

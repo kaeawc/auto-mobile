@@ -4,7 +4,7 @@ import type { ViewHierarchy } from "../../observe/ViewHierarchy";
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../../observe/ios";
-import { attachRawViewHierarchy } from "../../../utils/viewHierarchySearch";
+import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 

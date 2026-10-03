@@ -1,4 +1,4 @@
-import { SwipeDirection, SwipeOnOptions } from "../models";
+import { SwipeDirection, SwipeOnOptions } from "../../../models";
 
 /**
  * Maps scroll content direction to finger swipe direction.

@@ -16,8 +16,8 @@ import { FakeScreenshotStateStore } from "../../fakes/FakeScreenshotStateStore";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
-import { existsSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, promises as fsPromises } from "node:fs";
+import * as fs from "node:fs/promises";
 import { dirname } from "node:path";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -243,12 +243,19 @@ test("cached fallback uses cached dimensions without opening the path or writing
   await cacheStore.put(device.deviceId, { ...cached, screenshotPath: cachedPath });
   store.update(device.deviceId, "/fake/other.png");
   failCapture();
-  // Parallel shards share the temp directory; compare only names relevant to this path.
-  const relevantTempEntries = () =>
-    readdirSync(tmpdir()).filter((entry) => /screenshot|observe|never-opened/i.test(entry));
-  const tempEntries = new Set(relevantTempEntries());
+  // Observe this process's I/O, not the temp directory shared with parallel shards.
+  // Bun exposes separate bindings for node:fs/promises and node:fs.promises.
+  const unexpectedIo = new Error("Cached raster fallback must not open or write files");
+  const fileOperations = [fs, fsPromises].flatMap((files) => [
+    spyOn(files, "open").mockRejectedValue(unexpectedIo),
+    spyOn(files, "readFile").mockRejectedValue(unexpectedIo),
+    spyOn(files, "writeFile").mockRejectedValue(unexpectedIo),
+    spyOn(files, "mkdtemp").mockRejectedValue(unexpectedIo),
+  ]);
   const result = await screen.executeDeviceRead();
-  expect(relevantTempEntries().filter((entry) => !tempEntries.has(entry))).toEqual([]);
+  for (const operation of fileOperations) {
+    expect(operation).not.toHaveBeenCalled();
+  }
   expect(existsSync(cachedPath)).toBe(false);
   expect(existsSync(dirname(cachedPath))).toBe(false);
   expect(existsSync("scratch/rastersize/never-opened.png")).toBe(false);

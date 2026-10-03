@@ -1,6 +1,6 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
-import type { GestureEmitter, GestureEvent, A11ySource } from "./types";
+import type { GestureEmitter, GestureEvent, A11ySource, ReceivedInteraction } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
@@ -8,18 +8,6 @@ import { discoverTouchNode } from "./TouchNodeDiscovery";
 import { buildAxisRanges, buildScaler, queryDensity, queryRotation } from "./AxisRanges";
 import { GetEventReader } from "./GetEventReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
-
-/** An InteractionEvent from the CtrlProxy (subset of fields we use) */
-interface ReceivedInteraction {
-  type: string;
-  timestamp: number;
-  packageName?: string;
-  screenClassName?: string;
-  element?: Partial<Element>;
-  text?: string;
-  scrollDeltaX?: number;
-  scrollDeltaY?: number;
-}
 
 interface PendingGesture {
   gesture: GestureEvent;
@@ -96,9 +84,7 @@ export class DualTrackRecorder {
       (e) => logger.warn(`[DualTrackRecorder] GetEventReader error: ${e.message}`),
     );
 
-    this.unsubscribeA11y = a11y.onInteraction((e) =>
-      this.handleInteractionEvent(e as unknown as ReceivedInteraction),
-    );
+    this.unsubscribeA11y = a11y.onInteraction((e) => this.handleInteractionEvent(e));
 
     logger.debug("[DualTrackRecorder] Started dual-track recording");
   }

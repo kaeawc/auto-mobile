@@ -1,12 +1,12 @@
 import type { ScreenIdentity } from "../../../models/ObserveResult";
-import {
-  nodeAttributes,
-  type ViewHierarchyNode,
-  type ViewHierarchyResult,
-} from "../../../models/ViewHierarchyResult";
+import { nodeAttributes, type ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 
 type NodeAttrs = Record<string, unknown>;
-type HierarchyNodeLike = ViewHierarchyNode & Record<string, unknown>;
+type HierarchyNodeLike = {
+  [key: string]: unknown;
+  $?: NodeAttrs;
+  node?: HierarchyNodeLike | HierarchyNodeLike[];
+};
 
 const MODAL_CLASSES = new Set([
   "UIActionSheet",
@@ -49,11 +49,11 @@ function textOf(attrs: NodeAttrs): string | undefined {
   return asString(attrs["text"]) ?? asString(attrs["content-desc"]);
 }
 
-function attrsOf(node: ViewHierarchyNode | undefined): NodeAttrs {
+function attrsOf(node: HierarchyNodeLike | undefined): NodeAttrs {
   return node ? nodeAttributes(node) : {};
 }
 
-function nodeChildren(node: ViewHierarchyNode | undefined): ViewHierarchyNode[] {
+function nodeChildren(node: HierarchyNodeLike | undefined): HierarchyNodeLike[] {
   if (!node?.node) {
     return [];
   }
@@ -76,8 +76,8 @@ function hasNodeAttrs(value: unknown): boolean {
   );
 }
 
-function rootNode(viewHierarchy: ViewHierarchyResult | undefined): ViewHierarchyNode | undefined {
-  const hierarchy = viewHierarchy?.hierarchy as unknown as HierarchyNodeLike | undefined;
+function rootNode(viewHierarchy: ViewHierarchyResult | undefined): HierarchyNodeLike | undefined {
+  const hierarchy: HierarchyNodeLike | undefined = viewHierarchy?.hierarchy;
   if (!hierarchy) {
     return undefined;
   }
@@ -90,7 +90,7 @@ function rootNode(viewHierarchy: ViewHierarchyResult | undefined): ViewHierarchy
   return hierarchy.node ?? (hasNodeAttrs(hierarchy) ? hierarchy : undefined);
 }
 
-function walk(node: ViewHierarchyNode | undefined, visit: (node: ViewHierarchyNode) => void): void {
+function walk(node: HierarchyNodeLike | undefined, visit: (node: HierarchyNodeLike) => void): void {
   if (!node) {
     return;
   }
@@ -100,7 +100,7 @@ function walk(node: ViewHierarchyNode | undefined, visit: (node: ViewHierarchyNo
   }
 }
 
-function collectText(node: ViewHierarchyNode): string[] {
+function collectText(node: HierarchyNodeLike): string[] {
   const out: string[] = [];
   walk(node, (current) => {
     const text = textOf(attrsOf(current));
@@ -111,7 +111,7 @@ function collectText(node: ViewHierarchyNode): string[] {
   return out;
 }
 
-function findNavigationTitle(root: ViewHierarchyNode | undefined): string | undefined {
+function findNavigationTitle(root: HierarchyNodeLike | undefined): string | undefined {
   let fallback: string | undefined;
   let title: string | undefined;
   walk(root, (node) => {
@@ -142,9 +142,9 @@ function findNavigationTitle(root: ViewHierarchyNode | undefined): string | unde
   return title ?? fallback;
 }
 
-function findSelectedTab(root: ViewHierarchyNode | undefined): string | undefined {
+function findSelectedTab(root: HierarchyNodeLike | undefined): string | undefined {
   let selectedTab: string | undefined;
-  const walkForTab = (node: ViewHierarchyNode | undefined, inTabBar: boolean): void => {
+  const walkForTab = (node: HierarchyNodeLike | undefined, inTabBar: boolean): void => {
     if (!node || selectedTab) {
       return;
     }
@@ -174,9 +174,9 @@ function findSelectedTab(root: ViewHierarchyNode | undefined): string | undefine
 }
 
 function findModal(
-  root: ViewHierarchyNode | undefined,
+  root: HierarchyNodeLike | undefined,
 ): Pick<CandidateSignals, "modalClass" | "modalTitle"> {
-  let modalNode: ViewHierarchyNode | undefined;
+  let modalNode: HierarchyNodeLike | undefined;
   walk(root, (node) => {
     if (modalNode) {
       return;
@@ -196,7 +196,7 @@ function findModal(
   };
 }
 
-function findFocusedElementId(root: ViewHierarchyNode | undefined): string | undefined {
+function findFocusedElementId(root: HierarchyNodeLike | undefined): string | undefined {
   let focused: string | undefined;
   walk(root, (node) => {
     const attrs = attrsOf(node);
@@ -212,7 +212,7 @@ function findFocusedElementId(root: ViewHierarchyNode | undefined): string | und
   return focused;
 }
 
-function hasKeyboard(root: ViewHierarchyNode | undefined): boolean {
+function hasKeyboard(root: HierarchyNodeLike | undefined): boolean {
   let keyboardVisible = false;
   walk(root, (node) => {
     if (keyboardVisible) {

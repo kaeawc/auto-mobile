@@ -35,7 +35,7 @@ export async function pruneEventTableByCount(
     state,
     async () => {
       try {
-        const resolvedDb = db ?? (getDatabase() as unknown as Kysely<Database>);
+        const resolvedDb = db ?? getDatabase();
         const count = await resolvedDb
           .selectFrom(table)
           .select(resolvedDb.fn.countAll().as("count"))

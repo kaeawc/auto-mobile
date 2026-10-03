@@ -18,7 +18,7 @@ export type { EventRetentionState, EventTableName } from "./eventRetention";
  * byte-identical copy (issue #3516).
  */
 export function getDb(db?: Kysely<Database>): Kysely<Database> {
-  return db ?? (getDatabase() as unknown as Kysely<Database>);
+  return db ?? getDatabase();
 }
 
 /** A fresh, isolated retention counter for one event repository. */

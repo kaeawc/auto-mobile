@@ -367,7 +367,7 @@ function collectOccludedByViewIds(nodes: ViewHierarchyNode[]): Set<string> {
     if (!node) {
       return;
     }
-    const occludedByViewId = (node as unknown as Record<string, unknown>).occludedByViewId;
+    const occludedByViewId = node.occludedByViewId;
     if (typeof occludedByViewId === "string" && occludedByViewId !== "") {
       referencedViewIds.add(occludedByViewId);
     }
@@ -389,7 +389,7 @@ function trimHierarchyNodes(
     return;
   }
 
-  const attrs = node as unknown as Record<string, unknown>;
+  const attrs: Record<string, unknown> = node;
 
   // Drop view-id when it is identical to resource-id (redundant duplicate).
   if (
@@ -995,7 +995,7 @@ function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObser
     if (!node || typeof node !== "object") {
       return;
     }
-    const rec = node as unknown as Record<string, unknown>;
+    const rec: Record<string, unknown> = node;
     if (collapseKeyboard && node.extras?.["automobile:imePackage"]) {
       return;
     }
@@ -1450,9 +1450,8 @@ function isIosObservation(obs: ObserveResult): boolean {
     if (
       roots.some(
         (root) =>
-          classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIApplication" ||
-          classNameForDiff(root as unknown as Record<string, unknown>) ===
-            "XCUIElementTypeApplication",
+          classNameForDiff(root) === "XCUIApplication" ||
+          classNameForDiff(root) === "XCUIElementTypeApplication",
       )
     ) {
       return true;
@@ -1473,9 +1472,7 @@ function hasAndroidHierarchySignals(
     return true;
   }
   const roots = toNodeArray(viewHierarchy.hierarchy.node);
-  return roots.some((root) =>
-    platformClassNameForDiff(root as unknown as Record<string, unknown>).startsWith("android."),
-  );
+  return roots.some((root) => platformClassNameForDiff(root).startsWith("android."));
 }
 
 function stringAttr(attrs: Record<string, unknown>, key: string): string {
@@ -1817,8 +1814,8 @@ export function diffObserveResult(
   const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
   const elementFields = cfg?.elementFields ?? DIFF_ELEMENT_FIELDS;
   const fields: NonNullable<ObserveDiff["fields"]> = {};
-  const baseRecord = baseline as unknown as Record<string, unknown>;
-  const nextRecord = next as unknown as Record<string, unknown>;
+  const baseRecord: Record<string, unknown> = baseline;
+  const nextRecord: Record<string, unknown> = next;
   for (const field of scalarFields) {
     const equal =
       field === "layoutWarnings"

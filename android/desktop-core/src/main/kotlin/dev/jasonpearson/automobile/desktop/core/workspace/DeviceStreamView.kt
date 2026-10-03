@@ -567,4 +567,6 @@ internal fun streamEndReasonText(reason: VideoStreamEndReason): String =
     VideoStreamEndReason.IdentityQuarantined -> "The device's identity changed."
     VideoStreamEndReason.DaemonShutdown -> "The AutoMobile daemon shut down."
     VideoStreamEndReason.SessionEnded -> "This session ended."
+    VideoStreamEndReason.DeviceRestored ->
+      "The device was restored from a snapshot. Reconnect to continue."
   }

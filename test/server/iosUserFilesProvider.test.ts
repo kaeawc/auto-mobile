@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import * as appFiles from "../../src/server/appFileService";
 import type {
   AppFileFileSystem,
@@ -19,7 +19,7 @@ const device: BootedDevice = {
   platform: "ios",
 };
 const physical: BootedDevice = { ...device, deviceId: "00008110-000A1B2C3D4E5F60" };
-const root = "/runtime/fixture data";
+const root = resolve("/runtime/fixture data");
 const namespaceRoot = join(root, "Documents/automobile/run-42");
 const source = "/host/input.txt";
 
@@ -99,12 +99,12 @@ class MemoryFileSystem implements AppFileFileSystem {
       throw new Error("cleanup failed");
     }
     for (const key of this.files.keys()) {
-      if (key === path || key.startsWith(`${path}/`)) {
+      if (key === path || key.startsWith(`${path}${sep}`)) {
         this.files.delete(key);
       }
     }
     for (const key of this.directories) {
-      if (key === path || key.startsWith(`${path}/`)) {
+      if (key === path || key.startsWith(`${path}${sep}`)) {
         this.directories.delete(key);
       }
     }
@@ -309,7 +309,7 @@ describe("iOS Simulator user_files", () => {
   });
   test.each([
     "../escape",
-    "/host/input.txt",
+    resolve("/host/input.txt"),
     "nested/../../escape",
     "nested\\..\\escape",
     "",

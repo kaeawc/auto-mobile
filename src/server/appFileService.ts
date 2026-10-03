@@ -1,7 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { TextDecoder } from "node:util";
 import {
   AppFileContainer,
@@ -1469,7 +1469,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
 
   private assertBelow(root: string, target: string): void {
     const path = relative(root, target);
-    if (!path || path === ".." || path.startsWith(`..${posix.sep}`) || isAbsolute(path)) {
+    if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
       throw new ActionableError(
         "iOS Files fixture destination must remain strictly below its managed namespace root.",
       );
@@ -1477,7 +1477,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   }
 
   private async assertNoSymlinks(container: string, target: string): Promise<void> {
-    const parts = relative(container, target).split(posix.sep);
+    const parts = relative(container, target).split(sep);
     let current = container;
     for (const part of parts) {
       current = join(current, part);

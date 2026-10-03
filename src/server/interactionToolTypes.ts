@@ -6,7 +6,11 @@ import type { TapAtOptions } from "../models/TapAtOptions";
  */
 import type { Platform, ElementSelectionStrategy } from "../models";
 import type { ObserveWaitForOptions, SettledOptions } from "./observeTools";
-import type { SendKeysCommand, SendKeysSelector } from "../features/action/SendKeys";
+import type {
+  SendKeysCommand,
+  SendKeysSelector,
+  SendKeysFocusOptions,
+} from "../features/action/SendKeys";
 
 // ============================================================================
 // Tool Argument Types
@@ -41,7 +45,7 @@ export interface SystemTrayArgs {
   platform?: Platform;
 }
 
-export interface SendKeysArgs {
+export interface SendKeysArgs extends SendKeysFocusOptions {
   display?: string;
   commands: SendKeysCommand[];
   selector?: SendKeysSelector;

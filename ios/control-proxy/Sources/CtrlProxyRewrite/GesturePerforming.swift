@@ -34,12 +34,6 @@ public protocol GesturePerforming: Sendable {
     func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws
     func tapWithDiagnostics(x: Double, y: Double, durationMs: Int, strategy: String?) throws -> TapDiagnostics
 
-    /// Double tap at coordinates
-    func doubleTap(x: Double, y: Double) throws
-
-    /// Long press at coordinates
-    func longPress(x: Double, y: Double, duration: TimeInterval) throws
-
     // MARK: - Swipe Gestures
 
     /// Swipe from start to end coordinates

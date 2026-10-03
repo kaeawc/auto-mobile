@@ -12,14 +12,14 @@ import XCTest
 /// `multiFingerSwipe` keep the same bridge-availability wiring, so the same substring
 /// ordering must hold.
 final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
-    func testDoubleTapAndLongPressUseDisplayGestureFactory() throws {
-        for name in ["doubleTap(x:", "longPress(x:"] {
-            let function = try gesturePerformerFunction(named: name)
-            XCTAssertTrue(function.contains("DisplayGestureFactory("))
-            XCTAssertFalse(function.contains("GestureCoordinateFactory("))
-            XCTAssertTrue(function.contains("catchingObjCException"))
-            XCTAssertTrue(function.contains("throw GestureError.noApplication"))
-        }
+    func testPerformTapUsesDisplayGestureFactoryWithRequestedPressDuration() throws {
+        let tap = try gesturePerformerFunction(named: "performTap(")
+        let factory = try XCTUnwrap(tap.range(of: "let factory = try DisplayGestureFactory("))
+        let delivery = try XCTUnwrap(tap.range(of: "try factory.deliver("))
+
+        XCTAssertLessThan(factory.lowerBound, delivery.lowerBound)
+        XCTAssertTrue(tap.contains("start: GesturePoint(x: x, y: y), press: duration, forced: forced"))
+        XCTAssertFalse(tap.contains("GestureCoordinateFactory("))
     }
 
     func testPinchRoutesBridgeAvailabilitySignalToFallback() throws {

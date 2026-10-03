@@ -1074,46 +1074,6 @@ public final class GesturePerformer: GesturePerforming {
             }
         }
 
-        public func doubleTap(x: Double, y: Double) throws {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
-            try catchingObjCException {
-                let factory = try DisplayGestureFactory(
-                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
-                )
-                let delivery = try factory.deliverDoubleTap(
-                    start: GesturePoint(x: x, y: y), pause: { Thread.sleep(forTimeInterval: $0) }
-                )
-                if factory.mismatch {
-                    var sample = TapDiagnostics(requested: .init(x: x, y: y, durationMs: 0))
-                    factory.annotate(&sample, delivery: delivery)
-                    logger.warning("\(sample.logLine(gesture: "doubleTap"), privacy: .public)")
-                }
-            }
-        }
-
-        public func longPress(x: Double, y: Double, duration: TimeInterval) throws {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
-            try catchingObjCException {
-                let factory = try DisplayGestureFactory(
-                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
-                )
-                let delivery = try factory.deliver(start: GesturePoint(x: x, y: y), press: duration)
-                if factory.mismatch {
-                    let durationMs = duration
-                        .isFinite && abs(duration * 1000) < Double(Int.max) ? Int(duration * 1000) : 0
-                    var sample = TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))
-                    factory.annotate(&sample, delivery: delivery)
-                    logger.warning("\(sample.logLine(gesture: "longPress"), privacy: .public)")
-                }
-            }
-        }
-
         // MARK: - Swipe Gestures
 
         public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
@@ -2821,14 +2781,6 @@ public final class GesturePerformer: GesturePerforming {
         }
 
         public func tap(x _: Double, y _: Double, duration _: TimeInterval = 0) throws {
-            throw GestureError.notSupported("XCUITest only available on iOS")
-        }
-
-        public func doubleTap(x _: Double, y _: Double) throws {
-            throw GestureError.notSupported("XCUITest only available on iOS")
-        }
-
-        public func longPress(x _: Double, y _: Double, duration _: TimeInterval) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

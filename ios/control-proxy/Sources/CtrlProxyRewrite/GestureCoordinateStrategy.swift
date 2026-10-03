@@ -161,8 +161,6 @@ protocol GestureCoordinateProviding {
     func geometry() throws -> GestureCoordinateGeometry?
     func coordinate(selection: GestureCoordinateSelection) throws -> Coordinate
     func tap(_ coordinate: Coordinate, duration: TimeInterval) throws
-    func doubleTap(_ coordinate: Coordinate) throws
-    func press(_ coordinate: Coordinate, duration: TimeInterval) throws
     func drag(
         _ start: Coordinate, to end: Coordinate, press: TimeInterval, velocity: Double?, hold: TimeInterval
     ) throws

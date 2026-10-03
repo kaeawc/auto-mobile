@@ -116,14 +116,6 @@ import os
             }
         }
 
-        func doubleTap(_ coordinate: Coordinate) throws {
-            try catchingObjCException { coordinate.resolved.doubleTap() }
-        }
-
-        func press(_ coordinate: Coordinate, duration: TimeInterval) throws {
-            try catchingObjCException { coordinate.resolved.press(forDuration: duration) }
-        }
-
         func drag(
             _ start: Coordinate, to end: Coordinate, press: TimeInterval, velocity: Double?, hold: TimeInterval
         )

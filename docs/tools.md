@@ -9,6 +9,54 @@ This page reflects the current tool schema. Availability can still vary by
 platform, runner, and enabled feature gates; inspect the registered schema for
 the exact arguments supported by your connection.
 
+## Shared device and session options
+
+The following tools expose `sessionUuid` and `keepScreenAwake`:
+
+`accessibility`, `accessibilityFocus`, `appLifecycle`, `barrier`, `biometricAuth`,
+`changeLocalization`, `clearKeyValueFile`, `clearMockNetwork`, `clipboard`, `crashApp`,
+`criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
+`executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
+`getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
+`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
+`identifyInteractions`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
+`mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
+`postNotification`, `pressButton`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
+`resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
+`setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
+`setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
+`sqlQuery`, `stageSharedStorage`, `stageSharedStorageFixtures`, `startTestRecording`,
+`swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
+`videoRecording`, `wakeAndUnlock`.
+
+`sessionUuid` selects a daemon device session. When an Android session first
+runs device setup, `keepScreenAwake` defaults to true. On a detected physical
+Android device, AutoMobile attempts to wake the screen and enable staying awake
+while plugged in; if that fails, it attempts stay-on and screen-timeout settings.
+Pass `keepScreenAwake: false` on the call that first runs this setup to skip it.
+The result (including a skip or failure) is cached for the session, so later calls
+cannot toggle it. Emulators are skipped; iOS does not apply it. Applied settings
+are restored on session release when their original values are known, on a
+best-effort basis. The option has no effect outside daemon session setup.
+
+For the tools listed above, use the routing fields their registered schema
+exposes: `platform` selects Android or iOS, and `deviceId` identifies the target
+device. A string `device` selects a previously allocated plan device label and
+requires `sessionUuid`; it takes precedence over `deviceId`. A label requires an
+active daemon session. Not every listed tool exposes every routing field.
+
+### Shared observation output options
+
+These tools accept `raw` to return the raw hierarchy and `project` to choose
+`"skeleton"` (default) or `"full"` observation output:
+
+`biometricAuth`, `dragAndDrop`, `hitTest`, `homeScreen`, `launchApp`, `observe`, `openLink`,
+`pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`, `setPosture`,
+`shake`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
+
+Skeleton output contains actionable entries; the collapsed keyboard marker `<ime>` is not a
+selector. Use `sendKeys` or `keyboard` for keyboard input.
+
 ## Observe & navigate
 
 The default skeleton projection optionally includes `windowTruncations`:
@@ -510,6 +558,20 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 ### Navigation and highlight options
 
+`explore.timeoutMs` bounds exploration (default 300000 ms); `strategy` is
+`breadth-first`, `depth-first`, or `weighted` (default). `mode` is `discover`,
+`validate`, or `hybrid` (default), and `packageName` limits exploration to a package.
+`getNavigationGraph.appId` scopes the graph to that app instead of the foreground app.
+
+`identifyInteractions.filter` accepts `types` (`navigation`, `input`, `action`,
+`scroll`, `toggle`), `minConfidence` from 0 to 1, and a positive integer `limit`.
+
+`highlight` takes either `shape` (a `circle` with `bounds`) or an `elementId`/`text`
+selector, never both. `elementId` is a resource ID; `text` matches text,
+content description, or placeholder. `selectionStrategy` is `first` (default)
+or `random`. `description` labels the highlight, and `timeoutMs` bounds the
+highlight request (default 5000 ms).
+
 `explore` accepts `maxInteractions` (default 50), `resetToHome` to return home
 periodically (default false), `resetInterval` (default 15 interactions), and
 `dryRun` to explore without performing interactions.
@@ -980,6 +1042,15 @@ termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 
 ### App launch, installation, links, and storage options
 
+`openLink.url` is the URL to open. `getAppPermissions`, `getDeepLinks`,
+`getNotificationPolicy`, `clearKeyValueFile`, and `removeKeyValue` use `appId` for
+the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
+`removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
+`setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
+
+`resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
+erases every app's Keychain, regardless of `appId`.
+
 `launchApp.coldBoot` starts the app cold instead of resuming it (default false).
 `installApp.artifactPath` is the host path to an `.apk`, `.app`, or `.ipa`.
 `uninstallApp.keepData` retains app data after uninstall on Android (default
@@ -1357,6 +1428,18 @@ the structured result with `success: false` and set the MCP `isError` flag.
 
 ### Localization, display, and event options
 
+`changeLocalization.appId` selects the Android app package for locale changes.
+`displayConfig.reset` restores font scale, density, and theme to device defaults.
+`shake.duration` is the shake duration in milliseconds (default 1000).
+`biometricAuth.errorCode` supplies the BiometricPrompt error code for `action: "error"`.
+
+`postNotification` takes `title`, `body`, and `appId` (target Android package or iOS
+bundle ID; required on iOS, while Android defaults to the foreground app if omitted). `actions` supplies
+Android buttons, each with `label` and `actionId`.
+`sendSms.message` is the SMS body (at most 1024 characters, without newlines or NUL).
+`wakeAndUnlock.pin` supplies a secure Android unlock credential; it may be omitted
+if one is already remembered for the session and is ignored on iOS.
+
 `changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`.
 `timeFormat` selects `"12"` or `"24"`, and `textDirection` selects `ltr` or `rtl`.
 `calendarSystem` accepts calendar identifiers such as `gregory`, `japanese`,
@@ -1378,6 +1461,12 @@ image path for `bigPicture`.
 `ttlMs` sets the SDK override lifetime in milliseconds (default 5000).
 
 ### Acquisition, deletion, and snapshot options
+
+`deleteDevice.mode` is `"destroy"`: stop and permanently delete the platform device
+representation. `timeoutMs` is the total positive integer teardown timeout in
+milliseconds, at most 890000.
+`getIosSimulatorCapabilities.deviceType` selects a CoreSimulator device-type
+identifier from `automobile:devices/images`.
 
 `getAndroid` and `getApple` accept `bootTimeoutMs` for finding, recovering, or
 booting the OS and `automationReadyTimeoutMs` for installing, updating, starting,
@@ -1521,6 +1610,12 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 
 ### Network options
 
+`getNetworkGraph.method` filters by HTTP method.
+`mockNetwork` uses regex `host` and `path` patterns and an HTTP `method` (default
+`"*"`). A positive integer `limit` caps mock responses. Configure `statusCode`
+(default 200, range 100–599), `responseHeaders` (string values), `responseBody`
+(the mock body), and `contentType` (default `application/json`).
+
 `network.simulateErrors` configures error simulation with `errorType` (`http500`
 by default, or `timeout`, `connectionRefused`, `dnsFailure`, `tlsFailure`),
 optional positive `limit`, and positive `durationSeconds`. Set `cancel: true`
@@ -1535,6 +1630,9 @@ at or above which a request counts as slow.
 sets the minimum request count.
 
 ### Plan and recording options
+
+`barrier.lock` names the shared barrier that devices synchronize on.
+`criticalSection.lock` names its shared barrier lock.
 
 `executePlan.planContent` contains YAML plan content (also accepts a `base64:`
 prefix). `startStep` is the start step index (default 0).
@@ -1555,6 +1653,11 @@ barrier before serial execution.
 names the exported plan.
 
 ### Video recording quality and limits
+
+`videoRecording.resolution` sets positive integer `width` and `height`;
+`format` accepts `"mp4"`. `highlights` is an array of circle `shape` entries with
+`bounds`, optional `description`, and optional `timing.startTimeMs` (nonnegative
+integer milliseconds).
 
 `videoRecording.recordingId` identifies a recording to stop.
 Start options include `qualityPreset` (`low`, `medium`, or `high`),

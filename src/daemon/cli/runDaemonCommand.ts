@@ -400,8 +400,8 @@ export async function runDaemonCommand(
             throw new ActionableError(`Session not found: ${sessionId}`);
           }
           const deviceId = session.assignedDevice;
-          sessionManager.releaseSession(sessionId);
-          pool.releaseDevice(deviceId, sessionId);
+          await sessionManager.releaseSession(sessionId);
+          await pool.releaseDevice(deviceId, sessionId);
           console.log(`Session ${sessionId} released`);
           console.log(`Device ${deviceId} is now available`);
         } else {

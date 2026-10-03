@@ -2136,6 +2136,20 @@ async function attachObserveCrop(
   );
 }
 
+function recordObservationBackStack(result: ObserveResult, sessionUuid?: string): void {
+  if (result.backStack && result.activeWindow?.appId) {
+    const navGraph = sessionUuid
+      ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+      : NavigationGraphManager.getInstance();
+    // Only record if we have a current app and screen
+    if (navGraph.getCurrentAppId() === result.activeWindow.appId && navGraph.getCurrentScreen()) {
+      navGraph.recordBackStack(result.backStack).catch((error) => {
+        logger.warn(`Failed to record observation back stack: ${errorMessage(error)}`, error);
+      });
+    }
+  }
+}
+
 export function registerObserveTools(dependencies: ObserveToolDependencies = {}) {
   // Observe handler
   const observeHandler = async (
@@ -2221,17 +2235,8 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       // Record back stack information in navigation graph if available
-      if (!deviceRead && result.backStack && result.activeWindow?.appId) {
-        const navGraph = args.sessionUuid
-          ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
-          : NavigationGraphManager.getInstance();
-        // Only record if we have a current app and screen
-        if (
-          navGraph.getCurrentAppId() === result.activeWindow.appId &&
-          navGraph.getCurrentScreen()
-        ) {
-          navGraph.recordBackStack(result.backStack);
-        }
+      if (!deviceRead) {
+        recordObservationBackStack(result, args.sessionUuid);
       }
 
       // A disabled accessibility service invalidates both the manager setup latch

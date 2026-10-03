@@ -8,7 +8,6 @@ import android.view.View
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.RawRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,7 +18,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
@@ -48,6 +49,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -141,7 +143,7 @@ object VideoNotFoundSemantics {
 
 @Composable
 fun VideoNotFound(videoId: String, onNavigateBack: () -> Unit, modifier: Modifier = Modifier) {
-  Column(
+  Box(
     modifier =
       modifier
         .fillMaxSize()
@@ -149,37 +151,43 @@ fun VideoNotFound(videoId: String, onNavigateBack: () -> Unit, modifier: Modifie
         .background(MaterialTheme.colorScheme.background)
         .safeDrawingPadding()
         .padding(24.dp),
-    horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.Center,
+    contentAlignment = Alignment.Center,
   ) {
-    Icon(
-      imageVector = Icons.Filled.Warning,
-      contentDescription = VideoNotFoundSemantics.ICON_DESCRIPTION,
-      modifier = Modifier.size(48.dp),
-      tint = MaterialTheme.colorScheme.error,
-    )
-    Text(
-      text = "Video not found",
-      fontSize = 20.sp,
-      fontWeight = FontWeight.Bold,
-      color = MaterialTheme.colorScheme.onBackground,
-      modifier = Modifier.padding(top = 16.dp),
-    )
-    Text(
-      text = "Requested video: $videoId",
-      fontSize = 14.sp,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-      textAlign = TextAlign.Center,
-      modifier = Modifier.padding(vertical = 16.dp),
-    )
-    Button(
-      onClick = onNavigateBack,
-      modifier =
-        Modifier.testTag(VideoNotFoundSemantics.BACK_BUTTON_TAG).semantics {
-          contentDescription = VideoNotFoundSemantics.BACK_BUTTON_DESCRIPTION
-        },
+    Column(
+      modifier = Modifier.verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      Text("Go back")
+      Icon(
+        imageVector = Icons.Filled.Warning,
+        contentDescription = VideoNotFoundSemantics.ICON_DESCRIPTION,
+        modifier = Modifier.size(48.dp),
+        tint = MaterialTheme.colorScheme.error,
+      )
+      Text(
+        text = "Video not found",
+        fontSize = 20.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(top = 16.dp),
+      )
+      Text(
+        text = "Requested video: $videoId",
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(vertical = 16.dp),
+      )
+      Button(
+        onClick = onNavigateBack,
+        modifier =
+          Modifier.testTag(VideoNotFoundSemantics.BACK_BUTTON_TAG).semantics {
+            contentDescription = VideoNotFoundSemantics.BACK_BUTTON_DESCRIPTION
+          },
+      ) {
+        Text("Go back")
+      }
     }
   }
 }

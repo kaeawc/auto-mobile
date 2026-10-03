@@ -2,20 +2,23 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.RecompositionEntry
 import dev.jasonpearson.automobile.ctrlproxy.models.RecompositionSnapshot
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 
 class RecompositionStore {
-  private val entriesById = ConcurrentHashMap<String, RecompositionEntry>()
   private val enabled = AtomicBoolean(false)
-  private val lastUpdatedAt = AtomicLong(0)
-  private var lastApplicationId: String? = null
+  @Volatile private var state = SnapshotState(null, 0, emptyMap())
+
+  private class SnapshotState(
+    val applicationId: String?,
+    val timestamp: Long,
+    val entriesById: Map<String, RecompositionEntry>,
+  )
 
   fun setEnabled(isEnabled: Boolean) {
     enabled.set(isEnabled)
     if (!isEnabled) {
-      clear()
+      state = SnapshotState(null, 0, emptyMap())
     }
   }
 
@@ -26,31 +29,19 @@ class RecompositionStore {
       return
     }
 
-    lastApplicationId = snapshot.applicationId
-    lastUpdatedAt.set(snapshot.timestamp)
-    entriesById.clear()
-
-    snapshot.entries.forEach { entry -> entriesById[entry.id] = entry }
+    val entriesById = Collections.unmodifiableMap(snapshot.entries.associateBy { it.id })
+    state = SnapshotState(snapshot.applicationId, snapshot.timestamp, entriesById)
   }
 
   fun isForPackage(packageName: String?): Boolean {
-    return packageName != null && packageName == lastApplicationId
+    val current = state
+    return packageName != null && packageName == current.applicationId
   }
 
   fun findMatch(extras: Map<String, String>?): RecompositionEntry? {
-    extras?.get(RECOMPOSITION_ID_KEY)?.let { id ->
-      entriesById[id]?.let {
-        return it
-      }
-    }
-
-    return null
-  }
-
-  private fun clear() {
-    entriesById.clear()
-    lastUpdatedAt.set(0)
-    lastApplicationId = null
+    val current = state
+    val id = extras?.get(RECOMPOSITION_ID_KEY) ?: return null
+    return current.entriesById[id]
   }
 
   companion object {

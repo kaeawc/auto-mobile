@@ -1,10 +1,11 @@
-import { logger } from "../../../../src/utils/logger";
+import { logger, type Logger } from "../../../../src/utils/logger";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { BootedDevice } from "../../../../src/models";
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeLogger } from "../../../fakes/FakeLogger";
 import {
   createInstantFailureWebSocketFactory,
   FakeWebSocket,
@@ -27,7 +28,10 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
     AndroidCtrlProxyManager.resetInstances();
   });
 
-  const disconnectedClient = (timer: FakeTimer): AndroidCtrlProxyClient => {
+  const disconnectedClient = (
+    timer: FakeTimer,
+    loggerInstance?: Logger,
+  ): AndroidCtrlProxyClient => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
     adb.setScreenState(true);
@@ -40,67 +44,64 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
         return socket;
       },
       timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      loggerInstance,
     );
     return instance;
   };
 
   test("global action clears its registration when the socket disconnects before send", async () => {
     const timer = new FakeTimer();
-    client = disconnectedClient(timer);
+    const log = new FakeLogger();
+    client = disconnectedClient(timer, log);
     spyOn(client, "isConnected").mockReturnValue(true);
 
-    const log = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const result = await client.requestGlobalAction("back", 5000);
-      expect(result.success).toBe(false);
-      expect(log).toHaveBeenCalledWith(
-        "[CTRL_PROXY] Global action failed: WebSocket not connected",
-        expect.any(Error),
-      );
-      expect(result.error).toBe("Error: WebSocket not connected");
-    } finally {
-      log.mockRestore();
-    }
+    const result = await client.requestGlobalAction("back", 5000);
+    expect(result.success).toBe(false);
+    expect(log.at("warn")).toContainEqual({
+      level: "warn",
+      message: "[CTRL_PROXY] Global action failed: WebSocket not connected",
+      args: [expect.any(Error)],
+    });
+    expect(result.error).toBe("Error: WebSocket not connected");
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("frame validation clears its registration when the socket disconnects before send", async () => {
     const timer = new FakeTimer();
-    client = disconnectedClient(timer);
+    const log = new FakeLogger();
+    client = disconnectedClient(timer, log);
     spyOn(client, "isConnected").mockReturnValue(true);
 
-    const log = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const result = await client.validateFrameContext("frame", 5000);
-      expect(result.success).toBe(false);
-      expect(log).toHaveBeenCalledWith(
-        "[CTRL_PROXY] Frame validation failed: WebSocket not connected",
-        expect.any(Error),
-      );
-      expect(result.error).toBe("Error: WebSocket not connected");
-    } finally {
-      log.mockRestore();
-    }
+    const result = await client.validateFrameContext("frame", 5000);
+    expect(result.success).toBe(false);
+    expect(log.at("warn")).toContainEqual({
+      level: "warn",
+      message: "[CTRL_PROXY] Frame validation failed: WebSocket not connected",
+      args: [expect.any(Error)],
+    });
+    expect(result.error).toBe("Error: WebSocket not connected");
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("device info retains its failure when dispatch throws and warns", async () => {
     const timer = new FakeTimer();
-    client = disconnectedClient(timer);
+    const log = new FakeLogger();
+    client = disconnectedClient(timer, log);
     spyOn(client, "connectWebSocket").mockRejectedValue(new Error("connection denied"));
-    const log = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const result = await client.requestDeviceInfo(5000);
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("Error: connection denied");
-      expect(log).toHaveBeenCalledWith(
-        "[CTRL_PROXY] Device info failed: connection denied",
-        expect.any(Error),
-      );
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-    } finally {
-      log.mockRestore();
-    }
+    const result = await client.requestDeviceInfo(5000);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Error: connection denied");
+    expect(log.at("warn")).toContainEqual({
+      level: "warn",
+      message: "[CTRL_PROXY] Device info failed: connection denied",
+      args: [expect.any(Error)],
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("reset clears singleton state even when close rejects and warns", async () => {

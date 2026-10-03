@@ -3996,7 +3996,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
+      this.loggerInstance.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -4065,7 +4065,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`, error);
+      this.loggerInstance.warn(
+        `[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`,
+        error,
+      );
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -4168,7 +4171,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await promise;
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);
+      this.loggerInstance.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -6221,8 +6224,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       };
     } catch (error) {
       const message = errorMessage(error);
-      const logger = this.loggerInstance;
-      logger.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
+      this.loggerInstance.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
       return { success: false, error: `ADB screencap failed: ${message}` };
     }
   }

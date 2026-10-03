@@ -498,6 +498,11 @@ class VideoStreamWriter(
         (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
         rotation = if (isConfig) rotationProvider() else 0,
       )
+    return offerEncoded(ptsAndFlags, data)
+  }
+
+  /** Test seam for offering encoded packets without JVM-stubbed MediaCodec buffer metadata. */
+  internal fun offerEncoded(ptsAndFlags: Long, data: ByteArray): Boolean {
     synchronized(lock) { packetCache.remember(CachedVideoPacket(ptsAndFlags, data)) }
     return handoff.offer(EncodedVideoFrame(ptsAndFlags, data))
   }
@@ -571,7 +576,8 @@ class VideoStreamWriter(
 
   private fun replayCachedVideoLocked() {
     for (packet in packetCache.replay()) {
-      writePacketDataLocked(
+      // Replay must propagate I/O failures so attachment rolls back instead of reporting a client.
+      writeFramedPacketLocked(
         TRACK_ID_VIDEO,
         VideoStreamProtocol.replayed(packet.ptsAndFlags),
         packet.data,
@@ -579,21 +585,26 @@ class VideoStreamWriter(
     }
   }
 
-  private fun writePacketDataLocked(trackId: Int, ptsAndFlags: Long, data: ByteArray): Boolean {
+  private fun writeFramedPacketLocked(trackId: Int, ptsAndFlags: Long, data: ByteArray): Boolean {
+    // Replay ignores the result, preserving stopped/clientless no-ops; audio keeps this contract.
     if (stopped) return false
 
     // Keep the encoder alive during local client recovery. Video data is cached;
     // audio resumes live when the replacement mux client attaches.
     val output = outputStream ?: return true
+    // One write per packet: header + payload are framed into a single buffer so each packet
+    // costs one syscall instead of two and the header is never split from its payload across
+    // TCP segments (issue #4743). Stamped for the write-stall watchdog (#4784) so a wedged
+    // half-open transport is force-detached instead of orphaning the server.
+    trackingWriteStall {
+      output.write(VideoStreamProtocol.framedPacket(audioEnabled, trackId, ptsAndFlags, data))
+    }
+    return true
+  }
+
+  private fun writePacketDataLocked(trackId: Int, ptsAndFlags: Long, data: ByteArray): Boolean {
     try {
-      // One write per packet: header + payload are framed into a single buffer so each packet
-      // costs one syscall instead of two and the header is never split from its payload across
-      // TCP segments (issue #4743). Stamped for the write-stall watchdog (#4784) so a wedged
-      // half-open transport is force-detached instead of orphaning the server.
-      trackingWriteStall {
-        output.write(VideoStreamProtocol.framedPacket(audioEnabled, trackId, ptsAndFlags, data))
-      }
-      return true
+      return writeFramedPacketLocked(trackId, ptsAndFlags, data)
     } catch (e: IOException) {
       println("Error writing packet: ${e.message}")
       closeClientLocked()

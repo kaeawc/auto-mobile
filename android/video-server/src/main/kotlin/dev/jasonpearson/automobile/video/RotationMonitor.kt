@@ -121,8 +121,16 @@ class RotationMonitor(
 
   /** Read a fresh rotation and, only on a real change, notify the listener with the new value. */
   private fun dispatch() {
-    val newRotation = poll() ?: return
-    onRotationChanged?.invoke(newRotation)
+    try {
+      val newRotation = poll() ?: return
+      onRotationChanged?.invoke(newRotation)
+    } catch (_: InterruptedException) {
+      Thread.currentThread().interrupt()
+      return
+    } catch (error: Exception) {
+      // A transient reader failure must not end rotation detection; the next poll tick retries.
+      System.err.println("RotationMonitor dispatch failed: ${error.message}")
+    }
   }
 
   companion object {

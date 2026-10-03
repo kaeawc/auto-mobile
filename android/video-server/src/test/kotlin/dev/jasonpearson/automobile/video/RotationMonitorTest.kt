@@ -1,9 +1,12 @@
 package dev.jasonpearson.automobile.video
 
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -90,6 +93,93 @@ class RotationMonitorTest {
     assertEquals(1, observed.get())
 
     monitor.stop()
+  }
+
+  @Test
+  fun pollLoopSurvivesReaderExceptionAndStillDispatchesNewRotation() {
+    val reads = AtomicInteger()
+    val ticks = Semaphore(0)
+    val failedRead = CountDownLatch(1)
+    val dispatched = CountDownLatch(1)
+    val observed = AtomicInteger(NONE)
+    val pollThread = AtomicReference<Thread>()
+    val monitor =
+      RotationMonitor(
+        reader = {
+          when (reads.getAndIncrement()) {
+            0 -> 0
+            1 -> {
+              failedRead.countDown()
+              throw IllegalStateException("transient display read failure")
+            }
+            else -> 1
+          }
+        },
+        sleeper = {
+          pollThread.set(Thread.currentThread())
+          ticks.acquire()
+        },
+      )
+
+    try {
+      monitor.start {
+        observed.set(it)
+        dispatched.countDown()
+      }
+      // Each permit advances exactly one poll tick: first a failed read, then a fresh rotation.
+      ticks.release()
+      assertTrue("the first poll tick must attempt a read", failedRead.await(2, TimeUnit.SECONDS))
+      ticks.release()
+
+      assertTrue(
+        "a transient reader failure must not end the poll fallback",
+        dispatched.await(2, TimeUnit.SECONDS),
+      )
+      assertEquals(1, observed.get())
+    } finally {
+      monitor.stop()
+      pollThread.get()?.let {
+        it.join(TimeUnit.SECONDS.toMillis(2))
+        assertFalse("the interrupted poll thread must unwind", it.isAlive)
+      }
+    }
+  }
+
+  @Test
+  fun listenerCallbackSwallowsReaderException() {
+    val reads = AtomicInteger()
+    val rotation = AtomicInteger(0)
+    var listenerCallback: (() -> Unit)? = null
+    val observed = AtomicInteger(NONE)
+    val park = CountDownLatch(1)
+    val monitor =
+      RotationMonitor(
+        reader = {
+          if (reads.getAndIncrement() == 1) {
+            throw IllegalStateException("transient display read failure")
+          }
+          rotation.get()
+        },
+        registrar = { onChanged ->
+          listenerCallback = onChanged
+          {}
+        },
+        sleeper = { park.await() },
+      )
+
+    try {
+      monitor.start { observed.set(it) }
+      val listener = requireNotNull(listenerCallback)
+      listener()
+      assertEquals("a failed read must not dispatch a rotation", NONE, observed.get())
+
+      rotation.set(1)
+      listener()
+      assertEquals("the listener must retry after a failed read", 1, observed.get())
+    } finally {
+      monitor.stop()
+      park.countDown()
+    }
   }
 
   private companion object {

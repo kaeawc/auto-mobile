@@ -1541,8 +1541,49 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     isInstalled: async () => true,
     isRunning: async () => true,
     getServicePort: () => 8765,
-    getReportedRunnerPort: async () => 8765,
+    discoverRunnerPort: async () => 8765,
   };
+
+  test("discovers a running runner and checks its version on the discovered port", async () => {
+    const ports: number[] = [];
+    const simctl = baseDependencies.createSimctlClient();
+    const available = spyOn(simctl, "isAvailable").mockResolvedValue(true);
+    const booted = spyOn(simctl, "getBootedSimulators").mockResolvedValue([
+      { name: "iPhone", platform: "ios", deviceId: "SIM-1" },
+    ]);
+    const inspector = createIosCtrlProxyRunnerInspector(() => simctl, new FakeLogger(), {
+      getManager: () => ({
+        isInstalled: async () => true,
+        getServicePort: () => 8765,
+        discoverRunnerPort: async () => 8768,
+      }),
+      getExistingClient: () => null,
+      createClient: (_device, port) => {
+        ports.push(port);
+        return {
+          getRunnerIdentityForDiagnostics: async () => ({
+            commands: [...IOS_RUNNER_FEATURE_COMMANDS],
+            features: [...IOS_RUNNER_FEATURE_FLAGS],
+          }),
+          close: async () => {},
+        };
+      },
+    });
+    try {
+      const inspections = await inspector.inspectBootedRunners();
+      expect(inspections[0].running).toBe(true);
+      const result = await checkIosCtrlProxyRunner({
+        ...baseDependencies,
+        runnerInspector: inspector,
+      });
+      expect(result.message).toContain("running=true");
+      expect(result.message).toContain("versionStatus=compatible");
+      expect(ports).toEqual([8768, 8768]);
+    } finally {
+      available.mockRestore();
+      booted.mockRestore();
+    }
+  });
 
   test("both inspectors read a connected resident client despite stale manager state", async () => {
     const timer = new FakeTimer();
@@ -1862,6 +1903,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       getManager: () => ({
         ...runningManager,
         isRunning: async () => false,
+        discoverRunnerPort: async () => null,
       }),
       getExistingClient: () => existing,
       createClient: () => {
@@ -2046,7 +2088,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     isInstalled: async () => true,
     isRunning: async () => true,
     getServicePort: () => 8790,
-    getReportedRunnerPort: async () => 8790,
+    discoverRunnerPort: async () => 8790,
   };
   const viewHierarchy = {
     hierarchy: { node: { $: { text: "Home" } } },
@@ -2069,7 +2111,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     const hooks: IosObserveRoundTripInspectorHooks = {
       getManager: () => ({
         ...runningManager,
-        getReportedRunnerPort: async () => {
+        discoverRunnerPort: async () => {
           probeStarted.resolve();
           return await new Promise<never>(() => {});
         },
@@ -2187,7 +2229,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         isInstalled: async () => true,
         isRunning: async () => false,
         getServicePort: () => 8767,
-        getReportedRunnerPort: async () => 8765,
+        discoverRunnerPort: async () => 8765,
       }),
       getExistingClient: () => existing,
       createClient: () => {
@@ -2247,7 +2289,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         isInstalled: async () => true,
         isRunning: async () => false,
         getServicePort: () => 8790,
-        getReportedRunnerPort: async () => null,
+        discoverRunnerPort: async () => null,
       }),
       getExistingClient: () => null,
       createClient: () => {
@@ -2269,74 +2311,59 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     expect(inspections[0].hierarchyError).toBe("iOS CtrlProxy runner is not running");
   });
 
-  test("reports the runner's actual bound port from the manager, not the client port (#2735)", async () => {
-    // #2731 failure mode: the runner binds 8765 while the client/daemon expects
-    // 8767. isRunning() probes the client port (8767) and finds nothing, but the
-    // runner reports its real bound port (8765) via /health.
+  test("connects to the discovered host port despite stale manager allocation", async () => {
+    const requestedPorts: number[] = [];
     const hooks: IosObserveRoundTripInspectorHooks = {
       getManager: () => ({
         isInstalled: async () => true,
-        isRunning: async () => false,
-        getServicePort: () => 8767,
-        getReportedRunnerPort: async () => 8765,
+        getServicePort: () => 8765,
+        discoverRunnerPort: async () => 8768,
       }),
       getExistingClient: () => null,
-      createClient: () => {
-        throw new Error("should not create client when runner unreachable on client port");
+      createClient: (_device, port) => {
+        requestedPorts.push(port);
+        return {
+          getConnectionPortForDiagnostics: () => port,
+          requestHierarchySyncForDiagnostics: async () => ({
+            hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} },
+          }),
+          convertToViewHierarchyResult: () => viewHierarchy,
+          close: async () => {},
+        };
       },
       elementsBuilder,
     };
-
-    const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
-      new FakeLogger(),
-      hooks,
-    );
-    const inspections = await inspector.inspectBootedObserveRoundTrips();
-
-    // runnerPort must reflect the runner's reported bound port, decoupled from
-    // the client port, so classifyObserveRoundTrip can detect the mismatch.
-    expect(inspections[0].runnerPort).toBe(8765);
-    expect(inspections[0].clientPort).toBe(8767);
-    expect(inspections[0].connected).toBe(false);
+    const simctl = baseDependencies.createSimctlClient();
+    const available = spyOn(simctl, "isAvailable").mockResolvedValue(true);
+    const booted = spyOn(simctl, "getBootedSimulators").mockResolvedValue([
+      { name: "iPhone", platform: "ios", deviceId: "SIM-1" },
+    ]);
+    try {
+      const inspections = await createIosObserveRoundTripInspector(
+        () => simctl,
+        new FakeLogger(),
+        hooks,
+      ).inspectBootedObserveRoundTrips();
+      expect(requestedPorts).toEqual([8768]);
+      expect(inspections[0]).toMatchObject({
+        runnerPort: 8768,
+        clientPort: 8768,
+        connected: true,
+        hierarchyError: null,
+      });
+    } finally {
+      available.mockRestore();
+      booted.mockRestore();
+    }
   });
 
-  test("surfaces an actionable mismatch error when the runner is bound to a different port (#2735)", async () => {
-    const hooks: IosObserveRoundTripInspectorHooks = {
-      getManager: () => ({
-        isInstalled: async () => true,
-        isRunning: async () => false,
-        getServicePort: () => 8767,
-        getReportedRunnerPort: async () => 8765,
-      }),
-      getExistingClient: () => null,
-      createClient: () => {
-        throw new Error("should not create client when runner unreachable on client port");
-      },
-      elementsBuilder,
-    };
-
-    const inspector = createIosObserveRoundTripInspector(
-      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
-      new FakeLogger(),
-      hooks,
-    );
-    const inspections = await inspector.inspectBootedObserveRoundTrips();
-
-    expect(inspections[0].hierarchyError).toContain("8765");
-    expect(inspections[0].hierarchyError).toContain("8767");
-    // The misleading "not running" must not be reported when the runner is alive
-    // on another port.
-    expect(inspections[0].hierarchyError).not.toBe("iOS CtrlProxy runner is not running");
-  });
-
-  test("falls back to the service port when the runner reports no bound port", async () => {
+  test("uses the answering host port without requiring a self-reported port", async () => {
     const hooks: IosObserveRoundTripInspectorHooks = {
       getManager: () => ({
         isInstalled: async () => true,
         isRunning: async () => true,
         getServicePort: () => 8790,
-        getReportedRunnerPort: async () => null,
+        discoverRunnerPort: async () => 8790,
       }),
       getExistingClient: () => null,
       createClient: (_device, port) => ({

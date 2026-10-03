@@ -3,8 +3,6 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  handleDoctorResult,
-  doctorToolParams,
   runCliCommand,
   parseCliArgs,
   runDoctorCommand,
@@ -15,7 +13,22 @@ import { CLI_OUTPUT_INLINE_MAX_BYTES } from "../../src/cli/toolOutput";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DaemonClient } from "../../src/daemon/client";
 
-describe("doctorToolParams", () => {
+import type { DoctorReport } from "../../src/doctor/types";
+
+function report(failed = 0): DoctorReport {
+  return {
+    timestamp: "",
+    version: "test",
+    platform: "darwin",
+    arch: "arm64",
+    system: { checks: [] },
+    autoMobile: { checks: [] },
+    recommendations: [],
+    summary: { total: failed, passed: 0, warnings: 0, failed, skipped: 0 },
+  };
+}
+
+describe("runDoctorCommand", () => {
   test("rejects removed doctor flags before diagnosis with supported daemon remedies", async () => {
     const diagnosis = spyOn(DaemonClient.prototype, "callTool");
     try {
@@ -33,24 +46,53 @@ describe("doctorToolParams", () => {
     }
   });
 
-  test("retains ordinary diagnosis without --repair", async () => {
-    const diagnosis = spyOn(DaemonClient.prototype, "callTool").mockResolvedValue({
-      summary: { failed: 0 },
+  test("runs local diagnosis and forwards platform flags without a daemon call", async () => {
+    const diagnosis = spyOn(DaemonClient.prototype, "callTool").mockImplementation(() => {
+      throw new Error("doctor must not call a daemon tool");
     });
-    const close = spyOn(DaemonClient.prototype, "close").mockResolvedValue(undefined);
+    const connect = spyOn(DaemonClient.prototype, "connect").mockImplementation(() => {
+      throw new Error("doctor must not connect to the daemon");
+    });
+    const localOptions: unknown[] = [];
     setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
     try {
-      await runDoctorCommand({ ...parseCliArgs(["doctor"]).params, json: true });
-      expect(diagnosis).toHaveBeenCalledWith("doctor", {});
+      await runDoctorCommand(
+        { ios: true, android: false, json: true },
+        {
+          runDoctor: async (options) => {
+            localOptions.push(options);
+            return report();
+          },
+        },
+      );
+      expect(localOptions).toEqual([{ ios: true, android: false }]);
+      expect(diagnosis).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
     } finally {
       diagnosis.mockRestore();
-      close.mockRestore();
+      connect.mockRestore();
       resetCliOutputSinksForTesting();
     }
   });
 
-  test("keeps CLI JSON formatting out of the daemon doctor request", () => {
-    expect(doctorToolParams({ ios: true, json: true })).toEqual({ ios: true });
+  test("formats console output and exits with code one for a failed local report", async () => {
+    const output: string[] = [];
+    const exits: number[] = [];
+    const failedReport = report(1);
+    await runDoctorCommand(
+      {},
+      {
+        runDoctor: async () => failedReport,
+        formatConsoleOutput: (received) => {
+          expect(received).toBe(failedReport);
+          return "local diagnosis";
+        },
+        writeOutput: (text) => output.push(text),
+        exit: (code) => exits.push(code),
+      },
+    );
+    expect(output).toEqual(["local diagnosis"]);
+    expect(exits).toEqual([1]);
   });
 
   test("does not document removed repair-only doctor flags", async () => {
@@ -73,18 +115,12 @@ describe("doctorToolParams", () => {
     });
 
     try {
-      await handleDoctorResult(
-        { summary: { failed: 0 }, checks: [{ name: "node", ok: true }] },
-        true,
-      );
+      await runDoctorCommand({ json: true }, { runDoctor: async () => report() });
     } finally {
       resetCliOutputSinksForTesting();
     }
 
-    expect(JSON.parse(written[0])).toEqual({
-      summary: { failed: 0 },
-      checks: [{ name: "node", ok: true }],
-    });
+    expect(JSON.parse(written[0])).toEqual(report());
     expect(written[0]).toContain("\n");
   });
 
@@ -99,9 +135,14 @@ describe("doctorToolParams", () => {
     serverConfig.setToolOutputsDir(toolOutputsDir);
 
     try {
-      await handleDoctorResult(
-        { summary: { failed: 0 }, details: "x".repeat(CLI_OUTPUT_INLINE_MAX_BYTES + 1_024) },
-        true,
+      await runDoctorCommand(
+        { json: true },
+        {
+          runDoctor: async () => ({
+            ...report(),
+            details: "x".repeat(CLI_OUTPUT_INLINE_MAX_BYTES + 1_024),
+          }),
+        },
       );
       const parsed = JSON.parse(written[0]);
       expect(Buffer.byteLength(written[0], "utf8")).toBeLessThanOrEqual(

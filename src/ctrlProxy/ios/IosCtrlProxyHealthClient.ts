@@ -2,6 +2,7 @@ import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,
 } from "../../utils/HostCommandExecutor";
+import { combineAbortSignals } from "../../utils/AbortContext";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 
@@ -129,9 +130,9 @@ export class IosCtrlProxyHealthClient {
     port: number,
     deviceId: string,
     timeoutMs?: number,
-    options?: { requireDeviceId?: boolean },
+    options?: { requireDeviceId?: boolean; signal?: AbortSignal },
   ): Promise<boolean> {
-    const body = await this.readHealthEndpointBodyOnPort(port, timeoutMs);
+    const body = await this.readHealthEndpointBodyOnPort(port, timeoutMs, options);
     if (body === null) {
       return false;
     }
@@ -230,20 +231,27 @@ export class IosCtrlProxyHealthClient {
   public async readHealthEndpointBodyOnPort(
     port: number,
     timeoutMs?: number,
+    options: { signal?: AbortSignal } = {},
   ): Promise<string | null> {
     try {
-      return await this.requestHealthEndpointBodyOnPort(port, timeoutMs);
+      return await this.requestHealthEndpointBodyOnPort(port, timeoutMs, options);
     } catch (error) {
       // No runner listening on this port (connection refused/timeout) is the expected case; null means "not up yet".
       logger.debug(
         `src/ctrlProxy/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`,
         error,
       );
+      options.signal?.throwIfAborted();
       return null;
     }
   }
 
-  private async requestHealthEndpointBodyOnPort(port: number, timeoutMs?: number): Promise<string> {
+  private async requestHealthEndpointBodyOnPort(
+    port: number,
+    timeoutMs?: number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
+    options.signal?.throwIfAborted();
     const requestTimeoutMs = Math.min(
       IosCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
       Math.max(1, timeoutMs ?? IosCtrlProxyHealthClient.FETCH_TIMEOUT_MS),
@@ -254,7 +262,7 @@ export class IosCtrlProxyHealthClient {
       const timeoutId = this.timer.setTimeout(() => controller.abort(), requestTimeoutMs);
       try {
         const response = await fetch(`http://${host}:${port}/health`, {
-          signal: controller.signal,
+          signal: combineAbortSignals(options.signal, controller.signal),
         });
         return await response.text();
       } finally {
@@ -266,7 +274,7 @@ export class IosCtrlProxyHealthClient {
     const { stdout } = await this.processExecutor.executeCommand(
       "curl",
       ["-s", "--max-time", String(requestTimeoutMs / 1000), `http://${host}:${port}/health`],
-      { timeoutMs: requestTimeoutMs },
+      { timeoutMs: requestTimeoutMs, signal: options.signal },
     );
     return stdout;
   }

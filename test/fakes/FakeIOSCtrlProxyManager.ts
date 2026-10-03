@@ -182,6 +182,11 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.servicePort;
   }
 
+  async discoverRunnerPort(): Promise<number | null> {
+    this.executedOperations.push("discoverRunnerPort");
+    return this.runningState ? this.servicePort : null;
+  }
+
   async getReportedRunnerPort(): Promise<number | null> {
     this.executedOperations.push("getReportedRunnerPort");
     return this.reportedRunnerPort;

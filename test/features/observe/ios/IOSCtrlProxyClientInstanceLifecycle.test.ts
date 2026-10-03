@@ -100,6 +100,14 @@ describe("IOSCtrlProxyClient instance lifecycle", () => {
     await client.close();
   });
 
+  test("a detached doctor client uses the discovered port without allocating", async () => {
+    const detached = IOSCtrlProxyClient.createDetached(device, { port: 8768 });
+    expect(detached.getConnectionPortForDiagnostics()).toBe(8768);
+    expect(ports.allocateCalls).toBe(0);
+    expect(IOSCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+    await detached.close();
+  });
+
   test("closing a detached probe keeps the shared allocation", async () => {
     const managerPort = ports.allocate(device.deviceId);
     const detached = IOSCtrlProxyClient.createDetached(device);

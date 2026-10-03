@@ -316,28 +316,8 @@ private fun LongPressDurationButton(requiredDurationMs: Int, label: String, test
   }
 }
 
-internal data class DragReorderResult(val index: Int, val remainingOffset: Float)
-
-internal fun calculateDragReorder(
-  currentIndex: Int,
-  lastIndex: Int,
-  accumulatedOffset: Float,
-  itemHeightPx: Float,
-): DragReorderResult {
-  val rowsCrossed = (accumulatedOffset / itemHeightPx).toInt()
-  val newIndex = (currentIndex + rowsCrossed).coerceIn(0, lastIndex)
-  val remainingOffset = accumulatedOffset - (newIndex - currentIndex) * itemHeightPx
-  // Discard outward movement at either edge so it cannot accumulate or delay reversing direction.
-  val clampedOffset =
-    if (
-      (newIndex == 0 && remainingOffset < 0f) || (newIndex == lastIndex && remainingOffset > 0f)
-    ) {
-      0f
-    } else {
-      remainingOffset
-    }
-  return DragReorderResult(newIndex, clampedOffset)
-}
+private val DragRowHeight = 56.dp
+private val DragItemSpacing = 8.dp
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -353,8 +333,14 @@ private fun LongPressDragList() {
   }
   var draggingItemId by remember { mutableStateOf<Int?>(null) }
   var dragOffset by remember { mutableFloatStateOf(0f) }
-  val itemHeight = 56.dp
-  val itemHeightPx by rememberUpdatedState(with(LocalDensity.current) { itemHeight.toPx() })
+  val dragState = remember {
+    DragReorderState(items) { activeId, offset ->
+      draggingItemId = activeId
+      dragOffset = offset
+    }
+  }
+  val rowStridePx by
+    rememberUpdatedState(with(LocalDensity.current) { (DragRowHeight + DragItemSpacing).toPx() })
 
   Card(
     modifier = Modifier.fillMaxWidth(),
@@ -368,7 +354,7 @@ private fun LongPressDragList() {
     LazyColumn(
       modifier = Modifier.fillMaxWidth().height(280.dp),
       contentPadding = PaddingValues(8.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(DragItemSpacing),
     ) {
       items(items, key = { it.id }) { item ->
         val isDragging = draggingItemId == item.id
@@ -377,39 +363,18 @@ private fun LongPressDragList() {
         Card(
           modifier =
             Modifier.fillMaxWidth()
-              .height(itemHeight)
+              .height(DragRowHeight)
               .offset { IntOffset(0, offsetY.roundToInt()) }
               .zIndex(if (isDragging) 1f else 0f)
               .pointerInput(item.id) {
                 detectDragGesturesAfterLongPress(
-                  onDragStart = {
-                    draggingItemId = item.id
-                    dragOffset = 0f
-                  },
-                  onDragEnd = {
-                    draggingItemId = null
-                    dragOffset = 0f
-                  },
-                  onDragCancel = {
-                    draggingItemId = null
-                    dragOffset = 0f
-                  },
+                  onDragStart = { dragState.start(item.id) },
+                  onDragEnd = { dragState.end(item.id) },
+                  onDragCancel = { dragState.cancel(item.id) },
                 ) { change, dragAmount ->
-                  change.consume()
-                  val currentIndex = items.indexOfFirst { it.id == draggingItemId }
-                  if (currentIndex != -1) {
-                    val result =
-                      calculateDragReorder(
-                        currentIndex = currentIndex,
-                        lastIndex = items.lastIndex,
-                        accumulatedOffset = dragOffset + dragAmount.y,
-                        itemHeightPx = itemHeightPx,
-                      )
-                    if (result.index != currentIndex) {
-                      val movedItem = items.removeAt(currentIndex)
-                      items.add(result.index, movedItem)
-                    }
-                    dragOffset = result.remainingOffset
+                  if (dragState.draggingItemId == item.id) {
+                    change.consume()
+                    dragState.move(item.id, dragAmount.y, rowStridePx)
                   }
                 }
               }

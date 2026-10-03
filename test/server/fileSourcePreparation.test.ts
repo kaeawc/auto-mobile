@@ -1,4 +1,5 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { join } from "node:path";
 import { ActionableError } from "../../src/models";
 import {
   prepareFileSource,
@@ -6,10 +7,12 @@ import {
 } from "../../src/server/fileSourcePreparation";
 import { logger } from "../../src/utils/logger";
 
+const FAKE_DIR = "/fake/app-file";
+
 function fakeFileSystem() {
   return {
     stat: mock(async () => ({ size: 7, isFile: () => true })),
-    mkdtemp: mock(async () => "/fake/app-file"),
+    mkdtemp: mock(async () => FAKE_DIR),
     writeFileBuffer: mock(async (_path: string, _buffer: Buffer) => {}),
     rm: mock(async (_path: string) => {}),
   } satisfies FileSourceFileSystem;
@@ -33,7 +36,7 @@ describe("prepareFileSource", () => {
       try {
         await expect(prepareFileSource({ contentText: "hello" }, files)).rejects.toBe(original);
         expect(files.rm).toHaveBeenCalledTimes(1);
-        expect(files.rm).toHaveBeenCalledWith("/fake/app-file");
+        expect(files.rm).toHaveBeenCalledWith(FAKE_DIR);
         if (cleanupFails) {
           expect(warn).toHaveBeenCalledWith(
             "Failed to remove inline app file directory: cleanup denied",
@@ -51,14 +54,14 @@ describe("prepareFileSource", () => {
   test("hands directory ownership to cleanup on success", async () => {
     const files = fakeFileSystem();
     const source = await prepareFileSource({ contentText: "hé" }, files);
-    expect(source.path).toBe("/fake/app-file/content");
+    expect(source.path).toBe(join(FAKE_DIR, "content"));
     expect(source.byteCount).toBe(3);
     expect(files.writeFileBuffer).toHaveBeenCalledWith(source.path, Buffer.from("hé"));
     expect(files.rm).not.toHaveBeenCalled();
     expect(source.cleanup).toBeFunction();
     await source.cleanup?.();
     expect(files.rm).toHaveBeenCalledTimes(1);
-    expect(files.rm).toHaveBeenCalledWith("/fake/app-file");
+    expect(files.rm).toHaveBeenCalledWith(FAKE_DIR);
   });
 
   for (const contentBase64 of ["", "eB==", "eA==\n"]) {

@@ -1,10 +1,13 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { join } from "node:path";
 import { writeBulletinBoardTemp } from "../../../src/features/utility/ios/IosNotificationAuthorizationReader";
 import { logger } from "../../../src/utils/logger";
 
+const FAKE_DIR = "/fake/bulletin-board";
+
 function fakeFiles() {
   return {
-    mkdtemp: mock(async () => "/fake/bulletin-board"),
+    mkdtemp: mock(async () => FAKE_DIR),
     writeFile: mock(async (_file: string, _data: Buffer) => {}),
     rm: mock(async (_directory: string, _options: { recursive: true; force: true }) => {}),
   };
@@ -28,7 +31,7 @@ describe("writeBulletinBoardTemp", () => {
       try {
         await expect(writeBulletinBoardTemp(Buffer.from("blob"), files)).rejects.toBe(original);
         expect(files.rm).toHaveBeenCalledTimes(1);
-        expect(files.rm).toHaveBeenCalledWith("/fake/bulletin-board", {
+        expect(files.rm).toHaveBeenCalledWith(FAKE_DIR, {
           recursive: true,
           force: true,
         });
@@ -49,8 +52,8 @@ describe("writeBulletinBoardTemp", () => {
   test("returns the blob file without removing its directory on success", async () => {
     const files = fakeFiles();
     const buffer = Buffer.from("blob");
-    expect(await writeBulletinBoardTemp(buffer, files)).toBe("/fake/bulletin-board/blob.bplist");
-    expect(files.writeFile).toHaveBeenCalledWith("/fake/bulletin-board/blob.bplist", buffer);
+    expect(await writeBulletinBoardTemp(buffer, files)).toBe(join(FAKE_DIR, "blob.bplist"));
+    expect(files.writeFile).toHaveBeenCalledWith(join(FAKE_DIR, "blob.bplist"), buffer);
     expect(files.rm).not.toHaveBeenCalled();
   });
 });

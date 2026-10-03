@@ -7,7 +7,8 @@ description: Helper skill for Android-specific validation or build work in the a
 
 Run Android work from `android/` via the Gradle wrapper.
 
-- Prefer `(cd android && ./gradlew <task>)` or `bash scripts/android/gradlew_task.sh <task>` once that wrapper script is implemented.
+- Prefer `(cd android && ./gradlew <task>)` or `bash scripts/android/gradlew_task.sh <task>`.
+- The script works from any cwd, passes arguments unchanged to `./gradlew` run from `android/`, and returns Gradle's exit code. Combined stdout and stderr are shown and also saved to `scratch/gradlew-<UTC timestamp>-<pid>.log`; the log path is printed to stderr before and after the run. Use `-h` or `--help` as the first argument for usage.
 - Do not run Gradle tasks from the repo root.
 - Choose explicit tasks that match the request, such as `test`, `lint`, `assemble`, or a module-scoped task.
 - Save long Gradle output under `scratch/` when you need to inspect logs that will not be shown directly.

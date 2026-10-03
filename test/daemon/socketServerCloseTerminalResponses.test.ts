@@ -101,6 +101,7 @@ function createHarness(peerCloses = true) {
   const state: DaemonStateAccess = {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,

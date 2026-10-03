@@ -7,10 +7,13 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../src/models";
+import { PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
+import { logger } from "../../src/utils/logger";
 import {
   buildDeviceLabelMap,
   getDeviceLabelMap,
   registerDeviceLabelMap,
+  releaseDeviceLabelSessions,
 } from "../../src/server/deviceLabelMapping";
 
 /**
@@ -70,6 +73,58 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
     DaemonState.getInstance().reset();
     expect(getDeviceLabelMap("base")).toBeNull();
   });
+
+  test.each(["removed", "present", "pool-failure"])(
+    "label release propagates the error immediately with session %s",
+    async (scenario) => {
+      await sessionManager.createSession("base", androidA.deviceId, "android");
+      await sessionManager.createSession("base:B", "device-B", "android");
+      await sessionManager.createSession("base:C", "device-C", "android");
+      sessionManager.setDeviceLabels("base", buildDeviceLabelMap(["A", "B", "C"], "base"));
+      const pool = DaemonState.getInstance().getDevicePool();
+      const failure = new Error("B release failed");
+      const poolFailure = new Error("B pool release failed");
+      const originalRelease = sessionManager.releaseSession.bind(sessionManager);
+      const release = spyOn(sessionManager, "releaseSession").mockImplementation(
+        async (id, reason) => {
+          if (id === "base:B") {
+            if (scenario !== "present") {
+              await originalRelease(id, reason);
+            }
+            throw failure;
+          }
+          return originalRelease(id, reason);
+        },
+      );
+      const poolRelease = spyOn(pool, "releaseDevice").mockImplementation(async (_device, id) => {
+        if (id === "base:B" && scenario === "pool-failure") {
+          throw poolFailure;
+        }
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        await expect(releaseDeviceLabelSessions("base")).rejects.toBe(failure);
+        expect(release.mock.calls).toEqual([["base:B", PLAN_AUTO_RELEASE_REASON]]);
+        expect(poolRelease.mock.calls).toEqual(
+          scenario === "present" ? [] : [["device-B", "base:B"]],
+        );
+        expect(sessionManager.hasSession("base:B")).toBe(scenario === "present");
+        expect(sessionManager.hasSession("base:C")).toBe(true);
+        expect(info).not.toHaveBeenCalledWith(
+          expect.stringContaining("[DeviceLabelMap] Released label sessions"),
+        );
+        if (scenario === "pool-failure") {
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining("base:B"), poolFailure);
+        }
+      } finally {
+        release.mockRestore();
+        poolRelease.mockRestore();
+        warn.mockRestore();
+        info.mockRestore();
+      }
+    },
+  );
 
   test("registerDeviceLabelMap keeps the real single-label base setup and publication", async () => {
     await sessionManager.createSession("base", androidA.deviceId, "android");

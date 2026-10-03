@@ -1,4 +1,5 @@
 import { isSessionReleasing } from "./sessionReleaseState";
+import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import type { DeviceHealthMarker } from "./deviceHealthMarkers";
 import { z } from "zod";
 import {
@@ -38,6 +39,7 @@ export interface DaemonStateAccess {
   isInitialized(): boolean;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
+    hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
     getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
@@ -435,8 +437,7 @@ export async function handleDaemonRequest(
       }
       const pool = state.getDevicePool();
       const deviceId = session.assignedDevice;
-      await manager.releaseSession(sessionId);
-      await pool.releaseDevice(deviceId, sessionId);
+      await releaseSessionAndDevice(manager, pool, deviceId, sessionId);
       return {
         success: true,
         result: {

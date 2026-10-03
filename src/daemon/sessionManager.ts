@@ -2247,6 +2247,11 @@ export class SessionManager {
     return this.deviceSessionMap.get(deviceId) ?? null;
   }
 
+  /** Map membership, including fenced releases and any newer same-UUID incarnation. */
+  hasSession(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+
   isCurrentSession(session: Session): boolean {
     return (
       this.sessions.get(session.sessionId) === session &&

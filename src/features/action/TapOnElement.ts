@@ -1682,6 +1682,50 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
   }
 
+  private distinctFocusFields(nodes: readonly SearchableEntry[]): SearchableEntry[] {
+    const groups: SearchableEntry[][] = [];
+    for (const node of nodes) {
+      // A capture can deserialize the same field under both hierarchy and windows.
+      // Keep one occurrence per root in each group, so same-tree peers stay ambiguous.
+      const copies = groups.find((group) =>
+        group.every(
+          (copy) => copy.rootGroup !== node.rootGroup && this.isDuplicateFocusField(copy, node),
+        ),
+      );
+      if (copies) {
+        copies.push(node);
+      } else {
+        groups.push([node]);
+      }
+    }
+    return groups.map((group) => group[0]);
+  }
+
+  private isDuplicateFocusField(a: SearchableEntry, b: SearchableEntry): boolean {
+    return Boolean(
+      a.element &&
+      b.element &&
+      a.className === b.className &&
+      boundsNearlyEqual(
+        a.element.bounds,
+        b.element.bounds,
+        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+      ) &&
+      this.finder.isElementKeyboardFocused(a.element) ===
+        this.finder.isElementKeyboardFocused(b.element) &&
+      (
+        [
+          "resource-id",
+          "test-tag",
+          "view-id",
+          "text",
+          "content-desc",
+          "ios-accessibility-label",
+        ] as const
+      ).every((key) => a.element![key] === b.element![key]),
+    );
+  }
+
   private findSoleFocusedFieldByStableIdentity(
     target: Element,
     nodes: readonly SearchableEntry[],
@@ -1693,21 +1737,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         isFocusEditableElement(node.properties) &&
         this.finder.isElementKeyboardFocused(node.element),
     );
-    const seen = new Set<SearchableEntry["source"]>();
-    const distinctFocusedFields = focusedFields.filter((node) => {
-      if (seen.has(node.source)) {
-        return false;
-      }
-      seen.add(node.source);
-      return true;
-    });
+    const distinctFocusedFields = this.distinctFocusFields(focusedFields);
     if (distinctFocusedFields.length !== 1) {
       return undefined;
     }
     const candidate = distinctFocusedFields[0].element;
     return candidate &&
       (this.hasStableFocusIdentity(target, candidate, labelText) ||
-        this.hasEmptyTextFocusIdentity(target, candidate, nodes)) &&
+        this.hasEmptyTextFocusIdentity(target, candidate, nodes, labelText)) &&
       horizontalExtentNearlyEqual(
         target.bounds,
         candidate.bounds,
@@ -1721,6 +1758,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     target: Element,
     candidate: Element,
     nodes: readonly SearchableEntry[],
+    labelText?: string,
   ): boolean {
     // An empty Compose field can lose its merged label on focus (#8997).
     // Only the sole focused field may use this fallback, at the original bounds.
@@ -1728,7 +1766,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       this.device.platform !== "android" ||
       !isFocusEditableElement(target) ||
       target.class !== candidate.class ||
-      !target.text ||
+      !(target.text || labelText) ||
       (candidate.text !== undefined && candidate.text !== "") ||
       (["resource-id", "test-tag", "view-id"] as const).some((key) =>
         [target[key], candidate[key]].some(
@@ -1748,8 +1786,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
         ),
     );
-    const sources = new Set(sameBoundsFields.map((node) => node.source));
-    return sources.size === 1 && sameBoundsFields.some((node) => node.element === candidate);
+    return (
+      this.distinctFocusFields(sameBoundsFields).length === 1 &&
+      sameBoundsFields.some((node) => node.element === candidate)
+    );
   }
 
   private findFocusIdentifier(
@@ -1762,20 +1802,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (typeof value !== "string" || value.length === 0) {
         continue;
       }
-      const sources = new Set(
-        nodes
-          .filter(
-            (node) =>
-              node.element &&
-              isFocusEditableElement(node.properties) &&
-              node.element[key] === value,
-          )
-          .map((node) => node.source),
+      const fields = this.distinctFocusFields(
+        nodes.filter(
+          (node) =>
+            node.element && isFocusEditableElement(node.properties) && node.element[key] === value,
+        ),
       );
-      if (sources.size === 1) {
+      if (fields.length === 1) {
         return { key, value, shared: false };
       }
-      if (sources.size > 1) {
+      if (fields.length > 1) {
         shared ??= { key, value, shared: true };
       }
     }

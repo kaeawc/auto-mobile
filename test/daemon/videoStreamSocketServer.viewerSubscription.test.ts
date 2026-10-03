@@ -8,6 +8,8 @@ import {
   SessionScopedStreamAuthenticator,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { assertMayControl, ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import { encodeSubscriptionNotice } from "../../src/daemon/videoStreamFraming";
@@ -102,6 +104,7 @@ async function harness(
     owner?: string | null;
     authOff?: boolean;
     authenticator?: StreamSocketAuthenticator;
+    useDefaultAuthenticator?: boolean;
     startGate?: Promise<void>;
     resolveGate?: Promise<void>;
     outboundStallTimeoutMs?: number;
@@ -177,17 +180,19 @@ async function harness(
     },
     "/unused/viewer.sock",
     timer,
-    options.authenticator ??
-      new SessionScopedStreamAuthenticator(
-        () => ({
-          getSession: (id) => (state.live.has(id) ? session : null),
-          getReleasingSession: () => (state.releasing ? session : null),
-          getSessionForDevice: () => state.owner,
-          getDeviceLabels: () => undefined,
-        }),
-        "video-stream subscribe",
-        options.authOff ? { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } : {},
-      ),
+    options.useDefaultAuthenticator
+      ? undefined
+      : (options.authenticator ??
+          new SessionScopedStreamAuthenticator(
+            () => ({
+              getSession: (id) => (state.live.has(id) ? session : null),
+              getReleasingSession: () => (state.releasing ? session : null),
+              getSessionForDevice: () => state.owner,
+              getDeviceLabels: () => undefined,
+            }),
+            "video-stream subscribe",
+            options.authOff ? { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } : {},
+          )),
     {
       assertDeviceActionable: () => {
         if (state.quarantined) {
@@ -399,7 +404,7 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
       }
     },
   );
-  test("ownership acquired during pending stop rejects the never-registered subscriber without a new capture", async () => {
+  test("ownership acquired during pending stop admits the subscriber as viewer", async () => {
     let release = () => {};
     const stopGate = new Promise<void>((resolve) => {
       release = resolve;
@@ -426,12 +431,11 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
       release();
       await joining;
       expect(messages(socket)).toHaveLength(1);
-      expect(messages(socket)[0]).toMatchObject({ success: false, type: "video_stream_response" });
-      expect(messages(socket)[0].error).toContain("different daemon session");
-      expect(binary(socket)).toHaveLength(0);
-      expect(socket.destroyed).toBe(true);
-      expect(h.sources).toHaveLength(1);
-      expect(h.server.subscriberCount(device.deviceId)).toBe(0);
+      expect(messages(socket)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
+      expect(binary(socket)).toHaveLength(1);
+      expect(socket.destroyed).toBe(false);
+      expect(h.sources).toHaveLength(2);
+      expect(h.server.subscriberCount(device.deviceId)).toBe(1);
     } finally {
       release();
       await joining;
@@ -936,12 +940,20 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
     terminal(a, "device_removed");
     expect(binary(a).at(-1)).toEqual(encodeSubscriptionNotice("device_removed"));
   });
-  test("admission still rejects a device owned by another session", async () => {
+  test("admission attaches a live non-owner as viewer to an owner's capture", async () => {
     const h = await harness({ owner: "b" });
-    const a = await h.subscribe();
-    expect(messages(a)[0].success).toBe(false);
-    expect(messages(a)[0].error).toContain("different daemon session");
-    expect(h.sources).toHaveLength(0);
+    const owner = await h.subscribe("b");
+    const viewer = await h.subscribe("a", { deviceId: undefined });
+    expect(messages(owner)[0]).toMatchObject({ success: true, subscriptionKind: "owner" });
+    expect(messages(viewer)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
+    expect(h.sources).toHaveLength(1);
+    h.state.owner = "a";
+    h.ownership.changed();
+    expect(binary(owner).at(-1)).toEqual(encodeSubscriptionNotice("downgraded_to_viewer"));
+    expect(viewer.destroyed).toBe(false);
+    h.state.owner = null;
+    h.ownership.changed();
+    expect(h.server.subscriberCount(device.deviceId)).toBe(2);
   });
   test("legacy authenticator failure ends just its rejected subscriber", async () => {
     let reject = false;
@@ -975,3 +987,148 @@ test("restore without a capture is a no-op and does not affect another device", 
   expect(socket.written).toHaveLength(writes);
   expect(h.server.subscriberCount(device.deviceId)).toBe(1);
 });
+
+test.each(["missing", "unknown", "expired", "releasing", "observer"] as const)(
+  "viewer admission rejects %s before discovery or capture",
+  async (identity) => {
+    const h = await harness({ owner: "b" });
+    if (identity === "expired") {
+      h.state.live.delete("a");
+    }
+    if (identity === "releasing") {
+      h.state.releasing = true;
+    }
+    const sessionUuid =
+      identity === "missing"
+        ? undefined
+        : identity === "unknown" || identity === "observer"
+          ? identity
+          : "a";
+    const socket = await h.subscribe("a", { sessionUuid });
+    expect(messages(socket)[0]).toMatchObject({ success: false });
+    expect(messages(socket)[0].error).toContain(
+      identity === "missing"
+        ? "authenticated daemon session"
+        : identity === "releasing"
+          ? "being released"
+          : "unknown or expired",
+    );
+    expect(h.resolveCalls()).toBe(0);
+    expect(h.sources).toHaveLength(0);
+  },
+);
+test("admitted viewer survives owner release, ends on removal and re-subscribes", async () => {
+  const h = await harness({ owner: "b" });
+  const owner = await h.subscribe("b");
+  const viewer = await h.subscribe("a");
+  expect(messages(viewer)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
+  h.state.live.delete("b");
+  h.state.owner = null;
+  h.released("b");
+  h.ownership.changed();
+  terminal(owner, "session_ended");
+  expect(viewer.destroyed).toBe(false);
+  expect(h.sources[0].stopped).toBe(false);
+  h.lifecycle.deviceRemoved(device.deviceId);
+  terminal(viewer, "device_removed");
+  h.state.owner = "other";
+  const again = await h.subscribe("a");
+  expect(messages(again)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
+});
+test.each([
+  { owner: "a", joiner: "b", authOff: false, kind: "viewer", reconfigure: false },
+  { owner: null, joiner: "b", authOff: false, kind: "viewer", reconfigure: true },
+  { owner: "a", joiner: "a", authOff: false, kind: "owner", reconfigure: true },
+  { owner: "a", joiner: "b", authOff: true, kind: "owner", reconfigure: true },
+])("relay hint authority preserves owner and owner-less semantics: %j", async (scenario) => {
+  const h = await harness(scenario);
+  await h.subscribe("a", {
+    quality: "low",
+    fps: 5,
+    bitrateKbps: 1000,
+    size: { width: 320, height: 640 },
+  });
+  const joiner = await h.subscribe(scenario.joiner, {
+    quality: "high",
+    fps: 15,
+    bitrateKbps: 6000,
+    size: { width: 800, height: 1600 },
+  });
+  expect(messages(joiner)[0]).toMatchObject({ success: true, subscriptionKind: scenario.kind });
+  h.timer.advanceTime(200);
+  await flush();
+  expect(h.sources).toHaveLength(scenario.reconfigure ? 2 : 1);
+  expect(h.hints.at(-1)).toMatchObject({
+    quality: scenario.reconfigure ? "high" : "low",
+    fps: scenario.reconfigure ? 15 : 5,
+    bitrateBps: scenario.reconfigure ? 6000000 : 1000000,
+    size: { width: 320, height: 640 },
+  });
+});
+
+test("transport default rejects a registered observer-only session", async () => {
+  const sessions = releasingSessionHarness();
+  sessions.observers.register("observer", "desktop");
+  expect(sessions.observers.resolveObserverScope("observer").kind).not.toBe("denied");
+  const state = DaemonState.getInstance();
+  const stateSpies = [
+    spyOn(state, "isInitialized").mockReturnValue(true),
+    spyOn(state, "getSessionManager").mockReturnValue(sessions.manager),
+    spyOn(state, "getObserverSessionRegistry").mockReturnValue(sessions.observers),
+  ];
+  const previousAuth = process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
+  process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = "1";
+  try {
+    const h = await harness({ useDefaultAuthenticator: true });
+    const socket = await h.subscribe("observer");
+    expect(messages(socket)[0]).toMatchObject({
+      success: false,
+      error: expect.stringContaining("unknown or expired"),
+    });
+    expect(h.resolveCalls()).toBe(0);
+    expect(h.sources).toHaveLength(0);
+  } finally {
+    for (const spy of stateSpies) {
+      spy.mockRestore();
+    }
+    if (previousAuth === undefined) {
+      delete process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
+    } else {
+      process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = previousAuth;
+    }
+    sessions.dispose();
+  }
+});
+
+test.each([false, true])(
+  "viewer-first relay yields hints and size to owner (hints=%s)",
+  async (withHints) => {
+    const h = await harness({ owner: "b" });
+    const viewer = await h.subscribe("a", {
+      quality: "low",
+      fps: 5,
+      bitrateKbps: 1000,
+      size: { width: 320, height: 640 },
+    });
+    const ownerHints = withHints
+      ? { quality: "high", fps: 15, bitrateKbps: 6000, size: { width: 800, height: 1600 } }
+      : {};
+    const owner = await h.subscribe("b", ownerHints);
+    expect(messages(owner)[0]).toMatchObject({ success: true, subscriptionKind: "owner" });
+    h.timer.advanceTime(200);
+    await flush();
+    expect(h.hints.at(-1)).toMatchObject({
+      quality: withHints ? "high" : undefined,
+      fps: withHints ? 15 : 30,
+      bitrateBps: withHints ? 6000000 : undefined,
+      size: withHints ? { width: 800, height: 1600 } : undefined,
+    });
+    expect(h.hints[0]).toMatchObject({
+      quality: undefined,
+      fps: 30,
+      bitrateBps: undefined,
+      size: undefined,
+    });
+    expect(viewer.destroyed).toBe(false);
+  },
+);

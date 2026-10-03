@@ -6,6 +6,8 @@ import {
   SessionScopedStreamAuthenticator,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
 import { WebRtcPublisher, WhipClient, type H264CaptureSource } from "../../src/features/webrtc";
@@ -70,6 +72,7 @@ function harness(
     owner?: string;
     authOff?: boolean;
     authenticator?: StreamSocketAuthenticator;
+    useDefaultAuthenticator?: boolean;
     startGate?: Promise<void>;
   } = {},
 ) {
@@ -85,6 +88,7 @@ function harness(
     quarantined: false,
   };
   const sources: FakeH264Source[] = [];
+  const captureHints: Array<{ bitrateBps?: number; fps?: number }> = [];
   const publishers: WebRtcPublisher[] = [];
   manager.setWebRtcStreamManagerDependencies({
     idGenerator: new CountingIdGenerator(),
@@ -92,7 +96,8 @@ function harness(
     now: () => new Date(timer.now()),
     isSessionLive: (id) => state.live.has(id),
     resolveVideoJar: async () => null,
-    createSource: () => {
+    createSource: (options) => {
+      captureHints.push(options);
       const source = new FakeH264Source();
       sources.push(source);
       return source as H264CaptureSource;
@@ -179,17 +184,19 @@ function harness(
         },
       }),
     },
-    options.authenticator ??
-      new SessionScopedStreamAuthenticator(
-        () => ({
-          getSession: (id) => (state.live.has(id) ? session : null),
-          getReleasingSession: () => (state.releasing ? session : null),
-          getSessionForDevice: () => state.owner,
-          getDeviceLabels: () => undefined,
-        }),
-        "webrtcStream",
-        options.authOff ? { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } : {},
-      ),
+    options.useDefaultAuthenticator
+      ? undefined
+      : (options.authenticator ??
+          new SessionScopedStreamAuthenticator(
+            () => ({
+              getSession: (id) => (state.live.has(id) ? session : null),
+              getReleasingSession: () => (state.releasing ? session : null),
+              getSessionForDevice: () => state.owner,
+              getDeviceLabels: () => undefined,
+            }),
+            "webrtcStream",
+            options.authOff ? { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } : {},
+          )),
     {
       assertDeviceActionable: () => {
         if (state.quarantined) {
@@ -223,6 +230,7 @@ function harness(
     releases,
     state,
     sources,
+    captureHints,
     publishers,
     debug,
     info,
@@ -432,28 +440,25 @@ test.each(["device_removed", "identity_quarantined", "daemon_shutdown"] as const
     expect(endings(h)[0][0]).toContain(`reason=${reason}`);
   },
 );
-test("i: post-start admission race releases only its new lease and preserves admission refusal", async () => {
-  let release = () => {};
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const h = harness({ startGate: gate });
-  const starting = h.start();
-  await flush();
-  h.state.owner = "b";
-  release();
-  expect(await starting).toMatchObject({
-    success: false,
-    error: expect.stringContaining("different daemon session"),
-  });
-  expect(manager.listWebRtcStreams()).toHaveLength(0);
-  expect(h.sources[0].stopped).toBe(true);
-  expect(await h.start()).toMatchObject({
-    success: false,
-    error: expect.stringContaining("different daemon session"),
-  });
-  expect(h.sources).toHaveLength(1);
-});
+test.each([undefined, "a"])(
+  "post-start owner change admits/downgrades viewer (%s)",
+  async (owner) => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = harness({ owner, startGate: gate });
+    const starting = h.start();
+    await flush();
+    h.state.owner = "b";
+    release();
+    expect(await starting).toMatchObject({ success: true, subscriptionKind: "viewer" });
+    expect(manager.listWebRtcStreams()).toHaveLength(1);
+    expect(h.sources[0].stopped).toBe(false);
+    expect(await h.start()).toMatchObject({ success: true, subscriptionKind: "viewer" });
+    expect(h.sources).toHaveLength(1);
+  },
+);
 test("j: removal, explicit stop and shutdown race logs each end only once", async () => {
   const h = harness({ owner: "a" });
   const first = await h.start();
@@ -548,10 +553,10 @@ test("renewing start, status and await never recompute the recorded subscription
       subscriptionKind: "owner",
     });
   }
-  expect(resolutions).toBe(1);
+  expect(resolutions).toBe(3);
 });
 
-test("post-start admission rollback preserves another session's concurrently minted lease", async () => {
+test("post-start session expiry rollback preserves another session's concurrently minted lease", async () => {
   let release = () => {};
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -559,13 +564,14 @@ test("post-start admission rollback preserves another session's concurrently min
   const h = harness({ startGate: gate });
   const rejected = h.start();
   await flush();
+  h.state.live.delete("a");
   h.state.owner = "b";
   const admitted = h.start("b");
   await flush();
   release();
   expect(await rejected).toMatchObject({
     success: false,
-    error: expect.stringContaining("different daemon session"),
+    error: expect.stringContaining("unknown or expired"),
   });
   const owner = await admitted;
   expect(owner).toMatchObject({ success: true, subscriptionKind: "owner" });
@@ -741,32 +747,23 @@ test.each([
   { whipEndpoint: "http://127.0.0.1:8000/private" },
   { bitrateKbps: 777 },
   { whipToken: "secret-token" },
-])("fix2: differing owner attach is actionable without leaking values: %j", async (overrides) => {
+])("owner replaces differing viewer capture: %j", async (overrides) => {
   const h = harness({ owner: "a" });
   const first = await h.start();
   h.state.owner = "b";
   await h.changed();
-  const socket = new FakeSocket();
-  h.timer.advanceTime(1000);
-  await h.server.line(socket, { action: "start", sessionUuid: "b", ...overrides });
-  await flush();
-  const result = socket.getWrittenMessages()[0];
-  const serialized = JSON.stringify(result);
-  expect(result).toMatchObject({
-    success: false,
-    errorCode: "viewer_stream_active",
-    error: expect.stringContaining("stop"),
-  });
-  const key = "whipToken" in overrides ? "bearerToken" : Object.keys(overrides)[0];
-  expect(serialized).toContain(key);
-  for (const value of Object.values(overrides)) {
-    expect(serialized).not.toContain(String(value));
-  }
+  const joined = await h.request({ action: "start", sessionUuid: "b", ...overrides });
+  expect(joined).toMatchObject({ success: true, subscriptionKind: "owner" });
+  expect(h.sources[0].stopped).toBe(true);
+  expect(h.sources).toHaveLength(2);
   expect(manager.listWebRtcStreams()[0].consumerCount).toBe(1);
-  expect(h.sources[0].stopped).toBe(false);
-  h.timer.advanceTime(manager.WEBRTC_STREAM_LEASE_TTL_MS - 1000);
-  expect(manager.listWebRtcStreams()).toEqual([]);
-  expect(first.subscriptionKind).toBe("owner");
+  expect(
+    await h.request({
+      action: "status",
+      streamId: first.stream?.streamId,
+      leaseId: first.stream?.lease?.id,
+    }),
+  ).toMatchObject({ success: false, reason: "stopped_by_owner" });
 });
 test.each([false, true])(
   "fix2: compatible owner start attaches without restart (explicit=%s)",
@@ -813,18 +810,17 @@ test("fix4: repeated viewer rejection warns once per lease/action and debugs the
   expect(h.debug.mock.calls.filter(matches)).toHaveLength(4);
 });
 
-test("fix1: compatible viewer renewal still obeys ownership admission", async () => {
+test("compatible viewer renewal remains admitted on another session's device", async () => {
   const h = harness();
   const first = await h.start();
   h.state.owner = "b";
   await h.changed();
   h.timer.advanceTime(1000);
-  expect(await h.start("a", first.stream?.lease?.id)).toMatchObject({
-    success: false,
-    error: expect.stringContaining("different daemon session"),
-  });
+  const renewed = await h.start("a", first.stream?.lease?.id);
+  expect(renewed).toMatchObject({ success: true, subscriptionKind: "viewer" });
+  expect(renewed.stream?.lease?.id).toBe(first.stream?.lease?.id);
   expect(h.sources[0].stopped).toBe(false);
-  h.timer.advanceTime(manager.WEBRTC_STREAM_LEASE_TTL_MS - 1000);
+  h.timer.advanceTime(manager.WEBRTC_STREAM_LEASE_TTL_MS);
   expect(manager.listWebRtcStreams()).toEqual([]);
 });
 
@@ -926,4 +922,223 @@ test("fix1: addressed viewer reads and own release do not require current device
   }
   expect(manager.getWebRtcStreamDescriptor(other.stream!.streamId)?.consumerCount).toBe(1);
   expect(h.sources[0].stopped).toBe(false);
+});
+
+test.each(["missing", "unknown", "expired", "releasing", "observer"] as const)(
+  "viewer admission rejects %s before capture",
+  async (identity) => {
+    const h = harness({ owner: "b" });
+    if (identity === "expired") {
+      h.state.live.delete("a");
+    }
+    if (identity === "releasing") {
+      h.state.releasing = true;
+    }
+    const sessionUuid =
+      identity === "missing"
+        ? undefined
+        : identity === "unknown" || identity === "observer"
+          ? identity
+          : "a";
+    const socket = new FakeSocket();
+    await h.server.line(socket, { action: "start", sessionUuid, deviceId: device.deviceId });
+    await flush();
+    expect(socket.getWrittenMessages()[0]).toMatchObject({
+      success: false,
+      error: expect.stringContaining(
+        identity === "missing"
+          ? "authenticated daemon session"
+          : identity === "releasing"
+            ? "being released"
+            : "unknown or expired",
+      ),
+    });
+    expect(h.sources).toHaveLength(0);
+  },
+);
+test.each([false, true])(
+  "admitted viewer survives owner release and removal (ownership change=%s)",
+  async (changeOwner) => {
+    const h = harness({ owner: "b" });
+    const owner = await h.start("b");
+    const viewer = await h.start("a");
+    expect(owner).toMatchObject({ success: true, subscriptionKind: "owner" });
+    expect(viewer).toMatchObject({ success: true, subscriptionKind: "viewer" });
+    if (changeOwner) {
+      h.state.owner = "a";
+      await h.changed();
+      expect(
+        await h.request({
+          action: "status",
+          sessionUuid: "b",
+          streamId: owner.stream?.streamId,
+          leaseId: owner.stream?.lease?.id,
+        }),
+      ).toMatchObject({ success: true, subscriptionKind: "viewer" });
+      h.state.owner = "b";
+      await h.changed();
+    }
+    h.state.live.delete("b");
+    h.state.owner = null;
+    for (const cb of h.releases) {
+      cb("b");
+    }
+    await h.changed();
+    const address = { streamId: viewer.stream?.streamId, leaseId: viewer.stream?.lease?.id };
+    expect(await h.request({ action: "status", ...address })).toMatchObject({
+      success: true,
+      subscriptionKind: "viewer",
+    });
+    expect(h.sources[0].stopped).toBe(false);
+    h.lifecycle.deviceRemoved(device.deviceId);
+    await flush();
+    expect(await h.request({ action: "status", ...address })).toMatchObject({
+      success: false,
+      reason: "device_removed",
+      subscriptionKind: "viewer",
+    });
+    h.state.owner = "other";
+    expect(await h.start("a", viewer.stream?.lease?.id)).toMatchObject({
+      success: true,
+      subscriptionKind: "viewer",
+    });
+  },
+);
+test("owner stop ends a newly admitted viewer with a typed wire response and allows re-admission", async () => {
+  const h = harness({ owner: "b" });
+  const owner = await h.start("b");
+  const viewer = await h.start("a");
+  expect(viewer).toMatchObject({ success: true, subscriptionKind: "viewer" });
+  expect(
+    await h.request({ action: "stop", sessionUuid: "b", streamId: owner.stream?.streamId }),
+  ).toMatchObject({ success: true, stream: { state: "stopped" } });
+  const socket = new FakeSocket();
+  await h.server.line(socket, {
+    action: "await",
+    sessionUuid: "a",
+    streamId: viewer.stream?.streamId,
+    leaseId: viewer.stream?.lease?.id,
+  });
+  await flush();
+  expect(socket.getWrittenMessages()[0]).toMatchObject({
+    success: false,
+    reason: "stopped_by_owner",
+    subscriptionKind: "viewer",
+  });
+  expect(h.sources[0].stopped).toBe(true);
+  expect(h.publishers[0].getState()).toBe("stopped");
+  expect(await h.start("a", viewer.stream?.lease?.id)).toMatchObject({
+    success: true,
+    subscriptionKind: "viewer",
+  });
+});
+test.each([false, true])(
+  "new viewer overrides cannot reconfigure an owner's WebRTC capture (named=%s)",
+  async (named) => {
+    const h = harness({ owner: "b" });
+    const owner = await h.start("b");
+    const viewer = await h.request({
+      action: "start",
+      deviceId: named ? device.deviceId : undefined,
+      bitrateKbps: 777,
+      whipEndpoint: "http://127.0.0.1:8000/private",
+    });
+    expect(viewer).toMatchObject({ success: true, subscriptionKind: "viewer" });
+    expect(viewer.stream?.streamId).toBe(owner.stream?.streamId);
+    expect(viewer.stream?.whipEndpoint).toBe(owner.stream?.whipEndpoint);
+    expect(h.captureHints).toHaveLength(1);
+    expect(h.captureHints[0].bitrateBps).not.toBe(777000);
+    expect(h.sources).toHaveLength(1);
+    expect(h.publishers).toHaveLength(1);
+  },
+);
+
+test("transport default rejects a registered observer-only session", async () => {
+  const sessions = releasingSessionHarness();
+  sessions.observers.register("observer", "desktop");
+  expect(sessions.observers.resolveObserverScope("observer").kind).not.toBe("denied");
+  const state = DaemonState.getInstance();
+  const stateSpies = [
+    spyOn(state, "isInitialized").mockReturnValue(true),
+    spyOn(state, "getSessionManager").mockReturnValue(sessions.manager),
+    spyOn(state, "getObserverSessionRegistry").mockReturnValue(sessions.observers),
+  ];
+  const previousAuth = process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
+  process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = "1";
+  try {
+    const h = harness({ useDefaultAuthenticator: true });
+    const socket = new FakeSocket();
+    await h.server.line(socket, {
+      action: "start",
+      sessionUuid: "observer",
+      deviceId: device.deviceId,
+    });
+    await flush();
+    expect(socket.getWrittenMessages()[0]).toMatchObject({
+      success: false,
+      error: expect.stringContaining("unknown or expired"),
+    });
+    expect(h.sources).toHaveLength(0);
+  } finally {
+    for (const spy of stateSpies) {
+      spy.mockRestore();
+    }
+    if (previousAuth === undefined) {
+      delete process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
+    } else {
+      process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = previousAuth;
+    }
+    sessions.dispose();
+  }
+});
+
+test("viewer-first WebRTC overrides are ignored", async () => {
+  const h = harness({ owner: "b" });
+  const viewer = await h.request({
+    action: "start",
+    whipEndpoint: "http://127.0.0.1:8000/private",
+    bitrateKbps: 777,
+    androidFps: 7,
+  });
+  expect(viewer).toMatchObject({ success: true, subscriptionKind: "viewer" });
+  expect(viewer.stream?.whipEndpoint).toBe(endpoint);
+  expect(h.captureHints[0].bitrateBps).not.toBe(777000);
+  expect(h.captureHints[0].fps).not.toBe(7);
+});
+test("viewer-first WebRTC cannot block owner parameters", async () => {
+  const h = harness({ owner: "b" });
+  const viewer = await h.start("a");
+  const owner = await h.request({
+    action: "start",
+    sessionUuid: "b",
+    whipEndpoint: "http://127.0.0.1:8000/owner",
+    bitrateKbps: 888,
+    androidFps: 8,
+  });
+  expect(owner).toMatchObject({ success: true, subscriptionKind: "owner" });
+  expect(owner.stream?.whipEndpoint).toBe("http://127.0.0.1:8000/owner");
+  expect(h.captureHints.at(-1)).toMatchObject({ bitrateBps: 888000, fps: 8 });
+  expect(h.sources[0].stopped).toBe(true);
+  expect(
+    await h.request({
+      action: "status",
+      streamId: viewer.stream?.streamId,
+      leaseId: viewer.stream?.lease?.id,
+    }),
+  ).toMatchObject({ success: false, reason: "stopped_by_owner" });
+});
+
+test("device owner renewing a viewer lease can replace capture parameters", async () => {
+  const h = harness({ owner: "b" });
+  const viewer = await h.start("a");
+  h.state.owner = "a";
+  await h.changed();
+  const owner = await h.request({
+    action: "start",
+    leaseId: viewer.stream?.lease?.id,
+    bitrateKbps: 999,
+  });
+  expect(owner).toMatchObject({ success: true, subscriptionKind: "owner" });
+  expect(h.captureHints.at(-1)?.bitrateBps).toBe(999000);
+  expect(h.sources[0].stopped).toBe(true);
 });

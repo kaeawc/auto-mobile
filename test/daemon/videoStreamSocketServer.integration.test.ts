@@ -1864,7 +1864,7 @@ describe("VideoStreamSocketServer", () => {
       expect(h.server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
     });
 
-    test("rejects riding along on a device owned by another session", async () => {
+    test("admits a live viewer on a device owned by another session", async () => {
       const h = await startHarness({
         authenticator: enforcing(
           fakeSessionManager({ getSessionForDevice: () => "other-session" }),
@@ -1877,12 +1877,11 @@ describe("VideoStreamSocketServer", () => {
         sessionUuid: "session-1",
       });
 
-      expect(ack.success).toBe(false);
-      expect(String(ack.error)).toContain("different daemon session");
-      expect(h.sources).toHaveLength(0);
+      expect(ack).toMatchObject({ success: true, subscriptionKind: "viewer" });
+      expect(h.sources).toHaveLength(1);
     });
 
-    test("rejects an omitted deviceId when the resolved device belongs to another session", async () => {
+    test("admits a viewer with omitted deviceId when another session owns the resolved device", async () => {
       const h = await startHarness({
         authenticator: enforcing(
           fakeSessionManager({ getSessionForDevice: () => "other-session" }),
@@ -1892,9 +1891,8 @@ describe("VideoStreamSocketServer", () => {
         action: "subscribe",
         sessionUuid: "session-1",
       });
-      expect(ack.success).toBe(false);
-      expect(String(ack.error)).toContain("different daemon session");
-      expect(h.sources).toHaveLength(0);
+      expect(ack).toMatchObject({ success: true, subscriptionKind: "viewer" });
+      expect(h.sources).toHaveLength(1);
     });
 
     test("accepts an omitted deviceId when the resolved device belongs to the caller", async () => {

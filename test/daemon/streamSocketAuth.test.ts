@@ -92,6 +92,39 @@ describe("SessionScopedStreamAuthenticator", () => {
     );
   });
 
+  test("viewer admission accepts a live non-owner but never bypasses requireOwnership", () => {
+    const auth = authenticator(sessionManager({ getSessionForDevice: () => "other" }));
+    const input = { sessionUuid: "live", deviceId: "emu", admitViewer: true };
+    expect(() => auth.authorize(input)).not.toThrow();
+    expect(() => auth.authorize({ ...input, requireOwnership: true })).toThrow(
+      /different daemon session/,
+    );
+  });
+
+  test.each([undefined, "ghost", "expired", "observer"])(
+    "viewer admission still rejects invalid identity %s with a structured error",
+    (sessionUuid) => {
+      const auth = authenticator(sessionManager({ getSessionForDevice: () => "other" }));
+      const attempt = () => auth.authorize({ sessionUuid, deviceId: "emu", admitViewer: true });
+      expect(attempt).toThrow(ActionableError);
+      expect(attempt).toThrow(sessionUuid ? /unknown or expired/ : /authenticated daemon session/);
+    },
+  );
+
+  test("viewer admission rejects a releasing device session", () => {
+    const session = {};
+    const auth = authenticator(
+      sessionManager({
+        getSession: () => session,
+        getReleasingSession: () => session,
+        getSessionForDevice: () => "other",
+      }),
+    );
+    expect(() =>
+      auth.authorize({ sessionUuid: "live", deviceId: "emu", admitViewer: true }),
+    ).toThrow(/being released/);
+  });
+
   test("resolves a derived device-label session to its base for the registry check", () => {
     const sm = sessionManager({
       getSession: (sessionUuid) => (sessionUuid === "live" ? {} : null),
@@ -200,6 +233,7 @@ describe("structured subscription identity (additive to authorize)", () => {
       authEnabled: true,
       sessionExists: true,
       ownsDevice: false,
+      hasDeviceOwner: false,
     });
     owner = "live";
     expect(auth.resolveSubscriptionIdentity(input).ownsDevice).toBe(true);
@@ -208,6 +242,7 @@ describe("structured subscription identity (additive to authorize)", () => {
       authEnabled: true,
       sessionExists: true,
       ownsDevice: false,
+      hasDeviceOwner: true,
     });
     expect(() => auth.authorize(input)).toThrow(/different daemon session/);
     expect(
@@ -225,7 +260,7 @@ describe("structured subscription identity (additive to authorize)", () => {
     );
     expect(
       auth.resolveSubscriptionIdentity({ sessionUuid: " live:phone ", deviceId: "emu" }),
-    ).toEqual({ authEnabled: true, sessionExists: true, ownsDevice: true });
+    ).toEqual({ authEnabled: true, sessionExists: true, ownsDevice: true, hasDeviceOwner: true });
   });
   test("releasing identity is not live but a stale releasing object does not fence it", () => {
     const session = {};
@@ -241,6 +276,7 @@ describe("structured subscription identity (additive to authorize)", () => {
       authEnabled: true,
       sessionExists: false,
       ownsDevice: false,
+      hasDeviceOwner: true,
     });
     releasing = {};
     expect(
@@ -289,6 +325,8 @@ describe("observer session admission is opt-in", () => {
       expect(() =>
         new SessionScopedStreamAuthenticator(() => manager, operation, {}).authorize({
           sessionUuid: "observer",
+          deviceId: "owned",
+          admitViewer: true,
         }),
       ).toThrow(/not an active daemon session/);
     }

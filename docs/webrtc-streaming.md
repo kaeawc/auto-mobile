@@ -123,16 +123,21 @@ Capture stops when no leases remain. Viewers also allow `status`, `list`, and `a
 The device's current owner controls its streams: `stop`, with or without a lease,
 stops the stream outright, releases the owner's leases, and ends every other lease
 with `stopped_by_owner`. Viewers learn this on their next lease-carrying request.
-When only viewer leases remain and a new owner holds no lease, an incompatible
-`start` returns `errorCode: "viewer_stream_active"` with only the differing parameter
-keys: stop the stream first, then start with the desired parameters. Compatible
-parameters attach an owner lease without restarting capture. Comparisons resolve
-environment defaults too, so a no-override start matches a stream using those defaults.
-An owner already holding a lease retains the existing attach behavior.
+An owner start with different parameters replaces the capture using bounded owner-stop
+cleanup, ending other attached leases with `stopped_by_owner`. Compatible parameters
+attach without restarting. Comparisons resolve environment defaults too.
 
-Admission is unchanged for every `start`, including renewal: the device must be
-unowned or owned by the requesting session. A viewer starting a new stream on
-another session's device, or renewing there, is still rejected by that admission check.
+Video relay `subscribe` and WebRTC `start`, including renewal, admit any live,
+non-releasing device session to any device. The owning session attaches as `owner`;
+other device sessions attach read-only as `viewer`, including on another session's
+device. Missing, unknown, expired, releasing and registration-only observer sessions
+remain rejected. Viewers cannot change an owner's capture or control: WebRTC joins
+keep the existing capture configuration. A fresh WebRTC viewer start ignores all
+capture overrides and uses environment defaults if it starts the capture. Viewer
+lease renewals must remain compatible. The video relay ignores viewer hints and
+size while the device has an owner; a first owner join replaces viewer-created
+hints and size with its supplied values or defaults. Owner-less relay hints retain
+the existing last-supplied semantics.
 
 Either kind ends when its session ends (`session_ended`), the device is removed
 (`device_removed`) or quarantined (`identity_quarantined`), or the daemon shuts down

@@ -179,7 +179,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         const platform = ensurePlatform(request.platform);
         const selected = await this.deviceResolution.selectDevice(request.deviceId, platform);
         this.admissionGate.assertDeviceActionable(selected.deviceId, TEST_RECORDING_PURPOSE);
-        authorizeResolvedDevice(this.authenticator, request.sessionUuid, selected.deviceId);
+        authorizeResolvedDevice(this.authenticator, {
+          sessionUuid: request.sessionUuid,
+          deviceId: selected.deviceId,
+        });
         const device = await this.deviceResolution.readyDevice(selected);
         const result = await startTestRecording(device);
         return {
@@ -190,30 +193,8 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
           platform: result.platform,
         };
       }
-      case "stop": {
-        // Authorize the stop against the active recording's device so a session
-        // that does not own it cannot stop another session's recording — the
-        // recordingId-only guard in stopTestRecording is not an ownership check
-        // (issue #4752).
-        const active = getTestRecordingStatus();
-        this.authenticator.authorize({
-          sessionUuid: request.sessionUuid,
-          deviceId: request.deviceId ?? active?.deviceId,
-        });
-        const result = await stopTestRecording(request.recordingId, request.planName);
-        return {
-          success: true,
-          recordingId: result.recordingId,
-          startedAt: result.startedAt,
-          stoppedAt: result.stoppedAt,
-          deviceId: result.deviceId,
-          platform: result.platform,
-          planName: result.planName,
-          planContent: result.planContent,
-          stepCount: result.stepCount,
-          durationMs: result.durationMs,
-        };
-      }
+      case "stop":
+        return this.handleStop(request);
       case "status": {
         // Status reveals the active recording's device/id; require a live
         // session so it is not readable by an unauthenticated caller (issue #4752).
@@ -230,6 +211,37 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       default:
         throw new Error(`Unsupported test recording command: ${String(command)}`);
     }
+  }
+
+  private async handleStop(request: TestRecordingCommand): Promise<TestRecordingResponse> {
+    // Authorize the stop against the active recording's device so a session
+    // that does not own it cannot stop another session's recording — the
+    // recordingId-only guard in stopTestRecording is not an ownership check
+    // (issue #4752).
+    const active = getTestRecordingStatus();
+    this.authenticator.authorize({
+      sessionUuid: request.sessionUuid,
+      deviceId: active?.deviceId ?? request.deviceId,
+    });
+    if (!active) {
+      throw new ActionableError("No active recording. Start a recording before stopping.");
+    }
+    if (request.deviceId !== undefined && active.deviceId !== request.deviceId) {
+      throw new ActionableError(`No active recording found for device ${request.deviceId}.`);
+    }
+    const result = await stopTestRecording(request.recordingId, request.planName);
+    return {
+      success: true,
+      recordingId: result.recordingId,
+      startedAt: result.startedAt,
+      stoppedAt: result.stoppedAt,
+      deviceId: result.deviceId,
+      platform: result.platform,
+      planName: result.planName,
+      planContent: result.planContent,
+      stepCount: result.stepCount,
+      durationMs: result.durationMs,
+    };
   }
 
   protected createErrorResponse(_id: string | undefined, error: string): TestRecordingResponse {

@@ -4,6 +4,7 @@ import {
   decideOwnershipChange,
   subscriptionKindForIdentity,
   type StreamSubscriptionKind,
+  type StreamSubscriptionIdentity,
   type StreamSubscriptionEndReason,
 } from "./streamSubscriptionPolicy";
 import {
@@ -113,6 +114,7 @@ interface DeviceCapture {
   /** Latest explicit hint for each field wins; omitted fields retain their current value. */
   desiredHints: CaptureHints;
   appliedHints: CaptureHints;
+  hintKind: StreamSubscriptionKind;
   /** Also identifies the SPS/PPS and GOP cache; both are cleared when this advances at swap. */
   generation: number;
   reconfigureTimer: NodeJS.Timeout | null;
@@ -142,7 +144,6 @@ interface DeviceCapture {
   cachedGopBytes: number;
   sourceFrameSequence: number;
   lastEncodedBoundarySequence: number | null;
-  size?: { width: number; height: number };
   /**
    * Latest attested display rotation (0..3) from the source, or null when the source cannot attest
    * it (screenrecord/iOS) or none has arrived yet (issue #4786). Re-emitted on every config packet
@@ -171,7 +172,7 @@ interface DeviceCapture {
   lastLivenessProbeMs: number | null;
 }
 
-type CaptureHints = Pick<VideoStreamSocketRequest, "quality" | "fps" | "bitrateKbps">;
+type CaptureHints = Pick<VideoStreamSocketRequest, "quality" | "fps" | "bitrateKbps" | "size">;
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
 
@@ -212,11 +213,20 @@ const HEARTBEAT_INTERVAL_MS = 1_000;
 const SOURCE_PROBE_AFTER_MS = 6_000;
 const SOURCE_EVIDENCE_MAX_AGE_MS = 9_000;
 
+function subscriberMaySetCaptureHints(
+  kind: StreamSubscriptionKind,
+  identity?: StreamSubscriptionIdentity,
+): boolean {
+  return kind !== "viewer" || identity?.hasDeviceOwner === false;
+}
+
 function sameHints(left: CaptureHints, right: CaptureHints): boolean {
   return (
     left.quality === right.quality &&
     left.fps === right.fps &&
-    left.bitrateKbps === right.bitrateKbps
+    left.bitrateKbps === right.bitrateKbps &&
+    left.size?.width === right.size?.width &&
+    left.size?.height === right.size?.height
   );
 }
 
@@ -500,11 +510,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.subscribing.add(socket);
     try {
       // Authenticate before starting or attaching to any capture (issue #4751):
-      // an unauthenticated or cross-session subscribe is rejected here so it can
-      // never ride along on the raw H.264 screen stream.
+      // only a live device session may subscribe; non-owners attach read-only.
       this.authenticator.authorize({
         sessionUuid: request.sessionUuid,
         deviceId: request.deviceId,
+        admitViewer: true,
       });
       // FUNNEL 2, before any capture starts. Authorization is not this check:
       // the quarantine deliberately PRESERVES the owning session, so a subscribe
@@ -518,7 +528,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       }
       const device = await this.deps.resolveDevice(request.deviceId);
       this.admissionGate.assertDeviceActionable(device.deviceId, VIDEO_STREAM_PURPOSE);
-      authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
+      authorizeResolvedDevice(this.authenticator, {
+        sessionUuid: request.sessionUuid,
+        deviceId: device.deviceId,
+        admitViewer: true,
+      });
       const capture = await this.attach(socket, device, request);
       if (capture) {
         this.acknowledgeSubscriber(socket, capture, request);
@@ -552,7 +566,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (this.authenticator.resolveSubscriptionIdentity) {
       this.reconcileSubscriber(socket, capture.device.deviceId);
     } else {
-      authorizeResolvedDevice(this.authenticator, request.sessionUuid, capture.device.deviceId);
+      authorizeResolvedDevice(this.authenticator, {
+        sessionUuid: request.sessionUuid,
+        deviceId: capture.device.deviceId,
+        admitViewer: true,
+      });
     }
     if (!this.socketDeviceIds.has(socket) || socket.destroyed) {
       return;
@@ -573,7 +591,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.detach(socket);
       return;
     }
-    socket.write(encodeStreamHeader(capture.size?.width ?? 0, capture.size?.height ?? 0));
+    socket.write(
+      encodeStreamHeader(
+        capture.appliedHints.size?.width ?? 0,
+        capture.appliedHints.size?.height ?? 0,
+      ),
+    );
     this.acknowledgedSubscribers.add(socket);
 
     // The cache belongs to capture.generation. A joiner held for a future configuration must
@@ -762,16 +785,17 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         );
       }
     }
-    // This socket is not registered yet: a pending stop grants no live viewer rights.
-    authorizeResolvedDevice(this.authenticator, request.sessionUuid, deviceId);
-    const subscriptionKind = this.authenticator.resolveSubscriptionIdentity
-      ? subscriptionKindForIdentity(
-          this.authenticator.resolveSubscriptionIdentity({
-            sessionUuid: request.sessionUuid,
-            deviceId,
-          }),
-        )
-      : "owner";
+    // Recheck the live session after a pending stop; acquisition may now make it a viewer.
+    authorizeResolvedDevice(this.authenticator, {
+      sessionUuid: request.sessionUuid,
+      deviceId: deviceId,
+      admitViewer: true,
+    });
+    const identity = this.authenticator.resolveSubscriptionIdentity?.({
+      sessionUuid: request.sessionUuid,
+      deviceId,
+    });
+    const subscriptionKind = identity ? subscriptionKindForIdentity(identity) : "owner";
     this.socketSubscriptionKinds.set(socket, subscriptionKind);
     if (!this.checkSubscriberActionable(socket, deviceId)) {
       return null;
@@ -779,7 +803,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const existing = this.captures.get(deviceId);
     if (existing) {
       this.clearIdleTimer(existing);
-      this.updateDesiredHints(deviceId, existing, request);
+      this.updateDesiredHints({ deviceId, capture: existing, request, identity, subscriptionKind });
       existing.pendingSubscribers.add(socket);
       if (tracksConsumers(existing.source)) {
         existing.source.setHasConsumers(true);
@@ -793,18 +817,24 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return existing;
     }
 
+    const hints: CaptureHints = subscriberMaySetCaptureHints(subscriptionKind, identity)
+      ? request
+      : {};
     const capture: DeviceCapture = {
       device,
       desiredHints: {
-        quality: request.quality,
-        fps: request.fps,
-        bitrateKbps: request.bitrateKbps,
+        quality: hints.quality,
+        fps: hints.fps,
+        bitrateKbps: hints.bitrateKbps,
+        size: hints.size,
       },
       appliedHints: {
-        quality: request.quality,
-        fps: request.fps,
-        bitrateKbps: request.bitrateKbps,
+        quality: hints.quality,
+        fps: hints.fps,
+        bitrateKbps: hints.bitrateKbps,
+        size: hints.size,
       },
+      hintKind: subscriptionKind,
       generation: 0,
       reconfigureTimer: null,
       reconfiguring: null,
@@ -825,7 +855,6 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       cachedGopBytes: 0,
       sourceFrameSequence: 0,
       lastEncodedBoundarySequence: null,
-      size: request.size,
       rotation: null,
       idleTimer: null,
       heartbeatTimer: null,
@@ -985,7 +1014,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         }
       },
       bitrateBps: hints.bitrateKbps ? hints.bitrateKbps * 1000 : undefined,
-      size: capture.size,
+      size: hints.size,
       quality: hints.quality,
       // Use the observation rate for this platform when the client sent no hint.
       // A client hint wins so farm viewers can lower the rate across streams.
@@ -993,16 +1022,34 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     });
   }
 
-  private updateDesiredHints(
-    deviceId: string,
-    capture: DeviceCapture,
-    request: VideoStreamSocketRequest,
-  ): void {
-    const desired = capture.desiredHints;
+  private updateDesiredHints({
+    deviceId,
+    capture,
+    request,
+    identity,
+    subscriptionKind,
+  }: {
+    deviceId: string;
+    capture: DeviceCapture;
+    request: VideoStreamSocketRequest;
+    identity?: StreamSubscriptionIdentity;
+    subscriptionKind: StreamSubscriptionKind;
+  }): void {
+    // Read-only joiners cannot reconfigure an owner's shared encoder. Unowned
+    // captures and auth-off retain the existing last-supplied-hint behavior.
+    if (!subscriberMaySetCaptureHints(subscriptionKind, identity)) {
+      return;
+    }
+    const takingOwnership = subscriptionKind === "owner" && capture.hintKind === "viewer";
+    const desired: CaptureHints = takingOwnership ? {} : capture.desiredHints;
+    if (subscriptionKind === "owner") {
+      capture.hintKind = "owner";
+    }
     capture.desiredHints = {
       quality: request.quality ?? desired.quality,
       fps: request.fps ?? desired.fps,
       bitrateKbps: request.bitrateKbps ?? desired.bitrateKbps,
+      size: takingOwnership ? request.size : desired.size,
     };
     if (!sameHints(capture.desiredHints, capture.appliedHints)) {
       logger.info(`[VideoStream] ${deviceId} scheduling shared capture quality change`);

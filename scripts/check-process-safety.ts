@@ -296,6 +296,7 @@ function uninstallStubs(source: string): boolean {
   const commands = shellCommands(code);
   const stubDirectories = new Map<string, Set<string>>();
   const pathDirectories = new Set<string>();
+  const executableStubs = new Map<string, Set<string>>();
   let loopTools: string[] = [];
   let loopVariable = "";
   let setup = false;
@@ -327,10 +328,50 @@ function uninstallStubs(source: string): boolean {
         .slice(3)
         .filter((token) => ["pkill", "killall", "pgrep", "ps", "kill"].includes(token));
     }
-    if (["cat", "printf"].includes(tokens[0])) {
+    // Only executable modes can stand in for host process tools. Evidence is
+    // keyed by the exact destination, including a loop's expanded tool names.
+    const chmodMode = tokens[0] === "chmod" ? tokens[1] : undefined;
+    const installModeIndex = tokens[0] === "install" ? tokens.indexOf("-m") : -1;
+    const mode = chmodMode ?? (installModeIndex >= 0 ? tokens[installModeIndex + 1] : undefined);
+    const executableMode =
+      !!mode &&
+      (/^(?:[0-7]{3,4})$/.test(mode)
+        ? (Number.parseInt(mode, 8) & 0o100) !== 0
+        : /^(?:[au]*\+[rwx]*x[rwx]*)$/.test(mode));
+    if (mode !== undefined) {
+      const destinations = tokens[0] === "chmod" ? tokens.slice(2) : tokens.slice(-1);
+      for (const destination of destinations) {
+        const directory = destination.slice(0, destination.lastIndexOf("/")).replace(/[{}]/g, "");
+        const basename = destination.split("/").at(-1);
+        const tools = executableStubs.get(directory) ?? new Set<string>();
+        executableStubs.set(directory, tools);
+        if (basename === `$${loopVariable}` || basename === `\${${loopVariable}}`) {
+          for (const tool of loopTools) {
+            if (executableMode) {
+              tools.add(tool);
+            } else {
+              tools.delete(tool);
+            }
+          }
+        } else if (basename) {
+          if (executableMode) {
+            tools.add(basename);
+          } else {
+            tools.delete(basename);
+          }
+        }
+      }
+    }
+    if (["cat", "printf", "install"].includes(tokens[0])) {
       for (const [index, token] of tokens.entries()) {
         const destination =
-          token === ">" ? tokens[index + 1] : token.startsWith(">") ? token.slice(1) : undefined;
+          tokens[0] === "install" && index === tokens.length - 1
+            ? token
+            : token === ">"
+              ? tokens[index + 1]
+              : token.startsWith(">")
+                ? token.slice(1)
+                : undefined;
         if (!destination) {
           continue;
         }
@@ -367,7 +408,9 @@ function uninstallStubs(source: string): boolean {
       ([directory, tools]) =>
         pathDirectories.has(directory) &&
         ["pkill", "killall", "pgrep", "ps", "kill"].every(
-          (tool) => tools.has(tool) || (tool === "kill" && killFunction && killExport),
+          (tool) =>
+            (tools.has(tool) && executableStubs.get(directory)?.has(tool)) ||
+            (tool === "kill" && killFunction && killExport),
         ),
     )
   );
@@ -545,8 +588,37 @@ export function checkProcessSafetySource(
       }
     }
   }
+  // Semicolons end pipelines but not loop input flow. Keep compound scopes
+  // until done, so unsafe discovery feeding read/iteration taints signals in
+  // that body without treating literal or verified-record loops as discovery.
+  const compoundScopes: boolean[] = [];
+  const unsafeCompoundSignals = new Set<ShellCommand>();
+  for (const command of commands) {
+    const words = commandWords(command.words);
+    const tool = words[0]?.value;
+    if (tool === "done") {
+      compoundScopes.pop();
+      continue;
+    }
+    if (tool === "for" || tool === "while" || tool === "until") {
+      compoundScopes.push(
+        discoveries.has(command.pipeline) ||
+          words.some(
+            (word) =>
+              containsDiscovery(word.raw) ||
+              [...selectedVariables].some((variable) =>
+                new RegExp(`\\$\\{?${variable}(?:\\}|\\b)`).test(word.value),
+              ),
+          ),
+      );
+    }
+    if (compoundScopes.includes(true) && signallingCommands.includes(command)) {
+      unsafeCompoundSignals.add(command);
+    }
+  }
   const consumesDiscovery = signallingCommands.some(
     (signal) =>
+      unsafeCompoundSignals.has(signal) ||
       discoveries.has(signal.pipeline) ||
       commands
         .filter((command) => command.pipeline === signal.pipeline)
@@ -572,7 +644,7 @@ export function checkProcessSafetySource(
     violations.push({
       file,
       line: 1,
-      reason: "Uninstall test lacks process stubs or setup PATH prepend",
+      reason: "Uninstall test lacks executable process stubs or setup PATH prepend",
     });
   }
   return violations;

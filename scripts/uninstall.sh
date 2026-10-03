@@ -567,37 +567,70 @@ detect_cli() {
     return 0
 }
 
-# Mirror constants.ts: a set-but-empty primary override selects the default,
-# not the legacy alias. Relative paths use the absolute launch cwd, else PWD.
-# Filesystem resolution handles . and .. without requiring the file to exist.
+# Status 3 reserves ordinary error statuses 1/2 and blocks destructive follow-up.
+DAEMON_MAY_BE_RUNNING=3
+
+# Predicates run as statements, preserving the caller's errexit setting. This
+# shared seam lets detection, stop and reload inspect failures without SC2310.
+daemon_check() {
+    local caller_options="$-"
+    set +e
+    "$@"
+    DAEMON_CHECK_STATUS=$?
+    if [[ "${caller_options}" == *e* ]]; then set -e; fi
+    return 0
+}
+
+# Lexical POSIX path.resolve normalization only: never follow symlinks or cd.
+# Empty overrides select the product default. NUL cannot exist in a Bash/env
+# string; newline paths and explicit non-absolute launch cwd fail closed rather
+# than lose bytes in command substitution or guess the daemon's launch cwd.
+# TS currently preserves absolute overrides verbatim; normalized overrides with
+# dots may therefore fail the exact record/argv match safely until TS agrees.
 daemon_path() {
-    local primary="$1" legacy="$2" suffix="$3" override launch_cwd
+    local primary="$1" legacy="$2" suffix="$3" override launch_cwd part path
+    local parts=()
     override="${!primary-${!legacy-}}"
+    DAEMON_PATH=""
     if [[ -z "${override}" ]]; then
-        printf '/tmp/auto-mobile-daemon-%s.%s\n' "$(id -u)" "${suffix}"
-    elif [[ "${override}" == /* ]]; then
-        printf '%s\n' "${override}"
-    else
-        launch_cwd="${AUTOMOBILE_DAEMON_LAUNCH_CWD:-}"
+        override="/tmp/auto-mobile-daemon-$(id -u).${suffix}"
+    elif [[ "${override}" != /* ]]; then
+        launch_cwd="${AUTOMOBILE_DAEMON_LAUNCH_CWD:-${PWD}}"
         launch_cwd="${launch_cwd#"${launch_cwd%%[![:space:]]*}"}"
         launch_cwd="${launch_cwd%"${launch_cwd##*[![:space:]]}"}"
-        [[ "${launch_cwd}" == /* ]] || launch_cwd="${PWD}"
-        printf '%s/%s\n' "${launch_cwd}" "${override}"
+        [[ "${launch_cwd}" == /* ]] || return 1
+        override="${launch_cwd}/${override}"
     fi
+    [[ "${override}" != *$'\n'* && "${override}" != *$'\r'* ]] || return 1
+    path="${override}"
+    while [[ -n "${path}" ]]; do
+        part="${path%%/*}"
+        if [[ "${path}" == */* ]]; then path="${path#*/}"; else path=""; fi
+        case "${part}" in
+            ''|.) ;;
+            ..) if [[ ${#parts[@]} -gt 0 ]]; then unset 'parts[${#parts[@]}-1]'; fi ;;
+            *) parts+=("${part}") ;;
+        esac
+    done
+    DAEMON_PATH=""
+    for part in ${parts[@]+"${parts[@]}"}; do DAEMON_PATH+="/${part}"; done
+    DAEMON_PATH="${DAEMON_PATH:-/}"
+    printf '%s\n' "${DAEMON_PATH}"
 }
 
 # JSON is the product format. Without jq, accept only a strict legacy number;
 # never guess at JSON. Unreadable/malformed records are retained for manual stop.
 daemon_record_pid() {
     local record="$1" pid
-    if command_exists jq; then
+    if command -v jq >/dev/null 2>&1; then
         pid=$(printf '%s' "${record}" | jq -er 'if type == "object" then .pid else . end | select(type == "number" and floor == .)' 2>/dev/null) || return 1
     else
         pid="${record}"
     fi
     [[ "${pid}" =~ ^[0-9]+$ && ${#pid} -le 10 ]] || return 1
     (( 10#${pid} > 1 && 10#${pid} <= 2147483647 )) || return 1
-    printf '%s\n' "$((10#${pid}))"
+    DAEMON_RECORD_PID="$((10#${pid}))"
+    printf '%s\n' "${DAEMON_RECORD_PID}"
 }
 
 # Mirror processTable.ts parseDaemonSocketPath: adjacent quoted/unquoted pieces
@@ -634,7 +667,7 @@ daemon_decode_socket_marker() {
     local value="$1" result="" char hex byte remaining=0 low=128 high=191 index
     local LC_ALL=C
     if [[ "${value}" == /* || "${value}" == \\* || "${value}" =~ ^[A-Za-z]:[/\\] ]]; then
-        printf '%s' "${value}"; return 0
+        DAEMON_DECODED_MARKER="${value}"; printf '%s' "${value}"; return 0
     fi
     for ((index = 0; index < ${#value}; index++)); do
         char="${value:index:1}"
@@ -663,6 +696,7 @@ daemon_decode_socket_marker() {
         result+="${char}"
     done
     (( remaining == 0 )) || return 1
+    DAEMON_DECODED_MARKER="${result}"
     printf '%s' "${result}"
 }
 
@@ -671,7 +705,7 @@ daemon_decode_socket_marker() {
 daemon_record_matches_namespace() {
     local record="$1" socket_path="$2"
     [[ "${record}" != *'{'* ]] && return 0
-    command_exists jq || return 1
+    command -v jq >/dev/null 2>&1 || return 1
     printf '%s' "${record}" | jq -e --arg socket "${socket_path}" \
         'type == "object" and ((has("socketPath") | not) or .socketPath == $socket)' >/dev/null 2>&1
 }
@@ -679,12 +713,14 @@ daemon_record_matches_namespace() {
 daemon_pid_is_daemon() {
     local pid="$1" record="$2" socket_path="$3" pid_path="$4" command_line token marker="" markers=0 mode=false index
     [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]] || return 1
-    daemon_record_matches_namespace "${record}" "${socket_path}" || return 1
+    daemon_check daemon_record_matches_namespace "${record}" "${socket_path}"
+    [[ "${DAEMON_CHECK_STATUS}" == 0 ]] || return 1
     kill -0 "${pid}" 2>/dev/null || return 1
     command_line=$(ps -p "${pid}" -o command= 2>/dev/null) || return 1
     [[ -n "${command_line}" ]] || return 1
     local DAEMON_ARGV=()
-    daemon_command_tokens "${command_line}" || return 1
+    daemon_check daemon_command_tokens "${command_line}"
+    [[ "${DAEMON_CHECK_STATUS}" == 0 ]] || return 1
     for ((index = 0; index < ${#DAEMON_ARGV[@]}; index++)); do
         token="${DAEMON_ARGV[index]}"
         [[ "${token}" != --daemon-mode ]] || mode=true
@@ -697,13 +733,14 @@ daemon_pid_is_daemon() {
     [[ "${mode}" == true ]] || return 1
     if (( markers == 0 )); then
         # Only unmarked older launches may use the record + actual socket fallback.
-        [[ -S "${socket_path}" ]] && command_exists jq || return 1
+        [[ -S "${socket_path}" ]] && command -v jq >/dev/null 2>&1 || return 1
         printf '%s' "${record}" | jq -e --arg socket "${socket_path}" \
             'type == "object" and .socketPath == $socket' >/dev/null 2>&1
     else
         (( markers == 1 )) && [[ -n "${marker}" && "${marker}" != --* ]] || return 1
-        marker=$(daemon_decode_socket_marker "${marker}" && printf .) || return 1
-        marker="${marker%.}"
+        daemon_check daemon_decode_socket_marker "${marker}" >/dev/null
+        [[ "${DAEMON_CHECK_STATUS}" == 0 ]] || return 1
+        marker="${DAEMON_DECODED_MARKER}"
         [[ "${marker}" == "${socket_path}" ]]
     fi
 }
@@ -725,21 +762,33 @@ wait_for_daemon_to_stop() {
     local attempt attempts="${AUTOMOBILE_DAEMON_STOP_WAIT_ATTEMPTS:-100}"
     [[ "${attempts}" =~ ^[0-9]{1,3}$ ]] && (( 10#${attempts} <= 100 )) || attempts=100
     for ((attempt = 0; attempt < 10#${attempts}; attempt++)); do
-        daemon_pid_present "$1" || return 0
+        daemon_check daemon_pid_present "$1"
+        if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then return 0; fi
         daemon_termination_wait
     done
-    ! daemon_pid_present "$1"
+    daemon_check daemon_pid_present "$1"
+    [[ "${DAEMON_CHECK_STATUS}" != 0 ]]
 }
 
 detect_daemon() {
     local socket_path pid_path record pid
-    socket_path=$(daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock)
-    pid_path=$(daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid)
     DAEMON_RUNNING=false
+    daemon_check daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock >/dev/null
+    if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then DAEMON_RUNNING=true; return 0; fi
+    socket_path="${DAEMON_PATH}"
+    daemon_check daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid >/dev/null
+    if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then DAEMON_RUNNING=true; return 0; fi
+    pid_path="${DAEMON_PATH}"
     if [[ -S "${socket_path}" ]]; then
         DAEMON_RUNNING=true
-    elif [[ -f "${pid_path}" ]] && record=$(cat "${pid_path}") && pid=$(daemon_record_pid "${record}") && daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
-        DAEMON_RUNNING=true
+    elif [[ -f "${pid_path}" ]] && record=$(cat "${pid_path}"); then
+        # Substitution captures data; the status seam preserves predicate failures.
+        daemon_check daemon_record_pid "${record}" >/dev/null
+        if [[ "${DAEMON_CHECK_STATUS}" == 0 ]]; then
+            pid="${DAEMON_RECORD_PID}"
+            daemon_check daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"
+            if [[ "${DAEMON_CHECK_STATUS}" == 0 ]]; then DAEMON_RUNNING=true; fi
+        fi
     fi
     return 0
 }
@@ -959,74 +1008,115 @@ stop_daemon() {
         return 0
     fi
 
-    local socket_path pid_path record pid current_record
-    socket_path=$(daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock)
-    pid_path=$(daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid)
-    if [[ -f "${pid_path}" ]] && record=$(cat "${pid_path}") && [[ "${record}" == *'{'* || "${record}" == *'['* ]] && ! command_exists jq; then
-        log_warn "jq is required to read the PID record at ${pid_path}; use auto-mobile --daemon stop. Leaving namespace files in place."
-        return 0
+    local socket_path pid_path record pid current_record stop_status=0 term_status=0
+    daemon_check daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock >/dev/null
+    if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then
+        log_warn "Unverifiable daemon socket path; use auto-mobile --daemon stop."
+        return "${DAEMON_MAY_BE_RUNNING}"
     fi
-    if [[ ! -f "${pid_path}" ]] || ! record=$(cat "${pid_path}") || ! pid=$(daemon_record_pid "${record}"); then
+    socket_path="${DAEMON_PATH}"
+    daemon_check daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid >/dev/null
+    if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then
+        log_warn "Unverifiable daemon PID path; use auto-mobile --daemon stop."
+        return "${DAEMON_MAY_BE_RUNNING}"
+    fi
+    pid_path="${DAEMON_PATH}"
+    if [[ -f "${pid_path}" ]] && record=$(cat "${pid_path}") && [[ "${record}" == *'{'* || "${record}" == *'['* ]] && ! command -v jq >/dev/null 2>&1; then
+        log_warn "jq is required to read the PID record at ${pid_path}; use auto-mobile --daemon stop. Leaving namespace files in place."
+        return "${DAEMON_MAY_BE_RUNNING}"
+    fi
+    record=""
+    if [[ -f "${pid_path}" ]]; then record=$(cat "${pid_path}") || record=""; fi
+    daemon_check daemon_record_pid "${record}" >/dev/null
+    if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then
         if [[ -e "${socket_path}" || -S "${socket_path}" || -e "${pid_path}" ]]; then
             log_warn "A daemon may be running without a valid PID record; use auto-mobile --daemon stop. Leaving namespace files in place."
         else
             log_info "MCP daemon not running"
+            return 0
         fi
-        return 0
+        return "${DAEMON_MAY_BE_RUNNING}"
     fi
 
-    if ! daemon_record_matches_namespace "${record}" "${socket_path}"; then
+    pid="${DAEMON_RECORD_PID}"
+    daemon_check daemon_record_matches_namespace "${record}" "${socket_path}"
+    if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then
         log_warn "Foreign daemon PID record at ${pid_path}; leaving files in place. Use auto-mobile --daemon stop."
-        return 0
+        return "${DAEMON_MAY_BE_RUNNING}"
     fi
-    if daemon_pid_present "${pid}"; then
-        if ! daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
+    daemon_check daemon_pid_present "${pid}"
+    if [[ "${DAEMON_CHECK_STATUS}" == 0 ]]; then
+        daemon_check daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"
+        if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then
             log_warn "PID record is stale or PID ${pid} is not an AutoMobile daemon; leaving files in place. Use auto-mobile --daemon stop."
-            return 0
+            return "${DAEMON_MAY_BE_RUNNING}"
         fi
         log_info "Stopping MCP daemon (PID ${pid})..."
-        if ! daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
+        daemon_check daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"
+        if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then
             log_warn "Daemon identity changed; leaving files in place. Use auto-mobile --daemon stop."
-            return 0
+            return "${DAEMON_MAY_BE_RUNNING}"
         fi
-        if ! kill -TERM "${pid}" 2>/dev/null || ! wait_for_daemon_to_stop "${pid}"; then
-            log_warn "MCP daemon did not stop within 10 seconds; leaving files in place. Use auto-mobile --daemon stop."
-            return 0
+        kill -TERM "${pid}" 2>/dev/null && term_status=0 || term_status=$?
+        stop_status="${term_status}"
+        if [[ "${stop_status}" == 0 ]]; then
+            daemon_check wait_for_daemon_to_stop "${pid}"
+            stop_status="${DAEMON_CHECK_STATUS}"
         fi
-    else
-        if [[ -e "${socket_path}" || -S "${socket_path}" ]]; then
-            local probe_status=2 probe_output=""
-            if command_exists nc; then
-                probe_output=$(LC_ALL=C nc -U -z -w 1 "${socket_path}" 2>&1) && probe_status=0 || probe_status=$?
-                # A usage/permission/unsupported-option diagnostic is not refusal.
-                if [[ "${probe_status}" == 1 && -n "${probe_output}" && "${probe_output}" != *"Connection refused"* ]]; then
-                    probe_status=2
+        if [[ "${term_status}" == 0 && "${stop_status}" != 0 && "${1:-}" == reload ]]; then
+            # Reload retains its existing escalation, but only for the exact
+            # record/identity verified again immediately before signaling.
+            daemon_check daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"
+            if [[ "${DAEMON_CHECK_STATUS}" == 0 ]]; then
+                log_warn "Namespace daemon did not stop within 10 seconds; sending KILL to PID ${pid}."
+                kill -KILL "${pid}" 2>/dev/null && stop_status=0 || stop_status=$?
+                if [[ "${stop_status}" == 0 ]]; then
+                    daemon_check wait_for_daemon_to_stop "${pid}"
+                    stop_status="${DAEMON_CHECK_STATUS}"
                 fi
             fi
-            if [[ "${probe_status}" == 0 ]]; then
-                log_warn "Namespace socket still accepts connections; leaving socket and PID record in place. Use auto-mobile --daemon stop."
-                return 0
-            elif [[ "${probe_status}" != 1 ]]; then
-                # Missing/unsupported nc is inconclusive. Retire only our stale record.
-                if [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]]; then rm -f "${pid_path}"; fi
-                log_warn "Cannot verify stale namespace socket; leaving socket in place. Use auto-mobile --daemon stop."
-                return 0
+        fi
+        if [[ "${stop_status}" != 0 ]]; then
+            log_warn "MCP daemon did not stop within 10 seconds; leaving files in place. Use auto-mobile --daemon stop."
+            return "${DAEMON_MAY_BE_RUNNING}"
+        fi
+    else
+        log_info "MCP daemon not running; checking stale namespace files"
+    fi
+    # A successor can own the socket even after the recorded PID exits.
+    if [[ -e "${socket_path}" || -S "${socket_path}" ]]; then
+        local probe_status=2 probe_output=""
+        if command -v nc >/dev/null 2>&1; then
+            probe_output=$(LC_ALL=C nc -U -z -w 1 "${socket_path}" 2>&1) && probe_status=0 || probe_status=$?
+            # A usage/permission/unsupported-option diagnostic is not refusal.
+            if [[ "${probe_status}" == 1 && -n "${probe_output}" && "${probe_output}" != *"Connection refused"* ]]; then
+                probe_status=2
             fi
         fi
-        log_info "MCP daemon not running; removing stale namespace files"
+        if [[ "${probe_status}" == 0 ]]; then
+            log_warn "Namespace socket still accepts connections; leaving socket and PID record in place. Use auto-mobile --daemon stop."
+            return "${DAEMON_MAY_BE_RUNNING}"
+        elif [[ "${probe_status}" != 1 ]]; then
+            # Missing/unsupported nc is inconclusive. Retire only our stale record.
+            if [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]]; then rm -f "${pid_path}"; fi
+            log_warn "Cannot verify stale namespace socket; leaving socket in place. Use auto-mobile --daemon stop."
+            return "${DAEMON_MAY_BE_RUNNING}"
+        fi
     fi
+    log_info "MCP daemon not running; removing stale namespace files"
 
     # Do not unlink a successor's record if it replaced ours during shutdown.
     if [[ -f "${pid_path}" ]]; then
-        current_record=$(cat "${pid_path}") || return 0
+        current_record=$(cat "${pid_path}") || { log_warn "Cannot read daemon PID record; use auto-mobile --daemon stop."; return "${DAEMON_MAY_BE_RUNNING}"; }
         if [[ "${current_record}" != "${record}" ]]; then
-            log_warn "Daemon PID record changed; leaving namespace files in place."
-            return 0
+            log_warn "Daemon PID record changed; leaving namespace files in place. Use auto-mobile --daemon stop."
+            return "${DAEMON_MAY_BE_RUNNING}"
         fi
     fi
-    rm -f "${socket_path}" "${pid_path}"
+    rm -f "${socket_path}" "${pid_path}" || { log_warn "Cannot remove namespace files; use auto-mobile --daemon stop."; return "${DAEMON_MAY_BE_RUNNING}"; }
     log_info "MCP daemon stopped"
     CHANGES_MADE=true
+    return 0
 }
 
 remove_data_dir() {
@@ -1365,27 +1455,44 @@ main() {
         fi
     fi
 
+    local daemon_stop_status=0
     if [[ "${UNINSTALL_DAEMON}" == "true" ]]; then
-        stop_daemon
+        daemon_check stop_daemon
+        daemon_stop_status="${DAEMON_CHECK_STATUS}"
     fi
 
+    # Config/marketplace entries do not own daemon data or installed binaries;
+    # their removal is safe even when daemon shutdown cannot be confirmed.
+
     if [[ "${UNINSTALL_MCP_CONFIGS}" == "true" ]]; then
-        remove_mcp_configs
+        if [[ "${daemon_stop_status}" == 0 ]]; then
+            remove_mcp_configs
+        else
+            # Best-effort independent cleanup must still reach the blocked
+            # summary and preserve the distinct daemon status on failure.
+            daemon_check remove_mcp_configs
+            if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then log_warn "MCP configuration cleanup failed."; fi
+        fi
     fi
 
     if [[ "${UNINSTALL_MARKETPLACE}" == "true" ]]; then
-        remove_marketplace
+        if [[ "${daemon_stop_status}" == 0 ]]; then
+            remove_marketplace
+        else
+            daemon_check remove_marketplace
+            if [[ "${DAEMON_CHECK_STATUS}" != 0 ]]; then log_warn "Marketplace cleanup failed."; fi
+        fi
     fi
 
-    if [[ "${UNINSTALL_CLI}" == "true" ]]; then
+    if [[ "${UNINSTALL_CLI}" == "true" && "${daemon_stop_status}" == 0 ]]; then
         remove_cli
     fi
 
-    if [[ "${UNINSTALL_DATA}" == "true" ]]; then
+    if [[ "${UNINSTALL_DATA}" == "true" && "${daemon_stop_status}" == 0 ]]; then
         remove_data_dir
     fi
 
-    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
+    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" && "${daemon_stop_status}" == 0 ]]; then
         if ! remove_desktop_app; then
             log_error "Could not remove the AutoMobile desktop app; uninstall aborted."
             exit 1
@@ -1394,7 +1501,14 @@ main() {
 
     # Summary
     echo ""
-    if [[ "${DRY_RUN}" == "true" ]]; then
+    if [[ "${daemon_stop_status}" != 0 ]]; then
+        local skipped=""
+        if [[ "${UNINSTALL_CLI}" == true ]]; then skipped+=" remove_cli"; fi
+        if [[ "${UNINSTALL_DATA}" == true ]]; then skipped+=" remove_data_dir"; fi
+        if [[ "${UNINSTALL_DESKTOP_APP}" == true ]]; then skipped+=" remove_desktop_app"; fi
+        log_error "Uninstall blocked: daemon shutdown unconfirmed; skipped:${skipped:- no destructive steps selected}. Run auto-mobile --daemon stop, then retry."
+        return "${daemon_stop_status}"
+    elif [[ "${DRY_RUN}" == "true" ]]; then
         log_info "Dry-run complete. No changes were made."
     elif [[ "${CHANGES_MADE}" == "true" ]]; then
         log_info "Uninstall complete"

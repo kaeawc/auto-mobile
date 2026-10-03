@@ -63,6 +63,7 @@ describe("process safety guard", () => {
 #!/bin/bash
 exit 1
 STUB
+    chmod +x "\${STUB_BIN}/\${tool}"
   done
   kill() { return 1; }
   export -f kill
@@ -102,10 +103,52 @@ STUB
       expect(
         checkProcessSafetySource(
           "test/bats/fixture.bats",
-          `${command}\n${stubs.replace('PATH="\${STUB_BIN}', 'PATH="\${OTHER_BIN}')}`,
+          `${command}\n${stubs.replaceAll("${STUB_BIN}:${PATH}", "${OTHER_BIN}:${PATH}")}`,
         ),
       ).toHaveLength(1);
     }
+  });
+
+  test.each(["+x", "755", "a+x", "u+x"])("accepts executable chmod %s", (mode) => {
+    const source = stubs.replace("chmod +x", `chmod ${mode}`);
+    expect(
+      checkProcessSafetySource("test/bats/fixture.bats", `source scripts/uninstall.sh\n${source}`),
+    ).toEqual([]);
+  });
+
+  test("non-executable or differently chmodded stubs fail closed", () => {
+    for (const source of [
+      stubs.replaceAll('chmod +x "${STUB_BIN}/${tool}"', ""),
+      stubs.replaceAll('chmod +x "${STUB_BIN}/${tool}"', 'chmod +x "${STUB_BIN}/other"'),
+      stubs.replace("chmod +x", "chmod 644"),
+      stubs.replaceAll(
+        'chmod +x "${STUB_BIN}/${tool}"',
+        'chmod +x "${STUB_BIN}/${tool}"\n    chmod 644 "${STUB_BIN}/${tool}"',
+      ),
+    ]) {
+      expect(
+        checkProcessSafetySource(
+          "test/bats/fixture.bats",
+          `source scripts/uninstall.sh\n${source}`,
+        ),
+      ).toHaveLength(1);
+    }
+  });
+
+  test("install -m 755 creates executable process stubs", () => {
+    const source = stubs.replace(
+      /    cat > "\$\{STUB_BIN\}\/\$\{tool\}" <<'STUB'\n[\s\S]*?STUB\n    chmod \+x "\$\{STUB_BIN\}\/\$\{tool\}"/,
+      '    install -m 755 fixture "${STUB_BIN}/${tool}"',
+    );
+    expect(
+      checkProcessSafetySource("test/bats/fixture.bats", `source scripts/uninstall.sh\n${source}`),
+    ).toEqual([]);
+    expect(
+      checkProcessSafetySource(
+        "test/bats/fixture.bats",
+        `source scripts/uninstall.sh\n${source.replace("install -m 755", "install -m 644")}`,
+      ),
+    ).toHaveLength(1);
   });
 
   test.each([
@@ -142,6 +185,16 @@ STUB
     "exec time nice -n 5 timeout -s TERM 5 env pkill -f x",
     "true; then pkill -f x; else killall x",
     "kill `pgrep daemon`",
+    'pgrep -f daemon | while read -r pid; do kill "$pid"; done',
+    'ps aux | grep daemon | while read -r pid; do kill "$pid"; done',
+    'for pid in $(pgrep -f daemon); do kill "$pid"; done',
+    'for pid in `pgrep -f daemon`; do kill "$pid"; done',
+    'for pid in $(ps aux | grep daemon); do kill "$pid"; done',
+    "pids=$(pgrep daemon); kill $pids",
+    'pids=`pgrep daemon`; printf "%s" "$pids" | xargs kill',
+    'pids=$(pgrep daemon); for pid in $pids; do kill "$pid"; done',
+    'pgrep daemon | while read pid; do printf "%s" "$pid" | xargs kill; done',
+    'pgrep daemon | while read pid; do for child in 123; do kill "$child"; done; done',
   ])("rejects structural bypass %s", (source) => {
     expect(checkProcessSafetySource(fixture, source).length).toBeGreaterThan(0);
   });
@@ -158,6 +211,10 @@ STUB
     'pid=$!; pkill -TERM -P "$pid"',
     'pid=$$; pkill -KILL -P "${pid}"',
     "pkill -P $BASHPID",
+    'for pid in 123 456; do kill "$pid"; done',
+    'for pid in "$verified_pid"; do kill "$pid"; done',
+    'printf "%s" "$verified_pid" | while read pid; do kill "$pid"; done',
+    'pid=$!; pgrep -P "$pid" | while read child; do kill "$child"; done',
   ])("accepts data and owned child scope %s", (source) => {
     expect(checkProcessSafetySource(fixture, source)).toEqual([]);
   });

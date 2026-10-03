@@ -2,6 +2,7 @@
 
 setup() {
   TEST_ROOT="${BATS_TEST_TMPDIR}"
+  GUARD_BIN="$PWD/scratch/guardbin"
   STUB_BIN="${TEST_ROOT}/bin"
   export HOME="${TEST_ROOT}/home" TMPDIR="${TEST_ROOT}/tmp"
   export AUTOMOBILE_DAEMON_SOCKET_PATH="${TEST_ROOT}/daemon.sock"
@@ -93,7 +94,7 @@ teardown() {
 @test "reused live PID is neither signalled nor unlinked" {
   export PID_COMMAND="/usr/bin/sleep 60"
   run stop_daemon
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
   [[ "$output" == *"not an AutoMobile daemon"* ]]
   [ ! -s "${SIGNALS}" ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
@@ -103,6 +104,7 @@ teardown() {
 @test "socket without a PID record is retained with stop guidance" {
   rm "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [[ "$output" == *"auto-mobile --daemon stop"* ]]
   [ ! -s "${SIGNALS}" ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
@@ -158,6 +160,7 @@ teardown() {
 @test "bounded TERM wait retains files and never escalates" {
   export IGNORE_TERM=true
   run stop_daemon
+  [ "$status" -eq 3 ]
   [[ "$output" == *"within 10 seconds"*"auto-mobile --daemon stop"* ]]
   [ "$(cat "${SIGNALS}")" = "-TERM ${OWN_PID}" ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
@@ -169,6 +172,7 @@ teardown() {
   for record in '{"pid":1}' '{"pid":-2}' '{"pid":"123"}' '{"pid":2.5}' '{"pid":999999999999999999999999}' '{"pid":22'; do
     printf '%s' "${record}" > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
     run stop_daemon
+    [ "$status" -eq 3 ]
     [[ "$output" == *"valid PID record"* ]]
     [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
     [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
@@ -182,8 +186,9 @@ teardown() {
   for tool in bash cat rm ps grep; do
     ln -s "$(command -v "${tool}")" "${no_jq}/${tool}"
   done
-  export PATH="${no_jq}"
+  export PATH="${no_jq}:${GUARD_BIN}"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [[ "$output" == *"jq is required"*"${AUTOMOBILE_DAEMON_PID_FILE_PATH}"*"auto-mobile --daemon stop"* ]]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
   [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
@@ -205,7 +210,7 @@ teardown() {
   export HOT_RELOAD_SH_SOURCE_ONLY=true PID_COMMAND="/usr/bin/sleep 60"
   source "${BATS_TEST_DIRNAME}/../../scripts/local-dev/hot-reload.sh"
   run stop_namespace_daemon_for_reload
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
   [ ! -s "${SIGNALS}" ]
 }
 
@@ -233,6 +238,7 @@ teardown() {
   kill() { printf 'kill %s\n' "$*" >> "${PROCESS_CALLS}"; return 1; }
   export -f kill
   run stop_daemon
+  [ "$status" -eq 3 ]
   [[ "$output" == *"not an AutoMobile daemon"* ]]
   [ ! -s "${SIGNALS}" ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
@@ -242,6 +248,7 @@ teardown() {
 @test "another namespace marker never grants ownership" {
   export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH}2"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ ! -s "${SIGNALS}" ]
   [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
   [[ "$output" == *"auto-mobile --daemon stop"* ]]
@@ -275,6 +282,7 @@ stop_with_test_socket() {
 @test "unmarked daemon without a socket is left alone" {
   export PID_COMMAND="bun index.js --daemon-mode"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ ! -s "${SIGNALS}" ]
   [[ "$output" == *"auto-mobile --daemon stop"* ]]
 }
@@ -282,10 +290,12 @@ stop_with_test_socket() {
 @test "foreign record is retained even with matching argv or a dead PID" {
   printf '{"pid":%s,"socketPath":"/foreign.sock"}' "${OWN_PID}" > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [[ "$output" == *"Foreign daemon PID record"* ]]
   [ ! -s "${SIGNALS}" ]
   rm "${ALIVE}"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
 }
@@ -304,6 +314,7 @@ stop_with_test_socket() {
     "--daemon-socket-path='${AUTOMOBILE_DAEMON_SOCKET_PATH}"; do
     export PID_COMMAND="bun index.js --daemon-mode ${argv}"
     run stop_daemon
+    [ "$status" -eq 3 ]
     [ ! -s "${SIGNALS}" ]
     [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
   done
@@ -313,6 +324,7 @@ stop_with_test_socket() {
   printf '{"pid":%s}' "${OWN_PID}" > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
   export PID_COMMAND="/fake/auto-mobile-pretender --daemon-mode"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ ! -s "${SIGNALS}" ]
 }
 
@@ -334,6 +346,7 @@ stop_with_test_socket() {
   rm "${ALIVE}"
   export NC_STATUS=0
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
   [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
   [[ "$output" == *"still accepts"*"auto-mobile --daemon stop"* ]]
@@ -341,8 +354,14 @@ stop_with_test_socket() {
 
 @test "dead PID without nc retires only the stale PID record" {
   rm "${ALIVE}"
-  command_exists() { [[ "$1" != nc ]] && command -v "$1" >/dev/null 2>&1; }
+  local no_nc="${TEST_ROOT}/no-nc" tool
+  mkdir -p "${no_nc}"
+  for tool in bash cat rm ps jq grep; do
+    ln -s "$(command -v "${tool}")" "${no_nc}/${tool}"
+  done
+  export PATH="${no_nc}:${GUARD_BIN}"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
   [ ! -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
   [[ "$output" == *"auto-mobile --daemon stop"* ]]
@@ -352,6 +371,7 @@ stop_with_test_socket() {
   rm "${ALIVE}"
   export NC_STATUS=2
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
   [ ! -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
 }
@@ -363,6 +383,7 @@ stop_with_test_socket() {
     else touch "${reads}"; printf '%s' "bun index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH}"; fi
   }
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ ! -s "${SIGNALS}" ]
   [[ "$output" == *"identity changed"* ]]
 }
@@ -385,6 +406,7 @@ stop_with_test_socket() {
   rm "${ALIVE}"
   export NC_STATUS=1 NC_MESSAGE="nc: invalid option -- z"
   run stop_daemon
+  [ "$status" -eq 3 ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
   [ ! -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
   [[ "$output" == *"auto-mobile --daemon stop"* ]]
@@ -422,4 +444,172 @@ stop_with_test_socket() {
   export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH//\//%2F}%0A"
   run stop_daemon
   [ ! -s "${SIGNALS}" ]
+}
+
+# Exercise main's real status/selection/summary and data removal, with binaries
+# and configs represented by HOME sentinels. No host package-manager calls.
+setup_main_fixture() {
+  mkdir -p "${HOME}/.automobile"
+  touch "${HOME}/cli" "${HOME}/desktop" "${HOME}/mcp" "${HOME}/marketplace"
+  ensure_gum() { return 1; }
+  detect_mcp_configs() { MCP_CONFIGS_FOUND=("fixture"); }
+  detect_marketplace() { MARKETPLACE_INSTALLED=true; }
+  detect_cli() { CLI_INSTALLED=true; }
+  detect_desktop_app() { DESKTOP_APP_INSTALLED=true; }
+  stop_desktop_app_processes() { printf 'desktop-stop\n' >> "${TEST_ROOT}/steps"; }
+  remove_cli() { rm "${HOME}/cli"; }
+  remove_desktop_app() { rm "${HOME}/desktop"; }
+  remove_mcp_configs() { rm "${HOME}/mcp"; CHANGES_MADE=true; }
+  remove_marketplace() { rm "${HOME}/marketplace"; CHANGES_MADE=true; }
+}
+
+assert_blocked_main() {
+  [ "$status" -eq 3 ]
+  [ -d "${HOME}/.automobile" ]
+  [ -f "${HOME}/cli" ]
+  [ -f "${HOME}/desktop" ]
+  [ ! -e "${HOME}/mcp" ]
+  [ ! -e "${HOME}/marketplace" ]
+  [ "$(cat "${TEST_ROOT}/steps")" = desktop-stop ]
+  [[ "$output" == *"Uninstall blocked"*"remove_cli"*"remove_data_dir"*"remove_desktop_app"*"auto-mobile --daemon stop"* ]]
+  [[ "$output" != *"Uninstall complete"* ]]
+}
+
+@test "all uninstall without jq preserves data and binaries but removes independent configs" {
+  setup_main_fixture
+  local no_jq="${TEST_ROOT}/no-jq" tool
+  mkdir -p "${no_jq}"
+  for tool in bash cat rm ps grep; do
+    ln -s "$(command -v "${tool}")" "${no_jq}/${tool}"
+  done
+  export PATH="${no_jq}:${GUARD_BIN}"
+  run main --all --force
+  assert_blocked_main
+  [[ "$output" == *"jq is required"* ]]
+  [ ! -s "${SIGNALS}" ]
+}
+
+@test "all uninstall with unverifiable identity preserves data and binaries" {
+  setup_main_fixture
+  export PID_COMMAND="/usr/bin/sleep 60"
+  run main --all --force
+  assert_blocked_main
+  [ ! -s "${SIGNALS}" ]
+}
+
+@test "independent cleanup errors still reach the blocked summary and status" {
+  setup_main_fixture
+  export PID_COMMAND="/usr/bin/sleep 60"
+  remove_mcp_configs() { return 1; }
+  run main --all --force
+  [ "$status" -eq 3 ]
+  [ -d "${HOME}/.automobile" ]
+  [ -f "${HOME}/cli" ]
+  [ -f "${HOME}/desktop" ]
+  [ -f "${HOME}/mcp" ]
+  [ ! -e "${HOME}/marketplace" ]
+  [[ "$output" == *"MCP configuration cleanup failed"*"Uninstall blocked"*"auto-mobile --daemon stop"* ]]
+}
+
+@test "all uninstall after verified stop removes selected data binaries and configs" {
+  setup_main_fixture
+  run main --all --force
+  [ "$status" -eq 0 ]
+  [ ! -e "${HOME}/.automobile" ]
+  [ ! -e "${HOME}/cli" ]
+  [ ! -e "${HOME}/desktop" ]
+  [ ! -e "${HOME}/mcp" ]
+  [ ! -e "${HOME}/marketplace" ]
+  [[ "$output" == *"Uninstall complete"* ]]
+}
+
+@test "all uninstall with no namespace files removes selected components" {
+  setup_main_fixture
+  rm "${AUTOMOBILE_DAEMON_SOCKET_PATH}" "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
+  run main --all --force
+  [ "$status" -eq 0 ]
+  [ ! -e "${HOME}/.automobile" ]
+  [ ! -e "${HOME}/cli" ]
+  [ ! -e "${HOME}/desktop" ]
+  [ ! -e "${HOME}/mcp" ]
+  [ ! -e "${HOME}/marketplace" ]
+  [ ! -s "${SIGNALS}" ]
+}
+
+@test "daemon paths normalize lexically without requiring existing targets" {
+  export AUTOMOBILE_DAEMON_LAUNCH_CWD=/tmp/x/launch
+  local entry input expected
+  for entry in \
+    '../daemon.sock|/tmp/x/daemon.sock' \
+    './a/../b|/tmp/x/launch/b' \
+    'a//b///|/tmp/x/launch/a/b' \
+    '../../../..//daemon.sock/|/daemon.sock' \
+    '/tmp//x/./a/../daemon.sock/|/tmp/x/daemon.sock' \
+    '/../../..///|/' \
+    '~user/daemon.sock|/tmp/x/launch/~user/daemon.sock'; do
+    input="${entry%%|*}"; expected="${entry#*|}"
+    export AUTOMOBILE_DAEMON_SOCKET_PATH="${input}" AUTOMOBILE_DAEMON_PID_FILE_PATH="${input}"
+    run daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock
+    [ "$status" -eq 0 ]; [ "$output" = "${expected}" ]
+    run daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid
+    [ "$status" -eq 0 ]; [ "$output" = "${expected}" ]
+  done
+}
+
+@test "unverifiable launch cwd and newline paths fail closed" {
+  export AUTOMOBILE_DAEMON_LAUNCH_CWD=relative AUTOMOBILE_DAEMON_SOCKET_PATH=daemon.sock
+  run daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock
+  [ "$status" -ne 0 ]
+  run stop_daemon
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"Unverifiable daemon socket path"*"auto-mobile --daemon stop"* ]]
+  export AUTOMOBILE_DAEMON_SOCKET_PATH=$'/tmp/path\n.sock'
+  run daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock
+  [ "$status" -ne 0 ]
+  [ ! -s "${SIGNALS}" ]
+}
+
+@test "normalized relative namespace stops the verified daemon" {
+  export AUTOMOBILE_DAEMON_LAUNCH_CWD="${TEST_ROOT}/launch" AUTOMOBILE_DAEMON_SOCKET_PATH=../daemon.sock AUTOMOBILE_DAEMON_PID_FILE_PATH=../daemon.pid
+  export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=${TEST_ROOT}/daemon.sock"
+  run stop_daemon
+  [ "$status" -eq 0 ]
+  [ ! -e "${TEST_ROOT}/daemon.pid" ]
+}
+
+@test "hot reload fails before invoking restart on an unverifiable daemon" {
+  export HOT_RELOAD_SH_SOURCE_ONLY=true PID_COMMAND="/usr/bin/sleep 60"
+  source "${BATS_TEST_DIRNAME}/../../scripts/local-dev/hot-reload.sh"
+  auto-mobile() { printf 'restart invoked\n' >> "${TEST_ROOT}/restart"; }
+  export -f auto-mobile
+  run reload_mcp_daemon
+  [ "$status" -eq 3 ]
+  [ ! -e "${TEST_ROOT}/restart" ]
+  [ ! -s "${SIGNALS}" ]
+  [[ "$output" == *"Hot reload blocked"*"auto-mobile --daemon stop"* ]]
+}
+
+@test "post-stop accepting socket blocks removal and retains the record" {
+  export NC_STATUS=0
+  run stop_daemon
+  [ "$status" -eq 3 ]
+  [ ! -e "${ALIVE}" ]
+  [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+}
+
+@test "TERM failure is unconfirmed and does not escalate in reload" {
+  kill() { [[ "$1" == -0 ]]; }
+  run stop_daemon reload
+  [ "$status" -eq 3 ]
+  [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [ ! -s "${SIGNALS}" ]
+}
+
+@test "changed PID record after stop blocks cleanup" {
+  wait_for_daemon_to_stop() { printf '{"pid":424243}' > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"; return 0; }
+  run stop_daemon
+  [ "$status" -eq 3 ]
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+  [[ "$output" == *"PID record changed"*"auto-mobile --daemon stop"* ]]
 }

@@ -1,5 +1,9 @@
-import XCTest
 @testable import AutoMobileSDK
+import os
+import XCTest
+#if canImport(UIKit) && !os(watchOS)
+    import UIKit
+#endif
 
 // The register-vs-shutdown races these managers had are now closed by construction:
 // observers/path-monitor are registered WHILE the lock is held (see `initialize`), so a
@@ -8,6 +12,41 @@ import XCTest
 // deterministically; these tests pin the observable init/shutdown lifecycle instead.
 
 final class OsEventsTests: XCTestCase {
+    #if canImport(UIKit) && !os(watchOS)
+        @MainActor
+        func testBrightnessNotificationRecordsSynchronouslyOnMain() throws {
+            let osEvents = AutoMobileOsEvents.shared
+            osEvents.reset()
+            let receivedEvents = OSAllocatedUnfairLock<[SdkLifecycleEvent]>(initialState: [])
+            let buffer = SdkEventBuffer(timerFactory: { FakeTimer() }, onFlush: { batch in
+                receivedEvents.withLock { $0 += batch.compactMap { $0 as? SdkLifecycleEvent } }
+            })
+            osEvents.initialize(bundleId: "test.bundle", buffer: buffer)
+            defer {
+                osEvents.reset()
+                buffer.shutdown()
+            }
+
+            NotificationCenter.default.post(name: UIScreen.brightnessDidChangeNotification, object: nil)
+            buffer.flush()
+
+            let events = receivedEvents.withLock { $0 }
+                .filter { $0.state == "screen_brightness_change" }
+            XCTAssertEqual(events.count, 1)
+            let event = try XCTUnwrap(events.first)
+            XCTAssertEqual(event.details["brightness"], "\(Int(UIScreen.main.brightness * 100))")
+
+            osEvents.setEnabled(false)
+            NotificationCenter.default.post(name: UIScreen.brightnessDidChangeNotification, object: nil)
+            buffer.flush()
+            XCTAssertEqual(
+                receivedEvents.withLock { $0 }
+                    .filter { $0.state == "screen_brightness_change" }.count,
+                1
+            )
+        }
+    #endif
+
     func testOsEventsInitializesOnce() {
         let buffer = SdkEventBuffer { _ in }
         buffer.start()

@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
@@ -10,6 +11,8 @@ import { executionTracker } from "../../src/server/executionTracker";
 import { McpTestFixture, MCP_TEST_REQUEST_TIMEOUT_MS } from "../fixtures/mcpTestFixture";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+
+isolateToolRegistry();
 
 describe("device loss MCP outcome", () => {
   const toolName = "__device_lost_wire_probe__";

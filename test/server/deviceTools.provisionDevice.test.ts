@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeEach, describe, expect } from "bun:test";
@@ -51,6 +52,8 @@ import type {
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+
+isolateToolRegistry();
 
 async function provisionResponseText(args: Record<string, unknown>): Promise<string> {
   const tool = ToolRegistry.getTool("provisionDevice");

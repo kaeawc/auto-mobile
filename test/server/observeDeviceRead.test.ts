@@ -57,7 +57,9 @@ const callDeviceRead = (args: Record<string, unknown>) =>
   );
 
 let restoreInventory: () => void;
+let originalRepository: Parameters<typeof ToolRegistry.setToolCallRepositoryForTesting>[0];
 beforeEach(() => {
+  originalRepository = ToolRegistry["toolCallRepository"];
   ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
   restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
     displayInventory: new FakeDisplayInventoryProvider(),
@@ -66,6 +68,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreInventory();
+  ToolRegistry.setToolCallRepositoryForTesting(originalRepository);
   Reflect.set(ToolRegistry, "deviceSessionManager", originalManager);
   DaemonState.getInstance().reset();
   ToolRegistry.clearTools();

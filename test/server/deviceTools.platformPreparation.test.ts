@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
@@ -23,11 +24,14 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type {
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+
+isolateToolRegistry();
 
 class DeferredSessionPersistence extends FakeDeviceSessionPersistence {
   activeSessionUuid: string | undefined;
@@ -100,6 +104,7 @@ describe("platform device preparation tools", () => {
 
   afterEach(() => {
     resetDeviceToolsDependencies();
+    AndroidAvdProvenanceCache.resetForTests();
     DaemonState.getInstance().reset();
     sessionManager?.stopCleanupTimer();
   });

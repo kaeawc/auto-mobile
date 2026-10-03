@@ -1,27 +1,38 @@
 import { FakeSocket } from "../fakes/FakeNetServer";
 import * as net from "node:net";
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 let createdSocket: FakeSocket | undefined;
 let failNextConnect = false;
-mock.module("node:net", () => ({
-  ...net,
-  createConnection: (_socketPath: string, onConnect: () => void) => {
+let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">>;
+
+beforeEach(() => {
+  createdSocket = undefined;
+  failNextConnect = false;
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
     const socket = new FakeSocket();
     createdSocket = socket;
     if (failNextConnect) {
       failNextConnect = false;
       queueMicrotask(() => socket.emit("error", new Error("connect ECONNREFUSED")));
     } else {
-      queueMicrotask(onConnect);
+      queueMicrotask(onConnect!);
     }
-    return socket;
-  },
-}));
+    return socket as unknown as net.Socket;
+  });
+});
 
-const { DaemonClient, DaemonRequestNotDeliveredError, DaemonUnavailableError } =
-  await import("../../src/daemon/client");
+afterEach(() => {
+  createdSocket?.destroy();
+  createConnectionSpy.mockRestore();
+});
+
+import {
+  DaemonClient,
+  DaemonRequestNotDeliveredError,
+  DaemonUnavailableError,
+} from "../../src/daemon/client";
 
 function createClient() {
   return new DaemonClient("/fake/socket", 1_000, new FakeTimer(), {}, null, undefined, "win32");

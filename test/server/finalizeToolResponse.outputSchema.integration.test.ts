@@ -1,5 +1,6 @@
+import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { createMcpServer } from "../../src/server/index";
 import {
@@ -10,6 +11,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+
+const restoreTools = preserveToolRegistry();
+afterAll(restoreTools);
 
 beforeEach(() => {
   PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());

@@ -1,4 +1,4 @@
-import { describe, expect, mock, beforeEach, test } from "bun:test";
+import { describe, expect, mock, beforeEach, afterEach, test } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -7,6 +7,10 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
 describe("PlanExecutor — onBeforePlanStep", () => {
   let planExecutor: DefaultPlanExecutor;
+
+  afterEach(() => {
+    ToolRegistry.unregister("hookTestNoop");
+  });
 
   beforeEach(() => {
     planExecutor = new DefaultPlanExecutor();

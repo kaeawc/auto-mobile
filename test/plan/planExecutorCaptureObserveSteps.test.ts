@@ -2,7 +2,7 @@ import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { registerObserveTools } from "../../src/server/observeTools";
+import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
@@ -54,7 +54,7 @@ describe("PlanExecutor — captureObserveSteps", () => {
   });
 
   afterEach(() => {
-    registerObserveTools();
+    unregisterTemporaryTools("observe", "captureTestNoop");
   });
 
   test("summary mode stores stepObservation without viewHierarchy on successful observe steps", async () => {

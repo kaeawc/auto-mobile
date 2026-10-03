@@ -28,7 +28,7 @@ describe("ExecuteGesture Android swipe", () => {
     AndroidCtrlProxyClient.resetInstances();
   });
 
-  const createGesture = () => new ExecuteGesture(androidDevice, fakeAdb);
+  const createGesture = () => new ExecuteGesture({ ...androidDevice }, fakeAdb);
 
   test("dispatches an ADB input swipe with the given coordinates and duration in adb mode", async () => {
     const result = await createGesture().swipe(10, 20, 30, 40, { duration: 250 });

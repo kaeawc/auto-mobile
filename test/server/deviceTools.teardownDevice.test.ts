@@ -318,6 +318,9 @@ describe("deleteDevice handler", () => {
   };
 
   const cleanup = () => {
+    IOSCtrlProxyManager.resetInstances();
+    AndroidCtrlProxyManager.resetInstances();
+    PortManager.reset();
     clearDirectSessionDevices();
     resetDeviceToolsDependencies();
     resetVideoRecordingManagerDependencies();

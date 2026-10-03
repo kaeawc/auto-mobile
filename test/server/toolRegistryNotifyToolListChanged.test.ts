@@ -1,5 +1,5 @@
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
@@ -12,6 +12,10 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   beforeEach(() => {
     // The registry singleton is shared across suites; drop servers registered
     // by other tests so counts here are hermetic.
+    ToolRegistry.clearServersForTesting();
+  });
+
+  afterEach(() => {
     ToolRegistry.clearServersForTesting();
   });
 

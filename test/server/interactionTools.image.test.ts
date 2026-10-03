@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { afterEach, expect, test } from "bun:test";
 import {
@@ -10,6 +11,8 @@ import {
 } from "../../src/server/interactionTools";
 import type { TapAtOptions } from "../../src/models/TapAtOptions";
 import { cropSource } from "../helpers/imageRelativePoint";
+
+isolateToolRegistry();
 
 const screenshot = {
   screenSize: { width: 100, height: 200 },

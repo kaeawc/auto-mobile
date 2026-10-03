@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { registerInteractionTools } from "../../src/server/interactionTools";
+import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
@@ -28,7 +28,7 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
   });
 
   afterEach(() => {
-    registerInteractionTools();
+    unregisterTemporaryTools("sendKeys");
   });
 
   const registerSendKeys = (payload: Record<string, unknown>) => {

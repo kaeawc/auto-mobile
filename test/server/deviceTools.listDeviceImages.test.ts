@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -23,6 +24,8 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+
+isolateToolRegistry();
 
 let restoreDeviceToolProviders: () => void;
 beforeEach(() => {
@@ -100,6 +103,7 @@ describe("listDeviceImages", function () {
   });
 
   afterEach(function () {
+    AndroidAvdProvenanceCache.resetForTests();
     resetDeviceToolsDependencies();
     ToolRegistry.unregister("listDeviceImages");
   });

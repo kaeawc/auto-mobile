@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   invalidateReadinessForDisabledAccessibility,
@@ -6,6 +7,8 @@ import {
 } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, ObserveResult } from "../../src/models";
+
+isolateToolRegistry();
 
 describe("observe accessibility readiness", () => {
   const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };

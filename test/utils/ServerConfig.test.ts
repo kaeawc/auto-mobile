@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
@@ -6,6 +6,16 @@ import {
 } from "../../src/utils/runnerReadinessConfig";
 
 describe("ServerConfig", () => {
+  let previousToolOutputsDir: string | undefined;
+  let previousDismissKeyboard: boolean;
+  beforeEach(() => {
+    previousToolOutputsDir = serverConfig.getToolOutputsDir();
+    previousDismissKeyboard = serverConfig.isDismissKeyboardAfterInputEnabled();
+  });
+  afterEach(() => {
+    serverConfig.setToolOutputsDir(previousToolOutputsDir);
+    serverConfig.setDismissKeyboardAfterInputEnabled(previousDismissKeyboard);
+  });
   describe("tool output artifacts", () => {
     beforeEach(() => {
       serverConfig.setToolOutputsDir(undefined);

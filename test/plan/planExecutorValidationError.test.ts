@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { registerObserveTools } from "../../src/server/observeTools";
+import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
 // Issue #5854 §3: PlanExecutor called `tool.schema.parse(...)` directly, so a
@@ -48,7 +48,7 @@ describe("PlanExecutor validation error rendering (#5854)", () => {
   });
 
   afterEach(() => {
-    registerObserveTools();
+    unregisterTemporaryTools("observe", "validationErrorTool5854");
   });
 
   test("a non-finite step param names the finite constraint with the MCP wording", async () => {

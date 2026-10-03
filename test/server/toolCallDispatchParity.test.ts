@@ -1,5 +1,5 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -187,7 +187,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     await callThrough(direct.client, OK_TOOL, { count: 0 });
   });
 
-  afterEach(() => {
+  beforeEach(() => {
     handlerArgs.length = 0;
   });
 

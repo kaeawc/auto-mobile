@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import {
   afterAll,
@@ -25,6 +26,8 @@ import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+
+isolateToolRegistry();
 
 const TOOL = "__acceptance_discovery_capability_probe_7144__";
 const NO_SCHEMA_TOOL = "__acceptance_discovery_no_schema_probe_7144__";

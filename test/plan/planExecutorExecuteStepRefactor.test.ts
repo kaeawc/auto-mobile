@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { registerObserveTools } from "../../src/server/observeTools";
+import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
@@ -71,7 +71,13 @@ describe("PlanExecutor executeStep refactor", () => {
   });
 
   afterEach(() => {
-    registerObserveTools();
+    unregisterTemporaryTools(
+      "observe",
+      "executeStepRefactorOk",
+      "executeStepRefactorFail",
+      "executeStepRefactorDeviceLost",
+      "executeStepRefactorAbortWait",
+    );
   });
 
   test("successes share normalized params through sequential and device-track execution", async () => {

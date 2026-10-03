@@ -2,7 +2,6 @@ import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { registerObserveTools } from "../../src/server/observeTools";
 import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -45,7 +44,8 @@ describe("PlanExecutor — captureFailureObservation timer cancellation", () => 
   });
 
   afterEach(() => {
-    registerObserveTools();
+    ToolRegistry.unregister("observe");
+    ToolRegistry.unregister("captureTimerFailStep");
   });
 
   test("cancels the injected timer via this.timer, not global clearTimeout, on the success path", async () => {

@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../src/models";
 import {
@@ -18,6 +19,8 @@ import {
   parseSimulatorDisplays,
   simulatorDeviceDisplays,
 } from "../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+
+isolateToolRegistry();
 
 /**
  * Tests for the observe `waitFor` predicate DSL and the standalone

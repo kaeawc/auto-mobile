@@ -171,10 +171,13 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   afterEach(async function () {
-    // Clean up WebSocket connections
+    // Hierarchy-only tests start backoff without opening a WebSocket. Stop that
+    // work explicitly before close so fake captures cannot run in a later file.
     if (accessibilityServiceClient) {
+      accessibilityServiceClient.cancelScreenshotBackoff();
       await accessibilityServiceClient.close();
     }
+    fakeTimer.reset();
     await stopDeviceDataStreamSocketServer();
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });

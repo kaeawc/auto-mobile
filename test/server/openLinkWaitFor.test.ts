@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type {
   BootedDevice,
@@ -26,6 +27,8 @@ import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+isolateToolRegistry();
 
 const makeObservation = (marker: string): ObserveResult => ({
   updatedAt: 0,

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect } from "bun:test";
 import { logger, LogLevel } from "../../src/utils/logger";
 import { cancellationTests, warmedTests } from "./interactionCancellation";
 
@@ -26,7 +26,7 @@ describe("warmedTests lifecycle", () => {
     expect(logger.getLogLevel()).toBe(previousLevel);
   });
 
-  test("runs the scenario once more and resets after the real test", () => {
+  afterAll(() => {
     expect(calls).toBe(2);
     expect(resets).toBe(3);
     expect(dirty).toBe(false);
@@ -56,7 +56,7 @@ describe("warmedTests failures", () => {
     expect(dirty).toBe(false);
   });
 
-  test("the real run succeeded and its state was reset", () => {
+  afterAll(() => {
     expect(calls).toBe(2);
     expect(dirty).toBe(false);
   });
@@ -92,7 +92,7 @@ describe("warmedTests.each", () => {
     expect(dirty).toBe(false);
   });
 
-  test("both row shapes run identically during warm-up and measurement", () => {
+  afterAll(() => {
     expect(tuples).toEqual([
       ["tuple", 7],
       ["tuple", 7],

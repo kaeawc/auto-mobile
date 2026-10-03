@@ -1,5 +1,6 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { describe, expect, test, beforeEach, afterAll, mock } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach, afterAll, mock, spyOn } from "bun:test";
+import * as planUtils from "../../src/utils/planUtils";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -18,28 +19,6 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
 import { ExecutionTracker } from "../../src/server/executionTracker";
-
-// Mock planUtils so the orchestrator's runPlan() phase is observable without
-// spinning up a real PlanExecutor. The companion test
-// planTools.executePlanThrow.test.ts mocks the same module — keep them compatible.
-const executePlanMock = mock(() =>
-  Promise.resolve({
-    success: true,
-    executedSteps: 2,
-    totalSteps: 2,
-    debug: { executionTimeMs: 100, steps: [] },
-  }),
-);
-
-mock.module("../../src/utils/planUtils", () => {
-  const { YamlPlanSerializer } = require("../../src/utils/plan/PlanSerializer");
-  const serializer = new YamlPlanSerializer();
-  return {
-    importPlanFromYaml: serializer.importPlanFromYaml.bind(serializer),
-    exportPlanFromLogs: serializer.exportPlanFromLogs.bind(serializer),
-    executePlan: executePlanMock,
-  };
-});
 
 import {
   PlanExecutionOrchestrator,
@@ -103,6 +82,7 @@ const baseDeps = () => ({
 });
 
 describe("PlanExecutionOrchestrator", () => {
+  let executePlanMock: ReturnType<typeof spyOn<typeof planUtils, "executePlan">>;
   // Temp dirs created by the android manifest test; removed after the suite.
   const manifestTempDirs: string[] = [];
 
@@ -113,10 +93,19 @@ describe("PlanExecutionOrchestrator", () => {
   });
 
   beforeEach(() => {
-    executePlanMock.mockClear();
+    executePlanMock = spyOn(planUtils, "executePlan").mockResolvedValue({
+      success: true,
+      executedSteps: 2,
+      totalSteps: 2,
+      debug: { executionTimeMs: 100, steps: [] },
+    });
     // The plan-execution guard is a process-wide singleton; reset between tests
     // so one run never leaks state into another.
     serverConfig.setPlanExecutionActive(false);
+  });
+
+  afterEach(() => {
+    executePlanMock.mockRestore();
   });
 
   test("keeps the plan-execution guard active during the run and clears it afterward", async () => {

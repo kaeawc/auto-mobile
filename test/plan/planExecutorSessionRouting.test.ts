@@ -21,6 +21,16 @@ describe("PlanExecutor - Session-based Device Routing", () => {
   });
 
   afterEach(() => {
+    for (const name of [
+      "testDaemonNotInitializedTool",
+      "testDaemonInitializedTool",
+      "testDeviceIdInjectionTool",
+      "testLockNamespaceTool",
+      "testNoLockNamespaceTool",
+      "testNoOverrideTool",
+    ]) {
+      ToolRegistry.unregister(name);
+    }
     // Clean up daemon state if initialized
     const daemonState = DaemonState.getInstance();
     if (daemonState.isInitialized()) {

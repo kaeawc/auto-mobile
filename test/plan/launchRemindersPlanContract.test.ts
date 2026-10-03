@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { registerAppTools } from "../../src/server/appTools";
-import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
@@ -16,8 +14,9 @@ const planToolSchema = z.object({}).passthrough();
 
 describe("launch Reminders plan contract", () => {
   afterEach(() => {
-    registerAppTools();
-    registerObserveTools();
+    for (const name of ["launchApp", "observe", "terminateApp"]) {
+      ToolRegistry.unregister(name);
+    }
   });
 
   test("parses and executes the bundled launch, observe, and cleanup sequence", async () => {

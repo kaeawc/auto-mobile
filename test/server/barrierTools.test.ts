@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerBarrierTools } from "../../src/server/barrierTools";
@@ -6,6 +7,8 @@ import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+isolateToolRegistry();
 
 const makeDevice = (deviceId: string): BootedDevice => ({
   platform: "android",

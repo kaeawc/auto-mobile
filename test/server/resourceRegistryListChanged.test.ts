@@ -1,5 +1,5 @@
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   ReadResourceRequestSchema,
@@ -16,6 +16,11 @@ import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 import { InstalledAppsRepository } from "../../src/db/installedAppsRepository";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+
+afterEach(() => {
+  ResourceRegistry.clearServersForTesting();
+  ResourceRegistry.clearResources();
+});
 
 // Minimal MCP-server stand-in for ResourceRegistry: registerWithServer installs
 // request handlers on `server.server` and tracks the wrapper for notification

@@ -1,8 +1,11 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { registerDeviceTools } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+
+isolateToolRegistry();
 
 describe("device resource advertised constraints", () => {
   const validators = new Map<string, ValidateFunction>();

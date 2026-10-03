@@ -1,5 +1,6 @@
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { ListResourceTemplatesRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
@@ -9,16 +10,23 @@ describe("MCP Templates List", () => {
   let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
+    // Keep the cold server import outside each unit test's timing budget.
+    await import("../../../src/server/index");
+  });
+
+  beforeEach(async () => {
+    ToolRegistry.clearTools();
     restoreHermeticServer = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     if (fixture) {
       await fixture.teardown();
     }
     restoreHermeticServer();
+    ToolRegistry.clearTools();
   });
 
   test("should return registered resource templates including emulator template", async function () {

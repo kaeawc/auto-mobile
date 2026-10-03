@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { registerInteractionTools } from "../../src/server/interactionTools";
+import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
 /**
@@ -31,7 +31,7 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
   });
 
   afterEach(() => {
-    registerInteractionTools();
+    unregisterTemporaryTools("tapOn");
   });
 
   function registerCapturingTool(success: boolean): void {

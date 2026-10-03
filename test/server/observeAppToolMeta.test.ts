@@ -1,8 +1,11 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, test, expect, beforeEach } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { OBSERVE_APP_RESOURCE_URI } from "../../src/server/observeAppResource";
 import { z } from "zod/v4";
+
+isolateToolRegistry();
 
 describe("tool → MCP App UI association via _meta.ui.resourceUri", () => {
   beforeEach(() => {

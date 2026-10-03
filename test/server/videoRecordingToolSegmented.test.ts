@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,8 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
+
+isolateToolRegistry();
 
 async function drainMicrotasks(turns = 10): Promise<void> {
   for (let turn = 0; turn < turns; turn++) {

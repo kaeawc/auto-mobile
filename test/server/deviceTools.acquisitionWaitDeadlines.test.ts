@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -25,6 +26,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+isolateToolRegistry();
 
 async function flushMicrotasks(): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt++) {

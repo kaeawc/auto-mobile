@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { beforeAll, expect, spyOn, test } from "bun:test";
@@ -16,6 +17,8 @@ import {
 import { createProductionCoreDeviceProbe } from "../../src/utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+isolateToolRegistry();
 
 beforeAll(async () => {
   // Pay cold schema/SDK initialization outside the per-test timing budget.

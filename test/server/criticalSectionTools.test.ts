@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
@@ -9,6 +10,8 @@ import { logger } from "../../src/utils/logger";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+
+isolateToolRegistry();
 
 describe("criticalSection tool", () => {
   beforeAll(() => {

@@ -104,6 +104,37 @@ describe("SharedGestureDelegate", () => {
     expect(sentCounts).toEqual([1]);
   });
 
+  it("reports drag dispatch only after beforeSend and the request is sent", async () => {
+    const { context, sent } = createFakeContext();
+    const delegate = new SharedGestureDelegate(context, {
+      logTag: "TEST",
+      roundCoordinates: false,
+    });
+    const sentCounts: number[] = [];
+    await callAndResolve(sent, context.requestManager, () =>
+      delegate.requestDrag(
+        1,
+        2,
+        3,
+        4,
+        600,
+        300,
+        100,
+        5000,
+        undefined,
+        undefined,
+        undefined,
+        () => {
+          sentCounts.push(sent.length);
+        },
+        () => {
+          sentCounts.push(sent.length);
+        },
+      ),
+    );
+    expect(sentCounts).toEqual([0, 1]);
+  });
+
   describe("requestTapCoordinates abort signal (issue #6306 review)", () => {
     // A caller's outer deadline can expire WHILE `ensureConnected()` is
     // resolving a slow reconnect/auto-setup -- `ensureConnected()` itself is

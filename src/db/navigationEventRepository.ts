@@ -34,7 +34,8 @@ export async function recordNavigationEvent(
 ): Promise<void> {
   await getDb(db).insertInto("navigation_events").values(toNavigationRow(input)).execute();
 
-  cleanupIfNeeded(db);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db);
 }
 
 /**
@@ -50,7 +51,8 @@ export async function recordNavigationEvents(
   }
   await getDb(db).insertInto("navigation_events").values(inputs.map(toNavigationRow)).execute();
 
-  cleanupIfNeeded(db, undefined, undefined, inputs.length);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getNavigationEvents(

@@ -459,7 +459,7 @@ export interface NavigationGraph {
   recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void>;
 
   /** Record back stack information for the current screen */
-  recordBackStack(backStack: BackStackInfo): void;
+  recordBackStack(backStack: BackStackInfo): void | Promise<void>;
 
   /** Record a tool call for correlation */
   recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): void;

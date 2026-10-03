@@ -32,7 +32,8 @@ export async function recordOsEvent(
 ): Promise<void> {
   await getDb(db).insertInto("os_events").values(toOsRow(input)).execute();
 
-  cleanupIfNeeded(db);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db);
 }
 
 /**
@@ -48,7 +49,8 @@ export async function recordOsEvents(
   }
   await getDb(db).insertInto("os_events").values(inputs.map(toOsRow)).execute();
 
-  cleanupIfNeeded(db, undefined, undefined, inputs.length);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getOsEvents(

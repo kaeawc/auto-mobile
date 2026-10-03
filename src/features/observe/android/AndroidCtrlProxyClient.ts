@@ -5821,23 +5821,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // The full hierarchy (~10-50KB with bounds/states/extras) is available via
       // the observation stream and would cause excessive traffic at 500ms intervals.
       const compactHierarchy = data.hierarchy ? { node: compactifyNode(data.hierarchy) } : null;
-      recorder.recordLayoutEvent({
-        timestamp: now,
-        applicationId: data.packageName ?? null,
-        subType: "hierarchy_change",
-        composableName: null,
-        composableId: null,
-        recompositionCount: null,
-        durationMs: null,
-        likelyCause: null,
-        detailsJson: JSON.stringify({
+      recorder
+        .recordLayoutEvent({
+          timestamp: now,
+          applicationId: data.packageName ?? null,
+          subType: "hierarchy_change",
+          composableName: null,
+          composableId: null,
+          recompositionCount: null,
+          durationMs: null,
+          likelyCause: null,
+          detailsJson: JSON.stringify({
+            screenName,
+            windowCount,
+            foregroundActivity: data.foregroundActivity ?? null,
+            hierarchy: compactHierarchy,
+          }),
           screenName,
-          windowCount,
-          foregroundActivity: data.foregroundActivity ?? null,
-          hierarchy: compactHierarchy,
-        }),
-        screenName,
-      });
+        })
+        .catch((error) => {
+          logger.warn(`[CTRL_PROXY] Layout telemetry failed: ${errorMessage(error)}`, error);
+        });
     }
 
     // Notify hierarchy navigation detector

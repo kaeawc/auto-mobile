@@ -51,11 +51,6 @@ export interface AutoTargetSelectorService {
     direction: SwipeDirection,
   ): Element | null;
 
-  pickLargestDirectionMatchingScrollable(
-    scrollables: Element[],
-    direction: SwipeDirection,
-  ): Element | null;
-
   getScreenBounds(
     observeResult: ObserveResult,
     options?: { platform?: "android" | "ios"; includeSystemInsets?: boolean },

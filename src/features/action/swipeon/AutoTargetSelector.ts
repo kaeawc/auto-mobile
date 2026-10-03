@@ -2,38 +2,48 @@ import { Element, ObserveResult, SwipeDirection, SwipeOnOptions } from "../../..
 import { boundsArea, boundsEqual } from "../../../utils/bounds";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../../utils/screenBounds";
 import { getHierarchySnapshot } from "../../observe/HierarchyCapture";
+import { DefaultElementGeometry } from "../../utility/ElementGeometry";
+import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import { effectiveSwipeInsets, swipeScreenSize } from "./iosChromeInsets";
 import { AutoTargetSelectorService } from "./types";
 
 export class AutoTargetSelector implements AutoTargetSelectorService {
+  constructor(
+    private readonly geometry: Pick<
+      ElementGeometry,
+      "isPointInElement"
+    > = new DefaultElementGeometry(),
+  ) {}
+
   selectAutoTargetScrollable(
     scrollables: Element[],
     screenBounds: Element["bounds"] | null,
     direction: SwipeDirection,
   ): Element | null {
-    if (scrollables.length === 0) {
+    const matching = scrollables.filter((element) => this.matchesDirection(element, direction));
+    if (matching.length === 0) {
       return null;
     }
 
-    if (scrollables.length === 1) {
-      return this.matchesDirection(scrollables[0], direction) ? scrollables[0] : null;
-    }
-
     const nonScreenScrollables = screenBounds
-      ? scrollables.filter((scrollable) => !boundsEqual(scrollable.bounds, screenBounds))
-      : scrollables.slice();
+      ? matching.filter((scrollable) => !boundsEqual(scrollable.bounds, screenBounds))
+      : matching;
 
-    const candidates = nonScreenScrollables.length > 0 ? nonScreenScrollables : scrollables;
+    const candidates = nonScreenScrollables.length > 0 ? nonScreenScrollables : matching;
+    if (screenBounds) {
+      const centerX = (screenBounds.left + screenBounds.right) / 2;
+      const centerY = (screenBounds.top + screenBounds.bottom) / 2;
+      const centered = candidates.filter((element) =>
+        this.geometry.isPointInElement(element, centerX, centerY),
+      );
+      if (centered.length > 0) {
+        // For nested containers containing the centre, the smallest is innermost.
+        return centered.reduce((inner, current) =>
+          boundsArea(current.bounds) < boundsArea(inner.bounds) ? current : inner,
+        );
+      }
+    }
     return this.pickLargestScrollable(candidates);
-  }
-
-  pickLargestDirectionMatchingScrollable(
-    scrollables: Element[],
-    direction: SwipeDirection,
-  ): Element | null {
-    return this.pickLargestScrollable(
-      scrollables.filter((element) => this.matchesDirection(element, direction)),
-    );
   }
 
   pickLargestScrollable(scrollables: Element[]): Element | null {
@@ -49,10 +59,33 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
   }
 
   matchesDirection(element: Element, direction: SwipeDirection): boolean {
+    const vertical = direction === "up" || direction === "down";
+    const orientation =
+      typeof element.orientation === "string" ? element.orientation.toLowerCase() : undefined;
+    if (orientation === "horizontal" || orientation === "vertical") {
+      return vertical === (orientation === "vertical");
+    }
+
+    const className = element.class ?? element.className;
+    const simpleClassName =
+      typeof className === "string" ? (className.split(".").at(-1) ?? "") : "";
+    if (["HorizontalScrollView", "ViewPager", "ViewPager2", "LazyRow"].includes(simpleClassName)) {
+      return !vertical;
+    }
+    if (
+      ["ScrollView", "NestedScrollView", "ListView", "ExpandableListView", "LazyColumn"].includes(
+        simpleClassName,
+      )
+    ) {
+      return vertical;
+    }
+
+    // RecyclerView and generic Compose nodes do not expose their axis in every
+    // capture. scroll_forward/backward actions alone also do not identify it.
     const width = Math.abs(element.bounds.right - element.bounds.left);
     const height = Math.abs(element.bounds.bottom - element.bounds.top);
 
-    if (direction === "up" || direction === "down") {
+    if (vertical) {
       return height >= width;
     }
 

@@ -418,17 +418,12 @@ export class SwipeOn extends BaseVisualChange {
     observation: ObserveResult,
     bounds?: Element["bounds"],
   ): Element["bounds"] | undefined {
-    const fallbackElement =
-      options.autoTarget === true && !bounds
-        ? this.largestDirectionMatchingScrollable(observation, options.direction!)
-        : null;
-    const swipeBounds = fallbackElement?.bounds ?? bounds;
     // Preserve explicit display-container geometry; automatic screen fallback
     // uses available per-display insets unless the caller opts into system bars.
     return options.includeSystemInsets === false ||
       (options.autoTarget === true && !bounds && options.includeSystemInsets !== true)
-      ? this.insetDisplaySwipeBounds({ observation, bounds: swipeBounds })
-      : swipeBounds;
+      ? this.insetDisplaySwipeBounds({ observation, bounds })
+      : bounds;
   }
 
   private selectedDisplayAutoTarget({
@@ -1065,39 +1060,6 @@ export class SwipeOn extends BaseVisualChange {
       : "Swipe did not change the screen; no scrollable region was found in the hierarchy.";
   }
 
-  private largestDirectionMatchingScrollable(
-    observation: ObserveResult,
-    direction: SwipeDirection,
-  ): Element | null {
-    const scrollables = observation.viewHierarchy
-      ? this.finder.findScrollableElements(observation.viewHierarchy)
-      : [];
-    return this.autoTargetSelector.pickLargestDirectionMatchingScrollable(scrollables, direction);
-  }
-
-  private resolveScreenSwipeCoordinates(
-    options: SwipeOnResolvedOptions,
-    observation: ObserveResult,
-    bounds: Element["bounds"],
-  ): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
-    if (
-      this.device.platform === "android" &&
-      options.autoTarget !== false &&
-      observation.viewHierarchy
-    ) {
-      const element = this.largestDirectionMatchingScrollable(observation, options.direction);
-      if (element) {
-        return this.resolveContainerSwipeCoordinates(
-          options,
-          observation.viewHierarchy,
-          element,
-          observation,
-        );
-      }
-    }
-    return this.geometry.getSwipeWithinBounds(options.direction, bounds);
-  }
-
   private async executeScreenSwipe(
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
@@ -1121,9 +1083,8 @@ export class SwipeOn extends BaseVisualChange {
         }
         const bounds = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
 
-        const { startX, startY, endX, endY, warning } = this.resolveScreenSwipeCoordinates(
-          options,
-          observeResult,
+        const { startX, startY, endX, endY } = this.geometry.getSwipeWithinBounds(
+          options.direction,
           bounds,
         );
 
@@ -1187,14 +1148,11 @@ export class SwipeOn extends BaseVisualChange {
         return {
           ...swipeResult,
           targetType: "screen" as const,
-          warning: this.autoTargetSelector.mergeWarnings(
-            warning,
-            iosSwipeStartWarning({
-              ...insetOptions,
-              startX: Math.floor(startX),
-              startY: Math.floor(startY),
-            }),
-          ),
+          warning: iosSwipeStartWarning({
+            ...insetOptions,
+            startX: Math.floor(startX),
+            startY: Math.floor(startY),
+          }),
         };
       },
       {

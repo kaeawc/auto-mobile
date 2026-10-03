@@ -84,6 +84,95 @@ function expectEndpointsInside(
 }
 
 describe("Android unnamed auto-target capture regression", () => {
+  test.each(["up", "down", "left", "right"] as const)(
+    "nested unnamed pager and list select the capable container for %s",
+    async (direction) => {
+      const pagerBounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
+      const listBounds = { left: 80, top: 400, right: 1000, bottom: 1800 };
+      const before: ObserveResult = {
+        ...textObservation,
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: {
+          hierarchy: {
+            node: [
+              encodeAndroidFlat({
+                attrs: { scrollable: "true", class: "androidx.viewpager2.widget.ViewPager2" },
+                bounds: pagerBounds,
+                children: [
+                  {
+                    attrs: { scrollable: "true", class: "androidx.core.widget.NestedScrollView" },
+                    bounds: listBounds,
+                    children: [],
+                  },
+                ],
+              }),
+            ],
+          },
+        },
+      };
+      const result = await harness({ before }).action.execute({ direction, autoTarget: true });
+      const vertical = direction === "up" || direction === "down";
+      expect(result.targetType).toBe("element");
+      expect(result.element?.bounds).toEqual(vertical ? listBounds : pagerBounds);
+      expectEndpointsInside(result, { bounds: vertical ? listBounds : pagerBounds });
+      expect(result.warning).toContain("lacks a usable identifier; swiping within its bounds");
+    },
+  );
+
+  test("up selects the smaller unnamed vertical sibling through the real parser", async () => {
+    const horizontalBounds = { left: 0, top: 0, right: 1000, bottom: 100 };
+    const verticalBounds = { left: 450, top: 900, right: 550, bottom: 1400 };
+    const before: ObserveResult = {
+      ...textObservation,
+      viewHierarchy: {
+        hierarchy: {
+          node: [
+            encodeAndroidFlat({
+              attrs: { scrollable: "true", class: "android.widget.HorizontalScrollView" },
+              bounds: horizontalBounds,
+              children: [],
+            }),
+            encodeAndroidFlat({
+              attrs: { scrollable: "true", class: "android.widget.ScrollView" },
+              bounds: verticalBounds,
+              children: [],
+            }),
+          ],
+        },
+      },
+    };
+    const result = await harness({ before }).action.execute({ direction: "up", autoTarget: true });
+    expect(result.element?.bounds).toEqual(verticalBounds);
+    expectEndpointsInside(result, { bounds: verticalBounds });
+  });
+
+  for (const autoTarget of [undefined, false] as const) {
+    test.each(["up", "down", "left", "right"] as const)(
+      `screen swipe with autoTarget=${autoTarget} preserves main coordinates for %s`,
+      async (direction) => {
+        const selector = new AutoTargetSelector();
+        // Undefined retains legacy automatic selection; model its screen decision
+        // while leaving the captured scrollable present to catch any second search.
+        const select = spyOn(selector, "selectAutoTargetScrollable").mockReturnValue(null);
+        const result = await harness({ selector }).action.execute({ direction, autoTarget });
+        const coordinates = new DefaultElementGeometry().getSwipeWithinBounds(direction, {
+          left: 0,
+          top: 63,
+          right: 1080,
+          bottom: 2337,
+        });
+        expect(result.targetType).toBe("screen");
+        expect([result.x1, result.y1, result.x2, result.y2]).toEqual([
+          coordinates.startX,
+          coordinates.startY,
+          coordinates.endX,
+          coordinates.endY,
+        ]);
+        expect(select).toHaveBeenCalledTimes(autoTarget === false ? 0 : 1);
+      },
+    );
+  }
+
   test("starts inside the captured Text scrollable, not the bottom strip", async () => {
     expect(largest.bounds).toEqual({ left: 0, top: 652, right: 1080, bottom: 2064 });
     const h = harness();
@@ -92,7 +181,12 @@ describe("Android unnamed auto-target capture regression", () => {
     expect(result.y2).toBeGreaterThan(largest.bounds.top);
     expectEndpointsInside(result, largest);
     expect(result.targetType).toBe("element");
-    expect(result.element?.bounds).toEqual(largest.bounds);
+    // The capture contains an inner scrollable at the screen centre; selection
+    // now prefers it over its larger, also-scrollable parent.
+    expect(result.element?.bounds).toEqual({ left: 42, top: 694, right: 1038, bottom: 2022 });
+    expectEndpointsInside(result, {
+      bounds: { left: 42, top: 694, right: 1038, bottom: 2022 },
+    });
     expect(result.warning).toContain("lacks a usable identifier; swiping within its bounds");
     expect(result.warning).not.toContain("swiping the screen");
     expect(h.gesture.getSwipeCalls()).toHaveLength(1);
@@ -168,16 +262,26 @@ describe("Android unnamed auto-target capture regression", () => {
     expectEndpointsInside(result, { bounds: { left: 0, top: 63, right: 1080, bottom: 2337 } });
   });
 
-  test("screen fallback uses the largest direction-matching scrollable when selection declines it", async () => {
+  test("screen fallback preserves main geometry when selection declines it", async () => {
     const selector = new AutoTargetSelector();
     spyOn(selector, "selectAutoTargetScrollable").mockReturnValue(null);
     const result = await harness({ selector }).action.execute({ direction: "up" });
     expect(result.targetType).toBe("screen");
-    expectEndpointsInside(result, largest);
-    expect(result.y1).toBeLessThan(2064);
+    const coordinates = new DefaultElementGeometry().getSwipeWithinBounds("up", {
+      left: 0,
+      top: 63,
+      right: 1080,
+      bottom: 2337,
+    });
+    expect([result.x1, result.y1, result.x2, result.y2]).toEqual([
+      coordinates.startX,
+      coordinates.startY,
+      coordinates.endX,
+      coordinates.endY,
+    ]);
   });
 
-  test("screen fallback uses the injected selector's choice for swipe coordinates", async () => {
+  test("unnamed auto-target uses the injected selector's chosen element without reselecting", async () => {
     const smaller: Element = {
       ...largest,
       bounds: { left: 80, top: 1000, right: 280, bottom: 1600 },
@@ -185,15 +289,8 @@ describe("Android unnamed auto-target capture regression", () => {
     const elementFinder = new FakeElementFinder();
     elementFinder.nextScrollableElements = [largest, smaller];
     const realSelector = new AutoTargetSelector();
-    expect(
-      realSelector.pickLargestDirectionMatchingScrollable(
-        elementFinder.nextScrollableElements,
-        "up",
-      ),
-    ).toBe(largest);
     const selector: AutoTargetSelectorService = {
-      selectAutoTargetScrollable: mock(() => null),
-      pickLargestDirectionMatchingScrollable: mock(() => smaller),
+      selectAutoTargetScrollable: mock(() => smaller),
       getScreenBounds: realSelector.getScreenBounds.bind(realSelector),
       describeContainer: realSelector.describeContainer.bind(realSelector),
       mergeWarnings: realSelector.mergeWarnings.bind(realSelector),
@@ -204,11 +301,14 @@ describe("Android unnamed auto-target capture regression", () => {
     };
     const h = harness({ before, selector, elementFinder });
     const result = await h.action.execute({ direction: "up" });
-    expect(selector.pickLargestDirectionMatchingScrollable).toHaveBeenCalledWith(
+    expect(selector.selectAutoTargetScrollable).toHaveBeenCalledTimes(1);
+    expect(selector.selectAutoTargetScrollable).toHaveBeenCalledWith(
       elementFinder.nextScrollableElements,
+      { left: 0, top: 63, right: 1080, bottom: 2337 },
       "up",
     );
-    expect(result.targetType).toBe("screen");
+    expect(result.targetType).toBe("element");
+    expect(result.element).toBe(smaller);
     expectEndpointsInside(result, smaller);
     const coordinates = new DefaultElementGeometry().getSwipeWithinBounds("up", smaller.bounds);
     expect([result.x1, result.y1, result.x2, result.y2]).toEqual([

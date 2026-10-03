@@ -14,6 +14,11 @@ interface RecoveryConfigProvider {
   fun getMaxRecoveryToolCalls(): Int
 }
 
+/** Reader seam for the daemon's recovery configuration resource. */
+internal fun interface RecoveryConfigResourceReader {
+  fun read(uri: String, timeoutMs: Long): DaemonResponse
+}
+
 /**
  * Reads recovery config from the daemon's feature-flag resource.
  *
@@ -21,10 +26,18 @@ interface RecoveryConfigProvider {
  * restarting the JVM. The default TTL is 30 seconds — short enough to pick up a kill-switch toggle
  * within a test suite run, long enough to avoid per-test daemon round-trips.
  */
-class DaemonRecoveryConfigProvider(
+class DaemonRecoveryConfigProvider
+internal constructor(
   private val cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
   private val clock: () -> Long = System::currentTimeMillis,
+  private val reader: RecoveryConfigResourceReader =
+    RecoveryConfigResourceReader(DaemonSocketClientManager::readResource),
 ) : RecoveryConfigProvider {
+
+  constructor(
+    cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
+    clock: () -> Long = System::currentTimeMillis,
+  ) : this(cacheTtlMs, clock, RecoveryConfigResourceReader(DaemonSocketClientManager::readResource))
 
   private data class CachedEntry(val config: CachedConfig, val fetchedAt: Long)
 
@@ -45,7 +58,7 @@ class DaemonRecoveryConfigProvider(
     val config =
       try {
         val response =
-          DaemonSocketClientManager.readResource(
+          reader.read(
             "automobile:config/feature-flags/ai-recovery",
             5000L,
           )

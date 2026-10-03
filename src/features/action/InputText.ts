@@ -1157,10 +1157,25 @@ export class InputText extends BaseVisualChange {
 
     // Handle IME action if specified (CtrlProxy iOS supports this)
     if (imeAction) {
-      const imeResult = await client.requestImeAction(imeAction);
-      assertInputNotAborted(signal);
-      if (!imeResult.success) {
-        logger.warn(`[InputText] CtrlProxy iOS IME action failed: ${imeResult.error}`);
+      let imeError: string | undefined;
+      try {
+        const imeResult = await client.requestImeAction(imeAction);
+        assertInputNotAborted(signal);
+        if (!imeResult.success) {
+          imeError = imeResult.error || "unknown error";
+        }
+      } catch (error) {
+        assertInputNotAborted(signal);
+        imeError = errorMessage(error) || "unknown error";
+      }
+      if (imeError !== undefined) {
+        logger.warn(`[InputText] CtrlProxy iOS IME action '${imeAction}' failed: ${imeError}`);
+        return {
+          success: false,
+          text,
+          method: "a11y",
+          error: `IME action '${imeAction}' failed after the text was entered: ${imeError}. Do not retype the text.`,
+        };
       }
     }
 

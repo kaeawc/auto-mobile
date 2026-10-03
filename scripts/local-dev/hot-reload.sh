@@ -276,19 +276,21 @@ stop_namespace_daemon_for_reload() (
   export UNINSTALL_SH_SOURCE_ONLY=true
   # shellcheck source=scripts/uninstall.sh
   source "${PROJECT_ROOT}/scripts/uninstall.sh"
-  local pid_path record pid
+  local pid_path socket_path record pid
+  socket_path=$(daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock)
   pid_path=$(daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid)
   [[ -f "${pid_path}" ]] || return 0
   record=$(cat "${pid_path}") || return 0
   pid=$(daemon_record_pid "${record}") || { log_warn "Invalid daemon PID record; use auto-mobile --daemon stop."; return 0; }
-  if ! daemon_pid_is_daemon "${pid}"; then
+  if ! daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
     log_warn "Namespace PID ${pid} is not a live AutoMobile daemon; leaving it alone."
     return 0
   fi
+  daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}" || return 0
   kill -TERM "${pid}" 2>/dev/null || return 0
   if ! wait_for_daemon_to_stop "${pid}"; then
     # Recheck identity AND record before escalation: never kill a reused PID.
-    if [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]] && daemon_pid_is_daemon "${pid}"; then
+    if [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]] && daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
       log_warn "Namespace daemon did not stop within 10 seconds; sending KILL to PID ${pid}."
       kill -KILL "${pid}" 2>/dev/null || true
     fi

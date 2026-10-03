@@ -1,6 +1,4 @@
 import type {
-  CoreDeviceGuardVersionProvider,
-  CoreDeviceVersion,
   DevicectlCommandInvoker,
   DevicectlCommandResult,
   DevicectlVersionSource,
@@ -19,17 +17,6 @@ export class FakeDevicectlVersionSource implements DevicectlVersionSource {
       throw this.failure;
     }
     return this.capturedOutput;
-  }
-}
-
-export class FakeCoreDeviceGuardVersionProvider implements CoreDeviceGuardVersionProvider {
-  versions?: {
-    installedCoreDevice: CoreDeviceVersion;
-    selectedDeveloperDirCoreDevice: CoreDeviceVersion;
-  };
-
-  async getVersions() {
-    return this.versions;
   }
 }
 

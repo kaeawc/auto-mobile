@@ -16,7 +16,6 @@ const captureHelp = readFileSync(
 const unsupportedCapabilities: CoreDeviceCapabilityResult[] = [
   { kind: "unsupported", reason: "Screenshot capability is unsupported" },
   { kind: "unavailable", reason: "CoreDevice version is unavailable" },
-  { kind: "blocked", warning: "Selected developer directory is older than installed CoreDevice" },
   {
     kind: "notBooted",
     error: new ActionableError(

@@ -499,6 +499,7 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 | Tool                                 | What it does                                                              |
 | ------------------------------------ | ------------------------------------------------------------------------- |
+| 📸 <code>snapshotOf</code>           | Saves a PNG crop of an element or screen rectangle (opt-in).              |
 | 👀 <code>observe</code>              | Gets screen hierarchy and screenshot, with optional PNG crop.             |
 | 🎯 <code>hitTest</code>              | Estimates hierarchy nodes beneath a coordinate without dispatching input. |
 | 🔍 <code>explore</code>              | Explores an app to build a navigation graph.                              |
@@ -506,6 +507,17 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
+
+### Navigation and highlight options
+
+`explore` accepts `maxInteractions` (default 50), `resetToHome` to return home
+periodically (default false), `resetInterval` (default 15 interactions), and
+`dryRun` to explore without performing interactions.
+
+`navigateTo.targetScreen` names the target screen in the learned graph.
+`highlight.containerOf` highlights the selected element's container.
+`identifyInteractions.includeContext` controls `navigationGraph` predictions,
+`elementDetails`, and `suggestedParams`; each is included unless set to false.
 
 ### Android back stack user IDs
 
@@ -606,6 +618,7 @@ settled screenshot is eligible.
 
 | Tool                          | What it does                                                                                                                                                |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                    |
 | 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
@@ -617,6 +630,23 @@ settled screenshot is eligible.
 | 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                  |
 | ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                              |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                             |
+
+### Tap, swipe, and form search options
+
+`tapOn.searchUntil` polls for the element before tapping; its optional `duration`
+is 100–12000 ms (default 1500). `preTapStability` requires stable bounds before
+tapping, and `retryIfNoChange` retries once when the hierarchy is unchanged after
+a tap. `ensureTap` enables both checks. Direct semantic-link activation cannot
+use `searchUntil`.
+
+`tapAny.searchUntil` polls for an eligible clickable element with the same
+`duration` range and default. `scrollableContainer` restricts its search to
+scrollable containers/lists.
+
+`swipeOn.gestureType` chooses whether `direction` describes finger movement
+(`swipeFingerTowardsDirection`, the default) or content scrolling
+(`scrollTowardsDirection`). `setUIState.scrollDirection` sets the initial
+search scroll direction.
 
 On Android, `keyboard` can list installed input methods with
 `{"action":"listImes"}` and select an enabled component with
@@ -947,6 +977,28 @@ returns <code>supported: false</code> for both actions because no state-preservi
 termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 
 </details>
+
+### App launch, installation, links, and storage options
+
+`launchApp.coldBoot` starts the app cold instead of resuming it (default false).
+`installApp.artifactPath` is the host path to an `.apk`, `.app`, or `.ipa`.
+`uninstallApp.keepData` retains app data after uninstall on Android (default
+false; Android only).
+
+`openLink.acceptOpenAlert` automatically taps Open on an iOS system
+"Open in <app>?" alert. On Android, `chooserAppPackage` selects the exact package
+when opening the URL displays an intent chooser.
+
+`sqlQuery.databasePath` selects the database path; for iOS SDK databases, use the
+absolute registered path reported by the App Databases resource.
+`getDataStore.adapterName` and `listDataStores.adapterName` select the name under
+which the host app registered its AutoMobile SDK DataStore adapter.
+
+`setAppPermissions.notificationsEnabled` controls Android notification state
+independently of `POST_NOTIFICATIONS`. `notificationPolicyAccess` sets Android
+Do Not Disturb policy access, and `scheduleExactAlarm` sets the
+`SCHEDULE_EXACT_ALARM` appop to `allow` or `deny`.
+`setNotificationPolicy.policyAccess` likewise controls Android DND policy access.
 
 <details class="note" markdown="1">
 <summary>Intentional crash contract</summary>
@@ -1303,6 +1355,47 @@ include `currentOrientation`, `previousOrientation`, `rotationPerformed`,
 Successful no-ops report `rotationPerformed: false`. Returned failures retain
 the structured result with `success: false` and set the MCP `isError` flag.
 
+### Localization, display, and event options
+
+`changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`.
+`timeFormat` selects `"12"` or `"24"`, and `textDirection` selects `ltr` or `rtl`.
+`calendarSystem` accepts calendar identifiers such as `gregory`, `japanese`,
+`buddhist`, or `islamic-civil`. `restartApp` is the iOS bundle ID to relaunch
+after a locale change.
+
+`displayConfig.fontScale` changes Android system text scale; `"default"` removes
+the explicit override and restores the inherited default. Omission leaves it
+unchanged. `shake.intensity` sets Android shake intensity (default 100).
+
+`phoneCall.phoneNumber` is required except for the hold action.
+`sendSms.phoneNumber` specifies the sender's number.
+`postNotification.channelId` supplies the Android channel ID or iOS APNs category.
+`imageType` selects `normal` (default) or `bigPicture`; `imagePath` is the host
+image path for `bigPicture`.
+
+`biometricAuth.modality` selects `any` (default), `fingerprint`, or `face`.
+`fingerprintId` defaults to 1 for match/error and 2 for fail/cancel.
+`ttlMs` sets the SDK override lifetime in milliseconds (default 5000).
+
+### Acquisition, deletion, and snapshot options
+
+`getAndroid` and `getApple` accept `bootTimeoutMs` for finding, recovering, or
+booting the OS and `automationReadyTimeoutMs` for installing, updating, starting,
+and verifying the automation runner. Each defaults to 180000 ms; their sum,
+including defaults for omitted fields, must not exceed 890000 ms.
+
+`provisionDevice.operationId` is a caller-generated idempotency key.
+`deleteDevice.operationId` is a caller-generated idempotency and diagnostic
+correlation ID. `verifyAbsence` requires a complete inventory observation proving
+durable absence. `cancellationPolicy: "cancel-on-request-abort"` cancels accepted teardown when
+the MCP request is aborted; use it for deadline-critical, caller-owned cleanup
+that must stop when its caller stops waiting.
+
+`deviceSnapshot.useVmSnapshot` uses an emulator VM snapshot;
+`vmSnapshotTimeoutMs` sets the VM snapshot timeout in milliseconds.
+`strictBackupMode` is iOS-only and fails the whole snapshot unless every
+requested bundle is backed up (all-or-nothing).
+
 ### Keeping an Android orientation locked
 
 With an Android device session (`sessionUuid` and an available session manager),
@@ -1426,6 +1519,57 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                            |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                        |
 
+### Network options
+
+`network.simulateErrors` configures error simulation with `errorType` (`http500`
+by default, or `timeout`, `connectionRefused`, `dnsFailure`, `tlsFailure`),
+optional positive `limit`, and positive `durationSeconds`. Set `cancel: true`
+to cancel active simulation; otherwise `durationSeconds` is required.
+`notifFilter` selects `all`, `errors`, or `slow` notifications.
+`notifDebounceMs` sets the notification batching delay in milliseconds (zero is
+allowed); `slowThresholdMs` is the positive duration threshold in milliseconds
+at or above which a request counts as slow.
+
+`clearMockNetwork.mockId` selects one mock to clear; omit it to clear all.
+`getNetworkGraph.sinceSeconds` sets the lookback in seconds, and `minRequests`
+sets the minimum request count.
+
+### Plan and recording options
+
+`executePlan.planContent` contains YAML plan content (also accepts a `base64:`
+prefix). `startStep` is the start step index (default 0).
+`deviceAllocationTimeoutMs` is the device allocation timeout in milliseconds
+(default 300000). For multi-device failures, `abortStrategy` selects `immediate`
+(default) or `finish-current-step`. `testMetadata` supplies test identity
+(`testClass`, `testMethod`) and optional build metadata for execution records.
+`cleanupAppId` selects the app for cleanup and `cleanupClearAppData` requests
+clearing its data. `captureObserveSteps` attaches `summary` or `full` observe
+snapshots to the step debug trace; multi-device plans ignore this capture option.
+
+`barrier.deviceCount` specifies how many devices must arrive before the barrier
+lifts. `criticalSection.deviceCount` specifies the devices required at its
+barrier before serial execution.
+
+`recordSteps.planName` names the plan for `action: "end"`.
+`exportPlan.recordingId` identifies the recording to export, and `planName`
+names the exported plan.
+
+### Video recording quality and limits
+
+`videoRecording.recordingId` identifies a recording to stop.
+Start options include `qualityPreset` (`low`, `medium`, or `high`),
+`targetBitrateKbps` (positive integer bitrate in Kbps), `maxThroughputMbps`
+(positive throughput limit in Mbps), and `fps` (positive integer frames per
+second). The throughput limit caps the target bitrate at
+`maxThroughputMbps * 1000` Kbps. Built-in defaults are `low`, 1000 Kbps,
+5 Mbps, and 15 fps; configured recording defaults can override them.
+`qualityPreset` is a configuration label; it does not automatically replace the
+explicit bitrate or frame-rate settings.
+
+`maxDuration` sets a positive integer duration in seconds (default 30), capped
+at 300 seconds on Android and 3600 seconds on iOS. `outputName` supplies a
+recording label.
+
 On Android, `videoRecording({ action: "start", display })` accepts a physical
 panel key, the role `inner`, `cover`, `rear`, or `external`, or `"active"`.
 Omitting `display` selects the active panel when supported. Multi-panel recordings pin
@@ -1453,6 +1597,11 @@ accept the recording `display` argument.
 | ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it.                            |
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                |
 | 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`. |
+
+### Accessibility focus selectors
+
+`accessibilityFocus.resourceId` targets a resource ID. `contentDesc` matches the
+exact content description or accessible label, distinct from visible `text`.
 
 Before acquiring a device, read `automobile:tools` for every tool's default discovery state. Startup enable/disable settings also affect discovery only, not direct `tools/call` by name.
 

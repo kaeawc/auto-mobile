@@ -1,6 +1,6 @@
 {
   "name": "@kaeawc/auto-mobile",
-  "version": "0.0.81",
+  "version": "0.0.82",
   "description": "Mobile device interaction automation via MCP",
   "keywords": [
     "adb",

@@ -115,13 +115,15 @@ const OBSERVE_WAIT_METADATA_KEYS = [
  * skeletonizes by default but cannot be asked for the raw tree would be a silent
  * one-way door. #5872 shipped the first three; #5886 extends both the default and
  * the opt-out to every remaining observation-producing action tool, together.
- * Membership is bound to the advertised opt-out by an anti-divergence test
- * (test/server/tools/schema.integration.test.ts) so the two can never diverge in CI.
+ * Membership is checked in both directions against advertised defaults/opt-outs
+ * by test/server/skeletonDefaultDrift.test.ts, with explicit exemptions for
+ * tools whose payloads do not embed an observation.
  * `observe` is not here — it owns the projection at the payload top level, not
  * under `.observation`.
  */
 export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "tapOn",
+  "tapAt",
   "sendKeys",
   "launchApp",
   "tapAny",

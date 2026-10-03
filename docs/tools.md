@@ -582,7 +582,7 @@ settled screenshot is eligible.
 | 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                                                                                                                 |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                                                                                                               |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                                                            |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
@@ -643,8 +643,35 @@ bounds for native dispatch instead of a global resource-ID lookup. With iOS
 VoiceOver enabled, such `tapAny` calls require a label for activation at the
 selected bounds; an ID-only target fails without an action.
 
+`dragAndDrop.source` and `dragAndDrop.target` each accept exactly one of
+`elementId` or `text`, plus their own optional recursive `container` and
+`selectionStrategy` (`first`, `random`, or `unique`; default `first`):
+
+```json
+{
+  "source": {
+    "elementId": "remove",
+    "container": {
+      "elementId": "item_42",
+      "container": { "elementId": "cart_A" }
+    },
+    "selectionStrategy": "unique"
+  },
+  "target": { "elementId": "cart_B" }
+}
+```
+
+Both endpoints resolve independently before any drag starts. The same outermost
+first scope rules and container indices apply. `unique` requires one eligible
+leaf and one match at every unindexed container level. Missing or ambiguous
+scopes and leaves fail without a drag or global fallback; errors identify
+`source` or `target`, retain the container level or target failure, and list
+ambiguity candidates. Scoped and unscoped endpoints can be mixed. These fields
+belong inside each endpoint, not at the top level; unknown endpoint keys and
+malformed recursive containers are rejected.
+
 This nested-scoping contract is not yet available for
-`sendKeys`/`inputText`, `dragAndDrop`, `swipeOn`/`lookFor`, `observe` subtree
+`swipeOn`/`lookFor`, `observe` subtree
 queries, or `waitFor`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
@@ -662,6 +689,34 @@ modifiers on semantic keys:
     { "action": "type", "text": "replacement", "operation": "replace", "mode": "a11y" },
     { "action": "key", "key": "enter", "modifiers": ["shift"] }
   ]
+}
+```
+
+`sendKeys.container` accepts the same nested chain: the outermost scope resolves
+first, then each inner container and the field resolve among strict descendants
+of their immediate scope, across anonymous wrappers. Each container may specify
+a zero-based `index` within its own scoped candidate set. `selectionStrategy`
+accepts `first` (default), `random`, or `unique`; `unique` requires exactly one
+eligible field and one match at every unindexed container level, even if a level
+specifies another strategy. There is no top-level field index.
+
+Both `container` and `selectionStrategy` require a `selector` naming the field
+to focus. The field is focused once before any command, including `clear` and
+IME keys, on the requested display when supplied. Missing, ambiguous, or stale
+targets fail without executing any commands or falling back to a global match
+or an unrelated focused field. Resolver errors distinguish missing containers,
+missing fields within the container, and ambiguous containers or fields, with
+up to five ambiguity candidates including resource IDs, text, and bounds.
+
+```json
+{
+  "selector": { "elementId": "quantity" },
+  "container": {
+    "elementId": "item_42",
+    "container": { "elementId": "cart_A" }
+  },
+  "selectionStrategy": "unique",
+  "commands": [{ "action": "type", "text": "3" }]
 }
 ```
 

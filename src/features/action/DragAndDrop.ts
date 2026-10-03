@@ -1,4 +1,5 @@
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
+import type { DragAndDropTarget } from "../../models/DragAndDropOptions";
 import type { DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -338,7 +339,7 @@ export class DragAndDrop extends BaseVisualChange {
 
       if (this.visionConfig.enabled) {
         // Infer which element failed from the error message
-        const isSourceError = baseErrorMessage.toLowerCase().includes("source");
+        const isSourceError = this.isSourceResolutionError(baseErrorMessage);
         const failedTarget = isSourceError ? options.source : options.target;
         if (failedTarget) {
           const searchCriteria = {
@@ -367,6 +368,13 @@ export class DragAndDrop extends BaseVisualChange {
         error: finalErrorMessage,
       };
     }
+  }
+
+  private isSourceResolutionError(message: string): boolean {
+    return (
+      message.startsWith("dragAndDrop source") ||
+      (!message.startsWith("dragAndDrop target") && message.toLowerCase().includes("source"))
+    );
   }
 
   private validateOptions(options: DragAndDropOptions): string | null {
@@ -429,9 +437,7 @@ export class DragAndDrop extends BaseVisualChange {
 
   private resolveTarget(
     viewHierarchy: ViewHierarchyResult,
-    target: {
-      text?: string;
-      elementId?: string;
+    target: DragAndDropTarget & {
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
     label: "source" | "target",
@@ -442,30 +448,59 @@ export class DragAndDrop extends BaseVisualChange {
         `dragAndDrop ${label} must specify exactly one of text or elementId`,
       );
     }
+    let element;
+    try {
+      element = this.selectTargetElement(viewHierarchy, target);
+      if (!element && target.container) {
+        throw new ActionableError("Target not found within container");
+      }
+    } catch (error) {
+      const prefix =
+        target.container || target.selectionStrategy === "unique" ? `dragAndDrop ${label}: ` : "";
+      throw new ActionableError(`${prefix}${errorMessage(error)}`, { cause: error });
+    }
+    if (!element) {
+      const field = target.elementId ? "elementId" : "text";
+      throw new ActionableError(
+        `dragAndDrop ${label} not found with ${field} '${target.elementId ?? target.text}'`,
+      );
+    }
+    return element;
+  }
+
+  private selectTargetElement(
+    viewHierarchy: ViewHierarchyResult,
+    target: DragAndDropTarget & { screenSizeOptions?: ScreenSizeForOffscreenCheckOptions },
+  ) {
+    const selectionOptions = {
+      intentAction: "drag" as const,
+      screenSizeOptions: target.screenSizeOptions,
+      container: target.container,
+      strategy: target.selectionStrategy,
+    };
+    // The adapter preserves legacy one-level missing-container null results.
+    // Preflight that scope via the shared resolver so drag errors remain distinct.
+    if (
+      target.container &&
+      !target.container.container &&
+      target.selectionStrategy !== "unique" &&
+      this.selector.resolveContainer &&
+      !this.selector.resolveContainer(viewHierarchy, target.container, target.selectionStrategy)
+    ) {
+      throw new ActionableError(
+        `Container level 1 not found: ${target.container.elementId ?? target.container.text}`,
+      );
+    }
     if (target.elementId) {
-      const element = this.selector.selectByResourceId(viewHierarchy, target.elementId, {
-        intentAction: "drag",
-        screenSizeOptions: target.screenSizeOptions,
-      }).element;
-      if (!element) {
-        throw new ActionableError(
-          `dragAndDrop ${label} not found with elementId '${target.elementId}'`,
-        );
-      }
-      return element;
+      return this.selector.selectByResourceId(viewHierarchy, target.elementId, selectionOptions)
+        .element;
     }
-    if (target.text) {
-      const selection = this.selector.selectByText(viewHierarchy, target.text, {
-        intentAction: "drag",
-        screenSizeOptions: target.screenSizeOptions,
-      });
-      const element = selection.matchedElement ?? selection.element;
-      if (!element) {
-        throw new ActionableError(`dragAndDrop ${label} not found with text '${target.text}'`);
-      }
-      return element;
-    }
-    throw new ActionableError(`dragAndDrop ${label} requires text or elementId`);
+    const selection = this.selector.selectByText(
+      viewHierarchy,
+      target.text ?? "",
+      selectionOptions,
+    );
+    return selection.matchedElement ?? selection.element;
   }
 
   private async resolveViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {

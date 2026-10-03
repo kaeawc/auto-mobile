@@ -122,10 +122,10 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
       # The complete unit lane already ran in isolated shards. Reuse its
       # reports rather than asking Bun's broad --changed graph walk to run the
       # same hundreds of tests a second time.
-      echo "Source changes detected; measuring complete unit-lane reports."
+      echo "Source changes detected; measuring complete unit-lane reports." || true
       report_dir="$source_report_dir"
     else
-      echo "Source changes detected; measuring Bun-affected unit tests."
+      echo "Source changes detected; measuring Bun-affected unit tests." || true
       AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
         AUTOMOBILE_UNIT_TEST_WORKERS=3 \
         AUTOMOBILE_UNIT_TEST_BASE_REF="$BUN_TEST_TIMING_BASE_REF" \
@@ -178,6 +178,8 @@ identity_counts="$recheck_dir/identity-counts.tsv"
 rechecked_list="$recheck_dir/rechecked-files.txt"
 unverified_list="$recheck_dir/unverified-files.txt"
 changed_test_list="$recheck_dir/changed-test-files.txt"
+recheck_summary="$recheck_dir/summary.txt"
+recheck_verdict_file="$recheck_dir/verdict.txt"
 
 : > "$changed_test_list"
 for file in ${changed_test_files[@]+"${changed_test_files[@]}"}; do
@@ -307,10 +309,10 @@ for file in ${offender_files[@]+"${offender_files[@]}"}; do
 done
 
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
-  echo "Rechecking ${#recheck_files[@]} file(s) over the ${max_ms}ms budget: ${recheck_runs} isolated run(s) each, median enforced."
+  echo "Rechecking ${#recheck_files[@]} file(s) over the ${max_ms}ms budget: ${recheck_runs} isolated run(s) each, median enforced." || true
 fi
 if [[ "$changed_offender_count" -gt 0 ]]; then
-  echo "${changed_offender_count} of them are test file(s) this change touches and are rechecked first."
+  echo "${changed_offender_count} of them are test file(s) this change touches and are rechecked first." || true
 fi
 
 recheck_started_at="$(date +%s)"
@@ -365,9 +367,12 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   fi
 fi
 
+# Keep awk off the potentially non-blocking CI stdout. Its status still exposes
+# genuine processing errors; the data verdict is recorded separately from output.
 awk -F"$field_sep" \
   -v limit_ms="$max_ms" \
   -v limit_budget="$recheck_budget_seconds" \
+  -v verdict_file="$recheck_verdict_file" \
   -v identity_counts_file="$identity_counts" \
   -v recheck_file="$recheck_rows" \
   -v rechecked_file="$rechecked_list" \
@@ -463,6 +468,12 @@ FILENAME == recheck_file {
   fail = 1
 }
 END {
-  exit fail
+  print (fail ? 1 : 0) > verdict_file
 }
-' "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows"
+' "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows" > "$recheck_summary"
+
+IFS= read -r recheck_verdict < "$recheck_verdict_file"
+# cat handles partial writes/EAGAIN; losing diagnostic stdout must not change
+# the budget verdict. Keep stderr diagnostics and processing failures visible.
+cat "$recheck_summary" || true
+exit "$recheck_verdict"

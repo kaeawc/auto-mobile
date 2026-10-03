@@ -985,7 +985,46 @@ run_timing_gate_with_recheck_times() {
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
     TIMING_CHANGED_FILES='src/example.ts\n' \
     STUB_RECHECK_TIMES="$1" \
-    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+    bash -c '
+      if [[ "$3" == closed ]]; then
+        exec 1>&-
+      elif [[ -n "$3" ]]; then
+        exec > "$3"
+      fi
+      exec bash "$1" "$2"
+    ' bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml" "${2:-}"
+}
+
+@test "timing gate preserves the exact recheck summary text" {
+  seed_outlier_report
+  summary_output="$BATS_TEST_TMPDIR/summary-output.txt"
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011" "$summary_output"
+  [ "$status" -eq 0 ]
+  cat > "$BATS_TEST_TMPDIR/expected-output.txt" <<'EOF'
+Source changes detected; measuring complete unit-lane reports.
+Rechecking 1 file(s) over the 100ms budget: 3 isolated run(s) each, median enforced.
+Recheck cleared suite.slow: median 11.00ms over 3 isolated runs (first sample 200.00ms).
+EOF
+  cmp "$BATS_TEST_TMPDIR/expected-output.txt" "$summary_output"
+}
+
+# A closed stdout works on macOS as well as Linux, unlike /dev/full. These
+# exercise failures in both the progress output and the buffered summary emit.
+@test "timing gate clears an outlier even when stdout writes fail" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011" closed
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/timings.recheck.d/verdict.txt")" -eq 0 ]
+  grep -Fxq 'Recheck cleared suite.slow: median 11.00ms over 3 isolated runs (first sample 200.00ms).' \
+    "$BATS_TEST_TMPDIR/timings.recheck.d/summary.txt"
+}
+
+@test "timing gate fails a breaching median even when stdout writes fail" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160" closed
+  [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/timings.recheck.d/verdict.txt")" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
 }
 
 @test "timing gate clears an outlier whose median recheck is within budget" {

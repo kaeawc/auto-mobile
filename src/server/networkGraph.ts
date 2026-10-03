@@ -46,7 +46,7 @@ function isParameterizedSegment(segment: string): boolean {
 
 interface EventGroup {
   method: string;
-  contentType: string | null;
+  contentType: string | null | undefined;
   durations: number[];
   success: number;
   errors: number;
@@ -79,19 +79,20 @@ export function buildNetworkGraph(
     }
 
     const hostKey = `${scheme}://${host}`;
-    if (!hostMap.has(hostKey)) {
-      hostMap.set(hostKey, { scheme, host, pathGroups: new Map() });
+    let entry = hostMap.get(hostKey);
+    if (!entry) {
+      entry = { scheme, host, pathGroups: new Map() };
+      hostMap.set(hostKey, entry);
     }
-    const entry = hostMap.get(hostKey)!;
 
     const path = event.path ?? "/";
     const groupKey = `${path}::${event.method}`;
 
-    if (!entry.pathGroups.has(groupKey)) {
-      entry.pathGroups.set(groupKey, []);
+    let groups = entry.pathGroups.get(groupKey);
+    if (!groups) {
+      groups = [];
+      entry.pathGroups.set(groupKey, groups);
     }
-
-    const groups = entry.pathGroups.get(groupKey)!;
     let group = groups.find((g) => g.method === event.method);
     if (!group) {
       group = {

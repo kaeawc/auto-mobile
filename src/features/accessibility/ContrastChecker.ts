@@ -148,7 +148,9 @@ interface ElementCacheEntry {
 }
 
 export class ContrastChecker {
-  private config: Required<ContrastCheckConfig>;
+  private config: Required<Omit<ContrastCheckConfig, "maxCacheSize">> & {
+    maxCacheSize: Required<NonNullable<ContrastCheckConfig["maxCacheSize"]>>;
+  };
   private timer: Timer;
   private backend: ImageBackend;
 
@@ -661,7 +663,7 @@ export class ContrastChecker {
   /**
    * Generic LRU cache cleanup based on timestamp
    */
-  private cleanupCache<K, V extends { timestamp: number }>(
+  private cleanupCache<K, V extends number | { timestamp: number }>(
     cache: Map<K, V>,
     maxSize: number,
   ): void {
@@ -670,7 +672,13 @@ export class ContrastChecker {
     }
 
     // Convert to array and sort by timestamp (oldest first)
-    const entries = Array.from(cache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const entries = Array.from(cache.entries()).sort((a, b) => {
+      // Numeric contrast ratios have no timestamp; preserve insertion-order eviction.
+      if (typeof a[1] === "number" || typeof b[1] === "number") {
+        return 0;
+      }
+      return a[1].timestamp - b[1].timestamp;
+    });
 
     // Remove oldest entries until we're at maxSize
     const toRemove = cache.size - maxSize;

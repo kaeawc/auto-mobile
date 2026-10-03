@@ -26,8 +26,6 @@ private final class FakeGestureCoordinateProvider: GestureCoordinateProviding {
         actions.append(duration > 0 ? "tapPress" : "tap")
     }
 
-    func doubleTap(_: GestureCoordinateSelection) throws { actions.append("doubleTap") }
-    func press(_: GestureCoordinateSelection, duration _: TimeInterval) throws { actions.append("longPress") }
     func drag(
         _: GestureCoordinateSelection, to _: GestureCoordinateSelection,
         press _: TimeInterval, velocity: Double?, hold _: TimeInterval
@@ -203,7 +201,7 @@ final class GestureCoordinateStrategyTests: XCTestCase {
         XCTAssertEqual(resolved.coordinate.offset, GesturePoint(x: 443, y: 202))
     }
 
-    func testSharedFactorySupportsAllSingleFingerActionsWithoutPlatformTypes() throws {
+    func testSharedFactorySupportsTapAndDragWithoutPlatformTypes() throws {
         for geometry in [folded, unfolded] {
             let provider = FakeGestureCoordinateProvider(sample: geometry)
             let factory = try GestureCoordinateFactory(provider: provider)
@@ -211,10 +209,8 @@ final class GestureCoordinateStrategyTests: XCTestCase {
             let end = try factory.resolve(x: 250, y: 300)
             try provider.tap(start.coordinate, duration: 0)
             try provider.tap(start.coordinate, duration: 0.05)
-            try provider.doubleTap(start.coordinate)
-            try provider.press(start.coordinate, duration: 0.8)
             try provider.drag(start.coordinate, to: end.coordinate, press: 0.05, velocity: 123, hold: 0)
-            XCTAssertEqual(provider.actions, ["tap", "tapPress", "doubleTap", "longPress", "drag"])
+            XCTAssertEqual(provider.actions, ["tap", "tapPress", "drag"])
             XCTAssertEqual(provider.velocity, 123)
             XCTAssertTrue(provider.selections.allSatisfy {
                 $0.strategy == (geometry == folded ? .legacy : .appRelative)

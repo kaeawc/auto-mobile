@@ -1074,36 +1074,6 @@ public final class GesturePerformer: GesturePerforming {
             }
         }
 
-        public func doubleTap(x: Double, y: Double) throws {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
-            try catchingObjCException {
-                let factory = try GestureCoordinateFactory(
-                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
-                )
-                let resolved = try factory.resolve(x: x, y: y)
-                logRelativeCoordinate(resolved.selection, gesture: "doubleTap")
-                try factory.provider.doubleTap(resolved.coordinate)
-            }
-        }
-
-        public func longPress(x: Double, y: Double, duration: TimeInterval) throws {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
-            try catchingObjCException {
-                let factory = try GestureCoordinateFactory(
-                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
-                )
-                let resolved = try factory.resolve(x: x, y: y)
-                logRelativeCoordinate(resolved.selection, gesture: "longPress")
-                try factory.provider.press(resolved.coordinate, duration: duration)
-            }
-        }
-
         // MARK: - Swipe Gestures
 
         public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
@@ -2811,14 +2781,6 @@ public final class GesturePerformer: GesturePerforming {
         }
 
         public func tap(x _: Double, y _: Double, duration _: TimeInterval = 0) throws {
-            throw GestureError.notSupported("XCUITest only available on iOS")
-        }
-
-        public func doubleTap(x _: Double, y _: Double) throws {
-            throw GestureError.notSupported("XCUITest only available on iOS")
-        }
-
-        public func longPress(x _: Double, y _: Double, duration _: TimeInterval) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

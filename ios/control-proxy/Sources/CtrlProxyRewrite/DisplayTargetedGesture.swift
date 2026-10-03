@@ -51,8 +51,8 @@ struct DisplayGestureDelivery<Coordinate> {
     }
 }
 
-/// Only taps and single-finger swipes opt into this route. The existing factory remains
-/// the unchanged path for doubleTap, longPress, drag, pinch and multi-finger gestures.
+/// Taps and single-finger swipes use this route. The host sends long presses as taps with
+/// a press duration and double taps as two taps. Other gestures keep their existing paths.
 @MainActor
 struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     let provider: Provider

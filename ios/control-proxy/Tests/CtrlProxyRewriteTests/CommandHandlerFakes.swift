@@ -55,6 +55,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var keyCalls: [(String, [String])] = []
     var keyError: CommandError?
     var tapCalls = 0
+    var tapDurations: [TimeInterval] = []
     var lastTap: (x: Double, y: Double)?
     var diagnosticTapCalls = 0
     var tapStrategies: [String?] = []
@@ -97,7 +98,8 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         try await PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers), warning: keyWarning)
     }
 
-    func tap(x: Double, y: Double, duration _: TimeInterval) throws {
+    func tap(x: Double, y: Double, duration: TimeInterval) throws {
+        tapDurations.append(duration)
         tapCalls += 1
         lastTap = (x, y)
     }
@@ -117,8 +119,6 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         return tapDiagnosticsResult ?? TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))
     }
 
-    func doubleTap(x _: Double, y _: Double) throws {}
-    func longPress(x _: Double, y _: Double, duration _: TimeInterval) throws {}
     func swipe(startX _: Double, startY _: Double, endX _: Double, endY _: Double, duration _: TimeInterval) throws {
         swipeCalls += 1
         onSwipe?()
@@ -267,6 +267,7 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
     var actions: [String] = []
     var symbolsAvailable = true
     var synthesisError: Error?
+    var tapDurations: [TimeInterval] = []
 
     init(geometry: GestureCoordinateGeometry?) { cachedGeometry = geometry }
 
@@ -292,11 +293,10 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
     }
 
     func tap(_: GestureCoordinateSelection, duration: TimeInterval) throws {
+        tapDurations.append(duration)
         actions.append(duration > 0 ? "tapPress" : "tap")
     }
 
-    func doubleTap(_: GestureCoordinateSelection) throws { actions.append("doubleTap") }
-    func press(_: GestureCoordinateSelection, duration _: TimeInterval) throws { actions.append("longPress") }
     func drag(
         _: GestureCoordinateSelection, to _: GestureCoordinateSelection,
         press _: TimeInterval, velocity _: Double?, hold _: TimeInterval

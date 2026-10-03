@@ -187,6 +187,105 @@ final class DisplayTargetedGestureTests: XCTestCase {
         XCTAssertEqual(diagnostics.deviceIdiom, "phone")
     }
 
+    func testLongPressTargetsInnerDisplayAndAnnotatesDelivery() throws {
+        for duration in [0.8, 2.5] {
+            let provider = provider()
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: point, press: duration)
+            XCTAssertEqual(provider.touches.count, 1)
+            let touch = try XCTUnwrap(provider.touches.first)
+            XCTAssertEqual(touch.start, GesturePoint(x: 202, y: 508))
+            XCTAssertEqual(touch.end, touch.start)
+            XCTAssertEqual(touch.displayId, 2)
+            XCTAssertEqual(touch.interfaceOrientation, 1)
+            XCTAssertEqual(touch.pressDuration, duration)
+            XCTAssertEqual(touch.moveDuration, 0)
+            XCTAssertEqual(delivery.route, .displayTargetedRecord)
+            XCTAssertTrue(provider.actions.isEmpty)
+            XCTAssertTrue(provider.selections.isEmpty)
+            var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: Int(duration * 1000)))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertEqual(diagnostics.route, .displayTargetedRecord)
+            XCTAssertEqual(diagnostics.targetDisplayId, 2)
+            XCTAssertEqual(diagnostics.targetDisplayReason, "soleNonMainScreen")
+            XCTAssertEqual(diagnostics.synthesizedPoint, .init(x: 202, y: 508))
+            XCTAssertEqual(diagnostics.synthesizedInterfaceOrientation, 1)
+            XCTAssertNil(diagnostics.fallbackFrom)
+            XCTAssertNil(diagnostics.deliveryWarning)
+            XCTAssertTrue(diagnostics.logLine(gesture: "longPress").contains("gesture=longPress"))
+        }
+    }
+
+    func testFoldedLongPressRetainsCoordinatePressDuration() throws {
+        for duration in [0.8, 2.5] {
+            let provider = provider(geometry: folded)
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: point, press: duration)
+            XCTAssertEqual(delivery.route, .xcuiCoordinate)
+            XCTAssertEqual(delivery.selection, GestureCoordinateSelection.choose(point: point, geometry: folded))
+            XCTAssertEqual(provider.selections, [delivery.selection])
+            XCTAssertEqual(provider.actions, ["tapPress"])
+            XCTAssertEqual(provider.tapDurations, [duration])
+            XCTAssertEqual(provider.inventoryReads, 0)
+            XCTAssertTrue(provider.touches.isEmpty)
+        }
+    }
+
+    func testDoubleTapRequestsTargetInnerDisplayAsTwoDurationTaps() throws {
+        let provider = provider()
+        let factory = try DisplayGestureFactory(provider: provider)
+        for _ in 0 ..< 2 {
+            let delivery = try factory.deliver(start: point, press: 0.05)
+            XCTAssertEqual(delivery.route, .displayTargetedRecord)
+        }
+        XCTAssertEqual(provider.touches.count, 2)
+        let touch = try XCTUnwrap(provider.touches.first)
+        XCTAssertEqual(provider.touches, [touch, touch])
+        XCTAssertEqual(touch.displayId, 2)
+        XCTAssertEqual(touch.start, GesturePoint(x: 202, y: 508))
+        XCTAssertEqual(touch.end, touch.start)
+        XCTAssertEqual(touch.pressDuration, 0.05)
+        XCTAssertEqual(touch.moveDuration, 0)
+        XCTAssertTrue(provider.actions.isEmpty)
+        XCTAssertTrue(provider.selections.isEmpty)
+    }
+
+    func testFoldedDoubleTapRequestsRemainTwoCoordinateDurationTaps() throws {
+        let provider = provider(geometry: folded)
+        let factory = try DisplayGestureFactory(provider: provider)
+        let selection = GestureCoordinateSelection.choose(point: point, geometry: folded)
+        for _ in 0 ..< 2 {
+            let delivery = try factory.deliver(start: point, press: 0.05)
+            XCTAssertEqual(delivery.route, .xcuiCoordinate)
+            XCTAssertEqual(delivery.selection, selection)
+        }
+        XCTAssertEqual(provider.selections, [selection, selection])
+        XCTAssertEqual(provider.actions, ["tapPress", "tapPress"])
+        XCTAssertEqual(provider.tapDurations, [0.05, 0.05])
+        XCTAssertEqual(provider.inventoryReads, 0)
+        XCTAssertTrue(provider.touches.isEmpty)
+    }
+
+    func testLongPressUnavailableSymbolsRetainCoordinateDuration() throws {
+        let provider = provider()
+        provider.symbolsAvailable = false
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(start: point, press: 0.8)
+        XCTAssertEqual(provider.tapDurations, [0.8])
+        XCTAssertEqual(provider.actions, ["tapPress"])
+        XCTAssertEqual(provider.touches.count, 1)
+        XCTAssertEqual(provider.selections, [delivery.selection])
+        XCTAssertEqual(delivery.fallbackFrom, .displayTargeted)
+        XCTAssertEqual(delivery.selection.strategy, .appRelative)
+        var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 800))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+        XCTAssertEqual(diagnostics.targetDisplayId, 2)
+        XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+        XCTAssertEqual(diagnostics.fallbackFrom, TapCoordinateStrategy.displayTargeted.rawValue)
+        XCTAssertNil(diagnostics.synthesizedPoint)
+    }
+
     func testPadMainDisplayKeepsAppRelativeAndWarnsWithoutTargetedSynthesis() throws {
         let provider = provider()
         provider.inventory = GestureDisplayInventory(

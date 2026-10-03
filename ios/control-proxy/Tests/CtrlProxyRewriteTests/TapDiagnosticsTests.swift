@@ -210,6 +210,44 @@ final class TapDiagnosticsTests: XCTestCase {
         XCTAssertEqual(gestures.diagnosticTapCalls, 0)
     }
 
+    func testHandlerLongPressTapRequestConvertsMillisecondsToSeconds() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(), gesturePerformer: gestures,
+            perf: FakePerfTracking(flushResult: nil)
+        )
+        let request = try JSONDecoder().decode(
+            WebSocketRequest.self,
+            from: Data(#"{"type":"request_tap_coordinates","x":443,"y":202,"duration":800}"#.utf8)
+        )
+        let result = await handler.handle(request)
+        XCTAssertEqual((result as? WebSocketResponse)?.success, true)
+        XCTAssertEqual(gestures.tapCalls, 1)
+        XCTAssertEqual(gestures.tapDurations, [0.8])
+        XCTAssertEqual(gestures.lastTap?.x, 443)
+        XCTAssertEqual(gestures.lastTap?.y, 202)
+    }
+
+    func testHandlerDoubleTapRequestsDispatchTwoFiftyMillisecondTaps() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(), gesturePerformer: gestures,
+            perf: FakePerfTracking(flushResult: nil)
+        )
+        let request = try JSONDecoder().decode(
+            WebSocketRequest.self,
+            from: Data(#"{"type":"request_tap_coordinates","x":443,"y":202,"duration":50}"#.utf8)
+        )
+        for _ in 0 ..< 2 {
+            let result = await handler.handle(request)
+            XCTAssertEqual((result as? WebSocketResponse)?.success, true)
+        }
+        XCTAssertEqual(gestures.tapCalls, 2)
+        XCTAssertEqual(gestures.tapDurations, [0.05, 0.05])
+        XCTAssertEqual(gestures.lastTap?.x, 443)
+        XCTAssertEqual(gestures.lastTap?.y, 202)
+    }
+
     func testHandlerOnAttachesDiagnostics() async throws {
         let gestures = RewriteFakeGesturePerformer()
         gestures.tapDiagnosticsResult = fixture

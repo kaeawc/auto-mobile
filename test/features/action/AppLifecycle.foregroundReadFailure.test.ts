@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AppLifecycle } from "../../../src/features/action/AppLifecycle";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ForegroundAppReadResult } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -28,6 +29,11 @@ const foreground: ForegroundAppReadResult = {
 };
 const background: ForegroundAppReadResult = { state: "known", app: null };
 const unreadable: ForegroundAppReadResult = { state: "unreadable", error: "device offline" };
+
+class ParsingFakeAdbExecutor extends FakeAdbExecutor {
+  // Use the production checked reader over the fake's recorded command responses.
+  override getForegroundAppChecked = AdbClient.prototype.getForegroundAppChecked;
+}
 
 function harness(reads: ForegroundAppReadResult[], adb = new FakeAdbExecutor()) {
   adb.setCommandResponseSequence(processCommand, [result(before), result(gone)]);
@@ -64,6 +70,30 @@ function harness(reads: ForegroundAppReadResult[], adb = new FakeAdbExecutor()) 
 }
 
 describe("AppLifecycle checked foreground reads", () => {
+  for (const output of ["", "unparsable output"]) {
+    test(`real reader refuses am kill for ${output ? "unparseable" : "empty"} dumpsys output`, async () => {
+      const adb = new ParsingFakeAdbExecutor();
+      adb.setCommandResponse("shell dumpsys activity activities", result(output));
+      const h = harness([], adb);
+      expect(await h.action.execute(appId, "killBackgrounded", h.options)).toMatchObject({
+        success: false,
+        errorCode: "background_not_verified",
+      });
+      expect(adb.getExecutedCommands().some((command) => command.includes("am kill"))).toBe(false);
+      expect(h.counts()).toEqual({ homeCalls: 0, invalidations: 0, mutations: 0 });
+    });
+
+    test(`real reader reports indeterminate background for ${output ? "unparseable" : "empty"} dumpsys output`, async () => {
+      const adb = new ParsingFakeAdbExecutor();
+      adb.setCommandResponse("shell dumpsys activity activities", result(output));
+      const h = harness([], adb);
+      const response = await h.action.execute(appId, "background", h.options);
+      expect(response).toMatchObject({ success: false, errorCode: "background_not_verified" });
+      expect(response.error).toContain("indeterminate");
+      expect(h.counts()).toEqual({ homeCalls: 1, invalidations: 1, mutations: 1 });
+    });
+  }
+
   test("unreadable post-Home state reports an indeterminate outcome", async () => {
     const h = harness([foreground, unreadable]);
     const response = await h.action.execute(appId, "background", h.options);

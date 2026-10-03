@@ -10,6 +10,10 @@ export interface ForegroundApp {
   displayCount?: number;
 }
 
+/**
+ * Known with app: null requires positive evidence that no foreground app exists.
+ * AdbClient currently has no such evidence and reports unreadable if no resumed activity parses.
+ */
 export type ForegroundAppReadResult =
   | { state: "known"; app: ForegroundApp | null }
   | { state: "unreadable"; error: string };
@@ -175,7 +179,11 @@ export interface AdbExecutor {
     timeout?: number | { timeoutMs?: number; displayId?: number },
   ): Promise<ForegroundApp | null>;
 
-  /** Read foreground identity without treating command failure as an empty foreground. */
+  /**
+   * Read foreground identity without treating command or parse failure as an empty foreground.
+   * Known with app: null requires positive evidence of no foreground app; AdbClient
+   * currently has none and reports unreadable when no resumed activity parses.
+   */
   getForegroundAppChecked(
     signal?: AbortSignal,
     timeout?: number | { timeoutMs?: number; displayId?: number },

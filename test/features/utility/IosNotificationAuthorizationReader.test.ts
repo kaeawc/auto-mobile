@@ -1,6 +1,8 @@
 import { CORESIMULATOR_DEVICE_SET_PATH_ENV } from "../../../src/utils/workingDirectory";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import * as path from "path";
+import { logger } from "../../../src/utils/logger";
+import { parsePlist } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import {
   BulletinBoardAuthorizationReader,
   extractSectionDataBase64,
@@ -66,7 +68,7 @@ ${lines.join("\n")}
 }
 
 /** Fake deps: maps the outer path to canned plutil-xml; nested blobs matched by temp path. */
-function fakeDeps(opts: { outer?: string | Error; nested?: string }): {
+function fakeDeps(opts: { outer?: string | Error; nested?: string | Error }): {
   deps: BulletinBoardReaderDeps;
   plutilPaths: string[];
 } {
@@ -76,6 +78,9 @@ function fakeDeps(opts: { outer?: string | Error; nested?: string }): {
     plutilToXml: async (p: string) => {
       plutilPaths.push(p);
       if (p === lastTemp) {
+        if (opts.nested instanceof Error) {
+          throw opts.nested;
+        }
         return opts.nested ?? "";
       }
       if (opts.outer instanceof Error) {
@@ -357,6 +362,99 @@ describe("resolveDeviceDataRoot", () => {
 });
 
 describe("BulletinBoardAuthorizationReader", () => {
+  test("nested settings without authorizationStatus return unknown, not denied", async () => {
+    const b64 = Buffer.from("bplist00-placeholder").toString("base64");
+    const nested = nestedXml({
+      alertType: 1,
+      lockScreenSetting: 2,
+      notificationCenterSetting: 2,
+      pushSettings: 63,
+    });
+    expect(await parseSettingsFromNestedXml(nested)).toEqual({});
+    const { deps } = fakeDeps({
+      outer: outerXml({ "com.apple.MobileSMS": b64 }),
+      nested,
+    });
+    const reader = new BulletinBoardAuthorizationReader(deps);
+    const result = await reader.read(SIM_UDID, "com.apple.MobileSMS");
+
+    expect(result.supported).toBe(true);
+    expect(result.allowed).toBeNull();
+    expect(result.method).toBe("ios_bulletinboard_plist");
+    expect(result.authorizationStatus).toBeUndefined();
+    expect(result.warning).toContain("com.apple.MobileSMS");
+    expect(result.warning).toContain("no authorization status");
+    expect(result.error).toBeUndefined();
+  });
+
+  test("nested plutil rejection returns unknown and logs a warning", async () => {
+    const b64 = Buffer.from("bplist00-placeholder").toString("base64");
+    const error = new Error("nested plutil conversion failed");
+    const { deps, plutilPaths } = fakeDeps({
+      outer: outerXml({ "com.apple.MobileSMS": b64 }),
+      nested: error,
+    });
+    const reader = new BulletinBoardAuthorizationReader(deps);
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      const result = await reader.read(SIM_UDID, "com.apple.MobileSMS");
+
+      expect(plutilPaths).toHaveLength(2);
+      expect(result.supported).toBe(true);
+      expect(result.allowed).toBeNull();
+      expect(result.method).toBe("ios_bulletinboard_plist");
+      expect(result.authorizationStatus).toBeUndefined();
+      expect(result.warning).toContain("com.apple.MobileSMS");
+      expect(result.warning).toContain("Could not read notification authorization state");
+      expect(result.error).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(error.message), error);
+      expect(warnSpy.mock.calls[0][0]).toContain("com.apple.MobileSMS");
+      expect(warnSpy.mock.calls[0][0]).not.toContain(b64);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("malformed nested XML returns unknown and logs a warning", async () => {
+    const b64 = Buffer.from("bplist00-placeholder").toString("base64");
+    const nested = nestedXml({
+      authorizationStatus: 2,
+      alertType: 1,
+      lockScreenSetting: 2,
+      notificationCenterSetting: 2,
+      pushSettings: 63,
+    });
+    // Remove the closing tags from the same authorized settings fixture.
+    const malformed = nested.slice(0, nested.lastIndexOf("\t\t</dict>"));
+    await expect(parsePlist(malformed)).rejects.toThrow();
+    const { deps } = fakeDeps({
+      outer: outerXml({ "com.apple.MobileSMS": b64 }),
+      nested: malformed,
+    });
+    const reader = new BulletinBoardAuthorizationReader(deps);
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      const result = await reader.read(SIM_UDID, "com.apple.MobileSMS");
+
+      expect(result.supported).toBe(true);
+      expect(result.allowed).toBeNull();
+      expect(result.method).toBe("ios_bulletinboard_plist");
+      expect(result.authorizationStatus).toBeUndefined();
+      expect(result.warning).toContain("com.apple.MobileSMS");
+      expect(result.warning).toContain("Could not read notification authorization state");
+      expect(result.error).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("com.apple.MobileSMS"),
+        expect.any(Error),
+      );
+      expect(warnSpy.mock.calls[0][0]).not.toContain(b64);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test("authorized app (MobileSMS-like) maps to authorized + allowed", async () => {
     const b64 = Buffer.from("bplist00-placeholder").toString("base64");
     const { deps } = fakeDeps({

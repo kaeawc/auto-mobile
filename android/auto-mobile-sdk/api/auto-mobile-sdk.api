@@ -987,6 +987,60 @@ public final class dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTr
   public static final long access$getLastTapProcessedAt$p();
   public static final void access$setLastTapProcessedAt$p(long);
 }
+Compiled from "TapGestureClassifier.kt"
+public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action extends java.lang.Enum<dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action> {
+  public static final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action DOWN;
+  public static final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action UP;
+  public static final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action OTHER;
+  public static dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action[] values();
+  public static dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action> getEntries();
+}
+Compiled from "TapGestureClassifier.kt"
+public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$NoDecision implements dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result {
+  public static final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$NoDecision INSTANCE;
+  public static final int $stable;
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "TapGestureClassifier.kt"
+public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$NotTap implements dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result {
+  public static final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$NotTap INSTANCE;
+  public static final int $stable;
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "TapGestureClassifier.kt"
+public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$Tap implements dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$Tap(float, float, long);
+  public final float getX();
+  public final float getY();
+  public final long getDurationMs();
+  public final float component1();
+  public final float component2();
+  public final long component3();
+  public final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$Tap copy(float, float, long);
+  public static dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$Tap copy$default(dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result$Tap, float, float, long, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "TapGestureClassifier.kt"
+public interface dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result {
+}
+Compiled from "TapGestureClassifier.kt"
+public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$WhenMappings {
+  public static final int[] $EnumSwitchMapping$0;
+}
+Compiled from "TapGestureClassifier.kt"
+public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier(int, long);
+  public final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result classify$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action, float, float, long);
+}
 Compiled from "KeystoreTestState.kt"
 public final class dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState {
   public static final dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState INSTANCE;

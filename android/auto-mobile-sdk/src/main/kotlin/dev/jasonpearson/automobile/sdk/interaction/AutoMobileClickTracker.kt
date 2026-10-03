@@ -130,27 +130,33 @@ internal object AutoMobileClickTracker {
     private val window: Window,
   ) : Window.Callback by delegate {
 
-    private var downX = 0f
-    private var downY = 0f
-    private var downTime = 0L
+    private val tapClassifier = TapGestureClassifier(TAP_SLOP_PX, TAP_TIMEOUT_MS)
 
     override fun dispatchTouchEvent(event: MotionEvent?): Boolean {
       if (event != null) {
         when (event.actionMasked) {
           MotionEvent.ACTION_DOWN -> {
-            downX = event.rawX
-            downY = event.rawY
-            downTime = System.currentTimeMillis()
+            tapClassifier.classify(
+              TapGestureClassifier.Action.DOWN,
+              event.rawX,
+              event.rawY,
+              System.currentTimeMillis(),
+            )
           }
           MotionEvent.ACTION_UP -> {
-            val duration = System.currentTimeMillis() - downTime
-            val dx = event.rawX - downX
-            val dy = event.rawY - downY
-            // Only track taps, not drags/scrolls
-            if (dx * dx + dy * dy < TAP_SLOP_PX * TAP_SLOP_PX && duration < TAP_TIMEOUT_MS) {
+            val now = System.currentTimeMillis()
+            val result =
+              tapClassifier.classify(
+                TapGestureClassifier.Action.UP,
+                event.rawX,
+                event.rawY,
+                now,
+              )
+            if (result is TapGestureClassifier.Result.Tap) {
               // Post to avoid adding latency to the touch event dispatch
-              val tapX = event.rawX
-              val tapY = event.rawY
+              val tapX = result.x
+              val tapY = result.y
+              val duration = result.durationMs
               handler.post { emitTapEvent(tapX, tapY, duration) }
             }
           }

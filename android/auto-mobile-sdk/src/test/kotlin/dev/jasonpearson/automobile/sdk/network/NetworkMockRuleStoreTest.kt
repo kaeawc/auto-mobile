@@ -1,9 +1,16 @@
 package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.Test
 
 class NetworkMockRuleStoreTest {
@@ -169,6 +176,91 @@ class NetworkMockRuleStoreTest {
     assertEquals("""{"error":"mocked"}""", match.responseBody)
     assertEquals("application/json", match.contentType)
     assertEquals(mapOf("X-Mock" to "true"), match.responseHeaders)
+  }
+
+  // Probabilistic regression before atomic publication; deterministic no-null invariant after it.
+  @Test
+  fun `replacing rules never exposes an empty set to concurrent readers`() {
+    val store = createStore()
+    val dtos = listOf(rule(host = "api.example.com"))
+    store.setRules(dtos)
+    val started = CountDownLatch(1)
+    val stop = AtomicBoolean(false)
+    val sawNull = AtomicBoolean(false)
+    val iterations = AtomicInteger()
+    val readerFailure = AtomicReference<Throwable?>()
+    val reader = Thread {
+      do {
+        if (store.findMatchingRule("api.example.com", "/users", "GET") == null) {
+          sawNull.set(true)
+        }
+        iterations.incrementAndGet()
+        started.countDown()
+      } while (!stop.get())
+    }
+      .apply {
+        isDaemon = true
+        uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error ->
+          readerFailure.set(error)
+        }
+      }
+
+    reader.start()
+    try {
+      assertTrue(started.await(1, TimeUnit.SECONDS), "Reader did not start")
+      repeat(2000) { store.setRules(dtos) }
+    } finally {
+      stop.set(true)
+      reader.join(1000)
+    }
+
+    assertFalse(reader.isAlive, "Reader did not finish within the bounded join")
+    assertNull(readerFailure.get(), "Reader failed unexpectedly")
+    assertTrue(iterations.get() > 0, "Reader must exercise the published rules")
+    assertFalse(sawNull.get(), "Matching rule disappeared during replacement")
+  }
+
+  // Deterministic publication behavior: invalid rules are skipped and first match still wins.
+  @Test
+  fun `mixed valid and invalid rules preserve order and replace the previous set`() {
+    val store = createStore()
+    store.setRules(
+      listOf(
+        rule(mockId = "first"),
+        rule(mockId = "bad", path = "[invalid"),
+        rule(mockId = "second"),
+        rule(mockId = "posts", path = "/posts"),
+      )
+    )
+
+    assertEquals(3, store.getRuleCount())
+    assertEquals("first", store.findMatchingRule("api.example.com", "/users", "GET")?.mockId)
+    assertEquals("posts", store.findMatchingRule("api.example.com", "/posts", "GET")?.mockId)
+
+    store.setRules(listOf(rule(mockId = "replacement", path = "/replacement")))
+
+    assertEquals(1, store.getRuleCount())
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNull(store.findMatchingRule("api.example.com", "/posts", "GET"))
+    assertEquals(
+      "replacement",
+      store.findMatchingRule("api.example.com", "/replacement", "GET")?.mockId,
+    )
+  }
+
+  // Deterministic: every publication gets fresh counters, including unchanged rules.
+  @Test
+  fun `setRules resets remaining counters for unchanged rules`() {
+    val store = createStore()
+    val dtos = listOf(rule(limit = 5, remaining = 2))
+    store.setRules(dtos)
+    repeat(2) { assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET")) }
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+
+    store.setRules(dtos)
+
+    repeat(2) { assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET")) }
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
   }
 
   // --- Error simulation tests ---

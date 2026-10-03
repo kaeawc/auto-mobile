@@ -38,6 +38,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsPanel
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.shell.AboutDialog
 import dev.jasonpearson.automobile.desktop.core.shell.FloatingUpdateAffordance
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.shell.UpdateDetailsContent
@@ -47,6 +48,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.BOOTED_DEVICES_RESOURC
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DEVICE_LOCK_STATES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlExecutor
+import dev.jasonpearson.automobile.desktop.core.workspace.DesktopOverlayState
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceSessionSupersededForwarder
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
@@ -231,13 +233,21 @@ fun AutoMobileDesktopApp(
     }
   val recoveringDaemon by recoveryLauncher.inFlight.collectAsState()
   var paletteOpen by remember { mutableStateOf(false) }
-  var showSettings by remember { mutableStateOf(false) }
+  var overlayState by remember { mutableStateOf(DesktopOverlayState.None) }
+  val showSettings = overlayState == DesktopOverlayState.Settings
+  val showAbout = overlayState == DesktopOverlayState.About
   var captureRequest by remember { mutableStateOf<Pair<String, Int>?>(null) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
+  LaunchedEffect(menuBarActions.showAbout) {
+    if (menuBarActions.showAbout) {
+      overlayState = overlayState.openAbout()
+      menuBarActions.showAbout = false
+    }
+  }
   LaunchedEffect(menuBarActions.showSettings) {
     if (menuBarActions.showSettings) {
-      showSettings = true
+      overlayState = overlayState.openSettings()
       menuBarActions.showSettings = false
     }
   }
@@ -247,6 +257,7 @@ fun AutoMobileDesktopApp(
         !showOnboarding &&
           !pickerOpen &&
           !showSettings &&
+          !showAbout &&
           workspaceState is WorkspaceUiState.Content
       ) {
         paletteOpen = true
@@ -310,6 +321,7 @@ fun AutoMobileDesktopApp(
         !showOnboarding &&
         !pickerOpen &&
         !showSettings &&
+        !showAbout &&
         workspaceState is WorkspaceUiState.Content
     ) {
       paletteOpen = true
@@ -453,7 +465,7 @@ fun AutoMobileDesktopApp(
       // reachable from either one. It self-hides unless updateStatus is UpdateAvailable.
       val onLaunchSurface = showOnboarding || pickerOpen || workspaceState is WorkspaceUiState.Empty
       Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().isolatedBehindOverlay(showSettings)) {
+        Box(Modifier.fillMaxSize().isolatedBehindOverlay(showSettings || showAbout)) {
           when {
             showOnboarding ->
               OnboardingScreen(
@@ -693,9 +705,15 @@ fun AutoMobileDesktopApp(
         if (showSettings) {
           SettingsPanel(
             settings = settings,
-            onClose = { showSettings = false },
+            onClose = { overlayState = overlayState.closeSettings() },
             clientProvider = { graph.autoMobileClient },
             modifier = Modifier.fillMaxSize(),
+          )
+        }
+        if (showAbout) {
+          AboutDialog(
+            version = graph.appVersionProvider.current(),
+            onDismiss = { overlayState = overlayState.closeAbout() },
           )
         }
       }

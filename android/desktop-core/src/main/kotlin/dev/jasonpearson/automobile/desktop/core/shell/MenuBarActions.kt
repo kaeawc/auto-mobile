@@ -22,6 +22,7 @@ class MenuBarActions {
 
   // ---- Overlay triggers ----
   var showSettings by mutableStateOf(false)
+  var showAbout by mutableStateOf(false)
   var showCommandPalette by mutableStateOf(false)
   var showGlobalSearch by mutableStateOf(false)
   var showQuickJump by mutableStateOf(false)

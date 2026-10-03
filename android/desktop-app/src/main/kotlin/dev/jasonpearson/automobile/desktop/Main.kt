@@ -215,7 +215,7 @@ fun main() {
               )
             }
             Menu("Help", mnemonic = 'H') {
-              Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
+              Item("About AutoMobile", onClick = { menuBarActions.showAbout = true })
             }
           }
           AutoMobileDesktopApp(

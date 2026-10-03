@@ -4,9 +4,9 @@ import {
   resolveChooserActivityLabel,
   type ChooserAppMetadata,
   type ChooserActivityLabelResult,
-} from "../../src/utils/DeepLinkManager";
-import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeTimer } from "../fakes/FakeTimer";
+} from "../../../src/features/utility/DeepLinkManager";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const metadata = (
   label: string | null,

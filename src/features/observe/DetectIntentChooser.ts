@@ -1,6 +1,6 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { DeepLinkManager } from "../../utils/DeepLinkManager";
+import { DeepLinkManager } from "../utility/DeepLinkManager";
 import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
 import { BaseVisualChange } from "../action/BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";

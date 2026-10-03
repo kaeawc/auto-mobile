@@ -12,7 +12,7 @@ import { HandleIntentChooser } from "../../src/features/action/HandleIntentChoos
 import { FakeKeyboardHierarchyProvider } from "../fakes/FakeKeyboardHierarchyProvider";
 import { FakeDeviceUrlLauncher } from "../fakes/FakeDeviceUrlLauncher";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
-import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
+import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 import {
   resetKeyboardFactory,
   resetOpenUrlFactory,

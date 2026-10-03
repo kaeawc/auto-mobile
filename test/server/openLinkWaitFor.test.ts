@@ -16,7 +16,7 @@ import {
   resetTapOnElementFactory,
   setTapOnElementFactory,
 } from "../../src/server/interactionTools";
-import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
+import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 import { OpenURL } from "../../src/features/action/OpenURL";
 import { HandleIntentChooser } from "../../src/features/action/HandleIntentChooser";
 import { ToolRegistry } from "../../src/server/toolRegistry";

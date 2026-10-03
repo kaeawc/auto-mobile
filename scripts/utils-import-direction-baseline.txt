@@ -1,11 +1,5 @@
 src/utils/AccessibilityDetector.ts -> src/features/featureFlags/FeatureFlagService
 src/utils/ContentHashProvider.ts -> src/features/observe/GetAppMetadata
-src/utils/DeepLinkManager.ts -> src/features/action/ClearText
-src/utils/DeepLinkManager.ts -> src/features/observe/ViewHierarchy
-src/utils/DeepLinkManager.ts -> src/features/observe/android/StableNodeIdentity
-src/utils/DeepLinkManager.ts -> src/features/utility/ElementGeometry
-src/utils/DeepLinkManager.ts -> src/features/utility/ElementParser
-src/utils/DeepLinkManager.ts -> src/server/systemTrayHelpers
 src/utils/DeviceSessionManager.ts -> src/daemon/deviceAdmissionGate
 src/utils/DeviceSessionManager.ts -> src/features/observe/ObserveScreen
 src/utils/DeviceSessionManager.ts -> src/features/observe/Window

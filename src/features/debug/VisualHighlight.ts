@@ -9,7 +9,7 @@ import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/Per
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { SimulatorHighlights } from "./SimulatorHighlights";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import {
   ActionableError,
   BootedDevice,
@@ -162,7 +162,7 @@ export class VisualHighlight {
       return AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     }
     if (device.platform === "ios") {
-      if (isIosSimulatorUdid(device.deviceId)) {
+      if (resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator") {
         return new SimulatorHighlights(device);
       }
       return IOSCtrlProxyClient.getInstance(device);

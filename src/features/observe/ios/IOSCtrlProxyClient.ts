@@ -37,7 +37,7 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/Perfo
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { exponentialBackoff } from "../../../utils/Backoff";
-import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
@@ -1281,7 +1281,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
     // Use metadata's existing transport predicate. Physical bundle paths belong
     // to the device filesystem and cannot be hashed by the host bundle walker.
-    if (!isIosSimulatorUdid(this.device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) !== "simulator") {
       return { kind: "terminal", reason: "physical-device bundle hashing is unavailable" };
     }
     this.iosSource ??= createIosMetadataSource(this.device);

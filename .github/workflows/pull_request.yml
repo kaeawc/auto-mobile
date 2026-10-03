@@ -2164,7 +2164,7 @@ jobs:
     # so this TS<->runner integration test still runs on the TypeScript PRs that can
     # break it while the pure-Swift build jobs skip on src-only changes.
     if: needs.detect-changes.outputs.ios_integration_should_run == 'true' && needs.fast-validation.result == 'success'
-    timeout-minutes: 45
+    timeout-minutes: 48
     # CI's XCUITest cold-start routinely exceeds the defaults; give the daemon a
     # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
     # then kill+respawn) a runner still coming up, and let an `observe` request wait
@@ -2343,7 +2343,8 @@ jobs:
       - wait: ctrlproxy-simulator
 
       - name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
-        timeout-minutes: 5
+        # About 2 min xcodebuild startup, 2.3 min tests, remainder teardown (passing 4m51s; failing teardown 60-80 s).
+        timeout-minutes: 8
         env:
           SIMULATOR_UDID: ${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}
         run: |

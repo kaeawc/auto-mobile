@@ -214,6 +214,251 @@ describe("DualTrackRecorder", () => {
     },
   );
 
+  test.each(["deadline", "stop"])(
+    "an unmatched tap stays before a later resolved swipe when flushed by %s",
+    async (flush) => {
+      await recorder.start();
+      fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 10, screenY: 10 });
+      fakeTimer.advanceTime(100);
+      fakeGestures.emit({
+        type: "swipe",
+        arrivedAt: 100,
+        startX: 500,
+        startY: 800,
+        direction: "up",
+      });
+      fakeTimer.advanceTime(200);
+      fakeA11y.emit({
+        type: "scroll",
+        timestamp: 100,
+        element: {
+          "resource-id": "com.example:id/list",
+          bounds: { left: 400, top: 700, right: 600, bottom: 900 },
+        },
+      });
+      expect(recorder.stepCount).toBe(0);
+      if (flush === "deadline") {
+        fakeTimer.advanceTime(MERGE_WINDOW_MS - fakeTimer.now());
+        expect(recorder.stepCount).toBe(2);
+      }
+      const result = await recorder.stop();
+      expect(result.steps).toEqual([
+        { tool: "tapAt", params: { x: 10, y: 10, action: "tap" } },
+        {
+          tool: "swipeOn",
+          params: { direction: "up", container: { elementId: "com.example:id/list" } },
+        },
+      ]);
+      expect(result.stepCount).toBe(2);
+      expect((await recorder.stop()).steps).toEqual(result.steps);
+      fakeTimer.advanceTime(MERGE_WINDOW_MS);
+      expect(recorder.stepCount).toBe(2);
+    },
+  );
+
+  test("a resolved third tap waits for the unmatched middle tap", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    fakeTimer.advanceTime(100);
+    fakeGestures.emit({ type: "tap", arrivedAt: 100, screenX: 10, screenY: 10 });
+    fakeTimer.advanceTime(100);
+    fakeGestures.emit({ type: "tap", arrivedAt: 200, screenX: 650, screenY: 891 });
+    fakeTimer.advanceTime(100);
+    fakeA11y.emit({
+      type: "tap",
+      timestamp: 200,
+      element: {
+        "resource-id": "com.example:id/third",
+        bounds: { left: 600, top: 860, right: 700, bottom: 920 },
+      },
+    });
+    expect(recorder.stepCount).toBe(1);
+    fakeTimer.advanceTime(100 + MERGE_WINDOW_MS - fakeTimer.now());
+    expect(recorder.stepCount).toBe(3);
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+      { tool: "tapAt", params: { x: 10, y: 10, action: "tap" } },
+      { tool: "tapOn", params: { action: "tap", elementId: "com.example:id/third" } },
+    ]);
+  });
+
+  test.each(["held", "emitted"])(
+    "doubleTap upgrades the correct %s step across a pending gesture",
+    async (position) => {
+      await recorder.start();
+      const unmatchedTap = { type: "tap" as const, arrivedAt: 0, screenX: 10, screenY: 10 };
+      if (position === "held") {
+        fakeGestures.emit(unmatchedTap);
+      }
+      fakeTimer.advanceTime(100);
+      fakeGestures.emit({ type: "tap", arrivedAt: 100, screenX: 342, screenY: 891 });
+      fakeA11y.emit({ type: "tap", timestamp: 100, element: TAP_ELEMENT });
+      expect(recorder.stepCount).toBe(position === "held" ? 0 : 1);
+      if (position === "emitted") {
+        fakeTimer.advanceTime(50);
+        fakeGestures.emit({ ...unmatchedTap, arrivedAt: 150 });
+      }
+      fakeTimer.advanceTime(200 - fakeTimer.now());
+      fakeGestures.emit({
+        type: "doubleTap",
+        arrivedAt: 200,
+        firstTapArrivedAt: 100,
+        screenX: 342,
+        screenY: 891,
+      });
+      const fallback = { tool: "tapAt", params: { x: 10, y: 10, action: "tap" } };
+      const doubleTap = {
+        tool: "tapOn",
+        params: { action: "doubleTap", elementId: TAP_ELEMENT["resource-id"] },
+      };
+      expect((await recorder.stop()).steps).toEqual(
+        position === "held" ? [fallback, doubleTap] : [doubleTap, fallback],
+      );
+      expect(recorder.stepCount).toBe(2);
+    },
+  );
+
+  test("stop resolves several pending gestures in touch order", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 10, screenY: 10 });
+    fakeTimer.advanceTime(100);
+    fakeGestures.emit({ type: "swipe", arrivedAt: 100, startX: 500, startY: 800, direction: "up" });
+    fakeTimer.advanceTime(100);
+    fakeGestures.emit({
+      type: "longPress",
+      arrivedAt: 200,
+      screenX: 20,
+      screenY: 20,
+      durationMs: 800,
+    });
+    expect(recorder.stepCount).toBe(0);
+    expect(await recorder.stop()).toEqual({
+      steps: [
+        { tool: "tapAt", params: { x: 10, y: 10, action: "tap" } },
+        { tool: "swipeOn", params: { direction: "up" } },
+        { tool: "tapAt", params: { x: 20, y: 20, action: "longPress", durationMs: 800 } },
+      ],
+      stepCount: 3,
+    });
+  });
+
+  test("buttons, pinch and coalesced text wait behind earlier touches", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 10, screenY: 10 });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: 0, button: "back" });
+    fakeGestures.emit({ type: "pinch", arrivedAt: 0, pinchDirection: "in", scale: 0.5 });
+    const element = { "resource-id": "com.example:id/search" };
+    fakeA11y.emit({ type: "inputText", timestamp: 0, text: "h", element });
+    fakeA11y.emit({ type: "inputText", timestamp: 0, text: "hello", element });
+    expect(recorder.stepCount).toBe(0);
+    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    expect(recorder.stepCount).toBe(4);
+    const { steps } = await recorder.stop();
+    expect(steps.map((step) => step.tool)).toEqual(["tapAt", "pressButton", "pinchOn", "sendKeys"]);
+    expect(steps[3].params.commands[0].text).toBe("hello");
+  });
+
+  test("inputText does not coalesce across an unresolved gesture", async () => {
+    await recorder.start();
+    const element = { "resource-id": "com.example:id/search" };
+    fakeA11y.emit({ type: "inputText", timestamp: 0, text: "hello", element });
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 10, screenY: 10 });
+    fakeA11y.emit({ type: "inputText", timestamp: 0, text: "world", element });
+    fakeA11y.emit({ type: "inputText", timestamp: 0, text: "world!", element });
+    expect(recorder.stepCount).toBe(1);
+    const { steps } = await recorder.stop();
+    expect(steps.map((step) => step.tool)).toEqual(["sendKeys", "tapAt", "sendKeys"]);
+    expect(steps[0].params.commands[0].text).toBe("hello");
+    expect(steps[2].params.commands[0].text).toBe("world!");
+  });
+
+  test("a skipped gesture releases later resolved steps", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "swipe", arrivedAt: 0, startX: 10, startY: 10 });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: 0, button: "back" });
+    expect(recorder.stepCount).toBe(0);
+    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    expect(recorder.stepCount).toBe(1);
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "pressButton", params: { button: "back" } },
+    ]);
+  });
+
+  test("an unresolved doubleTap keeps the first tap's position and refreshes its deadline", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(100);
+    fakeGestures.emit({ type: "pressButton", arrivedAt: 100, button: "back" });
+    fakeGestures.emit({
+      type: "doubleTap",
+      arrivedAt: 100,
+      firstTapArrivedAt: 0,
+      screenX: 342,
+      screenY: 891,
+    });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS - 100);
+    expect(recorder.stepCount).toBe(0);
+    fakeTimer.advanceTime(50);
+    fakeA11y.emit({ type: "tap", timestamp: 100, element: TAP_ELEMENT });
+    expect(recorder.stepCount).toBe(2);
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "doubleTap", elementId: TAP_ELEMENT["resource-id"] } },
+      { tool: "pressButton", params: { button: "back" } },
+    ]);
+  });
+
+  test("incoming stateChange after the touch beats an older buffered stateChange without consuming it", async () => {
+    await recorder.start();
+    const older = { ...TAP_ELEMENT, "resource-id": "com.example:id/older" };
+    fakeTimer.advanceTime(90);
+    fakeA11y.emit({ type: "stateChange", timestamp: 999999, element: older });
+    fakeTimer.advanceTime(10);
+    fakeGestures.emit({ type: "tap", arrivedAt: 100, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(50);
+    fakeA11y.emit({ type: "stateChange", timestamp: -999999, element: TAP_ELEMENT });
+    expect(recorder.stepCount).toBe(1);
+    fakeTimer.advanceTime(50);
+    fakeGestures.emit({ type: "tap", arrivedAt: 200, screenX: 342, screenY: 891 });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+      { tool: "tapOn", params: { action: "tap", elementId: older["resource-id"] } },
+    ]);
+  });
+
+  test.each([0, 50])(
+    "the closest buffered stateChange at the touch beats an incoming event %d ms later",
+    async (delay) => {
+      await recorder.start();
+      const older = { ...TAP_ELEMENT, "resource-id": "com.example:id/older" };
+      fakeA11y.emit({ type: "stateChange", timestamp: 1000, element: older });
+      fakeTimer.advanceTime(100);
+      fakeA11y.emit({ type: "stateChange", timestamp: 1000, element: TAP_ELEMENT });
+      fakeGestures.emit({ type: "tap", arrivedAt: 100, screenX: 342, screenY: 891 });
+      fakeTimer.advanceTime(delay);
+      fakeA11y.emit({ type: "stateChange", timestamp: 1000, element: older });
+      expect((await recorder.stop()).steps).toEqual([
+        { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+      ]);
+    },
+  );
+
+  test("buffered pre-touch stateChanges fall back to the closest receipt time", async () => {
+    await recorder.start();
+    fakeA11y.emit({
+      type: "stateChange",
+      timestamp: 1000,
+      element: { ...TAP_ELEMENT, "resource-id": "com.example:id/older" },
+    });
+    fakeTimer.advanceTime(50);
+    fakeA11y.emit({ type: "stateChange", timestamp: -1000, element: TAP_ELEMENT });
+    fakeTimer.advanceTime(50);
+    fakeGestures.emit({ type: "tap", arrivedAt: 100, screenX: 342, screenY: 891 });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+    ]);
+  });
+
   test("a buffered genuine tap takes precedence over stateChange candidates", async () => {
     await recorder.start();
     fakeA11y.emit({
@@ -549,6 +794,7 @@ describe("DualTrackRecorder", () => {
       scale: 0.5,
     });
 
+    expect(recorder.stepCount).toBe(1);
     const { steps } = await recorder.stop();
 
     expect(steps).toHaveLength(1);
@@ -562,6 +808,7 @@ describe("DualTrackRecorder", () => {
 
     fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
 
+    expect(recorder.stepCount).toBe(1);
     const { steps } = await recorder.stop();
 
     expect(steps).toHaveLength(1);

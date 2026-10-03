@@ -1,11 +1,10 @@
 // swiftlint:disable force_unwrapping force_try
 // Force-unwrap/force-try are idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
 
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class EventPersistenceTests: XCTestCase {
-
     private var tempDir: URL!
     private var persistence: FileEventPersistence!
     private var fakeDateProvider: FakeDateProvider!

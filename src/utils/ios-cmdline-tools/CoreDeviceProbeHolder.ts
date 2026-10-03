@@ -2,10 +2,7 @@ import { DOCTOR_EXEC_TIMEOUT_MS } from "../diagnosticTimeouts";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
 import { logger, type Logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
-import {
-  CoreDeviceCapabilityProbe,
-  type CoreDeviceGuardVersionProvider,
-} from "./CoreDeviceCapabilityProbe";
+import { CoreDeviceCapabilityProbe } from "./CoreDeviceCapabilityProbe";
 import { SimCtlClient, type SimCtl } from "./SimCtlClient";
 import { SimCtlBootStateProvider } from "./SimCtlBootStateProvider";
 import {
@@ -25,7 +22,6 @@ export function createProductionCoreDeviceProbe(
     files?: DevicectlProbeFiles;
     timer?: Timer;
     logger?: Pick<Logger, "warn" | "debug">;
-    guardVersions?: CoreDeviceGuardVersionProvider;
   } = {},
 ): CoreDeviceCapabilityProbe {
   const timer = options.timer ?? defaultTimer;
@@ -44,7 +40,6 @@ export function createProductionCoreDeviceProbe(
       timer,
       timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
     }),
-    guardVersions: options.guardVersions,
     logger: log,
   });
 }

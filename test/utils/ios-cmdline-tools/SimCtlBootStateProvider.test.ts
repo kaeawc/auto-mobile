@@ -5,7 +5,6 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import { CoreDeviceCapabilityProbe } from "../../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import { SimCtlBootStateProvider } from "../../../src/utils/ios-cmdline-tools/SimCtlBootStateProvider";
 import {
-  FakeCoreDeviceGuardVersionProvider,
   FakeDevicectlCommandInvoker,
   FakeDevicectlVersionSource,
 } from "../../fakes/FakeCoreDeviceCapabilityDependencies";
@@ -73,16 +72,10 @@ describe("SimCtlBootStateProvider", () => {
   test("blocks a shut-down simulator in the capability probe before command invocation", async () => {
     const simctl = new FakeSimCtlClient();
     setState(simctl, "Shutdown");
-    const guardVersions = new FakeCoreDeviceGuardVersionProvider();
-    guardVersions.versions = {
-      installedCoreDevice: [651, 13, 4],
-      selectedDeveloperDirCoreDevice: [651, 13, 4],
-    };
     const commandInvoker = new FakeDevicectlCommandInvoker();
     const probe = new CoreDeviceCapabilityProbe({
       versionSource: new FakeDevicectlVersionSource(capturedVersion),
       bootState: new SimCtlBootStateProvider(simctl),
-      guardVersions,
       commandInvoker,
     });
 

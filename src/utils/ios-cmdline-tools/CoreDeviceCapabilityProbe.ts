@@ -18,12 +18,9 @@ export function formatCoreDeviceVersion(version: CoreDeviceVersion): string {
   return version.join(".");
 }
 
-export type CoreDeviceVersionResult =
+export type CoreDeviceVersionMeasurement =
   | { kind: "available"; version: CoreDeviceVersion }
-  | { kind: "unavailable"; reason: string; reasonKind?: "missing" | "unparsable" }
-  | { kind: "blocked"; warning: string };
-
-export type CoreDeviceVersionMeasurement = Exclude<CoreDeviceVersionResult, { kind: "blocked" }>;
+  | { kind: "unavailable"; reason: string; reasonKind?: "missing" | "unparsable" };
 
 /** The invoker classifies the captured structured CoreDevice failure envelope. */
 export interface DevicectlCommandInvoker {
@@ -44,53 +41,14 @@ export interface SimulatorBootStateProvider {
   }): Promise<SimulatorBootSummary>;
 }
 
-export interface CoreDeviceGuardVersionProvider {
-  /**
-   * Both versions must be measured for the current host and selected developer directory.
-   * Reading the Xcode-bundled CoreDevice version needs a design decision and capture.
-   */
-  getVersions(): Promise<
-    | {
-        installedCoreDevice: CoreDeviceVersion;
-        selectedDeveloperDirCoreDevice: CoreDeviceVersion;
-      }
-    | undefined
-  >;
-}
-
 export interface DevicectlVersionSource {
   getDevicectlVersion(): Promise<string>;
-}
-
-export type CoreDeviceDowngradeGuard = { kind: "safe" } | { kind: "blocked"; warning: string };
-
-/** Never enter devicectl through a developer directory with an older CoreDevice. */
-export function checkCoreDeviceDowngrade(
-  versions: Awaited<ReturnType<CoreDeviceGuardVersionProvider["getVersions"]>>,
-): CoreDeviceDowngradeGuard {
-  if (!versions) {
-    return {
-      kind: "blocked",
-      warning:
-        "Cannot verify the selected developer directory's CoreDevice version; devicectl was not run.",
-    };
-  }
-  if (
-    compareSimctlVersions(versions.selectedDeveloperDirCoreDevice, versions.installedCoreDevice) < 0
-  ) {
-    return {
-      kind: "blocked",
-      warning: `Selected developer directory bundles CoreDevice ${formatCoreDeviceVersion(versions.selectedDeveloperDirCoreDevice)}, older than installed CoreDevice ${formatCoreDeviceVersion(versions.installedCoreDevice)}; devicectl was not run. Select a compatible developer directory.`,
-    };
-  }
-  return { kind: "safe" };
 }
 
 export type CoreDeviceCapabilityResult =
   | { kind: "supported" }
   | { kind: "unsupported"; reason: string }
   | { kind: "unavailable"; reason: string }
-  | { kind: "blocked"; warning: string }
   | { kind: "notBooted"; error: ActionableError }
   | { kind: "failed"; message: string };
 
@@ -98,7 +56,6 @@ export interface CoreDeviceCapabilityProbeDependencies {
   versionSource: DevicectlVersionSource;
   commandInvoker: DevicectlCommandInvoker;
   bootState: SimulatorBootStateProvider;
-  guardVersions?: CoreDeviceGuardVersionProvider;
   logger?: Pick<Logger, "warn">;
 }
 
@@ -147,10 +104,6 @@ export class CoreDeviceCapabilityProbe implements CoreDeviceProbeDiagnostics {
   private readonly commandFlights = new SingleFlight<string, DevicectlCommandResult>();
 
   constructor(private readonly dependencies: CoreDeviceCapabilityProbeDependencies) {}
-
-  get guardStatus(): "configured" | "not configured" {
-    return this.dependencies.guardVersions ? "configured" : "not configured";
-  }
 
   getCachedVersion(): CoreDeviceVersionMeasurement | undefined {
     const result = this.cachedVersion;
@@ -210,11 +163,7 @@ export class CoreDeviceCapabilityProbe implements CoreDeviceProbeDiagnostics {
     return pending;
   }
 
-  async getVersion(): Promise<CoreDeviceVersionResult> {
-    const guard = await this.getGuardResult();
-    if (guard.kind === "blocked") {
-      return guard;
-    }
+  async getVersion(): Promise<CoreDeviceVersionMeasurement> {
     if (this.versionPromise) {
       return this.versionPromise;
     }
@@ -239,11 +188,6 @@ export class CoreDeviceCapabilityProbe implements CoreDeviceProbeDiagnostics {
     const requirement = `requires CoreDevice >= ${formatCoreDeviceVersion(requiredVersion)}`;
     if (compareSimctlVersions(version.version, requiredVersion) < 0) {
       return { kind: "unsupported", reason: `${command} ${requirement}` };
-    }
-
-    const guard = await this.getGuardResult();
-    if (guard.kind === "blocked") {
-      return guard;
     }
 
     const scope = this.dependencies.bootState.getCapabilityScope?.(deviceId) ?? deviceId;
@@ -348,26 +292,6 @@ export class CoreDeviceCapabilityProbe implements CoreDeviceProbeDiagnostics {
         kind: "unavailable",
         reason: `devicectl not functional: ${errorMessage(error)}`,
         reasonKind: "missing",
-      };
-    }
-  }
-
-  private async getGuardResult(): Promise<CoreDeviceDowngradeGuard | { kind: "not configured" }> {
-    // No measurements exist for a production guard yet. Absence is explicit in
-    // guardStatus and diagnostics; it must never be represented as verified safe.
-    if (!this.dependencies.guardVersions) {
-      return { kind: "not configured" };
-    }
-    try {
-      return checkCoreDeviceDowngrade(await this.dependencies.guardVersions.getVersions());
-    } catch (error) {
-      (this.dependencies.logger ?? logger).warn(
-        `CoreDevice downgrade guard failed: ${errorMessage(error)}`,
-        error,
-      );
-      return {
-        kind: "blocked",
-        warning: `Cannot verify the selected developer directory's CoreDevice version: ${errorMessage(error)}; devicectl was not run.`,
       };
     }
   }

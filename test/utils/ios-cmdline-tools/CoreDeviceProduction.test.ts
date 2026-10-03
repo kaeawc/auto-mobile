@@ -125,7 +125,6 @@ describe("production CoreDevice wiring", () => {
     expect(fresh.getCoreDeviceProbe()).toBe(fresh.getCoreDeviceProbe());
     expect(fresh.getCoreDeviceProbe()).not.toBe(createIosDoctorDependencies().getCoreDeviceProbe());
     expect(h.calls).toHaveLength(0);
-    expect(holder.get().guardStatus).toBe("not configured");
     expect(holder.get().getCachedVersion()).toBeUndefined();
   });
   test("doctor refresh seeds later booted capability calls and a failed refresh invalidates success", async () => {

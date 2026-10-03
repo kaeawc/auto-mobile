@@ -4,11 +4,9 @@ import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   CoreDeviceCapabilityProbe,
-  checkCoreDeviceDowngrade,
   parseCoreDeviceVersion,
 } from "../../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import {
-  FakeCoreDeviceGuardVersionProvider,
   FakeDevicectlVersionSource,
   FakeDevicectlCommandInvoker,
   FakeSimulatorBootStateProvider,
@@ -26,11 +24,6 @@ const required: [number, number, number] = [651, 13, 4];
 
 function harness(options: { scope?: string } = {}) {
   const versionSource = new FakeDevicectlVersionSource(capturedVersion);
-  const guardVersions = new FakeCoreDeviceGuardVersionProvider();
-  guardVersions.versions = {
-    installedCoreDevice: installed,
-    selectedDeveloperDirCoreDevice: installed,
-  };
   const bootState = new FakeSimulatorBootStateProvider();
   if (options.scope) {
     bootState.getCapabilityScope = () => options.scope!;
@@ -39,12 +32,11 @@ function harness(options: { scope?: string } = {}) {
   const warnings: string[] = [];
   const probe = new CoreDeviceCapabilityProbe({
     versionSource,
-    guardVersions,
     bootState,
     commandInvoker,
     logger: { warn: (message) => warnings.push(message) },
   });
-  return { probe, versionSource, guardVersions, bootState, commandInvoker, warnings };
+  return { probe, versionSource, bootState, commandInvoker, warnings };
 }
 
 describe("CoreDeviceCapabilityProbe", () => {
@@ -130,31 +122,6 @@ describe("CoreDeviceCapabilityProbe", () => {
     finish({ kind: "available", version: installed });
     expect(await pending).toMatchObject({ kind: "unavailable", reason: "new failure" });
     expect(h.probe.getCachedVersion()).toMatchObject({ kind: "unavailable" });
-  });
-
-  test("blocks an older or unverified developer directory before devicectl", async () => {
-    const older = harness();
-    older.guardVersions.versions = {
-      installedCoreDevice: installed,
-      selectedDeveloperDirCoreDevice: [650, 0, 0],
-    };
-    expect(await older.probe.checkSimulatorCommand("sim-1", "copy", required)).toMatchObject({
-      kind: "blocked",
-      warning: expect.stringContaining("older than installed CoreDevice"),
-    });
-    expect(older.versionSource.calls).toBe(0);
-    expect(older.commandInvoker.calls).toHaveLength(0);
-
-    const unknown = harness();
-    unknown.guardVersions.versions = undefined;
-    expect(await unknown.probe.getVersion()).toMatchObject({ kind: "blocked" });
-    expect(unknown.versionSource.calls).toBe(0);
-    expect(
-      checkCoreDeviceDowngrade({
-        installedCoreDevice: installed,
-        selectedDeveloperDirCoreDevice: installed,
-      }),
-    ).toEqual({ kind: "safe" });
   });
 
   test("blocks shut-down or unknown simulator states before command invocation", async () => {

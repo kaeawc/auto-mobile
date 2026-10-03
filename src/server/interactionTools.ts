@@ -708,11 +708,25 @@ export const tapAnySchema = withJsonSchemaOverride(
   (js) => compactExclusiveSelectorProperties(js, ["container"]),
 );
 
-const dragAndDropSelectorSchema = (label: "Source" | "Target") =>
-  createElementIdTextSelectorSchema({
+const dragAndDropSelectorSchema = (label: "Source" | "Target") => {
+  const selector = createElementIdTextSelectorSchema({
     elementId: `${label} ID`,
     text: `${label} text`,
-  }).describe(`${label} element`);
+  });
+  const scope = {
+    container: nestedElementContainerSchema
+      .optional()
+      .describe("Nested container scope for this endpoint; outermost container resolves first"),
+    selectionStrategy: resolverSelectionStrategySchema
+      .optional()
+      .describe(
+        "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target",
+      ),
+  };
+  return z
+    .union([selector.options[0].extend(scope), selector.options[1].extend(scope)])
+    .describe(`${label} element`);
+};
 
 const swipeOnLookForSchema = createElementIdTextSelectorSchema({
   elementId: "ID of the element to look for",

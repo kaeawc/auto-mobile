@@ -1241,48 +1241,92 @@
           "type": "string"
         },
         "source": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Source ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Source text",
-              "type": "string"
-            }
-          },
           "description": "Source element",
           "anyOf": [
             {
-              "required": ["elementId"]
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Source ID",
+                  "type": "string"
+                },
+                "container": {
+                  "description": "Nested container scope for this endpoint; outermost container resolves first",
+                  "$ref": "#/$defs/__schema0"
+                },
+                "selectionStrategy": {
+                  "description": "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
             },
             {
-              "required": ["text"]
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Source text",
+                  "type": "string"
+                },
+                "container": {
+                  "description": "Nested container scope for this endpoint; outermost container resolves first",
+                  "$ref": "#/$defs/__schema0"
+                },
+                "selectionStrategy": {
+                  "description": "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
             }
           ]
         },
         "target": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Target ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Target text",
-              "type": "string"
-            }
-          },
           "description": "Target element",
           "anyOf": [
             {
-              "required": ["elementId"]
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Target ID",
+                  "type": "string"
+                },
+                "container": {
+                  "description": "Nested container scope for this endpoint; outermost container resolves first",
+                  "$ref": "#/$defs/__schema0"
+                },
+                "selectionStrategy": {
+                  "description": "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
             },
             {
-              "required": ["text"]
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Target text",
+                  "type": "string"
+                },
+                "container": {
+                  "description": "Nested container scope for this endpoint; outermost container resolves first",
+                  "$ref": "#/$defs/__schema0"
+                },
+                "selectionStrategy": {
+                  "description": "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
             }
           ]
         },
@@ -1330,7 +1374,61 @@
         }
       },
       "required": ["source", "target"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {

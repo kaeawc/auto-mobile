@@ -1,6 +1,11 @@
+import type { ElementContainerSelector } from "./PinchOnOptions";
+import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
+
 export interface DragAndDropTarget {
   text?: string;
   elementId?: string;
+  container?: ElementContainerSelector;
+  selectionStrategy?: ElementSelectionStrategy;
 }
 
 export interface DragAndDropOptions {

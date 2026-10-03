@@ -582,7 +582,7 @@ settled screenshot is eligible.
 | 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                                                                                                                 |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                                                                                                               |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                                                            |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
@@ -643,8 +643,35 @@ bounds for native dispatch instead of a global resource-ID lookup. With iOS
 VoiceOver enabled, such `tapAny` calls require a label for activation at the
 selected bounds; an ID-only target fails without an action.
 
+`dragAndDrop.source` and `dragAndDrop.target` each accept exactly one of
+`elementId` or `text`, plus their own optional recursive `container` and
+`selectionStrategy` (`first`, `random`, or `unique`; default `first`):
+
+```json
+{
+  "source": {
+    "elementId": "remove",
+    "container": {
+      "elementId": "item_42",
+      "container": { "elementId": "cart_A" }
+    },
+    "selectionStrategy": "unique"
+  },
+  "target": { "elementId": "cart_B" }
+}
+```
+
+Both endpoints resolve independently before any drag starts. The same outermost
+first scope rules and container indices apply. `unique` requires one eligible
+leaf and one match at every unindexed container level. Missing or ambiguous
+scopes and leaves fail without a drag or global fallback; errors identify
+`source` or `target`, retain the container level or target failure, and list
+ambiguity candidates. Scoped and unscoped endpoints can be mixed. These fields
+belong inside each endpoint, not at the top level; unknown endpoint keys and
+malformed recursive containers are rejected.
+
 This nested-scoping contract is not yet available for
-`dragAndDrop`, `swipeOn`/`lookFor`, `observe` subtree
+`swipeOn`/`lookFor`, `observe` subtree
 queries, or `waitFor`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to

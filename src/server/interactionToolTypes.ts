@@ -1,5 +1,6 @@
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
 import type { TapAtOptions } from "../models/TapAtOptions";
+import type { DragAndDropTarget } from "../models/DragAndDropOptions";
 /**
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
@@ -119,14 +120,8 @@ export interface TapAnyArgs {
 
 export interface DragAndDropArgs {
   display?: string;
-  source: {
-    text?: string;
-    elementId?: string;
-  };
-  target: {
-    text?: string;
-    elementId?: string;
-  };
+  source: DragAndDropTarget;
+  target: DragAndDropTarget;
   pressDurationMs?: number;
   dragDurationMs?: number;
   holdDurationMs?: number;

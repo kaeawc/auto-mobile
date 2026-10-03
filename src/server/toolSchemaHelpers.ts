@@ -282,7 +282,8 @@ export function isInjectedDeviceIdSchema(zodSchema: object): boolean {
  *
  * Runtime validation is unaffected: this only mutates the advertised JSON schema
  * (via `withJsonSchemaOverride`); the source-of-truth zod union is untouched.
- * Non-matching properties are left as-is.
+ * Non-matching properties are left as-is. Branches with optional fields retain
+ * their full strict schemas so compaction cannot drop endpoint scope options.
  */
 export function compactExclusiveSelectorProperties(
   jsonSchema: Record<string, unknown>,
@@ -307,7 +308,8 @@ export function compactExclusiveSelectorProperties(
         b?.type !== "object" ||
         typeof b.properties !== "object" ||
         !Array.isArray(b.required) ||
-        b.required.length !== 1
+        b.required.length !== 1 ||
+        Object.keys(b.properties).length !== 1
       ) {
         matchesPattern = false;
         break;

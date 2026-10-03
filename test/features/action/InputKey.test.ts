@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { InputKey } from "../../../src/features/action/InputKey";
 import type { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -24,6 +24,27 @@ function createAdbFactory(fakeAdb: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("InputKey", () => {
+  test("throws Operation cancelled when the ADB keyevent is cancelled", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    const execute = spyOn(fakeAdb, "execute").mockImplementation(async (_args, options) => {
+      expect(options?.signal).toBe(controller.signal);
+      controller.abort();
+      throw new Error("ADB keyevent cancelled");
+    });
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      undefined,
+      new FakeTimer(),
+    );
+
+    await expect(
+      inputKey.press("enter", 500, undefined, [], { signal: controller.signal }),
+    ).rejects.toThrow("Operation cancelled");
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   test("preserves an iOS arrow failure and an unverified result from the runner", async () => {
     let response = {
       success: false,
@@ -260,9 +281,16 @@ describe("InputKey", () => {
   test("wraps an ADB keyevent failure in a stable error envelope", async () => {
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandError("KEYCODE_TAB", new Error("device offline"));
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      undefined,
+      new FakeTimer(),
+    );
 
-    const result = await inputKey.press("tab", 500);
+    const result = await inputKey.press("tab", 500, undefined, [], {
+      signal: new AbortController().signal,
+    });
 
     expect(result).toEqual({
       success: false,

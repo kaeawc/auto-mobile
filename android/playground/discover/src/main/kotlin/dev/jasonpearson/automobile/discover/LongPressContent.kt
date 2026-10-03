@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.TouchApp
@@ -37,11 +37,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -316,6 +316,29 @@ private fun LongPressDurationButton(requiredDurationMs: Int, label: String, test
   }
 }
 
+internal data class DragReorderResult(val index: Int, val remainingOffset: Float)
+
+internal fun calculateDragReorder(
+  currentIndex: Int,
+  lastIndex: Int,
+  accumulatedOffset: Float,
+  itemHeightPx: Float,
+): DragReorderResult {
+  val rowsCrossed = (accumulatedOffset / itemHeightPx).toInt()
+  val newIndex = (currentIndex + rowsCrossed).coerceIn(0, lastIndex)
+  val remainingOffset = accumulatedOffset - (newIndex - currentIndex) * itemHeightPx
+  // Discard outward movement at either edge so it cannot accumulate or delay reversing direction.
+  val clampedOffset =
+    if (
+      (newIndex == 0 && remainingOffset < 0f) || (newIndex == lastIndex && remainingOffset > 0f)
+    ) {
+      0f
+    } else {
+      remainingOffset
+    }
+  return DragReorderResult(newIndex, clampedOffset)
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LongPressDragList() {
@@ -328,22 +351,27 @@ private fun LongPressDragList() {
       DraggableListItem(5, "Drag item 5"),
     )
   }
-  var draggingIndex by remember { mutableIntStateOf(-1) }
+  var draggingItemId by remember { mutableStateOf<Int?>(null) }
   var dragOffset by remember { mutableFloatStateOf(0f) }
   val itemHeight = 56.dp
-  val itemHeightPx = with(LocalDensity.current) { itemHeight.toPx() }
+  val itemHeightPx by rememberUpdatedState(with(LocalDensity.current) { itemHeight.toPx() })
 
   Card(
     modifier = Modifier.fillMaxWidth(),
     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
   ) {
+    Text(
+      text = "Order: ${items.joinToString(",") { it.id.toString() }}",
+      modifier = Modifier.padding(8.dp).semantics { testTag = "draggable_order" },
+      fontSize = 14.sp,
+    )
     LazyColumn(
       modifier = Modifier.fillMaxWidth().height(280.dp),
       contentPadding = PaddingValues(8.dp),
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
-        val isDragging = draggingIndex == index
+      items(items, key = { it.id }) { item ->
+        val isDragging = draggingItemId == item.id
         val offsetY = if (isDragging) dragOffset else 0f
 
         Card(
@@ -352,33 +380,43 @@ private fun LongPressDragList() {
               .height(itemHeight)
               .offset { IntOffset(0, offsetY.roundToInt()) }
               .zIndex(if (isDragging) 1f else 0f)
-              .pointerInput(items.size, draggingIndex) {
+              .pointerInput(item.id) {
                 detectDragGesturesAfterLongPress(
-                  onDragStart = { draggingIndex = index },
+                  onDragStart = {
+                    draggingItemId = item.id
+                    dragOffset = 0f
+                  },
                   onDragEnd = {
-                    draggingIndex = -1
+                    draggingItemId = null
                     dragOffset = 0f
                   },
                   onDragCancel = {
-                    draggingIndex = -1
+                    draggingItemId = null
                     dragOffset = 0f
                   },
                 ) { change, dragAmount ->
                   change.consume()
-                  dragOffset += dragAmount.y
-                  val offsetIndex = (dragOffset / itemHeightPx).toInt()
-                  if (offsetIndex != 0 && draggingIndex != -1) {
-                    val newIndex = (draggingIndex + offsetIndex).coerceIn(0, items.lastIndex)
-                    if (newIndex != draggingIndex) {
-                      val movedItem = items.removeAt(draggingIndex)
-                      items.add(newIndex, movedItem)
-                      draggingIndex = newIndex
-                      dragOffset -= offsetIndex * itemHeightPx
+                  val currentIndex = items.indexOfFirst { it.id == draggingItemId }
+                  if (currentIndex != -1) {
+                    val result =
+                      calculateDragReorder(
+                        currentIndex = currentIndex,
+                        lastIndex = items.lastIndex,
+                        accumulatedOffset = dragOffset + dragAmount.y,
+                        itemHeightPx = itemHeightPx,
+                      )
+                    if (result.index != currentIndex) {
+                      val movedItem = items.removeAt(currentIndex)
+                      items.add(result.index, movedItem)
                     }
+                    dragOffset = result.remainingOffset
                   }
                 }
               }
-              .semantics { testTag = "draggable_item_${item.id}" },
+              .semantics {
+                testTag = "draggable_item_${item.id}"
+                contentDescription = "Drag item ${item.id}"
+              },
           colors =
             CardDefaults.cardColors(
               containerColor =

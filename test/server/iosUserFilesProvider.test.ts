@@ -309,7 +309,8 @@ describe("iOS Simulator user_files", () => {
   });
   test.each([
     "../escape",
-    resolve("/host/input.txt"),
+    "/host/input.txt",
+    "C:\\host\\input.txt",
     "nested/../../escape",
     "nested\\..\\escape",
     "",

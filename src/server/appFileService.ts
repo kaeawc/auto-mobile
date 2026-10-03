@@ -1,7 +1,17 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from "node:path";
 import { TextDecoder } from "node:util";
 import {
   AppFileContainer,
@@ -1364,6 +1374,11 @@ function normalizeIosFilesRequest(
   requireIosFilesSimulator(request.device);
   if (request.target.domain !== "user_files") {
     throw new ActionableError("iOS Files fixture provider requires target.domain user_files.");
+  }
+  if (win32.isAbsolute(request.destinationPath) || /^[A-Za-z]:/.test(request.destinationPath)) {
+    throw new ActionableError(
+      "iOS Files destinationPath must be relative, without an absolute path or drive-letter prefix.",
+    );
   }
   return {
     ...request,

@@ -3,12 +3,17 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 import { FakeKeyboardHierarchyProvider } from "../../fakes/FakeKeyboardHierarchyProvider";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import iosFormsEmptyFields from "../../fixtures/observe/ios-forms-empty-fields";
+import {
+  iosKeyboardVisibleHierarchy,
+  iosKeyboardMinimizedHierarchy,
+} from "../../fixtures/observe/iosKeyboardStates";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { getFocusedTextValue } from "../../../src/features/action/ClearText";
 import { logger } from "../../../src/utils/logger";
@@ -131,7 +136,7 @@ describe("Clipboard iOS", () => {
     ]);
   }
 
-  test("non-empty clipboard with unchanged focused value reports unconfirmed paste", async () => {
+  test("synthetic non-empty clipboard with unchanged focused value reports unconfirmed paste", async () => {
     readableClipboard();
     hierarchy.setDefaultResult(focusedIOSForm("AB"));
     const result = await clipboard.execute("paste");
@@ -149,8 +154,50 @@ describe("Clipboard iOS", () => {
     ]);
   });
 
+  test("real visible capture with unchanged focused value reports unconfirmed paste", async () => {
+    readableClipboard();
+    hierarchy.setDefaultResult(iosKeyboardVisibleHierarchy);
+    const result = await clipboard.execute("paste");
+    expect(result.success).toBe(false);
+    expect(result.method).toBe("a11y");
+    expect(result.error).toContain("nothing appears to have been pasted");
+    expect(result.error).toContain("outcome unconfirmed");
+    expect(timer.now()).toBe(1500);
+    expect(hierarchy.getCallCount()).toBe(7);
+    expect(hierarchy.getReadOptions()).toEqual(
+      [1500, 1500, 1250, 1000, 750, 500, 250].map((timeoutMs) => ({ timeoutMs })),
+    );
+    expect(getFocusedTextValue(iosKeyboardVisibleHierarchy)).toBe("mt8@example.com");
+  });
+
+  test("derived real visible capture with changed focused value confirms paste", async () => {
+    readableClipboard();
+    // Derived variant: only the focused field's value changes; the shared capture stays intact.
+    const after = structuredClone(iosKeyboardVisibleHierarchy);
+    const parser = new DefaultElementParser();
+    for (const root of parser.extractRootNodes(after)) {
+      parser.traverseNode(root, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (properties.focused === "true" && properties["hint-text"] === "Email") {
+          nodeAttributes(node).value = "mt8@example.com Z1";
+        }
+      });
+    }
+    expect(getFocusedTextValue(after)).toBe("mt8@example.com Z1");
+    hierarchy.setResults([iosKeyboardVisibleHierarchy, after]);
+    expect(await clipboard.execute("paste")).toEqual({
+      success: true,
+      action: "paste",
+      text: undefined,
+      method: "a11y",
+    });
+    expect(hierarchy.getCallCount()).toBe(2);
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(getFocusedTextValue(iosKeyboardVisibleHierarchy)).toBe("mt8@example.com");
+  });
+
   test.each(["AB Z1", "Z1"])(
-    "changed focused value %s succeeds with the original result shape",
+    "synthetic changed focused value %s succeeds with the original result shape",
     async (after) => {
       readableClipboard();
       hierarchy.setResults([focusedIOSForm("AB"), focusedIOSForm(after)]);
@@ -164,7 +211,7 @@ describe("Clipboard iOS", () => {
     },
   );
 
-  test("value changes only on a later fake-time poll", async () => {
+  test("synthetic value changes only on a later fake-time poll", async () => {
     readableClipboard();
     hierarchy.setResults([
       focusedIOSForm("AB"),
@@ -202,7 +249,7 @@ describe("Clipboard iOS", () => {
   test.each([
     ["unavailable", null],
     ["no focused field", iosFormsEmptyFields],
-    ["no readable value", focusedIOSForm(undefined)],
+    ["synthetic no readable value", focusedIOSForm(undefined)],
     ["hierarchy error", { hierarchy: { error: "read failed" } }],
   ] as const)(
     "%s hierarchy keeps success because verification is impossible",
@@ -214,7 +261,7 @@ describe("Clipboard iOS", () => {
     },
   );
 
-  test("hierarchy disappearing after paste keeps an indeterminate success", async () => {
+  test("synthetic hierarchy disappearing after paste keeps an indeterminate success", async () => {
     readableClipboard();
     hierarchy.setResults([focusedIOSForm("AB"), null]);
     expect((await clipboard.execute("paste")).success).toBe(true);
@@ -243,7 +290,7 @@ describe("Clipboard iOS", () => {
     }
   });
 
-  test("hanging post-paste hierarchy is bounded and cannot prove a dropped paste", async () => {
+  test("synthetic hanging post-paste hierarchy is bounded and cannot prove a dropped paste", async () => {
     readableClipboard();
     let reads = 0;
     const reader = {
@@ -265,7 +312,7 @@ describe("Clipboard iOS", () => {
     expect(timer.now()).toBe(1500);
   });
 
-  test("default hierarchy reader invalidates the iOS cache for every sample", async () => {
+  test("synthetic default hierarchy reader invalidates the iOS cache for every sample", async () => {
     readableClipboard();
     const invalidations: number[] = [];
     const client = {
@@ -324,7 +371,7 @@ describe("Clipboard iOS", () => {
     }
   });
 
-  test("runner paste failure preserves its error and skips post-paste reads", async () => {
+  test("synthetic runner paste failure preserves its error and skips post-paste reads", async () => {
     fakeIOSCtrlProxy.setClipboardResults([
       { success: true, action: "get", text: "Z1", totalTimeMs: 1 },
       { success: false, action: "paste", error: "paste rejected", totalTimeMs: 1 },
@@ -339,7 +386,33 @@ describe("Clipboard iOS", () => {
     expect(timer.getSleepCallCount()).toBe(0);
   });
 
-  test("focused value helper retains empty strings and whitespace and skips placeholders", () => {
+  test.each([
+    ["visible", iosKeyboardVisibleHierarchy, "mt8@example.com", "Email"],
+    ["minimized", iosKeyboardMinimizedHierarchy, "AB Z1 K1 EN9 EN9", "Display Name"],
+  ] as const)("focused value helper reads the real %s capture", (_name, capture, value, hint) => {
+    const parser = new DefaultElementParser();
+    const focused: Record<string, unknown>[] = [];
+    for (const root of parser.extractRootNodes(capture)) {
+      parser.traverseNode(root, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (properties.focused === "true") {
+          focused.push(properties);
+        }
+      });
+    }
+    expect(focused).toHaveLength(1);
+    expect(focused[0]).toMatchObject({
+      className: "UITextField",
+      focused: "true",
+      role: "textfield",
+      value,
+      "hint-text": hint,
+    });
+    expect(focused[0]).not.toHaveProperty("text");
+    expect(getFocusedTextValue(capture)).toBe(value);
+  });
+
+  test("synthetic focused value helper retains empty strings and whitespace and skips placeholders", () => {
     expect(getFocusedTextValue(focusedIOSForm(""))).toBe("");
     expect(getFocusedTextValue(focusedIOSForm("  "))).toBe("  ");
     expect(getFocusedTextValue(focusedIOSForm(undefined))).toBeUndefined();

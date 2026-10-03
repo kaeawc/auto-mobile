@@ -734,8 +734,29 @@ export interface ImeOccluder {
 export function getImeOccluder(elements: ObserveElements): ImeOccluder | undefined {
   const ime = detectImeWindow(elements);
   const row = imeAccumulator(elements, ime);
-  if (!ime || !row) {
+  if (!ime) {
     return undefined;
+  }
+  if (!row) {
+    // Minimized iOS keyboards have no collected keys, only an inert layout wrapper.
+    // Its inherited IME provenance still identifies the parked keyboard's bounds.
+    const wrapper =
+      ime.package === "com.apple.keyboard"
+        ? getUncollectedWrappers(elements).find(
+            (el) => getElementProvenance(el)?.keyboardPackage === ime.package,
+          )
+        : undefined;
+    const bounds = wrapper && boundsTuple(wrapper);
+    const provenance = wrapper && getElementProvenance(wrapper);
+    return bounds && provenance
+      ? {
+          bounds,
+          group: provenance.group,
+          windowRank: provenance.windowRank,
+          spanEnter: provenance.enter,
+          spanExit: provenance.exit,
+        }
+      : undefined;
   }
   const member = imeCandidates(elements, ime).find((el) => isImeKeycap(el, ime));
   // Uncollected IME wrappers can span the app window even when the visible

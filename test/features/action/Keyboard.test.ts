@@ -11,7 +11,10 @@ import { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeKeyboardHierarchyProvider } from "../../fakes/FakeKeyboardHierarchyProvider";
-import { iosKeyboardTabbarHierarchy } from "../../fixtures/observe/iosKeyboardTabbar";
+import {
+  iosKeyboardVisibleHierarchy,
+  iosKeyboardMinimizedHierarchy,
+} from "../../fixtures/observe/iosKeyboardStates";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("Keyboard", () => {
@@ -411,36 +414,28 @@ describe("Keyboard", () => {
     }
   });
 
-  // Synthetic hierarchy scaffolding: bounds as reported in #9083, not a captured hierarchy.
-  const parkedIOSKeyboard = (top = 918): ViewHierarchyResult => ({
+  // Synthetic boundary geometry and unavailable/error hierarchies are not raw captures.
+  const syntheticIOSKeyboard = (top: number, bottom = 1144): ViewHierarchyResult => ({
     screenWidth: 402,
     screenHeight: 874,
     hierarchy: {
       node: {
-        $: { class: "UIKeyboard", bounds: { left: 0, top, right: 402, bottom: 1144 } },
-        node: [
-          {
-            $: {
-              class: "UIKeyboardKey",
-              text: "Q",
-              bounds: { left: 0, top, right: 402, bottom: 1144 },
-            },
-          },
-        ],
+        $: { class: "UIKeyboard", clickable: true, bounds: { left: 0, top, right: 402, bottom } },
       },
     },
   });
 
   test.each([
-    ["visible docked keyboard", iosKeyboardTabbarHierarchy(true), true],
-    ["issue-reported off-screen keyboard", parkedIOSKeyboard(), false],
-    ["keyboard at screen bottom", parkedIOSKeyboard(874), false],
-    ["sub-point visible sliver", parkedIOSKeyboard(873.5), false],
-    ["no keyboard", { ...baseHierarchy(), screenWidth: 402, screenHeight: 874 }, false],
-    ["unavailable hierarchy", null, true],
-    ["unknown screen dimensions", baseHierarchy(), true],
+    ["real visible capture", iosKeyboardVisibleHierarchy, true],
+    ["real minimized capture", iosKeyboardMinimizedHierarchy, false],
+    ["synthetic keyboard at screen bottom", syntheticIOSKeyboard(874), false],
+    ["synthetic sub-point visible sliver", syntheticIOSKeyboard(873.5), false],
+    ["synthetic zero height", syntheticIOSKeyboard(600, 600), false],
+    ["synthetic no keyboard", { ...baseHierarchy(), screenWidth: 402, screenHeight: 874 }, false],
+    ["synthetic unavailable hierarchy", null, true],
+    ["synthetic unknown screen dimensions", baseHierarchy(), true],
     [
-      "hierarchy error",
+      "synthetic hierarchy error",
       { screenWidth: 402, screenHeight: 874, hierarchy: { error: "unavailable" } },
       true,
     ],
@@ -466,8 +461,8 @@ describe("Keyboard", () => {
     }
   });
 
-  test("ios open with a visible docked keyboard preserves the existing result", async () => {
-    fakeHierarchy.setDefaultResult(iosKeyboardTabbarHierarchy(true));
+  test("ios open with the real visible capture preserves the existing result", async () => {
+    fakeHierarchy.setDefaultResult(iosKeyboardVisibleHierarchy);
     const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
     } as IOSCtrlProxyClient);
@@ -480,8 +475,8 @@ describe("Keyboard", () => {
     }
   });
 
-  test("ios open fails clearly for the minimized off-screen keyboard", async () => {
-    fakeHierarchy.setDefaultResult(parkedIOSKeyboard());
+  test("ios open fails clearly for the real minimized capture", async () => {
+    fakeHierarchy.setDefaultResult(iosKeyboardMinimizedHierarchy);
     const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
     } as IOSCtrlProxyClient);

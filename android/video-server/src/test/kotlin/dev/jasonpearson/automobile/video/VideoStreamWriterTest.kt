@@ -402,6 +402,64 @@ class VideoStreamWriterTest {
   }
 
   @Test
+  fun attachRollsBackWhenCachedReplayWriteThrows() {
+    // Header (index 0) succeeds; the first replayed packet (CONFIG) fails.
+    assertCachedReplayFailure(failFromWriteIndex = 1)
+  }
+
+  @Test
+  fun attachRollsBackWhenIdrReplayWriteThrows() {
+    // Header and CONFIG succeed; the second replayed packet (IDR) fails.
+    assertCachedReplayFailure(failFromWriteIndex = 2)
+  }
+
+  private fun assertCachedReplayFailure(failFromWriteIndex: Int) {
+    var now = 1_000L
+    val output = ScriptedOutputStream(failFromWriteIndex)
+    val connection = FakeClientConnection(outputStream = output)
+    val attachCount = AtomicInteger()
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
+
+    assertTrue(
+      subject.offerEncoded(
+        VideoStreamProtocol.ptsAndFlags(0L, isConfig = true, isKeyFrame = false, rotation = 0),
+        byteArrayOf(1, 2),
+      )
+    )
+    assertTrue(
+      subject.offerEncoded(
+        VideoStreamProtocol.ptsAndFlags(1L, isConfig = false, isKeyFrame = true, rotation = 0),
+        byteArrayOf(3, 4),
+      )
+    )
+
+    try {
+      subject.bindServerSocket()
+      // A later attach must restart the window at rollback, rather than keep the initial deadline.
+      now = 2_000L
+      subject.acceptClients { attachCount.incrementAndGet() }
+
+      assertEquals("failed replay must not report a connected client", 0, attachCount.get())
+      assertTrue("rolled-back replay must close the client socket", connection.closed)
+      assertEquals(
+        "writes before the replay failure must succeed",
+        failFromWriteIndex,
+        output.writeCount,
+      )
+
+      now = 2_000L + VideoStreamWriter.CLIENT_RECONNECT_WINDOW_MS - 1
+      assertFalse("the rollback window must not expire early", subject.reconnectWindowExpired())
+      now++
+      assertTrue(
+        "rolled-back replay must arm the reconnect window",
+        subject.reconnectWindowExpired(),
+      )
+    } finally {
+      subject.stop()
+    }
+  }
+
+  @Test
   fun acceptFailureStopsAcceptorWithoutAttaching() {
     var now = 1_000L
     val attachCount = AtomicInteger()

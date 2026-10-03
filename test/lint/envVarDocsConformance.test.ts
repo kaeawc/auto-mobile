@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import ts from "typescript";
+import { moduleExportResolver, resolveModule } from "./moduleExportResolver";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
@@ -76,42 +77,62 @@ function isWrite(node: ts.Node): boolean {
 }
 
 /** Syntax-only constant resolution: no imports execute and no application state is opened. */
-function extractReads(sources: string[]): Set<string> {
-  const files = sources
-    .filter(
-      (source) =>
-        source.toLowerCase().includes("env") ||
-        source.includes("AUTOMOBILE_") ||
-        source.includes("AUTO_MOBILE_"),
-    )
-    .map((source) => ts.createSourceFile("env.ts", source, ts.ScriptTarget.Latest, true));
-  const exported = new Map<string, ts.Expression>();
-  const locals = new Map<ts.SourceFile, Map<string, ts.Expression>>();
-  const imports = new Map<ts.SourceFile, Map<string, string>>();
-  const namespaces = new Map<ts.SourceFile, Set<string>>();
-  const typedEnvironments = new Map<ts.SourceFile, Set<string>>();
-  const nodes: ts.Node[] = [];
+function extractReads(sources: { path: string; text: string }[]): Set<string> {
+  const texts = new Map(sources.map(({ path, text }) => [resolve(path), text]));
+  const known = new Set(texts.keys());
+  const files: ts.SourceFile[] = [];
+  const parsed = new Set<string>();
+  const parse = (path: string): void => {
+    const text = texts.get(path);
+    if (text === undefined || parsed.has(path)) {
+      return;
+    }
+    parsed.add(path);
+    files.push(ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true));
+  };
+  for (const [path, text] of texts) {
+    if (
+      text.toLowerCase().includes("env") ||
+      text.includes("AUTOMOBILE_") ||
+      text.includes("AUTO_MOBILE_")
+    ) {
+      parse(path);
+    }
+  }
+  // Retain the entire dependency closure, including barrels with no environment text.
   for (const file of files) {
-    const bindings = new Map<string, ts.Expression>();
-    locals.set(file, bindings);
-    const imported = new Map<string, string>();
-    const namespace = new Set<string>();
-    const typed = new Set<string>();
-    imports.set(file, imported);
-    namespaces.set(file, namespace);
-    typedEnvironments.set(file, typed);
-    const visit = (node: ts.Node): void => {
-      nodes.push(node);
-      if (ts.isImportDeclaration(node)) {
-        const named = node.importClause?.namedBindings;
-        if (named && ts.isNamedImports(named)) {
-          for (const binding of named.elements) {
-            imported.set(binding.name.text, (binding.propertyName ?? binding.name).text);
-          }
-        } else if (named && ts.isNamespaceImport(named)) {
-          namespace.add(named.name.text);
+    for (const node of file.statements) {
+      if (
+        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+        node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier)
+      ) {
+        const path = resolveModule(file.fileName, node.moduleSpecifier.text, known);
+        if (path) {
+          parse(path);
         }
       }
+    }
+  }
+  const resolver = moduleExportResolver(files);
+  const locals = new Map<string, Map<string, ts.Expression>>();
+  const typedEnvironments = new Map<string, Set<string>>();
+  const nodes: ts.Node[] = [];
+  for (const file of files) {
+    // Dependency modules remain available; only potential env readers need traversal.
+    if (
+      !file.text.toLowerCase().includes("env") &&
+      !file.text.includes("AUTOMOBILE_") &&
+      !file.text.includes("AUTO_MOBILE_")
+    ) {
+      continue;
+    }
+    const bindings = new Map<string, ts.Expression>();
+    locals.set(file.fileName, bindings);
+    const typed = new Set<string>();
+    typedEnvironments.set(file.fileName, typed);
+    const visit = (node: ts.Node): void => {
+      nodes.push(node);
       if (
         (ts.isParameter(node) ||
           ts.isVariableDeclaration(node) ||
@@ -126,15 +147,6 @@ function extractReads(sources: string[]): Set<string> {
       }
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         bindings.set(node.name.text, node.initializer);
-        if (
-          ts.isVariableDeclarationList(node.parent) &&
-          ts.isVariableStatement(node.parent.parent) &&
-          node.parent.parent.modifiers?.some(
-            (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
-          )
-        ) {
-          exported.set(node.name.text, node.initializer);
-        }
       }
       if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         bindings.set(node.name.text, node.initializer);
@@ -143,8 +155,7 @@ function extractReads(sources: string[]): Set<string> {
     };
     visit(file);
   }
-  const importedName = (node: ts.Identifier): string =>
-    imports.get(node.getSourceFile())?.get(node.text) ?? node.text;
+  const importedName = resolver.importedName;
   const values = (node: ts.Node | undefined, depth = 0): string[] => {
     if (!node || depth > 12) {
       return [];
@@ -154,7 +165,9 @@ function extractReads(sources: string[]): Set<string> {
     }
     if (ts.isIdentifier(node)) {
       return values(
-        locals.get(node.getSourceFile())?.get(node.text) ?? exported.get(importedName(node)),
+        locals.get(node.getSourceFile().fileName)?.get(node.text) ??
+          resolver.localValue(node) ??
+          resolver.importedValue(node),
         depth + 1,
       );
     }
@@ -172,15 +185,14 @@ function extractReads(sources: string[]): Set<string> {
       return [...values(node.whenTrue, depth + 1), ...values(node.whenFalse, depth + 1)];
     }
     if (ts.isPropertyAccessExpression(node)) {
-      if (
-        ts.isIdentifier(node.expression) &&
-        namespaces.get(node.getSourceFile())?.has(node.expression.text)
-      ) {
-        return values(exported.get(node.name.text), depth + 1);
+      const namespace = resolver.namespaceValue(node);
+      if (namespace) {
+        return values(namespace, depth + 1);
       }
       const binding = ts.isIdentifier(node.expression)
-        ? (locals.get(node.getSourceFile())?.get(node.expression.text) ??
-          exported.get(node.expression.text))
+        ? (locals.get(node.getSourceFile().fileName)?.get(node.expression.text) ??
+          resolver.localValue(node.expression) ??
+          resolver.importedValue(node.expression))
         : undefined;
       const object = binding && ts.isAsExpression(binding) ? binding.expression : binding;
       if (object && ts.isObjectLiteralExpression(object)) {
@@ -219,10 +231,10 @@ function extractReads(sources: string[]): Set<string> {
       : ts.isPropertyAccessExpression(node)
         ? node.name.text
         : undefined;
-    if (name && typedEnvironments.get(node.getSourceFile())?.has(name)) {
+    if (name && typedEnvironments.get(node.getSourceFile().fileName)?.has(name)) {
       return true;
     }
-    const initializer = name ? locals.get(node.getSourceFile())?.get(name) : undefined;
+    const initializer = name ? locals.get(node.getSourceFile().fileName)?.get(name) : undefined;
     return initializer ? environment(initializer, depth + 1) : false;
   };
   const reads = new Set<string>();
@@ -444,7 +456,7 @@ describe("environment variable documentation", () => {
   let markdown: string;
   beforeAll(() => {
     reads = extractReads(
-      sourceFiles(resolve(ROOT, "src")).map((file) => readFileSync(file, "utf8")),
+      sourceFiles(resolve(ROOT, "src")).map((path) => ({ path, text: readFileSync(path, "utf8") })),
     );
     markdown = readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8");
     docs = documentedNames(markdown);
@@ -463,8 +475,9 @@ describe("environment variable documentation", () => {
     expect(tableViolations("```\n| ignored |\n| x | y |\n```\n| A | B |\n| x | y |\n")).toEqual([]);
   });
   test("injected environment names, types and alias chains cover every access form", () => {
-    const found = extractReads([
-      `
+    const found = extractReads(
+      [
+        `
         function injected(processEnv: NodeJS.ProcessEnv, runtimeENV: unknown, configEnvironment: unknown) {
           processEnv["AUTOMOBILE_PARAM_BRACKET"];
           processEnv.AUTOMOBILE_PARAM_DOT;
@@ -491,8 +504,9 @@ describe("environment variable documentation", () => {
         const ordinary = {};
         ordinary.AUTOMOBILE_NOT_ENV;
       `,
-      `const settings = {}; settings.AUTOMOBILE_OTHER_FILE;`,
-    ]);
+        `const settings = {}; settings.AUTOMOBILE_OTHER_FILE;`,
+      ].map((text, index) => ({ path: `/virtual/${index === 0 ? "keys" : "consumer"}.ts`, text })),
+    );
     expect([...found].sort()).toEqual([
       "AUTOMOBILE_CHAIN",
       "AUTOMOBILE_CHAIN_DESTRUCTURED",
@@ -507,29 +521,36 @@ describe("environment variable documentation", () => {
     ]);
   });
   test("named and namespace imports resolve exported keys under local aliases", () => {
-    const found = extractReads([
-      'export const KEY = "AUTOMOBILE_IMPORTED_ALIAS"; export const OTHER = "AUTOMOBILE_NAMESPACE";',
-      `
+    const found = extractReads(
+      [
+        'export const KEY = "AUTOMOBILE_IMPORTED_ALIAS"; export const OTHER = "AUTOMOBILE_NAMESPACE";',
+        `
         import { KEY as RENAMED } from "./keys";
         import * as C from "./keys";
         process.env[RENAMED];
         process.env[C.OTHER];
         process.env[C.OTHER] = "1";
       `,
-    ]);
+      ].map((text, index) => ({ path: `/virtual/${index === 0 ? "keys" : "consumer"}.ts`, text })),
+    );
     expect([...found].sort()).toEqual(["AUTOMOBILE_IMPORTED_ALIAS", "AUTOMOBILE_NAMESPACE"]);
   });
   test("imported helper aliases retain inferred reads and getEnvVar recognition", () => {
-    const found = extractReads([
-      `export function readPositiveIntEnv(settings: NodeJS.ProcessEnv, key: string) { return settings[key]; }`,
-      `
+    const found = extractReads(
+      [
+        `export function readPositiveIntEnv(settings: NodeJS.ProcessEnv, key: string) { return settings[key]; }`,
+        `
         import { readPositiveIntEnv as readInt, getEnvVar as getValue } from "./reader";
         import * as R from "./reader";
         readInt(process.env, "AUTOMOBILE_ALIASED_HELPER");
         R.readPositiveIntEnv(process.env, "AUTOMOBILE_NAMESPACE_HELPER");
         getValue("AUTOMOBILE_ALIASED_GET_ENV");
       `,
-    ]);
+      ].map((text, index) => ({
+        path: `/virtual/${index === 0 ? "reader" : "consumer"}.ts`,
+        text,
+      })),
+    );
     expect([...found].sort()).toEqual([
       "AUTOMOBILE_ALIASED_GET_ENV",
       "AUTOMOBILE_ALIASED_HELPER",
@@ -537,8 +558,9 @@ describe("environment variable documentation", () => {
     ]);
   });
   test("extractor recognizes reads and ignores writes, comments and messages", () => {
-    const found = extractReads([
-      `
+    const found = extractReads(
+      [
+        `
       const KEY = "AUTOMOBILE_KEY";
       function read(name: string) { return process.env[name]; }
       const env = process.env;
@@ -552,7 +574,8 @@ describe("environment variable documentation", () => {
       // process.env.AUTOMOBILE_COMMENT
       const message = "AUTOMOBILE_MESSAGE";
     `,
-    ]);
+      ].map((text, index) => ({ path: `/virtual/${index === 0 ? "keys" : "consumer"}.ts`, text })),
+    );
     expect([...found].sort()).toEqual([
       "AUTOMOBILE_DESTRUCTURED",
       "AUTOMOBILE_DIRECT",
@@ -567,9 +590,11 @@ describe("environment variable documentation", () => {
     ]);
   });
   test("constant tables, imported keys and composed names remain covered", () => {
-    const found = extractReads([
-      'export const IMPORTED = "AUTOMOBILE_IMPORTED";',
-      `
+    const found = extractReads(
+      [
+        'export const IMPORTED = "AUTOMOBILE_IMPORTED";',
+        `
+        import { IMPORTED } from "./keys";
         function first(env: NodeJS.ProcessEnv, keys: string[]) {
           for (const key of keys) { if (env[key]) return env[key]; }
         }
@@ -584,7 +609,8 @@ describe("environment variable documentation", () => {
         const specs = [{ env: "AUTOMOBILE_SPEC" }];
         for (const spec of specs) { env[spec.env]; }
       `,
-    ]);
+      ].map((text, index) => ({ path: `/virtual/${index === 0 ? "keys" : "consumer"}.ts`, text })),
+    );
     expect([...found].sort()).toEqual([
       "AUTOMOBILE_ALIAS",
       "AUTOMOBILE_ARRAY",
@@ -594,6 +620,89 @@ describe("environment variable documentation", () => {
       "AUTOMOBILE_SPEC",
       "AUTOMOBILE_STATIC",
     ]);
+  });
+  test("same-named exported constants resolve by source module", () => {
+    const modules = [
+      { path: "/virtual/b.ts", text: 'export const KEY = "AUTOMOBILE_UNDOCUMENTED";' },
+      { path: "/virtual/a.ts", text: 'export const KEY = "AUTOMOBILE_DOCUMENTED";' },
+    ];
+    const consumer = (module: string, name: string) => ({
+      path: `/virtual/${name}.ts`,
+      text: `import { KEY } from "./${module}"; process.env[KEY];`,
+    });
+    const reads = extractReads([...modules, consumer("a", "c1"), consumer("b", "c2")]);
+    expect([...reads].sort()).toEqual(["AUTOMOBILE_DOCUMENTED", "AUTOMOBILE_UNDOCUMENTED"]);
+    expect(violations(reads, new Set(["AUTOMOBILE_DOCUMENTED"]), {})).toEqual([
+      "Undocumented: AUTOMOBILE_UNDOCUMENTED",
+    ]);
+    expect([...extractReads([...modules, consumer("b", "c2")])]).toEqual([
+      "AUTOMOBILE_UNDOCUMENTED",
+    ]);
+  });
+  test("aliased imports ignore same-named exports from other modules", () => {
+    expect([
+      ...extractReads([
+        { path: "/virtual/b.ts", text: 'export const KEY = "AUTOMOBILE_B";' },
+        {
+          path: "/virtual/a.ts",
+          text: 'export const KEY = "AUTOMOBILE_A"; export const K = "AUTOMOBILE_K";',
+        },
+        { path: "/virtual/c.ts", text: 'import { KEY as K } from "./b"; process.env[K];' },
+      ]),
+    ]).toEqual(["AUTOMOBILE_B"]);
+  });
+  test("re-export chains resolve named, renamed, wildcard and local exports and terminate cycles", () => {
+    for (const barrel of [
+      'export { KEY } from "./b";',
+      'export * from "./b";',
+      'export { KEY as RENAMED } from "./b";',
+      'import { KEY } from "./b"; export { KEY };',
+      'const X = "AUTOMOBILE_B"; export { X as KEY };',
+    ]) {
+      const name = barrel.includes("RENAMED") ? "RENAMED" : "KEY";
+      expect([
+        ...extractReads([
+          { path: "/virtual/b.ts", text: 'export const KEY = "AUTOMOBILE_B";' },
+          { path: "/virtual/barrel.ts", text: barrel },
+          { path: "/virtual/hop/index.ts", text: 'export * from "../barrel.js";' },
+          {
+            path: "/virtual/c.ts",
+            text: `import { ${name} } from "./barrel"; process.env[${name}];`,
+          },
+          { path: "/virtual/d.ts", text: `import { ${name} } from "./hop"; process.env[${name}];` },
+        ]),
+      ]).toEqual(["AUTOMOBILE_B"]);
+    }
+    expect([
+      ...extractReads([
+        { path: "/virtual/a.ts", text: 'export * from "./b";' },
+        { path: "/virtual/b.ts", text: 'export { KEY } from "./a";' },
+        { path: "/virtual/decoy.ts", text: 'export const KEY = "AUTOMOBILE_DECOY";' },
+        { path: "/virtual/c.ts", text: 'import { KEY } from "./a"; process.env[KEY];' },
+      ]),
+    ]).toEqual([]);
+  });
+  test("namespace imports resolve members in their source module", () => {
+    expect([
+      ...extractReads([
+        { path: "/virtual/b.ts", text: 'export const KEY = "AUTOMOBILE_B";' },
+        { path: "/virtual/a.ts", text: 'export const KEY = "AUTOMOBILE_A";' },
+        { path: "/virtual/c.ts", text: 'import * as NS from "./b"; process.env[NS.KEY];' },
+      ]),
+    ]).toEqual(["AUTOMOBILE_B"]);
+  });
+  test("missing and package imports never fall back to unrelated exports", () => {
+    for (const module of ["./missing", "package"]) {
+      expect([
+        ...extractReads([
+          { path: "/virtual/a.ts", text: 'export const KEY = "AUTOMOBILE_A";' },
+          {
+            path: "/virtual/c.ts",
+            text: `import { KEY } from "${module}"; import * as NS from "${module}"; process.env[KEY]; process.env[NS.KEY];`,
+          },
+        ]),
+      ]).toEqual([]);
+    }
   });
   test("markdown declarations exclude prose and code fences; internal entries cannot drift", () => {
     expect([

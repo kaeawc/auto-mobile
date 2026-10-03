@@ -89,6 +89,7 @@ if [[ "$1" == "scripts/lib/merge-junit-reports.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+if [[ -n "${STUB_BUN_EXIT:-}" ]]; then exit "$STUB_BUN_EXIT"; fi
 if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-unset}" >> "$STUB_BUN_WALL_FILE"
 fi
@@ -1510,4 +1511,67 @@ seed_changed_offender_report() {
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 2 ]
   [[ "$output" == *"BUN_TEST_MAX_MS must be a positive integer"* ]]
+}
+
+
+@test "randomized unit lane shares canonical discovery and uses one non-isolated process" {
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' test/utils/FileDownloader.test.ts test/planUtils.test.ts \
+  test/daemon/daemonClientAvailability.integration.test.ts test/stress/memory-leak.stress.test.ts
+EOF
+  chmod +x "$STUB_BIN/find"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=907919 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"seed=907919"* ]]
+  [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 1 ]
+  [ "$(cat "$BUN_ARGS_FILE")" = "test --timeout 5000 --randomize --seed=907919 test/planUtils.test.ts test/utils/FileDownloader.test.ts" ]
+
+  # Ordinary shards consume the same two files (one per worker).
+  : > "$BUN_ARGS_FILE"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 2 ]
+  grep -q 'test/planUtils.test.ts' "$BUN_ARGS_FILE"
+  grep -q 'test/utils/FileDownloader.test.ts' "$BUN_ARGS_FILE"
+  ! grep -qE 'integration.test.ts|test/stress/' "$BUN_ARGS_FILE"
+}
+
+@test "randomized unit lane reports seed and repro on failure and preserves exit status" {
+  local summary="$STUB_BIN/summary.md"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
+    GITHUB_STEP_SUMMARY="$summary" STUB_BUN_EXIT=7 bash "$SCRIPT" unit
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"seed=42"* ]]
+  grep -Fq 'Seed: `42`' "$summary"
+  grep -Fq 'AUTOMOBILE_UNIT_RANDOM_SEED=42 bash scripts/test-ts.sh unit' "$summary"
+  grep -Fq 'bun test --randomize --seed=42 <files>' "$summary"
+}
+
+@test "randomized unit success does not write a failure summary" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
+    GITHUB_STEP_SUMMARY="$STUB_BIN/summary.md" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ ! -e "$STUB_BIN/summary.md" ]
+}
+
+@test "randomized unit lane rejects invalid seeds and partial targets before invoking Bun" {
+  for seed in 0 -1 abc 4294967296 99999999999999999999; do
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED="$seed" bash "$SCRIPT" unit
+    [ "$status" -eq 2 ]
+  done
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit test/planUtils.test.ts
+  [ "$status" -eq 2 ]
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit --isolate
+  [ "$status" -eq 2 ]
+  [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+@test "randomized unit lane refuses empty discovery instead of running the whole suite" {
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/find"
+  chmod +x "$STUB_BIN/find"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No unit test files discovered"* ]]
+  [ ! -s "$BUN_ARGS_FILE" ]
 }

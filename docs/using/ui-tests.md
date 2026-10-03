@@ -332,3 +332,24 @@ canvas is deferred. Recordings and stop metadata are copied under
 Both tests release their session and restore opened posture in `finally`; the
 recording test also stops capture in `finally`. Without
 `AUTOMOBILE_FOLDABLE_LANE=1`, both tests skip.
+
+## Nightly randomized unit diagnostic
+
+Alongside the device lanes above, Nightly runs **Node Randomized Unit Tests
+(Advisory)** on Ubuntu. Like the race guard and XCTestRunner Thread Sanitizer,
+it uses job-level `continue-on-error` and has no downstream dependents. It does
+not run per PR. It diagnoses cross-file state leaks (#6698) in one shared Bun
+process, without isolation, parallel execution or sharding.
+
+The seed is `github.run_number`, so retrying a workflow preserves its order.
+`scripts/test-ts.sh` prints it before running and includes it in the failure
+summary. The script shares the ordinary unit shards' file selector, excluding
+`*.integration.test.ts` (including daemon lifecycle tests) and `test/stress/**`.
+Reproduce with the seed from the failed run and the same checkout/Bun version:
+
+```bash
+AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_RANDOM_SEED=N bash scripts/test-ts.sh unit
+```
+
+This executes `bun test --randomize --seed=N <files>` with an explicit, non-empty
+canonical unit file list. Do not omit `<files>` when invoking Bun directly.

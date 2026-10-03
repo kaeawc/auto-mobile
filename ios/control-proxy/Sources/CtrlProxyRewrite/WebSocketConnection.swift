@@ -48,8 +48,6 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
     /// one `onClose` (issue #5677). Queue-confined.
     private var didFireClose = false
 
-    private static let maximumHTTPRequestLength = 1_000_000
-
     /// Designated initializer over the `ByteChannel` seam.
     init(
         id: Int,
@@ -148,7 +146,7 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
         channel
             .receive(
                 minimumIncompleteLength: 1,
-                maximumLength: Self.maximumHTTPRequestLength
+                maximumLength: WebSocketFraming.maximumHTTPRequestLength
             ) { [weak self] data, isComplete, error in
                 guard let self = self else { return }
                 dispatchPrecondition(condition: .onQueue(self.queue))
@@ -168,14 +166,23 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
                 }
 
                 self.inboundBuffer.append(data)
-                guard self.inboundBuffer.count <= Self.maximumHTTPRequestLength else {
-                    print("[WebSocketConnection] HTTP request exceeds maximum length")
-                    self.channel.cancel()
+                let requestLength: Int
+                switch WebSocketFraming.classifyHTTPRequest(in: self.inboundBuffer) {
+                case .incomplete:
+                    guard self.inboundBuffer.count <= WebSocketFraming.maximumHTTPRequestLength else {
+                        self.rejectHTTPRequest(.payloadTooLarge)
+                        return
+                    }
+                    self.receiveHTTPUpgrade()
+                    return
+                case let .complete(length):
+                    requestLength = length
+                case let .rejected(reason):
+                    self.rejectHTTPRequest(reason)
                     return
                 }
-
-                guard let requestLength = WebSocketFraming.completeHTTPRequestLength(in: self.inboundBuffer) else {
-                    self.receiveHTTPUpgrade()
+                guard self.inboundBuffer.count <= WebSocketFraming.maximumHTTPRequestLength else {
+                    self.rejectHTTPRequest(.payloadTooLarge)
                     return
                 }
 
@@ -204,6 +211,13 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
                     }
                 }
             }
+    }
+
+    private func rejectHTTPRequest(_ rejection: WebSocketFraming.HTTPRequestRejection) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        channel.send(rejection.response) { [weak self] _ in
+            self?.channel.cancel()
+        }
     }
 
     private func handleHealthCheck() {

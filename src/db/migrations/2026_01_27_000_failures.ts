@@ -1,8 +1,9 @@
 import { type Kysely, sql } from "kysely";
+import { asMigratorDb } from "../migratorSchema";
 
 async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
-  const result = await db
-    .selectFrom("sqlite_master" as never)
+  const result = await asMigratorDb(db)
+    .selectFrom("sqlite_master")
     .select("name")
     .where("type", "=", "table")
     .where("name", "=", tableName)

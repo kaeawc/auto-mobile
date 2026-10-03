@@ -1,3 +1,4 @@
+import { setDeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
@@ -63,6 +64,7 @@ export class DaemonState implements DaemonStateLike {
     }
     this.devicePool = devicePool;
     this.deviceSessionRegistry = deviceSessionRegistry;
+    setDeviceAdmissionGate(devicePool);
     // The pool's incarnation counter is the only connection-epoch token in the
     // identity model, and feature code caching per-device state must be able to
     // read it without importing the daemon. Publish it here, where the live
@@ -146,6 +148,7 @@ export class DaemonState implements DaemonStateLike {
     this.observerSessionRegistry = null;
     this.sessionManager = null;
     this.devicePool = null;
+    setDeviceAdmissionGate(undefined);
     this.deviceSessionRegistry = null;
     this.unregisterSessionReadinessListener?.();
     this.unregisterSessionReadinessListener = null;

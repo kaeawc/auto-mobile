@@ -1,4 +1,7 @@
-import type { DeviceExecutionBinding } from "../../server/deviceExecutionBinding";
+import {
+  type DeviceExecutionBinding,
+  runWithDeviceExecutionBinding,
+} from "../../utils/deviceExecutionBinding";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionToolSelectionService } from "./SessionToolSelectionService";
 import type { ProgressCallback } from "../../server/toolRegistry";
@@ -67,7 +70,8 @@ export const runWithToolSelectionContext = async <T>(
       sessionToolSelectionService:
         context.sessionToolSelectionService ?? parent?.sessionToolSelectionService,
     },
-    fn,
+    () =>
+      runWithDeviceExecutionBinding((context.execution ?? parent?.execution)?.deviceBinding, fn),
   );
 };
 

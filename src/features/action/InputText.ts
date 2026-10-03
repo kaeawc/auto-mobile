@@ -33,7 +33,7 @@ import {
   asciiKeyEventNeedsKeyCombination,
   buildAsciiKeyEventPlan,
   type KeyEventPlan,
-} from "./asciiKeyEvents";
+} from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
 

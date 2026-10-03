@@ -37,8 +37,8 @@ import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
 import type { RunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { TmpdirRunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
-import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
-import { DeviceLockStore } from "../../features/action/DeviceLockStore";
+import { AndroidWakeAndUnlock } from "./AndroidWakeAndUnlock";
+import { DeviceLockStore } from "../../devices/DeviceLockStore";
 import { formFactorFrom } from "../../models/formFactor";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
 import {
@@ -4751,7 +4751,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * Wake up the emulator and dismiss the lock screen after boot.
    * This ensures the device is immediately usable for automation.
    *
-   * Delegates to the shared {@link WakeAndUnlock} feature so boot uses the same
+   * Delegates to the shared {@link AndroidWakeAndUnlock} implementation so boot uses the same
    * path as the `wakeAndUnlock` tool: a swipe lock is dismissed, and a secure
    * lock is unlocked with the PIN remembered for the device this session (if
    * any). A secure device with no remembered PIN is left locked — non-fatal, the
@@ -4760,7 +4760,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    */
   private async wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
     try {
-      const wakeAndUnlock = new WakeAndUnlock(device, this.adbFactory, {
+      const wakeAndUnlock = new AndroidWakeAndUnlock(device, this.adbFactory, {
         timer: this.timer,
         credentialStore: new DeviceLockStore(),
       });

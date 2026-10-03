@@ -15,7 +15,7 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
-import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */

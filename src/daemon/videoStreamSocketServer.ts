@@ -42,7 +42,7 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
-import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { DaemonState } from "./daemonState";
 import {

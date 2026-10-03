@@ -48,7 +48,7 @@ import {
   asciiKeyEventNeedsKeyCombination,
   buildAsciiKeyEventPlan,
   type KeyEventPlan,
-} from "./asciiKeyEvents";
+} from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import type { ProgressCallback } from "./BaseVisualChange";
 
 export const SEND_KEYS_TYPING_MODES = [

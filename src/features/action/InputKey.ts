@@ -8,7 +8,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
-import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "./asciiKeyEvents";
+import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 
 export const SUPPORTED_INPUT_KEYS = [
   "enter",

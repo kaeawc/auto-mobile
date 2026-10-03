@@ -7,6 +7,7 @@ import {
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import type { DeviceInfo } from "../../src/models";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/androidRebootCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 function pooledDevice(incarnation = 1): PooledDevice {
@@ -155,8 +156,8 @@ describe("DeviceDisconnectHandler", () => {
       "record",
       "reboot",
       "suppress",
-      "complete:not-attempted",
       "remove:true",
+      "complete:not-attempted",
       "settle",
     ]);
   });
@@ -193,7 +194,7 @@ describe("DeviceDisconnectHandler", () => {
       return false;
     };
     await h.handler.removeDisconnectedDevice(h.device.id, false, "incident");
-    expect(h.events).toEqual(["reboot", "settle"]);
+    expect(h.events).toEqual(["reboot", "complete:not-attempted", "settle"]);
     expect(h.devices.get(h.device.id)).toBe(replacement);
   });
 
@@ -204,6 +205,74 @@ describe("DeviceDisconnectHandler", () => {
     expect(h.events).toEqual(["reboot", "suppress", "remove:true", "settle"]);
     expect(await h.handler.isCurrentDisconnectedDevice(h.device)).toBe("recovered");
   });
+
+  test("settles an unconfirmed plain reboot shutdown and rethrows the same error", async () => {
+    const h = harness();
+    h.enableRecovery();
+    const failure = new UnconfirmedRecoveryShutdownError("Pixel", new Error("still running"));
+    h.port.rebootDisconnectedAndroidDevice = async () => {
+      h.events.push("reboot");
+      throw failure;
+    };
+    await expect(h.handler.removeDisconnectedDevice(h.device.id, false)).rejects.toBe(failure);
+    expect(h.events).toEqual(["record", "reboot", "complete:exhausted", "settle"]);
+  });
+
+  test("settles failed removal without recovery and rethrows the same error", async () => {
+    const h = harness();
+    const failure = new Error("cache cleanup failed");
+    h.port.removeDevice = async () => {
+      h.events.push("remove:true");
+      throw failure;
+    };
+    await expect(h.handler.removeDisconnectedDevice(h.device.id, false)).rejects.toBe(failure);
+    expect(h.events).toEqual([
+      "record",
+      "reboot",
+      "suppress",
+      "remove:true",
+      "complete:exhausted",
+      "settle",
+    ]);
+  });
+
+  test("settles a throwing recovery decision without attempting recovery", async () => {
+    const h = harness();
+    const failure = new Error("policy unavailable");
+    h.port.shouldRebootDisconnectedAndroidDevice = () => {
+      throw failure;
+    };
+    await expect(h.handler.removeDisconnectedDevice(h.device.id, false)).rejects.toBe(failure);
+    expect(h.events).toEqual(["record", "complete:exhausted", "settle"]);
+  });
+
+  test("settles throwing suppression without attempting recovery", async () => {
+    const h = harness();
+    const failure = new Error("suppression failed");
+    h.port.suppressAutoStartForDevice = () => {
+      throw failure;
+    };
+    await expect(h.handler.removeDisconnectedDevice(h.device.id, false)).rejects.toBe(failure);
+    expect(h.events).toEqual(["record", "reboot", "complete:exhausted", "settle"]);
+  });
+
+  test.each(["recovered", "exhausted"] as const)(
+    "does not overwrite coordinator outcome %s when later removal throws",
+    async (outcome) => {
+      const h = harness();
+      h.enableRecovery();
+      const failure = new Error("remove failed");
+      h.port.rebootDisconnectedAndroidDevice = async () => {
+        h.events.push(`complete:${outcome}`);
+        return false;
+      };
+      h.port.removeDevice = async () => {
+        throw failure;
+      };
+      await expect(h.handler.removeDisconnectedDevice(h.device.id, false)).rejects.toBe(failure);
+      expect(h.events).toEqual(["record", `complete:${outcome}`, "suppress", "settle"]);
+    },
+  );
 
   test("rechecks incarnation after a delayed stale-signal discovery", async () => {
     const h = harness();
@@ -230,8 +299,8 @@ describe("DeviceDisconnectHandler", () => {
       "record",
       "reboot",
       "suppress",
-      "complete:not-attempted",
       "remove:true",
+      "complete:not-attempted",
       "settle",
     ]);
     const recovered = harness();

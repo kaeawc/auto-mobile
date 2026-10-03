@@ -46,7 +46,7 @@ export interface DeviceDisconnectPoolPort {
   suppressAutoStartForDevice(device: PooledDevice): void;
   completeEmulatorLossRecovery(
     incidentId: string | undefined,
-    outcome: "not-attempted",
+    outcome: "not-attempted" | "exhausted",
   ): Promise<void>;
   getRecoveryPolicy(): DeviceRecoveryPolicy;
   isAndroidEmulatorActiveRelaunchEligible(
@@ -191,19 +191,35 @@ export class DeviceDisconnectHandler {
         undefined,
         "absent",
       ));
-    const recoveryWasAttempted = this.pool.shouldRebootDisconnectedAndroidDevice(device);
-    if (await this.pool.rebootDisconnectedAndroidDevice(device, recordedIncidentId)) {
-      this.pool.settleEmulatorLossIncident(recordedIncidentId);
-      return;
+    await this.cleanUpDisconnectedDevice(device, recordedIncidentId);
+  }
+
+  private async cleanUpDisconnectedDevice(
+    device: PooledDevice,
+    incidentId: string | undefined,
+  ): Promise<void> {
+    let recoveryCompleted = false;
+    try {
+      const recoveryWasAttempted = this.pool.shouldRebootDisconnectedAndroidDevice(device);
+      const recovered = await this.pool.rebootDisconnectedAndroidDevice(device, incidentId);
+      recoveryCompleted = recoveryWasAttempted;
+      if (recovered || this.hasReplacementDisconnectedDevice(device)) {
+        await this.completeRecoveryIfNotAttempted(incidentId, recoveryWasAttempted);
+        return;
+      }
+      this.pool.suppressAutoStartForDevice(device);
+      await this.pool.removeDevice(device.id, true, device);
+      await this.completeRecoveryIfNotAttempted(incidentId, recoveryWasAttempted);
+    } catch (error) {
+      // Plain reboot has no deferred incident owner; preserve any coordinator outcome.
+      if (!recoveryCompleted) {
+        await this.pool.completeEmulatorLossRecovery(incidentId, "exhausted");
+      }
+      logger.warn(`[DevicePool] Disconnect cleanup failed for ${device.id}`, error);
+      throw error;
+    } finally {
+      this.pool.settleEmulatorLossIncident(incidentId);
     }
-    if (this.hasReplacementDisconnectedDevice(device)) {
-      this.pool.settleEmulatorLossIncident(recordedIncidentId);
-      return;
-    }
-    this.pool.suppressAutoStartForDevice(device);
-    await this.completeRecoveryIfNotAttempted(recordedIncidentId, recoveryWasAttempted);
-    await this.pool.removeDevice(deviceId, true, device);
-    this.pool.settleEmulatorLossIncident(recordedIncidentId);
   }
 
   private matchesExpectedDisconnectedDevice(

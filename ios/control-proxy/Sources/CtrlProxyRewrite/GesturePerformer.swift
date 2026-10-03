@@ -2430,8 +2430,8 @@ public final class GesturePerformer: GesturePerforming {
                     app.typeKey("v", modifierFlags: .command)
                 }
 
-                // iOS 16+ may show "Allow Paste" system alert (label is English-only;
-                // no reliable cross-locale alternative exists without button index)
+                // iOS 16+ may show a paste-permission system alert; match known
+                // UIKitCore allow labels across locales without selecting deny actions.
                 try handlePasteAlert()
                 return nil
 
@@ -2449,6 +2449,13 @@ public final class GesturePerformer: GesturePerforming {
                 // Quick existence check avoids full 0.5s wait when no alert is present
                 if allowButton.exists || allowButton.waitForExistence(timeout: 0.3) {
                     allowButton.tap()
+                    return
+                }
+                // Immediate fallback: no additional wait when the English check misses.
+                if let localizedAllowButton = self.springboard.buttons.allElementsBoundByIndex.first(where: {
+                    PasteAlertLabelMatcher.isAllowPasteLabel($0.label)
+                }) {
+                    localizedAllowButton.tap()
                 }
             }
         }

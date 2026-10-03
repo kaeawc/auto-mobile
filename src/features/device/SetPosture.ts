@@ -14,6 +14,7 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { DisplayPanel } from "../../models/DisplayPanel";
 import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
@@ -84,6 +85,7 @@ export interface SetPostureDependencies {
   androidHingeAngleConsole?: AndroidHingeAngleConsole;
   observeFactory?: (device: BootedDevice) => ObserveScreen;
   iosClientProvider?: (device: BootedDevice) => IOSCtrlProxy;
+  simctl?: Pick<SimCtl, "getDeviceInfo">;
   timer?: Timer;
   transitionSink?: DisplayTransitionSink;
 }
@@ -441,6 +443,7 @@ export class SetPosture {
   private readonly androidHingeAngleConsole: AndroidHingeAngleConsole;
   private readonly observeFactory: (device: BootedDevice) => ObserveScreen;
   private readonly iosClientProvider: (device: BootedDevice) => IOSCtrlProxy;
+  private readonly simctl?: Pick<SimCtl, "getDeviceInfo">;
   private readonly timer: Timer;
   private readonly transitionSink: DisplayTransitionSink;
 
@@ -455,6 +458,7 @@ export class SetPosture {
       dependencies.observeFactory ?? ((target) => new RealObserveScreen(target));
     this.iosClientProvider =
       dependencies.iosClientProvider ?? ((target) => IOSCtrlProxyClient.getInstance(target));
+    this.simctl = dependencies.simctl;
     this.timer = dependencies.timer ?? defaultTimer;
     this.transitionSink = dependencies.transitionSink ?? displayTransitions;
   }
@@ -493,10 +497,11 @@ export class SetPosture {
       },
     };
     try {
-      const iosAngle =
-        request.hingeAngle !== undefined
-          ? this.validateHingeAngle(request.hingeAngle, displayPreset)
-          : this.validateRequest(request.posture, displayPreset);
+      const foldability = this.resolveIosFoldability(operation);
+      const iosFoldable = typeof foldability === "boolean" ? foldability : await foldability;
+      operation.assertCurrent();
+      throwIfAborted(signal);
+      const iosAngle = this.validateRequest(request, displayPreset, iosFoldable);
       if (typeof iosAngle === "object") {
         return iosAngle;
       }
@@ -568,6 +573,7 @@ export class SetPosture {
   private validateHingeAngle(
     angle: number,
     displayPreset?: DisplayPreset,
+    iosFoldable = false,
   ): SetPostureUnsupportedResult | undefined {
     if (
       !Number.isFinite(angle) ||
@@ -584,15 +590,9 @@ export class SetPosture {
       );
     }
     if (this.device.platform === "ios") {
-      const supported = this.validateIosPosture("opened");
+      const supported = this.validateIosPosture("opened", iosFoldable);
       if (typeof supported === "object") {
         return supported;
-      }
-      if (
-        !this.device.displays?.panels.some((panel) => panel.role === "cover") ||
-        !this.device.displays.panels.some((panel) => panel.role === "inner")
-      ) {
-        return { status: "unsupported", message: "This iOS simulator is not a foldable device." };
       }
     } else if (!isEmulator(this.device)) {
       return {
@@ -831,11 +831,16 @@ export class SetPosture {
   }
 
   private validateRequest(
-    requested: RequestedPosture,
+    request: PostureRequest,
     displayPreset?: DisplayPreset,
+    iosFoldable = false,
   ): number | SetPostureUnsupportedResult | undefined {
+    if (request.hingeAngle !== undefined) {
+      return this.validateHingeAngle(request.hingeAngle, displayPreset, iosFoldable);
+    }
+    const requested = request.posture;
     if (this.device.platform === "ios") {
-      return this.validateIosPosture(requested, displayPreset);
+      return this.validateIosPosture(requested, iosFoldable, displayPreset);
     }
     if (displayPreset && !isEmulator(this.device)) {
       throw new ActionableError(
@@ -982,8 +987,60 @@ export class SetPosture {
     };
   }
 
+  private resolveIosFoldability(operation: PostureOperation): boolean | Promise<boolean> {
+    const { signal, assertCurrent } = operation;
+    assertCurrent();
+    throwIfAborted(signal);
+    if (
+      this.device.platform !== "ios" ||
+      resolveIosDeviceKind({ deviceId: this.device.deviceId }) !== "simulator"
+    ) {
+      return false;
+    }
+    // Explicit identity wins over stale inventory; Duo panels suffice for session devices.
+    if (this.device.deviceType !== undefined) {
+      return this.device.deviceType.endsWith(".iPhone-Duo");
+    }
+    if (
+      this.device.displays?.panels.some((panel) => panel.role === "cover") &&
+      this.device.displays.panels.some((panel) => panel.role === "inner")
+    ) {
+      return true;
+    }
+    return this.lookupIosFoldability(operation);
+  }
+
+  private async lookupIosFoldability(operation: PostureOperation): Promise<boolean> {
+    const { signal, assertCurrent } = operation;
+    try {
+      // Resolve the production transport only when identity and inventory are insufficient.
+      const deviceInfo = await awaitWhileRequestIsLive(
+        (this.simctl ?? new SimCtlClient(this.device)).getDeviceInfo(this.device.deviceId),
+        signal,
+      );
+      assertCurrent();
+      throwIfAborted(signal);
+      if (!deviceInfo?.deviceTypeIdentifier) {
+        logger.warn(
+          `[SetPosture] Simulator device type is unavailable for ${this.device.deviceId}`,
+        );
+        return false;
+      }
+      return deviceInfo.deviceTypeIdentifier.endsWith(".iPhone-Duo");
+    } catch (error) {
+      assertCurrent();
+      throwIfAborted(signal);
+      logger.warn(
+        `[SetPosture] Failed to resolve simulator foldability: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
+  }
+
   private validateIosPosture(
     requested: RequestedPosture,
+    foldable: boolean,
     displayPreset?: DisplayPreset,
   ): number | SetPostureUnsupportedResult {
     if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) !== "simulator") {
@@ -992,7 +1049,7 @@ export class SetPosture {
         message: "Physical iOS hinge posture can only be read, not set.",
       };
     }
-    if (this.device.deviceType && !this.device.deviceType.endsWith(".iPhone-Duo")) {
+    if (!foldable) {
       return { status: "unsupported", message: "This iOS simulator is not a foldable device." };
     }
     if (displayPreset) {

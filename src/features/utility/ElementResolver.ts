@@ -154,13 +154,16 @@ export function promoteClickableAncestor(
 ): SearchableEntry | null {
   const action = intent.action === "long-press" ? "long-press" : "tap";
   let candidate: SearchableEntry | undefined = node;
-  while (candidate && candidate !== scope) {
+  while (candidate) {
     if (
       hasVisibleBounds(candidate, intent) &&
       (!intent.requireResourceId || candidate.nativeId) &&
       hasActionAffordance(candidate, { action })
     ) {
       return candidate;
+    }
+    if (candidate === scope) {
+      break;
     }
     candidate = candidate.parentIndex === undefined ? undefined : nodes[candidate.parentIndex];
   }
@@ -499,7 +502,14 @@ export class ElementResolver {
             ({ node: other }) => other !== node && isWithin(other, node, snapshot.nodes),
           ),
       );
-    } else if (selector.text !== undefined || selector.contentDescription !== undefined) {
+    } else if (
+      !(
+        scope &&
+        selector.selectionStrategy === "unique" &&
+        usesClickablePromotion(intent.action)
+      ) &&
+      (selector.text !== undefined || selector.contentDescription !== undefined)
+    ) {
       matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope, intent);
     }
     return matched;
@@ -542,6 +552,11 @@ export class ElementResolver {
   }
 
   private chooseUnique(result: ElementResolution, candidates: SearchableEntry[]): void {
+    // Scoped uniqueness belongs to the matched nodes, even if two of them
+    // share one clickable owner. Promotion must not erase ambiguity.
+    if (result.scope && result.candidates.length > 1) {
+      candidates = result.candidates;
+    }
     if (candidates.length === 1) {
       result.chosen = candidates[0];
       return;
@@ -601,6 +616,17 @@ export class ElementResolver {
     scope?: SearchableEntry,
   ): SearchableEntry | null {
     const promoted = promoteClickableAncestor(node, snapshot.nodes, intent, scope);
+    // Containers constrain the match and clickable promotion (including the
+    // container itself). If no owner exists inside scope, tap/long-press the
+    // matched node's own visible bounds, as the default inspect lookup does.
+    // Never search globally or apply this coordinate fallback to focus-input.
+    if (
+      !promoted &&
+      scope &&
+      eligible(node, { ...intent, action: "inspect", requireBounds: true })
+    ) {
+      return node;
+    }
     return intent.action === "highlight" && !promoted && eligible(node, intent) ? node : promoted;
   }
 

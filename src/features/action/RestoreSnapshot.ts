@@ -1,4 +1,8 @@
-import { resolveIosLenientAppListBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+import {
+  resolveIosSnapshotBackend,
+  type IosSnapshotBackend,
+  type IosSimulatorSnapshotBackend,
+} from "../../utils/ios-cmdline-tools/IosSnapshotBackend";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   BootedDevice,
@@ -22,13 +26,7 @@ import {
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { assertSafeSnapshotName } from "../../utils/snapshotNameValidation";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import {
-  getAppDataContainerPath,
-  IOS_APP_DATA_FOLDERS,
-  terminateAppIfRunning,
-} from "../../utils/ios-cmdline-tools/iosAppContainer";
-import { restoreIosSettings } from "../../utils/ios-cmdline-tools/iosSettings";
+import { IOS_APP_DATA_FOLDERS } from "../../utils/ios-cmdline-tools/iosAppContainer";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -134,7 +132,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private emulator: AndroidEmulatorClient;
   private store: DeviceSnapshotStore;
   private timer: Timer;
-  private simctl: SimCtlClient;
+  private iosSnapshotBackend: IosSnapshotBackend;
   private iosRestoreOperations: IosRestoreOperations;
 
   constructor(
@@ -152,16 +150,25 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     this.emulator = emulator || new AndroidEmulatorClient();
     this.store = store;
     this.timer = timer;
-    this.simctl = simctl || new SimCtlClient(device);
+    this.iosSnapshotBackend = resolveIosSnapshotBackend(device.deviceId, {
+      simctl: simctl || new SimCtlClient(device),
+    });
     this.iosRestoreOperations = iosRestoreOperations ?? {
       pathExists,
-      terminateAppIfRunning: (deviceId, bundleId) =>
-        terminateAppIfRunning(this.simctl, deviceId, bundleId),
-      getAppDataContainerPath: (deviceId, bundleId) =>
-        getAppDataContainerPath(this.simctl, deviceId, bundleId),
+      terminateAppIfRunning: (_deviceId, bundleId) =>
+        this.simulatorSnapshotBackend.terminateAppIfRunning(bundleId),
+      getAppDataContainerPath: (_deviceId, bundleId) =>
+        this.simulatorSnapshotBackend.getAppDataContainerPath(bundleId),
       rm: (destination, options) => fs.rm(destination, options),
       cp: (source, destination, options) => fs.cp(source, destination, options),
     };
+  }
+
+  private get simulatorSnapshotBackend(): IosSimulatorSnapshotBackend {
+    if (this.iosSnapshotBackend.kind === "physical") {
+      throw new Error("Snapshot app listing is not supported for physical iOS devices");
+    }
+    return this.iosSnapshotBackend;
   }
 
   /**
@@ -188,7 +195,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         // simctl for settings and app-container operations, which only works on a
         // Simulator. Reject a physical iPhone with an actionable error rather than
         // half-applying a restore over a failing simctl transport.
-        if (isIosPhysicalUdid(this.device.deviceId)) {
+        if (this.iosSnapshotBackend.kind === "physical") {
           throw new ActionableError(
             `Device snapshots are not supported on physical iOS devices (${this.device.deviceId}); ` +
               "they require a Simulator (simctl).",
@@ -491,7 +498,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     await this.validateIosSnapshotCompatibility(manifest);
 
     if (manifest.includeSettings && manifest.iosSettings) {
-      await restoreIosSettings(this.simctl, this.device.deviceId, manifest.iosSettings);
+      await this.simulatorSnapshotBackend.restoreSettings(manifest.iosSettings);
     }
 
     const failures = await this.restoreIosAppData(snapshotName, manifest);
@@ -674,14 +681,14 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
   private async getIosDeviceOsVersion(): Promise<string | undefined> {
     try {
-      const deviceInfo = await this.simctl.getDeviceInfo(this.device.deviceId);
+      const deviceInfo = await this.simulatorSnapshotBackend.getDeviceInfo();
       if (!deviceInfo) {
         return undefined;
       }
 
       let osVersion: string | undefined = deviceInfo.os_version;
       if (!osVersion && deviceInfo.runtime) {
-        const runtimes = await this.simctl.getRuntimes();
+        const runtimes = await this.simulatorSnapshotBackend.getRuntimes();
         const runtime = runtimes.find((entry) => entry.identifier === deviceInfo.runtime);
         osVersion = runtime?.version || runtime?.name;
       }
@@ -695,9 +702,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
   private async getInstalledIosBundleIds(): Promise<Set<string>> {
     try {
-      const apps = await resolveIosLenientAppListBackend(this.device.deviceId, {
-        simctl: this.simctl,
-      }).listApps();
+      const apps = await this.simulatorSnapshotBackend.listApps();
       const bundleIds = apps
         .map((app: any) => app.bundleId || app.CFBundleIdentifier)
         .filter((value: string | undefined) => typeof value === "string" && value.length > 0);

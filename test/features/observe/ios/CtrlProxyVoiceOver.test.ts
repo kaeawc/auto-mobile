@@ -509,6 +509,156 @@ describe("CtrlProxyVoiceOver", function () {
     });
   });
 
+  describe("requestActivateAccessibilityLink", function () {
+    // GesturePerformer.swift:119-122 renders the reasons at 2147/2166 with
+    // these prefixes; CommandHandler.swift:308 sends localizedDescription on the wire.
+    test.each([
+      "Gesture failed: Semantic link owner 'x' is missing, not actionable, or ambiguous",
+      "Element not found: semantic link 'T' occurrence 0",
+    ])("preserves the runner error reply verbatim: %s", async function (error) {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = commandPayloads(socket!)[0];
+        expect(sentMsg.type).toBe("request_activate_accessibility_link");
+        socket!.simulateMessage(
+          JSON.stringify({ type: "error", requestId: sentMsg.requestId, error }),
+        );
+
+        const result = await resultPromise;
+        expect(result.success).toBe(false);
+        expect(result.error).toBe(error);
+        expect(result.error).not.toContain("does not support");
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("reports an old runner's unknown semantic-link command as unsupported", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = commandPayloads(socket!)[0];
+        // ios/control-proxy/Sources/CtrlProxyRewrite/CommandError.swift:28.
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: sentMsg.requestId,
+            error: "Unknown command type: request_activate_accessibility_link",
+          }),
+        );
+
+        const result = await resultPromise;
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(
+          "runner rejected request_activate_accessibility_link as unknown",
+        );
+        expect(result.error).toContain("The runner is likely older than this daemon");
+        expect(result.error).toContain("rebuild and redeploy");
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("preserves a successful action_result and semantic-link parameters", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = commandPayloads(socket!)[0];
+        expect(sentMsg).toMatchObject({
+          type: "request_activate_accessibility_link",
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "action_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            totalTimeMs: 3,
+          }),
+        );
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+        expect(result.totalTimeMs).toBe(3);
+        expect(result.error).toBeUndefined();
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("reports a capability miss before dispatch as unsupported", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            id: 1,
+            supportedCommands: ["request_action"],
+          }),
+        );
+
+        const result = await client.requestActivateAccessibilityLink("T", 0, "x");
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(
+          "runner does not support request_activate_accessibility_link",
+        );
+        expect(commandPayloads(socket!)).toHaveLength(0);
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
   describe("requestSetVoiceOverEnabled", function () {
     test("emits set_voiceover_state with the enabled param and resolves on success", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);

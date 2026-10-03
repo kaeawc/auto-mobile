@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { Idle } from "../../../src/features/observe/Idle";
+import { Idle, ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, TouchIdleResult } from "../../../src/models";
@@ -643,6 +643,82 @@ describe("Idle - Unit Tests", function () {
   });
 
   describe("getRotationStatus error handling", function () {
+    for (const { stdout, currentRotation } of [
+      { stdout: "mRotation=0", currentRotation: 0 },
+      { stdout: "unparseable output", currentRotation: null },
+      { stdout: "mRotation=1", currentRotation: 1 },
+    ]) {
+      test(`stops polling when a read finishes after the deadline: ${stdout}`, async () => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        timer.setCurrentTime(493);
+        const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+          stdout,
+          stderr: "",
+        });
+        const executeCommand = adb.executeCommand.bind(adb);
+        adb.executeCommand = async (...args) => {
+          const result = await executeCommand(...args);
+          await timer.sleep(args[1] ?? 0);
+          return result;
+        };
+        const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
+
+        expect(timer.now()).toBe(493);
+        const result = await rotationIdle.getRotationStatus(1, 0, 500);
+
+        expect(result).toEqual({
+          rotationComplete: currentRotation === 1,
+          currentRotation,
+          shouldContinue: false,
+        });
+        expect(timer.now()).toBe(1493);
+        expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([
+          ROTATION_READ_FLOOR_MS,
+        ]);
+      });
+    }
+
+    for (const now of [500, 510]) {
+      for (const currentRotation of [0, 1]) {
+        test(`reads with the timeout floor at ${now}ms and reports rotation ${currentRotation}`, async () => {
+          const timer = new FakeTimer();
+          timer.setCurrentTime(now);
+          const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+          const adb = new FakeAdbExecutor();
+          const controller = new AbortController();
+          adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+            stdout: `mRotation=${currentRotation}`,
+            stderr: "",
+          });
+          const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
+
+          const result = await rotationIdle.getRotationStatus(
+            1,
+            0,
+            500,
+            undefined,
+            controller.signal,
+          );
+
+          expect(result).toEqual({
+            rotationComplete: currentRotation === 1,
+            currentRotation,
+            shouldContinue: false,
+          });
+          expect(adb.getCommandCalls()).toEqual([
+            expect.objectContaining({
+              command: 'shell dumpsys window | grep -i "mRotation="',
+              timeoutMs: 1000,
+              signal: controller.signal,
+            }),
+          ]);
+        });
+      }
+    }
+
     test("rejects an aborted signal instead of returning a rotation status", async function () {
       const timer = new FakeTimer();
       const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };

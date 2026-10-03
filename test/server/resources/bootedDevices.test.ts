@@ -19,6 +19,7 @@ import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersi
 import {
   setDeviceManager,
   setDeviceLockProbe,
+  setIosLockStateProbe,
   setOrientationReaderFactory,
   notifyBootedDeviceResourcesUpdated,
   BootedDevicesResourceContent,
@@ -55,6 +56,8 @@ import { z } from "zod/v4";
 import { FakeOrientationReader } from "../../fakes/FakeOrientationReader";
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 import { notifyDeviceImageResourcesUpdated } from "../../../src/server/deviceImageResources";
+import type { IosLockStateProbe } from "../../../src/features/observe/ios/IosLockStateProbe";
+import { logger } from "../../../src/utils/logger";
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
@@ -112,6 +115,7 @@ describe("MCP Booted Device Resources", () => {
     }
     // Restore the real (adb-backed) lock probe so a test's fake never leaks into the next.
     setDeviceLockProbe(null);
+    setIosLockStateProbe(null);
     setOrientationReaderFactory(null);
     resetBootedDevicesResourceCache();
   });
@@ -855,6 +859,73 @@ describe("MCP Booted Device Resources", () => {
       expect(data.devices[0].runtime.locked).toBeNull();
       expect("locked" in data.devices[0]).toBe(false);
     });
+
+    for (const scenario of [
+      { name: "locked simulator", deviceId: mockIosDevice1.deviceId, locked: true },
+      { name: "unlocked simulator", deviceId: mockIosDevice1.deviceId, locked: false },
+      { name: "unreadable simulator", deviceId: mockIosDevice1.deviceId },
+      { name: "throwing simulator probe", deviceId: mockIosDevice1.deviceId, throws: true },
+      { name: "physical iPhone", deviceId: "00008030-001C2D3E1234567A", physical: true },
+      {
+        name: "legacy physical iPhone",
+        deviceId: "0123456789abcdef0123456789abcdef0123456789",
+        physical: true,
+      },
+    ]) {
+      test(`real iOS lock dispatch handles ${scenario.name} in both resources`, async () => {
+        fakeDeviceUtils.setBootedDevices("ios", [
+          { ...mockIosDevice1, deviceId: scenario.deviceId },
+        ]);
+        const probe: IosLockStateProbe = {
+          read: async () => {
+            if (scenario.throws) {
+              throw new Error("fake iOS lock failure");
+            }
+            return scenario.locked === undefined
+              ? undefined
+              : { locked: scenario.locked, keyguardShowing: scenario.locked };
+          },
+        };
+        const read = spyOn(probe, "read");
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        setIosLockStateProbe(probe);
+        try {
+          const { client } = fixture.getContext();
+          const result = await client.readResource({ uri: "automobile:devices/lockStates" });
+          const content = result.contents[0];
+          if (!("text" in content)) {
+            throw new Error("Expected JSON lock-state resource");
+          }
+          const data: DeviceLockStatesResourceContent = JSON.parse(content.text);
+          expect(data.observationComplete).toBe(true);
+          expect(data.lockStates).toHaveLength(1);
+          expect(data.lockStates[0].locked).toBe(scenario.locked);
+
+          const booted = await getBootedDevicesForPlatforms(["ios"], new FakeTimer());
+          expect(booted.devices).toHaveLength(1);
+          expect(booted.devices[0].runtime.locked).toBe(scenario.locked ?? null);
+          if (scenario.physical) {
+            expect(read).not.toHaveBeenCalled();
+          } else {
+            expect(read).toHaveBeenCalledTimes(2);
+            expect(read.mock.calls[0][0]).toBe(scenario.deviceId);
+            expect(read.mock.calls[1][1]).toBeInstanceOf(AbortSignal);
+          }
+          if (scenario.throws) {
+            expect(warn).toHaveBeenCalledWith(
+              expect.stringContaining(
+                `Failed to query lock state for ${scenario.deviceId}: Error: fake iOS lock failure`,
+              ),
+            );
+          } else {
+            expect(warn).not.toHaveBeenCalled();
+          }
+        } finally {
+          warn.mockRestore();
+          read.mockRestore();
+        }
+      });
+    }
 
     test("lock-states resource surfaces per-device lock from the probe", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);

@@ -40,6 +40,11 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
+import {
+  NotifyutilIosLockStateProbe,
+  type IosLockStateProbe,
+} from "../features/observe/ios/IosLockStateProbe";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import type { CtrlProxyHealthCheckResult } from "../ctrlProxy/ios/IosCtrlProxyHealthClient";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import {
@@ -109,8 +114,8 @@ export function resetBootedDevicesResourceCache(): void {
   bootedDevicesResourcePublishedGeneration = ++bootedDevicesResourceGeneration;
 }
 
-// Per-device lock state. `locked` is Android-only (from the keyguard probe) and omitted when it
-// could not be read — a transient failure, or iOS, which has no lock probe.
+// Per-device lock state for Android and iOS simulators. Omitted for physical iOS devices or
+// when the advisory probe could not read the state.
 interface DeviceLockStateInfo {
   deviceId: string;
   locked?: boolean;
@@ -316,24 +321,35 @@ export function setBootCompletionAdbFactory(factory: AdbClientFactory | null): v
 /** Probes a device's lock state; returns `undefined` when it can't be determined. */
 export type DeviceLockProbe = (device: BootedDevice) => Promise<boolean | undefined>;
 
-// Injected only by tests, which need a deterministic lock state without real adb. When null, the
-// real adb-backed probe runs — but only while `serviceStatusEnabled` (i.e. no fake manager), so a
-// test that injects a fake device manager never triggers a real `dumpsys` unless it opts in here.
+// Injected only by tests, which need a deterministic lock state without real device transports.
+// A fake device manager disables production probes unless the test injects a probe explicitly.
 let injectedLockProbe: DeviceLockProbe | null = null;
 
-/** Inject a fake lock probe for tests (or null to restore the real adb-backed probe). */
+/** Inject a fake lock probe for tests (or null to restore the real platform probe). */
 export function setDeviceLockProbe(probe: DeviceLockProbe | null): void {
   injectedLockProbe = probe;
 }
 
+let injectedIosLockStateProbe: IosLockStateProbe | null = null;
+
+/** Inject an iOS probe, opting fake-manager tests into iOS lock reads only; null restores production. */
+export function setIosLockStateProbe(probe: IosLockStateProbe | null): void {
+  injectedIosLockStateProbe = probe;
+}
+
 /**
- * Real lock-state probe: reads the Android keyguard via `dumpsys window policy` (issue #4235). iOS
- * has no lock-state probe yet, so it returns `undefined` (the field is then omitted). A failed read
- * also yields `undefined` — lock state is advisory, never fatal to the resource.
+ * Reads Android keyguard via `dumpsys window policy` (issue #4235), or iOS simulator lock state
+ * via notifyutil (issue #5106). Physical iOS remains unknown. The caller bounds and handles
+ * failures — lock state is advisory, never fatal to the resource.
  */
 async function realDeviceLockProbe(device: BootedDevice): Promise<boolean | undefined> {
   if (device.platform !== "android") {
-    return undefined;
+    if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
+      return undefined;
+    }
+    const probe = injectedIosLockStateProbe ?? new NotifyutilIosLockStateProbe();
+    const lock = await probe.read(device.deviceId, getAbortSignal());
+    return lock?.locked;
   }
   const lock = await defaultAdbClientFactory.create(device).getDeviceLock();
   return lock?.locked;
@@ -341,9 +357,14 @@ async function realDeviceLockProbe(device: BootedDevice): Promise<boolean | unde
 
 const LOCK_STATE_TIMEOUT_MS = 3000;
 
-/** The active lock probe: an injected fake (tests) or the real adb probe when no fake manager is set. */
+/** An injected fake, the real platform probe, or iOS-only reads with an injected iOS probe. */
 function activeLockProbe(): DeviceLockProbe | null {
-  return injectedLockProbe ?? (serviceStatusEnabled ? realDeviceLockProbe : null);
+  if (injectedLockProbe || serviceStatusEnabled) {
+    return injectedLockProbe ?? realDeviceLockProbe;
+  }
+  return injectedIosLockStateProbe
+    ? async (device) => (device.platform === "ios" ? realDeviceLockProbe(device) : undefined)
+    : null;
 }
 
 export type OrientationReaderFactory = (device: BootedDevice) => OrientationReader;

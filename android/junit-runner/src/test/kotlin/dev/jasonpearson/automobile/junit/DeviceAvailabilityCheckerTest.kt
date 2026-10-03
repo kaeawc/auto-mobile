@@ -145,6 +145,183 @@ class DeviceAvailabilityCheckerTest {
     }
   }
 
+  @Test
+  fun documentedDeviceOutputCountsOnlyAvailableDevices() {
+    for ((output, expectedCount) in deviceOutputProbes()) {
+      val checker =
+        sdkChecker(
+          commandExecutor = { _, _ -> CommandResult(0, output, "") },
+          sleeper = { error("Successful device checks must not sleep") },
+        )
+
+      assertEquals(expectedCount, checker.getDeviceCount())
+      assertEquals(expectedCount > 0, checker.areDevicesAvailable())
+      assertNull(checker.getLastError())
+    }
+  }
+
+  @Test
+  fun pureParserHandlesDocumentedDeviceOutput() {
+    for ((output, expectedCount) in deviceOutputProbes()) {
+      assertEquals(expectedCount, DeviceAvailabilityChecker.countAvailableDevices(output))
+    }
+  }
+
+  @Test
+  fun adbServerFailureRetriesWithInjectedBackoffThenSucceeds() {
+    var attempts = 0
+    val delays = mutableListOf<Long>()
+    val checker =
+      sdkChecker(
+        commandExecutor = { _, _ ->
+          attempts++
+          if (attempts < 3) CommandResult(1, "", "ADB server didn't ACK")
+          else CommandResult(0, AVAILABLE_DEVICE_OUTPUT, "")
+        },
+        sleeper = { delays.add(it) },
+      )
+
+    assertEquals(1, checker.getDeviceCount())
+    assertTrue(checker.areDevicesAvailable())
+    assertEquals(3, attempts)
+    assertEquals(listOf(500L, 1000L), delays)
+    assertNull(checker.getLastError())
+  }
+
+  @Test
+  fun adbServerFailureExhaustsRetriesWithoutSleepingAfterLastAttempt() {
+    var attempts = 0
+    val delays = mutableListOf<Long>()
+    val checker =
+      sdkChecker(
+        commandExecutor = { _, _ ->
+          attempts++
+          CommandResult(1, "", "ADB server didn't ACK")
+        },
+        sleeper = { delays.add(it) },
+      )
+
+    assertEquals(0, checker.getDeviceCount())
+    assertFalse(checker.areDevicesAvailable())
+    assertEquals(3, attempts)
+    assertEquals(listOf(500L, 1000L), delays)
+    assertTrue(checker.getLastError()?.contains("ADB server didn't ACK") == true)
+  }
+
+  @Test
+  fun executorExceptionRetriesWithInjectedBackoffThenSucceeds() {
+    var attempts = 0
+    val delays = mutableListOf<Long>()
+    val checker =
+      sdkChecker(
+        commandExecutor = { _, _ ->
+          attempts++
+          if (attempts == 1) throw IllegalStateException("Temporary execution failure")
+          CommandResult(0, AVAILABLE_DEVICE_OUTPUT, "")
+        },
+        sleeper = { delays.add(it) },
+      )
+
+    assertEquals(1, checker.getDeviceCount())
+    assertTrue(checker.areDevicesAvailable())
+    assertEquals(2, attempts)
+    assertEquals(listOf(500L), delays)
+    assertNull(checker.getLastError())
+  }
+
+  @Test
+  fun executorExceptionExhaustsRetriesAndPreservesMessage() {
+    var attempts = 0
+    val delays = mutableListOf<Long>()
+    val checker =
+      sdkChecker(
+        commandExecutor = { _, _ ->
+          attempts++
+          throw IllegalStateException("Persistent execution failure")
+        },
+        sleeper = { delays.add(it) },
+      )
+
+    assertEquals(0, checker.getDeviceCount())
+    assertFalse(checker.areDevicesAvailable())
+    assertEquals(3, attempts)
+    assertEquals(listOf(500L, 1000L), delays)
+    assertEquals("Persistent execution failure", checker.getLastError())
+  }
+
+  @Test
+  fun nonRetryableFailureStopsAfterOneAttemptWithoutSleeping() {
+    var attempts = 0
+    val delays = mutableListOf<Long>()
+    val checker =
+      sdkChecker(
+        commandExecutor = { _, _ ->
+          attempts++
+          CommandResult(1, "", "error: something else")
+        },
+        sleeper = { delays.add(it) },
+      )
+
+    assertEquals(0, checker.getDeviceCount())
+    assertFalse(checker.areDevicesAvailable())
+    assertEquals(1, attempts)
+    assertTrue(delays.isEmpty())
+    assertTrue(checker.getLastError()?.contains("error: something else") == true)
+  }
+
+  private fun sdkChecker(
+    commandExecutor: (List<String>, Long) -> CommandResult,
+    sleeper: (Long) -> Unit,
+  ): DeviceAvailabilityChecker {
+    val sdkPath = temporaryFolder.newFolder().absolutePath
+    return DeviceAvailabilityChecker(
+      getenv = { name -> if (name == "ANDROID_HOME") sdkPath else null },
+      commandExecutor = commandExecutor,
+      sleeper = sleeper,
+    )
+  }
+
+  // Format probes built from adb's documented format, not captured device output.
+  private fun deviceOutputProbes(): List<Pair<String, Int>> {
+    val nonDeviceRows =
+      """
+      offline-serial\toffline
+      unauthorized-serial\tunauthorized
+      no-permissions-serial\tno permissions (user in plugdev group; are your udev rules wrong?); see [http://developer.android.com/tools/device.html]
+      authorizing-serial\tauthorizing
+      bootloader-serial\tbootloader
+      recovery-serial\trecovery
+      sideload-serial\tsideload
+      host-serial\thost
+      connecting-serial\tconnecting
+      """
+        .trimIndent()
+        .replace("\\t", "\t")
+    return listOf(
+      "List of devices attached\nemulator-5554\tdevice\nemulator-5556\tdevice\n" to 2,
+      "$AVAILABLE_DEVICE_OUTPUT$nonDeviceRows\n" to 1,
+      "List of devices attached\n$nonDeviceRows\n" to 0,
+      "\r\nList of devices attached\r\n\r\nemulator-5554\tdevice\r\n\r\n" to 1,
+      "List of devices attached\n\n" to 0,
+      "" to 0,
+      """
+      * daemon not running; starting now at tcp:5037
+      * daemon started successfully
+      * device must not count as a serial
+      List of devices attached
+      emulator-5554\tdevice
+      """
+        .trimIndent()
+        .replace("\\t", "\t") to 1,
+      """
+      List of devices attached
+      emulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:1
+      emulator-5556          offline product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:2
+      """
+        .trimIndent() to 1,
+    )
+  }
+
   private fun unsetEnvironmentChecker() =
     DeviceAvailabilityChecker(
       getenv = { null },
@@ -152,6 +329,9 @@ class DeviceAvailabilityCheckerTest {
     )
 
   companion object {
+    // Format probe built from adb's documented format, not captured device output.
+    private const val AVAILABLE_DEVICE_OUTPUT = "List of devices attached\nemulator-5554\tdevice\n"
+
     private const val MISSING_SDK_ERROR =
       "ANDROID_HOME / ANDROID_SDK_ROOT is not set; cannot locate adb — treating as no devices available"
   }

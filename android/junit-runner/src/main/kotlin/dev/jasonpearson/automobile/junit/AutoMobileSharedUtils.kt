@@ -91,6 +91,7 @@ constructor(
   private val commandExecutor: (List<String>, Long) -> CommandResult = { command, timeoutMs ->
     AutoMobileSharedUtils.executeCommand(command, timeoutMs)
   },
+  private val sleeper: (Long) -> Unit = { ms -> Thread.sleep(ms) },
 ) : DeviceChecker {
   @Volatile private var deviceCount = 0
 
@@ -102,6 +103,12 @@ constructor(
     private const val MAX_RETRIES = 3
     private const val INITIAL_BACKOFF_MS = 500L
     private const val COMMAND_TIMEOUT_MS = 10000L // 10 seconds per attempt
+
+    internal fun countAvailableDevices(output: String): Int =
+      output.lineSequence().count { line ->
+        val trimmed = line.trim()
+        !trimmed.startsWith("*") && trimmed.split(Regex("\\s+")).getOrNull(1) == "device"
+      }
 
     // JVM-wide lock to prevent parallel test executors from racing on ADB server startup
     private val adbLock = java.util.concurrent.locks.ReentrantLock()
@@ -168,12 +175,7 @@ constructor(
 
         if (result.exitCode == 0) {
           // Parse adb devices output to count connected devices
-          deviceCount =
-            result.output
-              .lines()
-              .drop(1) // Skip the "List of devices attached" header
-              .filter { line -> line.trim().isNotEmpty() && line.contains("\t") }
-              .size
+          deviceCount = countAvailableDevices(result.output)
 
           if (deviceCount > 0) {
             println("Found $deviceCount connected device(s)")
@@ -191,7 +193,7 @@ constructor(
           println(
             "ADB server issue detected (attempt $attempt/$MAX_RETRIES), retrying in ${backoffMs}ms..."
           )
-          Thread.sleep(backoffMs)
+          sleeper(backoffMs)
           continue
         } else {
           // Non-retryable error or max retries reached
@@ -202,6 +204,8 @@ constructor(
               "ADB server failed to start after $MAX_RETRIES attempts. This may be a CI environment issue."
             )
           }
+          // Further attempts cannot recover a non-retryable failure.
+          break
         }
       } catch (e: Exception) {
         lastException = e
@@ -210,7 +214,7 @@ constructor(
         if (attempt < MAX_RETRIES) {
           val backoffMs = INITIAL_BACKOFF_MS * (1 shl (attempt - 1))
           println("Retrying in ${backoffMs}ms...")
-          Thread.sleep(backoffMs)
+          sleeper(backoffMs)
           continue
         }
       }

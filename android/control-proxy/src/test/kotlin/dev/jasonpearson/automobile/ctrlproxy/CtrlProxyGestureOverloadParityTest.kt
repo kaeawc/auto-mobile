@@ -9,7 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -132,8 +131,6 @@ class CtrlProxyGestureOverloadParityTest {
     assertClearsCaret { actions.requestGestureStart("start", "stream", 100.0, 100.0) }
   }
 
-  // PR #8702 adds the missing clear. Keep the real failing assertion isolated from the live cases.
-  @Ignore("Fails until PR 8702 lands: display-id requestGestureStart skips rememberedInsert = null")
   @Test
   fun `display id gesture start clears caret before framework dispatch`() {
     assertClearsCaret { actions.requestGestureStart("start", "stream", 100.0, 100.0, 2) }

@@ -9,7 +9,10 @@ import {
   DeviceAppManager,
   DeviceUrlLauncher,
 } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  resolveIosOpenUrlBackend,
+  type IosOpenUrlBackend,
+} from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -119,9 +122,15 @@ const isSystemUrlScheme = (url: string): boolean => {
   return match ? SYSTEM_URL_HANDLERS.has(match[1].toLowerCase()) : false;
 };
 
+export interface OpenURLOptions {
+  timer?: Timer;
+  iosOpenUrlBackend?: IosOpenUrlBackend;
+}
+
 export class OpenURL extends BaseVisualChange {
   private readonly simctl: SimCtlClient | null;
   private readonly devicectl: DeviceUrlLauncher | null;
+  private readonly iosOpenUrlBackend?: IosOpenUrlBackend;
 
   /**
    * @param device - The target device
@@ -134,9 +143,11 @@ export class OpenURL extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     simctl: SimCtlClient | null = null,
     devicectl: DeviceUrlLauncher | null = null,
-    timer: Timer = defaultTimer,
+    timerOrOptions: Timer | OpenURLOptions = defaultTimer,
   ) {
-    super(device, adb, timer);
+    const options = "now" in timerOrOptions ? { timer: timerOrOptions } : timerOrOptions;
+    super(device, adb, options.timer ?? defaultTimer);
+    this.iosOpenUrlBackend = options.iosOpenUrlBackend;
     this.device = device;
     this.simctl = simctl;
     this.devicectl = devicectl;
@@ -277,23 +288,22 @@ export class OpenURL extends BaseVisualChange {
     };
   }
 
-  /**
-   * Execute iOS-specific URL opening. Branches on the canonical
-   * {@link isIosSimulatorUdid} signal: simulators keep the simulator-only
-   * `simctl openurl` path, while physical devices (iOS 17+) go through
-   * `devicectl`, since `simctl` cannot target a physical-device UDID.
-   * @param url - URL to open
-   * @returns Result of the URL opening operation
-   */
+  /** Execute iOS URL opening through the selected transport backend. */
   private async executeiOSOpenURL(
     url: string,
     previousObservation?: ObserveResult,
     signal?: AbortSignal,
   ): Promise<OpenURLResult> {
-    if (isIosSimulatorUdid(this.device.deviceId)) {
-      return this.executeiOSSimulatorOpenURL(url, previousObservation, signal);
+    const backend =
+      this.iosOpenUrlBackend ??
+      resolveIosOpenUrlBackend(this.device.deviceId, {
+        createSimctl: () => this.simctl ?? new SimCtlClient(),
+        createDeviceUrlLauncher: () => this.devicectl ?? new DeviceAppManager(),
+      });
+    if (backend.kind === "simulator") {
+      return this.executeiOSSimulatorOpenURL(backend, url, previousObservation, signal);
     }
-    return this.executeiOSPhysicalOpenURL(url, signal);
+    return this.executeiOSPhysicalOpenURL(backend, url, signal);
   }
 
   /**
@@ -302,18 +312,18 @@ export class OpenURL extends BaseVisualChange {
    * @returns Result of the URL opening operation
    */
   private async executeiOSSimulatorOpenURL(
+    backend: IosOpenUrlBackend,
     url: string,
     previousObservation?: ObserveResult,
     signal?: AbortSignal,
   ): Promise<OpenURLResult> {
-    const simctl = this.simctl ?? new SimCtlClient();
     try {
       // xcrun simctl openurl <device> <url>, issued as argv so the URL reaches
       // execFile byte-for-byte. The string path re-splits its command, which
       // mangles quotes and backslashes (issue #4213 / #4196).
       throwIfAborted(signal);
       await awaitWhileRequestIsLive(
-        simctl.executeCommandArgs(["openurl", this.device.deviceId, url]),
+        backend.openUrl(url, { bundleId: SAFARI_BUNDLE_ID, signal }),
         signal,
       );
       throwIfAborted(signal);
@@ -372,13 +382,12 @@ export class OpenURL extends BaseVisualChange {
    * @returns Result of the URL opening operation
    */
   private async executeiOSPhysicalOpenURL(
+    backend: IosOpenUrlBackend,
     url: string,
     signal?: AbortSignal,
   ): Promise<OpenURLResult> {
-    const devicectl = this.devicectl ?? new DeviceAppManager();
-
     throwIfAborted(signal);
-    if (!(await awaitWhileRequestIsLive(devicectl.isUrlLaunchAvailable(), signal))) {
+    if (!(await awaitWhileRequestIsLive(backend.isUrlLaunchAvailable(), signal))) {
       return {
         success: false,
         url,
@@ -401,10 +410,7 @@ export class OpenURL extends BaseVisualChange {
         ? SAFARI_BUNDLE_ID
         : (IOSCtrlProxyManager.getExistingTargetBundleId(this.device) ?? SAFARI_BUNDLE_ID);
       throwIfAborted(signal);
-      await awaitWhileRequestIsLive(
-        devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url, signal),
-        signal,
-      );
+      await awaitWhileRequestIsLive(backend.openUrl(url, { bundleId, signal }), signal);
       throwIfAborted(signal);
       return {
         success: true,

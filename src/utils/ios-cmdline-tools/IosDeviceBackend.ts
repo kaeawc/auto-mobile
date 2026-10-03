@@ -1,3 +1,4 @@
+import type { DeviceUrlLauncher } from "./DeviceAppManager";
 import { logger } from "../logger";
 import { isIosPhysicalUdid, isIosSimulatorUdid } from "./iosDeviceType";
 import type { SimCtlClient } from "./SimCtlClient";
@@ -475,4 +476,70 @@ export function resolveIosInstallBackend(
   return isIosSimulatorUdid(deviceId)
     ? new SimulatorIosInstallBackend(deviceId, deps.simctl)
     : new PhysicalIosInstallBackend(deviceId, deps);
+}
+
+/** URL transport only; action-level resolution, cancellation and observation stay with OpenURL. */
+export interface IosOpenUrlBackend {
+  readonly kind: "simulator" | "physical";
+  isUrlLaunchAvailable(): Promise<boolean>;
+  openUrl(url: string, options: { bundleId: string; signal?: AbortSignal }): Promise<void>;
+}
+
+export interface IosOpenUrlBackendDeps {
+  createSimctl: () => Pick<SimCtlClient, "executeCommandArgs">;
+  createDeviceUrlLauncher: () => DeviceUrlLauncher;
+}
+
+export class SimulatorIosOpenUrlBackend implements IosOpenUrlBackend {
+  readonly kind = "simulator";
+
+  constructor(
+    private readonly deviceId: string,
+    private readonly createSimctl: IosOpenUrlBackendDeps["createSimctl"],
+  ) {}
+
+  async isUrlLaunchAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  async openUrl(url: string): Promise<void> {
+    // Preserve argv forwarding: simctl's string command path re-splits URL bytes.
+    await this.createSimctl().executeCommandArgs(["openurl", this.deviceId, url]);
+  }
+}
+
+export class PhysicalIosOpenUrlBackend implements IosOpenUrlBackend {
+  readonly kind = "physical";
+  private launcher?: DeviceUrlLauncher;
+
+  constructor(
+    private readonly deviceId: string,
+    private readonly createDeviceUrlLauncher: IosOpenUrlBackendDeps["createDeviceUrlLauncher"],
+  ) {}
+
+  private get deviceUrlLauncher(): DeviceUrlLauncher {
+    return (this.launcher ??= this.createDeviceUrlLauncher());
+  }
+
+  isUrlLaunchAvailable(): Promise<boolean> {
+    return this.deviceUrlLauncher.isUrlLaunchAvailable();
+  }
+
+  openUrl(url: string, options: { bundleId: string; signal?: AbortSignal }): Promise<void> {
+    return this.deviceUrlLauncher.launchWithPayloadUrl(
+      this.deviceId,
+      options.bundleId,
+      url,
+      options.signal,
+    );
+  }
+}
+
+export function resolveIosOpenUrlBackend(
+  deviceId: string,
+  deps: IosOpenUrlBackendDeps,
+): IosOpenUrlBackend {
+  return isIosSimulatorUdid(deviceId)
+    ? new SimulatorIosOpenUrlBackend(deviceId, deps.createSimctl)
+    : new PhysicalIosOpenUrlBackend(deviceId, deps.createDeviceUrlLauncher);
 }

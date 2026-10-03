@@ -10,11 +10,16 @@ import { LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "../../action/tapAtGesture"
 import { GetEventReader } from "./GetEventReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 
-interface PendingGesture {
+interface OrderedStep {
+  resolved: boolean;
+  step?: PlanStep;
+  stepIndex?: number;
+}
+
+interface PendingGesture extends OrderedStep {
   gesture: GestureEvent;
   arrivedAt: number;
-  resolved: boolean;
-  stepIndex?: number;
+  timeout?: NodeJS.Timeout;
 }
 
 /**
@@ -39,9 +44,11 @@ export const MERGE_WINDOW_MS = 750;
  */
 export class DualTrackRecorder {
   private steps: PlanStep[] = [];
+  private orderedSteps: OrderedStep[] = [];
+  private latestEntry: OrderedStep | null = null;
   private pendingGestures: PendingGesture[] = [];
   private bufferedInteractions: (ReceivedInteraction & { receivedAt: number })[] = [];
-  private lastInputText: { elementKey: string; text: string; stepIndex: number } | null = null;
+  private lastInputText: { elementKey: string; entry: OrderedStep } | null = null;
   private activeEmitter: GestureEmitter | null = null;
   private unsubscribeA11y: (() => void) | null = null;
   /** Reference to the real AndroidCtrlProxyClient when not in test mode */
@@ -132,18 +139,19 @@ export class DualTrackRecorder {
     }
 
     if (gesture.type === "pressButton") {
-      this.steps.push(buildPressButtonStep(gesture));
+      this.enqueueStep({ resolved: true, step: buildPressButtonStep(gesture) });
       return;
     }
 
     if (gesture.type === "pinch") {
-      this.steps.push(buildPinchStep(gesture));
+      this.enqueueStep({ resolved: true, step: buildPinchStep(gesture) });
       return;
     }
 
     this.pendingGestures = this.pendingGestures.filter(
       (pending) =>
         !pending.resolved ||
+        (pending.step !== undefined && pending.stepIndex === undefined) ||
         (pending.gesture.type === "tap" &&
           gesture.arrivedAt - pending.gesture.arrivedAt <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS),
     );
@@ -171,12 +179,23 @@ export class DualTrackRecorder {
           Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
         );
       });
-      if (priorTap) {
-        priorTap.resolved = true;
-      }
-      const step = priorTap?.stepIndex === undefined ? undefined : this.steps[priorTap.stepIndex];
+      const step = priorTap?.step;
       if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
         step.params.action = "doubleTap";
+        return;
+      }
+      if (priorTap && !priorTap.resolved) {
+        // Keep the first tap's position, but allow the pair's delayed click a
+        // fresh merge window, as when recording an uncorrelated double tap.
+        if (priorTap.timeout) {
+          this.timer.clearTimeout(priorTap.timeout);
+        }
+        priorTap.gesture = gesture;
+        priorTap.arrivedAt = this.timer.now();
+        priorTap.timeout = this.timer.setTimeout(
+          () => this.resolveGesture(priorTap),
+          MERGE_WINDOW_MS,
+        );
         return;
       }
     }
@@ -188,8 +207,27 @@ export class DualTrackRecorder {
       resolved: false,
     };
     this.pendingGestures.push(pending);
+    this.enqueueStep(pending);
 
-    this.timer.setTimeout(() => this.resolveGesture(pending), MERGE_WINDOW_MS);
+    pending.timeout = this.timer.setTimeout(() => this.resolveGesture(pending), MERGE_WINDOW_MS);
+  }
+
+  private enqueueStep(entry: OrderedStep): void {
+    this.latestEntry = entry;
+    this.orderedSteps.push(entry);
+    this.flushResolvedSteps();
+  }
+
+  private flushResolvedSteps(): void {
+    // Emit only a contiguous resolved prefix, so accessibility receipt order
+    // cannot reorder touches. Skipped gestures still release later steps.
+    while (this.orderedSteps[0]?.resolved) {
+      const entry = this.orderedSteps.shift()!;
+      if (entry.step) {
+        entry.stepIndex = this.steps.length;
+        this.steps.push(entry.step);
+      }
+    }
   }
 
   private handleInteractionEvent(event: ReceivedInteraction): void {
@@ -236,31 +274,14 @@ export class DualTrackRecorder {
       return;
     }
     pending.resolved = true;
-
-    // Prune stale buffered interactions using host receipt time, not device timestamp,
-    // to avoid false drops/retains caused by host-device clock skew.
-    const now = this.timer.now();
-    const MAX_BUFFER_AGE_MS = MERGE_WINDOW_MS * 2;
-    this.bufferedInteractions = this.bufferedInteractions.filter(
-      (e) => now - e.receivedAt <= MAX_BUFFER_AGE_MS,
-    );
-
-    // Prefer a genuine click over Compose stateChange when both are available.
-    const matches = (e: ReceivedInteraction & { receivedAt: number }) =>
-      Math.abs(e.receivedAt - pending.arrivedAt) <= MERGE_WINDOW_MS &&
-      isCompatibleType(pending.gesture.type, e.type) &&
-      gestureHitsElement(pending.gesture, e.element);
-    const tapIndex = this.bufferedInteractions.findIndex((e) => e.type === "tap" && matches(e));
-    const idx = tapIndex >= 0 ? tapIndex : this.bufferedInteractions.findIndex(matches);
-    const event =
-      interaction?.type === "tap" || idx < 0
-        ? interaction
-        : this.bufferedInteractions.splice(idx, 1)[0];
-    const step = buildMergedStep(pending.gesture, event);
-    if (step) {
-      pending.stepIndex = this.steps.length;
-      this.steps.push(step);
+    if (pending.timeout) {
+      this.timer.clearTimeout(pending.timeout);
     }
+
+    const event = this.selectInteraction(pending, interaction);
+    const step = buildMergedStep(pending.gesture, event);
+    pending.step = step ?? undefined;
+    this.flushResolvedSteps();
     if (!event || !buildSelector(event.element) || !step) {
       const gesture = pending.gesture;
       const [x, y] =
@@ -276,6 +297,47 @@ export class DualTrackRecorder {
     }
   }
 
+  private selectInteraction(
+    pending: PendingGesture,
+    interaction?: ReceivedInteraction,
+  ): ReceivedInteraction | undefined {
+    // Prune stale buffered interactions using host receipt time, not device timestamp,
+    // to avoid false drops/retains caused by host-device clock skew.
+    const now = this.timer.now();
+    const MAX_BUFFER_AGE_MS = MERGE_WINDOW_MS * 2;
+    this.bufferedInteractions = this.bufferedInteractions.filter(
+      (e) => now - e.receivedAt <= MAX_BUFFER_AGE_MS,
+    );
+
+    const candidates = this.bufferedInteractions.map((event, index) => ({ event, index }));
+    if (interaction) {
+      candidates.push({ event: { ...interaction, receivedAt: now }, index: -1 });
+    }
+    const selected = candidates
+      .filter(
+        ({ event }) =>
+          Math.abs(event.receivedAt - pending.arrivedAt) <= MERGE_WINDOW_MS &&
+          isCompatibleType(pending.gesture.type, event.type) &&
+          gestureHitsElement(pending.gesture, event.element),
+      )
+      .sort((a, b) => {
+        // Genuine clicks beat stateChange. Within that priority, prefer events
+        // following the touch, then proximity. Stable ties retain buffer order
+        // (the incoming event is appended after buffered candidates).
+        const aDelta = a.event.receivedAt - pending.arrivedAt;
+        const bDelta = b.event.receivedAt - pending.arrivedAt;
+        return (
+          Number(b.event.type === "tap") - Number(a.event.type === "tap") ||
+          Number(aDelta < 0) - Number(bDelta < 0) ||
+          Math.abs(aDelta) - Math.abs(bDelta)
+        );
+      })[0];
+    if (selected && selected.index >= 0) {
+      this.bufferedInteractions.splice(selected.index, 1);
+    }
+    return selected?.event;
+  }
+
   private handleInputText(event: ReceivedInteraction): void {
     const elementKey = buildElementKey(event);
     if (event.text === undefined) {
@@ -283,17 +345,18 @@ export class DualTrackRecorder {
     }
 
     // Coalesce consecutive inputText events on the same element only when the
-    // previous replacement is still the most recent step (no intervening actions).
+    // previous replacement is still the most recent entry (including pending
+    // gestures). Stable references also allow coalescing a held text step.
     // Accessibility events carry the field's complete value, so recording an
     // insert would duplicate text when the plan is replayed.
     if (this.coalesceInputText(elementKey, event.text)) {
       return;
     }
 
-    const stepIndex = this.steps.length;
-    this.steps.push(this.buildRecordedTextStep(event.text));
+    const entry = { resolved: true, step: this.buildRecordedTextStep(event.text) };
+    this.enqueueStep(entry);
     if (elementKey) {
-      this.lastInputText = { elementKey, text: event.text, stepIndex };
+      this.lastInputText = { elementKey, entry };
     }
   }
 
@@ -312,12 +375,12 @@ export class DualTrackRecorder {
       !previous ||
       !elementKey ||
       previous.elementKey !== elementKey ||
-      previous.stepIndex !== this.steps.length - 1
+      previous.entry !== this.latestEntry
     ) {
       return false;
     }
 
-    return this.updateCoalescedTextStep(this.steps[previous.stepIndex], text);
+    return this.updateCoalescedTextStep(previous.entry.step, text);
   }
 
   private updateCoalescedTextStep(existing: PlanStep | undefined, text: string): boolean {

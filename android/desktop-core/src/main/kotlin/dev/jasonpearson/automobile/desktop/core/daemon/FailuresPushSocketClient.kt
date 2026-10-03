@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import dev.jasonpearson.automobile.desktop.core.connection.shouldReconnect
+import dev.jasonpearson.automobile.desktop.core.logging.Logger
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -15,12 +16,16 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.min
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -29,8 +34,44 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.serializer
+
+/** Socket close must be idempotent because disconnect and read-loop cleanup can race. */
+internal interface FailuresSocket : AutoCloseable {
+  fun readLine(): String?
+
+  fun writeLine(line: String)
+}
+
+internal fun interface FailuresRetryDelay {
+  suspend fun wait(delayMs: Long)
+}
+
+internal data class FailuresPushSocketOptions(
+  val sessionUuidProvider: (() -> String?)? = null,
+  val jitter: () -> Double = { Math.random() },
+  val socketPath: () -> String = { AutoMobileSocketPaths.socketPath("failures-push.sock") },
+)
+
+private class ChannelFailuresSocket(path: String) : FailuresSocket {
+  private val channel = SocketChannel.open(UnixDomainSocketAddress.of(path))
+  private val reader =
+    BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
+  private val writer =
+    BufferedWriter(OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8))
+
+  override fun readLine(): String? = reader.readLine()
+
+  override fun writeLine(line: String) {
+    writer.write(line)
+    writer.newLine()
+    writer.flush()
+  }
+
+  override fun close() = channel.close()
+}
 
 /**
  * Client for the failures push Unix socket server. Subscribes to receive real-time failure
@@ -38,20 +79,31 @@ import kotlinx.serialization.serializer
  *
  * Socket path: ~/.auto-mobile/failures-push.sock
  */
-class FailuresPushSocketClient(private val sessionUuidProvider: (() -> String?)? = null) {
-  companion object {
-    private fun getSocketPath(): String = AutoMobileSocketPaths.socketPath("failures-push.sock")
-  }
+class FailuresPushSocketClient
+internal constructor(
+  private val openSocket: (String) -> FailuresSocket,
+  private val retryDelay: FailuresRetryDelay,
+  private val scope: CoroutineScope,
+  private val socketAvailable: (String) -> Boolean,
+  private val log: Logger = LoggerFactory.getLogger(FailuresPushSocketClient::class.java),
+  private val options: FailuresPushSocketOptions = FailuresPushSocketOptions(),
+) {
+  constructor(
+    sessionUuidProvider: (() -> String?)? = null
+  ) : this(
+    ::ChannelFailuresSocket,
+    FailuresRetryDelay { delay(it) },
+    CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    { Files.exists(Path.of(it)) },
+    options = FailuresPushSocketOptions(sessionUuidProvider = sessionUuidProvider),
+  )
 
-  private val log = LoggerFactory.getLogger(FailuresPushSocketClient::class.java)
   @Volatile private var sessionRejected = false
 
   private val json = DaemonJson
-  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-  private var channel: SocketChannel? = null
-  private var reader: BufferedReader? = null
-  private var writer: BufferedWriter? = null
+  private val socket = AtomicReference<FailuresSocket?>()
+  private val connectionLock = Any()
+  private var connectionGeneration = 0L
   private var connectionJob: Job? = null
 
   private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
@@ -86,84 +138,66 @@ class FailuresPushSocketClient(private val sessionUuidProvider: (() -> String?)?
    *   severities.
    */
   fun connect(type: String? = null, severity: String? = null) {
-    if (sessionRejected || (sessionUuidProvider != null && sessionUuidProvider.invoke() == null))
-      return
-    if (_isConnected) {
-      log.info("Already connected to failures push")
-      return
-    }
-
-    // Cancel any existing connection job
-    connectionJob?.cancel()
-    _state.update { ConnectionState.Connecting }
-
-    connectionJob = scope.launch {
-      connectWithRetry(type, severity)
+    synchronized(connectionLock) {
+      if (
+        sessionRejected ||
+          (options.sessionUuidProvider != null && options.sessionUuidProvider.invoke() == null)
+      )
+        return
+      if (_isConnected || connectionJob?.isActive == true) {
+        log.info("Failures push connection already active")
+        return
+      }
+      val generation = ++connectionGeneration
+      _state.value = ConnectionState.Connecting
+      connectionJob = scope.launch { connectWithRetry(type, severity, generation) }
     }
   }
 
-  private suspend fun connectWithRetry(type: String?, severity: String?) {
-    val socketPath = getSocketPath()
+  private suspend fun connectWithRetry(type: String?, severity: String?, generation: Long) {
+    val socketPath = options.socketPath()
     var attempt = 0
 
-    while (_shouldReconnect) {
+    while (_shouldReconnect && !sessionRejected) {
+      currentCoroutineContext().ensureActive()
       log.info("Connecting to failures push at $socketPath (attempt ${attempt + 1})")
-
+      var currentSocket: FailuresSocket? = null
       try {
-        val path = Path.of(socketPath)
-        if (!Files.exists(path)) {
+        if (!socketAvailable(socketPath)) {
           throw SocketNotFoundError("Socket not found at $socketPath")
         }
-
-        val address = UnixDomainSocketAddress.of(socketPath)
-        channel = SocketChannel.open(address)
-        reader =
-          BufferedReader(
-            InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-          )
-        writer =
-          BufferedWriter(
-            OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-          )
-
-        _state.update { ConnectionState.Connected(subscribed = false) }
-        attempt = 0
-        log.info("Connected to failures push")
-
-        // Send subscribe request
-        subscribe(type, severity)
-
-        // Read messages (blocks until disconnected)
-        readMessages()
-
-        // If we get here, connection was lost
-        if (_shouldReconnect) {
-          log.info("Connection lost, will attempt to reconnect")
-          attempt++
-          _state.update { ConnectionState.Reconnecting(attempt, calculateBackoff(attempt)) }
+        val openedSocket = openSocket(socketPath)
+        currentSocket = openedSocket
+        currentCoroutineContext().ensureActive()
+        synchronized(connectionLock) {
+          // A disconnected or superseded attempt must never publish its late socket.
+          if (generation != connectionGeneration) return
+          socket.set(openedSocket)
+          _state.value = ConnectionState.Connected(subscribed = false)
+          subscribe(type, severity, openedSocket)
         }
+        readMessages(openedSocket, generation) {
+          // Accepting a socket is not healthy: reset only after a message is received.
+          attempt = 0
+        }
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
-        cleanupConnection()
-
-        if (!_shouldReconnect) {
-          log.info("Reconnection disabled, stopping connection attempts")
-          if (!sessionRejected) _state.update { ConnectionState.Disconnected("Disconnected") }
-          return
-        }
-
-        attempt++
-        val delayMs = calculateBackoff(attempt)
-
-        log.warn(
-          "Failed to connect to failures push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
-        )
-        _state.update { ConnectionState.Reconnecting(attempt, delayMs) }
-
-        delay(delayMs)
+        log.warn("Failures push connection failed: ${e.message}", e)
+      } finally {
+        cleanupConnection(currentSocket)
       }
-    }
 
-    if (!sessionRejected) _state.update { ConnectionState.Disconnected("Stopped") }
+      currentCoroutineContext().ensureActive()
+      val delayMs: Long
+      synchronized(connectionLock) {
+        if (generation != connectionGeneration || sessionRejected || !_shouldReconnect) return
+        attempt++
+        delayMs = calculateBackoff(attempt)
+        _state.value = ConnectionState.Reconnecting(attempt, delayMs)
+      }
+      retryDelay.wait(delayMs)
+    }
   }
 
   private fun calculateBackoff(attempt: Int): Long {
@@ -171,42 +205,33 @@ class FailuresPushSocketClient(private val sessionUuidProvider: (() -> String?)?
     val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
     val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
     // Add up to 10% jitter
-    val jitter = (cappedDelay * 0.1 * Math.random()).toLong()
+    val jitter = (cappedDelay * 0.1 * options.jitter()).toLong()
     return cappedDelay + jitter
   }
 
   private class SocketNotFoundError(message: String) : Exception(message)
 
   fun disconnect() {
-    val previousState = _state.value
-    // Stop reconnection attempts by moving to Disconnected
-    _state.update { ConnectionState.Disconnected(null) }
-
-    connectionJob?.cancel()
-    connectionJob = null
-
-    if (previousState !is ConnectionState.Connected) {
-      return
+    val previousState: ConnectionState
+    val previousSocket: FailuresSocket?
+    synchronized(connectionLock) {
+      connectionGeneration++
+      previousState = _state.value
+      if (!sessionRejected) _state.value = ConnectionState.Disconnected(null)
+      connectionJob?.cancel()
+      connectionJob = null
+      previousSocket = socket.getAndSet(null)
     }
 
     try {
-      if (previousState.subscribed) {
+      if (previousState is ConnectionState.Connected && previousState.subscribed) {
         val request =
-          FailuresPushRequest(
-            id = UUID.randomUUID().toString(),
-            command = "unsubscribe",
-          )
-        sendRequest(request)
+          FailuresPushRequest(id = UUID.randomUUID().toString(), command = "unsubscribe")
+        sendRequest(request, previousSocket)
       }
-
-      channel?.close()
-    } catch (e: Exception) {
-      log.warn("Error disconnecting from failures push: ${e.message}")
+    } finally {
+      cleanupConnection(previousSocket)
     }
-
-    channel = null
-    reader = null
-    writer = null
   }
 
   fun isConnected(): Boolean = _isConnected
@@ -226,13 +251,15 @@ class FailuresPushSocketClient(private val sessionUuidProvider: (() -> String?)?
       command = "subscribe",
       type = type,
       severity = severity,
-      sessionUuid = sessionUuidProvider?.invoke(),
+      sessionUuid = options.sessionUuidProvider?.invoke(),
     )
 
-  private fun subscribe(type: String?, severity: String?) {
+  private fun subscribe(type: String?, severity: String?, currentSocket: FailuresSocket) {
     val request = subscribeRequest(type, severity)
 
-    if (sendRequest(request)) {
+    if (!sendRequest(request, currentSocket)) {
+      throw IllegalStateException("Failed to send failures subscription")
+    } else {
       _state.update { current ->
         if (current is ConnectionState.Connected) {
           current.copy(subscribed = true)
@@ -246,56 +273,59 @@ class FailuresPushSocketClient(private val sessionUuidProvider: (() -> String?)?
     }
   }
 
-  private fun sendRequest(request: FailuresPushRequest): Boolean {
-    val currentWriter = writer ?: return false
-
+  private fun sendRequest(
+    request: FailuresPushRequest,
+    currentSocket: FailuresSocket? = socket.get(),
+  ): Boolean {
+    currentSocket ?: return false
     return try {
-      val message = json.encodeToString(serializer<FailuresPushRequest>(), request)
-      currentWriter.write(message)
-      currentWriter.newLine()
-      currentWriter.flush()
+      currentSocket.writeLine(json.encodeToString(serializer<FailuresPushRequest>(), request))
       true
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
-      log.warn("Failed to send request: ${e.message}")
+      log.warn("Failed to send request: ${e.message}", e)
       false
     }
   }
 
-  private suspend fun readMessages() {
-    val currentReader = reader ?: return
-
-    try {
-      log.info("Starting failures push message read loop")
-
-      while (_isConnected) {
-        val line = currentReader.readLine() ?: break
-        if (line.isBlank()) continue
-
+  private suspend fun readMessages(
+    currentSocket: FailuresSocket,
+    generation: Long,
+    onHealthy: () -> Unit,
+  ) {
+    while (_isConnected && !sessionRejected) {
+      // Inherit the injected scope's dispatcher; production uses IO, tests use virtual scheduling.
+      val line = runInterruptible { currentSocket.readLine() } ?: return
+      currentCoroutineContext().ensureActive()
+      if (line.isBlank()) continue
+      synchronized(connectionLock) {
+        if (generation != connectionGeneration) return
+        onHealthy()
         try {
           handleMessage(line)
+        } catch (e: CancellationException) {
+          throw e
         } catch (e: Exception) {
           log.warn("Failed to parse failures push message: ${e.message}", e)
         }
       }
-    } catch (e: Exception) {
-      log.warn("Error reading from failures push: ${e.message}", e)
     }
-
-    // Clean up connection state - reconnection is handled by connectWithRetry
-    cleanupConnection()
-    log.info("Failures push read loop ended")
   }
 
-  private fun cleanupConnection() {
+  private fun cleanupConnection(currentSocket: FailuresSocket?) {
     try {
-      channel?.close()
-    } catch (_: Exception) {}
-    channel = null
-    reader = null
-    writer = null
+      currentSocket?.close()
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      log.warn("Failed to close failures push socket: ${e.message}", e)
+    } finally {
+      socket.compareAndSet(currentSocket, null)
+    }
   }
 
-  private suspend fun handleMessage(message: String) {
+  private fun handleMessage(message: String) {
     val response = json.decodeFromString(serializer<FailuresPushResponse>(), message)
 
     when (response.type) {
@@ -328,7 +358,7 @@ class FailuresPushSocketClient(private val sessionUuidProvider: (() -> String?)?
   }
 
   private fun rejectSession(error: String?) {
-    if (!sessionRejected && isStreamSessionRejection(error)) {
+    if (!sessionRejected && (error == "session_rejected" || isStreamSessionRejection(error))) {
       sessionRejected = true
       _state.value = ConnectionState.Error(error ?: "Session registration required")
       log.warn("Subscription failed: $error")

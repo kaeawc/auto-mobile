@@ -62,6 +62,10 @@ class VideoStreamParserTest {
     assertNotice(5, VideoStreamNotice.Ended(VideoStreamEndReason.SessionEnded))
 
   @Test
+  fun `code 6 ends on device restoration`() =
+    assertNotice(6, VideoStreamNotice.Ended(VideoStreamEndReason.DeviceRestored))
+
+  @Test
   fun `unknown notice is typed and does not end or emit video`() =
     assertNotice(99, VideoStreamNotice.Unknown(99))
 

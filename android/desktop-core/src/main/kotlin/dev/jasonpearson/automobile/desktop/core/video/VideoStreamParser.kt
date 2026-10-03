@@ -19,6 +19,7 @@ private const val NOTICE_DEVICE_REMOVED = 2L
 private const val NOTICE_IDENTITY_QUARANTINED = 3L
 private const val NOTICE_DAEMON_SHUTDOWN = 4L
 private const val NOTICE_SESSION_ENDED = 5L
+private const val NOTICE_DEVICE_RESTORED = 6L
 
 /**
  * Bit 61: ROTATION_PRESENT (issue #4786). Set on a CONFIG packet whose bits 60-59 attest a display
@@ -49,7 +50,8 @@ enum class VideoStreamEndReason(val wire: String) {
   DeviceRemoved("device_removed"),
   IdentityQuarantined("identity_quarantined"),
   DaemonShutdown("daemon_shutdown"),
-  SessionEnded("session_ended");
+  SessionEnded("session_ended"),
+  DeviceRestored("device_restored");
 
   companion object {
     fun fromWire(value: String?): VideoStreamEndReason? = entries.firstOrNull { it.wire == value }
@@ -71,6 +73,7 @@ private fun subscriptionNotice(code: Long): VideoStreamNotice =
     NOTICE_IDENTITY_QUARANTINED -> VideoStreamNotice.Ended(VideoStreamEndReason.IdentityQuarantined)
     NOTICE_DAEMON_SHUTDOWN -> VideoStreamNotice.Ended(VideoStreamEndReason.DaemonShutdown)
     NOTICE_SESSION_ENDED -> VideoStreamNotice.Ended(VideoStreamEndReason.SessionEnded)
+    NOTICE_DEVICE_RESTORED -> VideoStreamNotice.Ended(VideoStreamEndReason.DeviceRestored)
     else -> VideoStreamNotice.Unknown(code)
   }
 

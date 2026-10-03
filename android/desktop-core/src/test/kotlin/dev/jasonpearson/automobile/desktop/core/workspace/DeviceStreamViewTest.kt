@@ -52,6 +52,8 @@ class DeviceStreamViewTest {
         VideoStreamEndReason.IdentityQuarantined to "The device's identity changed.",
         VideoStreamEndReason.DaemonShutdown to "The AutoMobile daemon shut down.",
         VideoStreamEndReason.SessionEnded to "This session ended.",
+        VideoStreamEndReason.DeviceRestored to
+          "The device was restored from a snapshot. Reconnect to continue.",
       )
     for ((reason, text) in texts) {
       val state = VideoStreamState.Ended(reason)

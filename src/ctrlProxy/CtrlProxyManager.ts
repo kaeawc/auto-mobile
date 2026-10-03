@@ -31,8 +31,8 @@ import {
 import AdmZip from "adm-zip";
 import crypto from "crypto";
 import os from "os";
-import { accessibilityDetector } from "../utils/AccessibilityDetector";
-import type { AccessibilityDetector } from "../utils/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
+import type { AccessibilityDetector } from "../features/accessibility/interfaces/AccessibilityDetector";
 import {
   NoOpPerformanceTracker,
   createGlobalPerformanceTracker,

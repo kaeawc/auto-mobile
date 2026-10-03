@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DefaultAccessibilityDetector } from "../../src/utils/AccessibilityDetector";
-import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../src/ctrlProxy/constants";
-import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
-import { FakeTimer } from "../fakes/FakeTimer";
-import type { ExecResult, BootedDevice, AndroidUser } from "../../src/models";
-import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../src/ctrlProxy/constants";
+import { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import type { ExecResult, BootedDevice, AndroidUser } from "../../../src/models";
+import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 /**
  * Fake ADB executor for testing

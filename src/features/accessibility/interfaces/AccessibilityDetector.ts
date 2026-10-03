@@ -1,5 +1,5 @@
-import { AdbExecutor } from "../android-cmdline-tools/interfaces/AdbExecutor";
-import { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
+import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 /**
  * Type representing the detected accessibility service

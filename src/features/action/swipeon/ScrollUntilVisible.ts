@@ -22,7 +22,7 @@ import { SearchableHierarchy } from "../../utility/SearchableNode";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
-import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
+import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { serverConfig } from "../../../utils/ServerConfig";

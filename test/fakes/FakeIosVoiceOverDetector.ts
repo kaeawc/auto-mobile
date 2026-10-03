@@ -1,4 +1,4 @@
-import type { IosVoiceOverDetector } from "../../src/utils/interfaces/IosVoiceOverDetector";
+import type { IosVoiceOverDetector } from "../../src/features/accessibility/interfaces/IosVoiceOverDetector";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 

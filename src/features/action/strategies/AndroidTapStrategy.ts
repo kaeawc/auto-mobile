@@ -2,8 +2,8 @@ import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ViewHierarchy } from "../../observe/ViewHierarchy";
-import type { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../../utils/AccessibilityDetector";
+import type { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";

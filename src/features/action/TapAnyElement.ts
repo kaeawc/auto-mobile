@@ -60,13 +60,13 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
-import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
-import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
+import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
+import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierarchy";
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
-import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
+import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import { dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
 import {
   requiresNodeSelector,

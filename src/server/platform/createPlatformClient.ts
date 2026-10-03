@@ -1,7 +1,7 @@
 import type { BootedDevice } from "../../models";
 import type { CtrlProxyClient } from "../../features/observe/interfaces/CtrlProxyClient";
-import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
-import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
+import type { AccessibilityDetector } from "../../features/accessibility/interfaces/AccessibilityDetector";
+import type { IosVoiceOverDetector } from "../../features/accessibility/interfaces/IosVoiceOverDetector";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import type { PlatformClient } from "../../utils/interfaces/PlatformClient";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
@@ -10,8 +10,8 @@ import { FeatureFlagService } from "../../features/featureFlags/FeatureFlagServi
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
-import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../features/accessibility/AccessibilityDetector";
+import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../features/accessibility/IosVoiceOverDetector";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../features/observe/ios/IOSCtrlProxyClient";

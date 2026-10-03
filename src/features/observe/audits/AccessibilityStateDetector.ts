@@ -1,8 +1,8 @@
 import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import { accessibilityDetector } from "../../../utils/AccessibilityDetector";
-import type { AccessibilityDetector as AccessibilityDetectorContract } from "../../../utils/interfaces/AccessibilityDetector";
-import { iosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
+import { accessibilityDetector } from "../../accessibility/AccessibilityDetector";
+import type { AccessibilityDetector as AccessibilityDetectorContract } from "../../accessibility/interfaces/AccessibilityDetector";
+import { iosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { IOSCtrlProxyClient } from "../ios";
 import type { BootedDevice, ObserveResult } from "../../../models";

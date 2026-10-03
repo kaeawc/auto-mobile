@@ -2,8 +2,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import type { VoiceOverResult } from "../../models/AccessibilityResult";
-import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
-import { iosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
+import type { IosVoiceOverDetector } from "./interfaces/IosVoiceOverDetector";
+import { iosVoiceOverDetector } from "./IosVoiceOverDetector";
 import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,

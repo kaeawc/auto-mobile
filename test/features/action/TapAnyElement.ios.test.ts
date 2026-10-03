@@ -11,7 +11,7 @@ import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
-import { DefaultIosVoiceOverDetector } from "../../../src/utils/IosVoiceOverDetector";
+import { DefaultIosVoiceOverDetector } from "../../../src/features/accessibility/IosVoiceOverDetector";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";

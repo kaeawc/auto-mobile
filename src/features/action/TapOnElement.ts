@@ -74,8 +74,8 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
-import { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
+import { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
@@ -106,8 +106,8 @@ import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
-import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
-import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
+import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
+import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";

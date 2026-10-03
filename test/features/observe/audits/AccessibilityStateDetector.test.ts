@@ -4,7 +4,7 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../../src/utils/constants";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
-import { DefaultAccessibilityDetector } from "../../../../src/utils/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../../src/features/accessibility/AccessibilityDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { invalidateReadinessForDisabledAccessibility } from "../../../../src/server/observeTools";

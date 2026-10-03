@@ -1,5 +1,5 @@
-import type { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
-import type { IOSCtrlProxy } from "../../features/observe/ios";
+import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { IOSCtrlProxy } from "../../observe/ios";
 
 /**
  * Interface for iOS VoiceOver detection

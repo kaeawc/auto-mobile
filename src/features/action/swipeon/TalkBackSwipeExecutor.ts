@@ -4,7 +4,7 @@ import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../..
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
-import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
+import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";

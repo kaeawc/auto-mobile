@@ -89,11 +89,7 @@ object DatabaseInspector {
     val ctx = context ?: throw DatabaseError.NotInitialized()
 
     // Create driver lazily
-    if (_driver == null) {
-      _driver = SQLiteDatabaseDriver(ctx)
-    }
-
-    return _driver!!
+    return _driver ?: SQLiteDatabaseDriver(ctx).also { _driver = it }
   }
 
   /** Close all open database connections. Call this when the app is being destroyed. */

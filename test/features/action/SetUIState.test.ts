@@ -120,6 +120,60 @@ describe("SetUIState", () => {
         timer: fakeTimer,
       });
 
+    test.each([
+      { site: "initial observation", abortAt: 1, taps: 0 },
+      { site: "off-screen search observation", abortAt: 2, taps: 0 },
+      { site: "post-success observation", abortAt: 2, taps: 1 },
+      { site: "field verification observation", abortAt: 2, taps: 1 },
+      { site: "retry element refresh", abortAt: 3, taps: 1 },
+    ])("forwards fresh-wait options and cancellation to $site", async ({ site, abortAt, taps }) => {
+      const controller = new AbortController();
+      const reason = new Error(`stop at ${site}`);
+      const hierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: [textField("first", 0), textField("second", 60)].map((element) => ({
+            $: element,
+          })),
+        },
+      };
+      fakeFieldTypeDetector.setFieldType("first", "text");
+      fakeFieldTypeDetector.setFieldType("second", "text");
+      if (site === "post-success observation") {
+        fakeFieldTypeDetector.setSkipVerification("first", true);
+      }
+      fakeObserve.setResultFactory((options) => {
+        if (fakeObserve.getCallCount() === abortAt && options?.signal) {
+          controller.abort(reason);
+        }
+        return createObserveResult(
+          site === "off-screen search observation" ? { hierarchy: {} } : hierarchy,
+        );
+      });
+
+      await expect(
+        buildCancellableTextAction().execute(
+          {
+            fields: [
+              { selector: { elementId: "first" }, value: "one" },
+              { selector: { elementId: "second" }, value: "two" },
+            ],
+          },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(reason);
+      expect(fakeObserve.getCallCount()).toBe(abortAt);
+      for (const options of fakeObserve.getExecuteOptions()) {
+        expect(options.signal).toBe(controller.signal);
+        expect(options.skipWaitForFresh).toBe(false);
+        expect(options.minTimestamp).toBe(0);
+      }
+      expect(fakeTap.getCallCount()).toBe(taps);
+      expect(fakeClear.getCallCount()).toBe(taps);
+      expect(fakeInput.getCalls().map((call) => call.text)).toEqual(taps ? ["one"] : []);
+      expect(fakeSwipe.getCallCount()).toBe(site === "off-screen search observation" ? 1 : 0);
+    });
+
     test("pre-aborted signal rejects before touching a field", async () => {
       const controller = new AbortController();
       const reason = new Error("stop before first field");

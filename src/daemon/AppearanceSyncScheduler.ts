@@ -1,6 +1,6 @@
 import type { AppearanceMode, BootedDevice } from "../models";
 import { DaemonState } from "./daemonState";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
 import { getAppearanceConfig, resolveAppearanceMode } from "../server/appearanceManager";

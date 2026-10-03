@@ -89,11 +89,7 @@ object SharedPreferencesInspector {
     val ctx = context ?: throw SharedPreferencesError.NotInitialized()
 
     // Create driver lazily
-    if (_driver == null) {
-      _driver = SharedPreferencesDriverImpl(ctx)
-    }
-
-    return _driver!!
+    return _driver ?: SharedPreferencesDriverImpl(ctx).also { _driver = it }
   }
 
   /**

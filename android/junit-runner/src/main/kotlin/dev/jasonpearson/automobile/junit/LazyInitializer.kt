@@ -5,19 +5,13 @@ package dev.jasonpearson.automobile.junit
  * until actually needed.
  */
 object LazyInitializer {
-  private var agentInitialized = false
   private var _agent: AutoMobileAgent? = null
 
   fun getAgent(): AutoMobileAgent {
-    if (!agentInitialized) {
-      _agent = AutoMobileAgent()
-      agentInitialized = true
-    }
-    return _agent!!
+    return _agent ?: AutoMobileAgent().also { _agent = it }
   }
 
   fun clear() {
     _agent = null
-    agentInitialized = false
   }
 }

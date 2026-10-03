@@ -471,24 +471,25 @@ internal fun McpProcessesPanel(
 
   // Handle test execution via LaunchedEffect
   LaunchedEffect(testingPid) {
-    if (testingPid != null) {
+    val pid = testingPid
+    if (pid != null) {
       kotlinx.coroutines.delay(500) // Simulate network latency
       val success = (0..10).random() > 2 // 80% success rate for demo
       val result =
         if (success) {
           TestResult(
-            pid = testingPid!!,
+            pid = pid,
             success = true,
             latencyMs = (20..150).random().toLong(),
           )
         } else {
           TestResult(
-            pid = testingPid!!,
+            pid = pid,
             success = false,
             error = "Connection refused",
           )
         }
-      testResults = testResults + (testingPid!! to result)
+      testResults = testResults + (pid to result)
       testingPid = null
     }
   }
@@ -539,7 +540,8 @@ internal fun McpProcessesPanel(
     }
 
     // Daemon start error
-    if (daemonStartError != null) {
+    val startError = daemonStartError
+    if (startError != null) {
       Row(
         modifier =
           Modifier.fillMaxWidth()
@@ -550,7 +552,7 @@ internal fun McpProcessesPanel(
       ) {
         Text("⚠", fontSize = 14.sp, color = Color(0xFFE53935))
         Text(
-          daemonStartError!!,
+          startError,
           fontSize = 11.sp,
           color = Color(0xFFE53935),
           modifier = Modifier.weight(1f),

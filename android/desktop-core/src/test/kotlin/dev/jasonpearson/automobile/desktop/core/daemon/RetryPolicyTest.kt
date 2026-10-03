@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.Test
 
@@ -99,6 +100,35 @@ class RetryPolicyTest {
       }
     assertEquals(1, attempts)
     assertEquals("fail", ex.message)
+  }
+
+  @Test
+  fun zeroRetriesPropagatesOriginalExceptionAfterOneAttempt() {
+    val original = IllegalStateException("original failure")
+    var attempts = 0
+    val thrown =
+      assertFailsWith<IllegalStateException> {
+        retryWithBackoffBlocking(RetryPolicy(maxRetries = 0, initialDelayMs = 0)) {
+          attempts++
+          throw original
+        }
+      }
+    assertEquals(1, attempts)
+    assertSame(original, thrown)
+  }
+
+  @Test
+  fun exhaustedRetriesPropagateLastExceptionInstance() {
+    val failures = List(3) { IllegalStateException("failure $it") }
+    var attempts = 0
+    val thrown =
+      assertFailsWith<IllegalStateException> {
+        retryWithBackoffBlocking(RetryPolicy(maxRetries = failures.size, initialDelayMs = 0)) {
+          throw failures[attempts++]
+        }
+      }
+    assertEquals(failures.size, attempts)
+    assertSame(failures.last(), thrown)
   }
 
   @Test

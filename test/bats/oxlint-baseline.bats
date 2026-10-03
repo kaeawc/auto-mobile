@@ -15,12 +15,13 @@ setup() {
   export OXLINT_BASELINE="$TEST_DIR/baseline.txt"
 
   # A canned oxlint JSON report: two ratcheted diagnostics in one file plus one
-  # in another, and one NON-ratcheted diagnostic that must be ignored entirely.
+  # in another, and two error-level diagnostics that must be ignored entirely.
   FIXTURE_JSON='printf "%s" "{\"diagnostics\":[
     {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
     {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
     {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
-    {\"code\":\"eslint(no-debugger)\",\"filename\":\"src/a.ts\"}
+    {\"code\":\"eslint(no-debugger)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"auto-mobile(no-raw-promise-race)\",\"filename\":\"src/a.ts\"}
   ]}"'
 }
 
@@ -32,10 +33,11 @@ teardown() {
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
   [ "$status" -eq 0 ]
 
-  # 3 ratcheted diagnostics captured; the non-ratcheted no-debugger is dropped.
+  # 3 ratcheted diagnostics captured; the error-level rules are dropped.
   run bash -c "grep -vE '^#|^$' '$OXLINT_BASELINE' | wc -l | tr -d ' '"
   [ "$output" -eq 3 ]
   ! grep -q 'eslint(no-debugger)' "$OXLINT_BASELINE"
+  ! grep -q 'auto-mobile(no-raw-promise-race)' "$OXLINT_BASELINE"
 }
 
 @test "check passes when current matches the baseline" {

@@ -104,7 +104,7 @@ import {
   RealHierarchyPlatformValidator,
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLockStateProbe";
 import { computeFreshness } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
@@ -1347,7 +1347,8 @@ export class RealObserveScreen implements ObserveScreen {
       ? "none"
       : resolveScreenshotMode(options?.screenshot);
     const iosLockState =
-      this.device.platform === "ios" && isIosSimulatorUdid(this.device.deviceId)
+      this.device.platform === "ios" &&
+      resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator"
         ? this.iosLockStateProbe.read(this.device.deviceId, signal)
         : undefined;
 

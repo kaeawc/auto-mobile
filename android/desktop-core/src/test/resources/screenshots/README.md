@@ -1,7 +1,7 @@
 # Desktop screenshot baselines
 
 This directory holds the committed baseline PNGs for `desktop-core` screenshot tests
-(see `src/test/kotlin/.../core/screenshot/`). Each `*.png` here is the reference image a
+(see `android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot/`). Each `*.png` here is the reference image a
 `screenshotTest("name") { … }` compares against.
 
 ## Recording / updating baselines

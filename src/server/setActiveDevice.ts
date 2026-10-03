@@ -6,7 +6,7 @@ import type { Platform } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import {

@@ -33,7 +33,7 @@ import {
   type IosSimulatorCaptureHelperLease,
 } from "../screen-stream/IosSimulatorCaptureHelperPool";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { logger } from "../../utils/logger";
 import {
   capToQualityPreset,
@@ -881,7 +881,7 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private async resolveCaptureTarget(helperPath: string): Promise<CaptureTarget> {
-    if (isIosSimulatorUdid(this.options.device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: this.options.device.deviceId }) === "simulator") {
       const windowID = await this.resolveSimulatorWindowIdWithDeadline(helperPath);
       return {
         kind: "simulator",

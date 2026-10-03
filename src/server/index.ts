@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   installToolCallDispatcher,
@@ -577,6 +578,7 @@ export { formatToolParamError };
  * by exact tool name.
  */
 export function registerMcpTools(daemonMode: boolean): void {
+  installDefaultProvisionedDeviceTransportFence();
   registerObserveTools();
   registerInteractionTools();
   registerAppTools();

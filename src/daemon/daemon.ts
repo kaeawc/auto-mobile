@@ -1,4 +1,5 @@
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
+import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
@@ -173,7 +174,7 @@ import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "./iosStartupInit";
 import { selectObservationStreamDevices } from "./observationInitialFrame";
@@ -449,6 +450,7 @@ export class Daemon {
     private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages"> = () =>
       new AvdManagerService(),
   ) {
+    installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
       this.resolveStartupCompletion = resolve;
       this.rejectStartupCompletion = reject;

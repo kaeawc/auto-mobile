@@ -1,5 +1,6 @@
 import { ActionableError } from "./ActionableError";
 import type { DeviceDisplays, DisplayPanel } from "./DisplayPanel";
+import { selectablePanels } from "./DisplayPanel";
 
 export interface PinnedDisplayDetails {
   pin: string;
@@ -7,7 +8,7 @@ export interface PinnedDisplayDetails {
 }
 
 function availableDisplayPanels(inventory: DeviceDisplays | undefined) {
-  return (inventory?.panels ?? []).map(({ key, role }) => ({ key, role }));
+  return selectablePanels(inventory).map(({ key, role }) => ({ key, role }));
 }
 
 function panelChoices(inventory: DeviceDisplays | undefined): string {
@@ -22,7 +23,7 @@ export class InvalidDisplayPinError extends ActionableError {
   readonly details;
   constructor(pin: unknown, inventory: DeviceDisplays | undefined) {
     super(
-      `Invalid display pin ${JSON.stringify(pin)}. Choose a panel key or role (inner, cover, rear, external); active and all cannot be pinned. Available panels: ${panelChoices(inventory)}`,
+      `Invalid display pin ${JSON.stringify(pin)}. Choose a panel key or role (inner, cover, rear, external); active resolves to the sole key only on single-display devices, and all cannot be pinned. Available panels: ${panelChoices(inventory)}`,
     );
     this.name = "InvalidDisplayPinError";
     this.details = { pin, availablePanels: availableDisplayPanels(inventory) };

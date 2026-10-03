@@ -102,7 +102,7 @@ All are JVM system properties, forwarded to the test JVM by `desktop-core/build.
 | --------------------------- | -------------------------------- | -------------------------------------------------- |
 | `screenshot.record`         | `false`                          | Write baselines instead of comparing.              |
 | `screenshot.reference.os`   | `linux`                          | Reference OS substring; `any` disables OS gating.  |
-| `screenshot.golden.dir`     | `src/test/resources/screenshots` | Where baseline PNGs are read/written.              |
+| `screenshot.golden.dir`     | `./src/test/resources/screenshots` | Where baseline PNGs are read/written, relative to the module.              |
 | `screenshot.report.dir`     | `build/reports/screenshots`      | Where rejected/diff images are written on failure. |
 
 Pixel tolerances (per-channel and max differing-pixel ratio) are set per test via

@@ -1,17 +1,14 @@
 import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
-
-export interface RetiredProvisionedDeviceTransport {
-  deviceId: string;
-  stableId: string;
-  reason: string;
-}
-
-export interface ProvisionedDeviceTransportTombstoneStore {
-  retire(input: RetiredProvisionedDeviceTransport, retiredAtMs: number): Promise<void>;
-  get(deviceId: string): Promise<RetiredProvisionedDeviceTransport | undefined>;
-}
+import type {
+  RetiredProvisionedDeviceTransport,
+  ProvisionedDeviceTransportTombstoneStore,
+} from "../utils/provisionedDeviceTransportFence";
+export type {
+  RetiredProvisionedDeviceTransport,
+  ProvisionedDeviceTransportTombstoneStore,
+} from "../utils/provisionedDeviceTransportFence";
 
 export class ProvisionedDeviceTransportTombstoneRepository implements ProvisionedDeviceTransportTombstoneStore {
   constructor(private readonly database?: Kysely<Database>) {}

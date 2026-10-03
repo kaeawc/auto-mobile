@@ -114,6 +114,7 @@ const socketIdentityStatusSchema = z.object({
   startedAt: z.number().finite().optional(),
   processGenerationToken: z.string().optional(),
   activeProvisioning: z.boolean().optional(),
+  structuredSessionNotFound: z.boolean().optional(),
   acceptanceCapabilityFingerprint: z.string().nullable().optional(),
 });
 
@@ -246,11 +247,20 @@ function daemonFallbackResponseError(response: DaemonResponse): Error {
 }
 
 function daemonResponseError(response: DaemonResponse): Error {
-  return (
+  const error =
     daemonLifecycleResponseError(response) ??
     daemonSessionResponseError(response) ??
-    daemonFallbackResponseError(response)
-  );
+    daemonFallbackResponseError(response);
+  // Preserve both top-level codes and the existing typed failure envelopes.
+  const code = [
+    response.code,
+    response.handshakeFailure?.code,
+    response.daemonShuttingDown?.code,
+    response.overloadFailure?.code,
+    response.boundSessionLoss?.code,
+    response.transportFailure?.code,
+  ].find((value) => value !== undefined);
+  return code === undefined ? error : Object.assign(error, { code });
 }
 
 /**

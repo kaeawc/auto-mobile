@@ -4279,6 +4279,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   if (success) lifecycle.completed(onResult = onResult)
                   else lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
                 },
+                nowMs = android.os.SystemClock::elapsedRealtime,
               )
               .start()
           }

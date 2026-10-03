@@ -1186,13 +1186,14 @@ private fun FailureListItem(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FailureDetailView(
+internal fun FailureDetailView(
   failure: FailureGroup,
   onBack: () -> Unit,
   onNavigateToScreen: (String) -> Unit,
   onNavigateToTest: (String) -> Unit,
   onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit,
 ) {
+  var expandedState by remember(failure.id) { mutableStateOf(ExpandableListState()) }
   val colors = SharedTheme.globalColors
 
   Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -1247,15 +1248,21 @@ private fun FailureDetailView(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.horizontalScroll(rememberScrollState()),
       ) {
-        failure.recentCaptures.take(5).forEach { capture ->
+        expandedState.visible(FailureSection.Captures, failure.recentCaptures).forEach { capture ->
           CaptureCard(capture = capture)
         }
       }
-      if (failure.recentCaptures.size > 5) {
-        ViewAllLink("View all ${failure.recentCaptures.size} captures") {
-          /* TODO: Show all captures */
+      // The daemon caps captures at 5 (src/db/failureAnalyticsRepository.ts).
+      // Offer expansion only beyond the preview limit; no capture total is available.
+      expansionLinkLabel(
+          noun = "captures",
+          loadedCount = failure.recentCaptures.size,
+          totalCount = failure.recentCaptures.size,
+          expanded = expandedState.isExpanded(FailureSection.Captures),
+        )
+        ?.let { label ->
+          ViewAllLink(label) { expandedState = expandedState.toggle(FailureSection.Captures) }
         }
-      }
       Spacer(Modifier.height(16.dp))
     }
 
@@ -1296,7 +1303,11 @@ private fun FailureDetailView(
     if (toolCallInfo != null) {
       Spacer(Modifier.height(16.dp))
       SectionHeader("Tool Call Details")
-      ToolCallDetailsSection(toolCallInfo = toolCallInfo)
+      ToolCallDetailsSection(
+        toolCallInfo = toolCallInfo,
+        expandedState = expandedState,
+        onToggle = { expandedState = expandedState.toggle(it) },
+      )
     }
 
     // Screen breakdown histogram
@@ -1304,13 +1315,16 @@ private fun FailureDetailView(
       Spacer(Modifier.height(16.dp))
       SectionHeader("Screens Visited (across ${failure.totalCount} occurrences)")
       ScreenBreakdownSection(
-        breakdown = failure.screenBreakdown.take(5),
+        breakdown = expandedState.visible(FailureSection.Screens, failure.screenBreakdown),
         failureScreens = failure.failureScreens,
         onNavigateToScreen = onNavigateToScreen,
       )
       if (failure.screenBreakdown.size > 5) {
-        ViewAllLink("View all ${failure.screenBreakdown.size} screens") {
-          /* TODO: Show all screens */
+        ViewAllLink(
+          if (expandedState.isExpanded(FailureSection.Screens)) "Show less"
+          else "View all ${failure.screenBreakdown.size} screens"
+        ) {
+          expandedState = expandedState.toggle(FailureSection.Screens)
         }
       }
     }
@@ -1321,7 +1335,7 @@ private fun FailureDetailView(
       SectionHeader("Devices (${failure.deviceBreakdown.size} models)")
       BreakdownList(
         items =
-          failure.deviceBreakdown.take(5).map { device ->
+          expandedState.visible(FailureSection.Devices, failure.deviceBreakdown).map { device ->
             BreakdownItem(
               label = device.deviceModel,
               sublabel = device.os,
@@ -1331,8 +1345,11 @@ private fun FailureDetailView(
           }
       )
       if (failure.deviceBreakdown.size > 5) {
-        ViewAllLink("View all ${failure.deviceBreakdown.size} devices") {
-          /* TODO: Show all devices */
+        ViewAllLink(
+          if (expandedState.isExpanded(FailureSection.Devices)) "Show less"
+          else "View all ${failure.deviceBreakdown.size} devices"
+        ) {
+          expandedState = expandedState.toggle(FailureSection.Devices)
         }
       }
     }
@@ -1343,7 +1360,7 @@ private fun FailureDetailView(
       SectionHeader("App Versions (${failure.versionBreakdown.size})")
       BreakdownList(
         items =
-          failure.versionBreakdown.take(5).map { version ->
+          expandedState.visible(FailureSection.Versions, failure.versionBreakdown).map { version ->
             BreakdownItem(
               label = version.version,
               sublabel = null,
@@ -1353,8 +1370,11 @@ private fun FailureDetailView(
           }
       )
       if (failure.versionBreakdown.size > 5) {
-        ViewAllLink("View all ${failure.versionBreakdown.size} versions") {
-          /* TODO: Show all versions */
+        ViewAllLink(
+          if (expandedState.isExpanded(FailureSection.Versions)) "Show less"
+          else "View all ${failure.versionBreakdown.size} versions"
+        ) {
+          expandedState = expandedState.toggle(FailureSection.Versions)
         }
       }
     }
@@ -1364,9 +1384,11 @@ private fun FailureDetailView(
       Spacer(Modifier.height(16.dp))
       SectionHeader("Affected Tests (${failure.affectedTests.size})")
       Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        failure.affectedTests.entries
-          .sortedByDescending { it.value }
-          .take(5)
+        expandedState
+          .visible(
+            FailureSection.Tests,
+            failure.affectedTests.entries.sortedByDescending { it.value },
+          )
           .forEach { (testName, count) ->
             Row(
               modifier =
@@ -1391,7 +1413,12 @@ private fun FailureDetailView(
             }
           }
         if (failure.affectedTests.size > 5) {
-          ViewAllLink("View all ${failure.affectedTests.size} tests") { /* TODO: Show all tests */ }
+          ViewAllLink(
+            if (expandedState.isExpanded(FailureSection.Tests)) "Show less"
+            else "View all ${failure.affectedTests.size} tests"
+          ) {
+            expandedState = expandedState.toggle(FailureSection.Tests)
+          }
         }
       }
     }
@@ -1401,12 +1428,21 @@ private fun FailureDetailView(
       Spacer(Modifier.height(16.dp))
       SectionHeader("Recent Occurrences")
       Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        failure.sampleOccurrences.take(5).forEach { occurrence ->
+        expandedState.visible(FailureSection.Occurrences, failure.sampleOccurrences).forEach {
+          occurrence ->
           OccurrenceRow(occurrence = occurrence)
         }
-        if (failure.sampleOccurrences.size > 5) {
-          ViewAllLink("View all ${failure.totalCount} occurrences") { /* TODO: Show all */ }
-        }
+        // The daemon caps sample occurrences at 6 (src/db/failureAnalyticsRepository.ts).
+        // Offer expansion only beyond the preview limit and label partial lists as N of TOTAL.
+        expansionLinkLabel(
+            noun = "occurrences",
+            loadedCount = failure.sampleOccurrences.size,
+            totalCount = failure.totalCount,
+            expanded = expandedState.isExpanded(FailureSection.Occurrences),
+          )
+          ?.let { label ->
+            ViewAllLink(label) { expandedState = expandedState.toggle(FailureSection.Occurrences) }
+          }
       }
     }
 
@@ -1504,7 +1540,11 @@ private fun StackTraceLine(
 }
 
 @Composable
-private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
+private fun ToolCallDetailsSection(
+  toolCallInfo: AggregatedToolCallInfo,
+  expandedState: ExpandableListState,
+  onToggle: (FailureSection) -> Unit,
+) {
   val colors = SharedTheme.globalColors
 
   Column(
@@ -1520,7 +1560,7 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
     if (toolCallInfo.errorCodes.isNotEmpty()) {
       Text("Error Codes:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
       val sortedCodes = toolCallInfo.errorCodes.entries.sortedByDescending { it.value }
-      sortedCodes.take(5).forEach { (code, count) ->
+      expandedState.visible(FailureSection.ErrorCodes, sortedCodes).forEach { (code, count) ->
         Row(modifier = Modifier.padding(start = 8.dp)) {
           Text(
             code,
@@ -1532,7 +1572,12 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
         }
       }
       if (sortedCodes.size > 5) {
-        ViewAllLink("View all ${sortedCodes.size} error codes") { /* TODO: Show all error codes */ }
+        ViewAllLink(
+          if (expandedState.isExpanded(FailureSection.ErrorCodes)) "Show less"
+          else "View all ${sortedCodes.size} error codes"
+        ) {
+          onToggle(FailureSection.ErrorCodes)
+        }
       }
     }
 
@@ -1555,7 +1600,7 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
     if (toolCallInfo.parameterVariants.isNotEmpty()) {
       Text("Parameters:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
       val params = toolCallInfo.parameterVariants.entries.toList()
-      params.take(5).forEach { (param, values) ->
+      expandedState.visible(FailureSection.Parameters, params).forEach { (param, values) ->
         Row(modifier = Modifier.padding(start = 8.dp)) {
           Text("$param: ", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.5f))
           Text(
@@ -1566,7 +1611,12 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
         }
       }
       if (params.size > 5) {
-        ViewAllLink("View all ${params.size} parameters") { /* TODO: Show all parameters */ }
+        ViewAllLink(
+          if (expandedState.isExpanded(FailureSection.Parameters)) "Show less"
+          else "View all ${params.size} parameters"
+        ) {
+          onToggle(FailureSection.Parameters)
+        }
       }
     }
   }

@@ -22,22 +22,19 @@ fun <T> retryWithBackoffBlocking(
   isRetryable: (Exception) -> Boolean = { true },
   block: () -> T,
 ): T {
-  var lastException: Exception? = null
+  var attempt = 0
   val attempts = maxOf(1, policy.maxRetries)
-  repeat(attempts) { attempt ->
+  while (true) {
     try {
       return block()
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
-      if (!isRetryable(e)) throw e
-      lastException = e
-      if (attempt < attempts - 1) {
-        val baseDelay = policy.initialDelayMs * policy.backoffMultiplier.pow(attempt.toDouble())
-        val jitter = baseDelay * policy.jitterFraction * Random.nextDouble()
-        Thread.sleep(min(baseDelay.toLong() + jitter.toLong(), policy.maxDelayMs))
-      }
+      if (!isRetryable(e) || attempt == attempts - 1) throw e
+      val baseDelay = policy.initialDelayMs * policy.backoffMultiplier.pow(attempt.toDouble())
+      val jitter = baseDelay * policy.jitterFraction * Random.nextDouble()
+      Thread.sleep(min(baseDelay.toLong() + jitter.toLong(), policy.maxDelayMs))
+      attempt++
     }
   }
-  throw lastException!!
 }

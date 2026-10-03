@@ -21,7 +21,7 @@ import {
   stopVideoRecording,
 } from "./videoRecordingManager";
 import type { VideoRecordingConfigInput } from "../models";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";

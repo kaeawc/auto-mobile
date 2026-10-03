@@ -9,9 +9,9 @@ internal data class GesturePoint(val x: Float, val y: Float)
  * @property isInitial true only for the very first segment of a gesture — the adapter builds a
  *   fresh `StrokeDescription` for it; every later segment is a `continueStroke` on the previous
  *   one.
- * @property isHold true when [from] == [to]: a stationary segment that either presses at the start
- *   or keeps the touch alive while no fresh move has arrived. Distinguished from a move so the
- *   adapter and tests can assert holds do not spend the gesture on travel.
+ * @property isHold marks a stationary phase. Finite drags may nudge its endpoint by one pixel to
+ *   preserve timing for a continued stroke; it need not have [from] == [to]. The live streaming
+ *   coordinator still computes this flag strictly from endpoint equality.
  * @property willContinue true while more strokes will follow; false on the final segment, which is
  *   what lifts the finger.
  */

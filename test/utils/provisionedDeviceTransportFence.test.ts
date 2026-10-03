@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { DeviceLostError } from "../../src/daemon/emulatorLossIncident";
 import type { RetiredProvisionedDeviceTransport } from "../../src/db/provisionedDeviceTransportTombstoneRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   DurableProvisionedDeviceTransportFence,
   InMemoryProvisionedDeviceTransportFence,
@@ -50,13 +51,16 @@ describe("ProvisionedDeviceTransportFence", () => {
       },
       get: async (deviceId: string) => (stored?.deviceId === deviceId ? { ...stored } : undefined),
     };
-    const firstProcess = new DurableProvisionedDeviceTransportFence(store);
+    const timer = new FakeTimer();
+    const firstProcess = new DurableProvisionedDeviceTransportFence({ store, timer });
     await firstProcess.retire({
       deviceId: "emulator-5554",
       stableId: "phone-api-36-a",
       reason: "timeout",
     });
-    setProvisionedDeviceTransportFenceForTests(new DurableProvisionedDeviceTransportFence(store));
+    setProvisionedDeviceTransportFenceForTests(
+      new DurableProvisionedDeviceTransportFence({ store, timer }),
+    );
 
     await expect(throwIfProvisionedDeviceTransportRetired("emulator-5554")).rejects.toMatchObject({
       code: "device_lost",

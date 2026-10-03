@@ -4,7 +4,7 @@ import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
-import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import { getDevicePoolTimeoutMs, isDevicePoolAutolockEnabled } from "./poolConfig";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";

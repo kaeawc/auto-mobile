@@ -440,6 +440,8 @@ describe("PersistentEncoderH264Source", () => {
     expect(args).toContain(`--session-token ${SESSION_TOKEN}`);
     expect(args).toContain(`--socket-name ${SESSION_SOCKET}`);
 
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
+
     // A stream header + one packet: only the packet payload reaches onData.
     ctx.sockets[0].feed(streamHeader(480, 1040));
     ctx.sockets[0].feed(framedPacket(Buffer.from([0, 0, 0, 1, 0x67])));
@@ -661,14 +663,21 @@ describe("PersistentEncoderH264Source", () => {
   });
 
   test("audio startup rejects when the socket errors before the post-audio-ready marker", async () => {
-    const ctx = makeSource({ audioEnabled: true });
+    const ctx = makeSource({ audioEnabled: true, readyTimeoutMs: 5_000 });
     const startPromise = ctx.source.start();
     await tick(); // push + spawn
     ctx.processes[0].ready();
     await tick(); // ready resolves, forward + connect, now waiting for Streaming started
-    ctx.sockets[0].emit("error", new Error("REMOTE_SUBMIX socket failed"));
+    // The streaming marker and first PCM packet retain their own deadlines.
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(2);
+    const failure = new Error("REMOTE_SUBMIX socket failed");
+    ctx.sockets[0].emit("error", failure);
 
-    await expect(startPromise).rejects.toThrow(/REMOTE_SUBMIX socket failed/);
+    await expect(startPromise).rejects.toBe(failure);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(2);
+    ctx.timer.advanceTime(5_000);
+    await tick();
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
     expect(ctx.errors).toEqual([]);
     expect(ctx.source.isRunning).toBe(false);
     expect(ctx.sockets[0].destroyed).toBe(true);
@@ -1166,10 +1175,10 @@ describe("PersistentEncoderH264Source", () => {
     await tick();
 
     expect(ctx.processes[0].listenerCount("error")).toBeGreaterThan(0);
-    expect(() =>
-      ctx.processes[0].emit("error", new Error("server failed while connecting")),
-    ).not.toThrow();
-    await expect(startPromise).rejects.toThrow("server failed while connecting");
+    const failure = new Error("server failed while connecting");
+    expect(() => ctx.processes[0].emit("error", failure)).not.toThrow();
+    await expect(startPromise).rejects.toBe(failure);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
     expect(ctx.errors).toEqual([]);
     expect(ctx.source.isRunning).toBe(false);
 

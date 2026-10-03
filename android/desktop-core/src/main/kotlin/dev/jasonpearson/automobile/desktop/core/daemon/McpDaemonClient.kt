@@ -106,16 +106,16 @@ class McpDaemonClient(
 
   override fun listResources(): List<McpResource> {
     val response = sendRequest("resources/list")
-    ensureSuccess(response)
-    val result = json.decodeFromJsonElement(serializer<ListResourcesResult>(), response.result!!)
+    val responseResult = ensureSuccess(response, "resources/list")
+    val result = json.decodeFromJsonElement(serializer<ListResourcesResult>(), responseResult)
     return result.resources
   }
 
   override fun listResourceTemplates(): List<McpResourceTemplate> {
     val response = sendRequest("resources/list-templates")
-    ensureSuccess(response)
+    val responseResult = ensureSuccess(response, "resources/list-templates")
     val result =
-      json.decodeFromJsonElement(serializer<ListResourceTemplatesResult>(), response.result!!)
+      json.decodeFromJsonElement(serializer<ListResourceTemplatesResult>(), responseResult)
     return result.resourceTemplates
   }
 
@@ -129,8 +129,8 @@ class McpDaemonClient(
           }
         } ?: JsonObject(emptyMap()),
       )
-    ensureSuccess(response)
-    val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
+    val responseResult = ensureSuccess(response, "tools/list")
+    val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), responseResult)
     return result.tools
   }
 
@@ -140,8 +140,8 @@ class McpDaemonClient(
         "resources/read",
         buildJsonObject { put("uri", JsonPrimitive(uri)) },
       )
-    ensureSuccess(response)
-    val result = json.decodeFromJsonElement(serializer<ReadResourceResult>(), response.result!!)
+    val responseResult = ensureSuccess(response, "resources/read")
+    val result = json.decodeFromJsonElement(serializer<ReadResourceResult>(), responseResult)
     return result.contents
   }
 
@@ -157,8 +157,8 @@ class McpDaemonClient(
 
   override fun listFeatureFlags(): List<FeatureFlagState> {
     val response = sendRequest("ide/listFeatureFlags")
-    ensureSuccess(response)
-    val result = json.decodeFromJsonElement(serializer<FeatureFlagListResult>(), response.result!!)
+    val responseResult = ensureSuccess(response, "ide/listFeatureFlags")
+    val result = json.decodeFromJsonElement(serializer<FeatureFlagListResult>(), responseResult)
     return result.flags
   }
 
@@ -178,8 +178,8 @@ class McpDaemonClient(
           }
         },
       )
-    ensureSuccess(response)
-    return json.decodeFromJsonElement(serializer<FeatureFlagState>(), response.result!!)
+    val responseResult = ensureSuccess(response, "ide/setFeatureFlag")
+    return json.decodeFromJsonElement(serializer<FeatureFlagState>(), responseResult)
   }
 
   override fun listPerformanceAuditResults(
@@ -322,10 +322,10 @@ class McpDaemonClient(
         timeoutMs = statusRequestTimeoutMs,
         skipLifecyclePreflight = true,
       )
-    ensureSuccess(response)
+    val responseResult = ensureSuccess(response, "ide/status")
     return json.decodeFromJsonElement(
       serializer<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse>(),
-      response.result!!,
+      responseResult,
     )
   }
 
@@ -338,8 +338,8 @@ class McpDaemonClient(
           put("platform", JsonPrimitive(platform))
         },
       )
-    ensureSuccess(response)
-    return json.decodeFromJsonElement(serializer<UpdateServiceResult>(), response.result!!)
+    val responseResult = ensureSuccess(response, "ide/updateService")
+    return json.decodeFromJsonElement(serializer<UpdateServiceResult>(), responseResult)
   }
 
   override fun inputTap(
@@ -699,9 +699,9 @@ class McpDaemonClient(
           put("type", JsonPrimitive(type))
         },
       )
-    ensureSuccess(response)
+    val responseResult = ensureSuccess(response, "ide/setKeyValue")
     return try {
-      json.decodeFromJsonElement(serializer<SetKeyValueResult>(), response.result!!)
+      json.decodeFromJsonElement(serializer<SetKeyValueResult>(), responseResult)
     } catch (e: Exception) {
       SetKeyValueResult(success = false, message = e.message ?: "Failed to set key value")
     }
@@ -725,9 +725,9 @@ class McpDaemonClient(
           put("key", JsonPrimitive(key))
         },
       )
-    ensureSuccess(response)
+    val responseResult = ensureSuccess(response, "ide/removeKeyValue")
     return try {
-      json.decodeFromJsonElement(serializer<RemoveKeyValueResult>(), response.result!!)
+      json.decodeFromJsonElement(serializer<RemoveKeyValueResult>(), responseResult)
     } catch (e: Exception) {
       RemoveKeyValueResult(success = false, message = e.message ?: "Failed to remove key value")
     }
@@ -749,9 +749,9 @@ class McpDaemonClient(
           put("fileName", JsonPrimitive(fileName))
         },
       )
-    ensureSuccess(response)
+    val responseResult = ensureSuccess(response, "ide/clearKeyValueFile")
     return try {
-      json.decodeFromJsonElement(serializer<ClearKeyValueResult>(), response.result!!)
+      json.decodeFromJsonElement(serializer<ClearKeyValueResult>(), responseResult)
     } catch (e: Exception) {
       ClearKeyValueResult(success = false, message = e.message ?: "Failed to clear key value file")
     }
@@ -831,8 +831,8 @@ class McpDaemonClient(
         DAEMON_REGISTER_SESSION_METHOD,
         json.encodeToJsonElement(RegisterSessionRequest(sessionId, clientName)).jsonObject,
       )
-    ensureSuccess(response)
-    return json.decodeFromJsonElement(serializer<RegisterSessionResult>(), response.result!!)
+    val responseResult = ensureSuccess(response, "daemon/registerSession")
+    return json.decodeFromJsonElement(serializer<RegisterSessionResult>(), responseResult)
   }
 
   /** Releases this client's daemon session, if it owns one. */
@@ -1106,13 +1106,17 @@ class McpDaemonClient(
     }
   }
 
-  private fun ensureSuccess(response: DaemonResponse) {
+  private fun ensureSuccess(
+    response: DaemonResponse,
+    method: String = "daemon request",
+  ): JsonElement {
     if (!response.success) {
       throw DaemonUnavailableException(response.error ?: "Daemon request failed")
     }
-    if (response.result == null) {
-      throw DaemonUnavailableException("Daemon response missing result")
-    }
+    return response.result
+      ?: throw DaemonUnavailableException(
+        "JSON-RPC $method response contained no result; check the daemon response."
+      )
   }
 
   private fun JsonObjectBuilder.putOptionalString(

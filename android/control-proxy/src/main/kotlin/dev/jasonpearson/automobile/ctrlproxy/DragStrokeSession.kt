@@ -16,6 +16,7 @@ internal class DragStrokeSession<S>(
   private val displayId: Int?,
   private val logError: (Exception) -> Unit,
   private val onFinished: (Boolean, String?) -> Unit,
+  private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
   private var previous: S? = null
   private var liftFrom: Pair<S, GesturePoint>? = null
@@ -39,10 +40,18 @@ internal class DragStrokeSession<S>(
         else dispatcher.continueStroke(requireNotNull(previous), segment)
       previous = stroke
       if (segment.willContinue) liftFrom = stroke to segment.to
+      val dispatchedAtMs = nowMs()
       dispatch(
         stroke,
         segment.durationMs + CALLBACK_GRACE_MS,
-        onComplete = { dispatchSegment(index + 1) },
+        onComplete = {
+          val elapsed = nowMs() - dispatchedAtMs
+          if (elapsed < segment.durationMs - EARLY_COMPLETION_TOLERANCE_MS) {
+            fail("Drag stroke completed early: ${elapsed}ms of ${segment.durationMs}ms")
+          } else {
+            dispatchSegment(index + 1)
+          }
+        },
         onFailed = ::fail,
         onRejected = { error ->
           liftFrom = precedingLift
@@ -128,6 +137,10 @@ internal class DragStrokeSession<S>(
   }
 
   companion object {
+    // Allow framework scheduling/rounding jitter, but reject a stroke that ended at once because
+    // nothing was emitted. Durations at or below this tolerance cannot complete materially early.
+    private const val EARLY_COMPLETION_TOLERANCE_MS = 50L
+
     // One missed callback plus a bounded lift still fits the client's 600ms timeout allowance.
     private const val CALLBACK_GRACE_MS = 250L
   }

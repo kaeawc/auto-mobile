@@ -1,4 +1,5 @@
 // Import all tool registration functions
+import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { registerObserveTools } from "../server/observeTools";
 import { registerInteractionTools } from "../server/interactionTools";
 import { registerAppTools } from "../server/appTools";
@@ -31,6 +32,7 @@ import { registerDownloadsFixtureTools } from "../server/downloadsFixtureTools";
 
 // Initialize tool registry for CLI mode
 export function initializeCliTools(): void {
+  installDefaultProvisionedDeviceTransportFence();
   // Register all tool categories
   registerObserveTools();
   registerInteractionTools();

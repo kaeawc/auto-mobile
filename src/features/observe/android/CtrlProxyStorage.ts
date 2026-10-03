@@ -450,7 +450,7 @@ export class CtrlProxyStorage {
   /**
    * Unsubscribe from storage changes.
    *
-   * @param subscriptionId - The subscription ID returned from subscribeStorage
+   * @param subscriptionId - The "<packageName>:<fileName>" ID returned from subscribeStorage
    * @param timeoutMs - Maximum time to wait for response in milliseconds
    */
   async unsubscribeStorage(subscriptionId: string, timeoutMs: number = 5000): Promise<void> {
@@ -483,9 +483,6 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      // NOTE: only subscriptionId is sent — the device handler needs packageName/fileName, so this
-      // currently no-ops on device and the request times out. Typed accurately in
-      // ctrlProxyProtocol (UnsubscribeStorageMessage); fixing the payload is a device-side follow-up.
       const message = serializeCtrlProxyRequest(
         ctrlProxyRequests.unsubscribeStorage({ requestId, subscriptionId }),
       );

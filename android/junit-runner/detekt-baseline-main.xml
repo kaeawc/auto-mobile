@@ -4,6 +4,5 @@
   <CurrentIssues>
     <ID>ImplicitDefaultLocale:DaemonSocketClient.kt:DaemonSocketPaths$"%02x".format(it)</ID>
     <ID>ImplicitDefaultLocale:MemoryMonitor.kt:MemoryMonitor$String.format("%.2f", deltaMb)</ID>
-    <ID>UnsafeCallOnNullableType:LazyInitializer.kt:LazyInitializer$_agent!!</ID>
   </CurrentIssues>
 </SmellBaseline>

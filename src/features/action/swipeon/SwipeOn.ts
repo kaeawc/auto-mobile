@@ -68,6 +68,12 @@ import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
 import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { buildContainerFromElement } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
+import {
+  effectiveSwipeInsets,
+  insetSwipeBounds,
+  iosSwipeStartWarning,
+  swipeScreenSize,
+} from "./iosChromeInsets";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
@@ -391,6 +397,7 @@ export class SwipeOn extends BaseVisualChange {
       candidates: this.buildScrollableCandidates(scrollables),
       observeResult: observation,
       direction: direction.direction,
+      includeSystemInsets: options.includeSystemInsets,
     });
     return {
       options: { ...options, direction: direction.direction, container: decision.container },
@@ -427,15 +434,9 @@ export class SwipeOn extends BaseVisualChange {
     observation: ObserveResult;
     bounds?: Element["bounds"];
   }): Element["bounds"] {
-    const screen = getScreenBounds(observation.screenSize, observation.systemInsets);
-    return bounds
-      ? {
-          left: Math.max(bounds.left, screen.left),
-          top: Math.max(bounds.top, screen.top),
-          right: Math.min(bounds.right, screen.right),
-          bottom: Math.min(bounds.bottom, screen.bottom),
-        }
-      : screen;
+    const insetOptions = { observation, platform: this.device.platform };
+    const screenSize = swipeScreenSize(insetOptions) ?? observation.screenSize;
+    return insetSwipeBounds({ ...insetOptions, bounds: bounds ?? getScreenBounds(screenSize) });
   }
 
   private validateSelectedDisplayObservation(options: {
@@ -681,18 +682,23 @@ export class SwipeOn extends BaseVisualChange {
     candidates,
     observeResult,
     direction,
+    includeSystemInsets,
   }: {
     scrollables: Element[];
     candidates: ScrollableCandidate[];
     observeResult?: ObserveResult;
     direction: SwipeDirection;
+    includeSystemInsets?: boolean;
   }): AutoTargetDecision {
     if (scrollables.length === 0) {
       logger.info(`[SwipeOn] Mode: screen swipe (no scrollables found)`);
       return {};
     }
     const screenBounds = observeResult
-      ? this.autoTargetSelector.getScreenBounds(observeResult)
+      ? this.autoTargetSelector.getScreenBounds(observeResult, {
+          platform: this.device.platform,
+          includeSystemInsets,
+        })
       : null;
     const element = this.autoTargetSelector.selectAutoTargetScrollable(
       scrollables,
@@ -740,9 +746,7 @@ export class SwipeOn extends BaseVisualChange {
     }
     return {
       ...result,
-      warning: decision.container
-        ? this.autoTargetSelector.mergeWarnings(result.warning, decision.warning)
-        : decision.warning,
+      warning: this.autoTargetSelector.mergeWarnings(result.warning, decision.warning),
       scrollableCandidates: decision.scrollableCandidates,
     };
   }
@@ -759,7 +763,11 @@ export class SwipeOn extends BaseVisualChange {
     signal?: AbortSignal;
   }): Promise<SwipeOnResult> {
     const context = await this.getScrollableContext(signal);
-    const decision = this.resolveAutoTargetDecision({ ...context, direction: options.direction });
+    const decision = this.resolveAutoTargetDecision({
+      ...context,
+      direction: options.direction,
+      includeSystemInsets: options.includeSystemInsets,
+    });
     const result = decision.container
       ? await this.executeElementSwipe(
           { ...options, container: decision.container },
@@ -950,15 +958,16 @@ export class SwipeOn extends BaseVisualChange {
     return this.observedInteraction(
       async (observeResult: ObserveResult, fence) => {
         throwIfAborted(signal);
-        if (!observeResult.screenSize) {
+        const insetOptions = {
+          observation: observeResult,
+          platform: this.device.platform,
+          includeSystemInsets: options.includeSystemInsets,
+        };
+        const screenSize = swipeScreenSize(insetOptions);
+        if (!screenSize) {
           throw new ActionableError("Could not determine screen size");
         }
-
-        const bounds = getScreenBounds(
-          observeResult.screenSize,
-          observeResult.systemInsets,
-          options.includeSystemInsets === true,
-        );
+        const bounds = getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions));
 
         const { startX, startY, endX, endY } = this.geometry.getSwipeWithinBounds(
           options.direction,
@@ -1025,6 +1034,11 @@ export class SwipeOn extends BaseVisualChange {
         return {
           ...swipeResult,
           targetType: "screen" as const,
+          warning: iosSwipeStartWarning({
+            ...insetOptions,
+            startX: Math.floor(startX),
+            startY: Math.floor(startY),
+          }),
         };
       },
       {
@@ -1153,14 +1167,15 @@ export class SwipeOn extends BaseVisualChange {
     containerElement: Element,
     observeResult: ObserveResult,
   ): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
-    return resolveContainerSwipeCoordinates(
-      this.geometry,
-      this.overlayDetector,
+    return resolveContainerSwipeCoordinates({
+      geometry: this.geometry,
+      overlayDetector: this.overlayDetector,
       options,
       viewHierarchy,
       containerElement,
       observeResult,
-    );
+      platform: this.device.platform,
+    });
   }
 
   private getDuration(options: SwipeOnResolvedOptions): number {

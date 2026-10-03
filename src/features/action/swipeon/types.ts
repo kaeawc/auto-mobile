@@ -51,7 +51,10 @@ export interface AutoTargetSelectorService {
     direction: SwipeDirection,
   ): Element | null;
 
-  getScreenBounds(observeResult: ObserveResult): Element["bounds"] | null;
+  getScreenBounds(
+    observeResult: ObserveResult,
+    options?: { platform?: "android" | "ios"; includeSystemInsets?: boolean },
+  ): Element["bounds"] | null;
 
   describeContainer(container: SwipeOnOptions["container"]): string;
 

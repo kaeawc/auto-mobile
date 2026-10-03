@@ -1,4 +1,5 @@
 import type {
+  ForegroundAppReadResult,
   AdbExecuteOptions,
   AdbExecutor,
   AdbProcess,
@@ -13,6 +14,7 @@ type FakeAdbClientContract = Pick<
   AdbExecutor,
   | "execute"
   | "executeCommand"
+  | "getForegroundAppChecked"
   | "getForegroundApp"
   | "getDeviceTimestampMs"
   | "getDeviceTimestampMsWithSource"
@@ -326,6 +328,17 @@ export class FakeAdbClient implements FakeAdbClientContract {
     return displayId === 0
       ? this.foregroundApp
       : (this.displayForegroundApps.get(displayId) ?? null);
+  }
+
+  async getForegroundAppChecked(
+    signal?: AbortSignal,
+    options?: number | { timeoutMs?: number; displayId?: number },
+  ): Promise<ForegroundAppReadResult> {
+    signal?.throwIfAborted();
+    if (this.foregroundAppError) {
+      return { state: "unreadable", error: this.foregroundAppError.message };
+    }
+    return { state: "known", app: await this.getForegroundApp(signal, options) };
   }
 
   /**

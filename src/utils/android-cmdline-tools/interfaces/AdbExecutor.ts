@@ -1,6 +1,19 @@
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../../models";
 import type { Readable, Writable } from "node:stream";
 
+export interface ForegroundApp {
+  packageName: string;
+  userId: number;
+  /** Resumed activity on the observed display, when dumpsys names it. */
+  activityName?: string;
+  /** Number of display-scoped activity sections in the dumpsys capture. */
+  displayCount?: number;
+}
+
+export type ForegroundAppReadResult =
+  | { state: "known"; app: ForegroundApp | null }
+  | { state: "unreadable"; error: string };
+
 /** The intentionally small process surface exposed by ADB streaming commands. */
 export interface AdbProcess {
   readonly stdin: Writable | null;
@@ -160,14 +173,13 @@ export interface AdbExecutor {
   getForegroundApp(
     signal?: AbortSignal,
     timeout?: number | { timeoutMs?: number; displayId?: number },
-  ): Promise<{
-    packageName: string;
-    userId: number;
-    /** Resumed activity on the observed display, when dumpsys names it. */
-    activityName?: string;
-    /** Number of display-scoped activity sections in the dumpsys capture. */
-    displayCount?: number;
-  } | null>;
+  ): Promise<ForegroundApp | null>;
+
+  /** Read foreground identity without treating command failure as an empty foreground. */
+  getForegroundAppChecked(
+    signal?: AbortSignal,
+    timeout?: number | { timeoutMs?: number; displayId?: number },
+  ): Promise<ForegroundAppReadResult>;
 
   /** Get device time in milliseconds. */
   getDeviceTimestampMs(): Promise<number>;

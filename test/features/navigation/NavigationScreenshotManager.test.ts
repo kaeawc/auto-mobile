@@ -1,4 +1,7 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { Image } from "../../../src/utils/image-utils";
+import { FakeImageBackend } from "../../fakes/FakeImageBackend";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { NavigationScreenshotManager } from "../../../src/features/navigation/NavigationScreenshotManager";
 import { FileSystem } from "../../../src/utils/filesystem/DefaultFileSystem";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -175,6 +178,114 @@ describe("NavigationScreenshotManager", () => {
 
   afterEach(() => {
     NavigationScreenshotManager.resetInstance();
+  });
+
+  test("obsolete screenshot deletion races keep the current image and emit debug", async () => {
+    const oldPath = `${screenshotDir}/${manager.generateFilename("app", "screen")}`;
+    fakeFs.setFile(oldPath, Buffer.from("old"));
+    const unlink = spyOn(fakeFs, "unlink").mockRejectedValue(new Error("already removed"));
+    try {
+      expect(await manager["deleteOldScreenshots"]("app", "screen", "new.webp")).toBeUndefined();
+      expect(fakeLogger.at("debug")[0]?.message).toBe(
+        "Obsolete screenshot cleanup failed: already removed",
+      );
+      expect(fakeFs.getFileCount()).toBe(1);
+    } finally {
+      unlink.mockRestore();
+    }
+  });
+
+  test("old screenshot discovery failure does not abort storage cleanup and warns", async () => {
+    fakeFs.failReaddir(new Error("listing denied"));
+    expect(await manager["deleteOldScreenshots"]("app", "screen", "new.webp")).toBeUndefined();
+    expect(fakeLogger.at("warn")[0]?.message).toBe(
+      "Old screenshot discovery failed: listing denied",
+    );
+  });
+
+  test("background LRU rejection preserves the stored image and warns", async () => {
+    const image = spyOn(Image, "fromBuffer").mockImplementation(
+      (buffer) => new Image(buffer, fakeTimer, new FakeImageBackend()),
+    );
+    const cleanup = spyOn(manager, "cleanupLRU").mockRejectedValue(new Error("cleanup denied"));
+    try {
+      const stored = await manager.storeScreenshot(
+        "app",
+        "screen",
+        Buffer.from("LRU failure image"),
+      );
+      expect(stored).toBe(`${screenshotDir}/${manager.generateFilename("app", "screen")}`);
+      expect(await fakeFs.pathExists(stored!)).toBe(true);
+      expect(fakeLogger.at("warn")[0]?.message).toBe(
+        "Screenshot LRU cleanup failed: cleanup denied",
+      );
+    } finally {
+      image.mockRestore();
+      cleanup.mockRestore();
+      Image.clearCache();
+    }
+  });
+
+  test("temporary capture deletion failure preserves the stored image and emits debug", async () => {
+    fakeFs.setFile("/capture.png", Buffer.from("temporary capture image"));
+    const image = spyOn(Image, "fromBuffer").mockImplementation(
+      (buffer) => new Image(buffer, fakeTimer, new FakeImageBackend()),
+    );
+    const remove = spyOn(fakeFs, "remove").mockRejectedValue(new Error("already removed"));
+    try {
+      const stored = await manager.captureAndStore(
+        { deviceId: "fake", platform: "android", name: "fake" },
+        new FakeAdbExecutor(),
+        "app",
+        "screen",
+        { execute: async () => ({ success: true, path: "/capture.png" }) },
+      );
+      expect(stored).toBe(`${screenshotDir}/${manager.generateFilename("app", "screen")}`);
+      expect(await fakeFs.pathExists(stored!)).toBe(true);
+      expect(fakeLogger.at("debug")[0]?.message).toBe(
+        "Temporary screenshot cleanup failed: already removed",
+      );
+    } finally {
+      image.mockRestore();
+      remove.mockRestore();
+      Image.clearCache();
+    }
+  });
+
+  test("LRU stat races skip removed entries and emit debug", async () => {
+    fakeFs.setFile(`${screenshotDir}/missing.webp`, Buffer.from("old"));
+    const stat = spyOn(fakeFs, "stat").mockRejectedValue(new Error("already removed"));
+    try {
+      expect(await manager.cleanupLRU()).toBeUndefined();
+      expect(fakeFs.getFileCount()).toBe(1);
+      expect(fakeLogger.at("debug")[0]?.message).toBe("Screenshot stat failed: already removed");
+    } finally {
+      stat.mockRestore();
+    }
+  });
+
+  test("LRU unlink races continue to the next candidate and emit debug", async () => {
+    const oldPath = `${screenshotDir}/old.webp`;
+    const nextPath = `${screenshotDir}/next.webp`;
+    fakeFs.setFile(oldPath, Buffer.alloc(800 * 1024), 0);
+    fakeFs.setFile(nextPath, Buffer.alloc(800 * 1024), 1);
+    const unlinkOriginal = fakeFs.unlink.bind(fakeFs);
+    const unlink = spyOn(fakeFs, "unlink").mockImplementation(async (file) => {
+      if (file === oldPath) {
+        throw new Error("already removed");
+      }
+      return unlinkOriginal(file);
+    });
+    try {
+      expect(await manager.cleanupLRU()).toBeUndefined();
+      expect(await fakeFs.pathExists(oldPath)).toBe(true);
+      expect(await fakeFs.pathExists(nextPath)).toBe(false);
+      expect(fakeLogger.at("debug")[0]?.message).toBe(
+        "Screenshot eviction failed: already removed",
+      );
+    } finally {
+      unlink.mockRestore();
+    }
   });
 
   describe("singleton pattern", () => {

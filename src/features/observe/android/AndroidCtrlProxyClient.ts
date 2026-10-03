@@ -2068,7 +2068,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public static resetInstances(): void {
     for (const instance of AndroidCtrlProxyClient.instances.values()) {
-      instance.close().catch(() => {});
+      instance.close().catch((error) => {
+        logger.warn(`[CTRL_PROXY] Instance reset cleanup failed: ${errorMessage(error)}`, error);
+      });
     }
     AndroidCtrlProxyClient.instances.clear();
     AndroidCtrlProxyClient.activeObservers.clear();
@@ -3994,6 +3996,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
+      logger.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -4004,7 +4007,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         success: false,
         action,
         totalTimeMs: this.timer.now() - startTime,
-        error: `${error}`,
+        error: error instanceof Error ? error.toString() : errorMessage(error),
       };
     }
   }
@@ -4062,13 +4065,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
+      logger.warn(`[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
           error instanceof Error ? error : new Error(String(error)),
         );
       }
-      return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
+      return {
+        success: false,
+        totalTimeMs: this.timer.now() - startTime,
+        error: error instanceof Error ? error.toString() : errorMessage(error),
+      };
     }
   }
 
@@ -4160,13 +4168,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await promise;
     } catch (error) {
+      logger.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
           error instanceof Error ? error : new Error(String(error)),
         );
       }
-      return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
+      return {
+        success: false,
+        totalTimeMs: this.timer.now() - startTime,
+        error: error instanceof Error ? error.toString() : errorMessage(error),
+      };
     }
   }
 
@@ -6208,7 +6221,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       };
     } catch (error) {
       const message = errorMessage(error);
-      this.loggerInstance.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
+      const logger = this.loggerInstance;
+      logger.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
       return { success: false, error: `ADB screencap failed: ${message}` };
     }
   }

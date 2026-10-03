@@ -7,7 +7,7 @@ export const IOS_STORAGE_NOT_FOREGROUND_MESSAGE =
   "The target app is not in the foreground; bring it to the foreground and retry.";
 
 const IOS_DATABASE_CAPABILITY_UNAVAILABLE_MESSAGE =
-  "Failed to execute SQL on iOS. The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).";
+  "The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).";
 
 // Match only CtrlProxy's two storage foreground gates, including the complete app id slot.
 const IOS_STORAGE_FOREGROUND_GATE_PATTERN =
@@ -132,7 +132,9 @@ function iosSdkSetupAdvice(): string {
 export function iosSqlErrorMessage(error: unknown, databasePath: string): string {
   const mapped = iosStorageErrorMessage(error);
   if (mapped) {
-    return mapped;
+    return mapped === IOS_DATABASE_CAPABILITY_UNAVAILABLE_MESSAGE
+      ? `Failed to execute SQL on iOS. ${mapped}`
+      : mapped;
   }
   const message = errorMessage(error);
   const prefix = `${SDK_UNAVAILABLE_PREFIX}: `;

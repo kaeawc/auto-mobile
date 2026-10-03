@@ -260,7 +260,7 @@ describe("iOS database inspection server integration", function () {
     ],
     [
       "The foreground iOS app does not expose the AutoMobile SDK capability database.",
-      "Failed to execute SQL on iOS. The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).",
+      "The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).",
     ],
     ["unrelated failure", "unrelated failure"],
   ])("database listing preserves its error shape with guidance: %s", async (detail, message) => {

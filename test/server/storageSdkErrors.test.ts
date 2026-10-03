@@ -3,6 +3,7 @@ import {
   IOS_STORAGE_MUTATION_AUTHORIZATION_HINT,
   mapStorageSdkError,
   iosSqlErrorMessage,
+  iosStorageErrorMessage,
 } from "../../src/server/storageSdkErrors";
 
 describe("storage SDK error mapping", () => {
@@ -77,6 +78,28 @@ const foregroundMessage =
   "The target app is not in the foreground; bring it to the foreground and retry.";
 const capabilityMessage =
   "Failed to execute SQL on iOS. The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).";
+const storageCapabilityMessage =
+  "The target app is either not in the foreground (bring it to the foreground and retry) or does not embed the AutoMobile SDK in a DEBUG build with DatabaseInspector.shared.setEnabled(true).";
+
+test("shared capability absence guidance has no SQL prefix", () => {
+  expect(
+    iosStorageErrorMessage(
+      new Error("The foreground iOS app does not expose the AutoMobile SDK capability database."),
+    ),
+  ).toBe(storageCapabilityMessage);
+});
+
+test.each(["storage", "database"] as const)(
+  "capability absence guidance has no SQL prefix for %s operations",
+  (operation) => {
+    expect(
+      mapStorageSdkError(
+        new Error("The foreground iOS app does not expose the AutoMobile SDK capability database."),
+        { operation },
+      ),
+    ).toBe(storageCapabilityMessage);
+  },
+);
 
 test.each([
   `${sdkPrefix}: app_not_active`,

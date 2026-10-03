@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import type { Element } from "../../src/models/Element";
+import type { Element } from "../../../src/models/Element";
 import {
   buildContainerFromElement,
   hasAccessibilityAction,
   isClickableElementProperties,
   isCollectionElementProperties,
   isTruthyFlag,
-} from "../../src/utils/elementProperties";
+} from "../../../src/features/utility/elementProperties";
 
 test("collection boundaries recognize decorated Android names without arbitrary substring matches", () => {
   expect(isCollectionElementProperties({ className: "com.example.RecyclerViewContainer" })).toBe(

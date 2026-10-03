@@ -16,7 +16,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 import { toSearchable } from "../utility/SearchableNode";
-import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
+import { ANDROID_INPUT_CLASSES } from "../utility/elementProperties";
 
 export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 export const DELETE_KEYEVENT_CHUNK_SIZE = 50;

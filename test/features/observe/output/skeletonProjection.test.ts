@@ -10,7 +10,7 @@ import { DefaultElementSelector } from "../../../../src/features/utility/Default
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { tapOnSchema } from "../../../../src/server/interactionTools";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
-import { attachRawViewHierarchy } from "../../../../src/utils/viewHierarchySearch";
+import { attachRawViewHierarchy } from "../../../../src/features/utility/viewHierarchySearch";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";

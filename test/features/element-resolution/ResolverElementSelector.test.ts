@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
-import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
+import { attachRawViewHierarchy } from "../../../src/features/utility/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";

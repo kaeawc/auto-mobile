@@ -33,7 +33,7 @@ import {
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
-import { resolveSwipeDirection } from "../../../utils/swipeOnUtils";
+import { resolveSwipeDirection } from "./swipeOnUtils";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../../utils/AccessibilityDetector";
 import {
@@ -66,7 +66,7 @@ import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
 import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
 import { ScrollUntilVisible } from "./ScrollUntilVisible";
-import { buildContainerFromElement } from "../../../utils/elementProperties";
+import { buildContainerFromElement } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";

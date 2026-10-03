@@ -1,4 +1,4 @@
-import { Element } from "../models/Element";
+import { Element } from "../../models/Element";
 
 export function isTruthyFlag(value: unknown): boolean {
   return value === true || value === "true";

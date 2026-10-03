@@ -252,6 +252,6 @@
 7	test/utils/deviceBootService.test.ts
 6	test/utils/ios-cmdline-tools/iosSettings.test.ts
 4	test/utils/ios-cmdline-tools/simctlArgvIntegrity.test.ts
-1	test/utils/swipeOnUtils.test.ts
+1	test/features/action/swipeon/swipeOnUtils.test.ts
 1	test/vision/ClaudeVisionClient.test.ts
 3	test/vision/VisionFallback.test.ts

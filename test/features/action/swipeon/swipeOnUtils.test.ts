@@ -1,6 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import { resolveSwipeDirection, SCROLL_TO_FINGER_DIRECTION } from "../../src/utils/swipeOnUtils";
-import { SwipeDirection } from "../../src/models";
+import {
+  resolveSwipeDirection,
+  SCROLL_TO_FINGER_DIRECTION,
+} from "../../../../src/features/action/swipeon/swipeOnUtils";
+import { SwipeDirection } from "../../../../src/models";
 
 describe("SCROLL_TO_FINGER_DIRECTION", () => {
   it("maps all four scroll directions to their finger-swipe inverses", () => {

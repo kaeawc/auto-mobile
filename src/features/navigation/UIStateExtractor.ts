@@ -7,7 +7,7 @@ import {
 } from "../../utils/interfaces/NavigationGraph";
 import { ObserveResult, ViewHierarchyResult } from "../../models";
 import { SwipeOnOptions } from "../../models";
-import { resolveSwipeDirection } from "../../utils/swipeOnUtils";
+import { resolveSwipeDirection } from "../action/swipeon/swipeOnUtils";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 

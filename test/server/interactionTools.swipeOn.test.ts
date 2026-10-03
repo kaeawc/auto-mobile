@@ -8,7 +8,7 @@ import {
 } from "../../src/server/interactionTools";
 import type { SwipeOnArgs } from "../../src/server/interactionToolTypes";
 import type { BootedDevice, SwipeOnOptions, SwipeOnToolPayload } from "../../src/models";
-import { resolveSwipeDirection } from "../../src/utils/swipeOnUtils";
+import { resolveSwipeDirection } from "../../src/features/action/swipeon/swipeOnUtils";
 import { getStructuredField } from "../../src/utils/toolUtils";
 
 test("swipeOn schema advertises the runtime default gesture type", () => {

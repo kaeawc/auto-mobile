@@ -20,7 +20,7 @@ import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { updatedAtToMillis } from "../observeTimestamp";
 import { captureFidelityTruncationReasons } from "../truncationReasons";
-import { hasAccessibilityAction, isTruthyFlag } from "../../../utils/elementProperties";
+import { hasAccessibilityAction, isTruthyFlag } from "../../utility/elementProperties";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { SYSTEM_TRAY_PACKAGE } from "../../../server/system-tray/notificationHints";

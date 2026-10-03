@@ -4,7 +4,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import type { ViewHierarchy } from "../../observe/ViewHierarchy";
 import type { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../../utils/AccessibilityDetector";
-import { attachRawViewHierarchy } from "../../../utils/viewHierarchySearch";
+import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 

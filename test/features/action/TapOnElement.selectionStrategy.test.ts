@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { serverConfig } from "../../../src/utils/ServerConfig";
-import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
+import { attachRawViewHierarchy } from "../../../src/features/utility/viewHierarchySearch";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";

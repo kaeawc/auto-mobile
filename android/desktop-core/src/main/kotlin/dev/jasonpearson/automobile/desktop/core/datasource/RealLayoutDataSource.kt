@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.layout.ElementBounds
 import dev.jasonpearson.automobile.desktop.core.layout.UIElementInfo
 import java.util.Base64
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -60,6 +61,7 @@ class RealLayoutDataSource(
               } else null
             }
           } catch (e: Exception) {
+            // Malformed hierarchy data falls back to an empty hierarchy.
             null
           }
         } ?: createEmptyHierarchy()
@@ -88,6 +90,7 @@ class RealLayoutDataSource(
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       Result.Error(e, "Failed to load observation: ${e.message}")
     }
   }

@@ -752,39 +752,58 @@ describe("deleteDevice handler", () => {
     });
   });
 
-  test("retires pooled ownership after destroying an already-stopped simulator", async () => {
-    const timer = new FakeTimer();
-    const device: DeviceInfo = {
-      platform: "ios",
-      name: "iPhone 16",
-      deviceId: "IOS-DEVICE-1",
-      isRunning: false,
-    };
-    const deviceSessionRepository = new FakeDeviceSessionRepository();
-    const sessionManager = new SessionManager(timer, deviceSessionRepository);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    const bootedDevice: BootedDevice = { ...device, deviceId: device.deviceId! };
-    manager.setBootedDevices("ios", [bootedDevice]);
-    await pool.addDevice(bootedDevice, device);
-    await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
-    manager.setBootedDevices("ios", []);
-    manager.setDeviceImages("ios", [device]);
+  test.each([false, true])(
+    "retires pooled ownership after destroying an already-stopped simulator (release rejects=%s)",
+    async (releaseRejects) => {
+      const timer = new FakeTimer();
+      const device: DeviceInfo = {
+        platform: "ios",
+        name: "iPhone 16",
+        deviceId: "IOS-DEVICE-1",
+        isRunning: false,
+      };
+      const deviceSessionRepository = new FakeDeviceSessionRepository();
+      const sessionManager = new SessionManager(timer, deviceSessionRepository);
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer: timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: manager,
+          retryExecutor: new DefaultRetryExecutor(timer),
+          deviceSessionRepository: deviceSessionRepository,
+        }),
+      );
+      const reserve = pool.reserveDeviceForShutdown.bind(pool);
+      pool.reserveDeviceForShutdown = async (...args) => {
+        const reservation = await reserve(...args);
+        if (!reservation) {
+          return undefined;
+        }
+        return {
+          ...reservation,
+          release: async () => {
+            await reservation.release();
+            if (releaseRejects) {
+              throw new Error("teardown reservation release failed");
+            }
+          },
+        };
+      };
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      const bootedDevice: BootedDevice = { ...device, deviceId: device.deviceId! };
+      manager.setBootedDevices("ios", [bootedDevice]);
+      await pool.addDevice(bootedDevice, device);
+      await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+      manager.setBootedDevices("ios", []);
+      manager.setDeviceImages("ios", [device]);
 
-    const response = await teardownTool().handler(request("ios", device.deviceId!, device.name));
+      const response = await teardownTool().handler(request("ios", device.deviceId!, device.name));
 
-    expect(responseBody(response).state).toBe("destroyed");
-    expect(pool.getDevice(device.deviceId!)).toBeNull();
-    expect(sessionManager.getSessionForDevice(device.deviceId!)).toBeNull();
-  });
+      expect(responseBody(response).state).toBe("destroyed");
+      expect(pool.getDevice(device.deviceId!)).toBeNull();
+      expect(sessionManager.getSessionForDevice(device.deviceId!)).toBeNull();
+    },
+  );
 
   test("retains already-stopped pooled ownership when its first recheck fails", async () => {
     const timer = new FakeTimer();

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
+import {
+  DragAndDrop,
+  getIosDragTimeoutMs,
+  IOS_DRAG_TIMEOUT_OVERHEAD_MS,
+  IOS_DRAG_TIMEOUT_DURATION_RATIO,
+} from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
@@ -10,6 +15,9 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosProjectionFixture } from "../../fixtures/iosProjectionFixture";
+import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 
 // Simulator-shaped UDID so isIosSimulatorUdid would pass (not that dragAndDrop branches on it,
 // but keeps the device realistic).
@@ -30,6 +38,7 @@ describe("DragAndDrop - iOS", () => {
   let iosSpy: ReturnType<typeof spyOn> | null = null;
   let androidSpy: ReturnType<typeof spyOn> | null = null;
   let managerSpy: ReturnType<typeof spyOn> | null = null;
+  let runnerFinishedAt = 0;
 
   const createHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
@@ -71,6 +80,7 @@ describe("DragAndDrop - iOS", () => {
     fakeAndroidClient = new FakeCtrlProxy();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    runnerFinishedAt = 0;
     fakeIosClient.setHierarchyData(createHierarchy());
     fakeIosClient.setViewHierarchyResult(createHierarchy());
 
@@ -102,6 +112,162 @@ describe("DragAndDrop - iOS", () => {
     androidSpy?.mockRestore();
     managerSpy?.mockRestore();
   });
+
+  // Model the client's transport deadline and a synchronous XCUITest call that
+  // can finish after the host has stopped waiting, using only fake time.
+  const fakeRunnerReply = (replyDelayMs?: number, controller?: AbortController) => {
+    return spyOn(fakeIosClient, "requestDrag").mockImplementation(
+      async (_x1, _y1, _x2, _y2, _press, _drag, _hold, timeoutMs, _context, signal) => {
+        const timeout = new Error(`Drag timed out after ${timeoutMs}ms`);
+        if (controller) {
+          fakeTimer.setTimeout(() => controller.abort(), 25);
+        }
+        const reply = new Promise<{ success: boolean; totalTimeMs: number }>((resolve) => {
+          if (replyDelayMs !== undefined) {
+            fakeTimer.setTimeout(
+              () => resolve({ success: true, totalTimeMs: replyDelayMs }),
+              replyDelayMs,
+            );
+          }
+        });
+        try {
+          return await raceWithDeadline(reply, {
+            timer: fakeTimer,
+            timeoutMs,
+            signal,
+            label: "Drag",
+            timeoutError: () => timeout,
+          });
+        } catch (error) {
+          if (error !== timeout) {
+            throw error;
+          }
+          return { success: false, totalTimeMs: timeoutMs, error: timeout.message };
+        } finally {
+          runnerFinishedAt = fakeTimer.now();
+        }
+      },
+    );
+  };
+
+  test("accepts a runner reply 850ms after the planned drag duration", async () => {
+    const runner = fakeRunnerReply(1850);
+    const result = await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+      pressDurationMs: 600,
+      dragDurationMs: 300,
+      holdDurationMs: 100,
+    });
+    expect(result.success).toBe(true);
+    expect(result.a11yTotalTimeMs).toBe(1850);
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  test("budgets short and long plans with sibling gesture headroom and scaling", () => {
+    expect(IOS_DRAG_TIMEOUT_OVERHEAD_MS).toBe(2000);
+    expect(IOS_DRAG_TIMEOUT_DURATION_RATIO).toBe(0.5);
+    expect(getIosDragTimeoutMs(600, 300, 100)).toBe(5000);
+    expect(getIosDragTimeoutMs(1000, 800, 300)).toBe(5150);
+    expect(getIosDragTimeoutMs(3000, 2000, 3000)).toBe(14000);
+  });
+
+  test.each([600, 1000.25])(
+    "an unanswered drag is indeterminate at the iOS budget (press %sms)",
+    async (pressDurationMs) => {
+      const runner = fakeRunnerReply();
+      const budget = getIosDragTimeoutMs(pressDurationMs, 800, 300);
+      const result = await dragAndDrop.execute({
+        source: { elementId: "source-id" },
+        target: { elementId: "target-id" },
+        pressDurationMs,
+        dragDurationMs: 800,
+        holdDurationMs: 300,
+      });
+      expect(runnerFinishedAt).toBe(budget);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Drag outcome is indeterminate");
+      expect(result.error).toContain(`Drag timed out after ${budget}ms`);
+      expect(result.error).toContain("gesture may have run");
+      expect(result.error).toContain("Do not retry automatically");
+      expect(result.error).toContain("observe");
+      expect(runner).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("iOS client forwards drag cancellation to the shared gesture delegate", async () => {
+    const controller = new AbortController();
+    const client = IOSCtrlProxyClient.createForTesting(
+      IOS_DEVICE,
+      8765,
+      createSuccessWebSocketFactory(fakeTimer),
+      fakeTimer,
+    );
+    const delegate = spyOn(client["gestures"], "requestDrag").mockResolvedValue({
+      success: true,
+      totalTimeMs: 1850,
+    });
+    try {
+      await client.requestDrag(50, 50, 250, 250, 600, 300, 100, 5000, undefined, controller.signal);
+      expect(delegate).toHaveBeenCalledWith(
+        50,
+        50,
+        250,
+        250,
+        600,
+        300,
+        100,
+        5000,
+        undefined,
+        controller.signal,
+      );
+    } finally {
+      delegate.mockRestore();
+    }
+  });
+
+  test("abort stops waiting even while the client is still connecting", async () => {
+    const controller = new AbortController();
+    const runner = spyOn(fakeIosClient, "requestDrag").mockImplementation(() => {
+      fakeTimer.setTimeout(() => controller.abort(), 25);
+      return new Promise(() => {});
+    });
+    await expect(
+      dragAndDrop.execute(
+        {
+          source: { elementId: "source-id" },
+          target: { elementId: "target-id" },
+        },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(fakeTimer.now()).toBe(25);
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(["explicit", "ambient"])(
+    "honours the %s abort before the drag budget",
+    async (kind) => {
+      const controller = new AbortController();
+      const runner = fakeRunnerReply(undefined, controller);
+      const execute = () =>
+        dragAndDrop.execute(
+          {
+            source: { elementId: "source-id" },
+            target: { elementId: "target-id" },
+          },
+          undefined,
+          kind === "explicit" ? controller.signal : undefined,
+        );
+      const pending =
+        kind === "ambient" ? runWithAbortSignal(controller.signal, execute) : execute();
+      await expect(pending).rejects.toThrow("Operation cancelled");
+      expect(fakeTimer.now()).toBe(25);
+      expect(runner.mock.calls[0][9]).toBe(controller.signal);
+      expect(runner).toHaveBeenCalledTimes(1);
+    },
+  );
 
   test("direct iOS sync cannot resolve an offscreen source excluded by observe", async () => {
     const freshHierarchy = {

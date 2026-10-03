@@ -21,7 +21,10 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../observe/shared/SharedGestureDelegate";
+import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "./gestureTransportTimeout";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -50,6 +53,23 @@ export const HOLD_DURATION_MIN_MS = 100;
 export const HOLD_DURATION_MAX_MS = 3000;
 const DROP_DURATION_MS = 100;
 const DRAG_TIMEOUT_BUFFER_MS = 500;
+export const IOS_DRAG_TIMEOUT_OVERHEAD_MS = LONG_PRESS_TIMEOUT_HEADROOM_MS;
+export const IOS_DRAG_TIMEOUT_DURATION_RATIO = 0.5;
+
+/** Match sibling gestures' 5s floor and 2s headroom, with room for longer XCUITest calls. */
+export function getIosDragTimeoutMs(
+  pressDurationMs: number,
+  dragDurationMs: number,
+  holdDurationMs: number,
+): number {
+  const plannedDurationMs = pressDurationMs + dragDurationMs + holdDurationMs;
+  return Math.max(
+    DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+    plannedDurationMs +
+      IOS_DRAG_TIMEOUT_OVERHEAD_MS +
+      plannedDurationMs * IOS_DRAG_TIMEOUT_DURATION_RATIO,
+  );
+}
 const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
 // XCUITest hierarchy extraction is slow (can take 5-15s), so the iOS refresh uses the same
 // 15s budget as CtrlProxyHierarchy.getAccessibilityHierarchy rather than the 5s Android value.
@@ -204,6 +224,7 @@ export class DragAndDrop extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<DragAndDropResult> {
+    signal = this.device.platform === "ios" ? combineWithAmbientAbort(signal) : signal;
     const targeted = await this.executeExplicitDisplay(options, signal);
     if (targeted) {
       return targeted;
@@ -241,12 +262,7 @@ export class DragAndDrop extends BaseVisualChange {
     const validationError = this.validateOptions(options);
     if (validationError) {
       perf.end();
-      return {
-        success: false,
-        duration: 0,
-        distance: 0,
-        error: validationError,
-      };
+      return { success: false, duration: 0, distance: 0, error: validationError };
     }
 
     try {
@@ -331,6 +347,9 @@ export class DragAndDrop extends BaseVisualChange {
       perf.end();
 
       logger.warn(`Drag and drop failed: ${errorMessage(error)}`, error);
+      if (this.device.platform === "ios") {
+        throwIfAborted(signal);
+      }
       if (error instanceof StaleDisplayError) {
         return withStaleDisplay({ success: false, duration: 0, distance: 0 }, error);
       }
@@ -571,22 +590,29 @@ export class DragAndDrop extends BaseVisualChange {
   }> {
     throwIfAborted(signal);
 
-    const timeoutMs = this.getDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);
+    const timeoutMs =
+      this.device.platform === "ios"
+        ? getIosDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs)
+        : this.getDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);
 
-    // Both clients expose requestDrag with an identical signature/return shape. iOS routes
-    // through the XCUITest CtrlProxy runner (XCUICoordinate.press/thenDragTo/thenHold);
+    // iOS routes through the XCUITest CtrlProxy runner (XCUICoordinate.press/thenDragTo/thenHold);
     // Android through the accessibility service. iOS preserves exact (non-rounded) coordinates.
     const result =
       this.device.platform === "ios"
-        ? await IOSCtrlProxyClient.getInstance(this.device).requestDrag(
-            startX,
-            startY,
-            endX,
-            endY,
-            pressDurationMs,
-            dragDurationMs,
-            holdDurationMs,
-            timeoutMs,
+        ? await awaitWhileRequestIsLive(
+            IOSCtrlProxyClient.getInstance(this.device).requestDrag(
+              startX,
+              startY,
+              endX,
+              endY,
+              pressDurationMs,
+              dragDurationMs,
+              holdDurationMs,
+              timeoutMs,
+              undefined,
+              signal,
+            ),
+            signal,
           )
         : await this.accessibilityService.requestDrag(
             startX,
@@ -598,6 +624,16 @@ export class DragAndDrop extends BaseVisualChange {
             holdDurationMs,
             timeoutMs,
           );
+
+    if (this.device.platform === "ios") {
+      throwIfAborted(signal);
+      if (!result.success && result.error === `Drag timed out after ${timeoutMs}ms`) {
+        return {
+          success: false,
+          error: `Drag outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error}). The gesture may have run. Do not retry automatically. Verify state first with observe.`,
+        };
+      }
+    }
 
     if (result.success) {
       return {

@@ -6,6 +6,8 @@ import type { Element, ObserveResult } from "../../../models";
  * model can debug a failed wait instead of getting a bare `false`.
  */
 export interface ConditionEvaluation {
+  /** Scoped resolver failure from the last poll; omitted for legacy waits. */
+  diagnostic?: string;
   matched: boolean;
   /** The element that satisfied the predicate, when matched. */
   matchedElement?: Element;
@@ -47,6 +49,8 @@ export interface WaitForConditionOptions {
  * on timeout carries the last-seen candidates (never a bare failure).
  */
 export interface WaitForConditionResult {
+  /** Scoped resolver failure from the last poll; omitted for legacy waits. */
+  diagnostic?: string;
   matched: boolean;
   /** The element that satisfied the predicate (present only when matched). */
   matchedElement?: Element;

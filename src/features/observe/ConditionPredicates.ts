@@ -15,7 +15,79 @@ import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
 
 export type ConditionResolver = Pick<ElementResolver, "resolve">;
-export type ConditionSelector = Pick<ResolverSelector, "elementId" | "text" | "container">;
+export type ConditionSelector = Pick<
+  ResolverSelector,
+  "elementId" | "text" | "container" | "selectionStrategy" | "match" | "caseSensitive"
+>;
+
+/** Additive scope opt-in; plain one-level containers keep legacy absence semantics. */
+export function usesScopedWait(selector: ConditionSelector): boolean {
+  const scope = selector.container;
+  return (
+    selector.selectionStrategy !== undefined ||
+    (!!scope &&
+      (scope.container !== undefined ||
+        scope.index !== undefined ||
+        scope.selectionStrategy !== undefined))
+  );
+}
+
+/** Keep the legacy substring container-text match at every level of the chain. */
+export function waitContainerSelector(
+  container: ResolverSelector | undefined,
+): ResolverSelector | undefined {
+  if (!container) {
+    return undefined;
+  }
+  return {
+    ...container,
+    match: container.text !== undefined ? "contains" : container.match,
+    container: waitContainerSelector(container.container),
+  };
+}
+
+export function isScopedWaitResolutionError(error: string | undefined): boolean {
+  return (
+    isMissingContainerError(error) ||
+    /^Container level \d+ ambiguous:/.test(error ?? "") ||
+    error?.startsWith("Target ambiguous:") === true ||
+    error?.startsWith("Target not found") === true
+  );
+}
+
+function resolutionFailureDiagnostic(
+  result: ElementResolution | undefined,
+  selector: ConditionSelector,
+): ConditionEvaluation {
+  return {
+    matched: false,
+    candidates:
+      result?.candidates.slice(0, 5).flatMap((node) => (node.element ? [node.element] : [])) ?? [],
+    diagnostic:
+      result?.error ??
+      (selector.container ? "Target not found within container" : "Target not found"),
+  };
+}
+
+export function waitResolutionFailure(
+  result: ElementResolution | undefined,
+  selector: ConditionSelector,
+  negative = false,
+): ConditionEvaluation | undefined {
+  if (!usesScopedWait(selector)) {
+    return undefined;
+  }
+  if (!result) {
+    return resolutionFailureDiagnostic(result, selector);
+  }
+  if (negative && result.error?.startsWith("Target not found")) {
+    return undefined;
+  }
+  if (!result.error && (result.chosen || negative)) {
+    return undefined;
+  }
+  return resolutionFailureDiagnostic(result, selector);
+}
 
 /** One resolver and one match-mode lock per wait, never shared across waits. */
 function searchForWait(
@@ -34,11 +106,12 @@ function searchForWait(
         id: String(observation.updatedAt ?? "wait"),
         nodes: projection.project(observation.viewHierarchy),
       },
-      selector.container?.text
-        ? { ...selector, container: { ...selector.container, match: "contains" } }
-        : selector,
+      { ...selector, container: waitContainerSelector(selector.container) },
       { ...intent, matchMode },
     );
+    if (usesScopedWait(selector) && isScopedWaitResolutionError(result.error)) {
+      return result;
+    }
     if (isMissingContainerError(result.error)) {
       return undefined;
     }
@@ -156,6 +229,10 @@ export function appear(
   const search = searchForWait(resolver, selector, { action: "inspect", requireBounds: true });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
+    const failure = waitResolutionFailure(result, selector);
+    if (failure) {
+      return failure;
+    }
     const sources =
       result?.matches
         .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
@@ -187,8 +264,24 @@ export function disappear(
   });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
+    const failure = waitResolutionFailure(result, selector, true);
+    if (failure) {
+      return failure;
+    }
     return { matched: !boundedMatchedSource(result, selector), candidates: elements(result) };
   };
+}
+
+function isClickableWaitTarget(
+  selected: SearchableEntry | null | undefined,
+  selector: ConditionSelector,
+): boolean {
+  return Boolean(
+    ownsSelectorText(selected ?? undefined, selector.text) &&
+    selected?.element &&
+    selected.bounds &&
+    selected.affordances.includes("tap"),
+  );
 }
 
 export function clickable(
@@ -198,12 +291,13 @@ export function clickable(
   const search = searchForWait(resolver, selector, { action: "inspect", matchMode: "exact" });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
+    const failure = waitResolutionFailure(result, selector);
+    if (failure) {
+      return failure;
+    }
     const source = result?.matches.find(({ node }) => node === result.chosen)?.sourceNodes?.[0];
     const selected = source ?? result?.chosen;
-    const ownsText = ownsSelectorText(selected, selector.text);
-    const actionable = Boolean(
-      ownsText && selected?.element && selected.bounds && selected.affordances.includes("tap"),
-    );
+    const actionable = isClickableWaitTarget(selected, selector);
     const candidates = idWaitCandidates(resolver, observation, selector, result, elements(result));
     return {
       matched: actionable,
@@ -219,30 +313,28 @@ export function textEquals(
   selector: ConditionSelector,
   expected: string,
 ): ConditionPredicate {
-  const projection = new SearchableHierarchy();
+  const container = waitContainerSelector(selector.container);
+  const search = searchForWait(
+    resolver,
+    selector.elementId !== undefined
+      ? { elementId: selector.elementId, container, selectionStrategy: selector.selectionStrategy }
+      : {
+          text: expected,
+          container,
+          selectionStrategy: selector.selectionStrategy,
+          match: "exact",
+          caseSensitive: true,
+        },
+    { action: "inspect", matchMode: "exact" },
+  );
   return (observation): ConditionEvaluation => {
-    if (!observation.viewHierarchy) {
-      return { matched: false, candidates: [] };
+    const result = search(observation);
+    const failure = waitResolutionFailure(result, selector);
+    if (failure) {
+      return failure;
     }
-    const container = selector.container?.text
-      ? { ...selector.container, match: "contains" as const }
-      : selector.container;
-    const snapshot = {
-      id: String(observation.updatedAt ?? "wait"),
-      nodes: projection.project(observation.viewHierarchy),
-    };
-    const result = resolver.resolve(
-      snapshot,
-      selector.elementId !== undefined
-        ? { elementId: selector.elementId, container }
-        : { text: expected, container, match: "exact", caseSensitive: true },
-      { action: "inspect", matchMode: "exact" },
-    );
-    if (isMissingContainerError(result.error)) {
+    if (!result) {
       return { matched: false, candidates: [] };
-    }
-    if (result.error) {
-      throw new ActionableError(result.error);
     }
     const exactText = (value: string | undefined) =>
       value !== undefined && normalizeQuotes(value) === normalizeQuotes(expected);
@@ -284,6 +376,12 @@ export function countStable(
   let equalRun = 0;
   return (observation): ConditionEvaluation => {
     const result = search(observation);
+    const failure = waitResolutionFailure(result, selector, result?.error === undefined);
+    if (failure) {
+      previousCount = undefined;
+      equalRun = 0;
+      return failure;
+    }
     const count = new Set(result?.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node]))
       .size;
     equalRun = previousCount !== undefined && count === previousCount ? equalRun + 1 : 1;

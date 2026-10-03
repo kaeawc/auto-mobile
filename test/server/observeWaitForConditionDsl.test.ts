@@ -800,3 +800,154 @@ describe("tool registration", () => {
     expect(names).not.toContain("waitForCondition");
   });
 });
+
+describe("scoped waits through the poll loop", () => {
+  const container = { elementId: "item_42", container: { elementId: "cart_A" } };
+  const frame = (inside: number, outer = "cart_A", updatedAt = 10) =>
+    makeObservation(
+      [
+        node({
+          "resource-id": "cart_B",
+          node: [node({ "resource-id": "item_42", node: [node({ "resource-id": "remove" })] })],
+        }),
+        node({
+          "resource-id": outer,
+          node: [
+            {
+              node: [
+                node({
+                  "resource-id": "item_42",
+                  node: Array.from({ length: inside }, () => node({ "resource-id": "remove" })),
+                }),
+              ],
+            },
+          ],
+        }),
+      ],
+      updatedAt,
+    );
+  const run = (wait: Parameters<typeof waitForObservation>[1], frames: ObserveResult[]) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult((index) => ({
+      ...frames[Math.min(index, frames.length - 1)],
+      updatedAt: 10 + index * 10,
+      viewHierarchy: {
+        ...frames[Math.min(index, frames.length - 1)].viewHierarchy!,
+        updatedAt: 10 + index * 10,
+      },
+    }));
+    return waitForObservation(screen, { timeoutMs: 450, ...wait }, undefined, false, timer);
+  };
+
+  test("DSL timeout reports unique target ambiguity and candidates", async () => {
+    const outcome = await run(
+      {
+        for: "appear",
+        elementId: "remove",
+        container,
+        selectionStrategy: "unique",
+      },
+      [frame(2)],
+    );
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.timeoutReason).toContain("Target ambiguous: 2 matches");
+    expect(outcome.candidates).toHaveLength(2);
+    const ambiguousScope = makeObservation([
+      node({ "resource-id": "cart_A" }),
+      node({ "resource-id": "cart_A" }),
+    ]);
+    const scopeOutcome = await run(
+      { for: "appear", elementId: "remove", container, selectionStrategy: "unique" },
+      [ambiguousScope],
+    );
+    expect(scopeOutcome.timedOut).toBe(true);
+    expect(scopeOutcome.timeoutReason).toContain("Container level 1 ambiguous");
+    expect(scopeOutcome.candidates).toHaveLength(2);
+  });
+
+  test("outside match never satisfies nested appear over the full timeout", async () => {
+    const outcome = await run({ for: "appear", elementId: "remove", container }, [frame(0)]);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.waitMs).toBe(450);
+    expect(outcome.timeoutReason).toContain("Target not found within container");
+  });
+
+  test("complete scope chain is re-resolved on every observation", async () => {
+    const outcome = await run({ for: "appear", elementId: "remove", container }, [
+      frame(0),
+      frame(1, "missing"),
+      frame(1),
+    ]);
+    expect(outcome.matched).toBe(true);
+    expect(outcome.polls).toBe(3);
+  });
+
+  test("legacy element arm now retains the nested chain and leaf unique", async () => {
+    const outside = await run({ elementId: "remove", container }, [frame(0)]);
+    expect(outside.timedOut).toBe(true);
+    const ambiguous = await run({ elementId: "remove", container, selectionStrategy: "unique" }, [
+      frame(2),
+    ]);
+    expect(ambiguous.timedOut).toBe(true);
+    expect(ambiguous.timeoutReason).toContain("Target ambiguous: 2 matches");
+    expect(ambiguous.candidates).toHaveLength(2);
+    const compound = makeObservation([
+      node({
+        "resource-id": "cart_A",
+        node: [
+          node({
+            "resource-id": "item_42",
+            node: [
+              node({ "resource-id": "remove", text: "Chosen" }),
+              node({ "resource-id": "remove", text: "Other" }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+    expect(
+      (
+        await run({ elementId: "remove", text: "Chosen", selectionStrategy: "unique", container }, [
+          compound,
+        ])
+      ).matched,
+    ).toBe(true);
+  });
+
+  test("scoped absent blocks missing and ambiguous scopes but accepts a missing leaf", async () => {
+    const wait = {
+      absent: { elementId: "remove" },
+      container,
+      selectionStrategy: "unique" as const,
+    };
+    expect((await run(wait, [frame(0, "missing")])).timedOut).toBe(true);
+    const ambiguous = frame(0);
+    ambiguous.viewHierarchy = makeHierarchy([
+      node({ "resource-id": "cart_A" }),
+      node({ "resource-id": "cart_A" }),
+    ]);
+    expect((await run(wait, [ambiguous])).timedOut).toBe(true);
+    expect((await run(wait, [frame(0)])).matched).toBe(true);
+    expect(
+      (
+        await run(
+          {
+            absent: { elementId: "remove", selectionStrategy: "unique" },
+            container: { elementId: "missing" },
+          },
+          [frame(0)],
+        )
+      ).timedOut,
+    ).toBe(true);
+    expect((await run(wait, [frame(1)])).timedOut).toBe(true);
+    expect(
+      (
+        await run({ absent: { elementId: "remove" }, container: { elementId: "missing" } }, [
+          frame(0),
+        ])
+      ).matched,
+    ).toBe(true);
+  });
+});

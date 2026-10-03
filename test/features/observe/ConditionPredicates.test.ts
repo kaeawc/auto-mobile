@@ -425,3 +425,114 @@ describe("disappear predicate", () => {
     expect(evaluation.matched).toBe(true);
   });
 });
+
+describe("scoped wait predicates", () => {
+  const resolver = new ElementResolver(() => 0.9);
+  const container = { elementId: "item_42", container: { elementId: "cart_A" } };
+  const selector = { elementId: "remove", container, selectionStrategy: "unique" as const };
+  const remove = () => node({ "resource-id": "remove", text: "Remove", clickable: true });
+  const cart = (id: string, leaves: Record<string, unknown>[]) =>
+    node({
+      "resource-id": id,
+      node: [
+        {
+          node: [
+            node({ "resource-id": "item_42", node: [{ node: leaves }] }),
+            node({ "resource-id": "item_73", node: [remove()] }),
+          ],
+        },
+      ],
+    });
+
+  test("nested appear excludes other carts across anonymous wrappers", () => {
+    const evaluation = appear(
+      resolver,
+      selector,
+    )(obs([cart("cart_B", [remove()]), cart("cart_A", [remove()])]));
+    expect(evaluation.matched).toBe(true);
+    expect(evaluation.candidates).toHaveLength(1);
+    expect(
+      appear(resolver, selector)(obs([cart("cart_B", [remove()]), cart("cart_A", [])])).matched,
+    ).toBe(false);
+  });
+
+  test("scoped disappear requires a resolved scope and ignores an outside leaf", () => {
+    const predicate = disappear(resolver, selector);
+    expect(predicate(obs([cart("cart_B", [remove()])])).matched).toBe(false);
+    expect(predicate(obs([cart("cart_B", [remove()]), cart("cart_A", [])])).matched).toBe(true);
+    expect(predicate(obs([cart("cart_A", [remove()])])).matched).toBe(false);
+  });
+
+  test("unique leaf ambiguity keeps polling with bounded target diagnostics", () => {
+    const evaluation = appear(
+      resolver,
+      selector,
+    )(obs([cart("cart_A", Array.from({ length: 8 }, remove))]));
+    expect(evaluation.matched).toBe(false);
+    expect(evaluation).toMatchObject({
+      diagnostic: expect.stringContaining("Target ambiguous: 8 matches"),
+    });
+    expect(evaluation.candidates).toHaveLength(5);
+  });
+
+  test("unique outer container ambiguity is not proof of presence or absence", () => {
+    const observation = obs([cart("cart_A", [remove()]), cart("cart_A", [])]);
+    const evaluation = appear(resolver, selector)(observation);
+    expect(evaluation.matched).toBe(false);
+    expect(evaluation).toMatchObject({
+      diagnostic: expect.stringContaining("Container level 1 ambiguous"),
+    });
+    expect(evaluation.candidates).toHaveLength(2);
+    expect(disappear(resolver, selector)(observation).matched).toBe(false);
+  });
+
+  test("missing and indexed-out-of-range scopes block every scoped predicate", () => {
+    for (const selected of [selector, { ...selector, container: { ...container, index: 9 } }]) {
+      const observation = obs([
+        cart("cart_B", [remove()]),
+        ...("index" in selected.container ? [cart("cart_A", [remove()])] : []),
+      ]);
+      for (const predicate of [
+        appear(resolver, selected),
+        disappear(resolver, selected),
+        clickable(resolver, selected),
+        textEquals(resolver, selected, "Remove"),
+      ]) {
+        expect(predicate(observation).matched).toBe(false);
+      }
+      const stable = countStable(resolver, selected);
+      expect(stable(observation).matched).toBe(false);
+      expect(stable(observation).matched).toBe(false);
+    }
+  });
+
+  test("unique textEquals and clickable do not pick one ambiguous leaf", () => {
+    const observation = obs([cart("cart_A", [remove(), remove()])]);
+    expect(clickable(resolver, selector)(observation).matched).toBe(false);
+    expect(
+      textEquals(resolver, { ...selector, text: "Remove" }, "Remove")(observation).matched,
+    ).toBe(false);
+  });
+
+  test("per-level index overrides unique and explicit random selects a leaf", () => {
+    const observation = obs([
+      cart("cart_A", []),
+      cart("cart_A", [remove(), node({ "resource-id": "remove", text: "Second" })]),
+    ]);
+    const indexed = {
+      ...selector,
+      container: { ...container, container: { elementId: "cart_A", index: 1 } },
+    };
+    expect(appear(resolver, indexed)(observation).matched).toBe(false);
+    const random = { ...indexed, selectionStrategy: "random" as const };
+    expect(appear(resolver, random)(observation).matchedElement?.text).toBe("Second");
+  });
+
+  test("legacy missing flat container disappear and unscoped appear stay compatible", () => {
+    expect(
+      disappear(resolver, { elementId: "remove", container: { elementId: "missing" } })(obs([]))
+        .matched,
+    ).toBe(true);
+    expect(appear(resolver, { elementId: "remove" })(obs([remove(), remove()])).matched).toBe(true);
+  });
+});

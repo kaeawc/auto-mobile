@@ -1,3 +1,5 @@
+import type { Element } from "../../models/Element";
+import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { ResolutionAction } from "../../features/utility/ElementResolver";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
@@ -6,15 +8,17 @@ import type { ElementSelectionStrategy } from "../../models/ElementSelectionStra
 import type { TextSelectionIntent } from "./ElementFinder";
 
 export interface ElementSelector {
-  hasContainer?(
+  resolveContainer?(
     capture: ViewHierarchyResult,
-    container: { elementId?: string; text?: string },
-  ): boolean;
+    container: ElementContainerSelector,
+    strategy?: ElementSelectionStrategy,
+  ): Element | undefined;
+  hasContainer?(capture: ViewHierarchyResult, container: ElementContainerSelector): boolean;
   selectByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementContainerSelector | null;
       partialMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
@@ -30,7 +34,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementContainerSelector | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
@@ -44,7 +48,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     testTag: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementContainerSelector | null;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
@@ -56,7 +60,7 @@ export interface ElementSelector {
   selectClickable(
     viewHierarchy: ViewHierarchyResult,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementContainerSelector | null;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
       scrollableContainer?: boolean;
@@ -68,7 +72,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     text: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementContainerSelector | null;
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
@@ -83,7 +87,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementContainerSelector | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;

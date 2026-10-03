@@ -25115,32 +25115,13 @@
       "type": "object",
       "properties": {
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
-          "description": "Scope search to a container",
-          "anyOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ]
+          "description": "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based.",
+          "$ref": "#/$defs/__schema0"
         },
         "selectionStrategy": {
-          "description": "Element selection strategy: 'first' (default) or 'random'",
+          "description": "Element selection strategy: first (default), random, or unique; unique requires exactly one eligible target and every unindexed container",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "scrollableContainer": {
           "description": "Search only scrollable containers/lists",
@@ -25195,7 +25176,61 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -25604,27 +25639,8 @@
           "type": "boolean"
         },
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
-          "description": "Scope search to a container",
-          "anyOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ]
+          "description": "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based.",
+          "$ref": "#/$defs/__schema0"
         },
         "action": {
           "description": "Action type (default: tap)",
@@ -25633,9 +25649,9 @@
           "enum": ["tap", "doubleTap", "longPress", "focus"]
         },
         "selectionStrategy": {
-          "description": "Selection strategy when multiple match (default: first)",
+          "description": "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target.",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "index": {
           "description": "0-based index into the full candidate list, ranked by topmost window, then smallest eligible area. Index 0 is the default first pick when candidates share an action. Out of range → no match.",
@@ -25722,7 +25738,61 @@
         }
       },
       "required": ["selector"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

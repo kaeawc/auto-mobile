@@ -1,3 +1,5 @@
+import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
+import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { getHierarchySnapshot } from "../observe/HierarchyCapture";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
@@ -20,11 +22,11 @@ import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 
 interface SelectionOptions {
-  container?: { elementId?: string; text?: string } | null;
+  container?: ElementContainerSelector | null;
   partialMatch?: boolean;
   caseSensitive?: boolean;
   fuzzyMatch?: boolean;
-  strategy?: "first" | "random";
+  strategy?: ElementSelectionStrategy;
   index?: number;
   selectionIntent?: TextSelectionIntent;
   intentAction?: ResolutionAction;
@@ -117,22 +119,35 @@ export class ResolverElementSelector implements ElementSelector {
     );
   }
 
-  hasContainer(
+  hasContainer(capture: ViewHierarchyResult, container: ElementContainerSelector): boolean {
+    return this.containerResolution(capture, container).scope !== undefined;
+  }
+
+  resolveContainer(
     capture: ViewHierarchyResult,
-    container: { elementId?: string; text?: string },
-  ): boolean {
+    container: ElementContainerSelector,
+    strategy?: ElementSelectionStrategy,
+  ) {
+    return this.containerResolution(capture, container, strategy).scope?.element;
+  }
+
+  private containerResolution(
+    capture: ViewHierarchyResult,
+    container: ElementContainerSelector,
+    strategy?: ElementSelectionStrategy,
+  ) {
     const result = this.resolver.resolve(
+      { id: "container", nodes: this.selectionNodes(capture, {}) },
       {
-        id: "container",
-        nodes: this.selectionNodes(capture, {}),
+        container:
+          strategy === "unique" ? { ...container, selectionStrategy: "unique" } : container,
       },
-      container,
       { action: "inspect" },
     );
     if (result.error && !isMissingContainerError(result.error)) {
       throw new ActionableError(result.error);
     }
-    return result.chosen !== null;
+    return result;
   }
 
   private viewport(capture: ViewHierarchyResult, options: ScreenSizeForOffscreenCheckOptions = {}) {
@@ -173,13 +188,21 @@ export class ResolverElementSelector implements ElementSelector {
         requireBounds: options.intentAction === "inspect",
       },
     );
-    if (result.error && !isMissingContainerError(result.error)) {
-      throw new ActionableError(result.error);
-    }
+    this.checkResolutionError(result.error, options);
     if (!result.error && !result.chosen && options.intentAction === "long-press") {
       return this.select(capture, selector, { ...options, intentAction: "tap" });
     }
     return this.selectionResult(result, capture, options.strategy ?? "first", selector);
+  }
+
+  private checkResolutionError(error: string | undefined, options: SelectionOptions): void {
+    if (!error) {
+      return;
+    }
+    const strictScope = options.strategy === "unique" || options.container?.container !== undefined;
+    if (strictScope || !isMissingContainerError(error)) {
+      throw new ActionableError(error);
+    }
   }
 
   private snapshotId(capture: ViewHierarchyResult): string {
@@ -228,7 +251,7 @@ export class ResolverElementSelector implements ElementSelector {
   private selectionResult(
     result: ElementResolution,
     capture: ViewHierarchyResult,
-    strategy: "first" | "random",
+    strategy: ElementSelectionStrategy,
     selector?: ResolverSelector,
   ): ElementSelectionResult {
     const source = matchedSourceNode(result, selector);

@@ -1,3 +1,4 @@
+import type { ElementContainerSelector } from "../models/PinchOnOptions";
 import type { TapAtOptions } from "../models/TapAtOptions";
 /**
  * Type definitions for interaction tools.
@@ -73,10 +74,7 @@ export interface TapOnArgs {
     accessibilityLink?: string;
   };
   sibling?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;
   index?: number;
   action: "tap" | "doubleTap" | "longPress" | "focus";
@@ -104,10 +102,7 @@ export type TapAtArgs = TapAtOptions & {
 };
 
 export interface TapAnyArgs {
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;
   action: "tap" | "doubleTap" | "longPress";
   duration?: number;

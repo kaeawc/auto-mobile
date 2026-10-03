@@ -39,7 +39,7 @@ test("nested scopes resolve outer to inner and identify the failing level", () =
     ).error,
   ).toContain("Container level 1 not found");
   expect(resolver.resolve(capture, { ...query, elementId: "missing" }, tap).error).toBe(
-    "Target not found",
+    "Target not found within container",
   );
 });
 

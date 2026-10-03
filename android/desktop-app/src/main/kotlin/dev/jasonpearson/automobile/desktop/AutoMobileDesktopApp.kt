@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.BOOTED_DEVICES_RESOURC
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DEVICE_LOCK_STATES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlExecutor
+import dev.jasonpearson.automobile.desktop.core.workspace.DesktopOverlayState
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceSessionSupersededForwarder
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
@@ -232,20 +233,21 @@ fun AutoMobileDesktopApp(
     }
   val recoveringDaemon by recoveryLauncher.inFlight.collectAsState()
   var paletteOpen by remember { mutableStateOf(false) }
-  var showSettings by remember { mutableStateOf(false) }
-  var showAbout by remember { mutableStateOf(false) }
+  var overlayState by remember { mutableStateOf(DesktopOverlayState.None) }
+  val showSettings = overlayState == DesktopOverlayState.Settings
+  val showAbout = overlayState == DesktopOverlayState.About
   var captureRequest by remember { mutableStateOf<Pair<String, Int>?>(null) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
   LaunchedEffect(menuBarActions.showAbout) {
     if (menuBarActions.showAbout) {
-      showAbout = true
+      overlayState = overlayState.openAbout()
       menuBarActions.showAbout = false
     }
   }
   LaunchedEffect(menuBarActions.showSettings) {
     if (menuBarActions.showSettings) {
-      showSettings = true
+      overlayState = overlayState.openSettings()
       menuBarActions.showSettings = false
     }
   }
@@ -703,7 +705,7 @@ fun AutoMobileDesktopApp(
         if (showSettings) {
           SettingsPanel(
             settings = settings,
-            onClose = { showSettings = false },
+            onClose = { overlayState = overlayState.closeSettings() },
             clientProvider = { graph.autoMobileClient },
             modifier = Modifier.fillMaxSize(),
           )
@@ -711,7 +713,7 @@ fun AutoMobileDesktopApp(
         if (showAbout) {
           AboutDialog(
             version = graph.appVersionProvider.current(),
-            onDismiss = { showAbout = false },
+            onDismiss = { overlayState = overlayState.closeAbout() },
           )
         }
       }

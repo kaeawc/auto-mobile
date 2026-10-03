@@ -1,5 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.platform
 
+import java.net.URL
+import java.net.URLConnection
+import java.net.URLStreamHandler
+import java.util.Collections
 import java.util.jar.Attributes
 import java.util.jar.Manifest
 import kotlin.test.Test
@@ -13,6 +17,29 @@ import kotlin.test.assertNull
  * chosen primary mechanism is actually covered, not just the fake seam.
  */
 class PackagedVersionSourceTest {
+
+  @Test
+  fun `provider prefers the resource version over a different manifest version`() {
+    val loader = FakeVersionClassLoader("version=1.2.3\n")
+    val provider = RuntimeAppVersionProvider(PackagedVersionSource(classLoader = loader))
+    assertEquals(AppVersion.of("1.2.3"), provider.current())
+    assertEquals(0, loader.manifestScans, "a valid resource avoids the manifest fallback")
+  }
+
+  @Test
+  fun `provider uses the manifest version when the resource is absent`() {
+    val loader = FakeVersionClassLoader(null)
+    val provider = RuntimeAppVersionProvider(PackagedVersionSource(classLoader = loader))
+    assertEquals(AppVersion.of("4.5.6"), provider.current())
+    assertEquals(1, loader.manifestScans)
+  }
+
+  @Test
+  fun `provider uses the manifest version when the resource version is blank`() {
+    val loader = FakeVersionClassLoader("version=   \n")
+    val provider = RuntimeAppVersionProvider(PackagedVersionSource(classLoader = loader))
+    assertEquals(AppVersion.of("4.5.6"), provider.current())
+  }
 
   @Test
   fun `reads the version from the generated classpath resource`() {
@@ -55,5 +82,34 @@ class PackagedVersionSourceTest {
       versionFromManifest(otherJar),
       "a third-party jar's version must not be mistaken for ours",
     )
+  }
+
+  private class FakeVersionClassLoader(private val resource: String?) : ClassLoader(null) {
+    var manifestScans = 0
+      private set
+
+    override fun getResourceAsStream(name: String) =
+      if (name == "automobile-version.properties") resource?.byteInputStream() else null
+
+    override fun getResources(name: String): java.util.Enumeration<URL> {
+      if (name != "META-INF/MANIFEST.MF") return Collections.emptyEnumeration()
+      manifestScans++
+      val manifest =
+        "Manifest-Version: 1.0\nImplementation-Title: AutoMobile\nImplementation-Version: 4.5.6\n\n"
+      val url =
+        URL(
+          null,
+          "memory:manifest",
+          object : URLStreamHandler() {
+            override fun openConnection(url: URL) =
+              object : URLConnection(url) {
+                override fun connect() = Unit
+
+                override fun getInputStream() = manifest.byteInputStream()
+              }
+          },
+        )
+      return Collections.enumeration(listOf(url))
+    }
   }
 }

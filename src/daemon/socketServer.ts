@@ -5742,9 +5742,9 @@ export class UnixSocketServer {
     }
     if (
       args.duration !== undefined &&
-      (typeof args.duration !== "number" || !Number.isFinite(args.duration))
+      (typeof args.duration !== "number" || !Number.isInteger(args.duration))
     ) {
-      throw new Error("input/tap duration must be numeric when provided");
+      throw new Error("input/tap duration must be an integer number of milliseconds when provided");
     }
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/tap deviceId must be a string when provided");
@@ -5799,11 +5799,11 @@ export class UnixSocketServer {
     if (
       args.durationMs !== undefined &&
       (typeof args.durationMs !== "number" ||
-        !Number.isFinite(args.durationMs) ||
+        !Number.isInteger(args.durationMs) ||
         args.durationMs < 1 ||
         args.durationMs > 60_000)
     ) {
-      throw new Error("input/swipe durationMs must be between 1 and 60000 milliseconds");
+      throw new Error("input/swipe durationMs must be integer milliseconds between 1 and 60000");
     }
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/swipe deviceId must be a string when provided");

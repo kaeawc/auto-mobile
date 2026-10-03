@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PressButton } from "../../src/features/action/PressButton";
+import { resolveAndroidKeyCode } from "../../src/features/action/pressButtonPolicy";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { createFakeDaemonState } from "../daemon/helpers/inputSocketHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -107,7 +109,23 @@ function validateRequests(markdown: string): number {
       expect(typeof request.id).toBe("string");
       expect(request.id).not.toBe("");
       expect(typeof request.method).toBe("string");
-      parserFor(request.method)(request.params);
+      const method = String(request.method);
+      const params = record(request.params);
+      const row = commandRows(doc).find(([cell]) => codeTokens(cell).includes(method));
+      if (!row) {
+        throw new Error(`Undocumented input route: ${method}`);
+      }
+      const parsed = record(parserFor(method)(params));
+      validateParsedParams(method, params, paramNames(row[1]), parsed);
+      if (method === "input/key") {
+        expect(params.platform, "input/key is Android-only").toBe("android");
+      }
+      if (method === "input/pressButton") {
+        expect(
+          buttonSupported(String(params.platform), String(parsed.button)),
+          `button ${String(params.button)}: ${String(params.platform)} support`,
+        ).toBe(true);
+      }
       requests++;
     }
   }
@@ -156,15 +174,15 @@ const samples: Record<string, unknown> = {
   startY: 1600,
   endX: 540,
   endY: 400,
-  durationMs: 300,
-  button: "home",
+  durationMs: 450,
+  button: "app_switch",
   key: "enter",
   text: "hello",
   mode: "append",
-  submit: false,
+  submit: true,
   frameContext: "frame-1",
   gestureId: "drag-1",
-  cancel: false,
+  cancel: true,
 };
 
 function sampleParams(names: string[]): Record<string, unknown> {
@@ -179,14 +197,84 @@ function sampleParams(names: string[]): Record<string, unknown> {
   );
 }
 
+// Every wire parameter needs an explicit retention mapping. Only mode/button normalize.
+const paramMappings: Record<string, { key: string; expected?: (value: unknown) => unknown }> = {
+  platform: { key: "platform" },
+  deviceId: { key: "deviceId" },
+  x: { key: "x" },
+  y: { key: "y" },
+  duration: { key: "duration" },
+  startX: { key: "startX" },
+  startY: { key: "startY" },
+  endX: { key: "endX" },
+  endY: { key: "endY" },
+  durationMs: { key: "durationMs" },
+  button: { key: "button", expected: (value) => (value === "app_switch" ? "recent" : value) },
+  key: { key: "key" },
+  text: { key: "text" },
+  mode: { key: "append", expected: (value) => value === "append" },
+  submit: { key: "submit" },
+  frameContext: { key: "frameContext" },
+  gestureId: { key: "gestureId" },
+  cancel: { key: "cancel" },
+};
+
+function paramNames(cell: string): string[] {
+  return codeTokens(cell.split("(e.g.")[0].split(" — ")[0]);
+}
+
+function validateParsedParams(
+  method: string,
+  params: Record<string, unknown>,
+  documentedNames: string[],
+  result: unknown,
+): void {
+  const parsed = record(result);
+  const names = documentedNames.map((name) => name.replace(/\?$/, ""));
+  const parsedKeys = names.map((name) => {
+    const mapping = paramMappings[name];
+    if (!mapping) {
+      throw new Error(`${method}: no retention mapping for documented param ${name}`);
+    }
+    return mapping.key;
+  });
+  for (const [param, value] of Object.entries(params)) {
+    const mapping = paramMappings[param];
+    if (!mapping) {
+      throw new Error(`${method}: no retention mapping for documented param ${param}`);
+    }
+    expect(Object.hasOwn(parsed, mapping.key), `${method}: param ${param} not retained`).toBe(true);
+    expect(
+      parsed[mapping.key],
+      `${method}: param ${param} mapped incorrectly to ${mapping.key}`,
+    ).toEqual(mapping.expected ? mapping.expected(value) : value);
+    expect(names, `${method}: undocumented param ${param}`).toContain(param);
+  }
+  // responseButton preserves the original alias in the response; button is normalized for dispatch.
+  const allowedKeys = method === "input/pressButton" ? ["responseButton"] : [];
+  if (method === "input/pressButton") {
+    expect(parsed.responseButton, `${method}: button original value not retained`).toBe(
+      params.button,
+    );
+  }
+  for (const key of Object.keys(parsed)) {
+    expect([...parsedKeys, ...allowedKeys], `${method}: undocumented parsed key ${key}`).toContain(
+      key,
+    );
+  }
+}
+
 function validateTableRow(methodCell: string, paramsCell: string): void {
-  const names = codeTokens(paramsCell.split("(e.g.")[0].split(" — ")[0]);
+  const names = paramNames(paramsCell);
   const params = sampleParams(names);
   for (const method of codeTokens(methodCell)) {
     const parser = parserFor(method);
-    expect(() => parser(params), `${method}: documented params`).not.toThrow();
+    if (method === "input/key") {
+      expect(paramsCell, "input/key must document Android-only support").toContain("Android only");
+    }
+    validateParsedParams(method, params, names, parser(params));
     for (const name of names) {
-      const param = name.endsWith("?") ? name.slice(0, -1) : name;
+      const param = name.replace(/\?$/, "");
       const without = { ...params };
       delete without[param];
       if (name.endsWith("?")) {
@@ -194,23 +282,69 @@ function validateTableRow(methodCell: string, paramsCell: string): void {
       } else {
         expect(() => parser(without), `${method}: required ${param}`).toThrow();
       }
-      // Restoring each documented key to an otherwise valid sample must be accepted.
-      expect(
-        () => parser({ ...without, [param]: samples[param] }),
-        `${method}: ${param}`,
-      ).not.toThrow();
     }
     const examples = paramsCell.split("(e.g.")[1]?.split(")")[0];
     if (examples) {
       const param = method === "input/pressButton" ? "button" : "key";
       for (const value of codeTokens(examples)) {
-        expect(
-          () => parser({ ...params, [param]: value }),
-          `${method}: example ${value}`,
-        ).not.toThrow();
+        const example = { ...params, [param]: value };
+        validateParsedParams(method, example, names, parser(example));
+        if (param === "key") {
+          expect(example.platform, "input/key examples must be Android-only").toBe("android");
+        }
       }
     }
   }
+}
+
+function buttonSupported(platform: string, normalized: string): boolean {
+  return platform === "android"
+    ? resolveAndroidKeyCode(normalized) !== undefined
+    : PressButton.IOS_NAVIGATION_BUTTONS.has(normalized) ||
+        PressButton.IOS_HARDWARE_BUTTONS.has(normalized);
+}
+
+function validateButtonTable(markdown: string): void {
+  const section = markdown.split("### Button support\n")[1]?.trimStart().split("\n\n")[0];
+  if (!section) {
+    throw new Error("Missing Button support table");
+  }
+  const rows = section
+    .split("\n")
+    .filter((line) => line.startsWith("| `"))
+    .map(tableCells);
+  const documentedButtons = rows.map(([cell]) => codeTokens(cell)[0]);
+  const buttonCell = commandRows(markdown).find(
+    ([method]) => method === "`input/pressButton`",
+  )?.[1];
+  const examples = codeTokens(buttonCell?.split("(e.g.")[1]?.split(")")[0] ?? "");
+  expect(documentedButtons.sort(), "Every button example needs platform support").toEqual(
+    examples.sort(),
+  );
+  for (const [cell, android, ios] of rows) {
+    const button = codeTokens(cell)[0];
+    for (const [platform, support] of [
+      ["android", android],
+      ["ios", ios],
+    ]) {
+      const params = { platform, button };
+      const parsed = record(parserFor("input/pressButton")(params));
+      validateParsedParams("input/pressButton", params, paramNames(buttonCell ?? ""), parsed);
+      const normalized = String(parsed.button);
+      const supported = buttonSupported(platform, normalized);
+      expect(support, `button ${button}: ${platform} support`).toBe(supported ? "Yes" : "No");
+    }
+  }
+}
+
+function validateDurationDocs(markdown: string): void {
+  expect(markdown, "tap duration must document integer milliseconds").toContain(
+    "`duration` for taps is an optional integer number of milliseconds",
+  );
+  expect(markdown, "swipe durationMs must document integer milliseconds and bounds").toContain(
+    "`durationMs` for swipes is an optional integer between 1 and 60000 milliseconds",
+  );
+  expect(markdown).toContain("defaults to 300 milliseconds");
 }
 
 describe("screen control docs match real socket parsers", () => {
@@ -270,8 +404,130 @@ describe("screen control docs match real socket parsers", () => {
     expect(() => validateTableRow("`input/typeText`", "`platform`, `text`, `mystery?`")).toThrow(
       "No canonical sample for documented param: mystery",
     );
-    expect(() => validateTableRow("`input/typeText`", "`platform`, `text`, `submit`")).toThrow();
-    expect(() => validateTableRow("`input/key`", "`platform`, `key` (e.g. `invalid`)")).toThrow();
+    expect(() =>
+      validateTableRow(
+        "`input/typeText`",
+        "`platform`, `deviceId?`, `text`, `mode?`, `submit`, `frameContext?`",
+      ),
+    ).toThrow();
+    expect(() =>
+      validateTableRow(
+        "`input/key`",
+        "`platform`, `deviceId?`, `key`, `frameContext?` (e.g. `invalid`) — Android only",
+      ),
+    ).toThrow();
     expect(() => parserFor("input/nonexistent")).toThrow("Undocumented input route");
+  });
+});
+
+describe("screen control contract guard regressions", () => {
+  test("platform button table matches dispatch support, including app_switch normalization", () => {
+    validateButtonTable(doc);
+  });
+
+  test("rejects menu documented as supported on iOS", () => {
+    const badDoc =
+      "## Input commands\n" +
+      "| `input/pressButton` | `platform`, `deviceId?`, `button`, `frameContext?` (e.g. `menu`) |\n" +
+      "### Button support\n\n| Button | Android | iOS |\n| --- | --- | --- |\n| `menu` | Yes | Yes |";
+    expect(() => validateButtonTable(badDoc)).toThrow("button menu: ios support");
+    const request = {
+      id: "menu",
+      type: "daemon_request",
+      method: "input/pressButton",
+      params: { platform: "ios", button: "menu" },
+    };
+    expect(() => validateRequests("```json\n" + JSON.stringify(request) + "\n```")).toThrow(
+      "button menu: ios support",
+    );
+  });
+
+  test("rejects iOS key requests despite wire-parser acceptance", () => {
+    const request = {
+      id: "key",
+      type: "daemon_request",
+      method: "input/key",
+      params: { platform: "ios", key: "enter" },
+    };
+    expect(() => validateRequests("```json\n" + JSON.stringify(request) + "\n```")).toThrow(
+      "input/key is Android-only",
+    );
+  });
+
+  test("rejects documented-but-dropped cancel in table and JSON requests", () => {
+    expect(() => validateTableRow("`input/tap`", "`platform`, `x`, `y`, `cancel?`")).toThrow(
+      "param cancel not retained",
+    );
+    const badDoc =
+      '```json\n{"id":"bad","type":"daemon_request","method":"input/tap","params":{"platform":"android","x":1,"y":2,"cancel":true}}\n```';
+    expect(() => validateRequests(badDoc)).toThrow("param cancel not retained");
+  });
+
+  test("rejects incorrectly mapped mode and missing retained frameContext", () => {
+    expect(() =>
+      validateParsedParams("input/typeText", { mode: "append" }, ["mode?"], { append: false }),
+    ).toThrow("param mode mapped incorrectly to append");
+    expect(() =>
+      validateParsedParams("input/tap", { frameContext: "frame-1" }, ["frameContext?"], {}),
+    ).toThrow("param frameContext not retained");
+  });
+
+  test("rejects undocumented parser output even when its value is undefined or a default", () => {
+    expect(() => validateTableRow("`input/tap`", "`platform`, `x`, `y`")).toThrow(
+      "undocumented parsed key deviceId",
+    );
+    expect(() => validateParsedParams("input/typeText", {}, [], { append: false })).toThrow(
+      "undocumented parsed key append",
+    );
+  });
+
+  test("documents integer duration units, swipe bounds, and default", () => {
+    validateDurationDocs(doc);
+    expect(() =>
+      validateDurationDocs(doc.replace("optional integer number", "optional finite number")),
+    ).toThrow("tap duration must document integer milliseconds");
+  });
+
+  for (const platform of ["android", "ios"]) {
+    test(`tap rejects fractional duration on ${platform}; integers and omission retain values`, () => {
+      const params = { platform, x: 1, y: 2 };
+      for (const duration of [1.5, NaN, Infinity, -Infinity, "100"]) {
+        expect(() => server["parseInputTapParams"]({ ...params, duration })).toThrow(
+          "integer number of milliseconds",
+        );
+      }
+      expect(server["parseInputTapParams"]({ ...params, duration: 100 }).duration).toBe(100);
+      expect(server["parseInputTapParams"](params).duration).toBeUndefined();
+    });
+
+    test(`swipe rejects fractional durationMs on ${platform}; integers, boundaries and omission retain values`, () => {
+      const params = { platform, startX: 1, startY: 2, endX: 3, endY: 4 };
+      for (const durationMs of [1.5, 0, 60_001, NaN, Infinity, -Infinity, "450"]) {
+        expect(() => server["parseInputSwipeParams"]({ ...params, durationMs })).toThrow(
+          "integer milliseconds between 1 and 60000",
+        );
+      }
+      for (const durationMs of [1, 450, 60_000]) {
+        expect(server["parseInputSwipeParams"]({ ...params, durationMs }).durationMs).toBe(
+          durationMs,
+        );
+      }
+      expect(server["parseInputSwipeParams"](params).durationMs).toBe(300);
+    });
+  }
+
+  test("JSON guard rejects fractional tap and swipe duration samples", () => {
+    for (const [method, params] of [
+      ["input/tap", { platform: "android", x: 1, y: 2, duration: 1.5 }],
+      [
+        "input/swipe",
+        { platform: "android", startX: 1, startY: 2, endX: 3, endY: 4, durationMs: 1.5 },
+      ],
+    ]) {
+      const request = { id: "fraction", type: "daemon_request", method, params };
+      expect(() => validateRequests("```json\n" + JSON.stringify(request) + "\n```")).toThrow(
+        "integer",
+      );
+    }
   });
 });

@@ -38,6 +38,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsPanel
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.shell.AboutDialog
 import dev.jasonpearson.automobile.desktop.core.shell.FloatingUpdateAffordance
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.shell.UpdateDetailsContent
@@ -232,9 +233,16 @@ fun AutoMobileDesktopApp(
   val recoveringDaemon by recoveryLauncher.inFlight.collectAsState()
   var paletteOpen by remember { mutableStateOf(false) }
   var showSettings by remember { mutableStateOf(false) }
+  var showAbout by remember { mutableStateOf(false) }
   var captureRequest by remember { mutableStateOf<Pair<String, Int>?>(null) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
+  LaunchedEffect(menuBarActions.showAbout) {
+    if (menuBarActions.showAbout) {
+      showAbout = true
+      menuBarActions.showAbout = false
+    }
+  }
   LaunchedEffect(menuBarActions.showSettings) {
     if (menuBarActions.showSettings) {
       showSettings = true
@@ -247,6 +255,7 @@ fun AutoMobileDesktopApp(
         !showOnboarding &&
           !pickerOpen &&
           !showSettings &&
+          !showAbout &&
           workspaceState is WorkspaceUiState.Content
       ) {
         paletteOpen = true
@@ -310,6 +319,7 @@ fun AutoMobileDesktopApp(
         !showOnboarding &&
         !pickerOpen &&
         !showSettings &&
+        !showAbout &&
         workspaceState is WorkspaceUiState.Content
     ) {
       paletteOpen = true
@@ -453,7 +463,7 @@ fun AutoMobileDesktopApp(
       // reachable from either one. It self-hides unless updateStatus is UpdateAvailable.
       val onLaunchSurface = showOnboarding || pickerOpen || workspaceState is WorkspaceUiState.Empty
       Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().isolatedBehindOverlay(showSettings)) {
+        Box(Modifier.fillMaxSize().isolatedBehindOverlay(showSettings || showAbout)) {
           when {
             showOnboarding ->
               OnboardingScreen(
@@ -696,6 +706,12 @@ fun AutoMobileDesktopApp(
             onClose = { showSettings = false },
             clientProvider = { graph.autoMobileClient },
             modifier = Modifier.fillMaxSize(),
+          )
+        }
+        if (showAbout) {
+          AboutDialog(
+            version = graph.appVersionProvider.current(),
+            onDismiss = { showAbout = false },
           )
         }
       }

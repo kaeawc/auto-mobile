@@ -1,4 +1,6 @@
-import { afterAll, afterEach, describe, it, expect, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, it, expect, spyOn, type Mock } from "bun:test";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
 import { AndroidSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/AndroidSystemConfigurationAdapter";
 import { IosSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/IosSystemConfigurationAdapter";
@@ -80,6 +82,65 @@ describe("SystemConfigurationAdapter", () => {
       });
     });
   }
+
+  describe("Android configuration failure traces", () => {
+    const cases = [
+      {
+        name: "device-wide locale",
+        command: "setprop persist.sys.locale",
+        run: (adapter: AndroidSystemConfigurationAdapter) =>
+          adapter.setLocale("ja-JP", { appId: "com.test", broadcast: false }),
+        legacy: true,
+      },
+      {
+        name: "app locale",
+        command: "cmd locale set-app-locales",
+        run: (adapter: AndroidSystemConfigurationAdapter) =>
+          adapter.setLocale("ja-JP", { appId: "com.test", broadcast: false }),
+      },
+      {
+        name: "time zone",
+        command: "setprop persist.sys.timezone",
+        run: (adapter: AndroidSystemConfigurationAdapter) => adapter.setTimeZone("UTC"),
+      },
+      {
+        name: "24-hour format",
+        command: "settings put system time_12_24",
+        run: (adapter: AndroidSystemConfigurationAdapter) => adapter.set24HourFormat(true),
+      },
+      {
+        name: "calendar system",
+        command: "settings put system calendar_type",
+        run: (adapter: AndroidSystemConfigurationAdapter) => adapter.setCalendarSystem("gregory"),
+      },
+    ];
+    for (const entry of cases) {
+      it(`retains the ${entry.name} typed failure and warns`, async () => {
+        const adb = new FakeAdbExecutor();
+        adb.setAndroidApiLevel(entry.legacy ? 32 : 33);
+        adb.setCommandResponse("shell id", { stdout: "uid=0(root)", stderr: "" });
+        adb.setCommandError(entry.command, new Error("write denied"));
+        const capability = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+          throw new Error("optional service unavailable");
+        });
+        const log = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await entry.run(
+            new AndroidSystemConfigurationAdapter(androidDevice, adb, new FakeTimer()),
+          );
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("write denied");
+          expect(log).toHaveBeenCalledWith(
+            `[SystemConfigurationManager] Failed to set ${entry.name}: write denied`,
+            expect.any(Error),
+          );
+        } finally {
+          capability.mockRestore();
+          log.mockRestore();
+        }
+      });
+    }
+  });
 
   describe("AndroidSystemConfigurationAdapter behavior", () => {
     it("quotes raw calendar input before the device shell and preserves normal identifiers", async () => {
@@ -586,9 +647,11 @@ describe("SystemConfigurationAdapter", () => {
   });
 
   describe("IosSystemConfigurationAdapter behavior", () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    afterEach(() => warn.mockClear());
-    afterAll(() => warn.mockRestore());
+    let warn: Mock<typeof logger.warn>;
+    beforeEach(() => {
+      warn = spyOn(logger, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
 
     it("logs simulator write failures and preserves each typed failure", async () => {
       const error = new Error("defaults write failed");

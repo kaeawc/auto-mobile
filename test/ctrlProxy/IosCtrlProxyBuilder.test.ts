@@ -47,6 +47,150 @@ describe("IosCtrlProxyBuilder", function () {
     }
   });
 
+  test("stale build-products cache is cleared and rediscovered", async () => {
+    const builder = IosCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+    const cached = path.join(tempDir, "stale");
+    builder["cachedBuildProductsPath"].set("simulator", cached);
+    const access = spyOn(fs, "access").mockImplementation(async (file) => {
+      if (file === cached) {
+        throw new Error("removed");
+      }
+    });
+    const log = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      expect(await builder.getBuildProductsPath()).toBe(
+        path.join(tempDir, "Build", "Products", "Debug-iphonesimulator"),
+      );
+      expect(log).toHaveBeenCalledWith(
+        "Cached build products probe failed: removed",
+        expect.any(Error),
+      );
+    } finally {
+      access.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  test("stale xctestrun cache is cleared and rediscovered", async () => {
+    const builder = IosCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+    const cached = path.join(tempDir, "stale.xctestrun");
+    builder["cachedXctestrunPath"].set("any", cached);
+    const access = spyOn(fs, "access").mockRejectedValue(new Error("removed"));
+    const listing = spyOn(fs, "readdir").mockResolvedValue(["fresh.xctestrun"]);
+    const log = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      expect(await builder.getXctestrunPath()).toBe(
+        path.join(tempDir, "Build", "Products", "fresh.xctestrun"),
+      );
+      expect(log).toHaveBeenCalledWith("Cached xctestrun probe failed: removed", expect.any(Error));
+    } finally {
+      access.mockRestore();
+      listing.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  test("artifact discovery rejection retains its typed failure and warns", async () => {
+    const builder = IosCtrlProxyBuilder.getInstance();
+    const original = builder["doBuild"];
+    builder["doBuild"] = async () => ({ success: true, message: "ready" });
+    const discovery = spyOn(builder, "getBuildProductsPath").mockRejectedValue(
+      new Error("discovery failed"),
+    );
+    const log = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await builder.build()).toEqual({
+        success: false,
+        message: "CtrlProxy artifact discovery failed",
+        error: "discovery failed",
+      });
+      expect(log).toHaveBeenCalledWith(
+        "CtrlProxy artifact discovery failed: discovery failed",
+        expect.any(Error),
+      );
+    } finally {
+      builder["doBuild"] = original;
+      discovery.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  test("download rejection retains its typed failure and warns", async () => {
+    const builder = IosCtrlProxyBuilder.getInstance();
+    const original = builder["ensureBundleDownloaded"];
+    builder["ensureBundleDownloaded"] = async () => {
+      throw new Error("download unavailable");
+    };
+    const log = spyOn(logger, "warn").mockImplementation(() => {});
+    delete process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD;
+    try {
+      expect(await builder.build()).toEqual({
+        success: false,
+        message: "CtrlProxy download failed",
+        error: "download unavailable",
+      });
+      expect(log).toHaveBeenCalledWith(
+        "[IOSCtrlProxyBuilder] Download failed: download unavailable",
+        expect.any(Error),
+      );
+    } finally {
+      builder["ensureBundleDownloaded"] = original;
+      log.mockRestore();
+    }
+  });
+
+  test("failed bundle rename copies and removes the source tree", async () => {
+    const builder = IosCtrlProxyBuilder.getInstance({
+      derivedDataPath: path.join(tempDir, "target"),
+    });
+    const original = builder["findXctestrunFiles"];
+    builder["findXctestrunFiles"] = async () => [
+      path.join(tempDir, "source", "Build", "Products", "runner.xctestrun"),
+    ];
+    const rename = spyOn(fs, "rename").mockRejectedValue(new Error("cross-device"));
+    const copy = spyOn(fs, "cp").mockResolvedValue(undefined);
+    const remove = spyOn(fs, "rm").mockResolvedValue(undefined);
+    const log = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await builder["normalizeExtractedBundle"]()).toBeUndefined();
+      expect(copy).toHaveBeenCalledWith(
+        path.join(tempDir, "source", "Build"),
+        path.join(tempDir, "target", "Build"),
+        { recursive: true },
+      );
+      expect(remove).toHaveBeenCalledWith(path.join(tempDir, "source", "Build"), {
+        recursive: true,
+        force: true,
+      });
+      expect(log).toHaveBeenCalledWith(
+        "CtrlProxy bundle rename failed; copying instead: cross-device",
+        expect.any(Error),
+      );
+    } finally {
+      builder["findXctestrunFiles"] = original;
+      rename.mockRestore();
+      copy.mockRestore();
+      remove.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  test("unreadable xctestrun scan retains an empty result and warns", async () => {
+    const builder = IosCtrlProxyBuilder.getInstance();
+    const listing = spyOn(fs, "readdir").mockRejectedValue(new Error("permission denied"));
+    const log = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await builder["findXctestrunFiles"]("unreadable")).toEqual([]);
+      expect(log).toHaveBeenCalledWith(
+        "CtrlProxy xctestrun directory scan failed: permission denied",
+        expect.any(Error),
+      );
+    } finally {
+      listing.mockRestore();
+      log.mockRestore();
+    }
+  });
+
   beforeEach(async function () {
     // Save original environment
     originalProjectRoot = process.env.AUTOMOBILE_PROJECT_ROOT;

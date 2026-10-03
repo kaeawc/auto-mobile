@@ -392,7 +392,9 @@ export class IosCtrlProxyBuilder {
       try {
         await fs.access(cachedPath);
         return cachedPath;
-      } catch {
+      } catch (error) {
+        // Cached artifacts may have been removed; rediscovery safely replaces the stale path.
+        logger.debug(`Cached build products probe failed: ${errorMessage(error)}`, error);
         this.cachedBuildProductsPath.set(platform, null);
       }
     }
@@ -426,7 +428,9 @@ export class IosCtrlProxyBuilder {
       try {
         await fs.access(cachedPath);
         return cachedPath;
-      } catch {
+      } catch (error) {
+        // Cached artifacts may have been removed; rediscovery safely replaces the stale path.
+        logger.debug(`Cached xctestrun probe failed: ${errorMessage(error)}`, error);
         this.cachedXctestrunPath.set(cacheKey, null);
       }
     }
@@ -681,6 +685,7 @@ export class IosCtrlProxyBuilder {
       }
       return { ...shared, buildPath: buildPath || undefined, xctestrunPath };
     } catch (error) {
+      logger.warn(`CtrlProxy artifact discovery failed: ${errorMessage(error)}`, error);
       return {
         success: false,
         message: "CtrlProxy artifact discovery failed",
@@ -728,7 +733,7 @@ export class IosCtrlProxyBuilder {
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
-      logger.error("[IOSCtrlProxyBuilder] Download failed:", errorMsg);
+      logger.warn(`[IOSCtrlProxyBuilder] Download failed: ${errorMsg}`, error);
 
       perf.end();
       return {
@@ -1257,7 +1262,8 @@ export class IosCtrlProxyBuilder {
 
     try {
       await fs.rename(sourceBuildDir, targetBuildDir);
-    } catch {
+    } catch (error) {
+      logger.warn(`CtrlProxy bundle rename failed; copying instead: ${errorMessage(error)}`, error);
       await fs.cp(sourceBuildDir, targetBuildDir, { recursive: true });
       await fs.rm(sourceBuildDir, { recursive: true, force: true });
     }
@@ -1669,7 +1675,8 @@ export class IosCtrlProxyBuilder {
       let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
       try {
         entries = await fs.readdir(current, { withFileTypes: true });
-      } catch {
+      } catch (error) {
+        logger.warn(`CtrlProxy xctestrun directory scan failed: ${errorMessage(error)}`, error);
         continue;
       }
 

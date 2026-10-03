@@ -178,6 +178,7 @@ export class SharedGestureDelegate {
     signal?: AbortSignal,
     displayId?: number,
     beforeSend?: () => void,
+    onDispatch?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<GestureTimingResult>(this.context, {
@@ -201,6 +202,7 @@ export class SharedGestureDelegate {
       errorLabel: "Drag",
       abortSignal: signal,
       beforeSend,
+      onDispatch,
     });
   }
 

@@ -409,6 +409,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs: number,
     frameContext?: string,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyDragResult>;
 
   requestPinch(
@@ -3533,6 +3534,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs: number,
     frameContext?: string,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyDragResult> {
     return this.gestures.requestDrag(
       x1,
@@ -3545,6 +3547,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timeoutMs,
       frameContext,
       signal,
+      undefined,
+      undefined,
+      onDispatch,
     );
   }
 

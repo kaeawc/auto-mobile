@@ -7,6 +7,7 @@ import {
   IOS_DRAG_TIMEOUT_DURATION_RATIO,
 } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import type { IOSCtrlProxy } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -17,6 +18,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosProjectionFixture } from "../../fixtures/iosProjectionFixture";
 import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
+import { awaitWhileRequestIsLive } from "../../../src/utils/toolUtils";
+import { DeviceLostError } from "../../../src/models/DeviceLostError";
+import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
+import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 
 // Simulator-shaped UDID so isIosSimulatorUdid would pass (not that dragAndDrop branches on it,
@@ -34,6 +40,7 @@ describe("DragAndDrop - iOS", () => {
   let fakeWindow: FakeWindow;
   let fakeIosClient: FakeCtrlProxy;
   let fakeAndroidClient: FakeCtrlProxy;
+  let iosDragClient: Pick<IOSCtrlProxy, "requestDrag">;
   let fakeTimer: FakeTimer;
   let iosSpy: ReturnType<typeof spyOn> | null = null;
   let androidSpy: ReturnType<typeof spyOn> | null = null;
@@ -77,6 +84,8 @@ describe("DragAndDrop - iOS", () => {
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeWindow = new FakeWindow();
     fakeIosClient = new FakeCtrlProxy();
+    // The shared fake retains Android positional arguments; view its iOS request contract.
+    iosDragClient = fakeIosClient as Pick<IOSCtrlProxy, "requestDrag">;
     fakeAndroidClient = new FakeCtrlProxy();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -116,8 +125,9 @@ describe("DragAndDrop - iOS", () => {
   // Model the client's transport deadline and a synchronous XCUITest call that
   // can finish after the host has stopped waiting, using only fake time.
   const fakeRunnerReply = (replyDelayMs?: number, controller?: AbortController) => {
-    return spyOn(fakeIosClient, "requestDrag").mockImplementation(
-      async (_x1, _y1, _x2, _y2, _press, _drag, _hold, timeoutMs, _context, signal) => {
+    return spyOn(iosDragClient, "requestDrag").mockImplementation(
+      async (_x1, _y1, _x2, _y2, _press, _drag, _hold, timeoutMs, _context, signal, onDispatch) => {
+        onDispatch?.();
         const timeout = new Error(`Drag timed out after ${timeoutMs}ms`);
         if (controller) {
           fakeTimer.setTimeout(() => controller.abort(), 25);
@@ -195,7 +205,7 @@ describe("DragAndDrop - iOS", () => {
     },
   );
 
-  test("iOS client forwards drag cancellation to the shared gesture delegate", async () => {
+  test("iOS client forwards drag cancellation and dispatch to the shared gesture delegate", async () => {
     const controller = new AbortController();
     const client = IOSCtrlProxyClient.createForTesting(
       IOS_DEVICE,
@@ -208,7 +218,20 @@ describe("DragAndDrop - iOS", () => {
       totalTimeMs: 1850,
     });
     try {
-      await client.requestDrag(50, 50, 250, 250, 600, 300, 100, 5000, undefined, controller.signal);
+      const onDispatch = () => {};
+      await client.requestDrag(
+        50,
+        50,
+        250,
+        250,
+        600,
+        300,
+        100,
+        5000,
+        undefined,
+        controller.signal,
+        onDispatch,
+      );
       expect(delegate).toHaveBeenCalledWith(
         50,
         50,
@@ -220,6 +243,9 @@ describe("DragAndDrop - iOS", () => {
         5000,
         undefined,
         controller.signal,
+        undefined,
+        undefined,
+        onDispatch,
       );
     } finally {
       delegate.mockRestore();
@@ -228,7 +254,7 @@ describe("DragAndDrop - iOS", () => {
 
   test("abort stops waiting even while the client is still connecting", async () => {
     const controller = new AbortController();
-    const runner = spyOn(fakeIosClient, "requestDrag").mockImplementation(() => {
+    const runner = spyOn(iosDragClient, "requestDrag").mockImplementation(() => {
       fakeTimer.setTimeout(() => controller.abort(), 25);
       return new Promise(() => {});
     });
@@ -268,6 +294,154 @@ describe("DragAndDrop - iOS", () => {
       expect(runner).toHaveBeenCalledTimes(1);
     },
   );
+
+  test.each(["explicit", "ambient"])(
+    "rethrows %s cancellation during explicit-display preflight",
+    async (kind) => {
+      const controller = new AbortController();
+      const device: BootedDevice = {
+        ...IOS_DEVICE,
+        displays: {
+          panels: [
+            { key: "internal", role: "inner", sizePx: { width: 100, height: 100 } },
+            { key: "external", role: "external", sizePx: { width: 200, height: 200 } },
+          ],
+          postures: [],
+        },
+      };
+      const action = new DragAndDrop(device, null, fakeTimer, {
+        lastRenderedObservation: () => ({ display: { key: "external" } }),
+      });
+      action.observeScreen = fakeObserveScreen;
+      const observe = spyOn(fakeObserveScreen, "execute").mockImplementation((options) => {
+        const pending = awaitWhileRequestIsLive(
+          new Promise<ObserveResult>(() => {}),
+          options?.signal,
+        );
+        controller.abort();
+        return pending;
+      });
+      const runner = spyOn(iosDragClient, "requestDrag");
+      try {
+        const execute = () =>
+          action.execute(
+            {
+              source: { elementId: "source-id" },
+              target: { elementId: "target-id" },
+              display: "external",
+            },
+            undefined,
+            kind === "explicit" ? controller.signal : undefined,
+          );
+        const pending =
+          kind === "ambient" ? runWithAbortSignal(controller.signal, execute) : execute();
+        await expect(pending).rejects.toThrow("Operation cancelled");
+        expect(observe.mock.calls[0][0]).toMatchObject({
+          display: "external",
+          signal: controller.signal,
+        });
+        expect(runner).not.toHaveBeenCalled();
+      } finally {
+        observe.mockRestore();
+        runner.mockRestore();
+      }
+    },
+  );
+
+  test.each(["cancel", "device loss"])(
+    "rethrows %s during connect before failure mapping",
+    async (kind) => {
+      const controller = new AbortController();
+      const loss = new DeviceLostError(IOS_DEVICE.deviceId, "Device connection lost");
+      const runner = spyOn(iosDragClient, "requestDrag").mockImplementation(async () => {
+        controller.abort(kind === "device loss" ? loss : undefined);
+        return { success: false, totalTimeMs: 0, error: "Request aborted before dispatch" };
+      });
+      const pending = dragAndDrop.execute(
+        {
+          source: { elementId: "source-id" },
+          target: { elementId: "target-id" },
+        },
+        undefined,
+        controller.signal,
+      );
+      if (kind === "device loss") {
+        await expect(pending).rejects.toBe(loss);
+      } else {
+        await expect(pending).rejects.toThrow("Operation cancelled");
+      }
+      expect(runner).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("rethrows abort when element resolution returns a null hierarchy", async () => {
+    const controller = new AbortController();
+    spyOn(dragAndDrop["hierarchyCapture"], "capture").mockImplementation(async (request) => {
+      expect(request.signal).toBe(controller.signal);
+      const snapshot = identifyObservedHierarchy("ios", createHierarchy(), "fresh", fakeTimer);
+      // Model the legacy null-on-abort boundary despite the capture's non-null type contract.
+      Object.defineProperty(snapshot, "hierarchy", { value: null });
+      controller.abort();
+      return snapshot;
+    });
+    const runner = spyOn(iosDragClient, "requestDrag");
+    await expect(
+      dragAndDrop.execute(
+        {
+          source: { elementId: "source-id" },
+          target: { elementId: "target-id" },
+        },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  test("rethrows abort swallowed by vision enrichment", async () => {
+    const controller = new AbortController();
+    const capturer = new FakeScreenshotCapturer();
+    const capture = spyOn(capturer, "capture").mockImplementation(async () => {
+      controller.abort();
+      throw new Error("screenshot cancelled");
+    });
+    Object.assign(dragAndDrop, {
+      visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: true },
+      screenshotCapturer: capturer,
+    });
+    const runner = spyOn(iosDragClient, "requestDrag");
+    await expect(
+      dragAndDrop.execute(
+        {
+          source: { elementId: "missing-source" },
+          target: { elementId: "target-id" },
+        },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  test("rethrows abort when post-action observation returns normally", async () => {
+    const controller = new AbortController();
+    const observe = spyOn(fakeObserveScreen, "execute").mockImplementation(async () => {
+      controller.abort();
+      return createObserveResult();
+    });
+    await expect(
+      dragAndDrop.execute(
+        {
+          source: { elementId: "source-id" },
+          target: { elementId: "target-id" },
+        },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(observe).toHaveBeenCalledTimes(1);
+  });
 
   test("direct iOS sync cannot resolve an offscreen source excluded by observe", async () => {
     const freshHierarchy = {
@@ -352,16 +526,44 @@ describe("DragAndDrop - iOS", () => {
     expect(fakeIosClient.getDragHistory()).toHaveLength(1);
   });
 
-  test("surfaces iOS runner failure", async () => {
-    fakeIosClient.setDragResult({ success: false, error: "Drag failed on runner" });
-
+  test.each([false, true])("maps a runner failure with dispatched=%s", async (dispatched) => {
+    spyOn(iosDragClient, "requestDrag").mockImplementation(async (...args) => {
+      if (dispatched) {
+        args[10]?.();
+      }
+      return { success: false, totalTimeMs: 0, error: "Drag failed on runner" };
+    });
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
       target: { elementId: "target-id" },
     });
-
     expect(result.success).toBe(false);
-    expect(result.error).toBe("Drag failed on runner");
+    if (dispatched) {
+      expect(result.error).toContain("Drag outcome is indeterminate");
+      expect(result.error).toContain("Drag failed on runner");
+    } else {
+      expect(result.error).toBe("Drag failed on runner");
+    }
+  });
+
+  test.each([false, true])("maps a transport throw with dispatched=%s", async (dispatched) => {
+    spyOn(iosDragClient, "requestDrag").mockImplementation(async (...args) => {
+      if (dispatched) {
+        args[10]?.();
+      }
+      throw new Error("transport disconnected");
+    });
+    const result = await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+    });
+    expect(result.success).toBe(false);
+    if (dispatched) {
+      expect(result.error).toContain("Drag outcome is indeterminate");
+      expect(result.error).toContain("transport disconnected");
+    } else {
+      expect(result.error).toBe("Failed to perform drag and drop: transport disconnected");
+    }
   });
 
   test("refreshes the iOS hierarchy before resolving drag targets", async () => {

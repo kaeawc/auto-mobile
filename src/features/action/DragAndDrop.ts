@@ -209,6 +209,9 @@ export class DragAndDrop extends BaseVisualChange {
           );
         }
       } catch (error) {
+        if (this.device.platform === "ios") {
+          throwIfAborted(signal);
+        }
         logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
         return withStaleDisplay(
           { success: false, duration: 0, distance: 0, error: errorMessage(error) },
@@ -337,6 +340,9 @@ export class DragAndDrop extends BaseVisualChange {
       );
 
       perf.end();
+      if (this.device.platform === "ios") {
+        throwIfAborted(signal);
+      }
 
       return {
         ...result,
@@ -380,12 +386,10 @@ export class DragAndDrop extends BaseVisualChange {
         }
       }
 
-      return {
-        success: false,
-        duration: 0,
-        distance: 0,
-        error: finalErrorMessage,
-      };
+      if (this.device.platform === "ios") {
+        throwIfAborted(signal);
+      }
+      return { success: false, duration: 0, distance: 0, error: finalErrorMessage };
     }
   }
 
@@ -532,6 +536,9 @@ export class DragAndDrop extends BaseVisualChange {
           ? IOS_HIERARCHY_REFRESH_TIMEOUT_MS
           : HIERARCHY_REFRESH_TIMEOUT_MS,
     });
+    if (this.device.platform === "ios") {
+      throwIfAborted(signal);
+    }
     return snapshot.hierarchy;
   }
 
@@ -597,24 +604,16 @@ export class DragAndDrop extends BaseVisualChange {
 
     // iOS routes through the XCUITest CtrlProxy runner (XCUICoordinate.press/thenDragTo/thenHold);
     // Android through the accessibility service. iOS preserves exact (non-rounded) coordinates.
-    const result =
-      this.device.platform === "ios"
-        ? await awaitWhileRequestIsLive(
-            IOSCtrlProxyClient.getInstance(this.device).requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
-              pressDurationMs,
-              dragDurationMs,
-              holdDurationMs,
-              timeoutMs,
-              undefined,
-              signal,
-            ),
-            signal,
-          )
-        : await this.accessibilityService.requestDrag(
+    let result;
+    if (this.device.platform === "ios") {
+      let dispatched = false;
+      const indeterminateResult = (reason: string) => ({
+        success: false,
+        error: `Drag outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The gesture may have run. Do not retry automatically. Verify state first with observe.`,
+      });
+      try {
+        result = await awaitWhileRequestIsLive(
+          IOSCtrlProxyClient.getInstance(this.device).requestDrag(
             startX,
             startY,
             endX,
@@ -623,16 +622,37 @@ export class DragAndDrop extends BaseVisualChange {
             dragDurationMs,
             holdDurationMs,
             timeoutMs,
-          );
-
-    if (this.device.platform === "ios") {
-      throwIfAborted(signal);
-      if (!result.success && result.error === `Drag timed out after ${timeoutMs}ms`) {
-        return {
-          success: false,
-          error: `Drag outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error}). The gesture may have run. Do not retry automatically. Verify state first with observe.`,
-        };
+            undefined,
+            signal,
+            () => {
+              dispatched = true;
+            },
+          ),
+          signal,
+        );
+        throwIfAborted(signal);
+        if (!result.success && dispatched) {
+          return indeterminateResult(result.error ?? "unknown error");
+        }
+      } catch (error) {
+        throwIfAborted(signal);
+        if (!dispatched) {
+          throw error;
+        }
+        logger.warn(`Drag outcome indeterminate: ${errorMessage(error)}`, error);
+        return indeterminateResult(errorMessage(error));
       }
+    } else {
+      result = await this.accessibilityService.requestDrag(
+        startX,
+        startY,
+        endX,
+        endY,
+        pressDurationMs,
+        dragDurationMs,
+        holdDurationMs,
+        timeoutMs,
+      );
     }
 
     if (result.success) {

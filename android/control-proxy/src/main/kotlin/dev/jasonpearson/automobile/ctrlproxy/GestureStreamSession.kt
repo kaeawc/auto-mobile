@@ -47,6 +47,11 @@ internal interface StrokeDispatcher<S> {
   ) = dispatch(stroke, onComplete, onFailed, displayId)
 }
 
+/** A stationary final continuation lifts the pointer; a stationary continuing stroke cancels. */
+// Mirrors DragStrokeSession's pointer release; can be unified after the drag press change lands.
+private fun pointerReleaseSegment(at: GesturePoint): GestureSegment =
+  GestureSegment(at, at, 1L, false, false, true)
+
 /**
  * Drives one streamed gesture: it turns the [GestureStreamCoordinator]'s segment decisions into
  * [StrokeDispatcher] calls, pumping the next segment each time the previous one completes, until
@@ -62,7 +67,8 @@ internal interface StrokeDispatcher<S> {
  * marshalled, so the coordinator is never touched concurrently.
  *
  * [onFinished] fires exactly once, on the gesture thread, when the gesture lifts (success) or a
- * dispatch fails (failure). The owning router uses it to drop the session.
+ * stroke fails, after any best-effort pointer release (failure). The owning router uses it to drop
+ * the session.
  */
 internal class GestureStreamSession<S>(
   private val coordinator: GestureStreamCoordinator,
@@ -71,7 +77,9 @@ internal class GestureStreamSession<S>(
   private val onFinished: (success: Boolean, error: String?) -> Unit,
 ) {
   private var previousStroke: S? = null
+  private var liftFrom: Pair<S, GesturePoint>? = null
   private var terminal = false
+  private var releasing = false
   private var displayId: Int? = null
 
   // The pump loop parks here when the coordinator returns Wait (touch held, no fresh move). A later
@@ -81,47 +89,53 @@ internal class GestureStreamSession<S>(
 
   /** Begin the gesture at ([x], [y]) and dispatch the initial press. Call once. */
   fun start(x: Float, y: Float, displayId: Int? = null) = runOnGestureThread {
+    if (terminal || releasing) return@runOnGestureThread
     this.displayId = displayId
     drive(coordinator.start(x, y))
   }
 
   /** Feed a new move target. Safe to call from any thread; a no-op after the gesture finished. */
   fun move(x: Float, y: Float) = runOnGestureThread {
+    if (terminal || releasing) return@runOnGestureThread
     coordinator.move(x, y)
     resumeIfWaiting()
   }
 
   /** Release (or [cancel]) the gesture. Safe to call from any thread. */
   fun end(x: Float, y: Float, cancel: Boolean) = runOnGestureThread {
+    if (terminal || releasing) return@runOnGestureThread
     coordinator.end(x, y, cancel)
     resumeIfWaiting()
   }
 
   /** Called by the router on the gesture thread before its handler is stopped. */
   fun cancel() {
-    if (terminal) return
+    if (terminal || releasing) return
     coordinator.cancel()
     waiting = false
     pump()
   }
 
-  private fun pump() = drive(coordinator.next())
+  private fun pump() {
+    if (terminal || releasing) return
+    drive(coordinator.next())
+  }
 
   /** Restart the parked pump loop after a move/end arrived while idle. */
   private fun resumeIfWaiting() {
-    if (waiting && !terminal) {
+    if (waiting && !terminal && !releasing) {
       waiting = false
       pump()
     }
   }
 
   private fun drive(action: GestureStreamAction) {
-    if (terminal) return
+    if (terminal || releasing) return
     when (action) {
       is GestureStreamAction.Done -> finish(success = true, error = null)
       is GestureStreamAction.Wait -> waiting = true
       is GestureStreamAction.Dispatch -> {
-        val segment = action.segment.clampedToScreen()
+        val segment = action.segment.clampedToNonNegative()
         if (
           !segment.isInitial &&
             segment.willContinue &&
@@ -131,11 +145,13 @@ internal class GestureStreamSession<S>(
           pump()
           return
         }
+        val precedingLift = liftFrom
         try {
           val stroke =
             if (segment.isInitial) dispatcher.initialStroke(segment)
             else dispatcher.continueStroke(requireNotNull(previousStroke), segment)
           previousStroke = stroke
+          if (segment.willContinue) liftFrom = stroke to segment.to
           // The dispatcher contract guarantees these callbacks fire on the gesture thread, so pump
           // the
           // next segment DIRECTLY — no re-post. The re-post added a full handler-queue cycle
@@ -145,30 +161,64 @@ internal class GestureStreamSession<S>(
           // long
           // enough for the framework to cancel the continued gesture (issue: streaming gesture
           // input).
-          dispatcher.dispatch(
+          dispatcher.dispatchContinuing(
             stroke = stroke,
             displayId = displayId,
             onComplete = { pump() },
-            onFailed = { error -> finish(success = false, error = error) },
+            onFailed = ::fail,
+            onRejected = { error ->
+              if (!terminal && !releasing) {
+                liftFrom = precedingLift
+                fail(error)
+              }
+            },
           )
         } catch (e: Exception) {
           // No Android log call: this framework-free session has no injected logger for JVM tests.
-          finish(success = false, error = e.message ?: "Failed to build streamed gesture stroke")
+          if (!terminal && !releasing) {
+            liftFrom = precedingLift
+            fail(e.message ?: "Failed to build streamed gesture stroke")
+          }
         }
       }
     }
   }
 
   /**
-   * Clamp both endpoints consistently to preserve stroke continuity. Moving continuations collapsed
-   * by clamping must be skipped: Android cancels stationary continued strokes, but the previous
-   * stroke already holds this point. Genuine holds, initial presses and final lifts still dispatch.
+   * Clamp both endpoints to non-negative coordinates consistently to preserve stroke continuity;
+   * there is no upper-bound clamp. Moving continuations collapsed by clamping must be skipped:
+   * Android cancels stationary continued strokes, but the previous stroke already holds this point.
+   * Genuine holds, initial presses and final lifts still dispatch.
    */
-  private fun GestureSegment.clampedToScreen(): GestureSegment =
+  private fun GestureSegment.clampedToNonNegative(): GestureSegment =
     copy(
       from = from.copy(x = from.x.coerceAtLeast(0f), y = from.y.coerceAtLeast(0f)),
       to = to.copy(x = to.x.coerceAtLeast(0f), y = to.y.coerceAtLeast(0f)),
     )
+
+  private fun fail(error: String) {
+    if (terminal || releasing) return
+    releasing = true
+    waiting = false
+    val anchor = liftFrom
+    if (anchor == null) {
+      finish(false, error)
+      return
+    }
+    try {
+      val release = dispatcher.continueStroke(anchor.first, pointerReleaseSegment(anchor.second))
+      // No deadline seam exists here: wait for the release callback before reporting the failure.
+      dispatcher.dispatchContinuing(
+        stroke = release,
+        displayId = displayId,
+        onComplete = { finish(false, error) },
+        onFailed = { finish(false, error) },
+        onRejected = { finish(false, error) },
+      )
+    } catch (_: Exception) {
+      finish(false, error)
+    }
+  }
 
   private fun finish(success: Boolean, error: String?) {
     if (terminal) return

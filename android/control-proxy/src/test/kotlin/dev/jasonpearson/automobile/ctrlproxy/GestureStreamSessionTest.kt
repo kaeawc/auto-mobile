@@ -4,6 +4,7 @@ import java.util.ArrayDeque
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -48,19 +49,28 @@ class GestureStreamSessionTest {
     }
   }
 
-  private class FakeStroke(val segment: GestureSegment)
+  private class FakeStroke(val segment: GestureSegment, val parent: FakeStroke? = null)
 
   private class FakeStrokeDispatcher(
     private val initialError: Exception? = null,
     private val continueError: Exception? = null,
     private val dispatchError: Exception? = null,
   ) : StrokeDispatcher<FakeStroke> {
+    data class Call(
+      val stroke: FakeStroke,
+      val complete: () -> Unit,
+      val fail: (String) -> Unit,
+      val reject: (String) -> Unit,
+    )
+
+    val calls = mutableListOf<Call>()
     val dispatched = mutableListOf<GestureSegment>()
     val displays = mutableListOf<Int?>()
     var initialCount = 0
     var continueCount = 0
-    private var pendingComplete: (() -> Unit)? = null
-    private var pendingFail: ((String) -> Unit)? = null
+    var nextContinueError: Exception? = null
+    var nextDispatchError: Exception? = null
+    private var pending: Call? = null
 
     override fun initialStroke(segment: GestureSegment): FakeStroke {
       initialCount++
@@ -70,8 +80,11 @@ class GestureStreamSessionTest {
 
     override fun continueStroke(previous: FakeStroke, segment: GestureSegment): FakeStroke {
       continueCount++
+      val nextError = nextContinueError
+      nextContinueError = null
+      nextError?.let { throw it }
       continueError?.let { throw it }
-      return FakeStroke(segment)
+      return FakeStroke(segment, previous)
     }
 
     override fun dispatch(
@@ -79,27 +92,43 @@ class GestureStreamSessionTest {
       onComplete: () -> Unit,
       onFailed: (error: String) -> Unit,
       displayId: Int?,
+    ) = dispatchContinuing(stroke, onComplete, onFailed, onFailed, displayId)
+
+    override fun dispatchContinuing(
+      stroke: FakeStroke,
+      onComplete: () -> Unit,
+      onFailed: (error: String) -> Unit,
+      onRejected: (error: String) -> Unit,
+      displayId: Int?,
     ) {
       dispatched.add(stroke.segment)
       displays.add(displayId)
-      pendingComplete = onComplete
-      pendingFail = onFailed
+      val call = Call(stroke, onComplete, onFailed, onRejected)
+      calls.add(call)
+      pending = call
+      val nextError = nextDispatchError
+      nextDispatchError = null
+      nextError?.let { throw it }
       dispatchError?.let { throw it }
     }
 
     /** Fire the in-flight stroke's completion, driving the loop one step. */
     fun completeLast() {
-      val c = requireNotNull(pendingComplete) { "no stroke in flight" }
-      pendingComplete = null
-      pendingFail = null
-      c()
+      val call = requireNotNull(pending) { "no stroke in flight" }
+      pending = null
+      call.complete()
     }
 
     fun failLast(error: String) {
-      val f = requireNotNull(pendingFail) { "no stroke in flight" }
-      pendingComplete = null
-      pendingFail = null
-      f(error)
+      val call = requireNotNull(pending) { "no stroke in flight" }
+      pending = null
+      call.fail(error)
+    }
+
+    fun rejectLast(error: String) {
+      val call = requireNotNull(pending) { "no stroke in flight" }
+      pending = null
+      call.reject(error)
     }
   }
 
@@ -118,6 +147,19 @@ class GestureStreamSessionTest {
           finishedError = error
         },
       )
+
+    fun assertRelease(anchor: FakeStroke, at: GesturePoint) {
+      val release = dispatcher.calls.last().stroke
+      assertSame(anchor, release.parent)
+      assertEquals(GestureSegment(at, at, 1L, false, false, true), release.segment)
+      assertEquals(0, finishCount)
+    }
+
+    fun assertFailedOnce(message: String) {
+      assertEquals(1, finishCount)
+      assertEquals(false, finishedSuccess)
+      assertEquals(message, finishedError)
+    }
   }
 
   private data class Ack(val requestId: String?, val success: Boolean, val error: String?)
@@ -258,43 +300,173 @@ class GestureStreamSessionTest {
     for (initial in listOf(true, false)) {
       val error = IllegalArgumentException(message)
       val dispatcher =
-        if (initial) FakeStrokeDispatcher(initialError = error)
-        else FakeStrokeDispatcher(continueError = error)
+        if (initial) FakeStrokeDispatcher(initialError = error) else FakeStrokeDispatcher()
       val h = Session(dispatcher)
-      h.session.start(10f, 10f)
+      h.session.start(-5f, 10f, 7)
       if (!initial) {
+        h.session.move(-5f, 30f)
+        h.dispatcher.completeLast()
+        h.dispatcher.nextContinueError = error
         h.session.move(20f, 30f)
         h.dispatcher.completeLast()
+        h.assertRelease(h.dispatcher.calls[1].stroke, GesturePoint(0f, 30f))
+        assertEquals(listOf(7, 7, 7), h.dispatcher.displays)
+        h.session.move(40f, 50f)
+        h.session.end(40f, 50f, cancel = false)
+        h.session.cancel()
+        assertEquals(3, h.dispatcher.dispatched.size)
+        h.dispatcher.completeLast()
+      } else {
+        assertEquals(0, h.dispatcher.continueCount)
       }
 
-      assertEquals(1, h.finishCount)
-      assertEquals(false, h.finishedSuccess)
-      assertEquals(message, h.finishedError)
+      h.assertFailedOnce(message)
       val dispatchedCount = h.dispatcher.dispatched.size
-      assertEquals(if (initial) 0 else 1, dispatchedCount)
+      assertEquals(if (initial) 0 else 3, dispatchedCount)
       h.session.move(40f, 50f)
       h.session.end(40f, 50f, cancel = false)
+      h.session.cancel()
+      h.dispatcher.calls.lastOrNull()?.complete?.invoke()
       assertEquals(dispatchedCount, h.dispatcher.dispatched.size)
-      assertEquals(1, h.finishCount)
+      h.assertFailedOnce(message)
     }
   }
 
   @Test
   fun `dispatch exceptions finish once even when stored callbacks fire later`() {
-    for (complete in listOf(true, false)) {
-      val h = Session(FakeStrokeDispatcher(dispatchError = IllegalStateException()))
-      h.session.start(10f, 10f)
+    for (initial in listOf(true, false)) {
+      for (complete in listOf(true, false)) {
+        val dispatcher =
+          if (initial) FakeStrokeDispatcher(dispatchError = IllegalStateException())
+          else FakeStrokeDispatcher()
+        val h = Session(dispatcher)
+        h.session.start(10f, 10f)
+        if (!initial) {
+          h.dispatcher.nextDispatchError = IllegalStateException()
+          h.session.move(20f, 30f)
+          h.dispatcher.completeLast()
+          h.assertRelease(h.dispatcher.calls.first().stroke, GesturePoint(10f, 10f))
+        }
+        val failedCall = h.dispatcher.calls[if (initial) 0 else 1]
 
-      assertEquals(1, h.finishCount)
-      assertEquals(false, h.finishedSuccess)
-      assertEquals("Failed to build streamed gesture stroke", h.finishedError)
+        h.session.move(40f, 50f)
+        h.session.end(40f, 50f, cancel = false)
+        h.session.cancel()
+        if (complete) failedCall.complete() else failedCall.fail("late failure")
+        failedCall.reject("late rejection")
+        assertEquals(if (initial) 1 else 3, h.dispatcher.dispatched.size)
+        assertEquals(if (initial) 1 else 0, h.finishCount)
+        if (!initial) h.dispatcher.completeLast()
+        h.assertFailedOnce("Failed to build streamed gesture stroke")
+        failedCall.complete()
+        failedCall.fail("later failure")
+        assertEquals(if (initial) 1 else 3, h.dispatcher.dispatched.size)
+        h.assertFailedOnce("Failed to build streamed gesture stroke")
+      }
+    }
+  }
+
+  @Test
+  fun `continued build and release build exceptions preserve the original error`() {
+    val message = "Path bounds must not be negative"
+    val h = Session(FakeStrokeDispatcher(continueError = IllegalStateException("release exploded")))
+    h.session.start(10f, 10f)
+    h.dispatcher.nextContinueError = IllegalArgumentException(message)
+    h.session.move(20f, 30f)
+    h.dispatcher.completeLast()
+
+    assertEquals(2, h.dispatcher.continueCount) // failed move, then failed release
+    assertEquals(1, h.dispatcher.dispatched.size)
+    h.assertFailedOnce(message)
+    h.session.move(40f, 50f)
+    h.session.end(40f, 50f, cancel = false)
+    h.dispatcher.calls.first().complete()
+    h.dispatcher.calls.first().fail("late failure")
+    assertEquals(1, h.dispatcher.dispatched.size)
+    h.assertFailedOnce(message)
+  }
+
+  @Test
+  fun `initial dispatch rejection finishes without releasing an unregistered pointer`() {
+    val h = Session()
+    h.session.start(10f, 10f)
+    val rejectedCall = h.dispatcher.calls.single()
+    h.dispatcher.rejectLast("initial dispatch refused")
+
+    assertEquals(0, h.dispatcher.continueCount)
+    h.assertFailedOnce("initial dispatch refused")
+    rejectedCall.complete()
+    rejectedCall.fail("late cancellation")
+    h.session.move(20f, 30f)
+    h.session.end(20f, 30f, cancel = false)
+    assertEquals(1, h.dispatcher.dispatched.size)
+    h.assertFailedOnce("initial dispatch refused")
+  }
+
+  @Test
+  fun `release dispatch failure rejection or exception preserves the original error`() {
+    for (failure in listOf("failure", "rejection", "exception")) {
+      val message = "Path bounds must not be negative"
+      val h = Session()
+      h.session.start(10f, 10f, 7)
+      h.dispatcher.nextContinueError = IllegalArgumentException(message)
+      if (failure == "exception") {
+        h.dispatcher.nextDispatchError = IllegalStateException("release dispatch exploded")
+      }
       h.session.move(20f, 30f)
-      h.session.end(20f, 30f, cancel = false)
-      if (complete) h.dispatcher.completeLast() else h.dispatcher.failLast("late failure")
-      assertEquals(1, h.dispatcher.dispatched.size)
-      assertEquals(1, h.finishCount)
-      assertEquals(false, h.finishedSuccess)
-      assertEquals("Failed to build streamed gesture stroke", h.finishedError)
+      h.dispatcher.completeLast()
+
+      if (failure != "exception") {
+        h.assertRelease(h.dispatcher.calls.first().stroke, GesturePoint(10f, 10f))
+        if (failure == "failure") h.dispatcher.failLast("release cancelled")
+        else h.dispatcher.rejectLast("release refused")
+      }
+      assertEquals(2, h.dispatcher.dispatched.size)
+      assertEquals(listOf(7, 7), h.dispatcher.displays)
+      h.assertFailedOnce(message)
+      val release = h.dispatcher.calls.last()
+      release.complete()
+      release.fail("late release failure")
+      release.reject("late release rejection")
+      h.session.move(40f, 50f)
+      h.session.end(40f, 50f, cancel = false)
+      assertEquals(2, h.dispatcher.dispatched.size)
+      h.assertFailedOnce(message)
+    }
+  }
+
+  @Test
+  fun `rejection releases the preceding stroke but cancellation releases the current stroke`() {
+    for (rejected in listOf(true, false)) {
+      val h = Session()
+      h.session.start(-5f, 10f, 7)
+      h.session.move(-5f, 30f)
+      h.dispatcher.completeLast()
+      val failedCall = h.dispatcher.calls.last()
+      val message = if (rejected) "dispatch refused" else "dispatch cancelled"
+      if (rejected) h.dispatcher.rejectLast(message) else h.dispatcher.failLast(message)
+
+      val anchor = if (rejected) h.dispatcher.calls.first().stroke else failedCall.stroke
+      h.assertRelease(anchor, GesturePoint(0f, if (rejected) 10f else 30f))
+      assertEquals(listOf(7, 7, 7), h.dispatcher.displays)
+      failedCall.complete()
+      failedCall.fail("duplicate failure")
+      failedCall.reject("duplicate rejection")
+      h.session.move(40f, 50f)
+      h.session.end(40f, 50f, cancel = false)
+      h.session.cancel()
+      assertEquals(3, h.dispatcher.dispatched.size)
+      assertEquals(0, h.finishCount)
+
+      val release = h.dispatcher.calls.last()
+      h.dispatcher.completeLast()
+      release.complete()
+      release.fail("late failure")
+      failedCall.complete()
+      h.session.move(60f, 70f)
+      h.session.end(60f, 70f, cancel = false)
+      assertEquals(3, h.dispatcher.dispatched.size)
+      h.assertFailedOnce(message)
     }
   }
 
@@ -382,6 +554,9 @@ class GestureStreamSessionTest {
 
     h.dispatcher.failLast("dispatchGesture refused")
 
+    h.assertRelease(h.dispatcher.calls.first().stroke, GesturePoint(10f, 10f))
+    assertEquals(2, h.dispatcher.dispatched.size)
+    h.dispatcher.completeLast()
     assertEquals(1, h.finishCount)
     assertEquals(false, h.finishedSuccess)
     assertEquals("dispatchGesture refused", h.finishedError)
@@ -395,9 +570,11 @@ class GestureStreamSessionTest {
     assertEquals(listOf(Ack("start", true, null)), h.acks)
 
     // The end was received on IO, but its routing work has not run yet. The gesture callback
-    // finishes first on the gesture thread; the queued end must consume that result.
+    // releases and finishes first on the gesture thread; the queued end must consume that result.
     h.router.end("end", "g1", 3f, 4f, cancel = false)
     h.dispatchers.single().failLast("dispatch cancelled")
+    assertEquals(1, h.acks.size)
+    h.dispatchers.single().completeLast() // release -> terminal result before the queued end
     h.drain()
 
     assertEquals(
@@ -414,6 +591,7 @@ class GestureStreamSessionTest {
     h.router.start("start", "g1", 1f, 2f)
     h.drain()
     h.dispatchers.single().failLast("framework cancelled")
+    h.dispatchers.single().completeLast() // release -> terminal failure retained for a late end
     h.router.end("end", "g1", 3f, 4f, cancel = false)
     h.router.end("late-end", "g1", 3f, 4f, cancel = false)
     h.drain()
@@ -437,6 +615,7 @@ class GestureStreamSessionTest {
       h.router.start("start-$index", "g$index", 1f, 2f)
       h.drain()
       h.dispatchers.last().failLast("failure $index")
+      h.dispatchers.last().completeLast() // release -> retain the unclaimed terminal failure
     }
     assertEquals(16, h.terminalFailureCount())
 
@@ -460,6 +639,9 @@ class GestureStreamSessionTest {
 
     h.dispatchers.single().failLast("lift cancelled")
 
+    assertEquals(listOf(Ack("start", true, null)), h.acks)
+    assertEquals(1, h.pendingEndCount())
+    h.dispatchers.single().completeLast() // release -> notify the registered end
     assertEquals(listOf(Ack("start", true, null), Ack("end", false, "lift cancelled")), h.acks)
     assertEquals(0, h.pendingEndCount())
   }
@@ -494,6 +676,7 @@ class GestureStreamSessionTest {
     h.router.start("next", "g1", 5f, 6f)
     h.drain()
     h.dispatchers.last().failLast("second gesture failed")
+    h.dispatchers.last().completeLast() // release -> fail only the new gesture
     assertEquals(1, h.acks.count { it.requestId == "end-1" })
     assertEquals(1, h.acks.count { it.requestId == "end-2" })
   }
@@ -512,6 +695,7 @@ class GestureStreamSessionTest {
     h.router.start("failed-start", "failed", 1f, 2f)
     h.drain()
     h.dispatchers.last().failLast("dispatch refused")
+    h.dispatchers.last().completeLast() // release -> retain the unrelated terminal failure
     assertEquals(1, h.terminalFailureCount())
 
     var cancelledBeforeClosed = false

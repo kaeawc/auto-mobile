@@ -1,6 +1,6 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {

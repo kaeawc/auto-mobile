@@ -4,7 +4,7 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { DeviceSessionManager } from "../../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../../devices/DeviceSessionManager";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";

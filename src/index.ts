@@ -137,7 +137,7 @@ async function main() {
   const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
   const appearanceSyncScheduler = await import("./daemon/AppearanceSyncScheduler");
   const { isAppearanceSyncEnabled } = await import("./daemon/PassiveWorkPolicy");
-  const { DeviceSessionManager } = await import("./utils/DeviceSessionManager");
+  const { DeviceSessionManager } = await import("./devices/DeviceSessionManager");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("./ctrlProxy/CtrlProxyManager");

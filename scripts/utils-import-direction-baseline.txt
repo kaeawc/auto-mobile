@@ -1,15 +1,4 @@
 src/utils/ContentHashProvider.ts -> src/features/observe/GetAppMetadata
-src/utils/DeviceSessionManager.ts -> src/daemon/deviceAdmissionGate
-src/utils/DeviceSessionManager.ts -> src/features/observe/ObserveScreen
-src/utils/DeviceSessionManager.ts -> src/features/observe/Window
-src/utils/DeviceSessionManager.ts -> src/features/observe/android
-src/utils/DeviceSessionManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
-src/utils/DeviceSessionManager.ts -> src/features/observe/interfaces/ObserveScreenCache
-src/utils/DeviceSessionManager.ts -> src/features/observe/interfaces/Window
-src/utils/DeviceSessionManager.ts -> src/features/observe/ios
-src/utils/DeviceSessionManager.ts -> src/features/observe/ios/IOSCtrlProxyClient
-src/utils/DeviceSessionManager.ts -> src/server/ToolExecutionContext
-src/utils/DeviceSessionManager.ts -> src/server/deviceExecutionBinding
 src/utils/KeepScreenAwakeManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
 src/utils/WorkProfileMonitor.ts -> src/db/installedAppsRepository
 src/utils/android-cmdline-tools/AvdConfigReader.ts -> src/features/device-control/virtualDeviceCapabilities

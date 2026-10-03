@@ -3,7 +3,7 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { afterEach, beforeAll, beforeEach, expect, test, spyOn } from "bun:test";
 import { z } from "zod/v4";
-import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {

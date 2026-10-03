@@ -174,7 +174,7 @@ import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "./iosStartupInit";
 import { selectObservationStreamDevices } from "./observationInitialFrame";

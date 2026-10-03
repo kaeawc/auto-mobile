@@ -42,7 +42,8 @@ export async function recordLayoutEvent(
 ): Promise<void> {
   await getDb(db).insertInto("layout_events").values(toLayoutRow(input)).execute();
 
-  cleanupIfNeeded(db);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db);
 }
 
 /**
@@ -58,7 +59,8 @@ export async function recordLayoutEvents(
   }
   await getDb(db).insertInto("layout_events").values(inputs.map(toLayoutRow)).execute();
 
-  cleanupIfNeeded(db, undefined, undefined, inputs.length);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getLayoutEvents(

@@ -1,3 +1,4 @@
+import { errorMessage } from "./describeUnknownError";
 import { EventEmitter } from "events";
 import {
   AdbClientFactory,
@@ -77,6 +78,10 @@ export interface AppLifecycleEventListener {
 }
 
 export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifecycleMonitor {
+  private readonly listenerWrappers = new WeakMap<
+    AppLifecycleEventListener,
+    (event: AppLifecycleEvent) => void
+  >();
   private trackedPackages: Set<string> = new Set();
   private runningPackages: Set<string> = new Set();
   private adbFactory: AdbClientFactory;
@@ -159,14 +164,26 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
    * Add event listener for specific event types
    */
   public addEventListener(type: string, listener: AppLifecycleEventListener): void {
-    this.on(type, listener);
+    let wrapper = this.listenerWrappers.get(listener);
+    if (!wrapper) {
+      wrapper = (event) => {
+        listener.call(this, event).catch((error) => {
+          logger.warn(`App lifecycle listener failed: ${errorMessage(error)}`, error);
+        });
+      };
+      this.listenerWrappers.set(listener, wrapper);
+    }
+    this.on(type, wrapper);
   }
 
   /**
    * Remove event listener
    */
   public removeEventListener(type: string, listener: AppLifecycleEventListener): void {
-    this.off(type, listener);
+    const wrapper = this.listenerWrappers.get(listener);
+    if (wrapper) {
+      this.off(type, wrapper);
+    }
   }
 
   /**

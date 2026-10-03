@@ -61,6 +61,15 @@ export function boundsEqual(a: ElementBounds, b: ElementBounds): boolean {
   return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
 }
 
+/** Return the shared rectangle, or null when the overlap has no area. */
+export function intersectBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.right, b.right);
+  const bottom = Math.min(a.bottom, b.bottom);
+  return right > left && bottom > top ? { left, top, right, bottom } : null;
+}
+
 /**
  * True when every edge of the two rects differs by at most epsilonPx (screen px).
  */

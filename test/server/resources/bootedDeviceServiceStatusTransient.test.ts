@@ -24,8 +24,13 @@ import {
 
 describe("iOS service status command applicability", () => {
   for (const isVirtual of [true, false, undefined]) {
-    for (const missing of ["set_hinge_angle", "set_voiceover_state", "request_shake"] as const) {
-      test(`missing ${missing} with isVirtual=${isVirtual}`, async () => {
+    for (const { missing, useDefaultRequirements } of [
+      { missing: "set_hinge_angle", useDefaultRequirements: false },
+      { missing: "set_hinge_angle", useDefaultRequirements: true },
+      { missing: "set_voiceover_state", useDefaultRequirements: false },
+      { missing: "request_shake", useDefaultRequirements: false },
+    ]) {
+      test(`missing ${missing} with isVirtual=${isVirtual}, default requirements=${useDefaultRequirements}`, async () => {
         const timer = new FakeTimer();
         const device = {
           name: "iPhone",
@@ -46,7 +51,7 @@ describe("iOS service status command applicability", () => {
         const cachedClient = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
           client,
         );
-        const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_hinge_angle", "set_voiceover_state"];
+        const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_voiceover_state"];
         const advertised = commands.filter((command) => command !== missing);
         const cachedCommands = spyOn(client, "getCachedSupportedCommands").mockReturnValue(
           advertised,
@@ -70,14 +75,17 @@ describe("iOS service status command applicability", () => {
             undefined,
             { getVersion: async () => undefined },
             timer,
-            { runnerCommandRequirements: requirements },
+            useDefaultRequirements ? undefined : { runnerCommandRequirements: requirements },
           );
           expect(status?.supportedCommandsComplete).toBe(complete);
           expect(status?.isCompatible).toBe(complete);
           // Doctor and the resource share this primitive; missing commands mean stale in both.
           expect(
-            getMissingIosRunnerFeatureCommands(new Set(advertised), environment, requirements)
-              .length === 0,
+            getMissingIosRunnerFeatureCommands(
+              new Set(advertised),
+              environment,
+              useDefaultRequirements ? undefined : requirements,
+            ).length === 0,
           ).toBe(complete);
         } finally {
           installed.mockRestore();

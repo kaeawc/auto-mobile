@@ -4,7 +4,6 @@ export type IosRunnerEnvironment = "simulator" | "physical";
 type Applicability = IosRunnerEnvironment | "both";
 
 // Mirrors CommandHandler.swift:54 supportedRequestTypes(in:); unlisted commands apply to both.
-// #8547: require "set_hinge_angle" in IOS_RUNNER_FEATURE_COMMANDS and this table only once RELEASE_CHECKSUM_REGISTRY[0] ships it; 0.0.81 predates PR 8343.
 export const IOS_RUNNER_COMMAND_APPLICABILITY = {
   request_shake: "both",
   request_press_button: "both",
@@ -15,7 +14,7 @@ export const IOS_RUNNER_COMMAND_APPLICABILITY = {
   set_hinge_angle: "simulator",
   set_voiceover_state: "physical",
 } as const satisfies Record<
-  (typeof IOS_RUNNER_FEATURE_COMMANDS)[number] | "set_hinge_angle" | "set_voiceover_state",
+  (typeof IOS_RUNNER_FEATURE_COMMANDS)[number] | "set_voiceover_state",
   Applicability
 >;
 

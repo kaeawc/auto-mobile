@@ -214,7 +214,9 @@ describe("NavigationScreenshotManager", () => {
         "screen",
         Buffer.from("LRU failure image"),
       );
-      expect(stored).toBe(`${screenshotDir}/${manager.generateFilename("app", "screen")}`);
+      expect(normalizePath(stored!)).toBe(
+        `${screenshotDir}/${manager.generateFilename("app", "screen")}`,
+      );
       expect(await fakeFs.pathExists(stored!)).toBe(true);
       expect(fakeLogger.at("warn")[0]?.message).toBe(
         "Screenshot LRU cleanup failed: cleanup denied",
@@ -240,7 +242,9 @@ describe("NavigationScreenshotManager", () => {
         "screen",
         { execute: async () => ({ success: true, path: "/capture.png" }) },
       );
-      expect(stored).toBe(`${screenshotDir}/${manager.generateFilename("app", "screen")}`);
+      expect(normalizePath(stored!)).toBe(
+        `${screenshotDir}/${manager.generateFilename("app", "screen")}`,
+      );
       expect(await fakeFs.pathExists(stored!)).toBe(true);
       expect(fakeLogger.at("debug")[0]?.message).toBe(
         "Temporary screenshot cleanup failed: already removed",
@@ -271,7 +275,7 @@ describe("NavigationScreenshotManager", () => {
     fakeFs.setFile(nextPath, Buffer.alloc(800 * 1024), 1);
     const unlinkOriginal = fakeFs.unlink.bind(fakeFs);
     const unlink = spyOn(fakeFs, "unlink").mockImplementation(async (file) => {
-      if (file === oldPath) {
+      if (normalizePath(file) === oldPath) {
         throw new Error("already removed");
       }
       return unlinkOriginal(file);

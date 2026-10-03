@@ -10,7 +10,7 @@ import type {
 } from "../models/DeviceResourceConfiguration";
 import { SimCtlClient, type SimCtl } from "./ios-cmdline-tools/SimCtlClient";
 import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
-import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "./ios-cmdline-tools/IosDeviceKind";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
@@ -101,7 +101,7 @@ export class DefaultDeviceResourceController implements DeviceResourceController
           "This resource has no approved control implementation; use a narrower resource where available.",
       };
     }
-    if (!isIosSimulatorUdid(run.request.device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: run.request.device.deviceId }) !== "simulator") {
       return { state: "unsupported", reason: "Resource control requires an iOS Simulator." };
     }
     run.inventory ??= this.reader.readRuntimeInventory(run.request);

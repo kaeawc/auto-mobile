@@ -17,7 +17,7 @@ import {
   androidResourceSettings,
 } from "./androidDeviceResourceCatalog";
 import { iosDeviceResourceCatalog } from "./iosDeviceResourceCatalog";
-import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "./ios-cmdline-tools/IosDeviceKind";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 
@@ -178,7 +178,7 @@ export class DefaultDeviceResourceObserver implements DeviceResourceObserver {
       platform: "ios",
       resources: { ...commonResources(), icloudSync: unsupported(), photoAnalysis: unsupported() },
     };
-    if (!isIosSimulatorUdid(request.device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: request.device.deviceId }) !== "simulator") {
       const reason = "Resource observation currently requires an iOS Simulator.";
       snapshot.resources = {
         ...commonResources(reason),

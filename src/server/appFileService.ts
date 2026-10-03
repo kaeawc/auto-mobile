@@ -51,7 +51,7 @@ import {
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { shellQuote } from "../utils/shellQuote";
 import { isPackageInstalledForUser } from "../utils/android-cmdline-tools/isPackageInstalledForUser";
 import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
@@ -1283,7 +1283,7 @@ class IosSimulatorMediaLibraryProvider implements AppFileWriteProvider {
       return [];
     }
     const request = requests[0]!;
-    if (!isIosSimulatorUdid(request.device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: request.device.deviceId }) !== "simulator") {
       throw new ActionableError(
         `iOS media-library staging is only supported on iOS simulators. Device ${request.device.deviceId} looks like a physical iOS device.`,
       );
@@ -1360,7 +1360,7 @@ function validateIosFilesDeviceTarget(device: BootedDevice, target: PutAppFileTa
 }
 
 function requireIosFilesSimulator(device: BootedDevice): void {
-  if (!isIosSimulatorUdid(device.deviceId)) {
+  if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
     throw new ActionableError(
       `iOS user_files staging is only supported on iOS Simulators. Device ${device.deviceId} looks like a physical iOS device. ` +
         "Physical iOS is unsupported without an on-device fixture-app integration.",
@@ -1751,7 +1751,7 @@ class IosSimulatorAppFileProvider
       );
     }
 
-    if (!isIosSimulatorUdid(device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
       throw new ActionableError(
         `iOS app file ${operation} is only supported on iOS simulators. ` +
           `Device ${device.deviceId} looks like a physical iOS device; app data containers require xcrun simctl.`,

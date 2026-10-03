@@ -238,8 +238,14 @@ describe("CtrlProxyStorage (Android)", function () {
         await waitForSentMessages(socket, baseCount + 1);
 
         const sent = findSentMessage(socket!, "subscribe_storage");
-        expect(sent.packageName).toBe("com.example");
-        expect(sent.fileName).toBe("settings.xml");
+        expect(sent.requestId).toBeString();
+        expect(sent.requestId).toMatch(/^subscribe_storage_.+/);
+        expect(JSON.parse(socket!.sentMessages[baseCount])).toEqual({
+          type: "subscribe_storage",
+          requestId: sent.requestId,
+          packageName: "com.example",
+          fileName: "settings.xml",
+        });
 
         // The device emits flat fields (no nested `subscription` object).
         socket!.simulateMessage(
@@ -300,6 +306,10 @@ describe("CtrlProxyStorage (Android)", function () {
   });
 
   describe("unsubscribeStorage", function () {
+    // CtrlProxyMessageHandlerTest.kt's `unsubscribe_storage with only subscriptionId resolves
+    // packageName and fileName` uses the same JSON shape; changing either side must change both.
+    const subscriptionId = "com.example:settings.xml";
+
     test("sends the subscriptionId and resolves on the device's result", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
       const client = AndroidCtrlProxyClient.createForTesting(
@@ -314,11 +324,17 @@ describe("CtrlProxyStorage (Android)", function () {
         await waitForSocketOpen(socket);
 
         const baseCount = socket!.sentMessages.length;
-        const resultPromise = client.unsubscribeStorage("com.example:settings.xml");
+        const resultPromise = client.unsubscribeStorage(subscriptionId);
         await waitForSentMessages(socket, baseCount + 1);
 
         const sent = findSentMessage(socket!, "unsubscribe_storage");
-        expect(sent.subscriptionId).toBe("com.example:settings.xml");
+        expect(sent.requestId).toBeString();
+        expect(sent.requestId).toMatch(/^unsubscribe_storage_.+/);
+        expect(JSON.parse(socket!.sentMessages[baseCount])).toEqual({
+          type: "unsubscribe_storage",
+          requestId: sent.requestId,
+          subscriptionId,
+        });
 
         socket!.simulateMessage(
           JSON.stringify({
@@ -331,8 +347,62 @@ describe("CtrlProxyStorage (Android)", function () {
           }),
         );
 
-        // Resolves (does not hang until timeout) — this is the bug the device-side fix repairs.
+        // The device result resolves the pending unsubscribe request.
         await expect(resultPromise).resolves.toBeUndefined();
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("sends the subscriptionId returned by subscribeStorage unchanged", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
+      const packageName = "com.example";
+      const fileName = "settings.xml";
+      try {
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        const subscribeCount = socket!.sentMessages.length;
+        const subscribePromise = client.subscribeStorage(packageName, fileName);
+        await waitForSentMessages(socket, subscribeCount + 1);
+        const subscribeRequest = findSentMessage(socket!, "subscribe_storage");
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "subscribe_storage_result",
+            requestId: subscribeRequest.requestId,
+            success: true,
+            packageName,
+            fileName,
+            subscriptionId,
+            totalTimeMs: 5,
+          }),
+        );
+        const subscription = await subscribePromise;
+
+        const unsubscribeCount = socket!.sentMessages.length;
+        const unsubscribePromise = client.unsubscribeStorage(subscription.subscriptionId);
+        await waitForSentMessages(socket, unsubscribeCount + 1);
+        const unsubscribeRequest = findSentMessage(socket!, "unsubscribe_storage");
+        expect(unsubscribeRequest.subscriptionId).toBe(subscription.subscriptionId);
+        expect(unsubscribeRequest.subscriptionId).toBe(`${packageName}:${fileName}`);
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "unsubscribe_storage_result",
+            requestId: unsubscribeRequest.requestId,
+            success: true,
+            packageName,
+            fileName,
+            totalTimeMs: 3,
+          }),
+        );
+        await expect(unsubscribePromise).resolves.toBeUndefined();
       } finally {
         await client.close();
       }

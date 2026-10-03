@@ -80,6 +80,7 @@
         "max-nested-callbacks": ["error", 3],
         "auto-mobile/no-accumulator-foreach": "error",
         "auto-mobile/no-inline-error-normalize": "error",
+        "auto-mobile/no-raw-promise-race": "error",
         "auto-mobile/no-caught-error-interpolation": "warn",
 
         // Ratcheted rules with pre-existing baselined violations. oxlint has no
@@ -96,7 +97,6 @@
           { "max": 150, "skipBlankLines": true, "skipComments": true }
         ],
         "auto-mobile/catch-convention": "warn",
-        "auto-mobile/no-raw-promise-race": "warn",
         "auto-mobile/no-unknown-cast": "warn",
         "typescript/no-floating-promises": "warn",
         "typescript/no-misused-promises": "warn"

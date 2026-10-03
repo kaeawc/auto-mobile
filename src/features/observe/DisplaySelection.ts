@@ -1,6 +1,6 @@
 import type { DeviceDisplays, DisplayPanel, Posture } from "../../models/DisplayPanel";
 import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
-import { POSTURE_PANEL_ROLES } from "../../models/DisplayPanel";
+import { POSTURE_PANEL_ROLES, selectablePanels } from "../../models/DisplayPanel";
 import {
   DisplayInventoryUnavailableError,
   InvalidDisplayPinError,
@@ -75,14 +75,19 @@ export function readableDisplayInventory(input: {
   return input.inventory ?? { panels: [], postures: [] };
 }
 
-/** Pins are physical keys or roles, never dynamic selectors or logical IDs. */
+/** Pins use the targeting keys/roles; single-display active resolves to its sole key. */
 export function validateDisplayPin(inventory: DeviceDisplays | undefined, pin: unknown): string {
-  if (typeof pin !== "string" || !pin || pin === "active" || pin === "all") {
+  if (typeof pin !== "string" || !pin || pin === "all") {
     throw new InvalidDisplayPinError(pin, inventory);
   }
   inventory = readableDisplayInventory({ inventory, pin });
+  const panels = selectablePanels(inventory);
+  if (pin === "active" && panels.length === 1) {
+    return panels[0].key;
+  }
   if (
-    !inventory.panels.some((panel) => panel.key === pin || (roles.has(pin) && panel.role === pin))
+    pin === "active" ||
+    !panels.some((panel) => panel.key === pin || (roles.has(pin) && panel.role === pin))
   ) {
     throw new InvalidDisplayPinError(pin, inventory);
   }
@@ -90,7 +95,7 @@ export function validateDisplayPin(inventory: DeviceDisplays | undefined, pin: u
 }
 
 function pinnedPanel(inventory: DeviceDisplays | undefined, pin: string): DisplayPanel {
-  const panels = readableDisplayInventory({ inventory, pin }).panels;
+  const panels = selectablePanels(readableDisplayInventory({ inventory, pin }));
   const panel =
     panels.find((candidate) => candidate.key === pin) ??
     (roles.has(pin) ? panels.find((candidate) => candidate.role === pin) : undefined);
@@ -102,12 +107,6 @@ function pinnedPanel(inventory: DeviceDisplays | undefined, pin: string): Displa
 
 function postureDefault(posture: Posture | undefined): DisplayPanel["role"] | undefined {
   return POSTURE_PANEL_ROLES.find(([defaultPosture]) => defaultPosture === posture)?.[1];
-}
-
-function selectablePanels(inventory: DeviceDisplays | undefined): DisplayPanel[] {
-  return inventory?.panels?.length
-    ? inventory.panels
-    : [{ key: "0", role: "unknown", sizePx: { width: 0, height: 0 } }];
 }
 
 /** Pure per-call panel selection. Inventory order is the stable final fallback. */

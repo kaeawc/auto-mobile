@@ -12,7 +12,7 @@ import {
   DeviceSessionManager,
   type ConnectedPlatformScan,
   type DeviceReadinessLevel,
-} from "../utils/DeviceSessionManager";
+} from "../devices/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";

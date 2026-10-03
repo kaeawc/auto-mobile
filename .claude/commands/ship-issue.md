@@ -86,7 +86,7 @@ If anything here is red, fix it before proceeding. Do not open a PR on red.
    must contain only your intended paths. Concurrent sessions share the checkout
    and can move refs — commit/push/PR only from this worktree.
 2. Create the PR using the repo PR template if one exists
-   (`.github/PULL_REQUEST_TEMPLATE.md` or `.github/pull_request_template.md`);
+   (`.github/PULL_REQUEST_TEMPLATE.md`);
    otherwise use clear Summary / Changes / Testing / Acceptance-criteria sections.
    Link the PR to issue #$ARGUMENTS (`Closes #$ARGUMENTS`).
 3. Do **not** enable auto-merge yet.

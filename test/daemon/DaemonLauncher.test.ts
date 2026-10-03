@@ -229,7 +229,8 @@ describe("DaemonLauncher", () => {
 
   test("spawns without a shell and cleans up startup listeners after readiness", async () => {
     const spawner = new FakeDaemonSpawner();
-    const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner) });
+    const timer = new FakeTimer();
+    const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner), timer });
     let aborted = false;
 
     await launcher.launchAndWait({
@@ -251,13 +252,16 @@ describe("DaemonLauncher", () => {
       options: { shell: false, env: { FEATURE: "enabled" } },
     });
     expect(aborted).toBe(false);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(spawner.process.listenerCount("error")).toBe(0);
     expect(spawner.process.listenerCount("exit")).toBe(0);
   });
 
   test("aborts readiness and returns the formatted child startup error", async () => {
     const spawner = new FakeDaemonSpawner();
-    const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner) });
+    const timer = new FakeTimer();
+    const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner), timer });
+    const failure = new Error("formatted: Daemon subprocess failed to spawn: ENOENT");
     let readinessSignal: AbortSignal | undefined;
 
     const launch = launcher.launchAndWait({
@@ -269,11 +273,15 @@ describe("DaemonLauncher", () => {
         readinessSignal = signal;
         return new Promise<boolean>(() => {});
       },
-      formatFailure: async (summary) => new Error(`formatted: ${summary}`),
+      formatFailure: async (summary) => {
+        expect(summary).toBe("Daemon subprocess failed to spawn: ENOENT");
+        return failure;
+      },
     });
     spawner.process.emit("error", new Error("ENOENT"));
 
-    await expect(launch).rejects.toThrow("formatted: Daemon subprocess failed to spawn: ENOENT");
+    await expect(launch).rejects.toBe(failure);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(readinessSignal?.aborted).toBe(true);
     expect(spawner.process.listenerCount("error")).toBe(0);
     expect(spawner.process.listenerCount("exit")).toBe(0);

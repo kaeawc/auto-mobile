@@ -1,4 +1,4 @@
-import { DeviceClientProvider } from "../../src/utils/DeviceSessionManager";
+import { DeviceClientProvider } from "../../src/devices/DeviceSessionManager";
 import { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";

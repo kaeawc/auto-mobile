@@ -399,10 +399,10 @@ export class DaemonLauncher {
     });
 
     try {
-      const ready = await Promise.race([
-        request.waitForReady(request.timeoutMs, readinessAbort.signal),
-        processFailure,
-      ]);
+      const ready = await raceWithDeadline(
+        [request.waitForReady(request.timeoutMs, readinessAbort.signal), processFailure],
+        { timer: this.timer, label: "Daemon readiness" },
+      );
       if (!ready) {
         // A readiness timeout can race the child binding its socket. Recheck the
         // PID-recorded daemon and its connection before signalling the exact

@@ -402,7 +402,7 @@ The script uses an already booted iPhone simulator when available, otherwise it 
 
 The following scripts are invoked by GitHub Actions workflows:
 
-- `benchmark-context-thresholds.ts` - Runs in `.github/workflows/context-thresholds.yml`
+- `benchmark-context-thresholds.ts` - Runs in `.github/workflows/merge.yml`
 - `benchmark-startup.sh` - Runs in `.github/workflows/pull_request.yml`
 - `benchmark-npm-unpacked-size.ts` - Runs in `.github/workflows/pull_request.yml`
 - `validate_*.sh` - Various validation workflows in `.github/workflows/pull_request.yml`

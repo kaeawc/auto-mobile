@@ -15,7 +15,7 @@ import { type DeviceCreationGate } from "../devices/deviceCreationGate";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
-import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
 import { getCurrentBuildIdentity } from "../daemon/buildIdentity";

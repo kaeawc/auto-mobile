@@ -290,40 +290,49 @@ describe("socket-owner daemon preflight", () => {
     });
   }
 
-  test("legacy status probe is ungated and closes its diagnostic connection", async () => {
-    const closed = spyOn(DaemonClient.prototype, "close").mockResolvedValue();
-    let declaredIdentity: unknown = "unset";
-    const method = spyOn(DaemonClient.prototype, "callDaemonMethod").mockImplementation(
-      async function (name) {
-        expect(name).toBe("ide/status");
-        declaredIdentity = (this as unknown as { clientIdentity: unknown }).clientIdentity;
-        return {
+  test.each([undefined, true])(
+    "status probe passes session-error capability through: %j",
+    async (structuredSessionNotFound) => {
+      const closed = spyOn(DaemonClient.prototype, "close").mockResolvedValue();
+      let declaredIdentity: unknown = "unset";
+      const method = spyOn(DaemonClient.prototype, "callDaemonMethod").mockImplementation(
+        async function (name) {
+          expect(name).toBe("ide/status");
+          declaredIdentity = (this as unknown as { clientIdentity: unknown }).clientIdentity;
+          return {
+            version: "0.0.68",
+            ...(structuredSessionNotFound === undefined ? {} : { structuredSessionNotFound }),
+            releaseVersion: "0.0.68",
+            activeProvisioning: true,
+            acceptanceCapabilityFingerprint: "1234abcd",
+            effectiveDebug: true,
+          };
+        },
+      );
+      try {
+        const status = await new DaemonClient(
+          "/fake.sock",
+          1000,
+          new FakeTimer(),
+        ).getDaemonStatus();
+        expect(status).toEqual({
+          running: true,
           version: "0.0.68",
-          releaseVersion: "0.0.68",
+          ...(structuredSessionNotFound === undefined ? {} : { structuredSessionNotFound }),
+          assetVersion: "0.0.68",
           activeProvisioning: true,
           acceptanceCapabilityFingerprint: "1234abcd",
           effectiveDebug: true,
-        };
-      },
-    );
-    try {
-      const status = await new DaemonClient("/fake.sock").getDaemonStatus();
-      expect(status).toEqual({
-        running: true,
-        version: "0.0.68",
-        assetVersion: "0.0.68",
-        activeProvisioning: true,
-        acceptanceCapabilityFingerprint: "1234abcd",
-        effectiveDebug: true,
-        socketPath: "/fake.sock",
-      });
-      expect(declaredIdentity).toBeNull();
-      expect(closed).toHaveBeenCalledTimes(1);
-    } finally {
-      method.mockRestore();
-      closed.mockRestore();
-    }
-  });
+          socketPath: "/fake.sock",
+        });
+        expect(declaredIdentity).toBeNull();
+        expect(closed).toHaveBeenCalledTimes(1);
+      } finally {
+        method.mockRestore();
+        closed.mockRestore();
+      }
+    },
+  );
 
   for (const pid of [101, 0, -1, 1.5, "101"]) {
     test(`socket status validates process identity ${JSON.stringify(pid)}`, async () => {

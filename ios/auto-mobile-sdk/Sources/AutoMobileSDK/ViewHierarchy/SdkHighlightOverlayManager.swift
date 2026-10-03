@@ -30,8 +30,6 @@
                 self.now = now
             }
 
-            isolated deinit { timer?.invalidate() }
-
             @discardableResult
             func show(id: String, shape: SdkHighlightShape) -> Bool {
                 guard !id.isEmpty else { return false }
@@ -45,9 +43,13 @@
                 window.layer.addSublayer(layer)
                 layers[id] = Entry(layer: layer, bounds: bounds, started: now())
                 if timer == nil {
-                    let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+                    let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+                        guard let self else {
+                            timer.invalidate()
+                            return
+                        }
                         // This timer is registered only on RunLoop.main below.
-                        MainActor.assumeIsolated { self?.tick() }
+                        MainActor.assumeIsolated { self.tick() }
                     }
                     RunLoop.main.add(timer, forMode: .common)
                     self.timer = timer

@@ -50,7 +50,7 @@ describe("authoritative iOS local builds", () => {
       hasIosPrerequisites: async () => true,
     });
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ios-local-build-"));
-    derivedDataPath = path.join(tempDir, "DerivedData");
+    derivedDataPath = path.join(tempDir, "Derived Data's");
     bundleCacheDir = path.join(tempDir, "cache");
     productsDir = path.join(derivedDataPath, "Build", "Products");
     xctestrunPath = path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun");
@@ -83,8 +83,10 @@ describe("authoritative iOS local builds", () => {
 
   // Reuse the existing fake's product fixture writer, independently of the
   // recording downloader injected into the builder under test.
-  async function placeLocalProducts(): Promise<void> {
-    await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
+  async function placeLocalProducts(includeDeviceProducts = false): Promise<void> {
+    const fixture = new FakeIOSCtrlProxyBundleDownloader();
+    fixture.includeDeviceProducts = includeDeviceProducts;
+    await fixture.extractBundle("fixture", derivedDataPath);
     await fs.writeFile(xctestrunPath, "local xctestrun");
   }
 
@@ -95,10 +97,15 @@ describe("authoritative iOS local builds", () => {
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = target;
       IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
       downloader.runnerChecksum = downloader.legacyRunnerChecksum = "a".repeat(64);
-      const binary = await builder.getRunnerBinaryPath("simulator", target);
-      if (!binary) {
-        throw new Error("Missing fixture runner binary");
-      }
+      const runnerApp = path.join(
+        productsDir,
+        "Debug-iphonesimulator",
+        "CtrlProxyUITests-Runner.app",
+      );
+      const binary =
+        target === "runner"
+          ? path.join(runnerApp, "CtrlProxyUITests-Runner")
+          : path.join(runnerApp, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
         await fs.utimes(binary, originalTimestamp, originalTimestamp);
@@ -124,10 +131,14 @@ describe("authoritative iOS local builds", () => {
 
   test("mtime alone identifies a new local build", async () => {
     await placeLocalProducts();
-    const binary = await builder.getRunnerBinaryPath("simulator", "xctest");
-    if (!binary) {
-      throw new Error("Missing fixture runner binary");
-    }
+    const binary = path.join(
+      productsDir,
+      "Debug-iphonesimulator",
+      "CtrlProxyUITests-Runner.app",
+      "PlugIns",
+      "CtrlProxyUITests.xctest",
+      "CtrlProxyUITests",
+    );
     await fs.utimes(binary, originalTimestamp, originalTimestamp);
     await builder.verifyRunnerBinaryBeforeLaunch("simulator");
     await fs.utimes(binary, originalTimestamp, rebuiltTimestamp);
@@ -137,10 +148,14 @@ describe("authoritative iOS local builds", () => {
 
   test("size alone identifies a new local build", async () => {
     await placeLocalProducts();
-    const binary = await builder.getRunnerBinaryPath("simulator", "xctest");
-    if (!binary) {
-      throw new Error("Missing fixture runner binary");
-    }
+    const binary = path.join(
+      productsDir,
+      "Debug-iphonesimulator",
+      "CtrlProxyUITests-Runner.app",
+      "PlugIns",
+      "CtrlProxyUITests.xctest",
+      "CtrlProxyUITests",
+    );
     const timestamp = new Date(1700000000000);
     await fs.utimes(binary, timestamp, timestamp);
     await builder.verifyRunnerBinaryBeforeLaunch("simulator");
@@ -169,10 +184,14 @@ describe("authoritative iOS local builds", () => {
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256 = downloader.runnerChecksum;
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = "xctest";
     await builder.verifyRunnerBinaryBeforeLaunch("simulator");
-    const binary = await builder.getRunnerBinaryPath("simulator", "xctest");
-    if (!binary) {
-      throw new Error("Missing fixture runner binary");
-    }
+    const binary = path.join(
+      productsDir,
+      "Debug-iphonesimulator",
+      "CtrlProxyUITests-Runner.app",
+      "PlugIns",
+      "CtrlProxyUITests.xctest",
+      "CtrlProxyUITests",
+    );
     await fs.writeFile(binary, "rebuilt runner with a different size");
     downloader.runnerChecksum = "rebuilt-sha";
     const info = spyOn(logger, "info").mockImplementation(() => {});
@@ -187,6 +206,127 @@ describe("authoritative iOS local builds", () => {
       info.mockRestore();
     }
   });
+
+  test.each(["runner", "xctest"] as const)(
+    "device %s validates and pins on first launch, re-pins a rebuild, and preserves the simulator pin",
+    async (target) => {
+      await placeLocalProducts(true);
+      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = target;
+      const runnerApp = path.join(productsDir, "Debug-iphoneos", "CtrlProxyUITests-Runner.app");
+      const binary =
+        target === "runner"
+          ? path.join(runnerApp, "CtrlProxyUITests-Runner")
+          : path.join(runnerApp, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
+      await fs.utimes(binary, originalTimestamp, originalTimestamp);
+      downloader.runnerChecksum = downloader.legacyRunnerChecksum = "simulator-sha";
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      downloader.runnerChecksum = downloader.legacyRunnerChecksum = "device-sha";
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await builder.getXctestrunPath("device")).toBe(
+          path.join(productsDir, "AutoMobileTest_iphoneos.xctestrun"),
+        );
+        await builder.verifyRunnerBinaryBeforeLaunch("device");
+        expect(downloader.checksummedFilePaths).toContain(binary);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "active for device: captured the existing local runner with derived SHA256 device-sha",
+          ),
+        );
+        await fs.writeFile(binary, "rebuilt device runner with a different size");
+        await fs.utimes(binary, rebuiltTimestamp, rebuiltTimestamp);
+        downloader.runnerChecksum = downloader.legacyRunnerChecksum = "rebuilt-device-sha";
+        await builder.verifyRunnerBinaryBeforeLaunch("device");
+        expect(info).toHaveBeenCalledWith(expect.stringContaining("New local build detected"), {
+          platform: "device",
+          oldSha: "device-sha",
+          newSha: "rebuilt-devi",
+        });
+        await builder.verifyRunnerBinaryBeforeLaunch("device");
+        downloader.runnerChecksum = downloader.legacyRunnerChecksum = "simulator-sha";
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+        downloader.runnerChecksum = downloader.legacyRunnerChecksum = "rebuilt-device-sha";
+        await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+          "SHA256 changed (pre-launch)",
+        );
+        expect(
+          info.mock.calls.filter(([message]) => message.includes("New local build detected")),
+        ).toHaveLength(1);
+        expect(downloader.downloadedUrls).toEqual([]);
+        expect(downloader.extractedPaths).toEqual([]);
+      } finally {
+        info.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("an explicit device SHA mismatch refuses first launch", async () => {
+    await placeLocalProducts(true);
+    IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+    process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256 = "a".repeat(64);
+    process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = "xctest";
+    downloader.runnerChecksum = "b".repeat(64);
+    await expect(builder.verifyRunnerBinaryBeforeLaunch("device")).rejects.toThrow(
+      "runner binary SHA256 mismatch (pre-launch) for device",
+    );
+    expect(downloader.checksummedFilePaths).toContain(
+      path.join(
+        productsDir,
+        "Debug-iphoneos",
+        "CtrlProxyUITests-Runner.app",
+        "PlugIns",
+        "CtrlProxyUITests.xctest",
+        "CtrlProxyUITests",
+      ),
+    );
+  });
+
+  test.each([true, false])(
+    "xctestrun discovery refreshes only in local mode (%s)",
+    async (localMode) => {
+      IosCtrlProxyBuilder.setUseLocalBuildForTesting(localMode);
+      await placeLocalProducts();
+      await fs.utimes(xctestrunPath, originalTimestamp, originalTimestamp);
+      expect(await builder.getXctestrunPath("simulator")).toBe(xctestrunPath);
+      const newer = path.join(productsDir, "AutoMobileTest_iphonesimulator-rebuilt.xctestrun");
+      await fs.writeFile(newer, "rebuilt xctestrun");
+      await fs.utimes(newer, rebuiltTimestamp, rebuiltTimestamp);
+      expect(await builder.getXctestrunPath("simulator")).toBe(localMode ? newer : xctestrunPath);
+    },
+  );
+
+  test.each(["simulator", "device"] as const)(
+    "missing %s products give a platform-specific rebuild command",
+    async (platform) => {
+      const failure = builder.verifyRunnerBinaryBeforeLaunch(platform);
+      await expect(failure).rejects.toBeInstanceOf(ActionableError);
+      const quotedPath = `'${tempDir}/Derived Data'\\''s'`;
+      if (platform === "simulator") {
+        await expect(failure).rejects.toThrow(
+          `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=${quotedPath} bash scripts/ios/ctrl-proxy-build-for-testing.sh`,
+        );
+        await expect(failure).rejects.not.toThrow("generic/platform=iOS'");
+      } else {
+        await expect(failure).rejects.toThrow(
+          "xcodebuild build-for-testing -project ios/control-proxy/CtrlProxy.xcodeproj -scheme AutoMobileTest -destination 'generic/platform=iOS'",
+        );
+        await expect(failure).rejects.toThrow(
+          `-derivedDataPath ${quotedPath} -configuration Debug`,
+        );
+        await expect(failure).rejects.toThrow(/-configuration Debug$/);
+        await expect(failure).rejects.toThrow(
+          "Device builds require valid code signing and a provisioning profile.",
+        );
+        await expect(failure).rejects.not.toThrow(
+          "bash scripts/ios/ctrl-proxy-build-for-testing.sh",
+        );
+        await expect(failure).rejects.not.toThrow("CODE_SIGNING_ALLOWED=NO");
+      }
+    },
+  );
 
   test("partial device products do not fail an explicit simulator build or launch", async () => {
     await placeLocalProducts();

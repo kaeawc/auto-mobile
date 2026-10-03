@@ -1508,6 +1508,41 @@ describe("IosCtrlProxyBuilder", function () {
       );
     });
 
+    test.each(["0.0.83-dev", "0.0.83-nightly", "99.99.99"])(
+      "an unregistered version %s is exempt only in local-build mode",
+      (version) => {
+        const previousVersion = process.env.AUTOMOBILE_VERSION;
+        const previousLocalMode = process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD;
+        process.env.AUTOMOBILE_VERSION = version;
+        delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH;
+        delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting(null);
+        try {
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "true";
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false);
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "false";
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true);
+          IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false);
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "true";
+          IosCtrlProxyBuilder.setUseLocalBuildForTesting(false);
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true);
+        } finally {
+          IosCtrlProxyBuilder.setUseLocalBuildForTesting(null);
+          if (previousVersion === undefined) {
+            delete process.env.AUTOMOBILE_VERSION;
+          } else {
+            process.env.AUTOMOBILE_VERSION = previousVersion;
+          }
+          if (previousLocalMode === undefined) {
+            delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD;
+          } else {
+            process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = previousLocalMode;
+          }
+        }
+      },
+    );
+
     test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function () {
       const prev = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";

@@ -1,11 +1,9 @@
 import type {
   CaptureSnapshotArgs,
   CaptureSnapshotResult,
-} from "../../features/action/CaptureSnapshot";
-import type {
   RestoreSnapshotArgs,
   RestoreSnapshotResult,
-} from "../../features/action/RestoreSnapshot";
+} from "../../models/DeviceSnapshot";
 
 /**
  * Captures a device-state snapshot. Implemented by `CaptureSnapshot`,

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import type { BootedDevice } from "../../../src/models";
-import type { AppearanceMode } from "../../../src/models";
-import type { AppearanceConfig } from "../../../src/server/appearanceManager";
-import { AppearanceSyncScheduler } from "../../../src/utils/appearance/AppearanceSyncScheduler";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { PassiveWorkPolicy, parsePassiveWorkSettings } from "../../../src/daemon/PassiveWorkPolicy";
-import { logger } from "../../../src/utils/logger";
+import type { BootedDevice } from "../../src/models";
+import type { AppearanceMode } from "../../src/models";
+import type { AppearanceConfig } from "../../src/server/appearanceManager";
+import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { PassiveWorkPolicy, parsePassiveWorkSettings } from "../../src/daemon/PassiveWorkPolicy";
+import { logger } from "../../src/utils/logger";
 
 function makeTarget(incarnation: number): BootedDevice & { incarnation: number } {
   return { deviceId: "emulator-5554", name: "emulator-5554", platform: "android", incarnation };

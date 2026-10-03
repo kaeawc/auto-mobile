@@ -1,11 +1,11 @@
-import type { AppearanceMode, BootedDevice } from "../../models";
-import { DaemonState } from "../../daemon/daemonState";
-import { DeviceSessionManager } from "../DeviceSessionManager";
-import { applyAppearanceToDevice } from "../deviceAppearance";
-import { logger } from "../logger";
-import { getAppearanceConfig, resolveAppearanceMode } from "../../server/appearanceManager";
-import { Timer, defaultTimer } from "../SystemTimer";
-import { raceWithDeadline } from "../raceWithDeadline";
+import type { AppearanceMode, BootedDevice } from "../models";
+import { DaemonState } from "./daemonState";
+import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { applyAppearanceToDevice } from "../utils/deviceAppearance";
+import { logger } from "../utils/logger";
+import { getAppearanceConfig, resolveAppearanceMode } from "../server/appearanceManager";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 const DEFAULT_SYNC_INTERVAL_MS = 10000;
 export const DEFAULT_APPEARANCE_APPLY_DEADLINE_MS = 10_000;

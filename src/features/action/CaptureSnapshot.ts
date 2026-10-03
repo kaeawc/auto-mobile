@@ -1,3 +1,5 @@
+import type { CaptureSnapshotArgs, CaptureSnapshotResult } from "../../models/DeviceSnapshot";
+export type { CaptureSnapshotArgs, CaptureSnapshotResult } from "../../models/DeviceSnapshot";
 import {
   resolveIosSnapshotBackend,
   type IosSnapshotBackend,
@@ -9,7 +11,6 @@ import {
   ActionableError,
   toActionableError,
   DeviceSnapshotManifest,
-  DeviceSnapshotType,
   IosBundleCaptureStatus,
 } from "../../models";
 import {
@@ -46,23 +47,6 @@ import {
 } from "../../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 
 export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
-
-export interface CaptureSnapshotArgs {
-  snapshotName: string;
-  includeAppData?: boolean;
-  includeSettings?: boolean;
-  useVmSnapshot?: boolean;
-  strictBackupMode?: boolean; // iOS-only: if true, fail the whole snapshot unless every requested bundle is backed up (all-or-nothing)
-  vmSnapshotTimeoutMs?: number; // Timeout in milliseconds for emulator VM snapshot commands (default: 30000ms)
-  appBundleIds?: string[]; // iOS-only: bundle identifiers to include in app data snapshot
-}
-
-export interface CaptureSnapshotResult {
-  snapshotName: string;
-  timestamp: string;
-  snapshotType: DeviceSnapshotType;
-  manifest: DeviceSnapshotManifest;
-}
 
 /**
  * Capture device state snapshot, dispatching on device platform.

@@ -1,3 +1,13 @@
+import type {
+  RestoreSnapshotArgs,
+  RestoreSnapshotResult,
+  RestoreSnapshotFailure,
+} from "../../models/DeviceSnapshot";
+export type {
+  RestoreSnapshotArgs,
+  RestoreSnapshotResult,
+  RestoreSnapshotFailure,
+} from "../../models/DeviceSnapshot";
 import {
   resolveIosSnapshotBackend,
   type IosSnapshotBackend,
@@ -59,31 +69,6 @@ export function parseIosSnapshotOsVersion(
     ? { major, minor }
     : null;
 }
-
-export interface RestoreSnapshotArgs {
-  snapshotName: string;
-  manifest: DeviceSnapshotManifest;
-  useVmSnapshot?: boolean;
-  vmSnapshotTimeoutMs?: number; // Timeout in milliseconds for emulator VM snapshot commands (default: 30000ms)
-  onVmSnapshotLoaded?: () => Promise<void> | void;
-  onBeforeVmSnapshotLoad?: () => Promise<void> | void;
-}
-
-export interface RestoreSnapshotResult {
-  snapshotType: DeviceSnapshotType;
-  restoredAt: string;
-  /** Android restore operation that actually ran. */
-  restoreMode?: "vm" | "settings_only";
-  /** Present when a VM snapshot record was restored without its VM state. */
-  restoreNote?: string;
-  /** Optional for existing restore-provider fakes; concrete restores always set both fields. */
-  success?: boolean;
-  failures?: RestoreSnapshotFailure[];
-}
-
-export type RestoreSnapshotFailure =
-  | { kind: "ios_bundle"; bundleId: string; reason: string }
-  | { kind: "android_setting"; namespace: string; key: string; reason: string };
 
 interface IosRestoreOperations {
   pathExists(path: string): Promise<boolean>;

@@ -181,7 +181,7 @@ import {
   startAppearanceSyncScheduler,
   syncAppearanceForDevice,
   stopAppearanceSyncScheduler,
-} from "../utils/appearance/AppearanceSyncScheduler";
+} from "./AppearanceSyncScheduler";
 import {
   startPerformanceMonitor,
   stopPerformanceMonitor,

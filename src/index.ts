@@ -135,7 +135,7 @@ async function main() {
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
   const appearanceSocketServer = await import("./daemon/appearanceSocketServer");
   const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
-  const appearanceSyncScheduler = await import("./utils/appearance/AppearanceSyncScheduler");
+  const appearanceSyncScheduler = await import("./daemon/AppearanceSyncScheduler");
   const { isAppearanceSyncEnabled } = await import("./daemon/PassiveWorkPolicy");
   const { DeviceSessionManager } = await import("./utils/DeviceSessionManager");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");

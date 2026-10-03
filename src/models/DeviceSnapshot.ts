@@ -125,3 +125,45 @@ export interface DeviceSnapshotMetadata {
   pendingReclaimReason?: string;
   manifest: DeviceSnapshotManifest;
 }
+
+export interface CaptureSnapshotArgs {
+  snapshotName: string;
+  includeAppData?: boolean;
+  includeSettings?: boolean;
+  useVmSnapshot?: boolean;
+  strictBackupMode?: boolean; // iOS-only: if true, fail the whole snapshot unless every requested bundle is backed up (all-or-nothing)
+  vmSnapshotTimeoutMs?: number; // Timeout in milliseconds for emulator VM snapshot commands (default: 30000ms)
+  appBundleIds?: string[]; // iOS-only: bundle identifiers to include in app data snapshot
+}
+
+export interface CaptureSnapshotResult {
+  snapshotName: string;
+  timestamp: string;
+  snapshotType: DeviceSnapshotType;
+  manifest: DeviceSnapshotManifest;
+}
+
+export interface RestoreSnapshotArgs {
+  snapshotName: string;
+  manifest: DeviceSnapshotManifest;
+  useVmSnapshot?: boolean;
+  vmSnapshotTimeoutMs?: number; // Timeout in milliseconds for emulator VM snapshot commands (default: 30000ms)
+  onVmSnapshotLoaded?: () => Promise<void> | void;
+  onBeforeVmSnapshotLoad?: () => Promise<void> | void;
+}
+
+export interface RestoreSnapshotResult {
+  snapshotType: DeviceSnapshotType;
+  restoredAt: string;
+  /** Android restore operation that actually ran. */
+  restoreMode?: "vm" | "settings_only";
+  /** Present when a VM snapshot record was restored without its VM state. */
+  restoreNote?: string;
+  /** Optional for existing restore-provider fakes; concrete restores always set both fields. */
+  success?: boolean;
+  failures?: RestoreSnapshotFailure[];
+}
+
+export type RestoreSnapshotFailure =
+  | { kind: "ios_bundle"; bundleId: string; reason: string }
+  | { kind: "android_setting"; namespace: string; key: string; reason: string };

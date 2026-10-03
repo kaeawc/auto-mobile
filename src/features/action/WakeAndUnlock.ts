@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosSimulatorControlBackend";
 import {
   NotifyutilIosLockStateProbe,
   type IosLockStateProbe,
@@ -387,7 +387,7 @@ export class WakeAndUnlock {
   }
 
   private iosUnlockDeadline(transportDeadlineMs?: number): number {
-    const simulator = isIosSimulatorUdid(this.device.deviceId);
+    const simulator = resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
     // Transport deadlines use the host wall clock. Convert once so injected
     // timers can use their own epoch throughout recovery, gestures, and polling.
     const budgetMs =
@@ -411,7 +411,7 @@ export class WakeAndUnlock {
     if (!this.iosUnlocker) {
       throw new ActionableError("wakeAndUnlock: iOS unlocker is not configured");
     }
-    const simulator = isIosSimulatorUdid(this.device.deviceId);
+    const simulator = resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
     const deadline = this.iosUnlockDeadline(transportDeadlineMs);
     if (simulator) {
       const initialLock = await this.readIosLockState(deadline, signal);

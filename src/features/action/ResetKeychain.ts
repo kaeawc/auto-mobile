@@ -1,7 +1,7 @@
 import { ActionableError, toActionableError } from "../../models";
 import type { BootedDevice, ExecResult, ResetKeychainResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosKeychainControlBackend } from "../../utils/ios-cmdline-tools/IosSimulatorControlBackend";
 
 /**
  * Minimal simctl seam this action needs: run a pre-split simctl argv and return
@@ -98,7 +98,8 @@ export class ResetKeychain {
 
     // Reject physical iOS devices: the only supported operation is the
     // simulator's device-wide reset. A scoped, app-owned reset is tracked in #5188.
-    if (!isIosSimulatorUdid(deviceId)) {
+    const backend = resolveIosKeychainControlBackend({ deviceId, simctl: this.simctl });
+    if (backend.kind === "physical") {
       throw new ActionableError(
         `Scoped Keychain reset for '${appId}' is not yet implemented on physical iOS devices ` +
           `(tracked in #5188). Only iOS Simulator device-wide reset is currently supported.`,
@@ -114,7 +115,7 @@ export class ResetKeychain {
     }
 
     try {
-      await this.simctl.executeCommandArgs(["keychain", deviceId, "reset"]);
+      await backend.resetKeychain();
     } catch (error) {
       throw toActionableError(
         error,

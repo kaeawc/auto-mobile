@@ -8,7 +8,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosSimulatorControlBackend";
 import { IOSCtrlProxyClient } from "../observe/ios";
 
 export class Shake extends BaseVisualChange {
@@ -32,7 +32,7 @@ export class Shake extends BaseVisualChange {
     const intensity = options.intensity ?? 100; // Default intensity of 100
 
     if (this.device.platform === "ios") {
-      if (!isIosSimulatorUdid(this.device.deviceId)) {
+      if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "physical") {
         perf.end();
         return {
           success: false,

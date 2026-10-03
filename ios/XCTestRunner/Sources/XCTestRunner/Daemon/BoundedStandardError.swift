@@ -12,7 +12,7 @@ import os
 /// never concurrently with itself. All mutable state lives behind the lock.
 final class BoundedStandardError: @unchecked Sendable {
     private static let maximumBytes = 4096
-    private let data = OSAllocatedUnfairLock<Data>(initialState: Data())
+    private let data = OSAllocatedUnfairLock(initialState: (bytes: Data(), capped: false))
     let pipe = Pipe()
 
     init() {
@@ -25,18 +25,43 @@ final class BoundedStandardError: @unchecked Sendable {
         pipe.fileHandleForReading.readabilityHandler = nil
         append(pipe.fileHandleForReading.readDataToEndOfFile())
         return data.withLock { current in
-            guard !current.isEmpty else { return nil }
-            return String(data: current, encoding: .utf8)
+            Self.capturedText(from: current.bytes)
         }
     }
 
     private func append(_ incoming: Data) {
         guard !incoming.isEmpty else { return }
         data.withLock { current in
-            let remaining = Self.maximumBytes - current.count
-            guard remaining > 0 else { return }
-            current.append(incoming.prefix(remaining))
+            guard !current.capped else { return }
+            let remaining = Self.maximumBytes - current.bytes.count
+            current.bytes.append(incoming.prefix(remaining))
+            if current.bytes.count == Self.maximumBytes {
+                current.capped = true
+                current.bytes = Self.cappedData(current.bytes)
+            }
         }
+    }
+
+    /// Keep a complete UTF-8 prefix at the byte cap, including when a scalar spans pipe reads.
+    static func cappedData(_ incoming: Data) -> Data {
+        var captured = Data(incoming.prefix(maximumBytes))
+        guard captured.count == maximumBytes else { return captured }
+        var scalarStart = captured.count - 1
+        while scalarStart > 0, captured[scalarStart] & 0xC0 == 0x80 {
+            scalarStart -= 1
+        }
+        let lead = captured[scalarStart]
+        let scalarBytes = lead & 0xE0 == 0xC0 ? 2 : lead & 0xF0 == 0xE0 ? 3 : lead & 0xF8 == 0xF0 ? 4 : 1
+        if captured.count - scalarStart < scalarBytes {
+            captured.removeSubrange(scalarStart...)
+        }
+        return captured
+    }
+
+    static func capturedText(from captured: Data) -> String? {
+        let captured = cappedData(captured)
+        guard !captured.isEmpty else { return nil }
+        return String(data: captured, encoding: .utf8)
     }
 
     deinit {

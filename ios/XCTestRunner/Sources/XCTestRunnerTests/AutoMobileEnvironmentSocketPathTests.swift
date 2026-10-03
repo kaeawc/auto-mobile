@@ -79,4 +79,30 @@ final class AutoMobileEnvironmentSocketPathTests: XCTestCase {
             XCTAssertFalse(tv.tv_sec == 0 && tv.tv_usec == 0, "timeout \(seconds) must not disable SO_RCVTIMEO")
         }
     }
+
+    func testReceiveTimeoutCarriesRoundedMicrosecondsIntoSeconds() {
+        for seconds in [0.9999996, 1.9999996] {
+            let tv = DaemonManager.receiveTimeout(forSeconds: seconds)
+            XCTAssertEqual(tv.tv_sec, Int(seconds.rounded()))
+            XCTAssertEqual(tv.tv_usec, 0)
+            XCTAssertLessThan(tv.tv_usec, 1_000_000)
+            XCTAssertEqual(Double(tv.tv_sec) + Double(tv.tv_usec) / 1_000_000, seconds, accuracy: 0.000001)
+        }
+    }
+
+    func testReceiveTimeoutInvalidAndNonPositiveValuesUseFloor() {
+        for seconds in [Double.nan, -Double.infinity, -1.0, 0.0] {
+            let tv = DaemonManager.receiveTimeout(forSeconds: seconds)
+            XCTAssertEqual(tv.tv_sec, 0)
+            XCTAssertEqual(tv.tv_usec, 1000)
+        }
+    }
+
+    func testReceiveTimeoutExcessiveValuesClampTo24Hours() {
+        for seconds in [Double.infinity, 1e30] {
+            let tv = DaemonManager.receiveTimeout(forSeconds: seconds)
+            XCTAssertEqual(tv.tv_sec, 24 * 60 * 60)
+            XCTAssertEqual(tv.tv_usec, 0)
+        }
+    }
 }

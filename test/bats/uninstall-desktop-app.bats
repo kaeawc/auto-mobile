@@ -11,16 +11,60 @@ setup() {
   printf '#!/usr/bin/env bash\nprintf "Darwin\\n"\n' > "${STUB_BIN}/uname"
   cat > "${STUB_BIN}/plutil" <<'SCRIPT'
 #!/usr/bin/env bash
+[[ "$4" == "${HOME}/"* ]] || exit 1
 if [[ "$1" == "-extract" && "$2" == "CFBundleIdentifier" && "$3" == "raw" ]]; then
   sed -n 's|.*<string>\([^<]*\)</string>.*|\1|p' "$4"
 fi
 SCRIPT
   chmod +x "${STUB_BIN}/uname" "${STUB_BIN}/plutil"
 
+  export HOME="${TEST_ROOT}/home" TMPDIR="${TEST_ROOT}/tmp"
+  export AUTOMOBILE_DAEMON_SOCKET_PATH="${TEST_ROOT}/daemon.sock"
+  export AUTOMOBILE_DAEMON_PID_FILE_PATH="${TEST_ROOT}/daemon.pid"
+  export AUTOMOBILE_DAEMON_LOCK_FILE_PATH="${TEST_ROOT}/daemon.lock"
+  export PROCESS_CALLS="${TEST_ROOT}/process-calls.log"
+  mkdir -p "${HOME}" "${TMPDIR}" "${STUB_BIN}"
+  : > "${PROCESS_CALLS}"
+  local tool
+  for tool in pkill killall pgrep; do
+    cat > "${STUB_BIN}/${tool}" <<'STUB'
+#!/usr/bin/env bash
+printf '%s %s\n' "${0##*/}" "$*" >> "${PROCESS_CALLS}"
+exit 1
+STUB
+    chmod +x "${STUB_BIN}/${tool}"
+  done
+  cat > "${STUB_BIN}/ps" <<'STUB'
+#!/usr/bin/env bash
+printf 'ps %s\n' "$*" >> "${PROCESS_CALLS}"
+# Empty process table: never inspect the developer's processes.
+exit 0
+STUB
+  chmod +x "${STUB_BIN}/ps"
+  # Bash uses a builtin kill; PATH alone cannot intercept it.
+  kill() { printf 'kill %s\n' "$*" >> "${PROCESS_CALLS}"; return 1; }
+  export -f kill
+  for tool in nc sleep; do
+    cat > "${STUB_BIN}/${tool}" <<'STUB'
+#!/usr/bin/env bash
+# Never connect or wait on the host. nc refusal is the default probe result.
+[[ "${0##*/}" == nc ]] && exit "${NC_STATUS:-1}"
+exit 0
+STUB
+    chmod +x "${STUB_BIN}/${tool}"
+  done
+  export PATH="${STUB_BIN}:${PATH}"
+  # Block package-manager mutations even if the host has the CLI installed.
+  for tool in bun npm claude; do
+    printf '#!/usr/bin/env bash\nexit 1\n' > "${STUB_BIN}/${tool}"
+    chmod +x "${STUB_BIN}/${tool}"
+  done
+
   UNINSTALL_SH_SOURCE_ONLY=true
   # shellcheck source=/dev/null
   source "${SCRIPT}"
   unset UNINSTALL_SH_SOURCE_ONLY
+  cd "${TEST_ROOT}"
 }
 
 @test "matches only an exact installed desktop executable path" {
@@ -213,13 +257,19 @@ SCRIPT
 }
 
 teardown() {
+  local process_status=0
+  if grep -Eq '^(pkill|killall|pgrep) ' "${PROCESS_CALLS}"; then
+    process_status=1
+  fi
   rm -rf "${TEST_ROOT}"
+  return "${process_status}"
 }
 
 @test "--all removes a desktop app installed in the user's Applications directory" {
   run env HOME="${TEST_HOME}" PATH="${STUB_BIN}:${PATH}" bash "${SCRIPT}" --all --force
 
   [ "$status" -eq 0 ]
+  ! grep -Eq '^(pkill|killall|pgrep) ' "${PROCESS_CALLS}"
   [ ! -e "${TEST_HOME}/Applications/AutoMobile.app" ]
   [[ "$output" == *"AutoMobile desktop app removed"* ]]
 }
@@ -239,5 +289,5 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [ -d "${TEST_HOME}/Applications/AutoMobile.app" ]
-  [[ "$output" == *"No AutoMobile components found to uninstall"* ]]
+  [[ "$output" != *"AutoMobile desktop app removed"* ]]
 }

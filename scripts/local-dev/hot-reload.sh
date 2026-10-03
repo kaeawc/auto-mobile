@@ -41,6 +41,9 @@
 # installed:
 #   adb shell dumpsys package dev.jasonpearson.automobile.ctrlproxy | grep versionName
 
+# The uninstaller is intentionally sourced only in a subshell; its PROJECT_ROOT
+# assignment must not change this watcher's root.
+# shellcheck disable=SC2031
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -204,6 +207,13 @@ kill_previous() {
 
 # Reload MCP daemon by restarting the daemon process
 reload_mcp_daemon() {
+  local stop_status=0
+  set +e
+  stop_namespace_daemon_for_reload
+  stop_status=$?
+  set -e
+  if [[ "${stop_status}" != 0 ]]; then return "${stop_status}"; fi
+
   local skip_ios_build="${1:-auto}"
   local should_skip_ios_build=false
   local daemon_env=()
@@ -251,12 +261,7 @@ reload_mcp_daemon() {
     if kill -0 "${daemon_pid}" 2>/dev/null; then
       log_warn "Daemon restart timed out, force killing..."
       kill -9 "${daemon_pid}" 2>/dev/null || true
-      # Also kill any daemon processes
-      local pids
-      pids=$(pgrep -f "auto-mobile.*--daemon-mode" 2>/dev/null || true)
-      if [[ -n "${pids}" ]]; then
-        echo "${pids}" | xargs kill -9 2>/dev/null || true
-      fi
+      stop_namespace_daemon_for_reload
     else
       # Check exit status of completed process
       local exit_status=0
@@ -268,21 +273,25 @@ reload_mcp_daemon() {
       fi
     fi
   else
-    local pids
-    pids=$(pgrep -f "auto-mobile.*--daemon-mode" 2>/dev/null || true)
-    if [[ -n "${pids}" ]]; then
-      log_info "Killing daemon processes: ${pids}"
-      echo "${pids}" | xargs kill 2>/dev/null || true
-      sleep 1
-      # Force kill if still running
-      pids=$(pgrep -f "auto-mobile.*--daemon-mode" 2>/dev/null || true)
-      if [[ -n "${pids}" ]]; then
-        log_warn "Force killing daemon processes..."
-        echo "${pids}" | xargs kill -9 2>/dev/null || true
-      fi
-    fi
+    stop_namespace_daemon_for_reload
   fi
 }
+
+# The development checkout includes the standalone uninstaller. Reuse its
+# namespace/PID/identity helpers in a subshell so its globals and traps stay local.
+stop_namespace_daemon_for_reload() (
+  export UNINSTALL_SH_SOURCE_ONLY=true
+  # shellcheck disable=SC1091
+  source "${PROJECT_ROOT}/scripts/uninstall.sh"
+  # Shared stop verifies identity, shutdown, socket and unchanged PID record.
+  # Reload alone may escalate, with the same identity recheck before KILL.
+  daemon_check stop_daemon reload
+  local stop_status="${DAEMON_CHECK_STATUS}"
+  if [[ "${stop_status}" != 0 ]]; then
+    log_error "Hot reload blocked: skipped daemon restart/replacement. Run auto-mobile --daemon stop, then retry."
+  fi
+  return "${stop_status}"
+)
 
 # List TypeScript source files to watch
 list_ts_files() {
@@ -935,6 +944,10 @@ cleanup() {
 }
 
 # Parse command line arguments
+if [[ "${HOT_RELOAD_SH_SOURCE_ONLY:-}" == "true" ]]; then
+  return 0
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --device)

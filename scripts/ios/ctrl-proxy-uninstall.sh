@@ -77,14 +77,10 @@ else
     echo -e "  ${YELLOW}○${NC} ${DERIVED_DATA} does not exist"
 fi
 
-# Kill any running CtrlProxy iOS processes
+# Test runners may belong to another checkout; never stop them by pattern.
 echo ""
-echo -e "${BLUE}Stopping CtrlProxy iOS processes...${NC}"
-if pkill -f "xcodebuild.*CtrlProxyUITests" 2>/dev/null; then
-    echo -e "  ${GREEN}✓${NC} Stopped xcodebuild test processes"
-else
-    echo -e "  ${YELLOW}○${NC} No xcodebuild test processes running"
-fi
+echo -e "${BLUE}CtrlProxy iOS test processes...${NC}"
+echo -e "  ${YELLOW}○${NC} xcodebuild test processes may still be running. Stop them with Ctrl-C in the terminal that started the tests."
 
 echo ""
 echo -e "${GREEN}CtrlProxy iOS uninstall complete${NC}"

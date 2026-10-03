@@ -23,6 +23,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 
 # Full-tree scans — safe to run all at once (no git, no shared writes).
 parallel_checks=(
+  "bun scripts/check-process-safety.ts"
   "bun scripts/check-no-direct-plutil.ts"
   "bash scripts/check-no-new-direct-git-metadata.sh"
   "bash scripts/check-utils-import-direction.sh"

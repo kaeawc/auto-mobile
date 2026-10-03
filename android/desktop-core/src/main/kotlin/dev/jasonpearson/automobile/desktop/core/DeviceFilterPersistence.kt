@@ -8,6 +8,8 @@ internal data class DeviceFilterState(
   val maxIos: Int = 26,
   val showIphone: Boolean = true,
   val showIpad: Boolean = true,
+  val minIosVersion: String? = null,
+  val maxIosVersion: String? = null,
 )
 
 internal fun loadDeviceFilter(file: java.io.File): DeviceFilterState {
@@ -28,9 +30,15 @@ internal fun loadDeviceFilter(file: java.io.File): DeviceFilterState {
         maxIos = intField("maxIos", 26),
         showIphone = boolField("showIphone", true),
         showIpad = boolField("showIpad", true),
+        minIosVersion =
+          (obj["minIosVersion"] as? kotlinx.serialization.json.JsonPrimitive)?.content,
+        maxIosVersion =
+          (obj["maxIosVersion"] as? kotlinx.serialization.json.JsonPrimitive)?.content,
       )
     }
-  } catch (_: Exception) {}
+  } catch (e: Exception) {
+    LOG.warn("Failed to load device filters from $file", e)
+  }
   return DeviceFilterState()
 }
 
@@ -43,11 +51,25 @@ internal fun saveDeviceFilter(
   maxIos: Int,
   showIphone: Boolean,
   showIpad: Boolean,
+  minIosVersion: String? = null,
+  maxIosVersion: String? = null,
 ) {
   try {
     file.parentFile?.mkdirs()
-    file.writeText(
-      "{\"minApi\":$minApi,\"maxApi\":$maxApi,\"googleApisOnly\":$googleApisOnly,\"minIos\":$minIos,\"maxIos\":$maxIos,\"showIphone\":$showIphone,\"showIpad\":$showIpad}"
-    )
-  } catch (_: Exception) {}
+    val json =
+      kotlinx.serialization.json.buildJsonObject {
+        put("minApi", kotlinx.serialization.json.JsonPrimitive(minApi))
+        put("maxApi", kotlinx.serialization.json.JsonPrimitive(maxApi))
+        put("googleApisOnly", kotlinx.serialization.json.JsonPrimitive(googleApisOnly))
+        put("minIos", kotlinx.serialization.json.JsonPrimitive(minIos))
+        put("maxIos", kotlinx.serialization.json.JsonPrimitive(maxIos))
+        put("showIphone", kotlinx.serialization.json.JsonPrimitive(showIphone))
+        put("showIpad", kotlinx.serialization.json.JsonPrimitive(showIpad))
+        minIosVersion?.let { put("minIosVersion", kotlinx.serialization.json.JsonPrimitive(it)) }
+        maxIosVersion?.let { put("maxIosVersion", kotlinx.serialization.json.JsonPrimitive(it)) }
+      }
+    file.writeText(json.toString())
+  } catch (e: Exception) {
+    LOG.warn("Failed to save device filters to $file", e)
+  }
 }

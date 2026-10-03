@@ -31,6 +31,9 @@ class AutoMobileContentDecompositionTest {
           listOf("fun McpProcessesPanel", "fun ProcessSection", "fun McpProcessItem"),
         "DevicesSection.kt" to
           listOf("fun DevicesSection", "fun DeviceImagesGrouped", "fun BootedDeviceRow"),
+        "shell/LeftSidebarPanel.kt" to listOf("fun LeftSidebarPanel"),
+        "shell/AvailableDeviceImagesSection.kt" to
+          listOf("fun AvailableDeviceImagesSection", "fun FilterChip"),
         "AppSelectorDropdown.kt" to listOf("fun AppSelectorDropdown", "fun AppDropdownItem"),
       )
       .forEach { (fileName, declarations) ->
@@ -46,6 +49,19 @@ class AutoMobileContentDecompositionTest {
           )
         }
       }
+  }
+
+  @Test
+  fun `left slot uses the panel and delegates image controls without the stub`() {
+    val source = sourceRoot.resolve("AutoMobileContent.kt").readSource()
+    val leftSlot =
+      source.substringAfter("leftPaneContent = {").substringBefore("rightPaneContent = {")
+    assertTrue(leftSlot.contains("LeftSidebarPanel("))
+    assertTrue(leftSlot.contains("AvailableDeviceImagesSection("))
+    assertTrue(leftSlot.contains("onRetryDetection = { mcpConnectRetryCounter++ }"))
+    assertFalse(leftSlot.contains("Stub: replaced by real LeftSidebarPanel"))
+    assertFalse(leftSlot.contains("devices.forEach"))
+    assertFalse(leftSlot.contains("loadDeviceFilter"))
   }
 
   private fun Path.readSource(): String {

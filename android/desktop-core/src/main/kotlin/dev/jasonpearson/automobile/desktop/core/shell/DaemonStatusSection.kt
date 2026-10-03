@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 import dev.jasonpearson.automobile.desktop.core.mcp.RealSocketFileChecker
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -30,8 +31,14 @@ import kotlinx.coroutines.withContext
 fun DaemonStatusSection(
   dataSourceMode: DataSourceMode,
   modifier: Modifier = Modifier,
+  statusProvider: (suspend () -> DaemonStatusResponse?)? = null,
+  providedSocketPath: String? = null,
+  refreshKey: Any? = null,
 ) {
-  val graph = LocalAutoMobileGraph.current
+  val graph =
+    if (statusProvider == null && dataSourceMode == DataSourceMode.Real)
+      LocalAutoMobileGraph.current
+    else null
   val colors = SharedTheme.globalColors
   var expanded by remember { mutableStateOf(true) }
   var daemonStatus by remember { mutableStateOf<DaemonStatusResponse?>(null) }
@@ -39,13 +46,20 @@ fun DaemonStatusSection(
 
   val isConnected = daemonStatus != null
 
-  LaunchedEffect(dataSourceMode) {
+  LaunchedEffect(dataSourceMode, refreshKey) {
     if (dataSourceMode == DataSourceMode.Real) {
       withContext(Dispatchers.IO) {
         try {
-          daemonStatus = graph.autoMobileClient.getDaemonStatus()
-          socketPath = RealSocketFileChecker().findDaemonSocketFiles().firstOrNull()
-        } catch (_: Exception) {
+          daemonStatus =
+            if (statusProvider != null) statusProvider()
+            else graph?.autoMobileClient?.getDaemonStatus()
+          socketPath =
+            if (statusProvider != null) providedSocketPath
+            else RealSocketFileChecker().findDaemonSocketFiles().firstOrNull()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          LoggerFactory.getLogger("DaemonStatusSection").warn("Failed to read daemon status", e)
           daemonStatus = null
           socketPath = null
         }

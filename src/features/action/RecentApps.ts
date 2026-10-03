@@ -71,19 +71,16 @@ export class RecentApps extends BaseVisualChange {
 
         switch (navigationMethod) {
           case "gesture":
-            await perf.track("gestureNavigation", () =>
+            return perf.track("gestureNavigation", () =>
               this.executeGestureNavigation(observeResult, signal),
             );
-            return { success: true, method: "gesture" };
           case "legacy":
-            await perf.track("legacyNavigation", () =>
+            return perf.track("legacyNavigation", () =>
               this.executeLegacyNavigation(observeResult, signal),
             );
-            return { success: true, method: "legacy" };
           case "hardware":
           default:
-            await perf.track("hardwareNavigation", () => this.executeHardwareNavigation(signal));
-            return { success: true, method: "hardware" };
+            return perf.track("hardwareNavigation", () => this.executeHardwareNavigation(signal));
         }
       },
       {

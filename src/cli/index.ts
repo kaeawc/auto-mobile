@@ -10,7 +10,7 @@ import {
 } from "../features/toolSelection/toolSelectionControl";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
-import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
+import { DaemonUnavailableError } from "../daemon/client";
 import {
   DaemonMcpProxy,
   DaemonVersionMismatchError,
@@ -353,126 +353,43 @@ async function runToolViaDaemon(
   }
 }
 
-/**
- * Run `doctor` against the daemon as a diagnostic — deliberately NOT via {@link DaemonMcpProxy}.
- *
- * Doctor must *report* a wrong-version/build daemon, not silently restart it (which would defeat
- * the diagnosis and wedge active sessions just because a user ran `--cli doctor`). It therefore
- * uses a raw, non-reconciling `DaemonClient` with a null identity so the request bypasses the
- * server handshake gate (#2744): even a skewed daemon answers, and the client-side
- * {@link handleDoctorResult}/`applyClientBuildIdentity` step reports the mismatch. Throws (→ direct
- * fallback) only when the daemon is unreachable.
- */
-/** Remove CLI-only presentation options before calling the daemon's doctor tool. */
-export function doctorToolParams(params: Record<string, any>): Record<string, any> {
-  const doctorParams = { ...params };
-  delete doctorParams.json;
-  return doctorParams;
-}
-
-async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
-  const client = new DaemonClient(undefined, undefined, undefined, {}, null);
-  try {
-    // `json` controls CLI presentation only. The daemon's doctor tool accepts
-    // diagnostic options, so do not forward the local formatting flag through
-    // its strict schema.
-    const result = await client.callTool("doctor", doctorToolParams(params));
-    if (result === null) {
-      throw new ActionableError(
-        "Daemon returned null result for doctor. " +
-          `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
-      );
-    }
-    return result;
-  } finally {
-    await client.close();
-  }
+/** Local doctor dependencies; diagnosis never opens a daemon tool connection. */
+interface DoctorCommandOptions {
+  runDoctor?: typeof import("../doctor").runDoctor;
+  formatConsoleOutput?: typeof import("../doctor").formatConsoleOutput;
+  writeOutput?: (output: string) => void;
+  exit?: (code: number) => void;
 }
 
 export async function runDoctorCommand(
   params: Record<string, any>,
+  options: DoctorCommandOptions = {},
 ): Promise<CliTerminationRequest | undefined> {
-  const jsonOutput = params.json === true;
-
   if (Object.hasOwn(params, "repair") || Object.hasOwn(params, "timeoutMs")) {
     throw new ActionableError(
       "doctor is status-only; --repair and --timeout-ms were removed. Use --daemon restart to recover the daemon; --daemon diagnose only gathers further diagnostics.",
     );
   }
 
-  // Try daemon first
-  try {
-    logger.debug("Attempting to run doctor via daemon");
-    const daemonResult = await runDoctorViaDaemon(params);
-    await handleDoctorResult(daemonResult, jsonOutput);
-    return;
-  } catch (error) {
-    logger.debug(`Daemon not available for doctor, falling back to direct execution: ${error}`);
-  }
-
-  // Fallback to direct execution
-  const { runDoctor, formatConsoleOutput } = await import("../doctor");
-  const report = await runDoctor({
+  const doctor = await import("../doctor");
+  const report = await (options.runDoctor ?? doctor.runDoctor)({
     android: params.android,
     ios: params.ios,
   });
-
-  if (jsonOutput) {
+  if (params.json === true) {
     writeCliToolOutput(report, "doctor");
   } else {
-    console.log(formatConsoleOutput(report, process.stdout.isTTY ?? true));
+    (options.writeOutput ?? console.log)(
+      (options.formatConsoleOutput ?? doctor.formatConsoleOutput)(
+        report,
+        process.stdout.isTTY ?? true,
+      ),
+    );
   }
-
-  // Exit with error code if any failures
   if (report.summary.failed > 0) {
-    process.exit(1);
+    (options.exit ?? process.exit)(1);
   }
-}
-
-/**
- * Handle doctor command result from daemon
- */
-export async function handleDoctorResult(result: any, jsonOutput: boolean): Promise<void> {
-  // Extract the report from MCP response format
-  let report = result;
-  if (
-    result &&
-    typeof result === "object" &&
-    "content" in result &&
-    Array.isArray(result.content)
-  ) {
-    if (result.content.length > 0 && result.content[0].type === "text") {
-      try {
-        report = JSON.parse(result.content[0].text);
-      } catch {
-        // Keep original result
-      }
-    }
-  }
-
-  // The daemon runs doctor in its own process, so its build-identity check
-  // compared the daemon to itself. Recompute it here, client-side, so the
-  // comparison uses THIS checkout's identity vs the daemon's PID-file identity
-  // and a wrong-build skew is actually surfaced (issue #2736).
-  try {
-    const { applyClientBuildIdentity } = await import("../doctor");
-    report = await applyClientBuildIdentity(report);
-  } catch (error) {
-    logger.debug(`Could not reconcile daemon build identity client-side: ${error}`);
-  }
-
-  if (jsonOutput) {
-    writeCliToolOutput(report, "doctor");
-  } else {
-    // Use the formatter for console output
-    const { formatConsoleOutput } = await import("../doctor");
-    console.log(formatConsoleOutput(report, process.stdout.isTTY ?? true));
-  }
-
-  // Exit with error code if any failures
-  if (report && report.summary && report.summary.failed > 0) {
-    process.exit(1);
-  }
+  return undefined;
 }
 
 function cliToolResultPayload(result: any): any {
@@ -642,7 +559,7 @@ export async function runCliCommand(
       }
     }
 
-    // Special handling for doctor command - try daemon first, fallback to direct
+    // Doctor is a local CLI diagnostic, separate from daemon tool execution.
     if (toolName === "doctor") {
       return await runDoctorCommand(params);
     }

@@ -1000,15 +1000,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * without leaving anything behind: because it is never cached, a later
    * `getExistingInstance` can't rediscover a closed probe and mistake it for a
    * live session (which would reconnect and leak the socket/SDK polling timer).
-   * Uses the shared port allocation and production defaults, but does not own
-   * that allocation because the registered manager or client may also use it.
+   * Uses an explicit discovered host port when supplied, otherwise the shared
+   * allocation. Does not own that allocation: a registered manager may use it.
    */
-  public static createDetached(device: BootedDevice): IOSCtrlProxyClient {
+  public static createDetached(
+    device: BootedDevice,
+    options: { port?: number } = {},
+  ): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.createDetached");
     const port =
-      device.platform === "ios"
+      options.port ??
+      (device.platform === "ios"
         ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
-        : IOSCtrlProxyClient.DEFAULT_PORT;
+        : IOSCtrlProxyClient.DEFAULT_PORT);
     return new IOSCtrlProxyClient(device, port);
   }
 

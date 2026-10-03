@@ -1,3 +1,5 @@
+import type { DoctorProbeOptions } from "../doctor/types";
+import { createDoctorDeadline, remainingDoctorProbe, awaitDoctorProbe } from "../doctor/deadline";
 import { errorMessage } from "../utils/describeUnknownError";
 import { runDetachedFromPerf, trackAmbient } from "../utils/PerfContext";
 import { logger } from "../utils/logger";
@@ -3596,6 +3598,64 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
+   * Read-only doctor discovery. Return the answering host port, never the
+   * advertised on-device port, without changing daemon allocation or state.
+   */
+  public async discoverRunnerPort(options: DoctorProbeOptions = {}): Promise<number | null> {
+    const deadline = createDoctorDeadline({ ...options, timer: options.timer ?? this.timer });
+    const candidates = new Set([this.servicePort, IOSCtrlProxyManager.DEFAULT_PORT]);
+    const probePort = async (port: number): Promise<boolean> => {
+      const remaining = remainingDoctorProbe(deadline.probe);
+      const probe = createDoctorDeadline({
+        signal: remaining.signal,
+        timeoutMs: Math.min(250, remaining.timeoutMs ?? 250),
+        timer: remaining.timer,
+      });
+      try {
+        return await awaitDoctorProbe(probe.probe, () =>
+          this.healthClient.checkHealthEndpointOnPortForDevice(
+            port,
+            this.device.deviceId,
+            probe.probe.timeoutMs,
+            { signal: probe.probe.signal },
+          ),
+        );
+      } catch (error) {
+        // An unanswered port is expected; caller cancellation must still stop discovery.
+        logger.debug(`[IOSCtrlProxy] Doctor port ${port} probe failed`, error);
+        remainingDoctorProbe(deadline.probe);
+        return false;
+      } finally {
+        probe.dispose();
+      }
+    };
+    try {
+      for (const port of candidates) {
+        if (await probePort(port)) {
+          return port;
+        }
+      }
+      const basePort = PortManager.getBasePort();
+      // MaxDevices is a count, including the base port; it also reflects END/SIZE env config.
+      const endPort = Math.min(65535, basePort + PortManager.getMaxDevices() - 1);
+      for (let start = basePort; start <= endPort; start += 4) {
+        const ports = Array.from(
+          { length: Math.min(4, endPort - start + 1) },
+          (_, index) => start + index,
+        ).filter((port) => !candidates.has(port));
+        const results = await Promise.all(ports.map(probePort));
+        const match = ports.find((_, index) => results[index]);
+        if (match !== undefined) {
+          return match;
+        }
+      }
+      return null;
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  /**
    * Ask the runner what port it is *actually* bound to, by reading the `port`
    * field the runner self-reports in its `/health` payload. Probes the same
    * candidate ports as runner discovery (the allocated service port plus the
@@ -3612,9 +3672,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * before the device-id guard is even consulted.
    *
    * Returns null when no matching runner answers or when the runner is too old
-   * to report a port. Used by `doctor` to compare the runner's real bound port
-   * against the client port — a comparison that is meaningless if both are
-   * derived from `getServicePort()` (issue #2735).
+   * to report a port. This is runner-advertised metadata; doctor uses
+   * `discoverRunnerPort()` to find the answering host port instead (#5636).
    */
   public async getReportedRunnerPort(): Promise<number | null> {
     const candidatePorts = new Set([this.servicePort, IOSCtrlProxyManager.DEFAULT_PORT]);

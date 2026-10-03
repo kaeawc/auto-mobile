@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   IosCtrlProxyHealthClient,
   isValidCtrlProxyPort,
@@ -187,6 +187,48 @@ describe("IosCtrlProxyHealthClient (local curl transport)", function () {
       execResult(`{"status":"ok","deviceId":"${DEVICE_ID}","port":70000}`),
     );
     expect(await badPort.client.readReportedPortFromHealth(8765)).toBeNull();
+  });
+
+  test("threads doctor cancellation and timeout into the local transport", async () => {
+    const executor = new FakeProcessExecutor();
+    const controller = new AbortController();
+    const started = Promise.withResolvers<void>();
+    let transportSignal: AbortSignal | undefined;
+    const execute = spyOn(executor, "executeCommand").mockImplementation(
+      async (_file, args, options) => {
+        expect(args).toContain("0.05");
+        expect(options?.timeoutMs).toBe(50);
+        transportSignal = options?.signal;
+        started.resolve();
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+    const client = new IosCtrlProxyHealthClient(executor, new FakeTimer(), localContext());
+    const health = client.checkHealthEndpointOnPortForDevice(8768, DEVICE_ID, 50, {
+      signal: controller.signal,
+    });
+    await started.promise;
+    controller.abort(new Error("doctor cancelled"));
+    await expect(health).rejects.toThrow("doctor cancelled");
+    expect(transportSignal).toBe(controller.signal);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not start a transport probe after cancellation", async () => {
+    const { client, executor } = makeClient(() => execResult("OK"));
+    const execute = spyOn(executor, "executeCommand");
+    const controller = new AbortController();
+    controller.abort(new Error("doctor cancelled"));
+    await expect(
+      client.checkHealthEndpointOnPortForDevice(8768, DEVICE_ID, 50, {
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("doctor cancelled");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   test("probes IPv4 loopback on the requested port via curl", async function () {

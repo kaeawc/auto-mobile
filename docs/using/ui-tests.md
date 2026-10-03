@@ -266,7 +266,7 @@ bunx @kaeawc/auto-mobile@0.0.82 --cli doctor
 
 Replace `0.0.82` with the version used by your test runner dependency.
 
-`--cli doctor` is status-only: it never installs, updates or enables Android CtrlProxy,
+`--cli doctor` runs locally, without a daemon tool connection. It is status-only: it never installs, updates or enables Android CtrlProxy,
 and never resets running session state. It reports installation, accessibility and
 APK checksum status for every booted Android device, up to eight devices per run;
 if more are attached, it reports how many were not checked. A mismatch is a warning

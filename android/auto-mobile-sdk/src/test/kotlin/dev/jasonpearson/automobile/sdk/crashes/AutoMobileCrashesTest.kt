@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.sdk.crashes
 
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -105,6 +107,69 @@ class AutoMobileCrashesTest {
       foreign,
       Thread.getDefaultUncaughtExceptionHandler(),
     )
+  }
+
+  @Test
+  fun `broadcast failure with an Exception still invokes the original handler exactly once`() {
+    val originalCalls = AtomicInteger()
+    val original = Thread.UncaughtExceptionHandler { _, _ -> originalCalls.incrementAndGet() }
+    Thread.setDefaultUncaughtExceptionHandler(original)
+    AutoMobileCrashes.initialize(context)
+    AutoMobileCrashes.currentScreenProvider = { throw RuntimeException("boom") }
+
+    Thread.getDefaultUncaughtExceptionHandler()!!.uncaughtException(
+      Thread.currentThread(),
+      RuntimeException("crash"),
+    )
+
+    assertEquals(1, originalCalls.get())
+  }
+
+  @Test
+  fun `broadcast failure with an Error still invokes the original handler exactly once`() {
+    val originalCalls = AtomicInteger()
+    val original = Thread.UncaughtExceptionHandler { _, _ -> originalCalls.incrementAndGet() }
+    Thread.setDefaultUncaughtExceptionHandler(original)
+    AutoMobileCrashes.initialize(context)
+    AutoMobileCrashes.currentScreenProvider = { throw OutOfMemoryError() }
+
+    Thread.getDefaultUncaughtExceptionHandler()!!.uncaughtException(
+      Thread.currentThread(),
+      RuntimeException("crash"),
+    )
+
+    assertEquals(1, originalCalls.get())
+  }
+
+  @Test
+  fun `no original handler does not throw`() {
+    Thread.setDefaultUncaughtExceptionHandler(null)
+    AutoMobileCrashes.initialize(context)
+    AutoMobileCrashes.currentScreenProvider = { throw OutOfMemoryError() }
+    val handler = Thread.getDefaultUncaughtExceptionHandler()
+
+    assertNotNull(handler)
+    handler!!.uncaughtException(Thread.currentThread(), RuntimeException("crash"))
+  }
+
+  @Test
+  fun `tracking disabled still invokes the original handler exactly once`() {
+    val originalCalls = AtomicInteger()
+    val original = Thread.UncaughtExceptionHandler { _, _ -> originalCalls.incrementAndGet() }
+    Thread.setDefaultUncaughtExceptionHandler(original)
+    AutoMobileCrashes.initialize(context)
+
+    try {
+      AutoMobileSDK.setEnabled(false)
+      Thread.getDefaultUncaughtExceptionHandler()!!.uncaughtException(
+        Thread.currentThread(),
+        RuntimeException("crash"),
+      )
+
+      assertEquals(1, originalCalls.get())
+    } finally {
+      AutoMobileSDK.setEnabled(true)
+    }
   }
 
   @Test

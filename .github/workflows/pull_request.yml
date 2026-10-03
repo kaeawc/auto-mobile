@@ -327,9 +327,10 @@ jobs:
               - 'src/utils/IOSCtrlProxy*'
               - 'src/utils/Ios*'
               - 'src/utils/ios-*/**'
-              - 'src/utils/CtrlProxyManager.ts'
+              - 'src/ctrlProxy/**'
               - 'src/utils/Device*'
               - 'src/utils/device*'
+              - 'src/devices/**'
               - 'src/devices/requireBootedDevice.ts'
               - 'src/utils/plan/**'
               - 'src/utils/planUtils.ts'
@@ -416,7 +417,6 @@ jobs:
               - '**/*.toml'
               - '.oxfmtrc.json'
               - '.gitignore'
-              - '.prettierignore'
 
       - name: "Decide if Android jobs should run"
         id: android_should_run

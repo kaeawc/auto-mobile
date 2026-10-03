@@ -19,6 +19,28 @@ final class BreadcrumbTrailTests: XCTestCase {
         XCTAssertEqual(crumbs[1].message, "Button tapped")
     }
 
+    func testZeroMaxSizeKeepsNoBreadcrumbs() {
+        let trail = BreadcrumbTrail(maxSize: 0)
+        XCTAssertTrue(trail.snapshot().isEmpty)
+
+        for index in 0..<3 {
+            trail.add(Breadcrumb(timestamp: 1000, category: .custom, message: "msg-\(index)"))
+        }
+
+        XCTAssertTrue(trail.snapshot().isEmpty)
+    }
+
+    func testNegativeMaxSizeKeepsNoBreadcrumbs() {
+        let trail = BreadcrumbTrail(maxSize: -5)
+        XCTAssertTrue(trail.snapshot().isEmpty)
+
+        for index in 0..<3 {
+            trail.add(Breadcrumb(timestamp: 1000, category: .custom, message: "msg-\(index)"))
+        }
+
+        XCTAssertTrue(trail.snapshot().isEmpty)
+    }
+
     func testRingBufferOverflow() {
         let maxSize = 5
         let trail = BreadcrumbTrail(maxSize: maxSize)

@@ -10,6 +10,8 @@ protocol EventPersisting: AnyObject, Sendable {
     /// Remove a successfully delivered batch.
     func removeBatch(_ batchId: String)
     /// Remove batches older than maxAgeDays.
+    /// Negative values are invalid and do nothing; zero removes batches strictly older than now.
+    /// Large values are safe and do not overflow.
     func cleanup(maxAgeDays: Int)
 }
 
@@ -25,10 +27,16 @@ final class FileEventPersistence: EventPersisting, Sendable {
     private let directory: URL
     private let lock = OSAllocatedUnfairLock<Void>()
     private let dateProvider: DateProvider
+    private let readData: @Sendable (URL) throws -> Data
 
-    init(directory: URL, dateProvider: DateProvider = SystemDateProvider()) {
+    init(
+        directory: URL,
+        dateProvider: DateProvider = SystemDateProvider(),
+        readData: @escaping @Sendable (URL) throws -> Data = { try Data(contentsOf: $0) }
+    ) {
         self.directory = directory
         self.dateProvider = dateProvider
+        self.readData = readData
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
@@ -72,9 +80,17 @@ final class FileEventPersistence: EventPersisting, Sendable {
 
             let decoder = JSONDecoder()
             return files.compactMap { fileURL in
-                guard let data = try? Data(contentsOf: fileURL),
-                      let persisted = try? decoder.decode([PersistedEvent].self, from: data)
-                else {
+                let data: Data
+                do {
+                    data = try readData(fileURL)
+                } catch {
+                    let readError = error as NSError
+                    if readError.domain != NSCocoaErrorDomain || readError.code != NSFileReadNoSuchFileError {
+                        InternalLogger.warning("Pending event batch read failed: \(error.localizedDescription)")
+                    }
+                    return nil
+                }
+                guard let persisted = try? decoder.decode([PersistedEvent].self, from: data) else {
                     try? FileManager.default.removeItem(at: fileURL) // corrupt file
                     return nil
                 }
@@ -96,9 +112,13 @@ final class FileEventPersistence: EventPersisting, Sendable {
         }
     }
 
+    /// Remove batches older than maxAgeDays.
+    /// Negative values are invalid and do nothing; zero removes batches strictly older than now.
+    /// Large values are safe and do not overflow.
     func cleanup(maxAgeDays: Int = 7) {
+        guard maxAgeDays >= 0 else { return }
         lock.withLock {
-            let cutoff = dateProvider.now().timeIntervalSince1970 * 1000 - Double(maxAgeDays * 24 * 60 * 60 * 1000)
+            let cutoff = dateProvider.now().timeIntervalSince1970 * 1000 - Double(maxAgeDays) * 24 * 60 * 60 * 1000
             guard let files = try? FileManager.default.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: nil

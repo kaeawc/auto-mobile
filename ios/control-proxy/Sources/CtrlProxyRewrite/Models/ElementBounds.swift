@@ -14,6 +14,25 @@ public struct ElementBounds: Codable, Sendable {
         self.bottom = bottom
     }
 
+    /// Clamp snapshot coordinates so invalid lock-screen frames cannot trap integer conversion.
+    public init(clamping frame: CGRect) {
+        self.init(
+            left: Self.clampedInt(frame.origin.x),
+            top: Self.clampedInt(frame.origin.y),
+            right: Self.clampedInt(frame.origin.x + frame.width),
+            bottom: Self.clampedInt(frame.origin.y + frame.height)
+        )
+    }
+
+    /// Map NaN to zero and clamp to +/-Int32.max, preserving truncation for normal coordinates.
+    public static func clampedInt(_ value: CGFloat) -> Int {
+        guard !value.isNaN else { return 0 }
+        let limit = Int(Int32.max)
+        if value >= CGFloat(limit) { return limit }
+        if value <= -CGFloat(limit) { return -limit }
+        return Int(value)
+    }
+
     public var width: Int {
         BoundsArithmetic.signedDifference(right, left)
     }

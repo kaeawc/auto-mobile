@@ -21,6 +21,18 @@ export interface ParseLogger {
   warn(message: string): void;
 }
 
+type CliVideoRecordingNumericKey =
+  | "targetBitrateKbps"
+  | "maxThroughputMbps"
+  | "fps"
+  | "maxArchiveSizeMb";
+
+export type CliVideoRecordingDefaults = Omit<
+  VideoRecordingConfigInput,
+  CliVideoRecordingNumericKey
+> &
+  Partial<Record<CliVideoRecordingNumericKey, number>>;
+
 const booleanOptions = Object.fromEntries(
   [
     "cli",
@@ -186,7 +198,7 @@ export function parseArgs(
   }
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   let planExecutionLockScopeExplicit = false;
-  const videoRecordingDefaults: VideoRecordingConfigInput = {};
+  const videoRecordingDefaults: CliVideoRecordingDefaults = {};
 
   const parsePositiveNumber = (
     value: string | undefined,
@@ -228,39 +240,38 @@ export function parseArgs(
     process.env.AUTOMOBILE_VIDEO_QUALITY_PRESET ?? process.env.AUTO_MOBILE_VIDEO_QUALITY_PRESET,
     "env",
   );
-  const envNumbers: Array<[string | undefined, string, boolean, keyof VideoRecordingConfigInput]> =
+  const envNumbers: Array<[string | undefined, string, boolean, CliVideoRecordingNumericKey]> = [
     [
-      [
-        process.env.AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS ??
-          process.env.AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS,
-        "video target bitrate",
-        false,
-        "targetBitrateKbps",
-      ],
-      [
-        process.env.AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS ??
-          process.env.AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS,
-        "video max throughput",
-        true,
-        "maxThroughputMbps",
-      ],
-      [
-        process.env.AUTOMOBILE_VIDEO_FPS ?? process.env.AUTO_MOBILE_VIDEO_FPS,
-        "video fps",
-        false,
-        "fps",
-      ],
-      [
-        process.env.AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB ?? process.env.AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB,
-        "video max archive size",
-        true,
-        "maxArchiveSizeMb",
-      ],
-    ];
+      process.env.AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS ??
+        process.env.AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS,
+      "video target bitrate",
+      false,
+      "targetBitrateKbps",
+    ],
+    [
+      process.env.AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS ??
+        process.env.AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS,
+      "video max throughput",
+      true,
+      "maxThroughputMbps",
+    ],
+    [
+      process.env.AUTOMOBILE_VIDEO_FPS ?? process.env.AUTO_MOBILE_VIDEO_FPS,
+      "video fps",
+      false,
+      "fps",
+    ],
+    [
+      process.env.AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB ?? process.env.AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB,
+      "video max archive size",
+      true,
+      "maxArchiveSizeMb",
+    ],
+  ];
   for (const [value, label, allowFloat, key] of envNumbers) {
     const parsed = parsePositiveNumber(value, label, allowFloat);
     if (parsed !== undefined) {
-      videoRecordingDefaults[key] = parsed as never;
+      videoRecordingDefaults[key] = parsed;
     }
   }
   applyFormat(process.env.AUTOMOBILE_VIDEO_FORMAT ?? process.env.AUTO_MOBILE_VIDEO_FORMAT, "env");

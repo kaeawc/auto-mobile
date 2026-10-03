@@ -1,3 +1,4 @@
+import { resolveIosSnapshotAppListBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   BootedDevice,
@@ -608,7 +609,13 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private async getInstalledIosBundleIds(): Promise<Set<string>> {
     let apps: IosInstalledAppRecord[];
     try {
-      apps = await this.simctl.listAppsOrThrow(this.device.deviceId);
+      const backend = resolveIosSnapshotAppListBackend(this.device.deviceId, {
+        simctl: this.simctl,
+      });
+      if (!backend) {
+        throw new Error("Snapshot app listing is not supported for physical iOS devices");
+      }
+      apps = await backend.listApps();
     } catch (error) {
       throw toActionableError(error, "Failed to list installed iOS apps to validate appBundleIds");
     }

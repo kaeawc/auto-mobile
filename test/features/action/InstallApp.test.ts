@@ -1339,6 +1339,107 @@ describe("InstallApp", () => {
     expect(simctl.getMethodCallCount("installApp")).toBe(1);
   });
 
+  test.each([
+    "success",
+    "terminate failure",
+    "uninstall failure",
+    "reinstall failure",
+    "no backend",
+  ])("uses the injected downgrade recovery backend: %s", async (outcome) => {
+    const calls: string[] = [];
+    const originalError = new Error("A newer version of this application is already installed.");
+    const uninstallError = new Error("uninstall rejected");
+    const reinstallError = new Error("reinstall rejected");
+    const simctl = new FakeSimctl();
+    const repository = new CountingInstalledAppsRepository();
+    let attempts = 0;
+    let listings = 0;
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      simctl,
+      timer: fakeTimer,
+      performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+      plist: fakePlist("com.example.app"),
+      installedAppsRepository: repository,
+      cacheInvalidator: {
+        invalidate: () => {
+          calls.push("invalidate");
+        },
+      },
+      iosInstallBackendResolver: () => ({
+        kind: "simulator",
+        listApps: async () => {
+          if (listings++ > 0) {
+            throw new Error("post-install listing unavailable");
+          }
+          return [];
+        },
+        installApp: async () => {
+          calls.push(attempts++ === 0 ? "install" : "reinstall");
+          if (attempts > 1) {
+            expect(repository.markStaleCalls).toBe(1);
+          }
+          if (attempts === 1) {
+            throw originalError;
+          }
+          if (outcome === "reinstall failure") {
+            throw reinstallError;
+          }
+        },
+      }),
+      iosDowngradeRecoveryBackendResolver: (deviceId, deps) => {
+        expect(deviceId).toBe(iosSimulatorDevice.deviceId);
+        expect(deps.simctl).toBe(simctl);
+        calls.push("resolve recovery");
+        return outcome === "no backend"
+          ? null
+          : {
+              kind: "simulator",
+              terminateApp: async (bundleId) => {
+                expect(bundleId).toBe("com.example.app");
+                calls.push("terminate");
+                if (outcome === "terminate failure") {
+                  throw new Error("not running");
+                }
+              },
+              uninstallApp: async (bundleId) => {
+                expect(bundleId).toBe("com.example.app");
+                calls.push("uninstall");
+                if (outcome === "uninstall failure") {
+                  throw uninstallError;
+                }
+              },
+            };
+      },
+    });
+
+    if (outcome === "no backend") {
+      await expect(installApp.execute("/tmp/MyApp.app")).rejects.toBe(originalError);
+      expect(calls).toEqual(["install", "resolve recovery"]);
+      expect(repository.markStaleCalls).toBe(0);
+    } else if (outcome === "uninstall failure") {
+      await expect(installApp.execute("/tmp/MyApp.app")).rejects.toBe(uninstallError);
+      expect(calls).toEqual(["install", "resolve recovery", "terminate", "uninstall"]);
+      expect(repository.markStaleCalls).toBe(0);
+    } else {
+      if (outcome === "reinstall failure") {
+        await expect(installApp.execute("/tmp/MyApp.app")).rejects.toBe(reinstallError);
+      } else {
+        expect((await installApp.execute("/tmp/MyApp.app")).success).toBe(true);
+      }
+      expect(calls.slice(0, 6)).toEqual([
+        "install",
+        "resolve recovery",
+        "terminate",
+        "uninstall",
+        "invalidate",
+        "reinstall",
+      ]);
+      expect(repository.markStaleCalls).toBe(outcome === "reinstall failure" ? 1 : 2);
+    }
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([]);
+    expect(simctl.getMethodCalls("uninstallApp")).toEqual([]);
+  });
+
   test("keeps iOS simulator install successful when post-install listing fails", async () => {
     const simctl = new SequencedFakeSimctl();
     simctl.setStrictListResponses([[], new Error("simctl listapps temporarily unavailable")]);

@@ -17,6 +17,8 @@ import {
   PhysicalIosTerminateBackend,
   SimulatorIosTerminateBackend,
   resolveIosColdStartTerminateBackend,
+  resolveIosDowngradeRecoveryBackend,
+  resolveIosSnapshotAppListBackend,
   resolveIosTerminateBackend,
   resolveIosDeviceBackend,
   resolveIosLaunchBackend,
@@ -426,4 +428,65 @@ test("malformed IDs keep launch and install on physical backends", () => {
     }).kind,
   ).toBe("physical");
   expect(resolveIosColdStartTerminateBackend(deviceId, { simctl })).toBeNull();
+});
+
+describe("resolveIosDowngradeRecoveryBackend", () => {
+  test("routes both recovery operations through simctl with the selected simulator", async () => {
+    const simctl = new FakeSimctl();
+    const backend = resolveIosDowngradeRecoveryBackend(simulatorUdid, { simctl });
+
+    expect(backend?.kind).toBe("simulator");
+    await backend?.terminateApp(bundleId);
+    await backend?.uninstallApp(bundleId);
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
+    expect(simctl.getMethodCalls("uninstallApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
+  });
+
+  test.each([physicalUdid, "unrecognized-device"])(
+    "returns no recovery backend for %s",
+    (deviceId) => {
+      const simctl = new FakeSimctl();
+      expect(resolveIosDowngradeRecoveryBackend(deviceId, { simctl })).toBeNull();
+      expect(simctl.getMethodCalls("terminateApp")).toEqual([]);
+      expect(simctl.getMethodCalls("uninstallApp")).toEqual([]);
+    },
+  );
+
+  test("preserves both transport errors for the caller", async () => {
+    const error = new Error("recovery transport failed");
+    const backend = resolveIosDowngradeRecoveryBackend(simulatorUdid, {
+      simctl: {
+        terminateApp: async () => {
+          throw error;
+        },
+        uninstallApp: async () => {
+          throw error;
+        },
+      },
+    });
+    await expect(backend!.terminateApp(bundleId)).rejects.toBe(error);
+    await expect(backend!.uninstallApp(bundleId)).rejects.toBe(error);
+  });
+});
+
+describe("resolveIosSnapshotAppListBackend", () => {
+  test.each([simulatorUdid, "unrecognized-device"])(
+    "keeps strict simctl listing for %s",
+    async (deviceId) => {
+      const simctl = new FakeSimctl();
+      const backend = resolveIosSnapshotAppListBackend(deviceId, { simctl });
+      expect(backend?.kind).toBe("simulator");
+      expect(await backend?.listApps()).toEqual([]);
+      expect(simctl.getMethodCalls("listAppsOrThrow")).toEqual([{ deviceId }]);
+      const error = new Error("listing unavailable");
+      spyOn(simctl, "listAppsOrThrow").mockRejectedValue(error);
+      await expect(backend!.listApps()).rejects.toBe(error);
+    },
+  );
+
+  test("does not add listing support for physical devices", () => {
+    const simctl = new FakeSimctl();
+    expect(resolveIosSnapshotAppListBackend(physicalUdid, { simctl })).toBeNull();
+    expect(simctl.getMethodCalls("listAppsOrThrow")).toEqual([]);
+  });
 });

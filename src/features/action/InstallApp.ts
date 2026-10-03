@@ -42,6 +42,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   resolveIosInstallBackend,
+  resolveIosDowngradeRecoveryBackend,
   type IosInstallBackend,
 } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import {
@@ -68,6 +69,7 @@ export interface InstallAppOptions {
   physicalAppLister?: IosPhysicalAppLister;
   timer?: Timer;
   iosInstallBackendResolver?: typeof resolveIosInstallBackend;
+  iosDowngradeRecoveryBackendResolver?: typeof resolveIosDowngradeRecoveryBackend;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 
@@ -83,6 +85,7 @@ export class InstallApp {
   private timer?: Timer;
   private plist: PlistReader;
   private readonly iosInstallBackendResolver?: typeof resolveIosInstallBackend;
+  private readonly iosDowngradeRecoveryBackendResolver: typeof resolveIosDowngradeRecoveryBackend;
   private cacheInvalidatorOverride?: DeviceWindowCacheInvalidator;
   private installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository();
 
@@ -93,6 +96,8 @@ export class InstallApp {
   ) {
     const plist = options.plist ?? new PlistClient();
     this.iosInstallBackendResolver = options.iosInstallBackendResolver;
+    this.iosDowngradeRecoveryBackendResolver =
+      options.iosDowngradeRecoveryBackendResolver ?? resolveIosDowngradeRecoveryBackend;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.hostExecutor = options.hostExecutor ?? new DefaultHostCommandExecutor();
@@ -616,6 +621,12 @@ export class InstallApp {
       if (!this.isiOSDowngradeError(text)) {
         throw error;
       }
+      const recoveryBackend = this.iosDowngradeRecoveryBackendResolver(this.device.deviceId, {
+        simctl: this.simctl,
+      });
+      if (!recoveryBackend) {
+        throw error;
+      }
       const bundleId = await this.resolveAppBundleId(appPath);
       if (!bundleId) {
         throw new Error(
@@ -627,11 +638,15 @@ export class InstallApp {
         `[InstallApp] Version downgrade detected for ${bundleId}; uninstalling existing version and reinstalling.`,
       );
       try {
-        await this.simctl.terminateApp(bundleId, this.device.deviceId);
-      } catch {
+        await recoveryBackend.terminateApp(bundleId);
+      } catch (terminateError) {
         // Best-effort terminate; proceed with uninstall regardless.
+        logger.debug(
+          `[InstallApp] Best-effort terminate before downgrade recovery failed`,
+          terminateError,
+        );
       }
-      await this.simctl.uninstallApp(bundleId, this.device.deviceId);
+      await recoveryBackend.uninstallApp(bundleId);
       this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
       if (signal?.aborted) {

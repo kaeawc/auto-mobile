@@ -418,6 +418,35 @@ export function resolveIosColdStartTerminateBackend(
   return backend.kind === "simulator" ? backend : null;
 }
 
+/** Recovery keeps SimCtlClient's executor for both simulator lifecycle operations. */
+export interface IosDowngradeRecoveryBackend {
+  readonly kind: "simulator";
+  terminateApp(bundleId: string): Promise<void>;
+  uninstallApp(bundleId: string): Promise<void>;
+}
+
+export function resolveIosDowngradeRecoveryBackend(
+  deviceId: string,
+  deps: { simctl: Pick<SimCtlClient, "terminateApp" | "uninstallApp"> },
+): IosDowngradeRecoveryBackend | null {
+  if (!isIosSimulatorUdid(deviceId)) {
+    return null;
+  }
+  return {
+    kind: "simulator",
+    terminateApp: (bundleId) => deps.simctl.terminateApp(bundleId, deviceId),
+    uninstallApp: (bundleId) => deps.simctl.uninstallApp(bundleId, deviceId),
+  };
+}
+
+/** Snapshot capture rejects physical devices; unknown IDs historically keep simctl. */
+export function resolveIosSnapshotAppListBackend(
+  deviceId: string,
+  deps: Pick<IosAppListBackendDeps, "simctl">,
+): IosAppListBackend | null {
+  return isIosPhysicalUdid(deviceId) ? null : new SimulatorIosAppListBackend(deviceId, deps.simctl);
+}
+
 /** Install transport and strict app listings used to verify the installed bundle. */
 export interface IosInstallBackend {
   readonly kind: "simulator" | "physical";

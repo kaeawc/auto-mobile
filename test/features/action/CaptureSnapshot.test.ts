@@ -6,6 +6,7 @@ import {
 import { BootedDevice } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
@@ -620,6 +621,46 @@ describe("CaptureSnapshot (iOS)", () => {
   function makeCapture(): CaptureSnapshot {
     return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl as any);
   }
+
+  test("returns installed bundle IDs through strict simctl listing", async () => {
+    const transport = new FakeSimctl();
+    transport.setInstalledApps([
+      { CFBundleIdentifier: "com.example.app" },
+      { CFBundleIdentifier: "com.apple.Preferences" },
+      { CFBundleIdentifier: "com.example.app" },
+    ]);
+    const capture = new CaptureSnapshot(
+      device,
+      undefined,
+      undefined,
+      new FakeTimer(),
+      store,
+      transport,
+    );
+    expect(await capture["getInstalledIosBundleIds"]()).toEqual(
+      new Set(["com.example.app", "com.apple.Preferences"]),
+    );
+    expect(transport.getMethodCalls("listAppsOrThrow")).toEqual([{ deviceId: device.deviceId }]);
+    expect(transport.getMethodCalls("listApps")).toEqual([]);
+  });
+
+  test("wraps a strict simctl listing failure with the existing actionable context", async () => {
+    const transport = new FakeSimctl();
+    transport.setListAppsError(new Error("listing unavailable"));
+    const capture = new CaptureSnapshot(
+      device,
+      undefined,
+      undefined,
+      new FakeTimer(),
+      store,
+      transport,
+    );
+    await expect(capture["getInstalledIosBundleIds"]()).rejects.toThrow(
+      "Failed to list installed iOS apps to validate appBundleIds",
+    );
+    expect(transport.getMethodCalls("listAppsOrThrow")).toEqual([{ deviceId: device.deviceId }]);
+    expect(transport.getMethodCalls("listApps")).toEqual([]);
+  });
 
   it("rejects a physical iOS device instead of driving simctl against it", async () => {
     // Physical iOS devices became discoverable/assignable in #5620, but every iOS

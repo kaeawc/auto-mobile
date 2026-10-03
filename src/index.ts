@@ -359,9 +359,14 @@ async function main() {
         }
       : null;
 
-    const cliOverrides: Array<
-      [FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]
-    > = [
+    type CliFeatureFlagOverride = [
+      FeatureFlagKey,
+      boolean,
+      string,
+      (Record<string, unknown> | null | undefined)?,
+    ];
+
+    const cliOverrides: CliFeatureFlagOverride[] = [
       ["debug", debug, "--debug"],
       ["debug-perf", debugPerf, "--debug-perf/--ui-perf-debug"],
       ["ui-perf-mode", uiPerfMode, "--ui-perf-mode"],
@@ -370,15 +375,12 @@ async function main() {
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
-      ...OUTPUT_REDUCTION_FLAG_SPECS.map(
-        (spec) =>
-          [spec.featureFlagKey, outputReduction[spec.field], spec.label, undefined] as [
-            FeatureFlagKey,
-            boolean,
-            string,
-            Record<string, unknown> | null | undefined,
-          ],
-      ),
+      ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec): CliFeatureFlagOverride => [
+        spec.featureFlagKey,
+        outputReduction[spec.field],
+        spec.label,
+        undefined,
+      ]),
     ];
 
     // All DB-touching feature-flag startup work: migration-gated initialize()

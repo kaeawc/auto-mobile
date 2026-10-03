@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
+import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
@@ -15,6 +16,7 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import {
@@ -1927,9 +1929,7 @@ export class SendKeys {
       !selector &&
       commands.some((command) => command.action !== "key" || isSemanticKey(command.key))
     ) {
-      throw new Error(
-        `sendKeys on display "${target.observation.display.key}" requires a selector for text, clear, or IME keys so the field can be focused on that panel.`,
-      );
+      await this.assertFocusedDisplay(target.observation, signal);
     }
     if (selector && this.device.platform === "android") {
       const focused = await this.focuser.focus(selector, signal, display, options);
@@ -1939,6 +1939,32 @@ export class SendKeys {
       return { displayId: target.displayId, assertCurrent: target.assertCurrent };
     }
     return { displayId: target.displayId, selector, assertCurrent: target.assertCurrent };
+  }
+
+  private async assertFocusedDisplay(
+    observation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (selectablePanels(this.device.displays).length === 1) {
+      return;
+    }
+    // An explicitly captured panel (and its focused node) does not establish global input focus.
+    const focusedWindow = observation.viewHierarchy?.windows?.find((window) => window.isFocused);
+    const focusedPanel = focusedWindow
+      ? await new ObservedAndroidDisplayCache(this.timer).panelForLogicalId(
+          this.device,
+          this.adbFactory.create(this.device),
+          focusedWindow.displayId,
+          signal,
+          focusedWindow.panelUniqueId,
+        )
+      : undefined;
+    if (focusedPanel?.key === observation.display.key) {
+      return;
+    }
+    throw new ActionableError(
+      `sendKeys on display "${observation.display.key}" requires a selector for text, clear, or IME keys because the focused panel is ${focusedPanel ? `"${focusedPanel.key}"` : "unknown"}. Use tapOn to focus a field on display "${observation.display.key}", or clear the pin with setActiveDevice {display: null}.`,
+    );
   }
 
   private async executeBoundedIosIme(

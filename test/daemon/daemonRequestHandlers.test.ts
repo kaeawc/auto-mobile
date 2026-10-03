@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../src/utils/logger";
 import { DevicePoolStats, handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import { DAEMON_SESSION_NOT_FOUND_CODE, DaemonRequest } from "../../src/daemon/types";
@@ -403,6 +404,52 @@ describe("handleDaemonRequest", () => {
     expect(devicePool.releasedDevices).toEqual([{ deviceId, expectedSessionId: sessionId }]);
     expect(sessionManager.getSession(sessionId)).toBeNull();
   });
+
+  test.each(["removed", "present", "pool-failure"])(
+    "release rejection preserves the original error with session %s",
+    async (scenario) => {
+      const sessionId = "release-failure";
+      const deviceId = "emulator-5556";
+      await sessionManager.createSession(sessionId, deviceId, "android");
+      const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+      const originalRelease = sessionManager.releaseSession.bind(sessionManager);
+      const failure = new Error("release persistence failed");
+      const poolFailure = new Error("pool release failed");
+      const release = spyOn(sessionManager, "releaseSession").mockImplementation(async (id) => {
+        if (scenario !== "present") {
+          await originalRelease(id);
+        }
+        throw failure;
+      });
+      const poolRelease = spyOn(devicePool, "releaseDevice");
+      if (scenario === "pool-failure") {
+        poolRelease.mockRejectedValue(poolFailure);
+      }
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await expect(
+          handleDaemonRequest(
+            buildRequest("daemon/releaseSession", { sessionId }),
+            new FakeDaemonState(sessionManager, devicePool),
+          ),
+        ).rejects.toBe(failure);
+        if (scenario === "present") {
+          expect(poolRelease).not.toHaveBeenCalled();
+          expect(sessionManager.getSession(sessionId)).not.toBeNull();
+        } else {
+          expect(poolRelease.mock.calls).toEqual([[deviceId, sessionId]]);
+          expect(sessionManager.getSession(sessionId)).toBeNull();
+        }
+        if (scenario === "pool-failure") {
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining(sessionId), poolFailure);
+        }
+      } finally {
+        release.mockRestore();
+        poolRelease.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
 
   test("refreshes device pool and returns stats", async () => {
     const devicePool = new FakeDevicePool(

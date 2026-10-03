@@ -13,7 +13,12 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE,
+  resolveIosCrashBackend,
+  type IosCrashBackend,
+  type SimulatorCrashCommandRunner,
+} from "../../utils/ios-cmdline-tools/IosCrashBackend";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -22,6 +27,8 @@ import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
+
+export type { SimulatorCrashCommandRunner } from "../../utils/ios-cmdline-tools/IosCrashBackend";
 
 const PROCESS_STATE_COMMAND = "shell dumpsys activity processes";
 const CONFIRMATION_ATTEMPTS = 10;
@@ -56,14 +63,11 @@ interface AndroidDispatchPreparation {
   targetedProcesses: AndroidPackageProcess[];
 }
 
-export interface SimulatorCrashCommandRunner {
-  executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
-}
-
 export interface CrashAppDependencies {
   adb?: AdbExecutor;
   adbFactory?: AdbClientFactory;
   simctl?: SimulatorCrashCommandRunner;
+  crashBackend?: IosCrashBackend;
   uid?: () => number;
   timer?: Timer;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
@@ -71,7 +75,7 @@ export interface CrashAppDependencies {
 
 export class CrashApp {
   private readonly adb: AdbExecutor;
-  private readonly simctl: SimulatorCrashCommandRunner;
+  private readonly crashBackend: IosCrashBackend;
   private readonly uid: () => number;
   private readonly timer: Timer;
   private readonly cacheInvalidator: DeviceWindowCacheInvalidator;
@@ -82,7 +86,11 @@ export class CrashApp {
   ) {
     const adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.adb = dependencies.adb ?? adbFactory.create(device);
-    this.simctl = dependencies.simctl ?? new SimCtlClient(device);
+    this.crashBackend =
+      dependencies.crashBackend ??
+      resolveIosCrashBackend(device.deviceId, {
+        simctl: dependencies.simctl ?? new SimCtlClient(device),
+      });
     this.uid = dependencies.uid ?? (() => os.userInfo().uid);
     this.timer = dependencies.timer ?? defaultTimer;
     this.cacheInvalidator =
@@ -111,7 +119,7 @@ export class CrashApp {
         mechanism:
           this.device.platform === "android"
             ? "android_am_crash"
-            : isIosSimulatorUdid(this.device.deviceId)
+            : this.crashBackend.kind === "simulator"
               ? "ios_simulator_sigabrt"
               : "unsupported",
         timestamp,
@@ -298,7 +306,6 @@ export class CrashApp {
     timestamp: number,
     signal?: AbortSignal,
   ): Promise<CrashAppResult> {
-    const simulator = isIosSimulatorUdid(this.device.deviceId);
     const base = {
       platform: "ios" as const,
       appId,
@@ -306,15 +313,13 @@ export class CrashApp {
       confirmed: false,
     };
 
-    if (!simulator) {
+    if (this.crashBackend.kind === "physical") {
       return {
         ...base,
         success: false,
         supported: false,
         mechanism: "unsupported",
-        error:
-          "crashApp is not supported on physical iOS devices; " +
-          "AutoMobile will not fall back to normal termination",
+        error: PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE,
       };
     }
 
@@ -346,18 +351,12 @@ export class CrashApp {
     const inductionTimestampMs = this.timer.now();
     const attemptBase = { ...base, timestamp: inductionTimestampMs };
     try {
-      await this.simctl.executeCommandArgs(
-        [
-          "spawn",
-          this.device.deviceId,
-          "launchctl",
-          "kill",
-          "SIGABRT",
-          `user/${this.uid()}/${appProcess.serviceLabel}`,
-        ],
-        CRASH_COMMAND_TIMEOUT_MS,
+      await this.crashBackend.killProcess({
+        serviceLabel: appProcess.serviceLabel,
+        uid: this.uid(),
+        timeoutMs: CRASH_COMMAND_TIMEOUT_MS,
         signal,
-      );
+      });
     } catch (error) {
       signal?.throwIfAborted();
       const message = errorMessage(error);
@@ -490,11 +489,10 @@ export class CrashApp {
 
   private async listIosSimulatorProcesses(signal?: AbortSignal): Promise<string> {
     return (
-      await this.simctl.executeCommandArgs(
-        ["spawn", this.device.deviceId, "launchctl", "list"],
-        PREFLIGHT_COMMAND_TIMEOUT_MS,
+      await this.crashBackend.listProcesses({
+        timeoutMs: PREFLIGHT_COMMAND_TIMEOUT_MS,
         signal,
-      )
+      })
     ).stdout;
   }
 
@@ -511,24 +509,10 @@ export class CrashApp {
   private async tryReadIosSimulatorCrashLog(signal?: AbortSignal): Promise<string | undefined> {
     try {
       return (
-        await this.simctl.executeCommandArgs(
-          [
-            "spawn",
-            this.device.deviceId,
-            "log",
-            "show",
-            "--last",
-            "1m",
-            "--style",
-            "compact",
-            "--timezone",
-            "UTC",
-            "--predicate",
-            'eventMessage CONTAINS[c] "SIGABRT"',
-          ],
-          CONFIRMATION_COMMAND_TIMEOUT_MS,
+        await this.crashBackend.readCrashLog({
+          timeoutMs: CONFIRMATION_COMMAND_TIMEOUT_MS,
           signal,
-        )
+        })
       ).stdout;
     } catch (error) {
       signal?.throwIfAborted();

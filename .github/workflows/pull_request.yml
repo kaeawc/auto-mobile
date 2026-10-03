@@ -2901,7 +2901,8 @@ jobs:
           # colour/contrast/typography/shape/asset tests live in
           # :playground:design:system, which :playground:app:assembleDebug does
           # not exercise, so without this they never gate.
-          gradle-tasks: ":playground:app:assembleDebug :playground:design:system:testDebugUnitTest"
+          # Discover host unit tests (including Long Press Drag reorder) also gate here.
+          gradle-tasks: ":playground:app:assembleDebug :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

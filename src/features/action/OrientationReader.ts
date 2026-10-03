@@ -1,6 +1,6 @@
 import type { BootedDevice } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
+import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { logger } from "../../utils/logger";
 
 function orientationFromRotation(
@@ -31,14 +31,7 @@ export class AndroidOrientationReader implements OrientationReader {
     signal?: AbortSignal,
   ): Promise<"portrait" | "landscape" | null> {
     try {
-      const { stdout } = await this.adb.executeCommand(
-        'shell dumpsys window | grep -i "mRotation="',
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
-      const rotation = parseWindowManagerRotation(stdout);
+      const rotation = await readWindowManagerRotation(this.adb, { signal });
       if (rotation === null) {
         return null;
       }

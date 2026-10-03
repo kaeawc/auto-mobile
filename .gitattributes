@@ -7,6 +7,7 @@ test/fixtures/release/*.md text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 # Pin byte-exact captured plutil output to LF across Windows checkouts.
 test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
+test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 

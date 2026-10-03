@@ -41,6 +41,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
    * non-goal).
    */
   const REQUIRED_NATIVE_GLOBS = [
+    // validateMarkdownRepoPaths.test.ts reads every tracked README.md under android/ and ios/
+    // to check the repo paths they cite.
+    "android/**/README.md",
+    "ios/**/README.md",
     // sdkApiBaselineWorkflow.test.ts reads the SDK API baseline and Gradle wiring.
     "android/auto-mobile-sdk/build.gradle.kts",
     "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
@@ -454,6 +458,14 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           }
           const source = readFileSync(abs, "utf8");
           const record = (path: string): void => {
+            // The Markdown guard allowlists this gitignored SDK config without
+            // reading it. Its presence varies by checkout, so it is not a cache input.
+            if (
+              rel === "test/lint/validateMarkdownRepoPaths.test.ts" &&
+              path === "android/local.properties"
+            ) {
+              return;
+            }
             // SwiftPM's `.build` and Gradle's `build` outputs can exist after a
             // local native build but are never source inputs for a TS unit test.
             const segments = path.split("/");
@@ -564,13 +576,38 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     );
   });
 
-  /** Prefixes a declared glob matches, i.e. `foo/bar/**` covers `foo/bar` and below. */
+  /** Match directory prefixes and recursive basename globs, including the root basename. */
   function coveredBy(inputs: readonly string[], path: string): boolean {
     return inputs.some((glob) => {
+      const parts = glob.split("/**/");
+      if (parts.length === 2 && parts[1] && !parts[1].includes("/")) {
+        return path.startsWith(`${parts[0]}/`) && path.endsWith(`/${parts[1]}`);
+      }
       const prefix = glob.replace(/\/\*\*$/, "");
       return path === prefix || path.startsWith(`${prefix}/`);
     });
   }
+
+  test("recursive README globs cover root and nested READMEs only", () => {
+    for (const root of ["android", "ios"]) {
+      const inputs = [`${root}/**/README.md`];
+      expect(coveredBy(inputs, `${root}/README.md`)).toBe(true);
+      expect(coveredBy(inputs, `${root}/module/README.md`)).toBe(true);
+      expect(coveredBy(inputs, `${root}/module/nested/README.md`)).toBe(true);
+      expect(coveredBy(inputs, `${root}-other/README.md`)).toBe(false);
+      expect(coveredBy(inputs, `${root}/module/OTHER.md`)).toBe(false);
+      expect(coveredBy(inputs, `${root}/module/README.md.bak`)).toBe(false);
+      expect(coveredBy(inputs, `${root}/module/README.md/child`)).toBe(false);
+    }
+  });
+
+  test("other globs retain their existing prefix coverage", () => {
+    expect(coveredBy(["native/module/**"], "native/module")).toBe(true);
+    expect(coveredBy(["native/module/**"], "native/module/Source.kt")).toBe(true);
+    expect(coveredBy(["native/module/**"], "native/module-other/Source.kt")).toBe(false);
+    expect(coveredBy(["native/file.md"], "native/file.md")).toBe(true);
+    expect(coveredBy(["native/file.md"], "native/file.md/child")).toBe(true);
+  });
 
   /**
    * Native paths a test references but deliberately does NOT read as a cache

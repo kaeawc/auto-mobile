@@ -90,7 +90,7 @@ automobile-tests:
       run: auto-mobile --cli observe --platform ios
 
     - name: Run AutoMobile tests
-      run: bash scripts/ios/xcode-automobile-tests.sh
+      run: xcodebuild test-without-building -xctestrun "$xctestrun_file" -destination "platform=iOS Simulator,id=$booted_udid" -only-testing:YourAppAutoMobileTests -enableCodeCoverage NO -skipMacroValidation
 
     - name: Stop AutoMobile daemon
       if: always()
@@ -195,11 +195,10 @@ plans execute.
 
 ### 6. Run AutoMobile tests
 
-```bash
-bash scripts/ios/xcode-automobile-tests.sh
-```
-
-The script finds the `.xctestrun`, identifies the booted simulator, and runs:
+Set `xctestrun_file` to the downloaded `.xctestrun` and `booted_udid` to the simulator UUID
+in the same shell step, then run the command below. These are application-specific
+examples; the repository does not provide a test-without-building wrapper.
+`scripts/ios/xcode-test.sh` builds and tests repository Xcode projects instead.
 
 ```bash
 xcodebuild test-without-building \
@@ -238,7 +237,7 @@ file. The simulator remains booted for the remainder of the runner's lifetime
 The `simulator-tests` job runs unit tests using `-skip-testing:YourAppAutoMobileTests`:
 
 ```bash
-# scripts/ios/xcode-test-without-building.sh
+# Application-specific unit-test command
 # -skip-testing:YourAppAutoMobileTests excludes the AutoMobile bundle
 xcodebuild test-without-building \
   -xctestrun "$xctestrun_file" \
@@ -282,6 +281,9 @@ package directories it depends on): `*.swift`, `*.m`, `*.mm`, `*.h`, `*.c`, `*.c
 excluding `.build/`, `DerivedData/`, and `SourcePackages/` (already excluded by scoping to source
 directories, matching the SPM cache-path exclusions above).
 
+The workflow examples above require `xctestrun_file` and `booted_udid` to be set in
+the test step (or exported through `GITHUB_ENV` by earlier steps).
+
 ## Required secrets
 
 No additional secrets are required for a basic AutoMobile test run. The macOS runner has Xcode
@@ -294,7 +296,7 @@ them as environment variables through the test scheme:
 - name: Run AutoMobile tests
   env:
     AUTOMOBILE_TEST_API_KEY: ${{ secrets.TEST_API_KEY }}
-  run: bash scripts/ios/xcode-automobile-tests.sh
+  run: xcodebuild test-without-building -xctestrun "$xctestrun_file" -destination "platform=iOS Simulator,id=$booted_udid" -only-testing:YourAppAutoMobileTests -enableCodeCoverage NO -skipMacroValidation
 ```
 
 Resolve them from the environment in the test target before executing the plan.

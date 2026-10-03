@@ -2,9 +2,12 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.graphics.PathMeasure
+import android.graphics.RectF
 import android.os.Handler
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import java.time.Duration
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
@@ -22,6 +25,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.shadows.ShadowAccessibilityService
+import org.robolectric.shadows.ShadowSystemClock
 import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
@@ -69,6 +73,15 @@ class CtrlProxyDragDispatchTest {
     assertTrue(frames.isEmpty())
     assertEquals(3, shadow.attempts.size)
     assertChain(listOf(true, true, false))
+    val press = shadow.attempts.first().gesture.getStroke(0)
+    val pressPath = PathMeasure(press.path, false)
+    assertEquals(600L, press.duration)
+    assertEquals(1f, pressPath.length, 0f)
+    val bounds = RectF()
+    press.path.computeBounds(bounds, false)
+    assertEquals(RectF(10f, 20f, 10f, 21f), bounds)
+    shadow.attempts[1].gesture.getStroke(0).path.computeBounds(bounds, false)
+    assertEquals(RectF(10f, 21f, 100f, 200f), bounds)
     shadow.complete()
     val result = Json.parseToJsonElement(frames.single()).jsonObject
     assertEquals("drag_result", result.getValue("type").jsonPrimitive.content)
@@ -86,6 +99,24 @@ class CtrlProxyDragDispatchTest {
       root.getValue("children").jsonArray.map {
         it.jsonObject.getValue("name").jsonPrimitive.content
       },
+    )
+  }
+
+  @Test
+  fun `instant press completion lifts pointer and reports early completion failure`() {
+    drag()
+    shadow.complete(0L)
+    assertTrue(frames.isEmpty())
+    assertChain(listOf(true, false))
+    val release = shadow.attempts.last().gesture.getStroke(0)
+    assertEquals(1L, release.duration)
+    assertEquals(0f, PathMeasure(release.path, false).length, 0f)
+    shadow.complete(0L)
+    val result = Json.parseToJsonElement(frames.single()).jsonObject
+    assertFalse(result.getValue("success").jsonPrimitive.boolean)
+    assertEquals(
+      "Drag stroke completed early: 0ms of 600ms",
+      result.getValue("error").jsonPrimitive.content,
     )
   }
 
@@ -240,7 +271,10 @@ class DragAccessibilityServiceShadow : ShadowAccessibilityService() {
     return super.dispatchGesture(gesture, callback, handler)
   }
 
-  fun complete() = attempts.last().let { it.callback.onCompleted(it.gesture) }
+  fun complete(elapsedMs: Long = attempts.last().gesture.getStroke(0).duration) {
+    ShadowSystemClock.advanceBy(Duration.ofMillis(elapsedMs))
+    attempts.last().let { it.callback.onCompleted(it.gesture) }
+  }
 
   fun cancel() = attempts.last().let { it.callback.onCancelled(it.gesture) }
 }

@@ -71,20 +71,38 @@ class DragStrokeSessionTest {
     }
   }
 
-  private class Harness {
+  private class FakeClock {
+    var nowMs = 10_000L
+
+    fun advance(durationMs: Long) {
+      nowMs += durationMs
+    }
+  }
+
+  private class Harness(
+    plan: List<GestureSegment> =
+      dragStrokePlan(GesturePoint(1f, 2f), GesturePoint(3f, 4f), 600L, 300L, 100L)
+  ) {
     val dispatcher = Dispatcher()
     val timer = FakeGestureDeadline()
+    val clock = FakeClock()
     val results = mutableListOf<Pair<Boolean, String?>>()
     val errors = mutableListOf<Exception>()
     val session =
       DragStrokeSession(
-        dragStrokePlan(GesturePoint(1f, 2f), GesturePoint(3f, 4f), 600L, 300L, 100L),
+        plan,
         dispatcher,
         timer,
         7,
         { errors.add(it) },
         { success, error -> results.add(success to error) },
+        nowMs = { clock.nowMs },
       )
+
+    fun complete(elapsedMs: Long = dispatcher.calls.last().stroke.segment.durationMs) {
+      clock.advance(elapsedMs)
+      dispatcher.calls.last().complete()
+    }
 
     fun assertRelease() {
       val release = dispatcher.calls.last().stroke
@@ -98,14 +116,69 @@ class DragStrokeSessionTest {
   }
 
   @Test
+  fun `instant press completion fails and lifts pointer before reporting original error`() {
+    val h = Harness()
+    h.session.start()
+    h.complete(0L)
+    assertEquals(2, h.dispatcher.calls.size)
+    h.assertRelease()
+    val release = h.dispatcher.calls.last().stroke.segment
+    assertEquals(release.from, release.to)
+    assertEquals(1L, release.durationMs)
+    h.complete(0L)
+    assertEquals(listOf(false to "Drag stroke completed early: 0ms of 600ms"), h.results)
+    assertTrue(h.timer.tasks.all { it.cancelled })
+  }
+
+  @Test
+  fun `completion at tolerance succeeds but one millisecond earlier fails`() {
+    for (elapsed in listOf(550L, 549L)) {
+      val h = Harness()
+      h.session.start()
+      h.complete(elapsed)
+      if (elapsed == 550L) {
+        repeat(2) { h.complete() }
+        assertEquals(listOf(true to null), h.results)
+      } else {
+        h.assertRelease()
+        h.complete(0L)
+        assertEquals(listOf(false to "Drag stroke completed early: 549ms of 600ms"), h.results)
+      }
+    }
+  }
+
+  @Test
+  fun `early final hold completion fails and releases previous continued stroke`() {
+    val h = Harness()
+    h.session.start()
+    repeat(2) { h.complete() }
+    h.complete(0L)
+    h.assertRelease()
+    assertEquals(h.dispatcher.calls[1].stroke, h.dispatcher.calls.last().stroke.parent)
+    h.complete(0L)
+    assertEquals(listOf(false to "Drag stroke completed early: 0ms of 100ms"), h.results)
+  }
+
+  @Test
+  fun `tiny durations do not trip early completion check`() {
+    for (duration in listOf(1L, 50L)) {
+      val h = Harness(dragStrokePlan(GesturePoint(1f, 2f), GesturePoint(3f, 4f), 0L, duration, 0L))
+      h.session.start()
+      h.complete(0L)
+      assertEquals(1, h.dispatcher.calls.size)
+      assertEquals(listOf(true to null), h.results)
+    }
+  }
+
+  @Test
   fun `success waits for final completion and ignores duplicate callbacks`() {
     val h = Harness()
     h.session.start()
-    repeat(2) { h.dispatcher.calls.last().complete() }
+    repeat(2) { h.complete() }
     assertTrue(h.results.isEmpty())
     assertEquals(3, h.dispatcher.calls.size)
     assertEquals(1, h.dispatcher.calls.count { it.stroke.parent == null })
-    h.dispatcher.calls.last().complete()
+    h.complete()
     h.dispatcher.calls.first().fail("late cancellation")
     assertEquals(listOf(true to null), h.results)
     assertTrue(h.timer.tasks.all { it.cancelled })
@@ -115,7 +188,7 @@ class DragStrokeSessionTest {
   fun `mid chain cancellation releases pointer before reporting failure`() {
     val h = Harness()
     h.session.start()
-    h.dispatcher.calls.last().complete()
+    h.complete()
     val cancelled = h.dispatcher.calls.last()
     cancelled.fail("cancelled")
     h.assertRelease()
@@ -132,7 +205,7 @@ class DragStrokeSessionTest {
       h.session.start()
       h.dispatcher.throwNext = throws
       h.dispatcher.rejectNext = !throws
-      h.dispatcher.calls.last().complete()
+      h.complete()
       h.assertRelease()
       assertEquals(h.dispatcher.calls.first().stroke, h.dispatcher.calls.last().stroke.parent)
       h.dispatcher.calls.last().complete()
@@ -146,7 +219,7 @@ class DragStrokeSessionTest {
   fun `stroke timeout releases pointer and cleanup timeout cannot hang result`() {
     val h = Harness()
     h.session.start()
-    h.dispatcher.calls.last().complete()
+    h.complete()
     h.timer.expire()
     h.assertRelease()
     h.timer.expire()
@@ -160,7 +233,7 @@ class DragStrokeSessionTest {
   fun `failed final segment attempts lift and cleanup rejection remains failure`() {
     val h = Harness()
     h.session.start()
-    repeat(2) { h.dispatcher.calls.last().complete() }
+    repeat(2) { h.complete() }
     h.dispatcher.calls.last().fail("final cancelled")
     h.assertRelease()
     h.dispatcher.calls.last().fail("release rejected")
@@ -174,7 +247,7 @@ class DragStrokeSessionTest {
     val h = Harness()
     h.session.start()
     h.dispatcher.throwOnContinue = true
-    h.dispatcher.calls.last().complete()
+    h.complete()
     h.assertRelease()
     assertEquals(2, h.dispatcher.calls.size)
     h.dispatcher.calls.last().complete()

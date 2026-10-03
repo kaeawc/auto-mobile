@@ -370,9 +370,10 @@ extension GestureCoordinateStrategyTests {
         }
     }
 
-    func testFailedReferenceReadKeepsCapturedIPhoneWarningAndMemoizesNil() throws {
+    func testFailedReferenceReadKeepsCapturedIPhoneWarningDuringRetryInterval() throws {
         let reader = FakeReferenceScreenReader(result: nil)
-        let cache = ReferenceScreenCache { reader.read() }
+        let timer = FakeProxyTimer(mode: .manual)
+        let cache = ReferenceScreenCache(timer: timer) { reader.read() }
         let provider = FakeReferenceDisplayGestureProvider(
             sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
         )
@@ -394,13 +395,14 @@ extension GestureCoordinateStrategyTests {
         XCTAssertEqual(provider.liveGeometryReads, 3)
     }
 
-    func testInvalidReferenceSizesAreMemoizedAsNilAndKeepMismatch() throws {
+    func testInvalidReferenceSizesKeepMismatchDuringRetryInterval() throws {
         for invalid in [
             GestureSize(width: 0, height: 0), GestureSize(width: .nan, height: 874),
             GestureSize(width: 402, height: .infinity), GestureSize(width: -1, height: 874),
         ] {
             let reader = FakeReferenceScreenReader(result: invalid)
-            let cache = ReferenceScreenCache { reader.read() }
+            let timer = FakeProxyTimer(mode: .manual)
+            let cache = ReferenceScreenCache(timer: timer) { reader.read() }
             let provider = FakeReferenceDisplayGestureProvider(
                 sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
             )
@@ -419,7 +421,8 @@ extension GestureCoordinateStrategyTests {
 
     func testReferenceCacheKeysRawSizesAndCachedReadsNeverCallReader() throws {
         let reader = FakeReferenceScreenReader(result: capturedIPhone.app)
-        let cache = ReferenceScreenCache { reader.read() }
+        let timer = FakeProxyTimer(mode: .manual)
+        let cache = ReferenceScreenCache(timer: timer) { reader.read() }
         let provider = FakeReferenceDisplayGestureProvider(
             sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
         )
@@ -451,11 +454,115 @@ extension GestureCoordinateStrategyTests {
         XCTAssertNil(cache.cachedScreen(for: otherScreen))
         XCTAssertEqual(reader.reads, 2)
         reader.result = nil
+        // Repeated failed reads are suppressed only during the retry interval.
         XCTAssertNil(cache.screen(for: otherScreen))
         XCTAssertNil(cache.screen(for: otherScreen))
         XCTAssertEqual(cache.cachedScreen(for: capturedIPhone), capturedIPhone.app)
         XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
         XCTAssertEqual(reader.reads, 3)
+    }
+
+    func testFailedReferenceReadRetriesAndCachesSuccessfulCorrection() throws {
+        let reader = FakeReferenceScreenReader(result: nil)
+        let timer = FakeProxyTimer(mode: .manual, initialTime: 100)
+        let cache = ReferenceScreenCache(timer: timer) { reader.read() }
+        XCTAssertNil(cache.screen(for: capturedIPhone))
+        XCTAssertNil(cache.cachedScreen(for: capturedIPhone))
+        XCTAssertNil(capturedIPhone.resolvingSinglePanel(reference: cache.cachedScreen(for: capturedIPhone)))
+        XCTAssertEqual(reader.reads, 1)
+
+        reader.result = capturedIPhone.app
+        timer.advance(by: ReferenceScreenCache.failedReadRetryIntervalMs + 1)
+        XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+        XCTAssertEqual(cache.cachedScreen(for: capturedIPhone), capturedIPhone.app)
+        let corrected = try XCTUnwrap(
+            capturedIPhone.resolvingSinglePanel(reference: cache.cachedScreen(for: capturedIPhone))
+        )
+        XCTAssertEqual(corrected, capturedIPhone.replacingScreen(capturedIPhone.app))
+        XCTAssertFalse(hasMultiPanelMismatch(app: corrected.app, screen: corrected.screen))
+        XCTAssertEqual(reader.reads, 2)
+
+        reader.result = nil
+        timer.advance(by: ReferenceScreenCache.failedReadRetryIntervalMs * 2)
+        for _ in 0 ..< 3 {
+            XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+            XCTAssertEqual(cache.cachedScreen(for: capturedIPhone), capturedIPhone.app)
+        }
+        XCTAssertEqual(reader.reads, 2)
+    }
+
+    func testRepeatedReferenceFailuresAreRateLimitedPerKey() {
+        let reader = FakeReferenceScreenReader(result: nil)
+        let timer = FakeProxyTimer(mode: .manual, initialTime: 100)
+        let retryAfterMs: Int64 = 250
+        let cache = ReferenceScreenCache(timer: timer, retryAfterMs: retryAfterMs) { reader.read() }
+        for _ in 0 ..< 10 {
+            XCTAssertNil(cache.screen(for: capturedIPhone))
+        }
+        XCTAssertEqual(reader.reads, 1)
+        timer.advance(by: retryAfterMs - 1)
+        XCTAssertNil(cache.screen(for: capturedIPhone))
+        XCTAssertEqual(reader.reads, 1)
+
+        timer.advance(by: 1)
+        XCTAssertNil(cache.cachedScreen(for: capturedIPhone))
+        XCTAssertEqual(reader.reads, 1)
+        for _ in 0 ..< 10 {
+            XCTAssertNil(cache.screen(for: capturedIPhone))
+        }
+        XCTAssertEqual(reader.reads, 2)
+        timer.advance(by: retryAfterMs - 1)
+        XCTAssertNil(cache.screen(for: capturedIPhone))
+        XCTAssertEqual(reader.reads, 2)
+
+        // Another raw-size key reads immediately even while this key is throttled.
+        XCTAssertNil(cache.screen(for: capturedIPhone.replacingScreen(unfolded.screen)))
+        XCTAssertEqual(reader.reads, 3)
+    }
+
+    func testSuccessfulReferenceReadIsMemoizedOncePerKey() {
+        let reader = FakeReferenceScreenReader(result: capturedIPhone.app)
+        let timer = FakeProxyTimer(mode: .manual)
+        let cache = ReferenceScreenCache(timer: timer) { reader.read() }
+        for _ in 0 ..< 3 {
+            XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+            timer.advance(by: ReferenceScreenCache.failedReadRetryIntervalMs)
+        }
+        XCTAssertEqual(reader.reads, 1)
+
+        let landscape = GestureCoordinateGeometry(
+            app: GestureSize(width: 874, height: 402), screen: capturedIPhone.screen,
+            observation: GestureSize(width: 874, height: 402), rotation: 1
+        )
+        reader.result = landscape.app
+        for _ in 0 ..< 3 {
+            XCTAssertEqual(cache.screen(for: landscape), landscape.app)
+        }
+        XCTAssertEqual(reader.reads, 2)
+        XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+        XCTAssertEqual(cache.cachedScreen(for: landscape), landscape.app)
+        XCTAssertEqual(reader.reads, 2)
+    }
+
+    func testInvalidReferenceSizeCanRecoverAfterRetryInterval() {
+        for invalid in [GestureSize(width: 0, height: 0), GestureSize(width: .nan, height: 874)] {
+            let reader = FakeReferenceScreenReader(result: invalid)
+            let timer = FakeProxyTimer(mode: .manual)
+            let cache = ReferenceScreenCache(timer: timer) { reader.read() }
+            XCTAssertNil(cache.screen(for: capturedIPhone))
+            XCTAssertNil(cache.cachedScreen(for: capturedIPhone))
+            XCTAssertEqual(reader.reads, 1)
+
+            reader.result = capturedIPhone.app
+            timer.advance(by: ReferenceScreenCache.failedReadRetryIntervalMs - 1)
+            XCTAssertNil(cache.screen(for: capturedIPhone))
+            XCTAssertEqual(reader.reads, 1)
+            timer.advance(by: 1)
+            XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+            XCTAssertEqual(cache.cachedScreen(for: capturedIPhone), capturedIPhone.app)
+            XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+            XCTAssertEqual(reader.reads, 2)
+        }
     }
 
     func testReferenceResolutionCorrectsOnlyMatchingOrTransposedSinglePanelSizes() throws {

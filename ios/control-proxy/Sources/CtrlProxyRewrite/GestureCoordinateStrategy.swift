@@ -68,9 +68,11 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
     }
 }
 
-/// Memoizes failures too, so an unavailable reference does not add IPC to every tap.
+/// Memoizes successful reads and rate-limits retries after unavailable or invalid references.
 @MainActor
 final class ReferenceScreenCache {
+    static let failedReadRetryIntervalMs: Int64 = 5000
+
     private struct Key: Hashable {
         let app: GestureSize
         let screen: GestureSize
@@ -81,27 +83,38 @@ final class ReferenceScreenCache {
         }
     }
 
-    private struct Entry {
-        let screen: GestureSize?
-    }
-
+    private let timer: any ProxyTimer
+    private let retryAfterMs: Int64
     private let reader: @MainActor () -> GestureSize?
-    private var entries: [Key: Entry] = [:]
+    private var entries: [Key: GestureSize] = [:]
+    private var failedReads: [Key: Int64] = [:]
 
-    init(reader: @escaping @MainActor () -> GestureSize?) { self.reader = reader }
+    init(
+        timer: any ProxyTimer = SystemTimer(),
+        retryAfterMs: Int64 = ReferenceScreenCache.failedReadRetryIntervalMs,
+        reader: @escaping @MainActor () -> GestureSize?
+    ) {
+        self.timer = timer
+        self.retryAfterMs = retryAfterMs
+        self.reader = reader
+    }
 
     func screen(for geometry: GestureCoordinateGeometry) -> GestureSize? {
         let key = Key(geometry)
-        if let entry = entries[key] { return entry.screen }
-        let result = reader()
-        let screen = result.flatMap { $0.isValid ? $0 : nil }
-        entries[key] = Entry(screen: screen)
-        return screen
+        if let screen = entries[key] { return screen }
+        if let failedAt = failedReads[key], timer.now() - failedAt < retryAfterMs { return nil }
+        if let screen = reader(), screen.isValid {
+            entries[key] = screen
+            failedReads.removeValue(forKey: key)
+            return screen
+        }
+        failedReads[key] = timer.now()
+        return nil
     }
 
     /// Forced legacy can consume a warm entry, but must never trigger a platform read.
     func cachedScreen(for geometry: GestureCoordinateGeometry) -> GestureSize? {
-        entries[Key(geometry)]?.screen
+        entries[Key(geometry)]
     }
 }
 

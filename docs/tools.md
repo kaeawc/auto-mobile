@@ -1160,13 +1160,18 @@ for Android emulators and multi-panel iPhone Duo simulators only. `displayPreset
 requires a named posture and cannot be combined with an angle.
 
 Android tries `adb emu sensor set hinge-angle0 <deg>` once without retries or a
-fold/unfold/posture fallback. This console syntax and its output are **unconfirmed
-on real emulators**; support is detected from the command's own output at call
-time using the existing console failure check. A rejected console command returns
+fold/unfold/posture fallback. Support is detected from the command's own output at
+call time using the existing console failure check. A rejected console command
+returns
 `{ "status": "unsupported", "message": "..." }`, including the raw first
 non-empty output line as the reason; no state changed. Physical Android angles
 are likewise unsupported because they require the emulator console. An unreachable
-ADB, timeout, or abort throws an actionable operational error.
+ADB or timeout while setting, or an abort at any stage, throws an actionable
+operational error. After acceptance, `adb emu sensor get hinge-angle0` reads the
+angle back, strictly parsing one non-empty line of `hinge-angle0 = <n>`. A mismatch
+of more than 1 degree warns with the requested and actual angles; an unreadable
+or failed read-back warns that the angle could not be verified. These warnings
+remain best effort and do not fail the request.
 
 After an accepted Android angle, committed `cmd device_state state` is mapped
 through `cmd device_state print-states`, polling for up to 3000 ms. A known mapped
@@ -1186,14 +1191,18 @@ retain their existing unsupported results. Named iOS postures retain the existin
 0/130/180 mapping and are not gated by this new capability check. An angle's resulting posture
 comes from the observed active panel: cover reports closed, inner reports its
 observed posture (or opened if the inner panel is known but posture is unknown),
-and an indeterminate panel reports unknown with a reason.
+and an indeterminate panel reports unknown with a reason. The runner's reported
+angle is compared with the request: a difference of more than 1 degree warns
+with both angles, and a missing angle warns that it is not verifiable. Neither
+warning fails the request.
 
 Named-posture results retain `message`, the requested `posture`, and `display`
 (key, role, posture, generation), with optional `locked` and `warnings`. Angle
 results also echo the requested `hingeAngle`; `posture` is the device read-back
-or `"unknown"` with `postureReason`. Android reports **no angle read-back**.
-iOS adds `observedHingeAngle` only when the runner returns an angle. Both request
-kinds share the same device lock, supersession checks, cache invalidation, and
+or `"unknown"` with `postureReason`. Android also reports `observedHingeAngle`
+when the console read-back is valid; iOS reports it when the runner returns an
+angle. Mismatched or unverified angle messages describe the angle as requested.
+Both request kinds share the same device lock, supersession checks, cache invalidation, and
 final observation/generation fence. Unsupported angles return `status:
 "unsupported"` with a reason and no state change; operational failures throw
 actionable errors.

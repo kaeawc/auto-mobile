@@ -192,4 +192,32 @@ describe("setPosture hinge angle contract", () => {
     });
     expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
   });
+  test.each([180, undefined])(
+    "handler describes an unverified angle %s as requested",
+    async (actual) => {
+      setSetPostureFactory(() => ({
+        execute: async () => {
+          throw new Error("Unexpected posture request");
+        },
+        executeHingeAngle: async () => ({
+          hingeAngle: 120,
+          ...(actual !== undefined ? { observedHingeAngle: actual } : {}),
+          warnings: [
+            actual === undefined
+              ? "Could not verify hinge angle: KO: unknown sensor."
+              : "Hinge angle read-back mismatch: requested 120 degrees but the emulator reports 180 degrees.",
+          ],
+          posture: "opened",
+          display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+        }),
+      }));
+      const response = await setPostureHandler(device, { hingeAngle: 120 });
+      expect(response.structuredContent).toMatchObject({
+        message:
+          actual === undefined
+            ? "Requested hinge angle 120 degrees; the resulting angle could not be verified (posture opened)"
+            : "Requested hinge angle 120 degrees; the device reports 180 degrees (posture opened)",
+      });
+    },
+  );
 });

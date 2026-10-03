@@ -35,7 +35,7 @@ async function withoutUnhandledRejections(run: () => Promise<void>): Promise<voi
   }
 }
 
-function harness(releaseError?: Error) {
+function harness(releaseError?: unknown) {
   const log = new FakeLogger();
   const service = new DeviceShutdownService(log);
   const events: string[] = [];
@@ -95,6 +95,40 @@ describe("DeviceShutdownService", () => {
       expectReleaseWarning(h.log, releaseError, "finally");
     });
   });
+
+  for (const phase of ["finally", "late operation success", "late operation failure"] as const) {
+    test(`a null-prototype release rejection preserves the shutdown result (${phase})`, async () => {
+      await withoutUnhandledRejections(async () => {
+        const releaseError: unknown = Object.create(null);
+        const h = harness(releaseError);
+        const operation = deferred();
+        if (phase !== "finally") {
+          h.workflow.execute = async (_reservation, retain) => {
+            h.events.push("execute");
+            retain(operation.promise, true);
+            return "success";
+          };
+        }
+        expect(await h.service.shutdown(h.workflow)).toBe("success");
+        if (phase !== "finally") {
+          expect(h.events).toEqual(["prepare", "execute"]);
+          if (phase === "late operation success") {
+            operation.resolve();
+          } else {
+            operation.reject(new Error("late teardown failed"));
+          }
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        expect(h.events).toEqual(["prepare", "execute", "release"]);
+        expect(h.failures).toEqual([]);
+        expect(h.log.at("warn")).toHaveLength(1);
+        expect(h.log.at("warn")[0]?.message).toBe(
+          `[DeviceShutdownService] Failed to release shutdown reservation (${phase}): [object Object]`,
+        );
+        expect(h.log.at("warn")[0]?.args).toEqual([releaseError]);
+      });
+    });
+  }
 
   for (const releaseRejects of [false, true]) {
     test(`execute failure result survives finally release (rejects=${releaseRejects})`, async () => {

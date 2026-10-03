@@ -13,6 +13,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
@@ -1643,6 +1644,17 @@ export async function shutdownDevice(
         return reservation;
       },
       execute: async (shutdownReservation, retainReservationUntil) => {
+        const releaseShutdownReservation = async (): Promise<void> => {
+          try {
+            await shutdownReservation?.release();
+          } catch (error) {
+            // Release is best-effort cleanup and must not replace the shutdown outcome.
+            logger.warn(
+              `[DeviceTools] Failed to release shutdown reservation for ${device.deviceId}: ${errorMessage(error)}`,
+              error,
+            );
+          }
+        };
         const expectedPooledDevice = shutdownReservation?.device ?? null;
         const retainShutdownUntil = (
           operation: Promise<unknown>,
@@ -1676,26 +1688,20 @@ export async function shutdownDevice(
           dependencies.stopAndroidObservers,
         );
 
-        const retainKillReservationUntil = (
-          retirement: Promise<void>,
-          releaseReservationAfterFailure?: boolean,
-        ): void => {
-          retainShutdownUntil(retirement, releaseReservationAfterFailure);
-        };
         const alreadyStoppedMessage = await killProcessAndRetireOwnership(
           {
             ...context,
             expectedPooledDevice,
             expectedSession,
-            retainReservationUntil: retainKillReservationUntil,
+            retainReservationUntil: retainShutdownUntil,
           },
           dependencies,
           perf,
           devicePool,
           {
             androidObserverState,
-            releaseShutdownReservation: async () => await shutdownReservation?.release(),
-            retainReservationUntil: retainKillReservationUntil,
+            releaseShutdownReservation,
+            retainReservationUntil: retainShutdownUntil,
             strictDeadline,
             timeoutMs,
             killTarget,
@@ -1741,7 +1747,7 @@ export async function shutdownDevice(
         const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
           device.deviceId,
         );
-        await shutdownReservation?.release();
+        await releaseShutdownReservation();
         unregisterDirectSessionsForDevice(device.deviceId);
 
         const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);

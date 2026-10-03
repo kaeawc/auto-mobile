@@ -2935,24 +2935,32 @@ async function retireTeardownPooledOwnership(
       timeoutMs: context.timeoutMs,
     },
   );
+  const releaseReservation = async (): Promise<void> => {
+    try {
+      await reservation?.release();
+    } catch (error) {
+      // Release is best-effort cleanup and must not replace the shutdown outcome.
+      logger.warn(
+        `[DeviceTools] Failed to release teardown shutdown reservation for ${expectedPooledDevice.id}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  };
   if (!reservation || reservation.device !== expectedPooledDevice) {
-    await reservation?.release();
+    await releaseReservation();
     return;
   }
 
   let retainsReservation = false;
   const retainReservationUntil = (retirement: Promise<unknown>): void => {
     retainsReservation = true;
-    void retirement.then(
-      () => reservation.release(),
-      (error) => {
-        // A failed retirement has not proved disappearance. Keep this exact
-        // pooled incarnation unavailable until a later explicit recovery.
-        logger.warn(
-          `[DeviceTools] Retaining teardown shutdown reservation for ${expectedPooledDevice.id}: ${error}`,
-        );
-      },
-    );
+    void retirement.then(releaseReservation, (error) => {
+      // A failed retirement has not proved disappearance. Keep this exact
+      // pooled incarnation unavailable until a later explicit recovery.
+      logger.warn(
+        `[DeviceTools] Retaining teardown shutdown reservation for ${expectedPooledDevice.id}: ${error}`,
+      );
+    });
   };
   const retirementDevice: BootedDevice = {
     platform: expectedPooledDevice.platform,
@@ -2995,7 +3003,7 @@ async function retireTeardownPooledOwnership(
     );
   } finally {
     if (!retainsReservation) {
-      await reservation.release();
+      await releaseReservation();
     }
   }
 }

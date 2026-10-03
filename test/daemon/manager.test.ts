@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { runDaemonCommand } from "../../src/daemon/manager";
@@ -9,6 +9,7 @@ import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
 import { FakeAbsentDaemonIdentity } from "../fakes/FakeAbsentDaemonIdentity";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
+import { readPidFileDataSync } from "../../src/daemon/daemonFiles";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   createDefaultDaemonProcessFinder,
@@ -1185,13 +1186,15 @@ describe("DaemonManager control-state recovery", () => {
 });
 
 describe("DaemonManager stop", () => {
+  // Process normalization excludes process.pid. Keep every fake PID distinct from
+  // the test runner so OS PID allocation cannot send verification to a real socket.
   function createManagerForStop(
     livePids: Set<number>,
     timer: FakeTimer,
     pidFilePath: string,
     socketPath: string,
     onLivenessCheck?: () => void,
-    lockFilePath: string = join(tmpdir(), "unused-daemon-lock"),
+    lockFilePath: string = join(dirname(pidFilePath), "daemon.lock"),
     processSignaler: DaemonProcessSignaler = new FakeDaemonProcessSignaler(),
   ): DaemonManager {
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
@@ -1220,6 +1223,18 @@ describe("DaemonManager stop", () => {
       undefined,
       undefined,
       processSignaler,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        socketExists: () => existsSync(socketPath),
+        readRecord: () => readPidFileDataSync(pidFilePath),
+        // These fixtures are ordinary files, not listening daemon sockets.
+        probe: async () => ({ running: false }),
+      },
     );
   }
 
@@ -1227,7 +1242,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-stubborn-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 4242;
+    const pid = process.pid + 4242;
     const livePids = new Set([pid]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -1246,7 +1261,7 @@ describe("DaemonManager stop", () => {
 
     try {
       await expect(manager.stop(1_000)).rejects.toThrow(
-        "Daemon process 4242 did not exit after SIGKILL",
+        `Daemon process ${pid} did not exit after SIGKILL`,
       );
 
       expect(signaler.signals).toEqual([
@@ -1264,7 +1279,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-exit-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 4243;
+    const pid = process.pid + 4243;
     const livePids = new Set([pid]);
     const timer = new FakeTimer();
     let livenessChecks = 0;
@@ -1289,7 +1304,7 @@ describe("DaemonManager stop", () => {
     );
 
     try {
-      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+      await manager.stop(1_000);
 
       expect(signaler.signals).toEqual([
         { pid, signal: "SIGTERM" },
@@ -1307,7 +1322,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-generation-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 4246;
+    const pid = process.pid + 4246;
     const livePids = new Set([pid]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -1329,7 +1344,7 @@ describe("DaemonManager stop", () => {
     );
 
     try {
-      await expect(manager.stop()).resolves.toBeUndefined();
+      await manager.stop();
       expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -1340,7 +1355,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-stop-eperm-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42460;
+    const pid = process.pid + 42460;
     const livePids = new Set([pid]);
     const timer = new FakeTimer();
     writeStopPidFile(pidFilePath, pid, socketPath);
@@ -1379,7 +1394,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-stop-esrch-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42461;
+    const pid = process.pid + 42461;
     const livePids = new Set([pid]);
     const timer = new FakeTimer();
     writeStopPidFile(pidFilePath, pid, socketPath);
@@ -1412,7 +1427,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-r2-pid-reuse-wait-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42462;
+    const pid = process.pid + 42462;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
@@ -1488,7 +1503,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-foreign-pid-reuse-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42466;
+    const pid = process.pid + 42466;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath, "old-generation", 1);
@@ -1537,7 +1552,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-non-daemon-pid-reuse-"));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const pid = 42468;
+    const pid = process.pid + 42468;
     const expected: DaemonProcessRecord = {
       pid,
       ppid: 1,
@@ -1585,7 +1600,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-same-generation-"));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const pid = 42469;
+    const pid = process.pid + 42469;
     const expected: DaemonProcessRecord = {
       pid,
       ppid: 1,
@@ -1628,7 +1643,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-missing-pid-reuse-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42467;
+    const pid = process.pid + 42467;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const replacement: DaemonProcessRecord = {
@@ -1678,7 +1693,7 @@ describe("DaemonManager stop", () => {
     );
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42464;
+    const pid = process.pid + 42464;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
@@ -1733,7 +1748,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-r3-scan-timeout-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42465;
+    const pid = process.pid + 42465;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
@@ -1793,7 +1808,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-r2-stop-scan-budget-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 42463;
+    const pid = process.pid + 42463;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
@@ -1854,7 +1869,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pre-signal-exit-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 4247;
+    const pid = process.pid + 4247;
     const livePids = new Set([pid]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -1892,8 +1907,8 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pre-signal-winner-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const exitedPid = 4248;
-    const winnerPid = 4249;
+    const exitedPid = process.pid + 4248;
+    const winnerPid = process.pid + 4249;
     const livePids = new Set([exitedPid]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -1936,7 +1951,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pid-reuse-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 4247;
+    const pid = process.pid + 4247;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
@@ -1982,7 +1997,7 @@ describe("DaemonManager stop", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-deadline-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 4244;
+    const pid = process.pid + 4244;
     const livePids = new Set([pid]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -2006,7 +2021,7 @@ describe("DaemonManager stop", () => {
     );
 
     try {
-      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+      await manager.stop(1_000);
 
       expect(signaler.signals).toEqual([
         { pid, signal: "SIGTERM" },
@@ -2038,7 +2053,7 @@ describe("DaemonManager stop", () => {
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
     const lockFilePath = join(directory, "daemon.lock");
-    const pid = 4247;
+    const pid = process.pid + 4247;
     // The recorded PID is already dead when stop() is invoked — no live process
     // to signal at all (unlike the SIGTERM/SIGKILL cases above).
     const livePids = new Set<number>();
@@ -2083,7 +2098,7 @@ describe("DaemonManager stop", () => {
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
     const lockFilePath = join(directory, "daemon.lock");
-    const deadLoserPid = 4248;
+    const deadLoserPid = process.pid + 4248;
     // The recorded (loser) PID is confirmed dead, but a DIFFERENT, live winner
     // process now holds the socket path — stop() has no way to know this from
     // the PID file alone, which is exactly why it must never touch the socket.
@@ -2130,8 +2145,8 @@ describe("DaemonManager stop", () => {
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
     const lockFilePath = join(directory, "daemon.lock");
-    const deadLoserPid = 4249;
-    const winnerPid = 4250;
+    const deadLoserPid = process.pid + 4249;
+    const winnerPid = process.pid + 4250;
     const livePids = new Set<number>([winnerPid]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -2179,8 +2194,8 @@ describe("DaemonManager stop", () => {
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
     const lockFilePath = join(directory, "daemon.lock");
-    const deadLoserPid = 4251;
-    const lockHolderPid = 4252;
+    const deadLoserPid = process.pid + 4251;
+    const lockHolderPid = process.pid + 4252;
     // The lock holder is alive for the whole test — every acquire attempt
     // inside the bounded retry loop must see it as genuinely held.
     const livePids = new Set<number>([lockHolderPid]);

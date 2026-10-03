@@ -577,19 +577,19 @@ settled screenshot is eligible.
 
 ## Interact with the UI
 
-| Tool                          | What it does                                                                                                                   |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; can idempotently ensure a toggle is checked or unchecked. |
-| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to a container.                                                                  |
-| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                                                                                    |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                                                                                  |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                               |
-| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                  |
-| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                  |
-| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                         |
-| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                     |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                 |
-| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                |
+| Tool                          | What it does                                                                                                                                                |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
+| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                                                                                                                 |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                                                                                                               |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                                                            |
+| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
+| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
+| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                      |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                                                  |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                                              |
+| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                                             |
 
 On Android, `keyboard` can list installed input methods with
 `{"action":"listImes"}` and select an enabled component with
@@ -606,6 +606,46 @@ If a previously observed focused editor or IME window disappears while waiting
 for a key, the session reports focus loss and restores the original keyboard.
 Enabled-set drift is reported with bounded component IDs; the session never
 overwrites external enable/disable changes.
+
+`tapOn` and `tapAny` accept recursive `container` selectors. The outermost
+container resolves first; every inner container and the target must be strict
+descendants of the previous level, including across anonymous wrappers:
+
+```json
+{
+  "selector": { "elementId": "remove" },
+  "container": {
+    "elementId": "item_42",
+    "container": { "elementId": "cart_A" }
+  },
+  "selectionStrategy": "unique"
+}
+```
+
+For `tapAny`, omit `selector` to select any eligible clickable descendant.
+The default remains `first`; `random` keeps its existing behavior. `unique`
+requires exactly one eligible target and exactly one match at every unindexed
+container level, even when that level specifies `first` or `random`. A
+container's explicit zero-based `index` selects within that level's scoped
+candidate set; `tapOn.index` similarly overrides leaf uniqueness. Missing or
+ambiguous levels fail without a tap or a global fallback. Errors name the
+container level (outermost is 1) or target and show up to five ambiguity
+candidates with resource IDs, text, and bounds.
+
+For ordered `textAny` selectors, `unique` skips missing text variants within the
+same scope, but fails immediately on an ambiguous variant or container.
+
+`unique` supports `ensureChecked` and owner-scoped `subtext`. It cannot combine
+with `sibling` or direct `accessibilityLink`; select a unique owner with
+`subtext` for semantic links. The existing random/subtext and indexed-owner
+restrictions still apply. Nested or unique taps use the selected coordinates or
+bounds for native dispatch instead of a global resource-ID lookup. With iOS
+VoiceOver enabled, such `tapAny` calls require a label for activation at the
+selected bounds; an ID-only target fails without an action.
+
+This nested-scoping contract is not yet available for
+`sendKeys`/`inputText`, `dragAndDrop`, `swipeOn`/`lookFor`, `observe` subtree
+queries, or `waitFor`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands. Each `key` command accepts at most 4 raw modifier entries

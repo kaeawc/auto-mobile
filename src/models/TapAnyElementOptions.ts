@@ -1,10 +1,8 @@
+import type { ElementContainerSelector } from "./PinchOnOptions";
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 
 export interface TapAnyElementOptions {
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
 
   selectionStrategy?: ElementSelectionStrategy;
 

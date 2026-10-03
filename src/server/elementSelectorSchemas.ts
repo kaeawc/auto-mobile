@@ -25,13 +25,15 @@ export const elementContainerSchema = createElementIdTextSelectorSchema({
   text: "Container text",
 });
 
+export const resolverSelectionStrategySchema = z.enum(["first", "random", "unique"]);
+
 export const nestedElementContainerSchema: z.ZodType<ElementContainerSelector> = z.lazy(() =>
   z.union([
     z
       .object({
         elementId: z.string().min(1).describe("Container resource ID"),
         index: z.number().int().nonnegative().optional(),
-        selectionStrategy: z.enum(["first", "random", "unique"]).optional(),
+        selectionStrategy: resolverSelectionStrategySchema.optional(),
         container: nestedElementContainerSchema.optional(),
       })
       .strict(),
@@ -39,7 +41,7 @@ export const nestedElementContainerSchema: z.ZodType<ElementContainerSelector> =
       .object({
         text: z.string().trim().min(1).describe("Container text"),
         index: z.number().int().nonnegative().optional(),
-        selectionStrategy: z.enum(["first", "random", "unique"]).optional(),
+        selectionStrategy: resolverSelectionStrategySchema.optional(),
         container: nestedElementContainerSchema.optional(),
       })
       .strict(),

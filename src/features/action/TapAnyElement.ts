@@ -1,3 +1,4 @@
+import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   resolveDisplayFence,
   type DisplayFenceOption,
@@ -107,6 +108,7 @@ type RefreshViewHierarchy = (
 ) => Promise<ViewHierarchyResult | null>;
 
 interface CapturedTapTarget {
+  scoped?: boolean;
   element: Element;
   capture: HierarchySnapshot;
 }
@@ -499,16 +501,14 @@ export class TapAnyElement extends BaseVisualChange {
       talkBackEnabled &&
       (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
         displayFence: fence,
+        scoped: target.scoped,
       }))
     ) {
       return;
     }
 
     if (action === "longPress") {
-      if (
-        element["hierarchy-source"] !== "uiautomator" &&
-        (await this.trySemanticAndroidLongPress(element, signal))
-      ) {
+      if (await this.trySemanticAndroidLongPress(element, { signal, scoped: target.scoped })) {
         return;
       }
       // Match tapOn's touchscreen source and retain the generic input fallback.
@@ -572,10 +572,11 @@ export class TapAnyElement extends BaseVisualChange {
 
   private async trySemanticAndroidLongPress(
     element: Element,
-    signal?: AbortSignal,
+    context: { signal?: AbortSignal; scoped?: boolean },
   ): Promise<boolean> {
+    const { signal, scoped } = context;
     const selector = stableNodeSelectorForElement(element);
-    if (!selector) {
+    if (!selector || scoped || element["hierarchy-source"] === "uiautomator") {
       return false;
     }
     const needsNodeSelector = requiresNodeSelector(selector);
@@ -612,11 +613,11 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: DisplayFenceOption & { scoped?: boolean } = {},
   ): Promise<boolean> {
     const fence = fenceOptions.displayFence;
     const driver = this.talkBackDriverFactory.createDriver(this.device);
-    if (action === "longPress") {
+    if (action === "longPress" && !fenceOptions.scoped) {
       const result = await this.talkBackStrategy.executeLongPress(
         x,
         y,
@@ -632,7 +633,7 @@ export class TapAnyElement extends BaseVisualChange {
       }
       return result.success;
     }
-    if (action === "tap") {
+    if (action === "tap" && !fenceOptions.scoped) {
       const direct = await this.talkBackStrategy.executeDirectActivation(element, driver);
       if (direct.success) {
         return true;
@@ -658,7 +659,7 @@ export class TapAnyElement extends BaseVisualChange {
     durationMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: DisplayFenceOption & { selectionOptions?: TapAnyElementOptions } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     if (!preTapHash) {
@@ -677,7 +678,23 @@ export class TapAnyElement extends BaseVisualChange {
     if (probe.status === "changed") {
       return;
     }
-    // The first tap was unobserved. Retry the same captured target once after debounce.
+    const options = fenceOptions.selectionOptions;
+    if (options && (options.container || options.selectionStrategy === "unique")) {
+      const capture = identifyObservedHierarchy(
+        this.device.platform,
+        probe.hierarchy,
+        "cached-ok",
+        this.timer,
+      );
+      const refound = this.findClickableElement(options, capture.hierarchy, {
+        observationScreenSize: screenSize,
+      });
+      if (!refound.element) {
+        return;
+      }
+      target = { element: refound.element, capture, scoped: target.scoped };
+    }
+    // The first tap was unobserved. Retry the captured or re-resolved target once after debounce.
     const retryPoint = this.geometry.getElementCenter(target.element);
     logger.warn(
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
@@ -741,7 +758,7 @@ export class TapAnyElement extends BaseVisualChange {
 
   private isContainerAvailable(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
+    container?: ElementContainerSelector,
   ): boolean {
     if (!container) {
       return true;
@@ -959,7 +976,7 @@ export class TapAnyElement extends BaseVisualChange {
     longPressDuration: number,
     element?: Element,
     signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: DisplayFenceOption & { scoped?: boolean } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
@@ -979,7 +996,10 @@ export class TapAnyElement extends BaseVisualChange {
     );
 
     if (isVoiceOverEnabled && element) {
-      await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, longPressDuration);
+      await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, {
+        durationMs: longPressDuration,
+        scoped: fenceOptions.scoped,
+      });
       return;
     }
 
@@ -1082,7 +1102,9 @@ export class TapAnyElement extends BaseVisualChange {
    * `TapOnElement`/`TalkBackTapStrategy` activate Android elements by resourceId) —
    * on-device this resolves the element via `elementLocator.findElement(byResourceId:)`
    * and calls `found.tap()`/`found.press()` on the *specific* node the selector
-   * matched. Only when no usable resource-id exists does this fall back to
+   * matched. Nested/unique calls instead use the selected bounds with the label,
+   * because resource-ID activation can reselect a peer outside the scope.
+   * For legacy calls, only when no usable resource-id exists does this fall back to
    * activating by accessibility label (`requestVoiceOverActivate`): CtrlProxy
    * resolves a label via `.firstMatch`, a global (not container-scoped) query, so
    * an element whose label is shared by multiple controls could activate a
@@ -1144,16 +1166,19 @@ export class TapAnyElement extends BaseVisualChange {
     element: Element,
     x: number,
     y: number,
-    longPressDuration: number,
+    pressOptions: { durationMs: number; scoped?: boolean },
   ): Promise<void> {
+    const longPressDuration = pressOptions.durationMs;
     const label = this.resolveIosVoiceOverLabel(element);
-    const resourceId = this.resolveIosResourceId(element);
+    const resourceId = pressOptions.scoped ? undefined : this.resolveIosResourceId(element);
 
     if (!label && !resourceId) {
       throw new ActionableError(
-        "VoiceOver is enabled but the selected element has no accessibility label, " +
-          "content-desc, text, or resource-id to activate; a coordinate press would " +
-          "only focus it under VoiceOver, not activate it",
+        pressOptions.scoped
+          ? "Scoped VoiceOver activation requires a label and selected bounds; global resource-ID activation cannot preserve the scope"
+          : "VoiceOver is enabled but the selected element has no accessibility label, " +
+              "content-desc, text, or resource-id to activate; a coordinate press would " +
+              "only focus it under VoiceOver, not activate it",
       );
     }
 
@@ -1317,7 +1342,11 @@ export class TapAnyElement extends BaseVisualChange {
           }
 
           const tapPoint = this.geometry.getElementCenter(element);
-          const target = { element, capture: selectedCapture };
+          const target = {
+            element,
+            capture: selectedCapture,
+            scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
+          };
           const action = options.action;
           const longPressDuration = this.getLongPressDuration(options);
 
@@ -1346,7 +1375,7 @@ export class TapAnyElement extends BaseVisualChange {
                 longPressDuration,
                 observeResult.screenSize,
                 signal,
-                { displayFence: fence },
+                { displayFence: fence, selectionOptions: options },
               );
               break;
             }
@@ -1359,7 +1388,7 @@ export class TapAnyElement extends BaseVisualChange {
                 longPressDuration,
                 element,
                 signal,
-                { displayFence: fence },
+                { displayFence: fence, scoped: target.scoped },
               );
               break;
             default:

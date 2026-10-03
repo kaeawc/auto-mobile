@@ -1,6 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { tapOnSchema, tapAnySchema } from "../../../src/server/interactionTools";
+import {
+  tapOnSchema,
+  tapAnySchema,
+  pinchOnSchema,
+  tapOnHandler,
+  tapAnyHandler,
+  setTapOnElementFactory,
+  resetTapOnElementFactory,
+  setTapAnyElementFactory,
+  resetTapAnyElementFactory,
+} from "../../../src/server/interactionTools";
+
+import { selectedElementSchema } from "../../../src/server/toolOutputSchemas";
+import { elementSelectionStrategySchema } from "../../../src/server/elementSelectorSchemas";
+import { applyJsonSchemaOverride } from "../../../src/server/toolSchemaHelpers";
+
+import type { TapOnElementOptions, TapAnyElementOptions } from "../../../src/models";
 
 // P4 (issue #4181, rank 10): the removed-field rejections used bare
 // `.toThrow()`, which passes even when the schema throws for an UNRELATED
@@ -364,4 +380,123 @@ describe("tapAny schema", () => {
   test("accepts a zero duration (the lower bound is inclusive)", () => {
     expect(tapAnySchema.parse({ platform: "android", duration: 0 })).toMatchObject({ duration: 0 });
   });
+});
+
+describe("nested tap scopes", () => {
+  const container = { elementId: "item_42", container: { elementId: "cart_A", index: 0 } };
+  for (const [name, schema, selector] of [
+    ["tapOn", tapOnSchema, { selector: { elementId: "remove" } }],
+    ["tapAny", tapAnySchema, {}],
+  ] as const) {
+    test(`${name} accepts nested scopes and unique selection`, () => {
+      expect(
+        schema.parse({ platform: "android", ...selector, container, selectionStrategy: "unique" }),
+      ).toMatchObject({ container, selectionStrategy: "unique" });
+    });
+    test.each([
+      {},
+      { elementId: "" },
+      { text: "   " },
+      { elementId: "cart_A", extra: true },
+      { elementId: "cart_A", text: "Cart" },
+      { elementId: "cart_A", index: -1 },
+    ])(`${name} rejects malformed nested scope %p`, (outer) => {
+      expect(
+        schema.safeParse({
+          platform: "android",
+          ...selector,
+          container: { elementId: "item_42", container: outer },
+        }).success,
+      ).toBe(false);
+    });
+  }
+  test("unique supports indexed leaves, ensureChecked and owner subtext", () => {
+    for (const options of [{ index: 1 }, { ensureChecked: true }, { subtext: { text: "Terms" } }]) {
+      expect(
+        tapOnSchema.safeParse({
+          platform: "android",
+          selector: { elementId: "remove" },
+          container,
+          selectionStrategy: "unique",
+          ...options,
+        }).success,
+      ).toBe(true);
+    }
+  });
+  test.each([{ sibling: true }, { selector: { accessibilityLink: "Terms" } }])(
+    "unique rejects selector paths without leaf cardinality guarantees: %p",
+    (options) => {
+      expect(
+        tapOnSchema.safeParse({
+          platform: "android",
+          selector: { elementId: "remove" },
+          selectionStrategy: "unique",
+          ...options,
+        }).success,
+      ).toBe(false);
+    },
+  );
+});
+
+test("tap JSON schemas retain pinchOn's bounded recursive container definitions", () => {
+  const json = (schema: z.ZodType) =>
+    z.toJSONSchema(schema, {
+      override: ({ zodSchema, jsonSchema }) => applyJsonSchemaOverride(zodSchema, jsonSchema),
+    });
+  const pinch = json(pinchOnSchema);
+  for (const schema of [tapOnSchema, tapAnySchema]) {
+    const output = json(schema);
+    expect(output.$defs).toEqual(pinch.$defs);
+    expect(output.properties?.container).toMatchObject({ $ref: "#/$defs/__schema0" });
+    expect(JSON.stringify(output).length).toBeLessThan(15000);
+    expect(output.properties?.selectionStrategy).toMatchObject({
+      enum: ["first", "random", "unique"],
+    });
+  }
+});
+
+test("tap result metadata accepts unique while highlight's enum remains unchanged", () => {
+  expect(selectedElementSchema.parse({ selectionStrategy: "unique" }).selectionStrategy).toBe(
+    "unique",
+  );
+  expect(elementSelectionStrategySchema.options).toEqual(["first", "random"]);
+});
+
+test("handlers forward the complete nested scope and unique strategy", async () => {
+  const requests: (TapOnElementOptions | TapAnyElementOptions)[] = [];
+  const execute = async (options: TapOnElementOptions | TapAnyElementOptions) => {
+    requests.push(options);
+    return {
+      success: false,
+      action: "tap",
+      error: "injected failure",
+      element: { bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
+    };
+  };
+  const container = { elementId: "item_42", index: 1, container: { elementId: "cart_A" } };
+  const device = { name: "fake", deviceId: "fake", platform: "android" as const };
+  setTapOnElementFactory(() => ({ execute }));
+  setTapAnyElementFactory(() => ({ execute }));
+  try {
+    await tapOnHandler(device, {
+      action: "tap",
+      platform: "android",
+      selector: { elementId: "remove" },
+      container,
+      selectionStrategy: "unique",
+    });
+    await tapAnyHandler(device, {
+      action: "tap",
+      platform: "android",
+      container,
+      selectionStrategy: "unique",
+    });
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(request).toMatchObject({ container, selectionStrategy: "unique" });
+    }
+  } finally {
+    resetTapOnElementFactory();
+    resetTapAnyElementFactory();
+  }
 });

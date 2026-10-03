@@ -134,7 +134,7 @@ import {
   createElementIdTextSelectorSchema,
   elementContainerSchema,
   tapOnSelectorSchema,
-  elementSelectionStrategySchema,
+  resolverSelectionStrategySchema,
   nestedElementContainerSchema,
 } from "./elementSelectorSchemas";
 import {
@@ -388,14 +388,20 @@ export const tapOnSchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe("Tap a clickable sibling of the match, e.g. checkbox beside label"),
-        container: elementContainerSchema.optional().describe("Scope search to a container"),
+        container: nestedElementContainerSchema
+          .optional()
+          .describe(
+            "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based.",
+          ),
         action: z
           .enum(["tap", "doubleTap", "longPress", "focus"])
           .default("tap")
           .describe("Action type (default: tap)"),
-        selectionStrategy: elementSelectionStrategySchema
+        selectionStrategy: resolverSelectionStrategySchema
           .optional()
-          .describe("Selection strategy when multiple match (default: first)"),
+          .describe(
+            "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target.",
+          ),
         index: z
           .number()
           .int()
@@ -463,9 +469,6 @@ export const tapOnSchema = withJsonSchemaOverride(
   ).superRefine((value, ctx) => {
     validateEnsureCheckedSchema(value, ctx);
     const isDirectLink = "accessibilityLink" in value.selector;
-    if (!isDirectLink && !value.subtext) {
-      return;
-    }
     const addIssue = (invalid: unknown, message: string, path: (string | number)[]) => {
       if (!invalid) {
         return;
@@ -476,6 +479,14 @@ export const tapOnSchema = withJsonSchemaOverride(
         path,
       });
     };
+    addIssue(
+      value.selectionStrategy === "unique" && (value.sibling || isDirectLink),
+      "unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead",
+      ["selectionStrategy"],
+    );
+    if (!isDirectLink && !value.subtext) {
+      return;
+    }
     addIssue(
       isDirectLink && value.subtext,
       "accessibilityLink and subtext cannot be used together",
@@ -648,10 +659,16 @@ export const tapAnySchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
       .object({
-        container: elementContainerSchema.optional().describe("Scope search to a container"),
-        selectionStrategy: elementSelectionStrategySchema
+        container: nestedElementContainerSchema
           .optional()
-          .describe("Element selection strategy: 'first' (default) or 'random'"),
+          .describe(
+            "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based.",
+          ),
+        selectionStrategy: resolverSelectionStrategySchema
+          .optional()
+          .describe(
+            "Element selection strategy: first (default), random, or unique; unique requires exactly one eligible target and every unindexed container",
+          ),
         scrollableContainer: z
           .boolean()
           .optional()

@@ -1,1 +1,1 @@
-export type ElementSelectionStrategy = "first" | "random";
+export type ElementSelectionStrategy = "first" | "random" | "unique";

@@ -1,5 +1,5 @@
-import { describe, expect, test, afterEach, mock, spyOn } from "bun:test";
-import { mkdtempSync, writeFileSync, readdirSync } from "node:fs";
+import { describe, expect, test, beforeEach, afterEach, mock, spyOn } from "bun:test";
+import { mkdtempSync, writeFileSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pruneLogFiles, type LogRetentionNamespaceSource } from "../../src/utils/logPruner";
@@ -7,8 +7,10 @@ import {
   logRetentionNamespaces,
   registerLogRetentionNamespaceSource,
   resetLogRetentionNamespaceSourceForTesting,
+  flushLogRetentionStartupSweepForTesting,
 } from "../../src/utils/logger";
 import * as processLiveness from "../../src/utils/processLiveness";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * Tests the REAL prune used by logger.ts (src/utils/logPruner.ts), which is
@@ -25,6 +27,8 @@ describe("pruneLogFiles", () => {
     tempDirs.push(dir);
     return dir;
   }
+
+  beforeEach(() => resetLogRetentionNamespaceSourceForTesting());
 
   afterEach(() => {
     resetLogRetentionNamespaceSourceForTesting();
@@ -47,6 +51,140 @@ describe("pruneLogFiles", () => {
       readDaemonLaunchLogOwnerTombstoneSync: mock(() => undefined),
     };
   }
+
+  function startupFixture(isProcessAlive: (pid: number) => boolean = dead) {
+    const dir = createTempLogsDir();
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_800_000_000_000);
+    const launchLog = join(dir, "daemon-launch-222.log");
+    writeFileSync(launchLog, "three-day-old launch log");
+    const staleTime = new Date(timer.now() - 3 * 24 * 60 * 60 * 1000);
+    utimesSync(launchLog, staleTime, staleTime);
+    const source = fakeNamespaceSource();
+    source.readDaemonOwnerForRetentionSync = mock(() => ({ pid: 333, launchLogPath: launchLog }));
+    const sweep = () =>
+      pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: 24 * 60 * 60 * 1000,
+        now: timer.now(),
+        isProcessAlive,
+        sleep: (ms) => timer.sleep(ms),
+        ...logRetentionNamespaces,
+      });
+    const prune = mock(sweep);
+    resetLogRetentionNamespaceSourceForTesting({ timer, prune });
+    return { dir, timer, staleTime, source, prune, sweep };
+  }
+
+  test("startup defers pruning until registration and applies live-owner readers", async () => {
+    const { dir, timer, source, prune } = startupFixture((pid) => pid === 333);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(prune).not.toHaveBeenCalled();
+    expect(source.listDaemonPidFilesSync).not.toHaveBeenCalled();
+    registerLogRetentionNamespaceSource(source);
+    // Registration never discovers namespaces in the module-evaluation stack.
+    expect(prune).not.toHaveBeenCalled();
+    expect(source.listDaemonPidFilesSync).not.toHaveBeenCalled();
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(prune).toHaveBeenCalledTimes(1);
+    expect(source.readDaemonOwnerForRetentionSync).toHaveBeenCalledWith("peer.pid");
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+  });
+
+  test("fallback before registration retains a launch log later identified as live", async () => {
+    const { dir, timer, source } = startupFixture((pid) => pid === 333);
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(source.readDaemonOwnerForRetentionSync).not.toHaveBeenCalled();
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+    registerLogRetentionNamespaceSource(source);
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(source.readDaemonOwnerForRetentionSync).toHaveBeenCalledWith("peer.pid");
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+  });
+
+  test("late registration prunes a three-day-old launch log with a dead-owner PID record", async () => {
+    const { dir, timer, source, prune } = startupFixture();
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+    registerLogRetentionNamespaceSource(source);
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(source.readDaemonOwnerForRetentionSync).toHaveBeenCalledWith("peer.pid");
+    expect(readdirSync(dir)).not.toContain("daemon-launch-222.log");
+    expect(prune).toHaveBeenCalledTimes(2); // fallback, then registered sweep
+  });
+
+  test("unregistered bounded fallback preserves own-file cap and stale-file retention", async () => {
+    const { dir, timer, staleTime, prune } = startupFixture();
+    for (let i = 0; i < 15; i++) {
+      writeFileSync(join(dir, `stdio-111-${String(i).padStart(2, "0")}.log`), "backup");
+    }
+    writeFileSync(join(dir, "stdio-111.log"), "active");
+    const stalePeerLog = join(dir, "stdio-444.log");
+    writeFileSync(stalePeerLog, "abandoned");
+    utimesSync(stalePeerLog, staleTime, staleTime);
+    const recentPeerLog = join(dir, "stdio-555.log");
+    writeFileSync(recentPeerLog, "recent");
+    const recentTime = new Date(timer.now());
+    utimesSync(recentPeerLog, recentTime, recentTime);
+    expect(prune).not.toHaveBeenCalled();
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    const files = readdirSync(dir);
+    expect(files.filter((file) => file.startsWith("stdio-111"))).toHaveLength(10);
+    expect(files).toContain("stdio-111.log");
+    expect(files).not.toContain("stdio-444.log");
+    expect(files).toContain("stdio-555.log");
+    expect(files).toContain("daemon-launch-222.log");
+    expect(prune).toHaveBeenCalledTimes(1);
+  });
+
+  test("repeated registration replaces readers but runs exactly one startup sweep", async () => {
+    const { timer, source, prune } = startupFixture();
+    const replacement = fakeNamespaceSource();
+    registerLogRetentionNamespaceSource(source);
+    registerLogRetentionNamespaceSource(replacement);
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(prune).toHaveBeenCalledTimes(1);
+    expect(source.listDaemonPidFilesSync).not.toHaveBeenCalled();
+    expect(replacement.listDaemonPidFilesSync).toHaveBeenCalledTimes(1);
+    registerLogRetentionNamespaceSource(source);
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(prune).toHaveBeenCalledTimes(1);
+    expect(logRetentionNamespaces.readDaemonOwner("peer.pid")).toEqual(
+      source.readDaemonOwnerForRetentionSync("peer.pid"),
+    );
+  });
+
+  test("registration follows an in-flight fallback once instead of skipping or overlapping", async () => {
+    const { dir, timer, source, prune, sweep } = startupFixture();
+    const fallbackFinished = Promise.withResolvers<void>();
+    const releaseFallback = Promise.withResolvers<void>();
+    prune.mockImplementationOnce(async () => {
+      await sweep();
+      fallbackFinished.resolve();
+      await releaseFallback.promise;
+    });
+    timer.advanceTime(0);
+    await fallbackFinished.promise;
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+    registerLogRetentionNamespaceSource(source);
+    registerLogRetentionNamespaceSource(source);
+    timer.advanceTime(0);
+    expect(prune).toHaveBeenCalledTimes(1);
+    releaseFallback.resolve();
+    await flushLogRetentionStartupSweepForTesting();
+    expect(prune).toHaveBeenCalledTimes(2);
+    expect(readdirSync(dir)).not.toContain("daemon-launch-222.log");
+  });
 
   test("logger retention delegates enumeration, liveness, owners and tombstones to its source", () => {
     const source = fakeNamespaceSource();

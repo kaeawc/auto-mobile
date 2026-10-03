@@ -424,10 +424,25 @@ let logRetentionNamespaceSource: LogRetentionNamespaceSource | undefined;
 
 export function registerLogRetentionNamespaceSource(source: LogRetentionNamespaceSource): void {
   logRetentionNamespaceSource = source;
+  if (startupLogSweep && !startupLogSweep.registeredSweepStarted) {
+    scheduleStartupLogSweep(startupLogSweep);
+  }
 }
 
-export function resetLogRetentionNamespaceSourceForTesting(): void {
+export function resetLogRetentionNamespaceSourceForTesting(options?: {
+  timer: Timer;
+  prune: () => Promise<void>;
+}): void {
   logRetentionNamespaceSource = undefined;
+  if (startupLogSweep?.timeout !== undefined) {
+    startupLogSweep.timer.clearTimeout(startupLogSweep.timeout);
+  }
+  // Replacing the state also invalidates work queued behind an in-flight sweep.
+  startupLogSweep = options ? createStartupLogSweep(options.timer, options.prune) : undefined;
+}
+
+export function flushLogRetentionStartupSweepForTesting(): Promise<void> {
+  return startupLogSweep?.pending ?? Promise.resolve();
 }
 
 function requireLogRetentionNamespaceSource(): LogRetentionNamespaceSource {
@@ -527,16 +542,60 @@ const pruneOldLogFiles = (): Promise<void> => {
   });
 };
 
-// Sweep logs abandoned by already-exited processes once at startup. Short-lived
-// agents exit with small logs and never reach the size-based rotation that would
-// otherwise trigger a sweep, so without this their per-PID files would accumulate
-// in the shared logs dir on a busy multi-agent host. Fire-and-forget so it never
-// delays logger initialization; the sweep itself only removes dead-owner files.
-if (logsDir) {
-  pruneOldLogFiles().catch(() => {
-    /* best-effort startup sweep */
-  });
+interface StartupLogSweep {
+  timer: Timer;
+  prune: () => Promise<void>;
+  timeout?: NodeJS.Timeout;
+  pending: Promise<void>;
+  fallbackStarted: boolean;
+  registeredSweepStarted: boolean;
 }
+
+function scheduleStartupLogSweep(state: StartupLogSweep): void {
+  if (state.timeout !== undefined) {
+    return;
+  }
+  state.timeout = state.timer.setTimeout(() => {
+    state.timeout = undefined;
+    // Serialize a registration sweep after an in-flight unregistered fallback.
+    // Repeated registration can replace readers, but never adds another sweep.
+    state.pending = state.pending.then(async () => {
+      if (state !== startupLogSweep || state.registeredSweepStarted) {
+        return;
+      }
+      const registered = logRetentionNamespaceSource !== undefined;
+      if (state.fallbackStarted && !registered) {
+        return;
+      }
+      state.fallbackStarted = true;
+      state.registeredSweepStarted = registered;
+      try {
+        await state.prune();
+      } catch (error) {
+        logger.warn("Startup log pruning failed", error);
+      }
+    });
+  }, 0);
+  state.timeout.unref?.();
+}
+
+function createStartupLogSweep(timer: Timer, prune: () => Promise<void>): StartupLogSweep {
+  const state: StartupLogSweep = {
+    timer,
+    prune,
+    pending: Promise.resolve(),
+    fallbackStarted: false,
+    registeredSweepStarted: false,
+  };
+  scheduleStartupLogSweep(state);
+  return state;
+}
+
+// Give module-load reader registration one event-loop turn without delaying
+// logger initialization or keeping short-lived CLI processes open. Logger-only
+// paths still get bounded, fail-closed cleanup. If daemonFiles loads later,
+// registration schedules exactly one sweep with readers, even after the fallback.
+let startupLogSweep = logsDir ? createStartupLogSweep(defaultTimer, pruneOldLogFiles) : undefined;
 
 // Closes the active stream ahead of rotation and WAITS for it to actually
 // finish before the caller opens a replacement at the same path. A

@@ -8,7 +8,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosSimulatorControlBackend";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { IOSCtrlProxyClient } from "../observe/ios";
 
 export class Shake extends BaseVisualChange {

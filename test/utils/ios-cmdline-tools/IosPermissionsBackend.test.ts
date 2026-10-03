@@ -1,8 +1,8 @@
+import { resolveIosDeviceKind } from "../../../src/utils/ios-cmdline-tools/IosDeviceKind";
 import { describe, expect, test } from "bun:test";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import {
   resolveIosPermissionsBackend,
-  resolveIosPermissionsKind,
   SimulatorIosPermissionsBackend,
   PhysicalIosPermissionsBackend,
 } from "../../../src/utils/ios-cmdline-tools/IosPermissionsBackend";
@@ -65,7 +65,7 @@ describe("IosPermissionsBackend", () => {
     ["G1B2C3D4-E5F6-7890-ABCD-EF1234567890", "physical"],
   ])("preserves historical kind resolution for %s", (deviceId, kind) => {
     const simctl = new FakeSimCtlClient();
-    expect(resolveIosPermissionsKind({ deviceId })).toBe(kind);
+    expect(resolveIosDeviceKind({ deviceId })).toBe(kind);
     expect(resolveIosPermissionsBackend({ deviceId, simctl }).kind).toBe(kind);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });

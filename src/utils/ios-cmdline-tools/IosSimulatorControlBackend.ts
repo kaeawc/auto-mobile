@@ -1,21 +1,6 @@
 import type { ExecResult } from "../../models";
-import { resolveIosDeviceBackend, type IosDeviceBackend } from "./IosDeviceBackend";
-
-/** Resolve kind only; neither uninstall transport is reachable through this seam. */
-export function resolveIosDeviceKind(options: { deviceId: string }): IosDeviceBackend["kind"] {
-  return resolveIosDeviceBackend(options.deviceId, {
-    simctl: {
-      terminateApp: async () => {
-        throw new Error("Kind resolution cannot terminate apps");
-      },
-    },
-    deviceAppUninstaller: {
-      uninstallApp: async () => {
-        throw new Error("Kind resolution cannot uninstall apps");
-      },
-    },
-  }).kind;
-}
+import type { IosDeviceBackend } from "./IosDeviceBackend";
+import { resolveIosDeviceKind } from "./IosDeviceKind";
 
 export interface IosKeychainControlClient {
   executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
@@ -30,7 +15,7 @@ export function resolveIosKeychainControlBackend(options: {
   deviceId: string;
   simctl: IosKeychainControlClient;
 }): IosKeychainControlBackend {
-  const kind = resolveIosDeviceKind(options);
+  const kind = resolveIosDeviceKind({ deviceId: options.deviceId });
   if (kind === "physical") {
     return {
       kind,

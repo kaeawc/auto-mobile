@@ -1,4 +1,4 @@
-import { isIosSimulatorUdid } from "./iosDeviceType";
+import { resolveIosDeviceKind } from "./IosDeviceKind";
 import type { SimCtl } from "./SimCtlClient";
 
 /** SpringBoard transport only; runner Home presses and verification stay in the actions. */
@@ -36,7 +36,7 @@ export class PhysicalIosHomeBackend implements IosHomeBackend {
 }
 
 export function resolveIosHomeBackend(deviceId: string, deps: IosHomeBackendDeps): IosHomeBackend {
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosHomeBackend(deviceId, deps.simctl)
     : new PhysicalIosHomeBackend();
 }

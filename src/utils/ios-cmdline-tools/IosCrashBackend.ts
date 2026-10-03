@@ -1,6 +1,6 @@
 import type { ExecResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
-import { isIosSimulatorUdid } from "./iosDeviceType";
+import { resolveIosDeviceKind } from "./IosDeviceKind";
 
 export const PHYSICAL_IOS_CRASH_UNSUPPORTED_MESSAGE =
   "crashApp is not supported on physical iOS devices; " +
@@ -104,7 +104,7 @@ export function resolveIosCrashBackend(
   deviceId: string,
   deps: IosCrashBackendDeps,
 ): IosCrashBackend {
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosCrashBackend(deviceId, deps.simctl)
     : new PhysicalIosCrashBackend();
 }

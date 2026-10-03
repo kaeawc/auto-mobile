@@ -1,3 +1,4 @@
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice, ExecResult } from "../../models";
 import {
@@ -10,7 +11,6 @@ import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import {
   resolveIosPermissionsBackend,
-  resolveIosPermissionsKind,
   type IosPermissionsBackend,
   type IosSimulatorPrivacyClient,
 } from "../../utils/ios-cmdline-tools/IosPermissionsBackend";
@@ -92,7 +92,7 @@ export class SqliteTccPermissionReader extends SimulatorTccSqliteClient {
 }
 
 export function isIosSimulatorDevice(device: BootedDevice): boolean {
-  return resolveIosPermissionsKind(device) === "simulator";
+  return resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator";
 }
 
 export function normalizePermissions(permissions: string[] | undefined): string[] {

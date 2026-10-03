@@ -644,7 +644,7 @@ VoiceOver enabled, such `tapAny` calls require a label for activation at the
 selected bounds; an ID-only target fails without an action.
 
 This nested-scoping contract is not yet available for
-`sendKeys`/`inputText`, `dragAndDrop`, `swipeOn`/`lookFor`, `observe` subtree
+`dragAndDrop`, `swipeOn`/`lookFor`, `observe` subtree
 queries, or `waitFor`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
@@ -662,6 +662,34 @@ modifiers on semantic keys:
     { "action": "type", "text": "replacement", "operation": "replace", "mode": "a11y" },
     { "action": "key", "key": "enter", "modifiers": ["shift"] }
   ]
+}
+```
+
+`sendKeys.container` accepts the same nested chain: the outermost scope resolves
+first, then each inner container and the field resolve among strict descendants
+of their immediate scope, across anonymous wrappers. Each container may specify
+a zero-based `index` within its own scoped candidate set. `selectionStrategy`
+accepts `first` (default), `random`, or `unique`; `unique` requires exactly one
+eligible field and one match at every unindexed container level, even if a level
+specifies another strategy. There is no top-level field index.
+
+Both `container` and `selectionStrategy` require a `selector` naming the field
+to focus. The field is focused once before any command, including `clear` and
+IME keys, on the requested display when supplied. Missing, ambiguous, or stale
+targets fail without executing any commands or falling back to a global match
+or an unrelated focused field. Resolver errors distinguish missing containers,
+missing fields within the container, and ambiguous containers or fields, with
+up to five ambiguity candidates including resource IDs, text, and bounds.
+
+```json
+{
+  "selector": { "elementId": "quantity" },
+  "container": {
+    "elementId": "item_42",
+    "container": { "elementId": "cart_A" }
+  },
+  "selectionStrategy": "unique",
+  "commands": [{ "action": "type", "text": "3" }]
 }
 ```
 

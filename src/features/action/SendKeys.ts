@@ -1,5 +1,7 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { BaseActionResult } from "../../models/BaseActionResult";
+import type { ElementContainerSelector } from "../../models/PinchOnOptions";
+import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
 import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
@@ -137,6 +139,11 @@ export interface SendKeysSelector {
   textAny?: string[];
 }
 
+export interface SendKeysFocusOptions {
+  container?: ElementContainerSelector;
+  selectionStrategy?: ElementSelectionStrategy;
+}
+
 export interface SendKeysTypeCommand {
   action: "type";
   text: string;
@@ -212,6 +219,7 @@ export interface SendKeysTargetFocuser {
     selector: SendKeysSelector,
     signal?: AbortSignal,
     display?: string,
+    options?: SendKeysFocusOptions,
   ): Promise<{ success: boolean; error?: string }>;
 }
 
@@ -238,7 +246,7 @@ export interface SendKeysDependencies {
   timer?: Timer;
 }
 
-interface SendKeysRouting {
+interface SendKeysRouting extends SendKeysFocusOptions {
   onDispatch?: () => void;
   onCommandResult?: (result: SendKeysCommandResult) => void;
   display?: string;
@@ -1790,7 +1798,7 @@ export class SendKeys {
     this.focuser =
       dependencies.focuser ??
       ({
-        focus: async (selector, signal, display) => {
+        focus: async (selector, signal, display, options) => {
           const tap = display
             ? new TapOnElement(device, adbFactory.create(device), {
                 timer: this.timer,
@@ -1798,7 +1806,7 @@ export class SendKeys {
               })
             : new TapOnElement(device);
           const result = await tap.execute(
-            { ...selector, action: "focus", display },
+            { ...selector, ...options, action: "focus", display },
             undefined,
             signal,
           );
@@ -1813,7 +1821,18 @@ export class SendKeys {
     progress?: ProgressCallback,
     signal?: AbortSignal,
     display?: string,
+    options?: SendKeysFocusOptions,
   ): Promise<SendKeysResult> {
+    const focusOptionsError = this.validateFocusOptions(selector, options);
+    if (focusOptionsError) {
+      return {
+        success: false,
+        completedCommands: 0,
+        failedIndex: 0,
+        commands: [],
+        error: focusOptionsError,
+      };
+    }
     const preflight = this.preflightCommands(commands);
     this.executor.resetCaretState?.();
     let displayId: number | undefined;
@@ -1829,7 +1848,13 @@ export class SendKeys {
         };
       }
       try {
-        const target = await this.prepareExplicitDisplay(commands, selector, display, signal);
+        const target = await this.prepareExplicitDisplay(
+          commands,
+          selector,
+          display,
+          signal,
+          options,
+        );
         displayId = target.displayId;
         selector = target.selector;
         assertCurrent = target.assertCurrent;
@@ -1853,15 +1878,32 @@ export class SendKeys {
         : undefined;
     if (this.device.platform === "ios" && semanticKey) {
       return this.executeBoundedIosIme(commands, selector, progress, signal, semanticKey, {
+        ...options,
         display,
         assertCurrent,
       });
     }
     return this.executeUnbounded(commands, selector, progress, signal, {
+      ...options,
       display,
       displayId,
       assertCurrent,
     });
+  }
+
+  private validateFocusOptions(
+    selector: SendKeysSelector | undefined,
+    options: SendKeysFocusOptions = {},
+  ): string | undefined {
+    if (selector) {
+      return undefined;
+    }
+    for (const field of ["container", "selectionStrategy"] as const) {
+      if (options[field] !== undefined) {
+        return `${field} requires a selector naming the field to focus`;
+      }
+    }
+    return undefined;
   }
 
   private async prepareExplicitDisplay(
@@ -1869,6 +1911,7 @@ export class SendKeys {
     selector: SendKeysSelector | undefined,
     display: string,
     signal?: AbortSignal,
+    options: SendKeysFocusOptions = {},
   ): Promise<{ displayId?: number; selector?: SendKeysSelector; assertCurrent: () => void }> {
     const target = await prepareTargetDisplayAction(
       this.device,
@@ -1889,7 +1932,7 @@ export class SendKeys {
       );
     }
     if (selector && this.device.platform === "android") {
-      const focused = await this.focuser.focus(selector, signal, display);
+      const focused = await this.focuser.focus(selector, signal, display, options);
       if (!focused.success) {
         throw new Error(focused.error ?? "Unable to focus target field");
       }
@@ -1904,7 +1947,7 @@ export class SendKeys {
     progress: ProgressCallback | undefined,
     signal: AbortSignal | undefined,
     key: SendKeysSemanticKey,
-    target: Pick<SendKeysRouting, "display" | "assertCurrent">,
+    target: Pick<SendKeysRouting, "display" | "assertCurrent" | "container" | "selectionStrategy">,
   ): Promise<SendKeysResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -1985,24 +2028,32 @@ export class SendKeys {
   ): Promise<SendKeysResult> {
     signal?.throwIfAborted();
     const preflight = this.preflightCommands(commands);
+    const observe = async (minTimestamp?: number) => {
+      await progress?.(commands.length, commands.length, "Observing final keyboard input state");
+      return this.observer.execute({
+        display: routing.display,
+        signal,
+        freshness: "fresh",
+        minTimestamp,
+      });
+    };
     // Accept hierarchy updates emitted while focus or command delivery is completing.
     const actionStartTimestamp = preflight ? undefined : await this.timestampProvider.now();
-    const focusFailure = preflight ? undefined : await this.focusTarget(selector, signal);
+    const focusFailure = preflight ? undefined : await this.focusTarget(selector, signal, routing);
     signal?.throwIfAborted();
+    // Preserve resolver diagnostics even if a later observation is unavailable
+    // or would consume the bounded iOS IME deadline. No command was dispatched.
+    if (focusFailure) {
+      const observation =
+        routing.container !== undefined || routing.selectionStrategy !== undefined
+          ? undefined
+          : await observe();
+      return this.buildResult([], focusFailure, observation);
+    }
     const execution =
-      preflight ??
-      (focusFailure
-        ? { results: [], failure: focusFailure }
-        : await this.executeCommands(commands, progress, signal, routing));
-    const minTimestamp = preflight || focusFailure ? undefined : actionStartTimestamp;
+      preflight ?? (await this.executeCommands(commands, progress, signal, routing));
     signal?.throwIfAborted();
-    await progress?.(commands.length, commands.length, "Observing final keyboard input state");
-    const observation = await this.observer.execute({
-      display: routing.display,
-      signal,
-      freshness: "fresh",
-      minTimestamp,
-    });
+    const observation = await observe(actionStartTimestamp);
     return this.buildResult(execution.results, execution.failure, observation);
   }
 
@@ -2050,12 +2101,16 @@ export class SendKeys {
   private async focusTarget(
     selector?: SendKeysSelector,
     signal?: AbortSignal,
+    routing: SendKeysRouting = {},
   ): Promise<SendKeysFailure | undefined> {
     if (!selector) {
       return undefined;
     }
     signal?.throwIfAborted();
-    const result = await this.focuser.focus(selector, signal);
+    const result = await this.focuser.focus(selector, signal, routing.display, {
+      container: routing.container,
+      selectionStrategy: routing.selectionStrategy,
+    });
     return result.success
       ? undefined
       : {
@@ -2114,7 +2169,7 @@ export class SendKeys {
   private buildResult(
     results: SendKeysCommandResult[],
     failure: SendKeysFailure | undefined,
-    observation: ObserveResult,
+    observation?: ObserveResult,
   ): SendKeysResult {
     const warnings = results.filter((result) => result.warning).map((result) => result.warning);
     if (failure) {

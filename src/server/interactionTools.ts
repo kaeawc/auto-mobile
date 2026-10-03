@@ -1091,25 +1091,55 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
   ]),
 );
 
-export const sendKeysSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      display: z.string().optional().describe("Target panel key, role, or active"),
-      selector: sendKeysSelectorSchema
-        .optional()
-        .describe("Field to focus once before executing the ordered command sequence"),
-      commands: z
-        .array(sendKeysCommandSchema)
-        .min(1)
-        .max(SEND_KEYS_MAX_COMMANDS)
-        .describe(
-          `One to ${SEND_KEYS_MAX_COMMANDS} commands executed serially; execution stops on the first failure`,
-        ),
-      // #5870: Device or session targeting resolves the platform.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
+export const sendKeysSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        display: z.string().optional().describe("Target panel key, role, or active"),
+        selector: sendKeysSelectorSchema
+          .optional()
+          .describe(
+            "Field to focus once before executing the ordered command sequence; supports nested container scope and unique selection",
+          ),
+        container: nestedElementContainerSchema
+          .optional()
+          .describe(
+            "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based. Requires a selector naming the field to focus.",
+          ),
+        selectionStrategy: resolverSelectionStrategySchema
+          .optional()
+          .describe(
+            "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target. Requires a selector naming the field to focus.",
+          ),
+        commands: z
+          .array(sendKeysCommandSchema)
+          .min(1)
+          .max(SEND_KEYS_MAX_COMMANDS)
+          .describe(
+            `One to ${SEND_KEYS_MAX_COMMANDS} commands executed serially; execution stops on the first failure`,
+          ),
+        // #5870: Device or session targeting resolves the platform.
+        platform: platformSchema.optional(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
+  ).superRefine((value, ctx) => {
+    if (value.selector !== undefined) {
+      return;
+    }
+    for (const field of ["container", "selectionStrategy"] as const) {
+      if (value[field] !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${field} requires a selector naming the field to focus`,
+          path: [field],
+        });
+      }
+    }
+  }),
+  (jsonSchema) => {
+    jsonSchema.dependentRequired = { container: ["selector"], selectionStrategy: ["selector"] };
+  },
 );
 
 export interface SendKeysRunnerCommandSource {
@@ -3049,6 +3079,7 @@ export function registerInteractionTools() {
       progress,
       signal,
       args.display,
+      { container: args.container, selectionStrategy: args.selectionStrategy },
     );
     const response = createJSONToolResponse({
       message: result.success

@@ -1,13 +1,128 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
   assertSendKeysRunnerCompatible,
   registerInteractionTools,
   sendKeysSchema,
+  setSendKeysFactory,
+  resetSendKeysFactory,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import type { SendKeys } from "../../src/features/action/SendKeys";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 
 describe("sendKeysSchema", () => {
+  const scoped = {
+    selector: { elementId: "quantity" },
+    container: { elementId: "item_42", container: { elementId: "cart_A", index: 0 } },
+    selectionStrategy: "unique",
+    commands: [{ action: "type", text: "3" }],
+  };
+  test("accepts nested field scope and every resolver strategy", () => {
+    for (const selectionStrategy of ["first", "random", "unique"]) {
+      expect(sendKeysSchema.parse({ ...scoped, selectionStrategy })).toMatchObject({
+        container: scoped.container,
+        selectionStrategy,
+      });
+    }
+  });
+  test("advertises nested scope, strategies, and selector dependencies", () => {
+    registerInteractionTools();
+    const schema = ToolRegistry.getToolDefinitions().find(
+      (tool) => tool.name === "sendKeys",
+    )?.inputSchema;
+    expect(schema).toMatchObject({
+      properties: {
+        container: { description: expect.stringContaining("Nested container scope") },
+        selectionStrategy: { enum: ["first", "random", "unique"] },
+      },
+      dependentRequired: { container: ["selector"], selectionStrategy: ["selector"] },
+    });
+  });
+  test("handler forwards scope options and preserves structured focus failure as isError", async () => {
+    let handler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
+    const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation(
+      (...args) => {
+        if (args[0] === "sendKeys") {
+          handler = args[3];
+        }
+      },
+    );
+    const capability = spyOn(
+      AndroidCtrlProxyClient.prototype,
+      "getSupportedCommands",
+    ).mockResolvedValue(["request_insert_text"]);
+    const calls: Parameters<SendKeys["execute"]>[] = [];
+    const error =
+      "Container level 2 ambiguous: item_42; Candidates: resourceId=item_42 text=item_42 bounds=[0,0,100,20]";
+    setSendKeysFactory(() => ({
+      execute: async (...args) => {
+        calls.push(args);
+        return { success: false, completedCommands: 0, failedIndex: 0, commands: [], error };
+      },
+    }));
+    try {
+      registerInteractionTools();
+      expect(handler).toBeDefined();
+      const args = sendKeysSchema.parse({ ...scoped, display: "external" });
+      const response = await handler!(
+        { deviceId: "fake-handler-scope", name: "Field", platform: "android" },
+        args,
+      );
+      expect(calls).toHaveLength(1);
+      expect(calls[0][1]).toEqual(scoped.selector);
+      expect(calls[0][4]).toBe("external");
+      expect(calls[0][5]).toEqual({ container: scoped.container, selectionStrategy: "unique" });
+      expect(response).toMatchObject({
+        isError: true,
+        content: [expect.objectContaining({ text: expect.stringContaining(error) })],
+      });
+    } finally {
+      resetSendKeysFactory();
+      capability.mockRestore();
+      registration.mockRestore();
+    }
+  });
+  test.each(["container", "selectionStrategy"] as const)(
+    "%s requires a field selector",
+    (field) => {
+      const parsed = sendKeysSchema.safeParse({
+        commands: scoped.commands,
+        [field]: scoped[field],
+      });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.issues).toContainEqual(
+          expect.objectContaining({
+            path: [field],
+            message: `${field} requires a selector naming the field to focus`,
+          }),
+        );
+      }
+    },
+  );
+  test.each([
+    {},
+    { elementId: "" },
+    { text: "   " },
+    { elementId: "item_42", unknown: true },
+    { elementId: "item_42", container: {} },
+    { elementId: "item_42", container: { text: "Cart", sibling: true } },
+    { elementId: "item_42", index: -1 },
+    { elementId: "item_42", index: 0.5 },
+  ])("rejects malformed or unsupported recursive scopes: %j", (container) => {
+    expect(sendKeysSchema.safeParse({ ...scoped, container }).success).toBe(false);
+  });
+  test("rejects unknown strategy, leaf index, sibling, and accessibility link", () => {
+    for (const extra of [
+      { selectionStrategy: "last" },
+      { index: 0 },
+      { selector: { sibling: true } },
+      { selector: { accessibilityLink: "Terms" } },
+    ]) {
+      expect(sendKeysSchema.safeParse({ ...scoped, ...extra }).success).toBe(false);
+    }
+  });
   test("accepts device, session, and bound-session targeting without a platform", () => {
     for (const target of [{ deviceId: "emulator-5554" }, { sessionUuid: "session-1" }, {}]) {
       const parsed = sendKeysSchema.parse({

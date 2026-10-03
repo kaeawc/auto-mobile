@@ -1,4 +1,4 @@
-import capture from "./ios-keyboard-tabbar/observe-keyboard-up.json";
+import capture from "../observe-output/ios-keyboard-tabbar/observe-keyboard-up.json";
 import type {
   ElementBounds,
   SkeletonElement,

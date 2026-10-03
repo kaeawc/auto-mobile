@@ -108,6 +108,12 @@ describe("#4130 hadolint hoist (fast-validation)", () => {
     const checks = stepNamed(steps, "Run fast validation checks");
     expect(checks?.run).toContain("docs-assets");
   });
+
+  test("the environment variable docs gate is in the fast-validation --only list", () => {
+    // Docs-only PRs skip node-unit-tests, so Fast Validation must select this guard.
+    const checks = stepNamed(steps, "Run fast validation checks");
+    expect(checks?.run).toContain("env-var-docs");
+  });
 });
 
 describe("#4130 deploy-docs fan-outs (docs.yml)", () => {

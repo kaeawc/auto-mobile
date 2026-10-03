@@ -374,7 +374,7 @@ describe("published observe waitFor input schema", () => {
     );
   });
 
-  test("leaves predicate conditional validation to runtime", () => {
+  test("advertises stable scope restrictions", () => {
     expect(
       validatePublishedObserveInput({
         platform: "android",
@@ -392,7 +392,7 @@ describe("published observe waitFor input schema", () => {
         platform: "android",
         waitFor: { for: "stable", container: { elementId: "scope" } },
       }).valid,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("publishes the additive posture timeout diagnostic in the output schema", () => {
@@ -424,10 +424,10 @@ describe("published observe waitFor input schema", () => {
     ).toBe(true);
   });
 
-  test("retains container selector shape while leaving exclusive selection to runtime", () => {
+  test("advertises exclusive container selectors", () => {
     for (const [container, expected] of [
       [{}, false],
-      [{ elementId: "scope", text: "Scope" }, true],
+      [{ elementId: "scope", text: "Scope" }, false],
     ]) {
       expect(
         validatePublishedObserveInput({
@@ -2676,4 +2676,60 @@ test("textAny waits for a visible candidate before locking its match mode", () =
     "Ready",
   );
   expect([...modes.values()]).toEqual(["exact"]);
+});
+
+describe("nested waitFor runtime and advertised agreement", () => {
+  let validatePublished = (_input: unknown): boolean => false;
+  beforeAll(() => {
+    ToolRegistry.clearTools();
+    registerObserveTools();
+    const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe")!;
+    validatePublished = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+  });
+  const chain = {
+    elementId: "item_42",
+    index: 0,
+    container: { text: "Cart", selectionStrategy: "unique" },
+  };
+  test("accepts nested container and every leaf strategy on DSL and legacy arms", () => {
+    for (const selectionStrategy of ["first", "random", "unique"]) {
+      for (const extra of [
+        { for: "appear" },
+        {},
+        { absent: { elementId: "spinner", selectionStrategy } },
+      ]) {
+        const input = {
+          waitFor: { elementId: "remove", container: chain, selectionStrategy, ...extra },
+        };
+        expect(observeSchema.safeParse(input).success).toBe(true);
+        expect(validatePublished(input)).toBe(true);
+      }
+    }
+  });
+  test("advertised schema accepts the same nested chain as runtime", () => {
+    const input = {
+      waitFor: {
+        for: "appear",
+        elementId: "remove",
+        container: chain,
+        selectionStrategy: "unique",
+      },
+    };
+    expect(observeSchema.safeParse(input).success).toBe(true);
+    expect(validatePublished(input)).toBe(true);
+  });
+  test.each([
+    { for: "stable", selectionStrategy: "unique" },
+    { for: "stable", container: chain },
+    { textAny: ["A"], selectionStrategy: "first" },
+    { posture: "closed", selectionStrategy: "first" },
+    { elementId: "remove", unknown: true },
+    { elementId: "remove", container: { elementId: "x", container: {} } },
+    { elementId: "remove", container: { elementId: "x", index: -1 } },
+    { elementId: "remove", container: { elementId: "x", text: "Both" } },
+    { elementId: "remove", container: { elementId: "x", unknown: true } },
+  ])("rejects unsupported or malformed wait %j", (waitFor) => {
+    expect(observeSchema.safeParse({ waitFor }).success).toBe(false);
+    expect(validatePublished({ waitFor })).toBe(false);
+  });
 });

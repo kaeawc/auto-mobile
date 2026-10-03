@@ -1497,6 +1497,60 @@ bar notification chrome. An artifact-spilled diff keeps its `skeleton`,
 `context`, and capture metadata inline while the bulky node and field deltas are
 available from its artifact pointer.
 
+`observe.waitFor` element conditions (`appear`, `disappear`, `clickable`,
+`textEquals`, `countStable`, and legacy element predicates) accept a nested
+`container` chain and leaf `selectionStrategy: "first" | "random" | "unique"`.
+Each container names exactly one `elementId` or `text` and may carry its own
+zero-based `index`, `selectionStrategy`, and enclosing `container`. The outermost
+container resolves first; later levels and the leaf search only strict descendants
+in the automation hierarchy, including through anonymous wrappers. Rectangles do
+not establish scope. The complete chain is resolved again on every fresh poll.
+
+`unique` requires one eligible match at every unindexed scope level and at the
+leaf. An explicit container `index` overrides uniqueness at that level; an
+out-of-range index keeps polling. Missing or ambiguous scopes and ambiguous unique
+leaves keep polling within the timeout. Scoped timeouts include a failing-level
+`timeoutReason` and at most five diagnostic `candidates`. Default and explicit
+`first` choose the first eligible match; `random` chooses an eligible match.
+Compound legacy element fields are combined before the leaf strategy is applied.
+
+Scoped absence (`for: "disappear"` or `absent`) is satisfied only after the scope
+resolves and the leaf is absent inside it. A missing or ambiguous scope is not
+proof of absence, even if the same leaf exists elsewhere. `absent` uses the
+wait's `container` and can override the leaf strategy inside its predicate.
+Scoped behavior is opt-in through a nested container, any container index or
+strategy, or an explicit leaf strategy. For compatibility, a plain flat one-level
+`{elementId}` or `{text}` container without an index or strategy retains the legacy
+behavior: a missing container satisfies `disappear`/`absent`. Unscoped calls also
+retain their behavior. To wait for a container itself to disappear, target that
+container at its enclosing scope. `for: "stable"` rejects both container and leaf
+strategy; textAny-only and posture-only waits reject leaf strategies.
+
+Inspect the hierarchy with `observe` first:
+
+```json
+{ "project": "full" }
+```
+
+Then use the captured identifiers for a scoped wait. After confirming the
+`cart_A > item_42 > remove` ancestry, call `observe` again to wait for that
+removal control to disappear:
+
+```json
+{
+  "waitFor": {
+    "for": "disappear",
+    "elementId": "remove",
+    "selectionStrategy": "unique",
+    "container": {
+      "elementId": "item_42",
+      "container": { "elementId": "cart_A" }
+    },
+    "timeoutMs": 5000
+  }
+}
+```
+
 `observe` can wait for a display stamp with `waitFor: { posture: "closed" }` or
 `waitFor: { activeDisplay: "cover" }`. `activeDisplay` accepts either a physical
 panel key or a role. These conditions compare the returned observation's

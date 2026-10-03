@@ -36,7 +36,10 @@ import type {
 import { RealSettleObserve } from "../features/observe/SettleObserve";
 import { RealWaitForCondition } from "../features/observe/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
-import type { ConditionPredicate } from "../features/observe/interfaces/WaitForCondition";
+import type {
+  ConditionEvaluation,
+  ConditionPredicate,
+} from "../features/observe/interfaces/WaitForCondition";
 import {
   appear,
   disappear,
@@ -44,6 +47,10 @@ import {
   textEquals,
   countStable,
   ConditionSelector,
+  usesScopedWait,
+  waitContainerSelector,
+  isScopedWaitResolutionError,
+  waitResolutionFailure,
 } from "../features/observe/ConditionPredicates";
 import {
   createJSONToolResponse,
@@ -72,14 +79,17 @@ import {
   withAppIdAliases,
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
-import { elementContainerSchema } from "./elementSelectorSchemas";
+import {
+  nestedElementContainerSchema,
+  resolverSelectionStrategySchema,
+} from "./elementSelectorSchemas";
 import { observeToolResultSchema } from "./toolOutputSchemas";
 import {
   ElementResolver,
   isMissingContainerError,
   type MatchMode,
 } from "../features/utility/ElementResolver";
-import { SearchableHierarchy } from "../features/utility/SearchableNode";
+import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
 import {
   isElementCenterOffScreen,
   screenSizeForOffscreenCheck,
@@ -116,9 +126,11 @@ import {
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are
 // evaluated against the same node unless matchType is explicitly "any".
-const waitForContainerField = elementContainerSchema
+const waitForContainerField = nestedElementContainerSchema
   .optional()
-  .describe("Scope match to a container");
+  .describe(
+    "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
+  );
 
 const publicActiveWindowAppIdAliases = ["packageName", "bundleId"] as const;
 
@@ -148,6 +160,7 @@ const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(
 // a positive predicate; the wait resolves only when NO element matches these.
 const absentPredicateBaseSchema = z
   .object({
+    selectionStrategy: resolverSelectionStrategySchema.optional(),
     elementId: z
       .string()
       .optional()
@@ -186,6 +199,7 @@ const waitForCommonShape = {
   timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
   timeoutMs: z.number().optional().describe("Alias for timeout"),
   container: waitForContainerField,
+  selectionStrategy: resolverSelectionStrategySchema.optional(),
 };
 
 const validateWaitForTimeoutAliases = (
@@ -228,7 +242,15 @@ const waitForTextAnySchema = z
     ...waitForCommonShape,
   })
   .strict()
-  .superRefine(validateWaitForTimeoutAliases);
+  .superRefine((value, ctx) => {
+    validateWaitForTimeoutAliases(value, ctx);
+    if (value.selectionStrategy !== undefined && value.absent === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "selectionStrategy requires an element or absent predicate",
+      });
+    }
+  });
 
 const waitForElementBaseSchema = z
   .object({
@@ -254,6 +276,16 @@ const waitForElementBaseSchema = z
   .strict()
   .superRefine((value, ctx) => {
     validateWaitForTimeoutAliases(value, ctx);
+    if (
+      value.selectionStrategy !== undefined &&
+      !hasElementPredicate(value) &&
+      value.absent === undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "selectionStrategy requires an element or absent predicate",
+      });
+    }
 
     if (value.textMatch === "regex" && value.text !== undefined) {
       try {
@@ -313,6 +345,7 @@ const waitForConditionDslSchema = z
     timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
     timeoutMs: z.number().optional().describe("Alias for timeout"),
     container: waitForContainerField,
+    selectionStrategy: resolverSelectionStrategySchema.optional(),
     textAny: z.never().optional(),
     className: z.never().optional(),
     contentDescription: z.never().optional(),
@@ -327,10 +360,10 @@ const waitForConditionDslSchema = z
   .superRefine((value, ctx) => {
     validateWaitForTimeoutAliases(value, ctx);
     if (value.for === "stable") {
-      if (value.container !== undefined) {
+      if (value.container !== undefined || value.selectionStrategy !== undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'waitFor "for: stable" does not support container',
+          message: 'waitFor "for: stable" does not support container or selectionStrategy',
         });
       }
       return;
@@ -368,11 +401,20 @@ const ELEMENT_PREDICATE_REQUIRED = [
   { required: ["className"] },
   { required: ["contentDescription"] },
 ];
+const WAIT_CONTAINER_ADVERTISED_SCHEMA = z.toJSONSchema(nestedElementContainerSchema, {
+  override: ({ jsonSchema }) => {
+    if (jsonSchema.$ref === "#") {
+      jsonSchema.$ref = "#waitForContainer";
+    }
+  },
+});
+const WAIT_SELECTION_ADVERTISED_SCHEMA = z.toJSONSchema(resolverSelectionStrategySchema);
 const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   description: "Wait until an element matching these fields is absent (text uses exact match)",
   properties: {
+    selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
     elementId: { type: "string" },
     text: { type: "string" },
     className: { type: "string" },
@@ -386,6 +428,7 @@ const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
   ],
 };
 const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
+  $defs: { waitForContainer: { ...WAIT_CONTAINER_ADVERTISED_SCHEMA, $anchor: "waitForContainer" } },
   type: "object",
   additionalProperties: false,
   properties: {
@@ -435,12 +478,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     },
     activeDisplay: { type: "string", description: "Physical panel key or role" },
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
-    container: {
-      type: "object",
-      properties: { elementId: { type: "string" }, text: { type: "string" } },
-      additionalProperties: false,
-      anyOf: [{ required: ["elementId"] }, { required: ["text"] }],
-    },
+    container: { $ref: "#waitForContainer" },
+    selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
     timeout: { type: "number" },
     timeoutMs: { type: "number" },
   },
@@ -450,18 +489,24 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   // so it is not part of the textAny exclusion set.
   anyOf: [
     {
-      properties: { for: { const: "stable" } },
+      properties: { for: { const: "stable" }, container: false, selectionStrategy: false },
       required: ["for"],
     },
     {
-      properties: { for: {} },
+      properties: { for: { enum: WAIT_FOR_CONDITION_KINDS } },
       required: ["for", "elementId"],
     },
-    { properties: { for: {} }, required: ["for", "text"] },
+    { properties: { for: { enum: WAIT_FOR_CONDITION_KINDS } }, required: ["for", "text"] },
     {
+      properties: { for: false, selectionStrategy: false },
       required: ["textAny"],
     },
     {
+      properties: { for: false },
+      anyOf: [...ELEMENT_PREDICATE_REQUIRED, { required: ["absent"] }],
+    },
+    {
+      properties: { for: false, selectionStrategy: false },
       anyOf: [
         ...ELEMENT_PREDICATE_REQUIRED,
         { required: ["activeWindow"] },
@@ -940,7 +985,12 @@ const runWaitForConditionDsl = async (
   const predicate = buildConditionPredicate(
     finder,
     waitFor.for,
-    { elementId: waitFor.elementId, text: waitFor.text, container: waitFor.container },
+    {
+      elementId: waitFor.elementId,
+      text: waitFor.text,
+      container: waitFor.container,
+      selectionStrategy: waitFor.selectionStrategy,
+    },
     { stableReads: waitFor.stableReads },
   );
   const result = await new RealWaitForCondition(pollingScreen, timer).execute(predicate, {
@@ -959,18 +1009,17 @@ const runWaitForConditionDsl = async (
     waitMs: result.waitMs,
     matchedElement: result.matchedElement,
     candidates: result.candidates,
+    ...(result.diagnostic
+      ? {
+          timeoutReason: `Timed out after ${result.waitMs} ms waiting for ${waitFor.for}; ${result.diagnostic}`,
+        }
+      : {}),
   };
   return applySettledGate(outcome, result.matched, predicate);
 };
 
-const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSelector | null => {
-  if (!waitFor.container) {
-    return null;
-  }
-  return "elementId" in waitFor.container
-    ? { elementId: waitFor.container.elementId }
-    : { text: waitFor.container.text, match: "contains" };
-};
+const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSelector | undefined =>
+  waitContainerSelector(waitFor.container);
 
 function shouldRetryCompoundText(
   waitFor: ObserveWaitForOptions,
@@ -1012,6 +1061,7 @@ function isWaitSourceVisible(
 
 interface WaitForElementOptions extends ScreenSizeForOffscreenCheckOptions {
   negative?: boolean;
+  evaluation?: ConditionEvaluation;
 }
 
 function resolveWaitForElementOptions(
@@ -1028,6 +1078,119 @@ function resolveWaitForElementOptions(
   };
 }
 
+function finderForSelection(
+  finder: ConditionResolver,
+  candidates: SearchableEntry[],
+  selectionStrategy: ResolverSelector["selectionStrategy"],
+) {
+  return finder.resolve(
+    {
+      id: "wait-selection",
+      nodes: candidates.map((node, index) => ({ ...node, index, parentIndex: undefined })),
+    },
+    { selectionStrategy },
+    { action: "inspect" },
+  );
+}
+
+function bindWaitScope(nodes: readonly SearchableEntry[], scope: SearchableEntry) {
+  let key = "wait-resolved-scope";
+  while (nodes.some((node) => node.nodeKey === key || node.nativeId === key)) {
+    key += "_";
+  }
+  return {
+    nodes: nodes.map((node) => (node === scope ? { ...node, nodeKey: key } : node)),
+    container: { elementId: key },
+  };
+}
+
+/** Resolve the chain once per frame, then pin later compound fields to that exact scope. */
+function scopedWaitFinder(
+  finder: ConditionResolver,
+  waitFor: ObserveWaitForOptions,
+  evaluation: ConditionEvaluation,
+): ConditionResolver {
+  let bound: { nodes: readonly SearchableEntry[]; container: ResolverSelector } | undefined;
+  return {
+    resolve: (snapshot, selector, intent) => {
+      const container = bound?.container ?? waitForContainerForFinder(waitFor);
+      const result = finder.resolve(
+        { ...snapshot, nodes: bound?.nodes ?? snapshot.nodes },
+        {
+          ...selector,
+          container: container && {
+            ...container,
+            selectionStrategy:
+              waitFor.selectionStrategy === "unique" ? "unique" : container.selectionStrategy,
+          },
+        },
+        intent,
+      );
+      if (result.error && !isScopedWaitResolutionError(result.error)) {
+        throw new ActionableError(result.error);
+      }
+      const failure = waitResolutionFailure(result, waitFor, true);
+      if (failure) {
+        Object.assign(evaluation, failure);
+        return result;
+      }
+      if (!bound && result.scope) {
+        bound = bindWaitScope(snapshot.nodes, result.scope);
+      }
+      return result;
+    },
+  };
+}
+
+function waitElementSelectors(waitFor: ObserveWaitForOptions): ResolverSelector[] {
+  const predicates: ResolverSelector[] = [];
+  if (waitFor.elementId !== undefined) {
+    predicates.push({ elementId: waitFor.elementId });
+  }
+  if (waitFor.text !== undefined) {
+    predicates.push({ text: waitFor.text, match: waitFor.textMatch });
+  }
+  if (waitFor.className !== undefined) {
+    predicates.push({ className: waitFor.className });
+  }
+  if (waitFor.contentDescription !== undefined) {
+    predicates.push({ contentDescription: waitFor.contentDescription, match: "exact" });
+  }
+  return predicates;
+}
+
+function waitElementEvaluation(options: boolean | WaitForElementOptions): ConditionEvaluation {
+  return typeof options === "boolean"
+    ? { matched: false }
+    : (options.evaluation ?? { matched: false });
+}
+
+function chooseWaitElement(
+  finder: ConditionResolver,
+  eligible: SearchableEntry[],
+  waitFor: ObserveWaitForOptions,
+  negative: boolean,
+  evaluation: ConditionEvaluation,
+): Element | null {
+  if (!usesScopedWait(waitFor)) {
+    return eligible[0]?.element ?? null;
+  }
+  if (evaluation.diagnostic) {
+    return null;
+  }
+  // Scope and compound matching are already proven; the shared resolver chooses
+  // among these source nodes without another random draw of the container chain.
+  const selected = finderForSelection(finder, eligible, waitFor.selectionStrategy);
+  if (waitFor.container && selected.error === "Target not found") {
+    selected.error = "Target not found within container";
+  }
+  const failure = waitResolutionFailure(selected, waitFor, negative);
+  if (failure) {
+    Object.assign(evaluation, failure);
+  }
+  return selected.chosen?.element ?? null;
+}
+
 export const findWaitForElement = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
@@ -1036,6 +1199,12 @@ export const findWaitForElement = (
   modes = new Map<string, MatchMode>(),
   options: boolean | WaitForElementOptions = false,
 ): Element | null => {
+  const evaluation = waitElementEvaluation(options);
+  const scoped = usesScopedWait(waitFor);
+  const selectionFinder = finder;
+  if (scoped) {
+    finder = scopedWaitFinder(finder, waitFor, evaluation);
+  }
   const { negative, screenSize } = resolveWaitForElementOptions(options, {
     hierarchy: viewHierarchy,
     platform,
@@ -1067,7 +1236,10 @@ export const findWaitForElement = (
       { ...selector, container: waitForContainerForFinder(waitFor) ?? undefined },
       { action: "inspect", negative, matchMode: modes.get(key) },
     );
-    if (isMissingContainerError(result.error)) {
+    if (
+      isMissingContainerError(result.error) ||
+      (scoped && isScopedWaitResolutionError(result.error))
+    ) {
       return [];
     }
     if (result.error) {
@@ -1118,19 +1290,7 @@ export const findWaitForElement = (
       }
     }
   }
-  const predicates: ResolverSelector[] = [];
-  if (waitFor.elementId !== undefined) {
-    predicates.push({ elementId: waitFor.elementId });
-  }
-  if (waitFor.text !== undefined) {
-    predicates.push({ text: waitFor.text, match: waitFor.textMatch });
-  }
-  if (waitFor.className !== undefined) {
-    predicates.push({ className: waitFor.className });
-  }
-  if (waitFor.contentDescription !== undefined) {
-    predicates.push({ contentDescription: waitFor.contentDescription, match: "exact" });
-  }
+  const predicates = waitElementSelectors(waitFor);
   const sets = predicates.map((selector) => {
     const candidates = resolve(selector);
     // Older iOS captures expose the accessibility label only as text. Keep this
@@ -1148,16 +1308,20 @@ export const findWaitForElement = (
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );
-  return (
-    candidates.find((candidate) =>
-      waitFor.matchType === "any"
-        ? sets.some((set) => set.includes(candidate))
-        : sets.every((set) => set.includes(candidate)),
-    )?.element ?? null
+  const eligible = candidates.filter((candidate) =>
+    waitFor.matchType === "any"
+      ? sets.some((set) => set.includes(candidate))
+      : sets.every((set) => set.includes(candidate)),
   );
+  return chooseWaitElement(selectionFinder, eligible, waitFor, negative, evaluation);
 };
 
-const hasElementPredicate = (waitFor: ObserveWaitForOptions): boolean =>
+const hasElementPredicate = (
+  waitFor: Pick<
+    ObserveWaitForOptions,
+    "elementId" | "text" | "textAny" | "className" | "contentDescription"
+  >,
+): boolean =>
   waitFor.elementId !== undefined ||
   waitFor.text !== undefined ||
   waitFor.textAny !== undefined ||
@@ -1214,6 +1378,7 @@ const matchesAbsent = (
   viewHierarchy: ViewHierarchyResult,
   platform: BootedDevice["platform"] | undefined,
   sizeOptions: ScreenSizeForOffscreenCheckOptions,
+  evaluation: ConditionEvaluation,
 ): boolean => {
   if (!waitFor.absent) {
     return true;
@@ -1221,12 +1386,14 @@ const matchesAbsent = (
   const absentAsWaitFor = {
     ...waitFor.absent,
     container: waitFor.container,
+    selectionStrategy: waitFor.absent.selectionStrategy ?? waitFor.selectionStrategy,
   } as ObserveWaitForOptions;
   return (
     findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform, new Map(), {
       ...sizeOptions,
       negative: true,
-    }) === null
+      evaluation,
+    }) === null && !evaluation.diagnostic
   );
 };
 
@@ -1253,13 +1420,14 @@ const evaluateWaitForObservation = (
   platform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
   { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
-): { matched: boolean; awaitedElement?: Element } => {
+): ConditionEvaluation & { awaitedElement?: Element } => {
   const sizeOptions = {
     platform,
     iosMultiPanel,
     observationScreenSize: observation.screenSize,
     display: observation.viewHierarchy,
   };
+  const evaluation: ConditionEvaluation = { matched: false };
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
   const displayMatched = matchesDisplayStamp(observation, waitFor, displayInventory);
   const needsElementMatch = hasElementPredicate(waitFor);
@@ -1267,6 +1435,7 @@ const evaluateWaitForObservation = (
     needsElementMatch && observation.viewHierarchy
       ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, modes, {
           ...sizeOptions,
+          evaluation,
         })
       : null;
   // Without a hierarchy we cannot confirm the absent element is gone, so treat
@@ -1275,10 +1444,18 @@ const evaluateWaitForObservation = (
     waitFor.absent === undefined
       ? true
       : observation.viewHierarchy
-        ? matchesAbsent(finder, waitFor, observation.viewHierarchy, platform, sizeOptions)
+        ? matchesAbsent(
+            finder,
+            waitFor,
+            observation.viewHierarchy,
+            platform,
+            sizeOptions,
+            evaluation,
+          )
         : false;
 
   return {
+    ...evaluation,
     matched:
       activeWindowMatched &&
       displayMatched &&
@@ -1429,6 +1606,15 @@ function recordDisplayWaitEvidence(
     observation.display !== undefined &&
     !(observation.display.key === "0" && observation.display.role === "unknown");
   activeDisplayEvidence.hierarchyCaptured ||= hasUsableHierarchy(observation.viewHierarchy);
+}
+
+function scopedWaitTimeoutMetadata(evaluation: ConditionEvaluation, waitMs: number) {
+  return evaluation.diagnostic
+    ? {
+        candidates: evaluation.candidates,
+        timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
+      }
+    : {};
 }
 
 export const waitForObservation = async (
@@ -1631,6 +1817,7 @@ export const waitForObservation = async (
       polls,
       waitMs,
       matchedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
+      ...scopedWaitTimeoutMetadata(waitEvaluation, waitMs),
     });
   }
 
@@ -1702,6 +1889,7 @@ export const waitForObservation = async (
     polls,
     waitMs,
     matchedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
+    ...scopedWaitTimeoutMetadata(waitEvaluation, waitMs),
   });
 };
 

@@ -68,6 +68,7 @@ export class RealWaitForCondition implements WaitForCondition {
       matched: false,
       matchedElement: undefined,
       candidates: lastEvaluation.candidates ?? [],
+      ...(lastEvaluation.diagnostic ? { diagnostic: lastEvaluation.diagnostic } : {}),
       observation: outcome.observation,
       polls: outcome.polls,
       waitMs: outcome.waitMs,

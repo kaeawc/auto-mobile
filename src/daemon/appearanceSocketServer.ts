@@ -101,6 +101,13 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     super(socketPath, timer, "Appearance");
   }
 
+  protected bypassesRequestChain(request: AppearanceSocketRequest): boolean {
+    // This read-only request is safe to bypass: replies carry the request id and
+    // the shipped client sends one request per connection. A pipelining client
+    // that assumes in-order replies would see reordering.
+    return (request.command ?? request.method) === "get_appearance_config";
+  }
+
   protected async handleRequest(
     request: AppearanceSocketRequest,
   ): Promise<AppearanceSocketResponse> {

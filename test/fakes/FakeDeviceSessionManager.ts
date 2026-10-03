@@ -2,7 +2,7 @@ import {
   type ConnectedPlatformScan,
   DeviceReadyOptions,
   DeviceSessionManager,
-} from "../../src/utils/DeviceSessionManager";
+} from "../../src/devices/DeviceSessionManager";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
 
 /**

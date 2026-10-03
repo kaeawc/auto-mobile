@@ -56,8 +56,8 @@ export interface DaemonResponse {
   result?: any;
   /** Error message if unsuccessful */
   error?: string;
-  /** JSON-RPC parse/invalid-request code when a request cannot be dispatched. */
-  code?: number;
+  /** Structured daemon error code, or JSON-RPC parse/invalid-request code. */
+  code?: string | number;
   /** Rejected before any device operation was admitted. */
   handshakeFailure?: DaemonHandshakeFailure;
   /**
@@ -108,6 +108,8 @@ export function sanitizeDaemonRequestFailureCause(
   }
   return { name: cause.name, message: cause.message };
 }
+
+export const DAEMON_SESSION_NOT_FOUND_CODE = "daemon_session_not_found";
 
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
@@ -323,6 +325,8 @@ export interface DaemonStatus {
   buildId?: string;
   /** Whether this daemon generation is currently executing provisionDevice. */
   activeProvisioning?: boolean;
+  /** Missing socket sessions use DAEMON_SESSION_NOT_FOUND_CODE; tool messages are not evidence. */
+  structuredSessionNotFound?: boolean;
   /** Non-secret fingerprint of the acceptance discovery capability bound at startup. */
   acceptanceCapabilityFingerprint?: string | null;
   /**

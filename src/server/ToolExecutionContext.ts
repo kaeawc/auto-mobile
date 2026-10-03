@@ -22,7 +22,7 @@ import {
 } from "../utils/deviceReadinessLock";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { serverConfig } from "../utils/ServerConfig";
-import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { ProxySetupErrorCategory, ProxySetupResult } from "../utils/interfaces/ProxyManager";
 
 /**

@@ -717,10 +717,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw error;
       }
       // After the deadline, the stop and direct termination are independent operations.
-      result = await Promise.race([
-        settled,
-        pendingForceStop.then(() => new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
-      ]);
+      result = await raceWithDeadline(
+        [
+          settled,
+          pendingForceStop.then(() => new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
+        ],
+        { timer, label: "CtrlProxy force stop" },
+      );
     }
     if (forceStop) {
       // Keep the registry until direct termination has also settled.

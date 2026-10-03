@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePoolStats, handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
-import { DaemonRequest } from "../../src/daemon/types";
+import { DAEMON_SESSION_NOT_FOUND_CODE, DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
@@ -336,6 +336,29 @@ describe("handleDaemonRequest", () => {
       restartedManager.stopCleanupTimer();
     }
   });
+
+  test.each(["daemon/sessionInfo", "daemon/heartbeat"])(
+    "%s codes a missing session without changing its message",
+    async (method) => {
+      const state = new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({
+          total: 0,
+          idle: 0,
+          assigned: 0,
+          error: 0,
+          avgAssignments: 0,
+        }),
+      );
+      await expect(
+        handleDaemonRequest(buildRequest(method, { sessionId: "missing" }), state),
+      ).resolves.toEqual({
+        success: false,
+        error: "Session not found: missing",
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+      });
+    },
+  );
 
   test("returns error when sessionId is missing", async () => {
     const devicePool = new FakeDevicePool({

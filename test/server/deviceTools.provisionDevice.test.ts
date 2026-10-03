@@ -49,7 +49,7 @@ import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
-import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 

@@ -17,9 +17,14 @@ import { FakeObserverSessionRegistry } from "../fakes/FakeObserverSessionRegistr
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import type { DaemonRequest } from "../../src/daemon/types";
+import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
 
 const sessionId = "00000000-0000-4000-8000-000000000001";
+const notFound = {
+  success: false,
+  error: `Session not found: ${sessionId}`,
+  code: DAEMON_SESSION_NOT_FOUND_CODE,
+};
 const request = (method: string, params: unknown): DaemonRequest => ({
   id: "test",
   type: "daemon_request",
@@ -125,14 +130,13 @@ describe("registration-only daemon requests", () => {
   }
 
   test("unknown and expired heartbeat keep the existing error", async () => {
-    const expected = { success: false, error: `Session not found: ${sessionId}` };
     expect(await handleDaemonRequest(request("daemon/heartbeat", { sessionId }), state)).toEqual(
-      expected,
+      notFound,
     );
     registry.register(sessionId, "desktop");
     timer.advanceTime(10000);
     expect(await handleDaemonRequest(request("daemon/heartbeat", { sessionId }), state)).toEqual(
-      expected,
+      notFound,
     );
   });
 
@@ -187,7 +191,7 @@ describe("registration-only daemon requests", () => {
       request("daemon/sessionInfo", { sessionId: "unknown" }),
       state,
     );
-    expect(observer).toEqual({ success: false, error: `Session not found: ${sessionId}` });
+    expect(observer).toEqual(notFound);
     expect(observer.error?.replace(sessionId, "UUID")).toBe(
       unknown.error?.replace("unknown", "UUID"),
     );

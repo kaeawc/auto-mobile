@@ -23,6 +23,8 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
 import { FakeAndroidHingeAngleConsole } from "../../fakes/FakeAndroidHingeAngleConsole";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import type { AppleDevice } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -581,12 +583,27 @@ describe("SetPosture", () => {
       "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
     ),
   };
+  const sessionDuo: BootedDevice = {
+    name: duo.name,
+    platform: duo.platform,
+    deviceId: duo.deviceId,
+    displays: duo.displays,
+  };
+  const simulatorInfo: AppleDevice = {
+    udid: duo.deviceId,
+    name: duo.name,
+    state: "Booted",
+    isAvailable: true,
+    deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+  };
 
   function makeIosFeature(
     device: BootedDevice = duo,
     observations: ObserveResult[] = [observation],
   ) {
     const client = new FakeIOSCtrlProxy();
+    const simctl = new FakeSimCtlClient();
+    simctl.setDeviceInfo(device.deviceId, simulatorInfo);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const sequence: string[] = [];
@@ -605,6 +622,7 @@ describe("SetPosture", () => {
     let observeCount = 0;
     const feature = new SetPosture(device, {
       iosClientProvider: () => client,
+      simctl,
       observeFactory: () =>
         ({
           execute: async () => {
@@ -619,8 +637,224 @@ describe("SetPosture", () => {
       timer,
       transitionSink,
     });
-    return { feature, client, timer, sequence, getObserveCount: () => observeCount };
+    return {
+      feature,
+      client,
+      simctl,
+      timer,
+      tracker,
+      sequence,
+      getObserveCount: () => observeCount,
+    };
   }
+
+  describe("session simulator foldability lookup", () => {
+    test("Android validation never looks up simulator metadata", async () => {
+      const simctl = new FakeSimCtlClient();
+      const feature = new SetPosture(makeDevice("physical-android", ["opened"]), { simctl });
+      await expect(feature.execute("closed")).rejects.toThrow("not supported by this device");
+      expect(await feature.executeHingeAngle(90)).toMatchObject({ status: "unsupported" });
+      expect(simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
+    });
+
+    test.each([
+      ["closed", 0],
+      ["half_opened", 130],
+      ["opened", 180],
+    ] as const)("looks up Duo identity for %s and hingeAngle", async (posture, angle) => {
+      const device = Object.freeze({ ...sessionDuo, displays: undefined });
+      const h = makeIosFeature(device);
+      h.simctl.setDeviceInfo(device.deviceId, {
+        ...simulatorInfo,
+        deviceTypeIdentifier: duo.deviceType,
+      });
+      h.client.supportedCommands = ["set_hinge_angle"];
+      expect(h.simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await h.feature.execute(posture)).toMatchObject({ posture });
+        expect(await h.feature.executeHingeAngle(angle)).toMatchObject({ hingeAngle: angle });
+        expect(h.client.getHingeAngleHistory()).toEqual([angle, angle]);
+        expect(h.simctl.getMethodCalls("getDeviceInfo")).toEqual([
+          { udid: device.deviceId },
+          { udid: device.deviceId },
+        ]);
+        expect(device.deviceType).toBeUndefined();
+        expect(device.displays).toBeUndefined();
+        expect(h.timer.getSleepHistory()).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test.each(["non-Duo", "throws", "null", "missing type"] as const)(
+      "both forms fail closed when lookup %s",
+      async (mode) => {
+        const h = makeIosFeature({ ...sessionDuo, displays: undefined });
+        const cause = new Error("simulator inventory unavailable");
+        if (mode === "throws") {
+          h.simctl.setDeviceInfoError(cause);
+        }
+        if (mode === "null") {
+          h.simctl.setDeviceInfo(duo.deviceId, null);
+        }
+        if (mode === "missing type") {
+          h.simctl.setDeviceInfo(duo.deviceId, {
+            ...simulatorInfo,
+            deviceTypeIdentifier: undefined,
+          });
+        }
+        h.client.supportedCommands = ["set_hinge_angle"];
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const hinge = spyOn(h.client, "requestSetHingeAngle");
+        const clear = spyOn(ObservedAndroidDisplayCache, "clear");
+        try {
+          const unsupported = {
+            status: "unsupported",
+            message: "This iOS simulator is not a foldable device.",
+          };
+          for (const posture of ["closed", "half_opened", "opened"] as const) {
+            expect(await h.feature.execute(posture)).toEqual(unsupported);
+          }
+          expect(await h.feature.executeHingeAngle(90)).toEqual(unsupported);
+          expect(h.simctl.getMethodCalls("getDeviceInfo")).toEqual(
+            Array(4).fill({ udid: duo.deviceId }),
+          );
+          expect(hinge).not.toHaveBeenCalled();
+          expect(clear).not.toHaveBeenCalled();
+          expect(h.tracker.identityRevision(duo.deviceId)).toBe(0);
+          expect(h.sequence).toEqual([]);
+          expect(pendingPostureOperationCountForTest()).toBe(0);
+          expect(h.timer.getSleepHistory()).toEqual([]);
+          if (mode === "non-Duo") {
+            expect(warn).not.toHaveBeenCalled();
+          } else if (mode === "throws") {
+            expect(warn).toHaveBeenCalledWith(
+              "[SetPosture] Failed to resolve simulator foldability: simulator inventory unavailable",
+              cause,
+            );
+          } else {
+            expect(warn).toHaveBeenCalledWith(
+              `[SetPosture] Simulator device type is unavailable for ${duo.deviceId}`,
+            );
+          }
+        } finally {
+          warn.mockRestore();
+          hinge.mockRestore();
+          clear.mockRestore();
+        }
+      },
+    );
+
+    test.each(["posture", "hingeAngle"] as const)(
+      "cancellation during lookup prevents %s dispatch and late side effects",
+      async (form) => {
+        const h = makeIosFeature({ ...sessionDuo, displays: undefined });
+        const controller = new AbortController();
+        const lookup = Promise.withResolvers<AppleDevice | null>();
+        const started = Promise.withResolvers<void>();
+        const getInfo = spyOn(h.simctl, "getDeviceInfo").mockImplementation(() => {
+          started.resolve();
+          return lookup.promise;
+        });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const clear = spyOn(ObservedAndroidDisplayCache, "clear");
+        try {
+          const result =
+            form === "posture"
+              ? h.feature.execute("closed", undefined, controller.signal)
+              : h.feature.executeHingeAngle(90, { signal: controller.signal });
+          await started.promise;
+          controller.abort();
+          await expect(result).rejects.toThrow("Posture request cancelled;");
+          lookup.resolve({ ...simulatorInfo, deviceTypeIdentifier: duo.deviceType });
+          await lookup.promise;
+          expect(h.client.getHingeAngleHistory()).toEqual([]);
+          expect(clear).not.toHaveBeenCalled();
+          expect(warn).not.toHaveBeenCalled();
+          expect(h.tracker.identityRevision(duo.deviceId)).toBe(0);
+          expect(h.sequence).toEqual([]);
+          expect(pendingPostureOperationCountForTest()).toBe(0);
+        } finally {
+          getInfo.mockRestore();
+          warn.mockRestore();
+          clear.mockRestore();
+        }
+      },
+    );
+
+    test("physical iOS refusal precedes lookup for both forms", async () => {
+      const h = makeIosFeature({
+        ...sessionDuo,
+        deviceId: "00008120-001C191E0E99003A",
+        displays: undefined,
+      });
+      for (const result of [
+        await h.feature.execute("tent"),
+        await h.feature.executeHingeAngle(90),
+      ]) {
+        expect(result).toEqual({
+          status: "unsupported",
+          message: "Physical iOS hinge posture can only be read, not set.",
+        });
+      }
+      expect(h.simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
+      expect(h.client.getHingeAngleHistory()).toEqual([]);
+    });
+  });
+
+  test.each([
+    {
+      ...duo,
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+      displays: { panels: [duo.displays!.panels[1]!], postures: ["opened" as const] },
+    },
+    // Explicit non-Duo identity wins even if a stale inventory claims Duo panels.
+    { ...duo, deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro" },
+    {
+      ...sessionDuo,
+      displays: { panels: [duo.displays!.panels[1]!], postures: ["opened" as const] },
+    },
+    {
+      ...sessionDuo,
+      displays: { panels: [duo.displays!.panels[0]!], postures: ["closed" as const] },
+    },
+    { ...sessionDuo, displays: { panels: [], postures: [] } },
+    { ...sessionDuo, displays: undefined },
+  ])("both forms refuse an iOS simulator without foldable evidence: %j", async (device) => {
+    const h = makeIosFeature(device);
+    h.client.supportedCommands = ["set_hinge_angle"];
+    const hinge = spyOn(h.client, "requestSetHingeAngle");
+    const clear = spyOn(ObservedAndroidDisplayCache, "clear");
+    const unsupported = {
+      status: "unsupported",
+      message: "This iOS simulator is not a foldable device.",
+    };
+    try {
+      for (const posture of [
+        "closed",
+        "half_opened",
+        "opened",
+        "rear_display",
+        "flipped",
+        "tent",
+      ] as const) {
+        expect(await h.feature.execute(posture)).toEqual(unsupported);
+      }
+      expect(await h.feature.executeHingeAngle(90)).toEqual(unsupported);
+      expect(hinge).not.toHaveBeenCalled();
+      expect(clear).not.toHaveBeenCalled();
+      expect(h.sequence).toEqual([]);
+      expect(h.tracker.identityRevision(device.deviceId)).toBe(0);
+      expect(h.getObserveCount()).toBe(0);
+      if (device.deviceType !== undefined) {
+        expect(h.simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
+      }
+    } finally {
+      hinge.mockRestore();
+      clear.mockRestore();
+    }
+  });
 
   describe("best effort hinge angles", () => {
     function makeAndroidAngleHarness() {
@@ -1213,8 +1447,9 @@ describe("SetPosture", () => {
       expect(h.sequence).toEqual([]);
     });
 
-    test("iOS angle requires a multi-panel simulator before capability probing", async () => {
-      const h = makeIosFeature({ ...duo, displays: { panels: [], postures: ["opened"] } });
+    test("iOS angle requires foldable evidence before capability probing", async () => {
+      // A Duo type now suffices, so exercise a session device lacking both forms of evidence.
+      const h = makeIosFeature({ ...sessionDuo, displays: { panels: [], postures: ["opened"] } });
       h.client.supportedCommands = ["set_hinge_angle"];
       expect(await h.feature.executeHingeAngle(90)).toEqual({
         status: "unsupported",
@@ -1403,7 +1638,12 @@ describe("SetPosture", () => {
     }
   });
 
-  test("sets each iPhone Duo simulator posture and observes its display", async () => {
+  test.each([
+    duo,
+    sessionDuo,
+    { ...duo, displays: undefined },
+    { ...duo, displays: { panels: [duo.displays!.panels[1]!], postures: ["opened" as const] } },
+  ])("both forms accept Duo type or hydrated Duo panels: %j", async (device) => {
     for (const [posture, angle] of [
       ["closed", 0],
       ["half_opened", 130],
@@ -1415,7 +1655,7 @@ describe("SetPosture", () => {
         role: posture === "closed" ? "cover" : "inner",
         posture,
       };
-      const { feature, client, getObserveCount } = makeIosFeature(duo, [
+      const { feature, client, simctl, getObserveCount } = makeIosFeature(device, [
         {
           ...observation,
           display: expectedDisplay,
@@ -1430,6 +1670,10 @@ describe("SetPosture", () => {
       });
       expect(client.getHingeAngleHistory()).toEqual([angle]);
       expect(getObserveCount()).toBe(1);
+      client.supportedCommands = ["set_hinge_angle"];
+      expect(await feature.executeHingeAngle(angle)).toMatchObject({ hingeAngle: angle });
+      expect(client.getHingeAngleHistory()).toEqual([angle, angle]);
+      expect(simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
     }
   });
 

@@ -11,7 +11,7 @@ import {
   resolveAppearanceMode,
   updateAppearanceConfig,
 } from "../server/appearanceManager";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,

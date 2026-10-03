@@ -36,9 +36,7 @@ build automatically resolves the debug variant, which registers the database and
 shared-preference inspection `ContentProvider`s, while a release build resolves
 the release variant, which packages no exported inspection components. A consumer
 with a custom build type (e.g. `staging`) must set `matchingFallbacks`, as with
-any multi-variant Android library. See
-[Storage Inspection packaging](../../docs/design-docs/plat/android/auto-mobile-sdk.md#packaging-how-the-providers-reach-maven-consumers-5714)
-for details.
+any multi-variant Android library.
 
 ## Usage
 

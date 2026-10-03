@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { staleDisplayError, withStaleDisplay } from "../../src/models/StaleDisplayError";
+import { runWithSelectedDisplayPin } from "../../src/features/observe/SessionDisplayContext";
 import type {
   TapAtResult,
   TapOnElementResult,
@@ -73,6 +74,16 @@ afterEach(() => {
 });
 
 describe("stale-display result channel", () => {
+  test("pinned stale coordinates name the actual unpin action before re-observing", () => {
+    const error = runWithSelectedDisplayPin({ pin: "inner", inventory: undefined }, () =>
+      staleDisplayError(7, 9, "cover"),
+    );
+    expect(error.message).toContain("setActiveDevice {display: null}");
+    expect(error.message).toContain("deviceId and sessionUuid");
+    expect(error.details).toEqual(stale.details);
+    expect(withStaleDisplay(results.tapAny, error).error).toBe(error.message);
+    expect(stale.message).not.toContain("setActiveDevice");
+  });
   test.each(Object.keys(results) as (keyof typeof results)[])("copies details onto %s", (name) => {
     const result = withStaleDisplay({ ...results[name], error: "old wrapped error" }, stale);
     expect(result.staleDisplay).toEqual({

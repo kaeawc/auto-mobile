@@ -318,6 +318,38 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("shutdownAll", function () {
+    test("returns the original timeout error after forced stop and clears its deadline", async () => {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const stop = deferred();
+      const force = deferred();
+      const forceCalled = Promise.withResolvers<void>();
+      spyOn(manager, "stop").mockReturnValue(stop.promise);
+      spyOn(
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> },
+        "forceStopForShutdown",
+      ).mockImplementation(() => {
+        forceCalled.resolve();
+        return force.promise;
+      });
+      const boundary = IOSCtrlProxyManager as unknown as {
+        stopWithinShutdownDeadline(
+          instance: IOSCtrlProxyManager,
+          timer: FakeTimer,
+        ): Promise<unknown>;
+      };
+      const stopped = boundary.stopWithinShutdownDeadline(manager, fakeTimer);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+      fakeTimer.advanceTime(1_200);
+      await forceCalled.promise;
+      force.resolve();
+
+      const result = await stopped;
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toBe("timed out after 1200ms");
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      stop.resolve();
+    });
+
     test("awaits in-flight force termination when the original stop settles", async () => {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);
       const stop = deferred();
@@ -337,6 +369,7 @@ describe("IOSCtrlProxyManager", function () {
       force.resolve();
       await shutdown;
       expect(settled).toBe(true);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     });
 
     for (const ignoreTerm of [true, false]) {

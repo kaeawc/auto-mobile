@@ -10,31 +10,6 @@ const ALLOW_LIST = new Map<string, string>([
   [RESOLVER, "canonical device kind resolver"],
   ["src/utils/ios-cmdline-tools/iosDeviceType.ts", "UDID predicate definition"],
   [
-    "src/features/debug/VisualHighlight.ts",
-    "pre-existing highlight transport routing; migrate in follow-up",
-  ],
-  [
-    "src/features/observe/ObservationDisplay.ts",
-    "pre-existing display capability gate; migrate in follow-up",
-  ],
-  [
-    "src/features/observe/ObserveScreen.ts",
-    "pre-existing observation routing; migrate in follow-up",
-  ],
-  [
-    "src/features/observe/TakeScreenshot.ts",
-    "pre-existing screenshot routing; migrate in follow-up",
-  ],
-  [
-    "src/features/observe/ios/IOSCtrlProxyClient.ts",
-    "pre-existing observation client capability gate; migrate in follow-up",
-  ],
-  ["src/features/webrtc/IosH264Source.ts", "pre-existing capture routing; migrate in follow-up"],
-  [
-    "src/features/webrtc/h264CaptureSourceFactory.ts",
-    "pre-existing capture audio capability gate; migrate in follow-up",
-  ],
-  [
     "src/utils/ios-cmdline-tools/DevicectlDeviceLister.ts",
     "device discovery and UDID classification, outside backend routing",
   ],

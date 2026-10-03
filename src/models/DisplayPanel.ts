@@ -43,3 +43,10 @@ export interface DeviceDisplays {
   panels: DisplayPanel[];
   postures: Posture[];
 }
+
+/** Shared targeting inventory, including the ordinary single-display fallback. */
+export function selectablePanels(inventory: DeviceDisplays | undefined): DisplayPanel[] {
+  return inventory?.panels?.length
+    ? inventory.panels
+    : [{ key: "0", role: "unknown", sizePx: { width: 0, height: 0 } }];
+}

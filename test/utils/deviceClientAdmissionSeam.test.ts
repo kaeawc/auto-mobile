@@ -16,7 +16,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
   DefaultDeviceClientProvider,
   DeviceSessionManager,
-} from "../../src/utils/DeviceSessionManager";
+} from "../../src/devices/DeviceSessionManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";

@@ -29,6 +29,71 @@ describe("FocusElementMatcher.findCurrentFocusIndex", () => {
     ).toBeNull();
   });
 
+  test("prefers object identity among repeated resource ids without bounds", () => {
+    const elements = [
+      { "resource-id": "row_title" },
+      { "resource-id": "row_title" },
+      { "resource-id": "row_title" },
+    ];
+
+    expect(matcher.findCurrentFocusIndex(elements[2], elements)).toBe(2);
+  });
+
+  test("resolves a copied row with repeated resource ids by exact bounds", () => {
+    const elements = [0, 1, 2].map((index) => ({
+      "resource-id": "row_title",
+      bounds: boundsAt(index),
+    }));
+    const currentFocus = { ...elements[1], bounds: { ...elements[1].bounds } };
+
+    expect(matcher.findCurrentFocusIndex(currentFocus, elements)).toBe(1);
+  });
+
+  test.each([
+    ["mismatched bounds", boundsAt(9)],
+    ["missing bounds", undefined],
+  ])("returns null for repeated resource ids with %s", (_label, bounds) => {
+    const elements = [0, 1, 2].map((index) => ({
+      "resource-id": "row_title",
+      text: `Row ${index}`,
+      bounds: boundsAt(index),
+    }));
+    const currentFocus = { ...elements[1], bounds };
+
+    expect(matcher.findCurrentFocusIndex(currentFocus, elements)).toBeNull();
+  });
+
+  test("resolves a unique resource id even when bounds differ", () => {
+    const elements = [
+      { "resource-id": "other", bounds: boundsAt(0) },
+      { "resource-id": "unique", bounds: boundsAt(1) },
+    ];
+
+    expect(
+      matcher.findCurrentFocusIndex({ "resource-id": "unique", bounds: boundsAt(9) }, elements),
+    ).toBe(1);
+  });
+
+  test.each([
+    ["test-tag", { "test-tag": "row" }, { "test-tag": "row" }, { "test-tag": "row" }],
+    [
+      "content-desc case-insensitively",
+      { "content-desc": "ROW" },
+      { "content-desc": "row" },
+      { "content-desc": "Row" },
+    ],
+    ["text case-insensitively", { text: "ROW" }, { text: "row" }, { text: "Row" }],
+  ])("disambiguates repeated %s by bounds", (_label, first, second, identifier) => {
+    const elements = [
+      { ...(first as Element), bounds: boundsAt(0) },
+      { ...(second as Element), bounds: boundsAt(1) },
+    ];
+    const currentFocus = { ...(identifier as Element), bounds: boundsAt(1) };
+
+    expect(matcher.findCurrentFocusIndex(currentFocus, elements)).toBe(1);
+    expect(matcher.findCurrentFocusIndex({ ...(identifier as Element) }, elements)).toBeNull();
+  });
+
   // Each row: an ordered traversal list, the current-focus element, and the index
   // the cursor should resolve to via the named rung.
   test.each([

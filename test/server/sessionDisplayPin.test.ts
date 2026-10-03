@@ -111,6 +111,86 @@ async function select(display?: unknown) {
   });
 }
 
+for (const inventoryKind of ["single", "empty", "one panel"] as const) {
+  for (const selector of ["0", "active"] as const) {
+    test(`${inventoryKind} inventory accepts ${selector} and honours the sole display pin`, async () => {
+      const source = new FakeDisplayInventorySource({
+        degraded: false,
+        ...(inventoryKind === "single"
+          ? {}
+          : {
+              displays: {
+                panels:
+                  inventoryKind === "empty"
+                    ? []
+                    : [{ key: "0", role: "unknown" as const, sizePx: { width: 100, height: 200 } }],
+                postures: [],
+              },
+            }),
+      });
+      const inventory = new CachingDisplayInventoryProvider(source, source, timer);
+      const single = { ...device, displays: undefined };
+      await pool.initializeWithDevices([single]);
+      const handler = createSetActiveDeviceHandler({
+        displayInventory: inventory,
+        resumeCtrlProxy: async () => {},
+      });
+      expect(
+        getStructuredPayload(
+          await handler({ deviceId: device.deviceId, sessionUuid: "one", display: selector }),
+        ),
+      ).toMatchObject({ displayPin: "0" });
+      const target = await inventory.hydrate(single, "single-test");
+      for (const name of ["observe", "tapOn", "tapAny"]) {
+        const calls: unknown[] = [];
+        const invoke = async (args: Record<string, unknown>) => {
+          calls.push(args.display);
+          const panel = resolveTargetDisplay(
+            target.displays,
+            args.display as string | undefined,
+            {},
+          );
+          const display = { key: panel.key, role: panel.role, posture: "unknown", generation: 0 };
+          return createStructuredToolResponse(
+            name === "observe" ? { display } : { success: true, observation: { display } },
+          );
+        };
+        const pinned = getStructuredPayload(
+          (await runSessionDisplayPin({
+            name,
+            acceptsDisplay: true,
+            device: target,
+            args: {},
+            sessionUuid: "one",
+            store: sessions,
+            invoke,
+          })) as Parameters<typeof getStructuredPayload>[0],
+        )!;
+        const output = name === "observe" ? pinned : (pinned.observation as { display: unknown });
+        expect(output.display).toMatchObject({ key: "0", pinned: true, generation: 0 });
+        await runSessionDisplayPin({
+          name,
+          acceptsDisplay: true,
+          device: target,
+          args: { display: "active" },
+          sessionUuid: "one",
+          store: sessions,
+          invoke,
+        });
+        expect(calls).toEqual(["0", "active"]);
+      }
+      await expect(
+        handler({ deviceId: device.deviceId, sessionUuid: "one", display: "missing" }),
+      ).rejects.toMatchObject({
+        name: "InvalidDisplayPinError",
+        message: expect.stringContaining("Available panels: 0 (unknown)"),
+        details: { availablePanels: [{ key: "0", role: "unknown" }] },
+      });
+      expect(sessions.getDisplayPin("one")).toBe("0");
+    });
+  }
+}
+
 test("strict display schema adds nullable string without weakening other fields", () => {
   expect(
     setActiveDeviceSchema.safeParse({ deviceId: device.deviceId, display: "inner" }).success,

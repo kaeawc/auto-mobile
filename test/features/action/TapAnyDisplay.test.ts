@@ -143,6 +143,24 @@ test("tapAny single-display omitted display retains default dispatch path", asyn
   expect(h.adb.getCommandCalls()).toEqual([]);
 });
 
+test("tapAny single-display pin targets logical zero through fake input and capture", async () => {
+  const single = { ...device, displays: undefined };
+  const h = harness(false, single);
+  h.observation.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
+  h.observation.viewHierarchy!.displayId = 0;
+  h.transitions.panel = { key: "0", role: "unknown" };
+  const result = await runWithSelectedDisplayPin({ pin: "0", inventory: undefined }, () =>
+    h.action.execute({ action: "tap", display: "0" }),
+  );
+  expect(result.success).toBe(true);
+  expect(h.observe.getExecuteOptions()).toEqual([expect.objectContaining({ display: "0" })]);
+  expect(h.capture.requests.length).toBeGreaterThan(0);
+  expect(h.capture.requests.every((request) => request.displayId === 0)).toBe(true);
+  // Logical zero retains CtrlProxy's ordinary default-display input contract.
+  expect(h.dispatches).toEqual([undefined, undefined]);
+  expect(h.adb.getCommandCalls()).toEqual([]);
+});
+
 for (const extra of [
   { scrollableContainer: true },
   { searchUntil: { duration: 100 } },

@@ -2224,11 +2224,15 @@ export async function tapAnyHandler(
   const searchSummary = buildTapAnySearchSummary(result);
   // A miss must not read as a completed tap: gate the message on the outcome
   // and mark the MCP envelope `isError`, exactly as tapOn does (#6152, #6163).
+  const failurePrefix = "Failed to tap clickable element: ";
+  const failure = result.error || "unknown error";
   const message = result.success
     ? searchSummary
       ? `Tapped clickable element (${searchSummary})`
       : "Tapped clickable element"
-    : `Failed to tap clickable element: ${result.error || "unknown error"}`;
+    : failure.startsWith(failurePrefix)
+      ? failure
+      : `${failurePrefix}${failure}`;
   const response = createStructuredToolResponse({
     message,
     observation: result.observation,

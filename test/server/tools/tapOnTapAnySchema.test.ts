@@ -519,6 +519,32 @@ test("tapAny accepts and forwards display exactly like tapOn", async () => {
   }
 });
 
+for (const error of [
+  "No clickable element found",
+  "Failed to tap clickable element: No clickable element found",
+  undefined,
+]) {
+  test(`tapAny failure message has one prefix: ${error}`, async () => {
+    setTapAnyElementFactory(() => ({
+      execute: async () => ({ success: false, error, element: {} }),
+    }));
+    try {
+      const response = await tapAnyHandler(
+        { name: "fake", deviceId: "fake", platform: "android" },
+        { action: "tap" },
+      );
+      const payload = JSON.parse(response.content[0].text!);
+      expect(payload.message).toBe(
+        `Failed to tap clickable element: ${error ? "No clickable element found" : "unknown error"}`,
+      );
+      expect(payload.error).toBe(error);
+      expect(response.isError).toBe(true);
+    } finally {
+      resetTapAnyElementFactory();
+    }
+  });
+}
+
 for (const key of ["subtext", "accessibilityLink", "focusFirst", "screenReaderNavigation"]) {
   test(`tapAny display does not admit tapOn-only unsupported option ${key}`, () => {
     expectRejectedKey(tapAnySchema, { display: "cover", [key]: true }, key);

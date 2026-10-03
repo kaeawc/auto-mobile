@@ -1,8 +1,6 @@
+import { resolveIosDeviceKind } from "../../../src/utils/ios-cmdline-tools/IosDeviceKind";
 import { describe, expect, test } from "bun:test";
-import {
-  resolveIosDeviceKind,
-  resolveIosKeychainControlBackend,
-} from "../../../src/utils/ios-cmdline-tools/IosSimulatorControlBackend";
+import { resolveIosKeychainControlBackend } from "../../../src/utils/ios-cmdline-tools/IosSimulatorControlBackend";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
 const simulatorUdid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";

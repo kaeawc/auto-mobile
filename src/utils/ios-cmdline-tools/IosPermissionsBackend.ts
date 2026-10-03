@@ -16,17 +16,6 @@ export interface IosPermissionsBackend {
   setPrivacy(operation: IosPrivacyOperation): Promise<Pick<ExecResult, "stdout" | "stderr">>;
 }
 
-/**
- * Keep permissions' historical simulator-only predicate in one place. The generic
- * device backend requires unrelated terminate/uninstall dependencies to read kind;
- * this narrow resolver avoids supplying stub transports for those operations.
- */
-export function resolveIosPermissionsKind(options: {
-  deviceId: string;
-}): IosPermissionsBackend["kind"] {
-  return resolveIosDeviceKind(options);
-}
-
 export class SimulatorIosPermissionsBackend implements IosPermissionsBackend {
   readonly kind = "simulator";
 
@@ -59,7 +48,7 @@ export function resolveIosPermissionsBackend(options: {
   deviceId: string;
   simctl: IosSimulatorPrivacyClient;
 }): IosPermissionsBackend {
-  return resolveIosPermissionsKind(options) === "simulator"
+  return resolveIosDeviceKind({ deviceId: options.deviceId }) === "simulator"
     ? new SimulatorIosPermissionsBackend(options)
     : new PhysicalIosPermissionsBackend();
 }

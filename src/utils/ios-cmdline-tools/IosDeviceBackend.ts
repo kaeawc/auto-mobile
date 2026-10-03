@@ -1,6 +1,7 @@
 import type { DeviceUrlLauncher } from "./DeviceAppManager";
 import { logger } from "../logger";
-import { isIosPhysicalUdid, isIosSimulatorUdid } from "./iosDeviceType";
+import { isIosPhysicalUdid } from "./iosDeviceType";
+import { resolveIosDeviceKind } from "./IosDeviceKind";
 import type { SimCtlClient } from "./SimCtlClient";
 import type { IosInstalledAppRecord } from "./iosInstalledApp";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
@@ -60,7 +61,7 @@ export function resolveIosDeviceBackend(
   deviceId: string,
   deps: IosDeviceBackendDeps,
 ): IosDeviceBackend {
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosDeviceBackend(deviceId, deps)
     : new PhysicalIosDeviceBackend(deviceId, deps);
 }
@@ -121,7 +122,7 @@ export function resolveIosLaunchBackend(
   deviceId: string,
   deps: IosLaunchBackendDeps,
 ): IosLaunchBackend {
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosLaunchBackend(deviceId, deps.simctl)
     : new PhysicalIosLaunchBackend(deviceId, deps.deviceAppLauncher);
 }
@@ -188,7 +189,7 @@ export function resolveIosTerminateBackend(
   deviceId: string,
   deps: IosTerminateBackendDeps,
 ): IosTerminateBackend {
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosTerminateBackend(deviceId, deps.simctl)
     : new PhysicalIosTerminateBackend(deviceId, deps.deviceAppTerminator);
 }
@@ -298,7 +299,7 @@ export function resolveIosAppInfoBackend(
   deps: IosAppInfoBackendDeps,
 ): IosAppInfoBackend {
   // Preserve metadata's simulator-only predicate, unlike the list resolver above.
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosAppInfoBackend(deviceId, deps)
     : new PhysicalIosAppInfoBackend(deviceId, deps.iosSource);
 }
@@ -390,7 +391,7 @@ export class PhysicalIosClearDataBackend implements IosClearDataBackend {
 export function resolveIosClearDataBackend(
   deviceId: string,
   deps: IosClearDataBackendDeps,
-  isSimulatorFn: () => boolean = () => isIosSimulatorUdid(deviceId),
+  isSimulatorFn: () => boolean = () => resolveIosDeviceKind({ deviceId }) === "simulator",
 ): IosClearDataBackend {
   return isSimulatorFn()
     ? new SimulatorIosClearDataBackend(deviceId, deps)
@@ -425,7 +426,7 @@ export function resolveIosDowngradeRecoveryBackend(
   deviceId: string,
   deps: { simctl: Pick<SimCtlClient, "terminateApp" | "uninstallApp"> },
 ): IosDowngradeRecoveryBackend | null {
-  if (!isIosSimulatorUdid(deviceId)) {
+  if (resolveIosDeviceKind({ deviceId }) === "physical") {
     return null;
   }
   return {
@@ -498,7 +499,7 @@ export function resolveIosInstallBackend(
   deviceId: string,
   deps: IosInstallBackendDeps,
 ): IosInstallBackend {
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosInstallBackend(deviceId, deps.simctl)
     : new PhysicalIosInstallBackend(deviceId, deps);
 }
@@ -564,7 +565,7 @@ export function resolveIosOpenUrlBackend(
   deviceId: string,
   deps: IosOpenUrlBackendDeps,
 ): IosOpenUrlBackend {
-  return isIosSimulatorUdid(deviceId)
+  return resolveIosDeviceKind({ deviceId }) === "simulator"
     ? new SimulatorIosOpenUrlBackend(deviceId, deps.createSimctl)
     : new PhysicalIosOpenUrlBackend(deviceId, deps.createDeviceUrlLauncher);
 }

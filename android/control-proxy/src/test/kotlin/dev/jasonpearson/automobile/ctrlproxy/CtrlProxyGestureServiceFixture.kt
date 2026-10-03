@@ -36,6 +36,7 @@ internal class CtrlProxyGestureServiceFixture {
 
   init {
     service.gestureThreadFactory = { InlineGestureThread() }
+    service.dragDeadline = FakeGestureDeadline()
     // Only request-result broadcasts use this scope in these tests. Run them inline, with no IO
     // worker or real timer; do not connect the service (which would open sockets/start logcat).
     ReflectionHelpers.getField<CoroutineScope>(service, "serviceScope").cancel()

@@ -32,6 +32,19 @@ internal interface StrokeDispatcher<S> {
     onFailed: (error: String) -> Unit,
     displayId: Int? = null,
   )
+
+  /**
+   * Distinguish a stroke rejected before injection from one cancelled after injection. A finite
+   * chain must release the preceding pointer when a new continuation was never registered. Legacy
+   * dispatchers can retain the original failure contract.
+   */
+  fun dispatchContinuing(
+    stroke: S,
+    onComplete: () -> Unit,
+    onFailed: (error: String) -> Unit,
+    onRejected: (error: String) -> Unit,
+    displayId: Int? = null,
+  ) = dispatch(stroke, onComplete, onFailed, displayId)
 }
 
 /**

@@ -299,8 +299,8 @@ extension ElementLocator {
             } else {
                 isChecked = isCheckable && isSelected
             }
-            // snapshot.hasFocus reflects UIKit focus (tvOS/iPad), not keyboard input
-            // focus on iPhone. Use the keyboardFocusFrame from the predicate query instead.
+            // Prefer the focus frame from the captured text inputs or predicate fallback;
+            // some iPhone UIKit fields do not report keyboard input focus via snapshot.hasFocus.
             let hasFocus: Bool
             if let focusFrame = keyboardFocusFrame, !frame.isEmpty, !focusFrame.isEmpty {
                 let epsilon: CGFloat = 0.5

@@ -1282,6 +1282,73 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertTrue(ElementLocator.shouldQueryKeyboardFocus(textInputSnapshotCount: 5))
     }
 
+    func testKeyboardFocusDecision_skipsWhenNoInputsPresent() {
+        XCTAssertEqual(ElementLocator.keyboardFocusDecision(textInputCandidates: []), .skip)
+    }
+
+    func testKeyboardFocusDecision_queriesWhenNoInputReportsFocus() {
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(textInputCandidates: [
+                (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
+                (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: false),
+            ]),
+            .liveQuery
+        )
+    }
+
+    func testKeyboardFocusDecision_usesFocusedSnapshotFrame() {
+        let focusedFrame = CGRect(x: 10, y: 80, width: 100, height: 40)
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(textInputCandidates: [
+                (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
+                (frame: focusedFrame, hasFocus: true),
+            ]),
+            .useSnapshotFrame(focusedFrame)
+        )
+    }
+
+    func testKeyboardFocusDecision_ignoresEmptyFocusedFrame() {
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(textInputCandidates: [
+                (frame: .zero, hasFocus: true),
+                (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
+            ]),
+            .liveQuery
+        )
+    }
+
+    func testKeyboardFocusDecision_usesFirstOfMultipleFocusedInputs() {
+        let firstFrame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(textInputCandidates: [
+                (frame: firstFrame, hasFocus: true),
+                (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: true),
+            ]),
+            .useSnapshotFrame(firstFrame)
+        )
+    }
+
+    func testKeyboardFocusDecision_skipsWhenAllFramesAreEmpty() {
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(textInputCandidates: [
+                (frame: .zero, hasFocus: true),
+                (frame: CGRect(x: 10, y: 20, width: 0, height: 40), hasFocus: false),
+            ]),
+            .skip
+        )
+    }
+
+    func testKeyboardFocusDecision_usesUsableFocusAfterEmptyFocusedFrame() {
+        let focusedFrame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(textInputCandidates: [
+                (frame: .zero, hasFocus: true),
+                (frame: focusedFrame, hasFocus: true),
+            ]),
+            .useSnapshotFrame(focusedFrame)
+        )
+    }
+
     func testShouldSnapshotSpringboardForAlerts_skipsWhenForegroundIsSpringboard() {
         // SpringBoard's tree is already the app snapshot — never take a second one.
         XCTAssertFalse(

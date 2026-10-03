@@ -1,7 +1,10 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { registerPlanTools } from "../../src/server/planTools";
 import * as realTestRecordingManager from "../../src/server/testRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+
+isolateToolRegistry();
 
 const realStartTestRecording = realTestRecordingManager.startTestRecording;
 const realStopTestRecording = realTestRecordingManager.stopTestRecording;

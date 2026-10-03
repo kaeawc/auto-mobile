@@ -1,3 +1,4 @@
+import { preserveToolRegistry } from "./withTemporaryTool";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +13,7 @@ export interface IsolatedCliDataDir {
  * or write the real developer or CI machine's ~/.auto-mobile data.
  */
 export function isolateCliDataDir(prefix = "automobile-cli-test-"): IsolatedCliDataDir {
+  const restoreTools = preserveToolRegistry();
   const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   process.env.AUTOMOBILE_DATA_DIR = dataDir;
@@ -19,6 +21,7 @@ export function isolateCliDataDir(prefix = "automobile-cli-test-"): IsolatedCliD
   return {
     dataDir,
     restore(): void {
+      restoreTools();
       if (previousDataDir === undefined) {
         delete process.env.AUTOMOBILE_DATA_DIR;
       } else {

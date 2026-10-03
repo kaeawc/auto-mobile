@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
   applyToolSelection,
@@ -10,6 +10,10 @@ describe("applyToolSelection", () => {
   const readOnlyService = {
     isEnabled: async () => false,
   };
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+  });
 
   beforeEach(() => {
     ToolRegistry.clearTools();

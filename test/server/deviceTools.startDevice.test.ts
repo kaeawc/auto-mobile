@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, describe, expect, beforeEach, afterEach } from "bun:test";
@@ -42,6 +43,8 @@ import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceC
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import * as os from "os";
+
+isolateToolRegistry();
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",

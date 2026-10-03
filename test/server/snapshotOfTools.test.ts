@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ScreenshotRetentionCapacityError } from "../../src/features/observe/ScreenshotRetention";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -12,6 +13,8 @@ import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import type { ViewHierarchyResult } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeImageBackend } from "../fakes/FakeImageBackend";
+
+isolateToolRegistry();
 
 const device = { deviceId: "device", platform: "android" as const, name: "Test" };
 const hierarchy: ViewHierarchyResult = {

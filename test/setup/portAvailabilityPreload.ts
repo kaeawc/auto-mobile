@@ -17,6 +17,16 @@ import { FakePortAvailabilityChecker } from "../fakes/FakePortAvailabilityChecke
 import { PortManager } from "../../src/utils/PortManager";
 import { isUnitTestPath } from "./realDeviceToolSpawnGuard";
 import { clearCtrlProxyRegistries } from "./ctrlProxyRegistryCleanup";
+import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
+
+// Unit action/observer constructors enqueue fire-and-forget cache sweeps even
+// when capture is faked. Those serialized host-filesystem scans outlive their
+// donor tests and can block a later capture until its test times out without
+// reaching getInstance restoration in finally. Keep the default sweep inert;
+// explicit BoundedScreenshotPathProtection instances still exercise retention.
+const sweep = screenshotPathProtection.sweep.bind(screenshotPathProtection);
+screenshotPathProtection.sweep = (directory, fileSystem) =>
+  isUnitTestPath(Bun.main) ? Promise.resolve() : sweep(directory, fileSystem);
 
 const installFake = (): void => {
   if (isUnitTestPath(Bun.main)) {

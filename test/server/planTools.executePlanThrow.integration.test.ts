@@ -1,23 +1,11 @@
-import { describe, expect, test, beforeAll, mock } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
+import * as planUtils from "../../src/utils/planUtils";
+import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 
-// Mock planUtils so executePlan throws while importPlanFromYaml works normally.
-// This is safe because no other test imports from "../../src/utils/planUtils" via
-// the same resolved path.
 const executePlanError = new Error("Simulated executePlan failure: device disconnected");
-const mockExecutePlan = mock(() => Promise.reject(executePlanError));
-
-mock.module("../../src/utils/planUtils", () => {
-  const { YamlPlanSerializer } = require("../../src/utils/plan/PlanSerializer");
-  const serializer = new YamlPlanSerializer();
-  return {
-    importPlanFromYaml: serializer.importPlanFromYaml.bind(serializer),
-    exportPlanFromLogs: serializer.exportPlanFromLogs.bind(serializer),
-    executePlan: mockExecutePlan,
-  };
-});
 
 const VALID_PLAN_YAML = `
 name: simple-test
@@ -34,10 +22,23 @@ const mockDevice = {
 };
 
 describe("executePlanTool — executePlan throws", () => {
-  beforeAll(() => {
-    if (!ToolRegistry.getTool("executePlan")) {
-      registerPlanTools();
-    }
+  let videoSpy: ReturnType<typeof spyOn>;
+  let mockExecutePlan: ReturnType<typeof spyOn<typeof planUtils, "executePlan">>;
+
+  beforeEach(() => {
+    mockExecutePlan = spyOn(planUtils, "executePlan").mockRejectedValue(executePlanError);
+    // Exercise the plan failure without opening the real recording DB or device.
+    videoSpy = spyOn(videoRecordingManager, "startVideoRecording").mockRejectedValue(
+      new Error("Video recording disabled in this test"),
+    );
+    ToolRegistry.clearTools();
+    registerPlanTools();
+  });
+
+  afterEach(() => {
+    mockExecutePlan.mockRestore();
+    videoSpy.mockRestore();
+    ToolRegistry.clearTools();
   });
 
   test("returns failure response with original error when executePlan throws", async () => {

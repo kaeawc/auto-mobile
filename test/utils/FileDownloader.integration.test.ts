@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -81,11 +81,11 @@ describe("FakeFileDownloader", function () {
 describe("DefaultFileDownloader pipeResponseToFile", function () {
   let tempDir: string;
 
-  beforeAll(async function () {
+  beforeEach(async function () {
     tempDir = await makeScratchTempDir("pipe-response-");
   });
 
-  afterAll(async function () {
+  afterEach(async function () {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 

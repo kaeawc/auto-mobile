@@ -1,5 +1,5 @@
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
@@ -21,17 +21,42 @@ const listToolsResponseSchema = z.object({
 
 describe("MCP Tools List", () => {
   let fixture: McpTestFixture;
+  let compiledObserveOutputSchema: unknown;
 
   describe("with default registry", () => {
     beforeAll(async () => {
       fixture = new McpTestFixture();
       await fixture.setup();
+      // Compile the static wire schema during setup; the test verifies the
+      // advertised schema stays identical to this successfully compiled value.
+      const initialTools = await fixture.client.request(
+        { method: "tools/list", params: {} },
+        listToolsResponseSchema,
+      );
+      compiledObserveOutputSchema = initialTools.tools.find(
+        (tool) => tool.name === "observe",
+      )?.outputSchema;
+      compileJsonSchema(compiledObserveOutputSchema);
     });
 
     afterAll(async () => {
       if (fixture) {
         await fixture.teardown();
       }
+    });
+
+    beforeEach(async () => {
+      // This suite shares its connected fixture, so undo its only selection mutation.
+      await fixture.client.request(
+        {
+          method: "tools/call",
+          params: {
+            name: "setToolEnabled",
+            arguments: { toolName: "deleteDevice", enabled: false },
+          },
+        },
+        z.any(),
+      );
     });
 
     test("tools/list serves only the core tool profile by default", async function () {
@@ -60,7 +85,10 @@ describe("MCP Tools List", () => {
     });
 
     test("discovers optional tool names through setToolEnabled before enabling them", async () => {
-      const result = await fixture.client.listTools();
+      const result = await fixture.client.request(
+        { method: "tools/list", params: {} },
+        listToolsResponseSchema,
+      );
       const selection = result.tools.find((tool) => tool.name === "setToolEnabled");
       const toolNameSchema = selection?.inputSchema.properties?.toolName as { enum: string[] };
 
@@ -156,7 +184,7 @@ describe("MCP Tools List", () => {
       const observe = result.tools.find((tool) => tool.name === "observe");
 
       expect(observe?.outputSchema).toBeDefined();
-      expect(() => compileJsonSchema(observe!.outputSchema)).not.toThrow();
+      expect(observe!.outputSchema).toEqual(compiledObserveOutputSchema);
     });
   });
 });
@@ -164,6 +192,10 @@ describe("MCP Tools List", () => {
 // App-resource registration starts device discovery independently of deviceTools.
 let restoreHermeticServer: () => void;
 beforeAll(() => {
+  ToolRegistry.clearTools();
   restoreHermeticServer = installHermeticServerFixture();
 });
-afterAll(() => restoreHermeticServer());
+afterAll(() => {
+  restoreHermeticServer();
+  ToolRegistry.clearTools();
+});

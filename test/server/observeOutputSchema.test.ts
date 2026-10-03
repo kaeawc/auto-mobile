@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
@@ -29,6 +30,8 @@ import { ToolRegistry, toolHasOutputSchema } from "../../src/server/toolRegistry
 import { registerObserveTools } from "../../src/server/observeTools";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObservationInsets } from "../../src/models/ObservationInsets";
+
+isolateToolRegistry();
 
 describe("windowTruncations output schemas", () => {
   const windowTruncations = [

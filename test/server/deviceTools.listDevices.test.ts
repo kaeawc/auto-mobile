@@ -148,7 +148,6 @@ describe("listDevices tool (#5870)", () => {
   };
 
   beforeAll(() => {
-    fakeDeviceUtils = new FakeDeviceUtils();
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
       displayInventory: {
@@ -173,6 +172,7 @@ describe("listDevices tool (#5870)", () => {
   });
 
   beforeEach(() => {
+    fakeDeviceUtils = new FakeDeviceUtils();
     inventoryHydrate = async (device, identityToken) => {
       expect(identityToken).toBe(device.deviceId);
       return device;
@@ -187,6 +187,7 @@ describe("listDevices tool (#5870)", () => {
 
   afterAll(() => {
     resetDeviceToolsDependencies();
+    AndroidAvdProvenanceCache.resetForTests();
   });
 
   test("listDevices includes optional health reason and timestamp only for dirty devices", async () => {

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { parseCliArgs } from "../../src/cli";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // The CLI ran every value through JSON.parse, so a numeric-looking string
 // argument arrived as a number and string-typed params rejected it (#4241).

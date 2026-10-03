@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   deviceResourceConfigurationSchema,
@@ -16,6 +17,8 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
 } from "../../src/daemon/constants";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+
+isolateToolRegistry();
 
 describe("setDeviceResources", () => {
   let controller: FakeDeviceResourceController;

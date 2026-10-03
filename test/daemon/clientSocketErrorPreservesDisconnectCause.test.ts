@@ -1,21 +1,28 @@
 import { FakeSocket } from "../fakes/FakeNetServer";
 import * as net from "node:net";
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
 let createdSocket: FakeSocket | undefined;
-mock.module("node:net", () => ({
-  ...net,
-  createConnection: (_socketPath: string, onConnect: () => void) => {
-    createdSocket = new FakeSocket();
-    queueMicrotask(onConnect);
-    return createdSocket;
-  },
-}));
+let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">>;
 
-const { DaemonClient, DaemonUnavailableError } = await import("../../src/daemon/client");
-const { DaemonDisconnectError } = await import("../../src/daemon/DaemonDisconnectError");
+beforeEach(() => {
+  createdSocket = undefined;
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
+    createdSocket = new FakeSocket();
+    queueMicrotask(onConnect!);
+    return createdSocket as unknown as net.Socket;
+  });
+});
+
+afterEach(() => {
+  createdSocket?.destroy();
+  createConnectionSpy.mockRestore();
+});
+
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 
 describe("DaemonClient socket error disconnect cause", () => {
   test("surfaces a disconnect cause on each pending request on transport error", async () => {

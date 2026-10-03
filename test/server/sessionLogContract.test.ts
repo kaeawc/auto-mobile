@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   SESSION_LOG_DEFAULT_MAX_BYTES,
   SESSION_LOG_MAX_BYTES_LIMIT,
@@ -14,6 +14,10 @@ import {
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 
 describe("session log contract (#7006)", () => {
+  afterEach(() => {
+    ResourceRegistry.clearResources();
+  });
+
   test("parses every source from one bounded query", () => {
     const request = parseSessionLogQuery("com.example.app", {
       container: "cache",

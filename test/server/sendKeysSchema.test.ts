@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -10,6 +11,8 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { SendKeys } from "../../src/features/action/SendKeys";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+
+isolateToolRegistry();
 
 describe("sendKeysSchema", () => {
   const scoped = {

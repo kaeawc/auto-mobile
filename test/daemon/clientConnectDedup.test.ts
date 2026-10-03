@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as net from "node:net";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -14,21 +14,18 @@ class DeferredSocket extends FakeSocket {
 }
 
 const sockets: DeferredSocket[] = [];
-mock.module("node:net", () => ({
-  ...net,
-  createConnection: (_socketPath: string, onConnect: () => void) => {
-    const socket = new DeferredSocket(onConnect);
-    sockets.push(socket);
-    return socket;
-  },
-}));
-
-const { DaemonClient, DaemonUnavailableError } = await import("../../src/daemon/client");
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 
 let timer: FakeTimer;
 let client: InstanceType<typeof DaemonClient>;
+let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">>;
 
 beforeEach(() => {
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
+    const socket = new DeferredSocket(onConnect!);
+    sockets.push(socket);
+    return socket as unknown as net.Socket;
+  });
   sockets.length = 0;
   timer = new FakeTimer();
   client = new DaemonClient("/fake/socket", 1_000, timer, {}, null, undefined, "win32");
@@ -41,6 +38,7 @@ afterEach(async () => {
   for (const socket of sockets) {
     socket.destroy();
   }
+  createConnectionSpy.mockRestore();
 });
 
 function observe<T>(promise: Promise<T>) {

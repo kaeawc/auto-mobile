@@ -26,6 +26,7 @@ describe("ToolRegistry.registerWithServer", () => {
     await client.close();
     await server.close();
     ToolRegistry.clearServersForTesting();
+    ToolRegistry.clearTools();
   });
 
   async function connect(): Promise<void> {

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import type { AppearanceMode } from "../../../src/models";
 import type { AppearanceConfig } from "../../../src/server/appearanceManager";
@@ -39,27 +39,24 @@ async function flushMicrotasks(): Promise<void> {
  * otherwise-healthy daemon into a restart loop — trigger() must swallow it.
  */
 describe("AppearanceSyncScheduler resilience", () => {
-  let triggerAppearanceSync: () => Promise<void>;
-
-  beforeAll(async () => {
-    mock.module("../../../src/server/appearanceManager", () => ({
-      getAppearanceConfig: async () => {
-        throw new Error("no such table: appearance_configs");
-      },
-      resolveAppearanceMode: async () => "dark",
-    }));
-    ({ triggerAppearanceSync } = await import(
-      `../../../src/utils/appearance/AppearanceSyncScheduler.ts?resilience=${Date.now()}-${Math.random()}`
-    ));
-  });
-
   afterEach(() => {
     mock.restore();
   });
 
-  test("triggerAppearanceSync resolves (does not reject) when the config read fails", async () => {
+  test("trigger resolves (does not reject) when the config read fails", async () => {
+    const getConfig = mock(async (): Promise<AppearanceConfig> => {
+      throw new Error("no such table: appearance_configs");
+    });
+    const scheduler = new AppearanceSyncScheduler(new FakeTimer(), {
+      getConfig,
+      resolveMode: async () => "dark",
+      getTargets: () => [],
+      apply: async () => {},
+    });
     // If trigger() re-threw, this await would reject and fail the test.
-    await expect(triggerAppearanceSync()).resolves.toBeUndefined();
+    await expect(scheduler.trigger()).resolves.toBeUndefined();
+    expect(getConfig).toHaveBeenCalledTimes(1);
+    await scheduler.stop();
   });
 
   test("syncs a same-serial replacement with a new incarnation", async () => {

@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
 import type { RestoreSnapshotResult } from "../../src/features/action/RestoreSnapshot";
@@ -14,6 +15,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
 import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
+
+isolateToolRegistry();
 
 describe("snapshot tool", () => {
   let repository: FakeDeviceSnapshotRepository;

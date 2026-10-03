@@ -1,4 +1,5 @@
 import { DeviceState } from "../../src/features/utility/DeviceState";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   setLaunchAppToolDependencies,
   resetLaunchAppToolDependencies,
@@ -43,6 +44,8 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { logger, LogLevel } from "../../src/utils/logger";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+
+isolateToolRegistry();
 
 /**
  * End-to-end proof that the `--tool-results-no-structured-content` strip runs at

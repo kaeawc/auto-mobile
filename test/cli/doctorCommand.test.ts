@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,6 +28,8 @@ function report(failed = 0): DoctorReport {
     summary: { total: failed, passed: 0, warnings: 0, failed, skipped: 0 },
   };
 }
+
+isolateToolRegistry();
 
 describe("runDoctorCommand", () => {
   test("rejects removed doctor flags before diagnosis with supported daemon remedies", async () => {

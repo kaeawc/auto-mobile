@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { sendKeysSchema } from "../../src/server/interactionTools";
 
 import { getDeviceStateSchema } from "../../src/server/utilityTools";
@@ -12,6 +13,8 @@ import { getCliHelpParameterInfo, getCliHelpSchemaShape } from "../../src/cli";
 import { launchAppSchema } from "../../src/server/appTools";
 import { waitForSchema } from "../../src/server/observeTools";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
+
+isolateToolRegistry();
 
 describe("getCliHelpSchemaShape", () => {
   test("unwraps aliased preprocess schemas for CLI parameter help", () => {

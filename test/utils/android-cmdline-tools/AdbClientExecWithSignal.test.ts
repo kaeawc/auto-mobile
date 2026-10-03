@@ -303,24 +303,27 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       result: new Promise(() => {}),
     });
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+      const internals = client as unknown as AdbClientInternals;
+      internals.isTestMode = false;
+      const result = internals.execWithSignal(
+        "adb",
+        ["shell", "getprop"],
+        undefined,
+        5,
+        undefined,
+        true,
+      );
 
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
-    const result = internals.execWithSignal(
-      "adb",
-      ["shell", "getprop"],
-      undefined,
-      5,
-      undefined,
-      true,
-    );
+      timer.advanceTime(5);
+      timer.advanceTime(1_000);
+      timer.advanceTime(1_000);
 
-    timer.advanceTime(5);
-    timer.advanceTime(1_000);
-    timer.advanceTime(1_000);
-
-    await expect(result).rejects.toBeInstanceOf(AdbCommandTimeoutError);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("did not exit after SIGKILL"));
+      await expect(result).rejects.toBeInstanceOf(AdbCommandTimeoutError);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("did not exit after SIGKILL"));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

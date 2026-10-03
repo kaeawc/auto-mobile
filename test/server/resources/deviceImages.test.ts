@@ -37,6 +37,7 @@ describe("Device Image Resources with Fakes", () => {
 
   afterEach(() => {
     resetAndroidDeviceImageResourceCache();
+    AndroidAvdProvenanceCache.resetForTests();
   });
 
   test("coalesces and caches the full Android device-image resource snapshot", async () => {

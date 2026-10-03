@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { VisionFallback, MAX_VISION_CACHE_ENTRIES } from "../../src/vision/VisionFallback";
 import type {
   VisionFallbackConfig,
@@ -12,7 +12,6 @@ import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
 // whose Anthropic client needs *some* key at construction. A dummy is fine — we
 // override the client with a counting stub before any call, so no request is
 // ever made.
-process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key-not-used";
 
 const config = (overrides: Partial<VisionFallbackConfig> = {}): VisionFallbackConfig => ({
   enabled: true,
@@ -54,16 +53,27 @@ function stubAnalyzer(fallback: VisionFallback, canned: VisionFallbackResult): (
 }
 
 describe("VisionFallback orchestrator", () => {
+  let originalApiKey: string | undefined;
   let timer: FakeTimer;
   let checksums: FakeChecksumCalculator;
 
   beforeEach(() => {
+    originalApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = originalApiKey || "test-key-not-used";
     timer = new FakeTimer();
     // Screenshots are keyed by content; give each path its own digest so the
     // fixtures behave like distinct screens without touching the disk.
     checksums = new FakeChecksumCalculator();
     // Each fixture path stands for a different screen.
     checksums.distinctPerFile = true;
+  });
+
+  afterEach(() => {
+    if (originalApiKey === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      process.env.ANTHROPIC_API_KEY = originalApiKey;
+    }
   });
 
   test("throws when vision fallback is disabled", async () => {

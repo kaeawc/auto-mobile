@@ -1,9 +1,12 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { changeLocalizationSchema, displayConfigSchema } from "../../src/server/utilityTools";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+
+isolateToolRegistry();
 
 test("calendar identifiers accept ICU keywords and reject shell syntax", () => {
   expect(changeLocalizationSchema.safeParse({ calendarSystem: "gregory" }).success).toBe(true);

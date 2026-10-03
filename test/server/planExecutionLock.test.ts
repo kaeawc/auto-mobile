@@ -1,3 +1,4 @@
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -61,6 +62,7 @@ describe("Plan execution lock", () => {
     if (fixture) {
       await fixture.teardown();
     }
+    AndroidAvdProvenanceCache.resetForTests();
     resetDeviceToolsDependencies();
   });
 

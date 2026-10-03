@@ -6,12 +6,20 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 
 describe("MCP Tools Registry", () => {
   let restoreHermeticServer: () => void;
+  const servers: ReturnType<typeof createMcpServer>[] = [];
 
-  afterAll(() => restoreHermeticServer());
+  afterAll(async () => {
+    for (const server of servers) {
+      await server.close();
+    }
+    ToolRegistry.clearTools();
+    restoreHermeticServer();
+  });
 
   beforeAll(() => {
+    ToolRegistry.clearTools();
     restoreHermeticServer = installHermeticServerFixture();
-    createMcpServer();
+    servers.push(createMcpServer());
   });
 
   test("should expose all required MCP tools through the registry", () => {
@@ -38,7 +46,7 @@ describe("MCP Tools Registry", () => {
 
   test("should maintain singleton registry across server instances", () => {
     // This tests the MCP initialization pattern
-    createMcpServer();
+    servers.push(createMcpServer());
 
     const tools1 = ToolRegistry.getToolDefinitions();
     const tools2 = ToolRegistry.getToolDefinitions();

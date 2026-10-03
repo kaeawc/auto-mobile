@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
@@ -12,6 +13,8 @@ import {
   SCREENSHOT_PATH_MIN_LIFETIME_MS,
   MAX_SCREENSHOT_PATH_PROTECTIONS,
 } from "../../src/features/observe/ScreenshotRetention";
+
+isolateToolRegistry();
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ");

@@ -1,3 +1,4 @@
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   setDeviceToolsDependencies,
@@ -11,6 +12,8 @@ import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeDeviceProvisioner } from "../fakes/FakeDeviceProvisioner";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
+
+isolateToolRegistry();
 
 describe("startDevice --create-if-missing wiring", () => {
   let fakeDeviceUtils: FakeDeviceUtils;

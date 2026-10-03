@@ -94,7 +94,8 @@ import {
   type TapOnElementResult,
   type TapOnSelectedElement,
 } from "../models";
-import { ListInstalledApps } from "../features/observe/ListInstalledApps";
+import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
+import { errorMessage } from "../utils/describeUnknownError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -2630,6 +2631,29 @@ const readCompleteTrayAppIds = async (
   ];
 };
 
+const readCompleteIosTrayAppIds = async (
+  device: BootedDevice,
+  signal?: AbortSignal,
+): Promise<string[]> => {
+  throwIfAborted(signal);
+  const inventory = await awaitWhileRequestIsLive(
+    Promise.resolve(
+      getSystemTrayDependencies().appInventoryFactory(device).executeIosDetailedResult?.(),
+    ),
+    signal,
+  );
+  throwIfAborted(signal);
+  if (!inventory?.successful) {
+    const reason = inventory?.error !== undefined ? ` ${errorMessage(inventory.error)}` : "";
+    throw new ActionableError(
+      `Cannot verify notification ownership because the installed apps could not be listed; the installed-app inventory is incomplete.${reason}`,
+    );
+  }
+  return inventory.apps
+    .map(getIosInstalledAppBundleId)
+    .filter((bundleId): bundleId is string => bundleId !== undefined);
+};
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -2828,7 +2852,7 @@ export function registerInteractionTools() {
         installedApps =
           device.platform === "android"
             ? await awaitWhileRequestIsLive(readCompleteTrayAppIds(device, signal), signal)
-            : await awaitWhileRequestIsLive(new ListInstalledApps(device).execute(signal), signal);
+            : await readCompleteIosTrayAppIds(device, signal);
         if (!installedApps.includes(notification.appId)) {
           throw new ActionableError(`App ${notification.appId} is not installed.`);
         }

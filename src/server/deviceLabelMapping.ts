@@ -227,7 +227,6 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
   const sessionManager = DaemonState.getInstance().getSessionManager();
   const sessions = new Set(Object.values(map));
   const released: string[] = [];
-  let firstFailure: { error: unknown } | undefined;
 
   sessions.delete(baseSessionUuid);
 
@@ -241,19 +240,14 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
     // build-context/detector) completes BEFORE the device is returned to the pool and
     // possibly reassigned — otherwise hierarchy/nav broadcasts during the release get
     // recorded under the ended session's uuid. Mirrors the base-session path (#4984).
-    try {
-      await releaseSessionAndDevice(
-        sessionManager,
-        devicePool,
-        deviceId,
-        sessionUuid,
-        PLAN_AUTO_RELEASE_REASON,
-      );
-      released.push(sessionUuid);
-    } catch (error) {
-      logger.warn(`[DeviceLabelMap] Failed to release label session ${sessionUuid}`, error);
-      firstFailure ??= { error };
-    }
+    await releaseSessionAndDevice(
+      sessionManager,
+      devicePool,
+      deviceId,
+      sessionUuid,
+      PLAN_AUTO_RELEASE_REASON,
+    );
+    released.push(sessionUuid);
   }
 
   if (released.length > 0) {
@@ -262,8 +256,5 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
     );
   }
 
-  if (firstFailure) {
-    throw firstFailure.error;
-  }
   return released;
 };

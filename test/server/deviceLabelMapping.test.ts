@@ -75,7 +75,7 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
   });
 
   test.each(["removed", "present", "pool-failure"])(
-    "label release preserves the first error and continues with session %s",
+    "label release propagates the error immediately with session %s",
     async (scenario) => {
       await sessionManager.createSession("base", androidA.deviceId, "android");
       await sessionManager.createSession("base:B", "device-B", "android");
@@ -105,21 +105,14 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
         await expect(releaseDeviceLabelSessions("base")).rejects.toBe(failure);
-        expect(release.mock.calls).toEqual([
-          ["base:B", PLAN_AUTO_RELEASE_REASON],
-          ["base:C", PLAN_AUTO_RELEASE_REASON],
-        ]);
+        expect(release.mock.calls).toEqual([["base:B", PLAN_AUTO_RELEASE_REASON]]);
         expect(poolRelease.mock.calls).toEqual(
-          scenario === "present"
-            ? [["device-C", "base:C"]]
-            : [
-                ["device-B", "base:B"],
-                ["device-C", "base:C"],
-              ],
+          scenario === "present" ? [] : [["device-B", "base:B"]],
         );
-        expect(sessionManager.getSession("base:C")).toBeNull();
-        expect(info).toHaveBeenCalledWith(
-          "[DeviceLabelMap] Released label sessions for base base: base:C",
+        expect(sessionManager.hasSession("base:B")).toBe(scenario === "present");
+        expect(sessionManager.hasSession("base:C")).toBe(true);
+        expect(info).not.toHaveBeenCalledWith(
+          expect.stringContaining("[DeviceLabelMap] Released label sessions"),
         );
         if (scenario === "pool-failure") {
           expect(warn).toHaveBeenCalledWith(expect.stringContaining("base:B"), poolFailure);

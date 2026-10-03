@@ -1,7 +1,7 @@
 import { logger } from "../utils/logger";
 
 export interface SessionReleaseManager {
-  getSession(sessionId: string): object | null;
+  hasSession(sessionId: string): boolean;
   releaseSession(sessionId: string, reason?: string): Promise<string | null>;
 }
 
@@ -24,9 +24,9 @@ export async function releaseSessionAndDevice(
       await manager.releaseSession(sessionId, reason);
     }
   } catch (releaseError) {
-    // Persistence can fail after removal and callbacks have committed. In-flight
-    // release bookkeeping is not live ownership; only getSession gates cleanup.
-    if (manager.getSession(sessionId) === null) {
+    // Routing lookup can hide a terminally fenced session before removal commits.
+    // Any same-UUID incarnation still in the map must retain device ownership.
+    if (!manager.hasSession(sessionId)) {
       try {
         await pool.releaseDevice(deviceId, sessionId);
       } catch (poolError) {

@@ -39,6 +39,7 @@ export interface DaemonStateAccess {
   isInitialized(): boolean;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
+    hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
     getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;

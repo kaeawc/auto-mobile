@@ -124,6 +124,32 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
     }
   });
 
+  test("reset logs close rejection through the injected logger", async () => {
+    const timer = new FakeTimer();
+    const log = new FakeLogger();
+    const instance = disconnectedClient(timer, log);
+    AndroidCtrlProxyClient.registerForTesting(instance, device.deviceId);
+    const error = new Error("boom");
+    const close = spyOn(instance, "close").mockRejectedValue(error);
+    const globalWarn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      AndroidCtrlProxyClient.resetInstances();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(log.at("warn")).toContainEqual({
+        level: "warn",
+        message: "[CTRL_PROXY] Instance reset cleanup failed: boom",
+        args: [error],
+      });
+      expect(globalWarn).not.toHaveBeenCalled();
+    } finally {
+      close.mockRestore();
+      globalWarn.mockRestore();
+    }
+  });
+
   test("device info clears its registration when the socket disconnects before send", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();

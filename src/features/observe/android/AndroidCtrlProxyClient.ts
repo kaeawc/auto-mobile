@@ -2069,6 +2069,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   public static resetInstances(): void {
     for (const instance of AndroidCtrlProxyClient.instances.values()) {
       instance.close().catch((error) => {
+        const logger = instance.loggerInstance;
+        // The local alias keeps the injected logger visible to the catch-convention lint rule.
         logger.warn(`[CTRL_PROXY] Instance reset cleanup failed: ${errorMessage(error)}`, error);
       });
     }

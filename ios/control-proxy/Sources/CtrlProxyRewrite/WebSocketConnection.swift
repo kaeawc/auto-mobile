@@ -389,9 +389,14 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
         let isMasked = (byte1 & 0x80) != 0
         let payloadLength = UInt64(byte1 & 0x7F)
 
-        // Close frame: echo close, then cancel from the send completion (#5677).
+        // Close (§5.5.1): read and unmask the payload before echoing it (#9023).
         if opcode == 0x08 {
-            sendCloseFrame()
+            guard WebSocketFraming.isValidControlFramePayloadLength(payloadLength) else {
+                print("[WebSocketConnection] Close payload too large (\(payloadLength) bytes), closing connection")
+                closeConnection()
+                return
+            }
+            readPayload(length: payloadLength, isMasked: isMasked, opcode: opcode, isFinal: isFinal)
             return
         }
 
@@ -458,17 +463,18 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
         // A zero-length data/continuation frame still matters for FIN (empty final
         // continuation completes a message; empty non-final data opens one).
         guard totalLength > 0 else {
-            if WebSocketFraming.isDataOrContinuation(opcode) {
-                handleDataFrame(opcode: opcode, isFinal: isFinal, payload: Data())
-            } else {
-                receiveWebSocketFrame()
-            }
+            handleEmptyFrame(opcode: opcode, isFinal: isFinal)
             return
         }
 
         receiveFrameBytes(totalLength) { [weak self] data in
             guard let self = self else { return }
             let payload: Data = isMasked ? WebSocketFraming.unmaskFrame(data) : data
+
+            if opcode == 0x08 {
+                self.sendCloseFrame(payload: payload)
+                return
+            }
 
             if WebSocketFraming.isDataOrContinuation(opcode) {
                 self.handleDataFrame(opcode: opcode, isFinal: isFinal, payload: payload)
@@ -486,6 +492,17 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
                 break
             }
             self.receiveWebSocketFrame()
+        }
+    }
+
+    private func handleEmptyFrame(opcode: UInt8, isFinal: Bool) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if opcode == 0x08 {
+            sendCloseFrame(payload: Data())
+        } else if WebSocketFraming.isDataOrContinuation(opcode) {
+            handleDataFrame(opcode: opcode, isFinal: isFinal, payload: Data())
+        } else {
+            receiveWebSocketFrame()
         }
     }
 
@@ -511,9 +528,13 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
         }
     }
 
-    private func sendCloseFrame() {
+    private func sendCloseFrame(payload: Data) {
         dispatchPrecondition(condition: .onQueue(queue))
-        let frame = WebSocketFraming.createWebSocketFrame(data: Data(), opcode: 0x08)
+        let frame = WebSocketFraming.createWebSocketFrame(
+            data: WebSocketFraming.closeReplyPayload(for: payload),
+            opcode: 0x08
+        )
+        // Cancel only after the close reply has been sent (#5677).
         channel.send(frame) { [weak self] _ in
             self?.channel.cancel()
         }

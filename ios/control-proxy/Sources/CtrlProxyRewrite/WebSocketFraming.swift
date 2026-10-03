@@ -30,7 +30,9 @@ enum WebSocketFraming {
         payloadLength: UInt64,
         isMasked: Bool,
         maxPayload: UInt64 = maxFramePayloadLength
-    ) -> Int? {
+    )
+        -> Int?
+    {
         guard payloadLength <= maxPayload else { return nil }
         return Int(payloadLength) + (isMasked ? 4 : 0)
     }
@@ -61,11 +63,15 @@ enum WebSocketFraming {
         inProgressOpcode: UInt8?,
         alreadyBuffered: Int,
         maxTotal: UInt64 = maxFramePayloadLength
-    ) -> FramePreReadDecision {
+    )
+        -> FramePreReadDecision
+    {
         switch opcode {
         case 0x01, 0x02:
             if inProgressOpcode != nil {
-                return .reject("new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open")
+                return .reject(
+                    "new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open"
+                )
             }
             guard declaredPayloadLength <= maxTotal else {
                 return .reject("frame payload exceeds \(maxTotal) bytes")
@@ -107,6 +113,21 @@ enum WebSocketFraming {
 
     static func isValidControlFramePayloadLength(_ payloadLength: UInt64) -> Bool {
         payloadLength <= maxControlFramePayloadLength
+    }
+
+    /// Echo the status and reason (§5.5.1). A one-byte payload cannot contain a
+    /// status code, so reply without a status. In-range payloads are echoed verbatim
+    /// without validating status codes or UTF-8. For oversized input, keep the status
+    /// and shorten the reason to a valid UTF-8 prefix within the control-frame cap.
+    static func closeReplyPayload(for payload: Data) -> Data {
+        guard payload.count != 1 else { return Data() }
+        guard payload.count > Int(maxControlFramePayloadLength) else { return payload }
+
+        var reason = Data(payload.dropFirst(2).prefix(Int(maxControlFramePayloadLength) - 2))
+        while !reason.isEmpty, String(data: reason, encoding: .utf8) == nil {
+            reason.removeLast()
+        }
+        return Data(payload.prefix(2)) + reason
     }
 
     // MARK: - Frame action (post-read)
@@ -156,12 +177,16 @@ enum WebSocketFraming {
         payload: Data,
         inProgressOpcode: inout UInt8?,
         maxTotal: UInt64 = maxFramePayloadLength
-    ) -> AccumulateResult {
+    )
+        -> AccumulateResult
+    {
         switch opcode {
         case 0x01, 0x02:
             // A new data frame is illegal while a fragmented message is still open.
             if inProgressOpcode != nil {
-                return .protocolError("new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open")
+                return .protocolError(
+                    "new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open"
+                )
             }
             guard UInt64(payload.count) <= maxTotal else {
                 return .protocolError("frame payload exceeds \(maxTotal) bytes")

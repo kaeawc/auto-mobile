@@ -1,3 +1,4 @@
+@testable import CtrlProxyRewrite
 import Foundation
 import XCTest
 
@@ -35,7 +36,9 @@ final class FramingParityTests: XCTestCase {
             assertFrame(length: 100_000, opcode: opcode, expectedHeaderLength: 10) { frame, len in
                 XCTAssertEqual(frame[1], 127)
                 var decoded = 0
-                for i in 2 ..< 10 { decoded = decoded << 8 | Int(frame[i]) }
+                for i in 2 ..< 10 {
+                    decoded = decoded << 8 | Int(frame[i])
+                }
                 XCTAssertEqual(decoded, len, "64-bit big-endian length")
             }
         }
@@ -80,10 +83,18 @@ final class FramingParityTests: XCTestCase {
     }
 
     func testControlAndDataOpcodePredicates() {
-        for n: UInt64 in [0, 1, 125] { XCTAssertTrue(RewriteFraming.isValidControl(n), "control len \(n) ok") }
-        for n: UInt64 in [126, 1000] { XCTAssertFalse(RewriteFraming.isValidControl(n), "control len \(n) invalid") }
-        for opcode: UInt8 in [0x00, 0x01, 0x02] { XCTAssertTrue(RewriteFraming.isDataOrContinuation(opcode)) }
-        for opcode: UInt8 in [0x08, 0x09, 0x0A, 0x03] { XCTAssertFalse(RewriteFraming.isDataOrContinuation(opcode)) }
+        for n: UInt64 in [0, 1, 125] {
+            XCTAssertTrue(RewriteFraming.isValidControl(n), "control len \(n) ok")
+        }
+        for n: UInt64 in [126, 1000] {
+            XCTAssertFalse(RewriteFraming.isValidControl(n), "control len \(n) invalid")
+        }
+        for opcode: UInt8 in [0x00, 0x01, 0x02] {
+            XCTAssertTrue(RewriteFraming.isDataOrContinuation(opcode))
+        }
+        for opcode: UInt8 in [0x08, 0x09, 0x0A, 0x03] {
+            XCTAssertFalse(RewriteFraming.isDataOrContinuation(opcode))
+        }
     }
 
     func testFrameActionKnownTags() {
@@ -96,11 +107,58 @@ final class FramingParityTests: XCTestCase {
         XCTAssertEqual(RewriteFraming.frameAction(opcode: 0x0A, unmaskedPayload: payload).tag, "ignore")
     }
 
+    // MARK: - Close reply payload (§5.5.1)
+
+    func testCloseReplyPayloadEchoesEmptyStatusAndReason() {
+        let status = Data([0x03, 0xE8])
+        for payload in [Data(), status, status + Data("done 🙂".utf8)] {
+            XCTAssertEqual(WebSocketFraming.closeReplyPayload(for: payload), payload)
+        }
+    }
+
+    func testCloseReplyPayloadWithOneByteHasNoStatus() {
+        XCTAssertEqual(WebSocketFraming.closeReplyPayload(for: Data([0x03])), Data())
+    }
+
+    func testCloseReplyPayloadTruncatesReasonAtUTF8ScalarBoundary() {
+        let status = Data([0x03, 0xE8])
+        for scalar in ["é", "€", "🙂"] {
+            let scalarBytes = Data(scalar.utf8)
+            for keptBytes in 0 ..< scalarBytes.count {
+                let prefix = Data(repeating: 0x61, count: 123 - keptBytes)
+                let payload = status + prefix + scalarBytes + Data("suffix".utf8)
+                let reply = WebSocketFraming.closeReplyPayload(for: payload)
+
+                XCTAssertEqual(reply, status + prefix)
+                XCTAssertLessThanOrEqual(reply.count, 125)
+                XCTAssertNotNil(String(data: reply.dropFirst(2), encoding: .utf8))
+            }
+        }
+    }
+
+    func testCloseReplyPayloadKeepsCompleteScalarAtLimit() {
+        let status = Data([0x03, 0xE8])
+        let reason = Data(repeating: 0x61, count: 119) + Data("🙂".utf8)
+
+        XCTAssertEqual(WebSocketFraming.closeReplyPayload(for: status + reason + Data("suffix".utf8)), status + reason)
+    }
+
+    func testCloseReplyPayloadEchoesUnvalidatedInRangeBytes() {
+        let payload = Data([0x00, 0x01, 0xFF])
+
+        XCTAssertEqual(WebSocketFraming.closeReplyPayload(for: payload), payload)
+    }
+
     // MARK: - Pre-read admission (documented decisions)
 
     func testPreReadDecisions() {
         func tag(_ opcode: UInt8, _ len: UInt64, _ inProgress: UInt8?, _ buffered: Int) -> String {
-            RewriteFraming.preReadDecision(opcode: opcode, declaredPayloadLength: len, inProgressOpcode: inProgress, alreadyBuffered: buffered).tag
+            RewriteFraming.preReadDecision(
+                opcode: opcode,
+                declaredPayloadLength: len,
+                inProgressOpcode: inProgress,
+                alreadyBuffered: buffered
+            ).tag
         }
         XCTAssertEqual(tag(0x01, 10, nil, 0), "read", "data, none open")
         XCTAssertEqual(tag(0x01, 10, 0x01, 0), "reject", "data while a message is open")
@@ -114,8 +172,22 @@ final class FramingParityTests: XCTestCase {
 
     func testAccumulateDecisions() {
         let he = Data("he".utf8), llo = Data("llo".utf8), bang = Data("!".utf8), hello = Data("hello".utf8)
-        func acc(_ buffer: Data, _ opcode: UInt8, _ isFinal: Bool, _ payload: Data, _ inProgress: UInt8?) -> (tag: String, data: Data?) {
-            let r = RewriteFraming.accumulate(buffer: buffer, opcode: opcode, isFinal: isFinal, payload: payload, inProgressOpcode: inProgress)
+        func acc(
+            _ buffer: Data,
+            _ opcode: UInt8,
+            _ isFinal: Bool,
+            _ payload: Data,
+            _ inProgress: UInt8?
+        )
+            -> (tag: String, data: Data?)
+        {
+            let r = RewriteFraming.accumulate(
+                buffer: buffer,
+                opcode: opcode,
+                isFinal: isFinal,
+                payload: payload,
+                inProgressOpcode: inProgress
+            )
             return (r.tag, r.data)
         }
         // Single unfragmented text message → delivered whole.
@@ -138,9 +210,17 @@ final class FramingParityTests: XCTestCase {
         let partialHeader = Data("GET /health HTTP/1.1\r\nHost: local".utf8)
         let withBody = Data("POST /sdk-events HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello".utf8)
         let partialBody = Data("POST /sdk-events HTTP/1.1\r\nContent-Length: 5\r\n\r\nhel".utf8)
-        XCTAssertEqual(RewriteFraming.completeHTTPRequestLength(in: bodyless), bodyless.count, "complete bodyless request")
+        XCTAssertEqual(
+            RewriteFraming.completeHTTPRequestLength(in: bodyless),
+            bodyless.count,
+            "complete bodyless request"
+        )
         XCTAssertNil(RewriteFraming.completeHTTPRequestLength(in: partialHeader), "incomplete header → nil")
-        XCTAssertEqual(RewriteFraming.completeHTTPRequestLength(in: withBody), withBody.count, "complete request with body")
+        XCTAssertEqual(
+            RewriteFraming.completeHTTPRequestLength(in: withBody),
+            withBody.count,
+            "complete request with body"
+        )
         XCTAssertNil(RewriteFraming.completeHTTPRequestLength(in: partialBody), "incomplete body → nil")
     }
 
@@ -167,9 +247,15 @@ final class FramingParityTests: XCTestCase {
     func testWireErrorMessagesNonEmpty() {
         let fieldX = FramingTestKey(stringValue: "x")
         let errors: [Error] = [
-            DecodingError.typeMismatch(Int.self, .init(codingPath: [fieldX], debugDescription: "Expected to decode Int")),
+            DecodingError.typeMismatch(
+                Int.self,
+                .init(codingPath: [fieldX], debugDescription: "Expected to decode Int")
+            ),
             DecodingError.valueNotFound(String.self, .init(codingPath: [fieldX], debugDescription: "Cannot get value")),
-            DecodingError.keyNotFound(fieldX, .init(codingPath: [], debugDescription: "No value associated with key x")),
+            DecodingError.keyNotFound(
+                fieldX,
+                .init(codingPath: [], debugDescription: "No value associated with key x")
+            ),
             NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "plain error"]),
         ]
         for error in errors {
@@ -182,7 +268,10 @@ final class FramingParityTests: XCTestCase {
             RewriteFraming.extractRequestId(from: Data(#"{"requestId":"abc-123","type":"request_screenshot"}"#.utf8)),
             "abc-123"
         )
-        XCTAssertNil(RewriteFraming.extractRequestId(from: Data(#"{"type":"request_screenshot"}"#.utf8)), "no requestId")
+        XCTAssertNil(
+            RewriteFraming.extractRequestId(from: Data(#"{"type":"request_screenshot"}"#.utf8)),
+            "no requestId"
+        )
         XCTAssertNil(RewriteFraming.extractRequestId(from: Data(#"{"requestId":42}"#.utf8)), "non-string requestId")
         XCTAssertNil(RewriteFraming.extractRequestId(from: Data(#"[1,2,3]"#.utf8)), "not an object")
         XCTAssertNil(RewriteFraming.extractRequestId(from: Data("not json".utf8)), "invalid json")

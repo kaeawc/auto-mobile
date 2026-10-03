@@ -46,7 +46,31 @@ describe("dispatchAndroidCoordinateTap", () => {
     await dispatchAndroidCoordinateTap(client, adb, 10, 20, 10);
 
     expect(adb.getExecutedCommands()).toEqual(["shell input touchscreen tap 10 20"]);
+    expect(adb.getCommandCalls()[0].timeoutMs).toBeUndefined();
   });
+
+  test.each([false, true])(
+    "covers a long press in the ADB fallback (fenced %s)",
+    async (fenced) => {
+      const adb = new FakeAdbExecutor();
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
+      };
+
+      await dispatchAndroidCoordinateTap(
+        client,
+        adb,
+        10,
+        20,
+        20000,
+        undefined,
+        undefined,
+        fenced ? () => {} : undefined,
+      );
+
+      expect(adb.getCommandCalls()[0].timeoutMs).toBeGreaterThanOrEqual(22000);
+    },
+  );
 
   test("does not fall back to ADB on a successful tap", async () => {
     const adb = new FakeAdbExecutor();
@@ -249,19 +273,20 @@ describe("androidDisplayTapDispatch", () => {
   );
 
   test.each([
-    ["tap", undefined, "tap 10 20", 1],
-    ["longPress", async () => false, "swipe 10 20 10 20 800", 1],
-    ["doubleTap", undefined, "tap 10 20", 2],
+    ["tap", undefined, "tap 10 20", 1, undefined],
+    ["longPress", async () => false, "swipe 10 20 10 20 800", 1, undefined],
+    ["longPress", async () => false, "swipe 10 20 10 20 20000", 1, 20000],
+    ["doubleTap", undefined, "tap 10 20", 2, undefined],
   ] as const)(
     "preserves ADB %s routing without display capability",
-    async (action, supportsCommand, input, count) => {
+    async (action, supportsCommand, input, count, duration) => {
       const adb = new FakeAdbExecutor();
       const onDispatched = mock(() => {});
       const requestTapCoordinates = mock(async () => ({ success: true }));
       const dispatch = await androidDisplayTapDispatch(
         { supportsCommand, requestTapCoordinates },
         adb,
-        { action },
+        { action, duration },
         { target, onDispatched },
       );
 
@@ -272,6 +297,11 @@ describe("androidDisplayTapDispatch", () => {
         Array.from({ length: count }, () => `shell input touchscreen -d 2 ${input}`),
       );
       expect(onDispatched).toHaveBeenCalledTimes(count);
+      if (action === "longPress" && duration === 20000) {
+        expect(adb.getCommandCalls()[0].timeoutMs).toBeGreaterThanOrEqual(22000);
+      } else if (action !== "longPress") {
+        expect(adb.getCommandCalls()[0].timeoutMs).toBeUndefined();
+      }
     },
   );
 });

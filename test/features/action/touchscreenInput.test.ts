@@ -39,5 +39,25 @@ describe("touchscreen input", () => {
   test("accepts empty command output", async () => {
     const adb = new FakeAdbExecutor();
     await expect(executeTouchscreenInput(adb, "tap 334 1281", 0)).resolves.toBeUndefined();
+    expect(adb.getCommandCalls()[0].timeoutMs).toBeUndefined();
+  });
+
+  test.each([false, true])("passes an explicit timeout to ADB (fenced %s)", async (fenced) => {
+    const adb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    let assertions = 0;
+    const assertCurrent = () => {
+      assertions++;
+    };
+    await executeTouchscreenInput(
+      adb,
+      "swipe 10 20 10 20 20000",
+      2,
+      controller.signal,
+      fenced ? assertCurrent : undefined,
+      { timeoutMs: 22000 },
+    );
+    expect(adb.getCommandCalls()[0]).toMatchObject({ timeoutMs: 22000, signal: controller.signal });
+    expect(assertions).toBe(fenced ? 1 : 0);
   });
 });

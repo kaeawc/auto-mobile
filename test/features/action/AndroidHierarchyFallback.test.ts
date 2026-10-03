@@ -5,16 +5,19 @@ import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const path = "/data/local/tmp/automobile-hierarchy-test.xml";
 const xml = (body: string) => `<?xml version="1.0"?><hierarchy rotation="0">${body}</hierarchy>`;
 const node = (text: string, bounds = "[0,0][100,100]", id = "com.test:id/row") =>
   `<node package="com.test" class="android.widget.Button" resource-id="${id}" text="${text}" bounds="${bounds}" clickable="true"/>`;
-function fixture(contents = xml(node("Missing"))) {
-  const adb = new FakeAdbClient();
+function fixture(
+  contents = xml(node("Missing")),
+  adb = new FakeAdbClient(),
+  timer = new FakeTimer(),
+) {
   adb.setForegroundApp({ packageName: "com.test", userId: 0 });
   adb.setCommandResult(`shell cat ${path}`, contents);
-  const timer = new FakeTimer();
   const original: ViewHierarchyResult = {
     hierarchy: {
       node: {
@@ -54,6 +57,73 @@ describe("Android hierarchy fallback", () => {
     expect(result.sources).toEqual(["control-proxy", "uiautomator"]);
     expect(original.frameContext).toBe("native-frame");
     expect(adb.wasCommandExecuted(`shell rm -f ${path}`)).toBe(true);
+    const cleanup = adb.getLastCommandCall();
+    expect(cleanup?.timeoutMs).toBeGreaterThanOrEqual(1000);
+    expect(cleanup?.noRetry).toBe(true);
+  });
+  test("cleans up when the dump exhausts the request deadline", async () => {
+    const timer = new FakeTimer();
+    class DeadlineConsumingAdb extends FakeAdbClient {
+      override async execute(args: string[], options?: AdbExecuteOptions) {
+        const result = await super.execute(args, options);
+        if (args.join(" ") === `shell uiautomator dump ${path}`) {
+          timer.advanceTime(1001);
+        }
+        return result;
+      }
+    }
+    const adb = new DeadlineConsumingAdb();
+    const { run, original } = fixture(undefined, adb, timer);
+    expect(await run()).toBe(original);
+    expect(adb.wasCommandExecuted(`shell cat ${path}`)).toBe(false);
+    expect(adb.wasCommandExecuted(`shell rm -f ${path}`)).toBe(true);
+    const cleanup = adb.getLastCommandCall();
+    expect(cleanup?.timeoutMs).toBeGreaterThanOrEqual(1000);
+    expect(cleanup?.timeoutMs).toBeLessThanOrEqual(2000);
+    expect(cleanup?.noRetry).toBe(true);
+  });
+  test("cleanup failure preserves the supplemented result", async () => {
+    const { run, adb } = fixture();
+    adb.setCommandError(`shell rm -f ${path}`, new Error("cleanup denied"));
+    const result = await run();
+    expect(result.sources).toEqual(["control-proxy", "uiautomator"]);
+    expect(
+      new DefaultElementParser()
+        .flattenViewHierarchy(result)
+        .some((x) => x.element.text === "Missing"),
+    ).toBe(true);
+    expect(adb.wasCommandExecuted(`shell rm -f ${path}`)).toBe(true);
+  });
+  test("cancellation during a dump still attempts cleanup within its grace budget", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    class CancellingAdb extends FakeAdbClient {
+      override async execute(args: string[], options?: AdbExecuteOptions) {
+        const result = await super.execute(args, options);
+        if (args.join(" ") === `shell uiautomator dump ${path}`) {
+          timer.advanceTime(1001);
+          controller.abort();
+        }
+        if (args.join(" ") === `shell rm -f ${path}`) {
+          timer.advanceTime(options?.timeoutMs ?? 0);
+          throw new Error("cleanup timed out");
+        }
+        return result;
+      }
+    }
+    const adb = new CancellingAdb();
+    const { run } = fixture(undefined, adb, timer);
+    await expect(run(controller.signal)).rejects.toThrow("Operation cancelled");
+    expect(adb.wasCommandExecuted(`shell cat ${path}`)).toBe(false);
+    expect(adb.wasCommandExecuted(`shell rm -f ${path}`)).toBe(true);
+    const cleanup = adb.getLastCommandCall();
+    expect(cleanup?.signal).toBeDefined();
+    expect(cleanup?.signal?.aborted).toBe(false);
+    expect(cleanup?.signal).not.toBe(controller.signal);
+    expect(cleanup?.noRetry).toBe(true);
+    expect(cleanup?.timeoutMs).toBeGreaterThanOrEqual(1000);
+    expect(cleanup?.timeoutMs).toBeLessThanOrEqual(2000);
+    expect(timer.now() - 1001).toBe(cleanup?.timeoutMs);
   });
   test("deduplicates matching native nodes but retains repeated IDs at other bounds", async () => {
     const { original, run } = fixture(xml(node("Same") + node("Other", "[0,100][100,200]")));

@@ -8,6 +8,8 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { logger } from "../../utils/logger";
 import { DefaultElementParser } from "../utility/ElementParser";
 
+const DUMP_CLEANUP_TIMEOUT_MS = 1500;
+
 export interface AndroidHierarchyFallbackDeps {
   adb: Pick<AdbExecutor, "execute" | "getForegroundApp">;
   timer: Timer;
@@ -149,25 +151,21 @@ export async function supplementAndroidHierarchy(
     logger.debug("[HierarchyFallback] Could not supplement incomplete CtrlProxy hierarchy", error);
     return original;
   } finally {
-    await removeDump(deps, path, deadline);
+    await removeDump(deps, path);
   }
 }
 
-async function removeDump(
-  deps: AndroidHierarchyFallbackDeps,
-  path: string,
-  deadline: number,
-): Promise<void> {
-  const remaining = deadline - deps.timer.now();
-  if (remaining > 0) {
-    try {
-      await deps.adb.execute(["shell", "rm", "-f", path], {
-        timeoutMs: Math.min(remaining, 100),
-        noRetry: true,
-      });
-    } catch (error) {
-      logger.debug("[HierarchyFallback] Could not remove temporary dump", error);
-    }
+async function removeDump(deps: AndroidHierarchyFallbackDeps, path: string): Promise<void> {
+  try {
+    await deps.adb.execute(["shell", "rm", "-f", path], {
+      timeoutMs: DUMP_CLEANUP_TIMEOUT_MS,
+      // Override ADB's ambient request signal so cancellation still permits bounded cleanup.
+      signal: new AbortController().signal,
+      noRetry: true,
+    });
+  } catch (error) {
+    // Best-effort removal of a temporary dump must not replace the capture result or cancellation.
+    logger.debug("[HierarchyFallback] Could not remove temporary dump", error);
   }
 }
 

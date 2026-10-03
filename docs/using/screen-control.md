@@ -64,9 +64,25 @@ In the table, `?` marks optional parameters.
 | `input/gestureMove`  | `platform`, `deviceId?`, `gestureId`, `x`, `y`, `cancel?` — Android streaming drag                                                            |
 | `input/gestureEnd`   | `platform`, `deviceId?`, `gestureId`, `x`, `y`, `cancel?` — Android streaming drag                                                            |
 
-`duration` for taps is an optional finite number. `durationMs` for swipes is
-optional, defaults to 300 milliseconds, and must be between 1 and 60000 when
-provided. `app_switch` is an alias of `recent`.
+### Button support
+
+| Button        | Android | iOS |
+| ------------- | ------- | --- |
+| `home`        | Yes     | Yes |
+| `back`        | Yes     | Yes |
+| `menu`        | Yes     | No  |
+| `power`       | Yes     | Yes |
+| `volume_up`   | Yes     | Yes |
+| `volume_down` | Yes     | Yes |
+| `recent`      | Yes     | Yes |
+| `app_switch`  | Yes     | Yes |
+
+`app_switch` is an alias of `recent`. Button availability can also depend on the
+device and its runner; iOS has no menu hardware button.
+
+`duration` for taps is an optional integer number of milliseconds.
+`durationMs` for swipes is an optional integer between 1 and 60000 milliseconds;
+it defaults to 300 milliseconds.
 
 All three gesture methods require a non-empty string `gestureId` and numeric
 `x`/`y`. Send a start, moves, and an end with the same `gestureId`. The parser

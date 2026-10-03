@@ -25,7 +25,7 @@ import {
   IosPhysicalPermissions,
   type IosPhysicalPrivacyClient,
 } from "./IosPhysicalPermissions";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosPermissionsKind } from "../../utils/ios-cmdline-tools/IosPermissionsBackend";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 
 /**
@@ -218,7 +218,7 @@ export class AppPermissions {
 
     // Physical iOS devices cannot use simctl privacy; route reset through the
     // CtrlProxy XCUITest runner (grant/revoke surface a clear "reset only" failure).
-    if (!isIosSimulatorUdid(this.device.deviceId)) {
+    if (resolveIosPermissionsKind(this.device) === "physical") {
       return this.setIosPhysicalPermissions(appId, action, permissions);
     }
 
@@ -403,7 +403,7 @@ export class AppPermissions {
     // Physical iOS devices expose no readable TCC store, so permission state
     // cannot be queried; mirror the set path's simulator/physical split and
     // surface a physical-aware failure instead of the simulator-only message.
-    if (!isIosSimulatorUdid(this.device.deviceId)) {
+    if (resolveIosPermissionsKind(this.device) === "physical") {
       return {
         success: false,
         appId: appId.trim(),

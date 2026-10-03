@@ -60,11 +60,11 @@ function functionName(node: FunctionNode): string {
 }
 function isEnvironment(node: ts.Node): boolean {
   if (ts.isIdentifier(node)) {
-    return /^(env|environment|childEnv)$/.test(node.text);
+    return /(?:env|environment)$/i.test(node.text);
   }
   return (
     ts.isPropertyAccessExpression(node) &&
-    (node.getText() === "process.env" || /^(env|environment)$/.test(node.name.text))
+    (node.getText() === "process.env" || /(?:env|environment)$/i.test(node.name.text))
   );
 }
 function isWrite(node: ts.Node): boolean {
@@ -80,17 +80,50 @@ function extractReads(sources: string[]): Set<string> {
   const files = sources
     .filter(
       (source) =>
-        source.includes("env") || source.includes("AUTOMOBILE_") || source.includes("AUTO_MOBILE_"),
+        source.toLowerCase().includes("env") ||
+        source.includes("AUTOMOBILE_") ||
+        source.includes("AUTO_MOBILE_"),
     )
     .map((source) => ts.createSourceFile("env.ts", source, ts.ScriptTarget.Latest, true));
   const exported = new Map<string, ts.Expression>();
   const locals = new Map<ts.SourceFile, Map<string, ts.Expression>>();
+  const imports = new Map<ts.SourceFile, Map<string, string>>();
+  const namespaces = new Map<ts.SourceFile, Set<string>>();
+  const typedEnvironments = new Map<ts.SourceFile, Set<string>>();
   const nodes: ts.Node[] = [];
   for (const file of files) {
     const bindings = new Map<string, ts.Expression>();
     locals.set(file, bindings);
+    const imported = new Map<string, string>();
+    const namespace = new Set<string>();
+    const typed = new Set<string>();
+    imports.set(file, imported);
+    namespaces.set(file, namespace);
+    typedEnvironments.set(file, typed);
     const visit = (node: ts.Node): void => {
       nodes.push(node);
+      if (ts.isImportDeclaration(node)) {
+        const named = node.importClause?.namedBindings;
+        if (named && ts.isNamedImports(named)) {
+          for (const binding of named.elements) {
+            imported.set(binding.name.text, (binding.propertyName ?? binding.name).text);
+          }
+        } else if (named && ts.isNamespaceImport(named)) {
+          namespace.add(named.name.text);
+        }
+      }
+      if (
+        (ts.isParameter(node) ||
+          ts.isVariableDeclaration(node) ||
+          ts.isPropertyDeclaration(node) ||
+          ts.isPropertySignature(node)) &&
+        ts.isIdentifier(node.name) &&
+        node.type &&
+        ts.isTypeReferenceNode(node.type) &&
+        /^(?:NodeJS\.)?ProcessEnv$/.test(node.type.typeName.getText())
+      ) {
+        typed.add(node.name.text);
+      }
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         bindings.set(node.name.text, node.initializer);
         if (
@@ -103,10 +136,15 @@ function extractReads(sources: string[]): Set<string> {
           exported.set(node.name.text, node.initializer);
         }
       }
+      if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        bindings.set(node.name.text, node.initializer);
+      }
       ts.forEachChild(node, visit);
     };
     visit(file);
   }
+  const importedName = (node: ts.Identifier): string =>
+    imports.get(node.getSourceFile())?.get(node.text) ?? node.text;
   const values = (node: ts.Node | undefined, depth = 0): string[] => {
     if (!node || depth > 12) {
       return [];
@@ -116,7 +154,7 @@ function extractReads(sources: string[]): Set<string> {
     }
     if (ts.isIdentifier(node)) {
       return values(
-        locals.get(node.getSourceFile())?.get(node.text) ?? exported.get(node.text),
+        locals.get(node.getSourceFile())?.get(node.text) ?? exported.get(importedName(node)),
         depth + 1,
       );
     }
@@ -134,6 +172,12 @@ function extractReads(sources: string[]): Set<string> {
       return [...values(node.whenTrue, depth + 1), ...values(node.whenFalse, depth + 1)];
     }
     if (ts.isPropertyAccessExpression(node)) {
+      if (
+        ts.isIdentifier(node.expression) &&
+        namespaces.get(node.getSourceFile())?.has(node.expression.text)
+      ) {
+        return values(exported.get(node.name.text), depth + 1);
+      }
       const binding = ts.isIdentifier(node.expression)
         ? (locals.get(node.getSourceFile())?.get(node.expression.text) ??
           exported.get(node.expression.text))
@@ -156,23 +200,31 @@ function extractReads(sources: string[]): Set<string> {
     }
     return [];
   };
-  const environmentAliases = new Set<ts.Node>();
-  for (const node of nodes) {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer &&
-      isEnvironment(node.initializer)
-    ) {
-      environmentAliases.add(node.name);
+  const environment = (node: ts.Node, depth = 0): boolean => {
+    if (depth > 12) {
+      return false;
     }
-  }
-  const environment = (node: ts.Node): boolean =>
-    isEnvironment(node) ||
-    (ts.isIdentifier(node) &&
-      [...environmentAliases].some(
-        (alias) => alias.getSourceFile() === node.getSourceFile() && alias.getText() === node.text,
-      ));
+    if (isEnvironment(node)) {
+      return true;
+    }
+    if (
+      ts.isAsExpression(node) ||
+      ts.isParenthesizedExpression(node) ||
+      ts.isSatisfiesExpression(node)
+    ) {
+      return environment(node.expression, depth + 1);
+    }
+    const name = ts.isIdentifier(node)
+      ? node.text
+      : ts.isPropertyAccessExpression(node)
+        ? node.name.text
+        : undefined;
+    if (name && typedEnvironments.get(node.getSourceFile())?.has(name)) {
+      return true;
+    }
+    const initializer = name ? locals.get(node.getSourceFile())?.get(name) : undefined;
+    return initializer ? environment(initializer, depth + 1) : false;
+  };
   const reads = new Set<string>();
   const add = (names: string[]): void => {
     for (const name of names) {
@@ -282,7 +334,9 @@ function extractReads(sources: string[]): Set<string> {
       }
       const name = ts.isPropertyAccessExpression(node.expression)
         ? node.expression.name.text
-        : node.expression.getText();
+        : ts.isIdentifier(node.expression)
+          ? importedName(node.expression)
+          : node.expression.getText();
       const indices = helpers.get(name);
       if (indices) {
         for (const index of indices) {
@@ -305,6 +359,43 @@ function extractReads(sources: string[]): Set<string> {
   return reads;
 }
 
+function tableCells(line: string): string[] {
+  const cells: string[] = [];
+  let start = 0;
+  let escaped = false;
+  for (let index = 0; index < line.length; index++) {
+    const character = line[index];
+    if (character === "|" && !escaped) {
+      cells.push(line.slice(start, index));
+      start = index + 1;
+    }
+    escaped = character === "\\" && !escaped;
+  }
+  cells.push(line.slice(start));
+  return cells.slice(1, -1);
+}
+
+function tableViolations(markdown: string): string[] {
+  const errors: string[] = [];
+  let expected: number | undefined;
+  let fenced = false;
+  for (const [index, line] of markdown.split("\n").entries()) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+    }
+    if (fenced || !line.startsWith("|")) {
+      expected = undefined;
+      continue;
+    }
+    const count = tableCells(line).length;
+    expected ??= count;
+    if (count !== expected) {
+      errors.push(`Line ${index + 1}: expected ${expected} cells, found ${count}`);
+    }
+  }
+  return errors;
+}
+
 /** Only first cells of table rows and headings declare variables; examples/prose do not. */
 function documentedNames(markdown: string): Set<string> {
   const names = new Set<string>();
@@ -318,7 +409,7 @@ function documentedNames(markdown: string): Set<string> {
       continue;
     }
     const declaration = line.startsWith("|")
-      ? line.split("|")[1]
+      ? tableCells(line)[0]
       : /^#{1,6}\s/.test(line)
         ? line
         : "";
@@ -350,17 +441,100 @@ function violations(
 describe("environment variable documentation", () => {
   let reads: Set<string>;
   let docs: Set<string>;
+  let markdown: string;
   beforeAll(() => {
     reads = extractReads(
       sourceFiles(resolve(ROOT, "src")).map((file) => readFileSync(file, "utf8")),
     );
-    docs = documentedNames(
-      readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8"),
-    );
+    markdown = readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8");
+    docs = documentedNames(markdown);
   }, 15_000);
   test("every source read is public documentation or explicitly internal", () => {
     expect(violations(reads, docs, INTERNAL)).toEqual([]);
     expect(Object.values(INTERNAL).every((reason) => reason.length > 0)).toBe(true);
+  });
+  test("every documentation table row has the header's cell count", () => {
+    expect(tableViolations(markdown)).toEqual([]);
+    expect(tableViolations("| A | B |\n| --- | --- |\n| x | `a \\|\\| b` |\n")).toEqual([]);
+    expect(tableViolations("| A | B |\n| --- | --- |\n| x | `a || b` |\n")).toEqual([
+      "Line 3: expected 2 cells, found 4",
+    ]);
+    expect(tableCells(String.raw`| x | even \\| y |`)).toHaveLength(3);
+    expect(tableViolations("```\n| ignored |\n| x | y |\n```\n| A | B |\n| x | y |\n")).toEqual([]);
+  });
+  test("injected environment names, types and alias chains cover every access form", () => {
+    const found = extractReads([
+      `
+        function injected(processEnv: NodeJS.ProcessEnv, runtimeENV: unknown, configEnvironment: unknown) {
+          processEnv["AUTOMOBILE_PARAM_BRACKET"];
+          processEnv.AUTOMOBILE_PARAM_DOT;
+          const { AUTOMOBILE_PARAM_DESTRUCTURED: renamed } = processEnv;
+          runtimeENV.AUTOMOBILE_SUFFIX;
+          configEnvironment["AUTOMOBILE_ENVIRONMENT_SUFFIX"];
+          processEnv.AUTOMOBILE_PARAM_WRITE = "1";
+          processEnv["AUTOMOBILE_BRACKET_WRITE"] = "1";
+        }
+        const settings: ProcessEnv = {};
+        settings.AUTOMOBILE_TYPED;
+        class Reader { private config: NodeJS.ProcessEnv; read() { return this.config.AUTOMOBILE_PROPERTY; } }
+        class AliasReader { private settings = process.env; read() { return this.settings.AUTOMOBILE_PROPERTY_ALIAS; } }
+        const first = process.env;
+        const second = first;
+        const third = (second as NodeJS.ProcessEnv);
+        const KEY = "AUTOMOBILE_CHAIN";
+        third[KEY];
+        const { AUTOMOBILE_CHAIN_DESTRUCTURED } = third;
+        third.AUTOMOBILE_CHAIN_WRITE = "1";
+        const cycleA = cycleB;
+        const cycleB = cycleA;
+        cycleA.AUTOMOBILE_CYCLE;
+        const ordinary = {};
+        ordinary.AUTOMOBILE_NOT_ENV;
+      `,
+      `const settings = {}; settings.AUTOMOBILE_OTHER_FILE;`,
+    ]);
+    expect([...found].sort()).toEqual([
+      "AUTOMOBILE_CHAIN",
+      "AUTOMOBILE_CHAIN_DESTRUCTURED",
+      "AUTOMOBILE_ENVIRONMENT_SUFFIX",
+      "AUTOMOBILE_PARAM_BRACKET",
+      "AUTOMOBILE_PARAM_DESTRUCTURED",
+      "AUTOMOBILE_PARAM_DOT",
+      "AUTOMOBILE_PROPERTY",
+      "AUTOMOBILE_PROPERTY_ALIAS",
+      "AUTOMOBILE_SUFFIX",
+      "AUTOMOBILE_TYPED",
+    ]);
+  });
+  test("named and namespace imports resolve exported keys under local aliases", () => {
+    const found = extractReads([
+      'export const KEY = "AUTOMOBILE_IMPORTED_ALIAS"; export const OTHER = "AUTOMOBILE_NAMESPACE";',
+      `
+        import { KEY as RENAMED } from "./keys";
+        import * as C from "./keys";
+        process.env[RENAMED];
+        process.env[C.OTHER];
+        process.env[C.OTHER] = "1";
+      `,
+    ]);
+    expect([...found].sort()).toEqual(["AUTOMOBILE_IMPORTED_ALIAS", "AUTOMOBILE_NAMESPACE"]);
+  });
+  test("imported helper aliases retain inferred reads and getEnvVar recognition", () => {
+    const found = extractReads([
+      `export function readPositiveIntEnv(settings: NodeJS.ProcessEnv, key: string) { return settings[key]; }`,
+      `
+        import { readPositiveIntEnv as readInt, getEnvVar as getValue } from "./reader";
+        import * as R from "./reader";
+        readInt(process.env, "AUTOMOBILE_ALIASED_HELPER");
+        R.readPositiveIntEnv(process.env, "AUTOMOBILE_NAMESPACE_HELPER");
+        getValue("AUTOMOBILE_ALIASED_GET_ENV");
+      `,
+    ]);
+    expect([...found].sort()).toEqual([
+      "AUTOMOBILE_ALIASED_GET_ENV",
+      "AUTOMOBILE_ALIASED_HELPER",
+      "AUTOMOBILE_NAMESPACE_HELPER",
+    ]);
   });
   test("extractor recognizes reads and ignores writes, comments and messages", () => {
     const found = extractReads([

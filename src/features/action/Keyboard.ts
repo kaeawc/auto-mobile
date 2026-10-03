@@ -55,11 +55,22 @@ export interface KeyboardHierarchyCache {
   invalidateCache(): void;
 }
 
-class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
-  private viewHierarchy: ViewHierarchy;
+export function selectKeyboardHierarchyCache(
+  platform: BootedDevice["platform"],
+  iosCache: () => KeyboardHierarchyCache,
+  androidCache: () => KeyboardHierarchyCache,
+): KeyboardHierarchyCache {
+  return platform === "ios" ? iosCache() : androidCache();
+}
+
+export class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
+  private viewHierarchy: Pick<ViewHierarchy, "getViewHierarchy">;
   private cache: KeyboardHierarchyCache;
 
-  constructor(viewHierarchy: ViewHierarchy, cache: KeyboardHierarchyCache) {
+  constructor(
+    viewHierarchy: Pick<ViewHierarchy, "getViewHierarchy">,
+    cache: KeyboardHierarchyCache,
+  ) {
     this.viewHierarchy = viewHierarchy;
     this.cache = cache;
   }
@@ -100,6 +111,7 @@ export class Keyboard {
   // fixed post-action sleep always sampled the stale state (#4238). Poll instead:
   // return as soon as the observed state matches, bounded by the timeout below.
   private static readonly STATE_CONFIRMATION_TIMEOUT_MS = 2_000;
+  private static readonly IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS = 2_000;
   private static readonly STATE_CONFIRMATION_POLL_INTERVAL_MS = 100;
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -130,7 +142,11 @@ export class Keyboard {
     } else {
       this.hierarchyProvider = new DefaultKeyboardHierarchyProvider(
         new ViewHierarchy(device, adbFactory),
-        AndroidCtrlProxyClient.getInstance(device, adbFactory),
+        selectKeyboardHierarchyCache(
+          device.platform,
+          () => IOSCtrlProxyClient.getInstance(device),
+          () => AndroidCtrlProxyClient.getInstance(device, adbFactory),
+        ),
       );
     }
   }
@@ -213,12 +229,16 @@ export class Keyboard {
 
   private async isIOSKeyboardOnScreen(signal?: AbortSignal): Promise<boolean | undefined> {
     try {
-      // Do not forceFresh here: the existing provider invalidates the Android cache.
-      const hierarchy = await awaitWhileRequestIsLive(
-        this.hierarchyProvider.getViewHierarchy(signal),
-        signal,
+      const timeoutMs = Keyboard.IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS;
+      const hierarchy = await raceWithDeadline(
+        () => this.hierarchyProvider.getViewHierarchy(signal, { timeoutMs, forceFresh: true }),
+        { timer: this.timer, timeoutMs, signal, label: "iOS keyboard visibility hierarchy" },
       );
       throwIfAborted(signal);
+      if (hierarchy?.fresh === false) {
+        logger.warn("iOS keyboard visibility hierarchy is stale; using runner state");
+        return undefined;
+      }
       const width = hierarchy?.screenWidth;
       const height = hierarchy?.screenHeight;
       if (

@@ -17,7 +17,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import type { KeyboardHierarchyProvider } from "./Keyboard";
-import { getFocusedTextValue } from "./ClearText";
+import { getFocusedTextField, type FocusedTextField } from "./ClearText";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -162,7 +162,7 @@ export class Clipboard {
   private async readIOSPasteValueBefore(
     client: ClipboardCtrlProxy,
     signal?: AbortSignal,
-  ): Promise<string | undefined> {
+  ): Promise<FocusedTextField | undefined> {
     try {
       const clipboard = await awaitWhileRequestIsLive(
         client.requestClipboard("get", undefined, undefined, undefined, signal),
@@ -183,21 +183,21 @@ export class Clipboard {
   private async readIOSFocusedValue(
     timeoutMs: number,
     signal?: AbortSignal,
-  ): Promise<string | undefined> {
+  ): Promise<FocusedTextField | undefined> {
     try {
       const hierarchy = await raceWithDeadline(
         () => this.hierarchyProvider.getViewHierarchy(signal, { timeoutMs }),
         { timer: this.timer, timeoutMs, signal, label: "iOS paste verification hierarchy" },
       );
-      const value =
-        hierarchy && !hierarchy.hierarchy?.error ? getFocusedTextValue(hierarchy) : undefined;
-      if (value === undefined) {
+      const field =
+        hierarchy && !hierarchy.hierarchy?.error ? getFocusedTextField(hierarchy) : undefined;
+      if (field?.value === undefined && !field?.secure) {
         logger.info(
           "[Clipboard] iOS paste verification unavailable: no readable focused field value",
         );
         return undefined;
       }
-      return value;
+      return field;
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(
@@ -208,7 +208,11 @@ export class Clipboard {
     }
   }
 
-  private async verifyIOSPaste(before: string, signal?: AbortSignal): Promise<boolean> {
+  private async verifyIOSPaste(before: FocusedTextField, signal?: AbortSignal): Promise<boolean> {
+    if (before.secure) {
+      logger.info("[Clipboard] iOS paste verification skipped for a secure field");
+      return true;
+    }
     const deadline = this.timer.now() + Clipboard.PASTE_VERIFICATION_TIMEOUT_MS;
     for (;;) {
       throwIfAborted(signal);
@@ -217,8 +221,12 @@ export class Clipboard {
         return false;
       }
       const after = await this.readIOSFocusedValue(remaining, signal);
+      if (after?.secure) {
+        logger.info("[Clipboard] iOS paste verification skipped for a secure field");
+        return true;
+      }
       // Missing hierarchy/value makes the outcome indeterminate, not a proven dropped paste.
-      if (after === undefined || after !== before) {
+      if (after === undefined || after.value !== before.value) {
         return true;
       }
       const delay = Math.min(Clipboard.PASTE_VERIFICATION_POLL_MS, deadline - this.timer.now());

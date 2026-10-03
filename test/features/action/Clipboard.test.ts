@@ -15,7 +15,7 @@ import {
   iosKeyboardMinimizedHierarchy,
 } from "../../fixtures/observe/iosKeyboardStates";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import { getFocusedTextValue } from "../../../src/features/action/ClearText";
+import { getFocusedTextField, getFocusedTextValue } from "../../../src/features/action/ClearText";
 import { logger } from "../../../src/utils/logger";
 import { spyOn } from "bun:test";
 
@@ -194,6 +194,72 @@ describe("Clipboard iOS", () => {
     expect(hierarchy.getCallCount()).toBe(2);
     expect(timer.getSleepCallCount()).toBe(0);
     expect(getFocusedTextValue(iosKeyboardVisibleHierarchy)).toBe("mt8@example.com");
+  });
+
+  test.each([
+    ["pre-paste only", true, false, 1],
+    ["verification only", false, true, 2],
+    ["both samples", true, true, 1],
+  ] as const)(
+    "secure field in %s skips unchanged-value verification",
+    async (_name, beforeSecure, afterSecure, reads) => {
+      readableClipboard();
+      // No iOS capture contains a secure field. Add only the runner's documented password attribute.
+      const secure = structuredClone(iosKeyboardVisibleHierarchy);
+      const parser = new DefaultElementParser();
+      for (const root of parser.extractRootNodes(secure)) {
+        parser.traverseNode(root, (node: ViewHierarchyNode) => {
+          const properties = parser.extractNodeProperties(node);
+          if (properties.focused === "true" && properties["hint-text"] === "Email") {
+            nodeAttributes(node).password = "true";
+          }
+        });
+      }
+      expect(getFocusedTextField(secure)).toEqual({ value: "mt8@example.com", secure: true });
+      expect(getFocusedTextField(iosKeyboardVisibleHierarchy)?.secure).toBe(false);
+      hierarchy.setResults([
+        beforeSecure ? secure : iosKeyboardVisibleHierarchy,
+        afterSecure ? secure : iosKeyboardVisibleHierarchy,
+      ]);
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        expect((await clipboard.execute("paste")).success).toBe(true);
+        expect(info).toHaveBeenCalledWith(
+          "[Clipboard] iOS paste verification skipped for a secure field",
+        );
+        expect(hierarchy.getCallCount()).toBe(reads);
+        expect(timer.now()).toBe(0);
+        expect(timer.getSleepCallCount()).toBe(0);
+        expect(fakeIOSCtrlProxy.getClipboardHistory().map((entry) => entry.action)).toEqual([
+          "get",
+          "paste",
+        ]);
+      } finally {
+        info.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    ["boolean password", { password: true }],
+    ["secure class", { class: "UISecureTextField" }],
+    ["secure className", { class: undefined, className: "XCUIElementTypeSecureTextField" }],
+    ["unreadable secure value", { password: "true", value: undefined }],
+  ] as const)("focused field metadata recognizes %s", (_name, attributes) => {
+    const secure = structuredClone(iosKeyboardVisibleHierarchy);
+    const parser = new DefaultElementParser();
+    for (const root of parser.extractRootNodes(secure)) {
+      parser.traverseNode(root, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (properties.focused === "true" && properties["hint-text"] === "Email") {
+          Object.assign(nodeAttributes(node), attributes);
+        }
+      });
+    }
+    expect(getFocusedTextField(secure)?.secure).toBe(true);
+    expect(getFocusedTextField(secure)?.value).toBe(
+      _name === "unreadable secure value" ? undefined : "mt8@example.com",
+    );
   });
 
   test.each(["AB Z1", "Z1"])(

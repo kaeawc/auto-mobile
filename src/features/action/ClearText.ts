@@ -101,23 +101,44 @@ export function getFocusedTextValue(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
 ): string | undefined {
+  return getFocusedTextField(viewHierarchy, parser)?.value;
+}
+
+export interface FocusedTextField {
+  value?: string;
+  secure: boolean;
+}
+
+/** Preserve security metadata even when a focused field's value is unreadable. */
+export function getFocusedTextField(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): FocusedTextField | undefined {
   for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
     for (const root of rootGroup) {
-      let value: string | undefined;
+      let field: FocusedTextField | undefined;
       parser.traverseNode(root, (node: ViewHierarchyNode) => {
         const properties = parser.extractNodeProperties(node);
-        if (value !== undefined || !isFocusedTextInputProperties(properties)) {
+        if (field !== undefined || !isFocusedTextInputProperties(properties)) {
           return;
         }
         const searchable = toSearchable(properties);
         // Text sources preserve editable values; captured length distinguishes empty text from absence.
-        value =
+        const value =
           searchable.textSources.value ??
           searchable.textSources.text ??
           (searchable.capturedTextLength === 0 ? "" : undefined);
+        const nodeClass = properties.class ?? properties.className;
+        const secure =
+          properties.password === true ||
+          properties.password === "true" ||
+          (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"));
+        if (value !== undefined || secure) {
+          field = { value, secure };
+        }
       });
-      if (value !== undefined) {
-        return value;
+      if (field !== undefined) {
+        return field;
       }
     }
   }
@@ -131,7 +152,8 @@ function isFocusedTextInputProperties(nodeProperties: Record<string, unknown>): 
   const nodeClass = nodeProperties.class ?? nodeProperties.className;
   const hasKnownInputClass =
     typeof nodeClass === "string" &&
-    ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass));
+    (nodeClass.includes("SecureTextField") ||
+      ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass)));
   const actions = nodeProperties.actions;
   const exposesTextAction = Array.isArray(actions) && actions.includes("set_text");
   const explicitlyEditable = nodeProperties.editable === "true" || nodeProperties.editable === true;

@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
-import { Keyboard } from "../../../src/features/action/Keyboard";
+import {
+  Keyboard,
+  DefaultKeyboardHierarchyProvider,
+  selectKeyboardHierarchyCache,
+  type KeyboardHierarchyReadOptions,
+} from "../../../src/features/action/Keyboard";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { decodeCtrlProxyMessage } from "../../../src/features/observe/ios/decodeCtrlProxyMessage";
 import type {
@@ -455,7 +460,7 @@ describe("Keyboard", () => {
       expect(result.open).toBe(open);
       expect(result.message).toStartWith(open ? "Keyboard is open" : "Keyboard is closed");
       expect(fakeHierarchy.getCallCount()).toBe(1);
-      expect(fakeHierarchy.getReadOptions()).toEqual([undefined]);
+      expect(fakeHierarchy.getReadOptions()).toEqual([{ timeoutMs: 2000, forceFresh: true }]);
     } finally {
       spy.mockRestore();
     }
@@ -517,6 +522,141 @@ describe("Keyboard", () => {
       }
     },
   );
+
+  test.each(["detect", "open"] as const)(
+    "ios %s bounds a hanging visibility read and falls back to runner",
+    async (action) => {
+      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+      } as IOSCtrlProxyClient);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const options: Array<KeyboardHierarchyReadOptions | undefined> = [];
+      const provider = {
+        getViewHierarchy: (_signal?: AbortSignal, readOptions?: KeyboardHierarchyReadOptions) => {
+          options.push(readOptions);
+          return new Promise<ViewHierarchyResult>(() => {});
+        },
+      };
+      try {
+        const result = await new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute(
+          action,
+        );
+        expect(result).toMatchObject({ success: true, open: true });
+        expect(fakeTimer.now()).toBe(2000);
+        expect(options).toEqual([{ timeoutMs: 2000, forceFresh: true }]);
+        expect(warning).toHaveBeenCalledWith(
+          "iOS keyboard visibility hierarchy read failed; using runner state",
+          expect.objectContaining({
+            message: "iOS keyboard visibility hierarchy timed out after 2000ms",
+          }),
+        );
+      } finally {
+        spy.mockRestore();
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test("ios visibility read propagates caller cancellation without falling back", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled visibility read");
+    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+    } as IOSCtrlProxyClient);
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const provider = {
+      getViewHierarchy: (signal?: AbortSignal) => {
+        expect(signal).toBe(controller.signal);
+        controller.abort(reason);
+        return new Promise<ViewHierarchyResult>(() => {});
+      },
+    };
+    try {
+      await expect(
+        new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute(
+          "detect",
+          controller.signal,
+        ),
+      ).rejects.toThrow("Operation cancelled");
+      expect(warning).not.toHaveBeenCalled();
+      expect(fakeTimer.now()).toBe(0);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      spy.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  test.each(["ios", "android"] as const)(
+    "default provider invalidates only the %s cache and forwards the read deadline",
+    async (platform) => {
+      const invalidations: string[] = [];
+      const selections: string[] = [];
+      const cache = selectKeyboardHierarchyCache(
+        platform,
+        () => {
+          selections.push("ios");
+          return { invalidateCache: () => invalidations.push("ios") };
+        },
+        () => {
+          selections.push("android");
+          return { invalidateCache: () => invalidations.push("android") };
+        },
+      );
+      const controller = new AbortController();
+      const reads: unknown[][] = [];
+      const provider = new DefaultKeyboardHierarchyProvider(
+        {
+          getViewHierarchy: async (...args) => {
+            reads.push(args);
+            return iosKeyboardVisibleHierarchy;
+          },
+        },
+        cache,
+      );
+      await provider.getViewHierarchy(controller.signal, { timeoutMs: 2000, forceFresh: true });
+      expect(selections).toEqual([platform]);
+      expect(invalidations).toEqual([platform]);
+      expect(reads[0]?.slice(2)).toEqual([false, 0, controller.signal, 2000]);
+      await provider.getViewHierarchy();
+      expect(invalidations).toEqual([platform]);
+    },
+  );
+
+  test("ios visibility forces past a pre-action cached minimized keyboard", async () => {
+    fakeHierarchy.setCachedResult(iosKeyboardMinimizedHierarchy);
+    fakeHierarchy.setDefaultResult(iosKeyboardVisibleHierarchy);
+    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+    } as IOSCtrlProxyClient);
+    try {
+      expect(
+        await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("open"),
+      ).toMatchObject({ success: true, open: true });
+      expect(fakeHierarchy.getReadOptions()).toEqual([{ timeoutMs: 2000, forceFresh: true }]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("ios stale fallback cannot override the runner's keyboard state", async () => {
+    fakeHierarchy.setDefaultResult({ ...iosKeyboardMinimizedHierarchy, fresh: false });
+    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+    } as IOSCtrlProxyClient);
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("detect"),
+      ).toMatchObject({ success: true, open: true });
+      expect(warning).toHaveBeenCalledWith(
+        "iOS keyboard visibility hierarchy is stale; using runner state",
+      );
+    } finally {
+      spy.mockRestore();
+      warning.mockRestore();
+    }
+  });
 
   test("ios hierarchy exception warns and falls back to runner", async () => {
     const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({

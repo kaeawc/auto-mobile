@@ -4,7 +4,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 export interface CompletedDaemonCommandLogger {
   closeAfterFlush(): Promise<void>;
   flush(): Promise<void>;
-  warn(message: string): void;
+  error(message: string): void;
 }
 
 /** Injectable process boundary keeps the shutdown outcome unit-testable. */
@@ -13,23 +13,31 @@ export interface DaemonCommandProcessTerminator {
 }
 
 /**
- * Exit a daemon command that has already completed successfully.
+ * Close the logger after the command result has already been committed.
  *
  * A late write from detached best-effort startup work can make logger teardown
- * reject after the command has committed. That teardown error must be visible,
- * but cannot turn the command result into a failure.
+ * reject after the command has committed. Report that failure at error level so
+ * it stays visible when the log level is raised to error, without turning the
+ * command result into a failure.
  */
-export async function exitAfterSuccessfulDaemonCommand(
+export async function closeLoggerAfterCommittedResult(
   logger: CompletedDaemonCommandLogger,
-  terminator: DaemonCommandProcessTerminator,
 ): Promise<void> {
   try {
     await logger.closeAfterFlush();
   } catch (error) {
-    logger.warn(
+    logger.error(
       `Daemon command completed successfully, but logger teardown failed; exiting 0: ${errorMessage(error)}`,
     );
     await logger.flush();
   }
+}
+
+/** Exit a daemon command that has already completed successfully. */
+export async function exitAfterSuccessfulDaemonCommand(
+  logger: CompletedDaemonCommandLogger,
+  terminator: DaemonCommandProcessTerminator,
+): Promise<void> {
+  await closeLoggerAfterCommittedResult(logger);
   terminator.exit(0);
 }

@@ -1,4 +1,4 @@
-import { ActionableError } from "../models";
+import { ActionableError, toActionableError } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
@@ -382,7 +382,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
+      throw toActionableError(error, `Failed to start ${args.platform} device`);
     } finally {
       const cleanup = async () => {
         const releaseReadiness = async () => {

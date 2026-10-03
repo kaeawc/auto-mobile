@@ -1,4 +1,10 @@
-import { ActionableError, type BootedDevice, type Platform, type SomePlatform } from "../models";
+import {
+  ActionableError,
+  toActionableError,
+  type BootedDevice,
+  type Platform,
+  type SomePlatform,
+} from "../models";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import {
@@ -105,7 +111,7 @@ export function createListingHandlers() {
         configuredInventory,
       });
     } catch (error) {
-      throw new ActionableError(`Failed to list ${args.platform} AVDs: ${error}`);
+      throw toActionableError(error, `Failed to list ${args.platform} AVDs`);
     }
   };
 

@@ -178,7 +178,7 @@ export class SwipeOn extends BaseVisualChange {
       dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = dependencies.visionAnalyzer;
     if (dependencies.observeScreen) {
-      this.observeScreen = dependencies.observeScreen as unknown as ObserveScreen;
+      this.observeScreen = dependencies.observeScreen;
     }
 
     // Initialize extracted modules

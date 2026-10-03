@@ -69,13 +69,14 @@ export class ProductionDevicectlCommandInvoker
 
   async invoke(deviceId: string, command: string): Promise<DevicectlCommandResult> {
     let directory: string | undefined;
+    let execFailure: unknown;
     try {
       const args = this.commandArgs(deviceId, command);
       directory = await this.options.files.mkdtemp(
         join(this.options.files.tmpdir(), "automobile-coredevice-"),
       );
       const outputPath = join(directory, "result.json");
-      const execFailure = await this.executeForOutput([
+      execFailure = await this.executeForOutput([
         "devicectl",
         "device",
         ...args,
@@ -88,8 +89,18 @@ export class ProductionDevicectlCommandInvoker
       const data: unknown = JSON.parse(await this.options.files.readFile(outputPath));
       return this.classifyOutput(data, execFailure);
     } catch (error) {
-      const message = errorMessage(error);
-      this.options.logger.warn(`CoreDevice command probe failed: ${message}`, error);
+      // A missing or malformed output file must not hide the command's own failure.
+      const failure = execFailure ?? error;
+      const cause = asRecord(asRecord(failure)?.cause ?? failure);
+      const stderr = cause?.stderr;
+      const message =
+        (Buffer.isBuffer(stderr)
+          ? stderr.toString()
+          : typeof stderr === "string"
+            ? stderr
+            : ""
+        ).trim() || errorMessage(failure);
+      this.options.logger.warn(`CoreDevice command probe failed: ${message}`, failure);
       return { kind: "failed", message };
     } finally {
       if (directory) {

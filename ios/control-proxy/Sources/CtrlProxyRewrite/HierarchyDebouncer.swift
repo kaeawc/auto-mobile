@@ -112,6 +112,8 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        // Start each run at the base polling interval.
+        effectivePollIntervalMs = pollIntervalMs
 
         // Capture initial state and broadcast it, then schedule the first poll.
         captureInitialState()
@@ -121,6 +123,8 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     func stop() {
         isRunning = false
         pollScheduled = false
+        // Clear idle backoff when polling stops.
+        effectivePollIntervalMs = pollIntervalMs
         // Invalidate any already-scheduled poll so it no-ops when it fires.
         pollGeneration += 1
     }

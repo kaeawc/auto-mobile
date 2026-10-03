@@ -431,7 +431,8 @@ export class IosCtrlProxyBuilder {
     platform ??= this.isLocalBuildMode() ? "simulator" : undefined;
     const cacheKey = platform || "any";
     const cachedPath = this.cachedXctestrunPath.get(cacheKey);
-    if (cachedPath) {
+    // Local rebuilds can leave the old xctestrun alongside a newer filename.
+    if (cachedPath && !this.isLocalBuildMode()) {
       try {
         await fs.access(cachedPath);
         return cachedPath;
@@ -452,10 +453,13 @@ export class IosCtrlProxyBuilder {
         return null;
       }
 
-      const platformFilter = platform === "device" ? "iphoneos" : "iphonesimulator";
-      const candidates = platform
-        ? xctestrunFiles.filter((file) => file.includes(platformFilter))
-        : xctestrunFiles;
+      // An empty filter preserves platform-agnostic discovery in release mode.
+      const platformFilter = {
+        device: "iphoneos",
+        simulator: "iphonesimulator",
+        any: "",
+      }[cacheKey];
+      const candidates = xctestrunFiles.filter((file) => file.includes(platformFilter));
 
       if (candidates.length === 0) {
         return null;
@@ -1198,12 +1202,15 @@ export class IosCtrlProxyBuilder {
   /**
    * Single source of truth for the iOS fail-closed decision: `AUTOMOBILE_VERSION`
    * names a concrete version absent from the checksum registry, with no escape hatch
-   * (vendored IPA/bundle path or explicit checksum override), so the CtrlProxy bundle
-   * cannot be integrity-verified (#2746). Reused by the build/reuse guards,
+   * (local-build mode, vendored IPA/bundle path or explicit checksum override),
+   * so the CtrlProxy bundle cannot be integrity-verified (#2746). Reused by the build/reuse guards,
    * `IOSCtrlProxyManager.setup()`, `doctor --ios`, and the booted-device compat check.
    */
   static isPinnedVersionUnverifiable(): boolean {
-    if (IosCtrlProxyBuilder.expectedChecksumOverride !== null) {
+    if (
+      IosCtrlProxyBuilder.expectedChecksumOverride !== null ||
+      IosCtrlProxyBuilder.isLocalBuildModeEnabled()
+    ) {
       return false;
     }
     const ipaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
@@ -1442,7 +1449,7 @@ export class IosCtrlProxyBuilder {
   }
 
   /** Whether the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch is active (#5561). */
-  private isLocalBuildMode(): boolean {
+  static isLocalBuildModeEnabled(): boolean {
     const override = IosCtrlProxyBuilder.useLocalBuildOverride;
     if (override !== null) {
       return override;
@@ -1450,17 +1457,31 @@ export class IosCtrlProxyBuilder {
     return isTruthyEnvValue(process.env[IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV]);
   }
 
+  private isLocalBuildMode(): boolean {
+    return IosCtrlProxyBuilder.isLocalBuildModeEnabled();
+  }
+
   /** Validate the existing local products without consulting release metadata. */
   private async requireLocalBuildProducts(
     platform: IOSCtrlProxyPlatform = "simulator",
   ): Promise<void> {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
+    const rebuildCommand =
+      platform === "device"
+        ? `xcodebuild build-for-testing -project ios/control-proxy/CtrlProxy.xcodeproj ` +
+          `-scheme AutoMobileTest -destination 'generic/platform=iOS' ` +
+          `-derivedDataPath ${shellQuote(this.config.derivedDataPath)} -configuration Debug`
+        : `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=${shellQuote(this.config.derivedDataPath)} ` +
+          `bash scripts/ios/ctrl-proxy-build-for-testing.sh`;
     const missingBuild = (expectedPath: string, cause?: unknown): ActionableError =>
       new ActionableError(
         `Local CtrlProxy build products missing or invalid at ${expectedPath}. ` +
-          `Local-build mode never installs the released bundle. Build with: ` +
-          `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=${shellQuote(this.config.derivedDataPath)} ` +
-          `bash scripts/ios/ctrl-proxy-build-for-testing.sh`,
+          `Local-build mode never installs the released bundle. ` +
+          (platform === "device"
+            ? `Device builds require valid code signing and a provisioning profile. `
+            : "") +
+          `Build with: ` +
+          rebuildCommand,
         { cause },
       );
     const xctestrunPath = await this.getXctestrunPath(platform);

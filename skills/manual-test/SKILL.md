@@ -109,88 +109,48 @@ at a time to conserve context; never let two actors drive devices at once.
      `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` (the root — the
      code appends `Build/Products` itself).
 
-   - **Set `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true` (or pass
-     `--skip-ctrl-proxy-download`) when testing a locally built iOS runner.**
-     Landing the build in the default derived-data path is **not** sufficient on
-     its own: `needsRebuild()` also consults release metadata cached **separately**
-     in `~/.automobile/ctrl-proxy-ios/ctrl-proxy-ios-bundle.json`, which the build
-     script never writes (`src/ctrlProxy/IosCtrlProxyBuilder.ts:398-433`). These states
-     are only reached when the service is **not** already running (a live runner is
-     reused and the builder never runs at all). Three of them download the
-     **released** runner and extract it straight over
-     `/tmp/automobile-ctrl-proxy`, destroying your local build without a warning:
-     - **fresh host / cleared cache** — metadata missing ⇒ "metadata missing, need
-       download";
-     - **changed `AUTOMOBILE_VERSION`** — expected checksum no longer matches the
-       cached metadata ⇒ "checksum mismatch, need download" (and if the pinned
-       version is not in the checksum registry, setup fails closed instead);
-     - **physical-device target** — the baked device app hash never matches a local
-       build ⇒ "app hash mismatch, need download". (Simulator targets have no
-       expected app hash, so this one does not fire there.)
+   - **Serve a locally built iOS runner.** Set
+     `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true` and point
+     `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` at your build
+     (omit the path variable for the default location). Local-build mode never
+     downloads or extracts the released bundle, regardless of cache metadata,
+     `AUTOMOBILE_VERSION`, or a vendored bundle override. It validates the local
+     products before consulting release metadata, including during background
+     prefetch. **Do not set `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` or pass
+     `--skip-ctrl-proxy-download` for this workflow:** the skip flag returns earlier
+     and bypasses product validation, pin capture, and prefetch.
 
-     Only when metadata is already present **and** matches the current version does
-     the "no env var" path reuse your local build. The skip flag short-circuits
-     `needsRebuild()` before any of those checks
-     (`src/ctrlProxy/IosCtrlProxyBuilder.ts:379-382`), so it is the reliable switch — and
-     it is the only thing that also covers the daemon-startup **prefetch**
-     (`IosCtrlProxyBuilder.prefetchBuild()`, `src/index.ts:538`), which runs
-     `needsRebuild()`/`build()` in the background independently of `setup()` and can
-     overwrite your local build before you make a single tool call.
+     The daemon derives the expected SHA from your freshly built runner, pins it
+     per platform, and re-verifies it before launch (a hash change with unchanged
+     binary identity still fails closed) — no SHA to hand-copy. Rebuilding is
+     picked up on the next launch without a daemon restart: the pin is re-derived
+     when the binary's size or mtime changes, with an INFO log showing the old and
+     new short SHA. It logs a loud WARN that the release-pinned guard is relaxed
+     for the run. Missing or invalid local products fail with an actionable error
+     naming the expected derived-data/products path and the platform-specific
+     rebuild command. For simulators, use
+     `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root> bash scripts/ios/ctrl-proxy-build-for-testing.sh`;
+     physical devices require a device build with valid signing and provisioning.
+     Background prefetch records this error without crashing the daemon.
+
+     To enforce your own SHA, also set
+     `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=<64-hex>` (and
+     `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=runner|xctest` to pick the
+     binary; defaults to the release's target). An explicit value overrides
+     local-build mode for hash verification only; it never enables a release
+     download in local-build mode. Unset it if you want auto-derivation.
+
+     **Non-local-build note:** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true` (or
+     `--skip-ctrl-proxy-download`) suppresses release downloads and prefetch, but
+     retains release-pinned runner verification. It is not the local-build setup.
      **Caveat — it is process-wide, not iOS-only:** it also suppresses the Android
      CtrlProxy download/install, so install the freshly built APK on the emulator
      yourself (`adb install -r <fresh apk>`) before starting the daemon, or run the
      Android leg in a separate daemon without the flag.
 
-   - **Serve a locally built iOS runner (the reliable procedure).** `SKIP` +
-     `IOS_DERIVED_DATA` alone are **not** enough for iOS: they stop the released
-     runner from overwriting your build, but they do **not** make the daemon
-     launch your build — a second gate rejects it. Before launch the daemon
-     re-hashes the runner binary and refuses on any mismatch against the
-     release-pinned `runnerSha256`
-     (`assertRunnerBinaryHash()`, `src/ctrlProxy/IosCtrlProxyBuilder.ts`), and a
-     locally built runner **always** hashes differently:
-
-     ```
-     CtrlProxy runner binary SHA256 mismatch (pre-launch) for simulator.
-     Expected: <pinned>, Got: <your local build>. Refusing to launch ...
-     ```
-
-     Two supported ways past this — **prefer the first**:
-     1. **First-class local-build mode (recommended).** Set
-        `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true`. The daemon then derives
-        the expected SHA from your freshly built runner, pins it, and re-verifies
-        against that pinned value before launch (a hash change with unchanged
-        binary identity still fails closed) — no SHA to hand-copy. Rebuilding with
-        `scripts/ios/ctrl-proxy-build-for-testing.sh` is picked up on the next launch
-        without a daemon restart: the pin is re-derived when the binary's size or
-        mtime changes, with an INFO log showing the old and new short SHA.
-        It logs a loud WARN that the release-pinned
-        guard is relaxed for the run. Run **without** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`
-        and point `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>`
-        at your build. Local-build mode never downloads or extracts the released
-        bundle, regardless of cache metadata or a vendored bundle override.
-        Missing or invalid local products fail with an actionable error naming
-        the expected derived-data/products path and the rebuild command:
-        `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root> bash scripts/ios/ctrl-proxy-build-for-testing.sh`.
-        Background prefetch records this error without crashing the daemon.
-     2. **Explicit pinned SHA (manual).** Set
-        `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=<64-hex>` (and
-        `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=runner|xctest` to pick the
-        binary; defaults to the release's target). This keeps the integrity gate
-        active against _your_ value. The catch is chicken-and-egg: you learn the
-        SHA only by launching once and reading the `Got:` value from the mismatch
-        error, then re-launching with it. An explicit value here **overrides**
-        local-build mode for hash verification only; it never enables a release
-        download in local-build mode. Unset it if you want auto-derivation.
-
-     **SKIP-flag interaction:** with `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true` the
-     iOS prefetch is disabled and the builder never launches a local runner — the
-     daemon just **reuses whatever runner is already live** on the port (often one
-     owned by another session's `bunx auto-mobile`), so freeing the port then
-     falls through to the launch/guard path above. For local-build mode, start
-     **without** the skip flag. If the daemon reuses a runner it did not launch it
-     now logs a loud WARN (`Reusing an external CtrlProxy runner this daemon did
-not launch`) — treat that as a signal to confirm which runner served the call.
+     If the daemon reuses a runner it did not launch, it logs a loud WARN
+     (`Reusing an external CtrlProxy runner this daemon did not launch`) — treat
+     that as a signal to confirm which runner served the call.
 
    - **Verify which runner actually served the call** — `grep xctestrun <daemon-log>`
      for the path, and `grep 'need download\|Downloading CtrlProxy bundle' <daemon-log>`

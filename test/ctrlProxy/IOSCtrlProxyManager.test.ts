@@ -4750,6 +4750,69 @@ describe("IOSCtrlProxyManager", function () {
       }
     });
 
+    test.each([false, true])(
+      "device launch verifies before xcodebuild and fails closed (%s)",
+      async (rejectVerification) => {
+        const physicalDevice: BootedDevice = {
+          deviceId: "00008030001E28C11E",
+          platform: "ios",
+          name: "iPhone",
+        };
+        const events: string[] = [];
+        const builder = createFakeBuilder();
+        builder.getXctestrunPath = async (platform) => {
+          events.push(`xctestrun:${platform}`);
+          return "/tmp/device.xctestrun";
+        };
+        builder.verifyRunnerBinaryBeforeLaunch = async (platform) => {
+          events.push(`verify:${platform}`);
+          if (rejectVerification) {
+            throw new Error("runner verification rejected");
+          }
+        };
+        const signing = {
+          resolveSigningForDevice: async () => ({
+            buildSettings: [],
+            allowProvisioningUpdates: false,
+            warnings: [],
+          }),
+        } as unknown as XcodeSigningManager;
+        const xcodebuild: Xcodebuild = {
+          executeCommand: async () => createExecResult("", ""),
+          isAvailable: async () => true,
+          startStreaming: async () => {
+            events.push("spawn");
+            return new FakeChildProcess(fakeTimer) as unknown as ChildProcess;
+          },
+        };
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          physicalDevice,
+          fakeTimer,
+          builder,
+          fakeExecutor,
+          signing,
+          undefined,
+          undefined,
+          undefined,
+          xcodebuild,
+        );
+        const internal = manager as unknown as {
+          startOnDevice: () => Promise<void>;
+          startIproxyTunnel: () => Promise<void>;
+          verifyInstalledAppBundle: () => Promise<void>;
+        };
+        internal.startIproxyTunnel = async () => {};
+        internal.verifyInstalledAppBundle = async () => {};
+        if (rejectVerification) {
+          await expect(internal.startOnDevice()).rejects.toThrow("runner verification rejected");
+          expect(events).toEqual(["xctestrun:device", "verify:device"]);
+        } else {
+          await internal.startOnDevice();
+          expect(events).toEqual(["xctestrun:device", "verify:device", "spawn"]);
+        }
+      },
+    );
+
     test("startOnDevice() delivers the allocated port via the xctestrun, not a build setting (EC7)", async function () {
       const physicalDevice: BootedDevice = {
         deviceId: "00008030001E28C11E",

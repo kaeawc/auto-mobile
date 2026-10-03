@@ -1,3 +1,4 @@
+import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
   resolveVoiceOverActivateCtrlProxyTimeoutMs,
@@ -511,6 +512,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private validateSemanticLinkOptions(options: TapOnElementOptions): string | null {
+    if (options.selectionStrategy === "unique" && (options.sibling || options.accessibilityLink)) {
+      return "tapOn unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead";
+    }
     if ((options as { relativePosition?: unknown }).relativePosition !== undefined) {
       return "tapOn relativePosition is no longer supported; use accessibilityLink or subtext";
     }
@@ -1366,22 +1370,27 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     });
   }
 
-  private selectDisplaySiblingOrMiss(
+  private selectVariantOrSiblingOrMiss(
     options: TapVerificationOptions,
     select: () => ElementSelectionResult,
   ): ElementSelectionResult {
-    if (options.verification === undefined) {
-      return select();
-    }
     try {
       return select();
     } catch (error) {
-      if (!(error instanceof ActionableError) || error.message !== "Sibling row not found") {
+      if (!(error instanceof ActionableError)) {
         throw error;
       }
-      // A missing sibling is expected while polling a targeted display; let
-      // the shared search loop retry and format the final selector error.
-      logger.debug("[TapOnElement] Target display sibling not found yet", error);
+      const expectedMissing =
+        (options.verification !== undefined && error.message === "Sibling row not found") ||
+        (options.textAny !== undefined &&
+          options.selectionStrategy === "unique" &&
+          error.message.startsWith("Target not found"));
+      if (!expectedMissing) {
+        throw error;
+      }
+      // Missing ordered text variants and polling display siblings are expected;
+      // keep all lookups scoped and propagate container errors and ambiguity.
+      logger.debug("[TapOnElement] Text variant or display sibling not found yet", error);
       return {
         element: null,
         totalMatches: 0,
@@ -1416,14 +1425,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         : options.action === "focus"
           ? "focus-input"
           : "tap";
-    const lookupAction = options.action === "focus" ? "focus-input" : "inspect";
+    const lookupAction = options.subtext
+      ? "inspect"
+      : options.selectionStrategy === "unique" || options.container?.container
+        ? intentAction
+        : options.action === "focus"
+          ? "focus-input"
+          : "inspect";
     const selectionIntent = TEXT_SELECTION_INTENT_BY_ACTION[options.action];
 
     const text = options.text;
     if (text) {
       if (options.sibling) {
         return {
-          selection: this.selectDisplaySiblingOrMiss(options, () =>
+          selection: this.selectVariantOrSiblingOrMiss(options, () =>
             this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
               container: options.container,
               screenSizeOptions: options.screenSizeOptions,
@@ -1459,7 +1474,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions);
       for (const text of options.textAny) {
         const selection = options.sibling
-          ? this.selectDisplaySiblingOrMiss(options, () =>
+          ? this.selectVariantOrSiblingOrMiss(options, () =>
               this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
                 container: options.container,
                 screenSizeOptions: options.screenSizeOptions,
@@ -1470,16 +1485,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 index: options.index,
               }),
             )
-          : this.elementSelector.selectByText(viewHierarchy, text, {
-              container: options.container,
-              screenSizeOptions: options.screenSizeOptions,
-              partialMatch: true,
-              caseSensitive: false,
-              strategy: options.selectionStrategy,
-              intentAction: lookupAction,
-              index: options.index,
-              selectionIntent,
-            });
+          : this.selectVariantOrSiblingOrMiss(options, () =>
+              this.elementSelector.selectByText(viewHierarchy, text, {
+                container: options.container,
+                screenSizeOptions: options.screenSizeOptions,
+                partialMatch: true,
+                caseSensitive: false,
+                strategy: options.selectionStrategy,
+                intentAction: lookupAction,
+                index: options.index,
+                selectionIntent,
+              }),
+            );
         lastSelection = selection;
         if (selection.element) {
           if (this.isElementTapTargetOffScreen(selection, viewHierarchy, screenSize, options)) {
@@ -1498,6 +1515,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
 
       if (lastSelection) {
+        if (options.selectionStrategy === "unique") {
+          throw new ActionableError(
+            `Target not found${options.container ? " within container" : ""}: no textAny variant matched`,
+          );
+        }
         return { selection: lastSelection, containerFound };
       }
     }
@@ -1506,7 +1528,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (elementId) {
       if (options.sibling) {
         return {
-          selection: this.selectDisplaySiblingOrMiss(options, () =>
+          selection: this.selectVariantOrSiblingOrMiss(options, () =>
             this.elementSelector.selectClickableSiblingOfResourceId(viewHierarchy, elementId, {
               container: options.container,
               screenSizeOptions: options.screenSizeOptions,
@@ -1793,7 +1815,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
     }
     return this.findElementInHierarchy(
-      { ...options, index: options.index ?? selectedIndex },
+      {
+        ...options,
+        index:
+          options.index ?? (options.selectionStrategy === "unique" ? undefined : selectedIndex),
+      },
       hierarchy,
     ).selection.element;
   }
@@ -2228,7 +2254,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         refind.selection.element as Element,
         freshHierarchy,
         action,
-        requireResourceId,
+        { requireResourceId, scoped: options.container !== undefined },
       );
       const b = refreshed.element.bounds;
       if (b === undefined || b === null) {
@@ -2596,7 +2622,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private isContainerAvailable(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
+    container?: ElementContainerSelector,
   ): boolean {
     if (!container) {
       return true;
@@ -2616,14 +2642,29 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!container) {
       return undefined;
     }
+    if (this.elementSelector.resolveContainer) {
+      return this.elementSelector.resolveContainer(
+        viewHierarchy,
+        container,
+        options.selectionStrategy,
+      );
+    }
+    const scopedOptions = {
+      container: container.container,
+      index: container.index,
+      strategy:
+        options.selectionStrategy === "unique" ? ("unique" as const) : container.selectionStrategy,
+    };
     if (container.elementId) {
       return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
+        ...scopedOptions,
         intentAction: "inspect",
         screenSizeOptions: options.screenSizeOptions,
       }).element as Element | undefined;
     }
     if (container.text) {
       return this.elementSelector.selectByText(viewHierarchy, container.text, {
+        ...scopedOptions,
         intentAction: "inspect",
         screenSizeOptions: options.screenSizeOptions,
         caseSensitive: false,
@@ -2828,8 +2869,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     viewHierarchy: ViewHierarchyResult | null,
     action: string,
-    requireResourceId: boolean,
+    targetOptions: boolean | { requireResourceId: boolean; scoped: boolean },
   ): { element: Element; usedParent: boolean } {
+    // Scoped lookups already select within the resolver boundary. Do not promote
+    // their result to a container or an ancestor outside the requested subtree.
+    if (typeof targetOptions !== "boolean" && targetOptions.scoped) {
+      return { element, usedParent: false };
+    }
+    const requireResourceId =
+      typeof targetOptions === "boolean" ? targetOptions : targetOptions.requireResourceId;
     if (!viewHierarchy || this.device.platform !== "android") {
       return { element, usedParent: false };
     }
@@ -3467,12 +3515,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const requireResourceId = isAccessibilityServiceEnabled;
           let tapElement: Element;
           let usedParent: boolean;
-          const initialTapTarget = this.resolveTapTargetElement(
-            element,
-            viewHierarchy,
-            action,
+          const initialTapTarget = this.resolveTapTargetElement(element, viewHierarchy, action, {
             requireResourceId,
-          );
+            scoped: options.container !== undefined,
+          });
           tapElement = initialTapTarget.element;
           usedParent = initialTapTarget.usedParent;
 
@@ -3797,6 +3843,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         : (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) ===
           "talkback";
 
+    if (options?.container?.container || options?.selectionStrategy === "unique") {
+      await this.executeScopedAndroidTap({
+        action,
+        x,
+        y,
+        durationMs,
+        element,
+        signal,
+        talkBackEnabled,
+        fence,
+      });
+      return undefined;
+    }
+
     if (talkBackEnabled) {
       // TalkBack mode: Use accessibility actions or precise coordinate
       // gestures through its CtrlProxy driver, with ADB as the last fallback.
@@ -3817,6 +3877,41 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return undefined;
   }
 
+  private async executeScopedAndroidTap(context: {
+    action: string;
+    x: number;
+    y: number;
+    durationMs: number;
+    element: Element;
+    signal?: AbortSignal;
+    talkBackEnabled: boolean;
+    fence?: DisplayFence;
+  }): Promise<void> {
+    const { action, x, y, durationMs, element, signal, talkBackEnabled, fence } = context;
+    // Native resource-ID activation is global. Bind new scoped/unique calls to
+    // the resolver's selected point, including accessibility and long-press fallback.
+    if (talkBackEnabled) {
+      const driver = this.talkBackDriverFactory.createDriver(this.device);
+      const result =
+        action === "tap"
+          ? await this.talkBackStrategy.executePreciseTap(x, y, driver, fence)
+          : await this.talkBackStrategy.executeCoordinateFallback(
+              x,
+              y,
+              action as "doubleTap" | "longPress",
+              durationMs,
+              driver,
+              { displayFence: fence },
+            );
+      if (result.success) {
+        return;
+      }
+    }
+    await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
+      displayFence: fence,
+    });
+  }
+
   /**
    * Execute tap using CtrlProxy's dispatchGesture API with ADB fallback.
    * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate.
@@ -3828,12 +3923,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element: Element,
     signal?: AbortSignal,
-    skipSemanticLongPress: boolean = false,
+    skipSemanticAction: boolean = false,
     fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     if (action === "tap") {
       if (
+        !skipSemanticAction &&
         isAndroidDocumentsUiRow(element) &&
         (await this.tryDocumentsUiRowActivation(element, signal))
       ) {
@@ -3841,7 +3937,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
     } else if (action === "longPress") {
-      await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticLongPress, {
+      await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticAction, {
         displayFence: fence,
       });
     } else if (action === "doubleTap") {
@@ -3943,7 +4039,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       logger.info("[TapOnElement][retryIfNoChange] Toggle reached requested checked state");
       return null;
     }
-    return this.resolveTapTargetElement(refound, hierarchy, action, requireResourceId).element;
+    return this.resolveTapTargetElement(refound, hierarchy, action, {
+      requireResourceId,
+      scoped: options.container !== undefined,
+    }).element;
   }
 
   private withRetryScreenSize(
@@ -3982,8 +4081,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return this.resolveEnsureCheckedRetryTarget(options, hierarchy, action, isTalkBackEnabled);
     }
     if (selection.element) {
-      return this.resolveTapTargetElement(selection.element, hierarchy, action, isTalkBackEnabled)
-        .element;
+      return this.resolveTapTargetElement(selection.element, hierarchy, action, {
+        requireResourceId: isTalkBackEnabled,
+        scoped: options.container !== undefined,
+      }).element;
     }
     if (options.text || options.textAny?.length || options.elementId || options.testTag) {
       logger.warn(

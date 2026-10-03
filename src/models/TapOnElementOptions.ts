@@ -1,3 +1,4 @@
+import type { ElementContainerSelector } from "./PinchOnOptions";
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 
 export interface TapOnSubtextTarget {
@@ -30,10 +31,7 @@ export interface TapOnElementOptions {
   index?: number;
 
   // Container to restrict search
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
 
   // Action to perform
   action: "tap" | "doubleTap" | "longPress" | "focus";

@@ -323,9 +323,10 @@ export class ElementResolver {
     for (let parent = selector.container; parent; parent = parent.container) {
       level += 1;
     }
+    const ambiguous = /ambiguous/i.test(result.error ?? "");
     return {
       ...result,
-      error: `Container level ${level} ${result.error?.includes("ambiguous") ? "ambiguous" : "not found"}: ${selector.elementId ?? selector.text}`,
+      error: `Container level ${level} ${ambiguous ? "ambiguous" : "not found"}: ${selector.elementId ?? selector.text}${ambiguous ? `; ${this.candidateDetails(result.candidates)}` : ""}`,
     };
   }
 
@@ -334,8 +335,7 @@ export class ElementResolver {
     return {
       ...container,
       selectionStrategy:
-        container.selectionStrategy ??
-        (selector.selectionStrategy === "unique" ? "unique" : undefined),
+        selector.selectionStrategy === "unique" ? "unique" : container.selectionStrategy,
     };
   }
 
@@ -423,10 +423,12 @@ export class ElementResolver {
     // Positional selection counts displayed actionable rows; diagnostic
     // matches retain inert labels so debug can still explain why they cannot act.
     const actionableCandidate = (candidate: SearchableEntry) =>
-      intent.action === "focus-input"
-        ? actionTarget(candidate) !== null
-        : actionTarget(candidate) !== null ||
-          (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0);
+      preserveTextScope
+        ? true
+        : intent.action === "focus-input"
+          ? actionTarget(candidate) !== null
+          : actionTarget(candidate) !== null ||
+            (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0);
     result.candidates = result.candidates.filter(actionableCandidate);
     this.rankCandidates(result, selector, actionTarget, intent);
     this.choose(result, selector, actionTarget);
@@ -518,18 +520,11 @@ export class ElementResolver {
     if (selector.index !== undefined) {
       const selected = result.candidates[selector.index];
       result.chosen = actionTarget(selected);
-    } else if (selector.selectionStrategy === "unique") {
-      const eligibleMatches = result.candidates
-        .map(actionTarget)
-        .filter((node): node is SearchableEntry => node !== null);
-      if (eligibleMatches.length !== 1) {
-        result.error =
-          eligibleMatches.length === 0
-            ? "Target not found"
-            : `Target ambiguous: ${eligibleMatches.length} matches`;
-      } else {
-        result.chosen = eligibleMatches[0];
+      if (!result.chosen && selector.selectionStrategy === "unique") {
+        result.error = `Target not found${result.scope ? " within container" : ""}: index ${selector.index} is out of range or ineligible`;
       }
+    } else if (selector.selectionStrategy === "unique") {
+      this.chooseUnique(result, actionable);
     } else if (selector.selectionStrategy === "random") {
       result.chosen =
         actionable[
@@ -544,6 +539,27 @@ export class ElementResolver {
         result.candidates.findIndex((candidate) => actionTarget(candidate) === result.chosen);
     }
     return result;
+  }
+
+  private chooseUnique(result: ElementResolution, candidates: SearchableEntry[]): void {
+    if (candidates.length === 1) {
+      result.chosen = candidates[0];
+      return;
+    }
+    result.error =
+      candidates.length === 0
+        ? `Target not found${result.scope ? " within container" : ""}`
+        : `Target ambiguous: ${candidates.length} matches; ${this.candidateDetails(candidates)}`;
+  }
+
+  private candidateDetails(nodes: readonly SearchableEntry[]): string {
+    const candidates = nodes
+      .slice(0, 5)
+      .map(
+        (node) =>
+          `resourceId=${JSON.stringify(node.nativeId ?? node.nodeKey)}, text=${JSON.stringify(node.label)}, bounds=${JSON.stringify(node.bounds ?? null)}`,
+      );
+    return `Candidates: ${candidates.join("; ")}. Use a more specific selector or a zero-based index.`;
   }
 
   private actionTarget(

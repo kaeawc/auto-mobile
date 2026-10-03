@@ -287,7 +287,7 @@ routinely ships nothing.
   - **A new path filter can silently un-gate a job.** When a job gains `if:
 needs.detect-changes.outputs.<x> == 'true'`, compare the `dorny/paths-filter` globs against
     the paths the script _it runs_ treats as significant. [#4026](https://github.com/kaeawc/auto-mobile/pull/4026) gated detekt on a filter omitting
-    `android/gradle/wrapper/**`, which `scripts/android/detekt_scope.sh` treats as a full-scope
+    `android/gradle/wrapper/**`, which the former Detekt scope script treated as a full-scope
     trigger — so a wrapper bump skipped detekt entirely instead of failing open.
 - **Post-merge-only workflows are invisible to PR CI**: `merge.yml`, `nightly.yml`,
   `dead-code-detection.yml`, `release.yml`, `prepare-release.yml`,

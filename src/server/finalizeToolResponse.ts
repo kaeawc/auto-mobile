@@ -78,9 +78,9 @@ export interface ObservationArtifactWriteInput {
    * output is the thing it measured and whose reported byte count has to match
    * the file on disk (#6870).
    *
-   * NOT a serialization strategy hook: the writer already persists `data`
-   * completely (see `serializeArtifactContent`), so a caller that just wants the
-   * whole payload written should omit this and pass `data` alone.
+   * Finalization also supplies its cached complete JSON here, sharing the
+   * structured-content size probe with the artifact writer. Callers without a
+   * cached rendering can omit this and pass `data` alone.
    */
   serialized?: string;
 }
@@ -357,6 +357,26 @@ interface ObservationDiffMetadata {
   toScreen?: ObservationDiffScreenIdentity;
 }
 
+/** Request-local renderings: inline text strips extras; complete JSON preserves them. */
+class ToolResponseSerialization {
+  private readonly inline = new Map<unknown, string>();
+  private readonly complete = new Map<unknown, string>();
+
+  text(payload: unknown): string {
+    if (!this.inline.has(payload)) {
+      this.inline.set(payload, stringifyToolResponse(payload));
+    }
+    return this.inline.get(payload)!;
+  }
+
+  artifact(payload: unknown): string {
+    if (!this.complete.has(payload)) {
+      this.complete.set(payload, JSON.stringify(payload));
+    }
+    return this.complete.get(payload)!;
+  }
+}
+
 /**
  * Single post-handler serialization hook (issue #2758). Handlers pre-serialize
  * via `createStructuredToolResponse` into an MCP envelope
@@ -380,6 +400,20 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   const envelopeView = readToolEnvelopePayload(response);
   if (!envelopeView) {
     return response;
+  }
+  const serialization = new ToolResponseSerialization();
+  const artifactWriter = ctx.artifactWriter;
+  if (artifactWriter) {
+    ctx = {
+      ...ctx,
+      artifactWriter: {
+        writeJsonArtifact: (input) =>
+          artifactWriter.writeJsonArtifact({
+            ...input,
+            serialized: input.serialized ?? serialization.artifact(input.data),
+          }),
+      },
+    };
   }
   const payload = envelopeView.payload;
   const hasStructured = envelopeView.hasStructured;
@@ -713,7 +747,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     !ctx.internal &&
     hasArtifactableObservation &&
     sanitizedPayload &&
-    shouldArtifactObservationPayload(ctx, sanitizedPayload, hasStructured)
+    shouldArtifactObservationPayload(ctx, sanitizedPayload, hasStructured, serialization)
   ) {
     if (isObserveTool) {
       // Keep compact wait status inline: without it, an artifacted `observe`
@@ -746,9 +780,13 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   // residue is still oversized and keep only the headline fields inline, so the
   // client always gets complete, parseable JSON plus a pointer to the rest.
   const boundedCandidate = sanitizedPayload ?? payload;
-  if (ctx.artifactWriter && !ctx.internal && exceedsInlineLimit(boundedCandidate, hasStructured)) {
+  if (
+    ctx.artifactWriter &&
+    !ctx.internal &&
+    exceedsInlineLimit(boundedCandidate, hasStructured, serialization)
+  ) {
     try {
-      sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate, hasStructured);
+      sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate, hasStructured, serialization);
     } catch (error) {
       // The operation itself already succeeded; only the spill failed (a full or
       // read-only tool-output directory). Throwing here would return NO result
@@ -769,7 +807,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   }
 
   // Rewrite both representations from the same object so they cannot diverge.
-  writeToolEnvelopePayload(envelopeView, sanitizedPayload);
+  writeToolEnvelopePayload(
+    envelopeView,
+    sanitizedPayload,
+    envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
+  );
   if (pendingBaselineUpdate) {
     ctx.baselineStore!.set(
       pendingBaselineUpdate.sessionUuid,
@@ -847,16 +889,15 @@ function spillOversizedPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
   hasStructured: boolean,
+  serialization: ToolResponseSerialization,
 ): Record<string, unknown> {
-  // No `serialized` override: the writer persists `data` complete (extras
-  // included), so every spill path — this one and the observation-only one above
-  // — produces the same complete artifact without per-call-site plumbing.
+  // The request-local writer shares the complete rendering with the size probe.
   const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
   const spilled = { ...pickInlineResidue(ctx, payload), ...artifact };
   // The per-field cap is counted in UTF-16 code units, so multi-byte text can
   // still serialize past the ceiling across every retained field. Fall back to
   // markers-only, whose size does not depend on the input at all.
-  return exceedsInlineLimit(spilled, hasStructured)
+  return exceedsInlineLimit(spilled, hasStructured, serialization)
     ? { ...markerResidue(ctx, payload), ...artifact }
     : spilled;
 }
@@ -980,8 +1021,14 @@ function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode
 }
 
 /** Whether the payload, as the client will actually receive it, is over the ceiling. */
-function exceedsInlineLimit(payload: Record<string, unknown>, hasStructured: boolean): boolean {
-  return emittedByteLength(payload, hasStructured) > DEFAULT_OBSERVATION_INLINE_MAX_BYTES;
+function exceedsInlineLimit(
+  payload: Record<string, unknown>,
+  hasStructured: boolean,
+  serialization: ToolResponseSerialization,
+): boolean {
+  return (
+    emittedByteLength(payload, hasStructured, serialization) > DEFAULT_OBSERVATION_INLINE_MAX_BYTES
+  );
 }
 
 /**
@@ -996,17 +1043,25 @@ function exceedsInlineLimit(payload: Record<string, unknown>, hasStructured: boo
  * the client. Measure the larger of the two renderings, so the gate bounds
  * whichever representation is actually emitted.
  */
-function emittedByteLength(payload: Record<string, unknown>, hasStructured: boolean): number {
-  const strippedBytes = Buffer.byteLength(stringifyToolResponse(payload), "utf8");
+function emittedByteLength(
+  payload: Record<string, unknown>,
+  hasStructured: boolean,
+  serialization: ToolResponseSerialization,
+): number {
+  const strippedBytes = Buffer.byteLength(serialization.text(payload), "utf8");
   if (!hasStructured) {
     return strippedBytes;
   }
-  return Math.max(strippedBytes, structuredByteLength(payload, strippedBytes));
+  return Math.max(strippedBytes, structuredByteLength(payload, strippedBytes, serialization));
 }
 
-function structuredByteLength(payload: Record<string, unknown>, fallback: number): number {
+function structuredByteLength(
+  payload: Record<string, unknown>,
+  fallback: number,
+  serialization: ToolResponseSerialization,
+): number {
   try {
-    return Buffer.byteLength(JSON.stringify(payload), "utf8");
+    return Buffer.byteLength(serialization.artifact(payload), "utf8");
   } catch (error) {
     // A payload the transport itself cannot serialize (a cycle, a BigInt) has no
     // structured byte count to compare against; the stripped rendering is the
@@ -1020,6 +1075,7 @@ function shouldArtifactObservationPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
   hasStructured: boolean,
+  serialization: ToolResponseSerialization,
 ): boolean {
   if (artifactMode(ctx) === "always") {
     return true;
@@ -1027,7 +1083,7 @@ function shouldArtifactObservationPayload(
 
   // Measures the whole served payload — `observationDiff` and every other
   // top-level field included — not just the observation subtree.
-  return exceedsInlineLimit(payload, hasStructured);
+  return exceedsInlineLimit(payload, hasStructured, serialization);
 }
 
 function writeObservationArtifact(

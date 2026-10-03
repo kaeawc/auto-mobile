@@ -48,11 +48,6 @@ src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'n
 src/features/accessibility/ContrastChecker.ts: error TS2532: Object is possibly 'undefined'.
 src/features/action/IosSimulatorPermissions.ts: error TS2352: Conversion of type 'TccPermissionRow' to type 'Record<string, null | number | string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.
-src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
-src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
-src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
-src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
-src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 src/features/action/swipeon/ScrollUntilVisible.ts: error TS2322: Type 'ViewHierarchyResult | undefined' is not assignable to type 'ViewHierarchyResult | null'.
 src/features/action/swipeon/SwipeOn.ts: error TS2322: Type 'AndroidCtrlProxyClient' is not assignable to type 'ScrollAccessibilityService'.
 src/features/navigation/Explore.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
@@ -192,7 +187,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["raw-element-search", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["ui-perf-mode", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
-# swap-fp: 7,7,55,56,63 :: src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 # swap-fp: 7,7,7,7,9,9,9,9 :: src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.

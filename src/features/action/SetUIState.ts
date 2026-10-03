@@ -423,7 +423,7 @@ export class SetUIState extends BaseVisualChange {
     // background when the deadline wins (see `raceAgainstDeadline`). It returns
     // the same structured all-`notAttempted` shape used by the admission check.
     const initialObservationRaced = await this.raceAgainstDeadline(
-      () => this.getObserveScreen().execute(undefined, undefined, false, 0, signal),
+      () => this.getObserveScreen().execute({ signal, skipWaitForFresh: false, minTimestamp: 0 }),
       () => cutoffMs(),
       "initial observation",
       subscribeLiveTransportDeadline,
@@ -674,7 +674,11 @@ export class SetUIState extends BaseVisualChange {
 
             // Re-observe after scroll
             signal?.throwIfAborted();
-            return this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+            return this.getObserveScreen().execute({
+              signal,
+              skipWaitForFresh: false,
+              minTimestamp: 0,
+            });
           },
           () => cutoffMs(),
           "off-screen search (swipe + re-observe)",
@@ -767,7 +771,7 @@ export class SetUIState extends BaseVisualChange {
     if (result.freshObservation) {
       return result.freshObservation;
     }
-    return this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
+    return this.getObserveScreen().execute({ signal, skipWaitForFresh: false, minTimestamp: 0 });
   }
 
   /**
@@ -1205,13 +1209,11 @@ export class SetUIState extends BaseVisualChange {
     previousElement: Element,
     signal?: AbortSignal,
   ): Promise<Element> {
-    const observation = await this.getObserveScreen().execute(
-      undefined,
-      undefined,
-      false,
-      0,
+    const observation = await this.getObserveScreen().execute({
       signal,
-    );
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+    });
     if (!observation?.viewHierarchy) {
       return previousElement;
     }
@@ -1486,13 +1488,11 @@ export class SetUIState extends BaseVisualChange {
     // Get fresh observation. The caller (processField -> execute) reuses this
     // as its own post-success refresh instead of issuing a second, effectively
     // redundant observe against the device (#6222).
-    const observation = await this.getObserveScreen().execute(
-      undefined,
-      undefined,
-      false,
-      0,
+    const observation = await this.getObserveScreen().execute({
       signal,
-    );
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+    });
     if (!observation?.viewHierarchy) {
       if (fieldType === "text") {
         return { verified: false, observation, unverifiable: true };

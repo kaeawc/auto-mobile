@@ -2077,6 +2077,62 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
 });
 
 describe("createIosObserveRoundTripInspector lifecycle", () => {
+  test("reports zero elements and closes the probe when the collector returns undefined", async () => {
+    let closes = 0;
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        getServicePort: () => 8790,
+        discoverRunnerPort: async () => 8790,
+      }),
+      getExistingClient: () => null,
+      createClient: () => ({
+        getConnectionPortForDiagnostics: () => 8790,
+        requestHierarchySyncForDiagnostics: async () => ({
+          hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} },
+        }),
+        convertToViewHierarchyResult: () => ({
+          hierarchy: {},
+          screenWidth: 390,
+          screenHeight: 844,
+        }),
+        close: async () => {
+          closes += 1;
+        },
+      }),
+      elementsBuilder: new ObserveElementsBuilder({ collect: () => undefined }),
+    };
+    const simctl = baseDependencies.createSimctlClient();
+    const available = spyOn(simctl, "isAvailable").mockResolvedValue(true);
+    const booted = spyOn(simctl, "getBootedSimulators").mockResolvedValue([
+      { name: "iPhone", platform: "ios", deviceId: "SIM-1" },
+    ]);
+    try {
+      const inspections = await createIosObserveRoundTripInspector(
+        () => simctl,
+        new FakeLogger(),
+        hooks,
+      ).inspectBootedObserveRoundTrips();
+
+      expect(inspections).toEqual([
+        {
+          deviceId: "SIM-1",
+          name: "iPhone",
+          runnerPort: 8790,
+          clientPort: 8790,
+          connected: true,
+          screenSize: { width: 390, height: 844 },
+          hierarchyError: null,
+          elementCount: 0,
+        },
+      ]);
+      expect(closes).toBe(1);
+    } finally {
+      available.mockRestore();
+      booted.mockRestore();
+    }
+  });
+
   const simctlReturning = (devices: { name: string; deviceId: string }[]) => ({
     ...baseDependencies.createSimctlClient(),
     isAvailable: async () => true,

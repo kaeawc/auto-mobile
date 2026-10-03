@@ -409,11 +409,12 @@ export function createIosObserveRoundTripInspector(
                   height: viewHierarchy.screenHeight ?? response.hierarchy.screenHeight ?? 0,
                 };
                 const elements = hooks.elementsBuilder.build(viewHierarchy, "ios");
-                elementCount =
-                  elements.clickable.length +
-                  elements.scrollable.length +
-                  elements.text.length +
-                  elements.media.length;
+                elementCount = elements
+                  ? elements.clickable.length +
+                    elements.scrollable.length +
+                    elements.text.length +
+                    elements.media.length
+                  : 0;
               }
             } finally {
               if (existing === null) {

@@ -1354,6 +1354,8 @@ export class DevicePool {
       suppressAutoStartForDevice: (device) => this.suppressAutoStartForDevice(device),
       completeEmulatorLossRecovery: (incidentId, outcome) =>
         this.completeEmulatorLossRecovery(incidentId, outcome),
+      refreshEmulatorLossRecoverySettlement: (incidentId, outcome) =>
+        this.refreshEmulatorLossRecoverySettlement(incidentId, outcome),
       getRecoveryPolicy: () => this.getRecoveryPolicy(),
       isAndroidEmulatorActiveRelaunchEligible: (device) =>
         this.isAndroidEmulatorActiveRelaunchEligible(device),

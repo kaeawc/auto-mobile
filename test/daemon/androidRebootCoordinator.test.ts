@@ -214,6 +214,15 @@ describe("AndroidRebootCoordinator", () => {
     expect(outcomes).toEqual(["not-attempted"]);
   });
 
+  test("completes a declined detach without attempting a relaunch", async () => {
+    const { coordinator, port, outcomes, attempts } = setup();
+    port.detachSessionForAndroidRecovery = () => false;
+    expect(await run(coordinator, { preserveSessionId: "session" })).toBe(false);
+    expect(outcomes).toEqual(["not-attempted"]);
+    expect(attempts).toEqual([]);
+    expect(port.calls).toEqual(["set-image", "recovering:emulator-5554", "stop", "finish"]);
+  });
+
   test("never accesses assignmentMutex directly through its port", async () => {
     const { coordinator, port } = setup();
     expect(await run(coordinator)).toBe(true);

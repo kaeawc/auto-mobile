@@ -25,6 +25,8 @@ import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
+import { getImeOccluder, getVisibleIosImeBounds } from "../observe/output/SkeletonProjection";
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -171,6 +173,30 @@ export class Keyboard {
       return this.iosFailure(action, result, client, signal);
     }
 
+    if (
+      action !== "close" &&
+      result.open === true &&
+      (await this.isIOSKeyboardOnScreen(signal)) === false
+    ) {
+      const message =
+        action === "detect"
+          ? "Keyboard is closed (no visible on-screen software keyboard)"
+          : "Keyboard did not open: no visible on-screen software keyboard. It may be minimized off screen because the simulator uses a hardware keyboard and cannot be shown on request.";
+      return {
+        success: action === "detect",
+        open: false,
+        message,
+        ...(action === "open" ? { error: message } : {}),
+      };
+    }
+
+    return this.iosKeyboardResult(action, result);
+  }
+
+  private iosKeyboardResult(
+    action: KeyboardAction,
+    result: CtrlProxyKeyboardResult,
+  ): KeyboardResult {
     const success =
       action === "detect" ||
       (action === "open" && result.open) ||
@@ -183,6 +209,35 @@ export class Keyboard {
       ...(action === "close" && result.method ? { method: result.method } : {}),
       ...(success ? {} : { error: message }),
     };
+  }
+
+  private async isIOSKeyboardOnScreen(signal?: AbortSignal): Promise<boolean | undefined> {
+    try {
+      // Do not forceFresh here: the existing provider invalidates the Android cache.
+      const hierarchy = await awaitWhileRequestIsLive(
+        this.hierarchyProvider.getViewHierarchy(signal),
+        signal,
+      );
+      throwIfAborted(signal);
+      const width = hierarchy?.screenWidth;
+      const height = hierarchy?.screenHeight;
+      if (
+        !hierarchy ||
+        hierarchy.hierarchy?.error ||
+        ![width, height].every(
+          (value) => typeof value === "number" && Number.isFinite(value) && value > 0,
+        )
+      ) {
+        return undefined;
+      }
+      const elements = new DefaultObserveElementCollector(this.parser).collect(hierarchy, "ios");
+      const ime = elements && getImeOccluder(elements);
+      return !!ime && getVisibleIosImeBounds(ime, { width: width!, height: height! }) !== undefined;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("iOS keyboard visibility hierarchy read failed; using runner state", error);
+      return undefined;
+    }
   }
 
   private async iosFailure(

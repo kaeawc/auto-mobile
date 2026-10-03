@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { Keyboard } from "../../../src/features/action/Keyboard";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { decodeCtrlProxyMessage } from "../../../src/features/observe/ios/decodeCtrlProxyMessage";
@@ -10,6 +11,7 @@ import { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeKeyboardHierarchyProvider } from "../../fakes/FakeKeyboardHierarchyProvider";
+import { iosKeyboardTabbarHierarchy } from "../../fixtures/observe/iosKeyboardTabbar";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("Keyboard", () => {
@@ -406,6 +408,140 @@ describe("Keyboard", () => {
       expect(getInstanceSpy).toHaveBeenCalled();
     } finally {
       getInstanceSpy.mockRestore();
+    }
+  });
+
+  // Synthetic hierarchy scaffolding: bounds as reported in #9083, not a captured hierarchy.
+  const parkedIOSKeyboard = (top = 918): ViewHierarchyResult => ({
+    screenWidth: 402,
+    screenHeight: 874,
+    hierarchy: {
+      node: {
+        $: { class: "UIKeyboard", bounds: { left: 0, top, right: 402, bottom: 1144 } },
+        node: [
+          {
+            $: {
+              class: "UIKeyboardKey",
+              text: "Q",
+              bounds: { left: 0, top, right: 402, bottom: 1144 },
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  test.each([
+    ["visible docked keyboard", iosKeyboardTabbarHierarchy(true), true],
+    ["issue-reported off-screen keyboard", parkedIOSKeyboard(), false],
+    ["keyboard at screen bottom", parkedIOSKeyboard(874), false],
+    ["sub-point visible sliver", parkedIOSKeyboard(873.5), false],
+    ["no keyboard", { ...baseHierarchy(), screenWidth: 402, screenHeight: 874 }, false],
+    ["unavailable hierarchy", null, true],
+    ["unknown screen dimensions", baseHierarchy(), true],
+    [
+      "hierarchy error",
+      { screenWidth: 402, screenHeight: 874, hierarchy: { error: "unavailable" } },
+      true,
+    ],
+  ] as const)("ios detect cross-checks %s", async (_name, hierarchy, open) => {
+    fakeHierarchy.setDefaultResult(hierarchy);
+    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+    } as IOSCtrlProxyClient);
+    try {
+      const result = await new Keyboard(
+        iosDevice,
+        fakeAdbFactory,
+        fakeHierarchy,
+        fakeTimer,
+      ).execute("detect");
+      expect(result.success).toBe(true);
+      expect(result.open).toBe(open);
+      expect(result.message).toStartWith(open ? "Keyboard is open" : "Keyboard is closed");
+      expect(fakeHierarchy.getCallCount()).toBe(1);
+      expect(fakeHierarchy.getReadOptions()).toEqual([undefined]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("ios open with a visible docked keyboard preserves the existing result", async () => {
+    fakeHierarchy.setDefaultResult(iosKeyboardTabbarHierarchy(true));
+    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+    } as IOSCtrlProxyClient);
+    try {
+      expect(
+        await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("open"),
+      ).toEqual({ success: true, open: true, message: "Keyboard opened" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("ios open fails clearly for the minimized off-screen keyboard", async () => {
+    fakeHierarchy.setDefaultResult(parkedIOSKeyboard());
+    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+    } as IOSCtrlProxyClient);
+    try {
+      const result = await new Keyboard(
+        iosDevice,
+        fakeAdbFactory,
+        fakeHierarchy,
+        fakeTimer,
+      ).execute("open");
+      expect(result.success).toBe(false);
+      expect(result.open).toBe(false);
+      expect(result.error).toContain("minimized off screen");
+      expect(result.error).toContain("hardware keyboard");
+      expect(fakeHierarchy.getCallCount()).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test.each(["detect", "open"] as const)(
+    "ios %s trusts closed runner without reading hierarchy",
+    async (action) => {
+      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        requestKeyboard: async () => ({ success: true, open: false, totalTimeMs: 1 }),
+      } as IOSCtrlProxyClient);
+      try {
+        const result = await new Keyboard(
+          iosDevice,
+          fakeAdbFactory,
+          fakeHierarchy,
+          fakeTimer,
+        ).execute(action);
+        expect(result.open).toBe(false);
+        expect(fakeHierarchy.getCallCount()).toBe(0);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+
+  test("ios hierarchy exception warns and falls back to runner", async () => {
+    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+    } as IOSCtrlProxyClient);
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const provider = {
+        getViewHierarchy: async () => {
+          throw new Error("read failed");
+        },
+      };
+      const result = await new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute(
+        "detect",
+      );
+      expect(result.open).toBe(true);
+      expect(warning).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      warning.mockRestore();
     }
   });
 

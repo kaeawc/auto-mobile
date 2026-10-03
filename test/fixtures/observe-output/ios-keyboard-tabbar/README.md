@@ -9,3 +9,4 @@ This is observe OUTPUT (including skeleton/context rows), not a raw iOS view
 hierarchy. A raw iOS hierarchy capture with the keyboard up is still owed.
 The tests build minimal synthetic hierarchy scaffolding from these captured
 bounds; that scaffolding must not be described as a captured raw hierarchy.
+A raw minimized-keyboard iOS hierarchy capture (#9083) is still owed.

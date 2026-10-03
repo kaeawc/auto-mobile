@@ -96,6 +96,34 @@ export function hasFocusedTextInput(
   return false;
 }
 
+/** Read the editable value, never an iOS field's accessibility label or placeholder. */
+export function getFocusedTextValue(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): string | undefined {
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    for (const root of rootGroup) {
+      let value: string | undefined;
+      parser.traverseNode(root, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (value !== undefined || !isFocusedTextInputProperties(properties)) {
+          return;
+        }
+        const searchable = toSearchable(properties);
+        // Text sources preserve editable values; captured length distinguishes empty text from absence.
+        value =
+          searchable.textSources.value ??
+          searchable.textSources.text ??
+          (searchable.capturedTextLength === 0 ? "" : undefined);
+      });
+      if (value !== undefined) {
+        return value;
+      }
+    }
+  }
+  return undefined;
+}
+
 function isFocusedTextInputProperties(nodeProperties: Record<string, unknown>): boolean {
   if (nodeProperties.focused !== "true" && nodeProperties.focused !== true) {
     return false;

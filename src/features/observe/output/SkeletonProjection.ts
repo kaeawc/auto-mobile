@@ -761,16 +761,55 @@ export function getIosImeOccluder(
 ): ImeOccluder {
   if (
     !screenSize ||
-    !Number.isFinite(screenSize.width) ||
-    !Number.isFinite(screenSize.height) ||
-    screenSize.width <= 0 ||
-    screenSize.height <= 0 ||
+    !clipImeBounds(occluder.bounds, screenSize) ||
     occluder.bounds[2] - occluder.bounds[0] < screenSize.width * 0.9
   ) {
     return occluder;
   }
   // Docked iOS key bounds omit the bottom emoji/dictation strip and side margins.
   return { ...occluder, bounds: [0, occluder.bounds[1], screenSize.width, screenSize.height] };
+}
+
+// Ignore sub-two-point animation slivers; they do not constitute a usable software keyboard.
+export const IOS_KEYBOARD_MIN_VISIBLE_HEIGHT = 2;
+
+/** Clip shared iOS action geometry to the screen; parked keyboards have no visible rectangle. */
+export function getVisibleIosImeBounds(
+  occluder: ImeOccluder,
+  screenSize: ObserveResult["screenSize"],
+): Bounds | undefined {
+  if (!screenSize) {
+    return undefined;
+  }
+  const measured = clipImeBounds(occluder.bounds, screenSize);
+  if (!measured || measured[3] - measured[1] < IOS_KEYBOARD_MIN_VISIBLE_HEIGHT) {
+    return undefined;
+  }
+  const clipped = clipImeBounds(getIosImeOccluder(occluder, screenSize).bounds, screenSize);
+  return clipped && clipped[3] - clipped[1] >= IOS_KEYBOARD_MIN_VISIBLE_HEIGHT
+    ? clipped
+    : undefined;
+}
+
+function clipImeBounds(
+  bounds: Bounds,
+  screenSize: NonNullable<ObserveResult["screenSize"]>,
+): Bounds | undefined {
+  if (
+    ![...bounds, screenSize.width, screenSize.height].every(Number.isFinite) ||
+    screenSize.width <= 0 ||
+    screenSize.height <= 0
+  ) {
+    return undefined;
+  }
+  const [left, top, right, bottom] = bounds;
+  const clipped: Bounds = [
+    Math.max(0, left),
+    Math.max(0, top),
+    Math.min(screenSize.width, right),
+    Math.min(screenSize.height, bottom),
+  ];
+  return clipped[2] > clipped[0] && clipped[3] > clipped[1] ? clipped : undefined;
 }
 
 function isBelowImeWindow(provenance: ElementProvenance | undefined, ime: ImeOccluder): boolean {

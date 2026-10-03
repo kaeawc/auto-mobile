@@ -713,4 +713,118 @@ class SdkEventBufferTest {
 
     assertEquals(1, persistence.persistCount.get())
   }
+
+  @Test
+  fun `undelivered batch persists on buffer executor without a drop`() {
+    val executor = Executors.newSingleThreadScheduledExecutor { Thread(it, "persist-test") }
+    val recorded = CopyOnWriteArrayList<List<SdkEvent>>()
+    val threads = CopyOnWriteArrayList<String>()
+    val counter = DefaultDropCounter()
+    val persistence =
+      object : EventPersistence {
+        override fun persist(events: List<SdkEvent>): String {
+          recorded.add(events)
+          threads.add(Thread.currentThread().name)
+          return "id"
+        }
+
+        override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+
+        override fun removeBatch(batchId: String) {}
+
+        override fun cleanup(maxAgeDays: Int) {}
+      }
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        executor = executor,
+        dropCounter = counter,
+      )
+    val events = listOf(makeEvent(1), makeEvent(2))
+    try {
+      buffer.persistUndelivered(events)
+      drainExecutor(executor)
+      assertEquals(listOf(events), recorded.toList())
+      assertEquals(listOf("persist-test"), threads.toList())
+      assertTrue(counter.snapshot().isEmpty())
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `null persistence result counts terminal delivery drops`() {
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val counter = DefaultDropCounter()
+    val persistence =
+      object : EventPersistence {
+        override fun persist(events: List<SdkEvent>): String? = null
+
+        override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+
+        override fun removeBatch(batchId: String) {}
+
+        override fun cleanup(maxAgeDays: Int) {}
+      }
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        executor = executor,
+        dropCounter = counter,
+      )
+    try {
+      buffer.persistUndelivered(listOf(makeEvent(1), makeEvent(2)))
+      drainExecutor(executor)
+      assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `throwing persistence on executor is contained and counts terminal drops`() {
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val counter = DefaultDropCounter()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = ThrowingPersistence(),
+        executor = executor,
+        dropCounter = counter,
+      )
+    try {
+      buffer.persistUndelivered(listOf(makeEvent(1), makeEvent(2)))
+      drainExecutor(executor)
+      assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `throwing persistence after shutdown is contained and counts drops`() {
+    val counter = DefaultDropCounter()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = ThrowingPersistence(),
+        dropCounter = counter,
+      )
+    buffer.shutdown()
+    buffer.persistUndelivered(listOf(makeEvent(1), makeEvent(2)))
+    assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `undelivered batch after shutdown persists inline`() {
+    val persistence = CountingPersistence()
+    val counter = DefaultDropCounter()
+    val buffer = SdkEventBuffer(onFlush = {}, persistence = persistence, dropCounter = counter)
+    buffer.shutdown()
+    buffer.persistUndelivered(listOf(makeEvent(1)))
+    assertEquals(1, persistence.persistCount.get())
+    assertTrue(counter.snapshot().isEmpty())
+  }
 }

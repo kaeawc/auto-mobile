@@ -43,48 +43,79 @@ object SdkEventBroadcaster {
    * @param context Application context for sending broadcasts
    * @param events The events to broadcast
    */
-  internal fun broadcastBatch(context: Context, events: List<SdkEvent>) {
-    if (events.isEmpty()) return
-
+  internal fun broadcastBatch(
+    context: Context,
+    events: List<SdkEvent>,
+    onUndelivered: ((List<SdkEvent>) -> Unit)? = null,
+    onComplete: (Boolean) -> Unit = {},
+  ) {
     val generation = deliveryGeneration.get()
-    val batches = splitIntoBatches(events, context.packageName)
-    val eventCount = events.size
-    val perBatch = if (batches.size > 1) eventCount / batches.size else eventCount
-    for ((i, json) in batches.withIndex()) {
-      val count = if (i == batches.lastIndex) eventCount - perBatch * i else perBatch
-      sendBatchIntent(context, json, count, generation = generation)
+    val chunks = splitEventBatches(events, context.packageName, MAX_BATCH_BYTES)
+    var remaining = chunks.size
+    var allDelivered = true
+    val completionLock = Any()
+    if (chunks.isEmpty()) {
+      if (generation == deliveryGeneration.get()) onComplete(true)
+      return
+    }
+    for (chunk in chunks) {
+      sendBatchIntent(
+        context,
+        serializeChunk(chunk, context.packageName, MAX_BATCH_BYTES),
+        generation = generation,
+      ) { delivered ->
+        if (generation != deliveryGeneration.get()) return@sendBatchIntent
+        if (!delivered) {
+          // A supplied callback owns persistence and drop accounting: persisted events
+          // are retained, not dropped. Replay supplies a no-op because it already has a file.
+          if (onUndelivered != null) onUndelivered(chunk)
+          else dropCounter?.increment(DropReason.DELIVERY_FAILED, chunk.size)
+        }
+        synchronized(completionLock) {
+          allDelivered = allDelivered && delivered
+          remaining--
+          if (remaining == 0 && generation == deliveryGeneration.get()) onComplete(allDelivered)
+        }
+      }
     }
   }
 
-  /**
-   * Splits events into serialized JSON batches that each fit within [MAX_BATCH_BYTES]. Visible for
-   * testing.
-   *
-   * @param events The events to batch
-   * @param applicationId Application ID for the batch envelope
-   * @param maxBytes Maximum serialized size per batch
-   * @return List of serialized JSON strings, one per batch
-   */
+  /** Serialized batches retained for existing callers and tests. */
   internal fun splitIntoBatches(
     events: List<SdkEvent>,
     applicationId: String?,
     maxBytes: Int = MAX_BATCH_BYTES,
-  ): List<String> {
+  ): List<String> =
+    splitEventBatches(events, applicationId, maxBytes).map {
+      serializeChunk(it, applicationId, maxBytes)
+    }
+
+  private fun splitEventBatches(
+    events: List<SdkEvent>,
+    applicationId: String?,
+    maxBytes: Int,
+  ): List<List<SdkEvent>> {
     if (events.isEmpty()) return emptyList()
-
-    val json = serializeBatch(events, applicationId)
-    if (json.toByteArray(Charsets.UTF_8).size <= maxBytes) {
-      return listOf(json)
-    }
-
+    if (
+      serializeBatch(events, applicationId).toByteArray(Charsets.UTF_8).size <= maxBytes ||
+        events.size == 1
+    )
+      return listOf(events.toList())
     val midpoint = events.size / 2
-    if (midpoint == 0) {
-      // Single event that's too large — send it anyway
-      return listOf(serializeBatch(events, null))
-    }
+    return splitEventBatches(events.subList(0, midpoint), applicationId, maxBytes) +
+      splitEventBatches(events.subList(midpoint, events.size), applicationId, maxBytes)
+  }
 
-    return splitIntoBatches(events.subList(0, midpoint), applicationId, maxBytes) +
-      splitIntoBatches(events.subList(midpoint, events.size), applicationId, maxBytes)
+  private fun serializeChunk(
+    events: List<SdkEvent>,
+    applicationId: String?,
+    maxBytes: Int,
+  ): String {
+    val json = serializeBatch(events, applicationId)
+    // Preserve the existing oversized single-event envelope.
+    return if (events.size == 1 && json.toByteArray(Charsets.UTF_8).size > maxBytes)
+      serializeBatch(events, null)
+    else json
   }
 
   private fun serializeBatch(events: List<SdkEvent>, applicationId: String?): String =
@@ -101,9 +132,9 @@ object SdkEventBroadcaster {
   private fun sendBatchIntent(
     context: Context,
     batchJson: String,
-    eventCount: Int = 1,
     attempt: Int = 0,
     generation: Long,
+    onResult: (Boolean) -> Unit,
   ) {
     if (generation != deliveryGeneration.get()) return
 
@@ -119,6 +150,7 @@ object SdkEventBroadcaster {
         }
       context.sendBroadcast(intent)
     } catch (_: Exception) {
+      // Broadcast failures are retried and reported; SDK delivery must not crash the host.
       if (generation != deliveryGeneration.get()) return
       if (attempt < retryPolicy.maxRetries) {
         val delayMs = retryPolicy.delayForAttempt(attempt)
@@ -127,16 +159,18 @@ object SdkEventBroadcaster {
             sendBatchIntent(
               context,
               batchJson,
-              eventCount,
               attempt + 1,
               generation = generation,
+              onResult = onResult,
             )
           },
           delayMs,
         )
       } else if (generation == deliveryGeneration.get()) {
-        dropCounter?.increment(DropReason.DELIVERY_FAILED, eventCount)
+        onResult(false)
       }
+      return
     }
+    if (generation == deliveryGeneration.get()) onResult(true)
   }
 }

@@ -18,8 +18,7 @@ import kotlin.concurrent.withLock
  * @param maxBufferSize Maximum events before forced flush (default 50)
  * @param flushIntervalMs Periodic flush interval in milliseconds (default 500)
  * @param onFlush Callback invoked with the batch of events to send
- * @param persistence Optional disk persistence — events are written before broadcast and removed on
- *   success
+ * @param persistence Optional disk persistence for failed deliveries
  * @param executor Optional executor for periodic flush scheduling (for testing)
  * @param processors Event processors invoked in order before buffering; returning null drops the
  *   event
@@ -220,15 +219,36 @@ internal class SdkEventBuffer(
     }
   }
 
+  /** Retry callbacks may arrive on the main looper; persist on our executor while active. */
+  internal fun persistUndelivered(events: List<SdkEvent>) {
+    val task = Runnable {
+      val persisted =
+        try {
+          persistence?.persist(events) != null
+        } catch (_: Exception) {
+          // Persistence is best-effort; contain custom failures to protect the host and executor.
+          false
+        }
+      // Only events that could not be retained on disk are delivery drops.
+      if (!persisted) dropCounter?.increment(DropReason.DELIVERY_FAILED, events.size)
+    }
+    lock.withLock {
+      if (isShutdown) {
+        task.run()
+      } else {
+        try {
+          execute(task)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+          // An externally stopped executor cannot accept work; retain events inline best-effort.
+          task.run()
+        }
+      }
+    }
+  }
+
   private fun deliverBatch(events: List<SdkEvent>) {
     if (events.isEmpty()) return
     try {
-      // Delivery (onFlush -> sendBroadcast) is a synchronous, fire-and-forget
-      // in-process post whose success/failure is known immediately, so there is no
-      // asynchronous sink whose failure would need a disk-backed retry. Persisting
-      // before delivery meant a write-then-immediate-delete on every flush — pure
-      // I/O churn — so only persist when delivery actually throws, for next-launch
-      // replay (#3710, the twin of iOS #3636).
       onFlush(events)
     } catch (_: Exception) {
       // A throwing custom EventPersistence.persist() must NOT escape this task: it

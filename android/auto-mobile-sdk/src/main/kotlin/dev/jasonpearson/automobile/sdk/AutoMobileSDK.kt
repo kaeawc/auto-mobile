@@ -42,6 +42,7 @@ import dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor
 import dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.replayEventBatches
 import dev.jasonpearson.automobile.sdk.session.SessionTracker
 import dev.jasonpearson.automobile.sdk.storage.DataStoreInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
@@ -169,11 +170,18 @@ object AutoMobileSDK {
         SdkEventBroadcaster.dropCounter = counter
 
         // Create shared event buffer with broadcast flush callback and disk persistence
-        val buffer =
+        lateinit var buffer: SdkEventBuffer
+        buffer =
           SdkEventBuffer(
             maxBufferSize = configuration.bufferSize,
             flushIntervalMs = configuration.flushIntervalMs,
-            onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
+            onFlush = { events ->
+              SdkEventBroadcaster.broadcastBatch(
+                appContext,
+                events,
+                onUndelivered = buffer::persistUndelivered,
+              )
+            },
             persistence = eventPersistence,
             dropCounter = counter,
             processors = configuration.eventProcessors,
@@ -304,15 +312,21 @@ object AutoMobileSDK {
       dropCounter = counter
       SdkEventBroadcaster.dropCounter = counter
 
-      eventBuffer =
+      lateinit var buffer: SdkEventBuffer
+      buffer =
         SdkEventBuffer(
-            onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
-            dropCounter = counter,
-          )
-          .also {
-            it.isEnabled = _isEnabled
-            it.start()
-          }
+          onFlush = { events ->
+            SdkEventBroadcaster.broadcastBatch(
+              appContext,
+              events,
+              onUndelivered = buffer::persistUndelivered,
+            )
+          },
+          dropCounter = counter,
+        )
+      buffer.isEnabled = _isEnabled
+      buffer.start()
+      eventBuffer = buffer
     } catch (error: Exception) {
       logger.e(TAG, error) {
         "Navigation-only initialization failed; disabling navigation delivery"
@@ -576,13 +590,8 @@ object AutoMobileSDK {
    * broadcast and removed on success; failures remain on disk.
    */
   private fun replayPendingBatches(context: Context, persistence: EventPersistence) {
-    for ((batchId, events) in persistence.loadPending()) {
-      try {
-        SdkEventBroadcaster.broadcastBatch(context, events)
-        persistence.removeBatch(batchId)
-      } catch (_: Exception) {
-        // Keep on disk for next launch attempt
-      }
+    replayEventBatches(persistence) { events, complete ->
+      SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
     }
   }
 

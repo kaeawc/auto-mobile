@@ -47,20 +47,42 @@ internal class FileEventPersistence(
   private val directory: File,
   private val clock: () -> Long = System::currentTimeMillis,
   private val uuidProvider: () -> String = { UUID.randomUUID().toString() },
+  // Bound disk growth during prolonged delivery outages, retaining the newest 100 batches.
+  private val maxPendingBatches: Int = 100,
 ) : EventPersistence {
 
   init {
+    require(maxPendingBatches > 0)
     directory.mkdirs()
   }
 
+  @Synchronized
   override fun persist(events: List<SdkEvent>): String? {
     if (events.isEmpty()) return null
     val batchId = "${clock()}_${uuidProvider()}"
     val file = File(directory, "events_$batchId.json")
     return try {
       file.writeText(serializeEvents(events))
-      batchId
+      val files =
+        directory
+          .listFiles { f ->
+            f.name.startsWith("events_") && f.name.endsWith(".json")
+          }
+          ?.sortedBy { it.name }
+          ?: run {
+            file.delete()
+            return null
+          }
+      for (oldest in files.take((files.size - maxPendingBatches).coerceAtLeast(0))) {
+        if (!oldest.delete()) {
+          file.delete()
+          return null
+        }
+      }
+      if (file.exists()) batchId else null
     } catch (_: Exception) {
+      // Disk persistence is best-effort; report failure without crashing the host.
+      runCatching { file.delete() }
       null
     }
   }

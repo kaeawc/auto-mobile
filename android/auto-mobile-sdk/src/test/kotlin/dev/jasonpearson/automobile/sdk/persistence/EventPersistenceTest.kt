@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
+import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.protocol.SdkLogEvent
@@ -531,5 +532,110 @@ class EventPersistenceTest {
       "Should use stable key 'lifecycle', not class simpleName",
     )
     assertTrue(!json.contains("SdkLifecycleEvent"), "Should not contain class name")
+  }
+
+  @Test
+  fun `persist cap evicts oldest files and retains newest batches`() {
+    var now = 1000L
+    val persistence =
+      FileEventPersistence(
+        directory = tempFolder.root,
+        clock = { now++ },
+        uuidProvider = { "id" },
+        maxPendingBatches = 2,
+      )
+    persistence.persist(listOf(makeLifecycleEvent("first")))
+    persistence.persist(listOf(makeLifecycleEvent("second")))
+    persistence.persist(listOf(makeLifecycleEvent("third")))
+    persistence.persist(listOf(makeLifecycleEvent("fourth")))
+    assertEquals(
+      listOf("third", "fourth"),
+      persistence.loadPending().map {
+        (it.second.single() as SdkLifecycleEvent).kind
+      },
+    )
+    assertEquals(2, tempFolder.root.listFiles()!!.size)
+  }
+
+  private class ReplayPersistence(val pending: List<Pair<String, List<SdkEvent>>>) :
+    EventPersistence {
+    val removed = mutableListOf<String>()
+    var persistCalls = 0
+
+    override fun persist(events: List<SdkEvent>): String? {
+      persistCalls++
+      return "duplicate"
+    }
+
+    override fun loadPending(): List<Pair<String, List<SdkEvent>>> = pending
+
+    override fun removeBatch(batchId: String) {
+      removed.add(batchId)
+    }
+
+    override fun cleanup(maxAgeDays: Int) {}
+  }
+
+  @Test
+  fun `replay removes only successful batches in oldest first submission order`() {
+    val first: List<SdkEvent> = listOf(makeLifecycleEvent("first"))
+    val second: List<SdkEvent> = listOf(makeLifecycleEvent("second"))
+    val persistence = ReplayPersistence(listOf("oldest" to first, "newest" to second))
+    val submitted = mutableListOf<List<SdkEvent>>()
+    val completions = mutableListOf<(Boolean) -> Unit>()
+    replayEventBatches(persistence) { events, complete ->
+      submitted.add(events)
+      completions.add(complete)
+    }
+    assertEquals(listOf(first, second), submitted)
+    assertTrue(persistence.removed.isEmpty())
+    completions[0](true)
+    completions[1](false)
+    assertEquals(listOf("oldest"), persistence.removed)
+    assertEquals(0, persistence.persistCalls)
+  }
+
+  @Test
+  fun `replay submission failure keeps original without repersisting`() {
+    val persistence = ReplayPersistence(listOf("id" to listOf(makeLifecycleEvent("one"))))
+    replayEventBatches(persistence) { _, _ -> throw IllegalStateException("failure") }
+    assertTrue(persistence.removed.isEmpty())
+    assertEquals(0, persistence.persistCalls)
+  }
+
+  @Test
+  fun `replay contains load and remove persistence failures`() {
+    val unreadable =
+      object : EventPersistence {
+        override fun persist(events: List<SdkEvent>): String? = null
+
+        override fun loadPending(): List<Pair<String, List<SdkEvent>>> =
+          throw IllegalStateException("read failure")
+
+        override fun removeBatch(batchId: String) {
+          error("not reached")
+        }
+
+        override fun cleanup(maxAgeDays: Int) {}
+      }
+    var submitted = false
+    replayEventBatches(unreadable) { _, _ -> submitted = true }
+    assertTrue(!submitted)
+    val unremovable =
+      object : EventPersistence {
+        override fun persist(events: List<SdkEvent>): String? = null
+
+        override fun loadPending(): List<Pair<String, List<SdkEvent>>> =
+          listOf("id" to listOf<SdkEvent>(makeLifecycleEvent("one")))
+
+        override fun removeBatch(batchId: String) {
+          throw IllegalStateException("remove failure")
+        }
+
+        override fun cleanup(maxAgeDays: Int) {}
+      }
+    var complete: ((Boolean) -> Unit)? = null
+    replayEventBatches(unremovable) { _, callback -> complete = callback }
+    complete!!(true)
   }
 }

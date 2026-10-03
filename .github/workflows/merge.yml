@@ -1516,19 +1516,8 @@ jobs:
             sleep 30
           done
 
-          artifacts="$(curl -fsS --retry 3 --retry-delay 5 \
-            -H "Circle-Token: $CIRCLECI_TOKEN" \
-            "$api/$project/$job_number/artifacts")"
-          badge_url="$(jq -r '[.items[]? | select(.path | endswith("coverage/swift-coverage-badge.json")) | .url] | first // empty' <<< "$artifacts")"
-          if [[ -z "$badge_url" ]]; then
-            echo "::error::CircleCI job $job_number has no Swift coverage badge artifact" >&2
-            exit 1
-          fi
-          mkdir -p coverage
-          curl -fsSL --retry 3 --retry-delay 5 \
-            -H "Circle-Token: $CIRCLECI_TOKEN" \
-            "$badge_url" -o coverage/swift-coverage-badge.json
-          jq -e . coverage/swift-coverage-badge.json > /dev/null
+          bash scripts/ci/fetch-circleci-swift-badge.sh \
+            "$api" "$project" "$job_number" coverage/swift-coverage-badge.json
 
       - name: "Upload Swift Coverage Badge"
         if: steps.filter-swift.outputs.ios == 'true'

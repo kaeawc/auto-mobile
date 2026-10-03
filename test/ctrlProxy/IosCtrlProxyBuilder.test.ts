@@ -1249,12 +1249,13 @@ describe("IosCtrlProxyBuilder", function () {
       // Release-pinned checksum the local build can never match.
       IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
       IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
       );
 
-      // Post-extract must not reject on the release-pinned mismatch; it derives
+      // Local verification must not reject on the release-pinned mismatch; it derives
       // and pins the local runner's hash instead.
       expect((await builder.build("simulator")).success).toBe(true);
 
@@ -1262,7 +1263,7 @@ describe("IosCtrlProxyBuilder", function () {
       await builder.verifyRunnerBinaryBeforeLaunch("simulator");
     });
 
-    test("local-build mode still fails closed if the runner binary changes after post-extract (TOCTOU) (#5561)", async function () {
+    test("local-build mode still fails closed if the runner binary changes after verification (TOCTOU) (#5561)", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
@@ -1272,6 +1273,7 @@ describe("IosCtrlProxyBuilder", function () {
       IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
       IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1279,7 +1281,7 @@ describe("IosCtrlProxyBuilder", function () {
 
       expect((await builder.build("simulator")).success).toBe(true);
 
-      // Swap the on-disk binary after it was pinned at post-extract.
+      // Swap the on-disk binary after it was pinned at local verification.
       downloader.runnerChecksum = "d".repeat(64);
 
       await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
@@ -1297,6 +1299,7 @@ describe("IosCtrlProxyBuilder", function () {
       IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("a".repeat(64), "xctest");
       IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1304,7 +1307,7 @@ describe("IosCtrlProxyBuilder", function () {
 
       expect((await builder.build("simulator")).success).toBe(true);
 
-      // A legitimate rebuild produces a different local binary. The re-extract must
+      // A legitimate rebuild produces a different local binary. Explicit build() must
       // drop the stale pin so this is NOT rejected as a TOCTOU swap.
       downloader.runnerChecksum = "d".repeat(64);
       expect((await builder.build("simulator")).success).toBe(true);
@@ -1325,6 +1328,7 @@ describe("IosCtrlProxyBuilder", function () {
       IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
       IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
       IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+      await new FakeIOSCtrlProxyBundleDownloader().extractBundle("fixture", derivedDataPath);
       const builder = IosCtrlProxyBuilder.getInstance(
         { derivedDataPath, bundleCacheDir: cacheDir },
         { downloader },
@@ -1503,6 +1507,41 @@ describe("IosCtrlProxyBuilder", function () {
         "Refusing to launch",
       );
     });
+
+    test.each(["0.0.83-dev", "0.0.83-nightly", "99.99.99"])(
+      "an unregistered version %s is exempt only in local-build mode",
+      (version) => {
+        const previousVersion = process.env.AUTOMOBILE_VERSION;
+        const previousLocalMode = process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD;
+        process.env.AUTOMOBILE_VERSION = version;
+        delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH;
+        delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting(null);
+        try {
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "true";
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false);
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "false";
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true);
+          IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false);
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = "true";
+          IosCtrlProxyBuilder.setUseLocalBuildForTesting(false);
+          expect(IosCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true);
+        } finally {
+          IosCtrlProxyBuilder.setUseLocalBuildForTesting(null);
+          if (previousVersion === undefined) {
+            delete process.env.AUTOMOBILE_VERSION;
+          } else {
+            process.env.AUTOMOBILE_VERSION = previousVersion;
+          }
+          if (previousLocalMode === undefined) {
+            delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD;
+          } else {
+            process.env.AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD = previousLocalMode;
+          }
+        }
+      },
+    );
 
     test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function () {
       const prev = process.env.AUTOMOBILE_VERSION;

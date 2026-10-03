@@ -27,8 +27,6 @@
     <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.lineNumber!!</ID>
     <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:selectedFailure!!</ID>
     <ID>UnsafeCallOnNullableType:FailuresPushSocketClient.kt:FailuresPushSocketClient$channel!!</ID>
-    <ID>UnsafeCallOnNullableType:KeyValueInspector.kt:saveError!!</ID>
-    <ID>UnsafeCallOnNullableType:KeyValueInspector.kt:selectedFile!!</ID>
     <ID>UnsafeCallOnNullableType:McpConnectionSection.kt:connectedProcess!!</ID>
     <ID>UnsafeCallOnNullableType:McpDaemonClient.kt:McpDaemonClient$response.result!!</ID>
     <ID>UnsafeCallOnNullableType:McpHttpClient.kt:McpHttpClient$protocolVersion!!</ID>
@@ -40,10 +38,8 @@
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:hoveredTransitionId!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:screenshotBitmap!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationDetailViews.kt:screenshotBitmap!!</ID>
-    <ID>UnsafeCallOnNullableType:ObservationStreamClient.kt:ObservationStreamClient$channel!!</ID>
     <ID>UnsafeCallOnNullableType:PropertyInspectorPanel.kt:element.text!!</ID>
     <ID>UnsafeCallOnNullableType:RetryPolicy.kt:lastException!!</ID>
     <ID>UnsafeCallOnNullableType:TelemetryDashboard.kt:previousDeviceId!!</ID>
-    <ID>UnsafeCallOnNullableType:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$channel!!</ID>
   </CurrentIssues>
 </SmellBaseline>

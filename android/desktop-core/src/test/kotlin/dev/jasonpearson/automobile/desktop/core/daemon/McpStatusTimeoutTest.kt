@@ -114,6 +114,109 @@ class McpStatusTimeoutTest {
     }
   }
 
+  @Test
+  fun `HTTP list tools without result names the method`() {
+    val client = httpClientForResponse("""{"jsonrpc":"2.0"}""")
+    val error = assertFailsWith<McpConnectionException> { client.listTools() }
+    assertTrue(error.message.orEmpty().contains("tools/list response contained no result"))
+  }
+
+  @Test
+  fun `HTTP omits missing session header and preserves negotiated protocol header`() {
+    val client = httpClientForResponse("""{"jsonrpc":"2.0","result":{"tools":[]}}""")
+    assertEquals(emptyList(), client.listTools())
+  }
+
+  @Test
+  fun `HTTP missing negotiated protocol version fails during initialize`() {
+    val client = httpClientForResponse("", """{"jsonrpc":"2.0","result":{}}""")
+    val error = assertFailsWith<McpConnectionException> { client.ping() }
+    assertTrue(error.message.orEmpty().contains("omitted protocolVersion"))
+  }
+
+  @Test
+  fun `STDIO list tools without result names the method`() {
+    val client = stdioClientForResult(null)
+    try {
+      val error = assertFailsWith<McpConnectionException> { client.listTools() }
+      assertTrue(error.message.orEmpty().contains("tools/list response contained no result"))
+    } finally {
+      client.close()
+    }
+  }
+
+  @Test
+  fun `STDIO well formed list tools response still decodes`() {
+    val client = stdioClientForResult("""{"tools":[]}""")
+    try {
+      assertEquals(emptyList(), client.listTools())
+    } finally {
+      client.close()
+    }
+  }
+
+  @Test
+  fun `STDIO missing negotiated protocol version fails during initialize`() {
+    val client = stdioClientForResult(null, "{}")
+    try {
+      val error = assertFailsWith<McpConnectionException> { client.ping() }
+      assertTrue(error.message.orEmpty().contains("omitted protocolVersion"))
+    } finally {
+      client.close()
+    }
+  }
+
+  private fun httpClientForResponse(
+    responseBody: String,
+    initialization: String = initializeResponse,
+  ): McpHttpClient {
+    var requests = 0
+    return McpHttpClient(
+      endpoint = "http://localhost/mcp",
+      requestSender =
+        HttpRequestSender { request ->
+          assertTrue(request.headers().firstValue("mcp-session-id").isEmpty)
+          if (requests > 0) {
+            assertEquals(
+              "2025-11-25",
+              request.headers().firstValue("mcp-protocol-version").orElseThrow(),
+            )
+          } else {
+            assertTrue(request.headers().firstValue("mcp-protocol-version").isEmpty)
+          }
+          FakeHttpResponse(
+            request,
+            when (requests++) {
+              0 -> initialization
+              1 -> "{}" // The initialized notification has no response result.
+              else -> responseBody
+            },
+          )
+        },
+    )
+  }
+
+  private fun stdioClientForResult(
+    result: String?,
+    initialization: String = """{"protocolVersion":"2025-11-25"}""",
+  ): McpStdioClient {
+    var responses = 0
+    return McpStdioClient(
+      command = "unused",
+      processStarter = { FakeProcess() },
+      responseReader =
+        StdioResponseReader { _, _ ->
+          JsonRpcResponse(
+            jsonrpc = "2.0",
+            result =
+              (if (responses++ == 0) initialization else result)?.let(
+                DaemonJson::parseToJsonElement
+              ),
+          )
+        },
+    )
+  }
+
   private class FakeProcess : Process() {
     private val output = ByteArrayOutputStream()
     private var alive = true

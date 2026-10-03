@@ -18,8 +18,6 @@
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.recompositionRate!!</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.timeToInteractiveMs!!</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.touchLatencyMs!!</ID>
-    <ID>UnsafeCallOnNullableType:DaemonStatusSection.kt:daemonStatus!!</ID>
-    <ID>UnsafeCallOnNullableType:DaemonStatusSection.kt:socketPath!!</ID>
     <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:onUpdateCell!!</ID>
     <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:selectedTable!!</ID>
     <ID>UnsafeCallOnNullableType:DeviceListSection.kt:error!!</ID>
@@ -28,18 +26,10 @@
     <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:selectedFailure!!</ID>
     <ID>UnsafeCallOnNullableType:FailuresPushSocketClient.kt:FailuresPushSocketClient$channel!!</ID>
     <ID>UnsafeCallOnNullableType:McpConnectionSection.kt:connectedProcess!!</ID>
-    <ID>UnsafeCallOnNullableType:McpDaemonClient.kt:McpDaemonClient$response.result!!</ID>
-    <ID>UnsafeCallOnNullableType:McpHttpClient.kt:McpHttpClient$protocolVersion!!</ID>
-    <ID>UnsafeCallOnNullableType:McpHttpClient.kt:McpHttpClient$response.result!!</ID>
-    <ID>UnsafeCallOnNullableType:McpHttpClient.kt:McpHttpClient$sessionId!!</ID>
-    <ID>UnsafeCallOnNullableType:McpProcessesPanel.kt:daemonStartError!!</ID>
-    <ID>UnsafeCallOnNullableType:McpProcessesPanel.kt:testingPid!!</ID>
-    <ID>UnsafeCallOnNullableType:McpStdioClient.kt:McpStdioClient$response.result!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:hoveredTransitionId!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:screenshotBitmap!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationDetailViews.kt:screenshotBitmap!!</ID>
     <ID>UnsafeCallOnNullableType:PropertyInspectorPanel.kt:element.text!!</ID>
-    <ID>UnsafeCallOnNullableType:RetryPolicy.kt:lastException!!</ID>
     <ID>UnsafeCallOnNullableType:TelemetryDashboard.kt:previousDeviceId!!</ID>
   </CurrentIssues>
 </SmellBaseline>

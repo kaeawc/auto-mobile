@@ -1,3 +1,10 @@
+import {
+  prepareTargetDisplayAction,
+  refreshTargetDisplayHierarchy,
+  sessionRenderedObservation,
+  type RenderedObservationReader,
+} from "./TargetDisplayAction";
+import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   resolveDisplayFence,
@@ -67,7 +74,7 @@ import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierar
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
-import { dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
+import { androidDisplayTapDispatch, dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
@@ -80,7 +87,14 @@ import {
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
 
+type TapAnyAccessibilityService = Pick<
+  AndroidCtrlProxyClient,
+  "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
+> &
+  Partial<Pick<AndroidCtrlProxyClient, "supportsCommand">>;
+
 interface TapAnyElementDependencies extends DisplayFenceDependencies {
+  lastRenderedObservation?: RenderedObservationReader;
   hierarchyCapture?: HierarchyCapture;
   timer?: Timer;
   elementSelector?: ElementSelector;
@@ -95,10 +109,7 @@ interface TapAnyElementDependencies extends DisplayFenceDependencies {
     | "executePreciseTap"
   >;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
-  accessibilityService?: Pick<
-    AndroidCtrlProxyClient,
-    "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
-  >;
+  accessibilityService?: TapAnyAccessibilityService;
 }
 
 type RefreshViewHierarchy = (
@@ -365,13 +376,11 @@ export const TAP_ANY_LONG_PRESS_MAX_DURATION_MS =
 export class TapAnyElement extends BaseVisualChange {
   private readonly iosMultiPanel =
     this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1;
+  private readonly lastRenderedObservation: RenderedObservationReader;
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
   private finder: ElementFinder;
-  private accessibilityService: Pick<
-    AndroidCtrlProxyClient,
-    "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
-  >;
+  private accessibilityService: TapAnyAccessibilityService;
   private hierarchyAccessibilityService: AndroidCtrlProxyClient;
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
@@ -405,6 +414,7 @@ export class TapAnyElement extends BaseVisualChange {
     options: TapAnyElementDependencies = {},
   ) {
     super(device, adb, options.timer, options.renderedDisplayRevision, options);
+    this.lastRenderedObservation = options.lastRenderedObservation ?? sessionRenderedObservation;
     this.geometry = new DefaultElementGeometry();
     this.elementSelector =
       options.elementSelector ??
@@ -435,6 +445,14 @@ export class TapAnyElement extends BaseVisualChange {
               request.timeoutMs,
             ),
           readFresh: async (request) => {
+            if (request.displayId !== undefined) {
+              return (
+                await createDeviceHierarchyCapture(device, {
+                  adbFactory: this.adbFactory,
+                  timer: this.timer,
+                }).capture(request)
+              ).hierarchy;
+            }
             const hierarchy = await this.readFreshHierarchy(
               request.timeoutMs ?? TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
               undefined,
@@ -659,7 +677,11 @@ export class TapAnyElement extends BaseVisualChange {
     durationMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption & { selectionOptions?: TapAnyElementOptions } = {},
+    fenceOptions: DisplayFenceOption & {
+      selectionOptions?: TapAnyElementOptions;
+      refresh?: RefreshViewHierarchy;
+      dispatch?: (point: { x: number; y: number }) => Promise<void>;
+    } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     if (!preTapHash) {
@@ -667,7 +689,12 @@ export class TapAnyElement extends BaseVisualChange {
     }
     const probe = await checkAndroidTapHierarchyChange(
       this.timer,
-      (timeoutMs) => this.refreshViewHierarchy(timeoutMs, screenSize, signal),
+      (timeoutMs) =>
+        (fenceOptions.refresh ?? this.refreshViewHierarchy.bind(this))(
+          timeoutMs,
+          screenSize,
+          signal,
+        ),
       (postTapHierarchy) => this.hashViewHierarchy(postTapHierarchy),
       preTapHash,
     );
@@ -700,6 +727,11 @@ export class TapAnyElement extends BaseVisualChange {
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
+    if (fenceOptions.dispatch) {
+      this.assertSelectedCapture(target.capture);
+      await fenceOptions.dispatch(retryPoint);
+      return;
+    }
     await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, signal, {
       displayFence: fence,
     });
@@ -1241,6 +1273,33 @@ export class TapAnyElement extends BaseVisualChange {
     try {
       throwIfAborted(signal);
 
+      const targetDisplay =
+        options.display === undefined
+          ? undefined
+          : await prepareTargetDisplayAction(
+              this.device,
+              options.display,
+              this.observeScreen,
+              this.adb,
+              this.lastRenderedObservation,
+              signal,
+              this.displayTransitionReader,
+            );
+      const refresh: RefreshViewHierarchy =
+        targetDisplay && this.device.platform === "android"
+          ? (timeoutMs, _screenSize, refreshSignal) =>
+              refreshTargetDisplayHierarchy(
+                targetDisplay,
+                this.hierarchyCapture,
+                timeoutMs,
+                () =>
+                  this.staleDisplay(
+                    targetDisplay.observation.display.generation ??
+                      this.displayTransitionReader.identityRevision(this.device.deviceId),
+                  ),
+                refreshSignal,
+              )
+          : this.refreshViewHierarchy.bind(this);
       const result = await this.observedInteraction(
         async (observeResult: ObserveResult, fence) => {
           throwIfAborted(signal);
@@ -1281,11 +1340,7 @@ export class TapAnyElement extends BaseVisualChange {
               if (remainingTimeMs <= 0) {
                 break;
               }
-              const refreshed = await this.refreshViewHierarchy(
-                remainingTimeMs,
-                observeResult.screenSize,
-                signal,
-              );
+              const refreshed = await refresh(remainingTimeMs, observeResult.screenSize, signal);
               requestCount += 1;
               if (!refreshed) {
                 continue;
@@ -1359,15 +1414,28 @@ export class TapAnyElement extends BaseVisualChange {
           switch (this.device.platform) {
             case "android": {
               const preTapHash = this.hashViewHierarchy(selectedCapture.hierarchy);
-              await this.executeAndroidTap(
-                action,
-                tapPoint.x,
-                tapPoint.y,
-                longPressDuration,
-                target,
-                signal,
-                { displayFence: fence },
-              );
+              const dispatch = targetDisplay
+                ? await androidDisplayTapDispatch(
+                    this.accessibilityService,
+                    this.adb,
+                    { action, duration: longPressDuration },
+                    { target: targetDisplay, signal, onDispatched: () => {} },
+                  )
+                : undefined;
+              if (dispatch) {
+                this.assertSelectedCapture(selectedCapture);
+                await dispatch(tapPoint);
+              } else {
+                await this.executeAndroidTap(
+                  action,
+                  tapPoint.x,
+                  tapPoint.y,
+                  longPressDuration,
+                  target,
+                  signal,
+                  { displayFence: fence },
+                );
+              }
               await this.retryAndroidTapIfNoChange(
                 preTapHash,
                 target,
@@ -1375,11 +1443,12 @@ export class TapAnyElement extends BaseVisualChange {
                 longPressDuration,
                 observeResult.screenSize,
                 signal,
-                { displayFence: fence, selectionOptions: options },
+                { displayFence: fence, selectionOptions: options, refresh, dispatch },
               );
               break;
             }
             case "ios":
+              targetDisplay?.assertCurrent();
               this.assertSelectedCapture(selectedCapture);
               await this.executeIosTap(
                 action,
@@ -1400,6 +1469,8 @@ export class TapAnyElement extends BaseVisualChange {
         },
         {
           changeExpected: false,
+          display: targetDisplay?.observation.display.key,
+          previousObservation: targetDisplay?.observation,
           timeoutMs: 800,
           progress,
           perf,
@@ -1418,6 +1489,7 @@ export class TapAnyElement extends BaseVisualChange {
         },
       );
 
+      targetDisplay?.assertCurrent();
       return result;
     } catch (error) {
       perf.end();
@@ -1426,14 +1498,17 @@ export class TapAnyElement extends BaseVisualChange {
       if (error instanceof StaleDisplayError) {
         return withStaleDisplay(this.createErrorResult(options.action, error.message), error);
       }
-      return {
-        success: false,
-        action: options.action,
-        error: `Failed to tap clickable element: ${errorMsg}`,
-        element: {
-          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-        } as Element,
-      };
+      return withStaleDisplay(
+        {
+          success: false,
+          action: options.action,
+          error: `Failed to tap clickable element: ${errorMsg}`,
+          element: {
+            bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+          } as Element,
+        },
+        error,
+      );
     }
   }
 

@@ -658,6 +658,7 @@ export const tapAnySchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
       .object({
+        display: z.string().optional().describe("Target panel key, role, or active"),
         container: nestedElementContainerSchema
           .optional()
           .describe(
@@ -2208,6 +2209,7 @@ export async function tapAnyHandler(
   const tapAnyCommand = tapAnyElementFactory(device);
   const result = await tapAnyCommand.execute(
     {
+      display: args.display,
       container: args.container,
       selectionStrategy: args.selectionStrategy,
       scrollableContainer: args.scrollableContainer,

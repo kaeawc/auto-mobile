@@ -650,6 +650,10 @@ descendants of the previous level, including across anonymous wrappers:
 ```
 
 For `tapAny`, omit `selector` to select any eligible clickable descendant.
+Like `tapOn`, `tapAny` accepts `display` (panel key, role, or `active`); an omitted
+value uses the session display pin when present. Android selection, polling,
+retry, and input stay on that panel; iOS requires the live panel. Explicit panel
+targeting requires a prior observation of that panel, as with `tapOn`.
 The default remains `first`; `random` keeps its existing behavior. `unique`
 requires exactly one eligible target and exactly one match at every unindexed
 container level, even when that level specifies `first` or `random`. A

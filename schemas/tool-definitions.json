@@ -25614,6 +25614,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
         "container": {
           "description": "Nested container scope; outermost resolves first, each level searches strict descendants. Per-level index is zero-based.",
           "$ref": "#/$defs/__schema0"

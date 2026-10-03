@@ -1,8 +1,5 @@
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
-import {
-  resolveCoordinateTapCtrlProxyTimeoutMs,
-  resolveVoiceOverActivateCtrlProxyTimeoutMs,
-} from "./gestureTransportTimeout";
+import { resolveVoiceOverActivateCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
@@ -119,9 +116,17 @@ import type {
 } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { sequenceBackoff } from "../../utils/Backoff";
-import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
-import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
-import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
+import {
+  androidDisplayTapDispatch,
+  dispatchAndroidCoordinateTap,
+  dispatchIosCoordinateTap,
+} from "./coordinateTapDispatch";
+import { executeTouchscreenInput } from "./touchscreenInput";
+import {
+  refreshTargetDisplayHierarchy,
+  prepareTargetDisplayAction,
+  type RenderedObservationReader,
+} from "./TargetDisplayAction";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import {
   checkAndroidTapHierarchyChange,
@@ -3088,52 +3093,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       onDispatched: () => void;
     },
   ): Promise<(point: { x: number; y: number }) => Promise<void>> {
-    const { target, signal } = context;
-    const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
+    return androidDisplayTapDispatch(
       this.accessibilityService,
-      target.displayId,
+      this.adb,
+      {
+        action: options.action === "focus" ? "tap" : options.action,
+        duration: options.duration,
+      },
+      context,
     );
-    const dispatch = async ({ x, y }: { x: number; y: number }) => {
-      throwIfAborted(signal);
-      target.assertCurrent();
-      const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
-      if (useCtrlProxy) {
-        const result = await this.accessibilityService.requestTapCoordinates(
-          x,
-          y,
-          duration,
-          resolveCoordinateTapCtrlProxyTimeoutMs(duration),
-          undefined,
-          undefined,
-          undefined,
-          signal,
-          target.displayId === 0 ? undefined : target.displayId,
-          target.assertCurrent,
-        );
-        throwIfAborted(signal);
-        if (!result.success) {
-          throw new ActionableError(result.error ?? "Android tap failed");
-        }
-      } else {
-        await executeTouchscreenInput(
-          this.adb,
-          options.action === "longPress"
-            ? `swipe ${x} ${y} ${x} ${y} ${duration}`
-            : `tap ${x} ${y}`,
-          target.displayId,
-          signal,
-          target.assertCurrent,
-        );
-      }
-      context.onDispatched();
-    };
-    const dispatchAction = async (point: { x: number; y: number }) => {
-      await dispatch(point);
-      if (options.action === "doubleTap") {
-        await dispatch(point);
-      }
-    };
-    return dispatchAction;
   }
 
   private selectElementOnDisplay(
@@ -3213,38 +3181,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     },
   ): Promise<TapOnElementResult> {
     const { target, signal } = context;
-    const refresh: AndroidTapVerification["refresh"] = async (timeoutMs) => {
-      throwIfAborted(signal);
-      target.assertCurrent();
-      let captured: ViewHierarchyResult;
-      try {
-        captured = (
-          await this.hierarchyCapture.capture({
-            freshness: "fresh",
-            searchRaw: serverConfig.isRawElementSearchEnabled(),
-            timeoutMs,
-            signal,
-            displayId: target.displayId ?? 0,
-          })
-        ).hierarchy;
-      } catch (error) {
-        target.assertCurrent();
-        if (error instanceof StaleDisplayError) {
-          throw error;
-        }
-        throwIfAborted(signal);
-        logger.warn(`[TapOnElement] Fresh display capture failed: ${errorMessage(error)}`, error);
-        return null;
-      }
-      target.assertCurrent();
-      if (captured.displayId !== (target.displayId ?? 0)) {
-        throw this.staleDisplay(
-          target.observation.display.generation ??
-            this.displayTransitionReader.identityRevision(this.device.deviceId),
-        );
-      }
-      return captured;
-    };
+    const refresh: AndroidTapVerification["refresh"] = (timeoutMs) =>
+      refreshTargetDisplayHierarchy(
+        target,
+        this.hierarchyCapture,
+        timeoutMs,
+        () =>
+          this.staleDisplay(
+            target.observation.display.generation ??
+              this.displayTransitionReader.identityRevision(this.device.deviceId),
+          ),
+        signal,
+      );
     const verificationOptions = { ...options, verification: { refresh } };
     const resolved = await this.resolveAndroidDisplaySelection(
       verificationOptions,

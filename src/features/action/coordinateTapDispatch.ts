@@ -3,7 +3,9 @@ import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { executeTouchscreenInput } from "./touchscreenInput";
+import type { TapAnyElementOptions } from "../../models/TapAnyElementOptions";
+import type { prepareTargetDisplayAction } from "./TargetDisplayAction";
+import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
 export interface CoordinateTapClient<Dispatch = never> {
@@ -121,4 +123,57 @@ export async function dispatchIosCoordinateTap(
   if (!result.success) {
     throw new ActionableError(`CtrlProxy iOS ${failureLabel} failed: ${result.error}`);
   }
+}
+
+/** Shared tapOn/tapAny routing; non-default panels require an advertised CtrlProxy capability. */
+export async function androidDisplayTapDispatch(
+  client: CoordinateTapClient & { supportsCommand?: (name: string) => Promise<boolean> },
+  adb: AdbExecutor,
+  options: Pick<TapAnyElementOptions, "action" | "duration">,
+  context: {
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    signal?: AbortSignal;
+    onDispatched: () => void;
+  },
+): Promise<(point: { x: number; y: number }) => Promise<void>> {
+  const { target, signal } = context;
+  const useCtrlProxy = await supportsCtrlProxyGestureDisplay(client, target.displayId);
+  const dispatch = async ({ x, y }: { x: number; y: number }) => {
+    throwIfAborted(signal);
+    target.assertCurrent();
+    const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
+    if (useCtrlProxy) {
+      const result = await client.requestTapCoordinates(
+        x,
+        y,
+        duration,
+        resolveCoordinateTapCtrlProxyTimeoutMs(duration),
+        undefined,
+        undefined,
+        undefined,
+        signal,
+        target.displayId === 0 ? undefined : target.displayId,
+        target.assertCurrent,
+      );
+      throwIfAborted(signal);
+      if (!result.success) {
+        throw new ActionableError(result.error ?? "Android tap failed");
+      }
+    } else {
+      await executeTouchscreenInput(
+        adb,
+        options.action === "longPress" ? `swipe ${x} ${y} ${x} ${y} ${duration}` : `tap ${x} ${y}`,
+        target.displayId,
+        signal,
+        target.assertCurrent,
+      );
+    }
+    context.onDispatched();
+  };
+  return async (point) => {
+    await dispatch(point);
+    if (options.action === "doubleTap") {
+      await dispatch(point);
+    }
+  };
 }

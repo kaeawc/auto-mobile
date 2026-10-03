@@ -3,7 +3,12 @@ import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DaemonState } from "../../daemon/daemonState";
-import { staleDisplayError } from "../../models/StaleDisplayError";
+import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { throwIfAborted } from "../../utils/toolUtils";
+import { serverConfig } from "../../utils/ServerConfig";
+import type { HierarchyCapture } from "../observe/HierarchyCapture";
+import { StaleDisplayError, staleDisplayError } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import { resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
@@ -143,4 +148,38 @@ export async function prepareTargetDisplayAction(
     displayId,
     assertCurrent,
   };
+}
+
+/** Search and retry captures must stay on the prepared Android panel. */
+export async function refreshTargetDisplayHierarchy(
+  target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
+  capture: HierarchyCapture,
+  timeoutMs: number,
+  stale: () => StaleDisplayError,
+  signal?: AbortSignal,
+) {
+  throwIfAborted(signal);
+  target.assertCurrent();
+  try {
+    const { hierarchy } = await capture.capture({
+      freshness: "fresh",
+      searchRaw: serverConfig.isRawElementSearchEnabled(),
+      timeoutMs,
+      signal,
+      displayId: target.displayId ?? 0,
+    });
+    target.assertCurrent();
+    if (hierarchy.displayId !== (target.displayId ?? 0)) {
+      throw stale();
+    }
+    return hierarchy;
+  } catch (error) {
+    target.assertCurrent();
+    if (error instanceof StaleDisplayError) {
+      throw error;
+    }
+    throwIfAborted(signal);
+    logger.warn(`Fresh display capture failed: ${errorMessage(error)}`, error);
+    return null;
+  }
 }

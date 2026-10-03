@@ -114,6 +114,7 @@ export class PostNotification {
           };
       }
     } catch (error) {
+      logger.warn(`Failed to post notification: ${errorMessage(error)}`, error);
       return {
         success: false,
         supported: false,
@@ -240,6 +241,7 @@ export class PostNotification {
       );
       return sdkResult;
     } catch (error) {
+      logger.warn(`Failed to post notification: ${errorMessage(error)}`, error);
       return {
         success: false,
         supported: false,
@@ -456,6 +458,7 @@ export class PostNotification {
     try {
       stats = await fs.stat(sourcePath);
     } catch (error) {
+      logger.warn(`Image file not found at ${sourcePath}: ${errorMessage(error)}`, error);
       return {
         success: false,
         error: `Image file not found at ${sourcePath}`,
@@ -489,6 +492,7 @@ export class PostNotification {
       );
       return { success: true, devicePath };
     } catch (error) {
+      logger.warn(`Failed to push image to device: ${errorMessage(error)}`, error);
       return {
         success: false,
         error: `Failed to push image to device: ${errorMessage(error)}`,

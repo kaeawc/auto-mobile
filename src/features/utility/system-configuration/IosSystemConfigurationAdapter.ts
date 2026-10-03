@@ -77,6 +77,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
+      logger.warn(`Failed to set locale: ${errorMessage(error)}`, error);
       return {
         success: false,
         languageTag,
@@ -118,6 +119,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
+      logger.warn(`Failed to set time zone: ${errorMessage(error)}`, error);
       return {
         success: false,
         zoneId,
@@ -173,6 +175,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
+      logger.warn(`Failed to set 24-hour format: ${errorMessage(error)}`, error);
       return {
         success: false,
         enabled,
@@ -208,6 +211,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
+      logger.warn(`Failed to set calendar system: ${errorMessage(error)}`, error);
       return {
         success: false,
         calendarSystem,

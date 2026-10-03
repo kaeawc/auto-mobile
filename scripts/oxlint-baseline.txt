@@ -369,8 +369,6 @@
 4	src/features/observe/android/CtrlProxyHierarchy.ts	eslint(complexity)
 4	src/features/observe/shared/SharedGestureDelegate.ts	eslint(max-params)
 4	src/features/preferences/AndroidPreferencesXmlFile.ts	auto-mobile(no-caught-error-interpolation)
-4	src/features/utility/PostNotification.ts	auto-mobile(catch-convention)
-4	src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts	auto-mobile(catch-convention)
 4	src/features/webrtc/WebRtcPublisher.ts	auto-mobile(catch-convention)
 4	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	eslint(complexity)
 4	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	eslint(max-lines-per-function)

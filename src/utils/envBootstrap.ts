@@ -2,6 +2,13 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
+export interface EnvBootstrapDeps {
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  homedir: () => string;
+  directoryExists: (p: string) => boolean;
+}
+
 /**
  * Bootstrap process.env so spawn/exec can find platform tooling even when the
  * MCP server is launched with a stripped environment (e.g. by an embedding host
@@ -13,17 +20,24 @@ import * as path from "path";
  *
  * Safe to call multiple times; only adds entries that are missing.
  */
-export function bootstrapEnvironment(): void {
-  ensureSystemPath();
-  ensureAndroidHome();
+export function bootstrapEnvironment(deps: Partial<EnvBootstrapDeps> = {}): void {
+  const resolved: EnvBootstrapDeps = {
+    env: deps.env ?? process.env,
+    platform: deps.platform ?? process.platform,
+    homedir: deps.homedir ?? os.homedir,
+    directoryExists: deps.directoryExists ?? defaultDirectoryExists,
+  };
+  ensureSystemPath(resolved);
+  ensureAndroidHome(resolved);
 }
 
-function ensureSystemPath(): void {
+function ensureSystemPath(deps: EnvBootstrapDeps): void {
+  const { env, directoryExists } = deps;
   const sep = path.delimiter;
-  const current = process.env.PATH ?? "";
+  const current = env.PATH ?? "";
   const existing = new Set(current.split(sep).filter(Boolean));
 
-  const candidates = systemPathCandidates();
+  const candidates = systemPathCandidates(deps);
   const additions: string[] = [];
   for (const candidate of candidates) {
     if (!existing.has(candidate) && directoryExists(candidate)) {
@@ -36,26 +50,25 @@ function ensureSystemPath(): void {
     return;
   }
 
-  process.env.PATH =
-    current.length > 0 ? `${current}${sep}${additions.join(sep)}` : additions.join(sep);
+  env.PATH = current.length > 0 ? `${current}${sep}${additions.join(sep)}` : additions.join(sep);
 }
 
-function ensureAndroidHome(): void {
-  if (process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT) {
+function ensureAndroidHome(deps: EnvBootstrapDeps): void {
+  const { env, directoryExists } = deps;
+  if (env.ANDROID_HOME || env.ANDROID_SDK_ROOT) {
     return;
   }
 
-  for (const candidate of androidHomeCandidates()) {
+  for (const candidate of androidHomeCandidates(deps)) {
     if (directoryExists(candidate)) {
-      process.env.ANDROID_HOME = candidate;
+      env.ANDROID_HOME = candidate;
       return;
     }
   }
 }
 
-function systemPathCandidates(): string[] {
-  const platform = process.platform;
-  const home = os.homedir();
+function systemPathCandidates({ env, platform, homedir }: EnvBootstrapDeps): string[] {
+  const home = homedir();
 
   if (platform === "darwin") {
     return [
@@ -88,7 +101,7 @@ function systemPathCandidates(): string[] {
   }
 
   if (platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA;
+    const localAppData = env.LOCALAPPDATA;
     const sdk = localAppData ? path.join(localAppData, "Android", "Sdk") : "";
     return [
       ...(sdk
@@ -104,9 +117,8 @@ function systemPathCandidates(): string[] {
   return [];
 }
 
-function androidHomeCandidates(): string[] {
-  const home = os.homedir();
-  const platform = process.platform;
+function androidHomeCandidates({ env, platform, homedir }: EnvBootstrapDeps): string[] {
+  const home = homedir();
 
   if (platform === "darwin") {
     return [path.join(home, "Library/Android/sdk")];
@@ -117,14 +129,14 @@ function androidHomeCandidates(): string[] {
   }
 
   if (platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA;
+    const localAppData = env.LOCALAPPDATA;
     return localAppData ? [path.join(localAppData, "Android", "Sdk")] : [];
   }
 
   return [];
 }
 
-function directoryExists(p: string): boolean {
+export function defaultDirectoryExists(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
   } catch {

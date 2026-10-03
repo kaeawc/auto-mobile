@@ -10,6 +10,20 @@ import type { FeatureFlagService } from "../../src/features/featureFlags/Feature
  * Allows configuring detection results without real device interaction
  */
 export class FakeAccessibilityDetector implements AccessibilityDetector {
+  private readonly ctrlProxyResults = new Map<string, boolean | null>();
+
+  setCtrlProxyServiceEnabled(deviceId: string, enabled: boolean | null): void {
+    this.ctrlProxyResults.set(deviceId, enabled);
+  }
+
+  async isCtrlProxyServiceEnabled(
+    deviceId: string,
+    _adb?: AdbExecutor,
+    _featureFlags?: FeatureFlagService,
+  ): Promise<boolean | null> {
+    return this.ctrlProxyResults.get(deviceId) ?? null;
+  }
+
   private detectionResults: Map<string, { enabled: boolean; service: AccessibilityService }> =
     new Map();
   private defaultResult: { enabled: boolean; service: AccessibilityService } = {
@@ -96,6 +110,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
    * Reset fake state
    */
   reset(): void {
+    this.ctrlProxyResults.clear();
     this.detectionResults.clear();
     this.defaultResult = { enabled: false, service: "unknown" };
     this.detectionCallCount = 0;
@@ -139,6 +154,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   }
 
   clearAllCache(): void {
+    this.ctrlProxyResults.clear();
     this.detectionResults.clear();
   }
 }

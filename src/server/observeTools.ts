@@ -102,6 +102,8 @@ import type { ConditionResolver } from "../features/observe/ConditionPredicates"
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
+import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
+import type { AccessibilityDetector } from "../features/accessibility/interfaces/AccessibilityDetector";
 import { DaemonState } from "../daemon/daemonState";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";
@@ -1894,25 +1896,35 @@ export const waitForObservation = async (
 };
 
 interface AccessibilityReadinessActions {
+  accessibilityDetector?: Pick<
+    AccessibilityDetector,
+    "isCtrlProxyServiceEnabled" | "invalidateCache"
+  >;
   resetSetupState(): void;
   isDaemonInitialized(): boolean;
   invalidateAutomationReadiness(sessionUuid: string, reason: string): void;
 }
 
-/** A synthetic disabled result is not evidence that the device lost accessibility. */
-export function invalidateReadinessForDisabledAccessibility(
+/** User-facing screen reader state is independent of CtrlProxy automation readiness. */
+export async function invalidateReadinessForDisabledAccessibility(
   device: BootedDevice,
   result: ObserveResult,
   sessionUuid: string | undefined,
   actions: AccessibilityReadinessActions,
-): void {
+): Promise<void> {
   if (
     device.platform !== "android" ||
-    result.accessibilityState?.enabled !== false ||
+    !result.accessibilityState ||
     result.accessibilityState.detectionSkipped === true
   ) {
     return;
   }
+  const detector = actions.accessibilityDetector ?? accessibilityDetector;
+  const ctrlProxyEnabled = await detector.isCtrlProxyServiceEnabled(device.deviceId);
+  if (ctrlProxyEnabled !== false) {
+    return;
+  }
+  detector.invalidateCache(device.deviceId);
   logger.warn(
     "[observe] Accessibility service not enabled, resetting setup state for next attempt",
   );
@@ -2234,10 +2246,10 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         }
       }
 
-      // A disabled accessibility service invalidates both the manager setup latch
-      // and the session readiness recorded before the service was lost.
+      // Consume the audit's cached CtrlProxy signal: a synthetic result or missing
+      // cached read is not evidence of loss and must not trigger independent ADB detection.
       if (!deviceRead) {
-        invalidateReadinessForDisabledAccessibility(device, result, args.sessionUuid, {
+        await invalidateReadinessForDisabledAccessibility(device, result, args.sessionUuid, {
           resetSetupState: () => AndroidCtrlProxyManager.getInstance(device).resetSetupState(),
           isDaemonInitialized: () => DaemonState.getInstance().isInitialized(),
           invalidateAutomationReadiness: (sessionUuid, reason) =>

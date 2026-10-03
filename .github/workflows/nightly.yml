@@ -253,6 +253,7 @@ jobs:
   update-sha256:
     name: "Update SHA256 Checksums"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [build-control-proxy-apk, build-ctrl-proxy-ios-ipa, build-video-server-jar]
     steps:
       - name: "Git Checkout"
@@ -472,6 +473,7 @@ jobs:
   ios-swift-packages-sweep:
     name: "Swift Packages Sweep (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
+    timeout-minutes: 45
     env:
       IOS_SIGNING_ENABLED: ${{ secrets.IOS_CERTIFICATE_BASE64 != '' }}
       MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 != '' }}
@@ -615,6 +617,7 @@ jobs:
   ios-xcode-build-sweep:
     name: "Build Xcode Projects Sweep (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

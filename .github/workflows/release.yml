@@ -34,6 +34,7 @@ jobs:
   validate-release-tag:
     name: "Validate Release Tag"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       is_release_tag: ${{ steps.validate.outputs.is_release_tag }}
       tag: ${{ steps.validate.outputs.tag }}
@@ -83,6 +84,7 @@ jobs:
     # has no prepared artifact run to prove what it would release.
     if: github.event_name == 'workflow_dispatch' && needs.validate-release-tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - validate-release-tag
     env:
@@ -704,6 +706,7 @@ jobs:
     if: ${{ vars.DESKTOP_PUBLISHER == 'conveyor' }}
     needs: [validate-release-tag, verify-and-release]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:

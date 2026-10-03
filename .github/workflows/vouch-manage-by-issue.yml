@@ -30,6 +30,7 @@ jobs:
   manage:
     name: "Apply vouch/denounce from issue comment"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Only run when a comment actually contains a management keyword.
     if: >
       contains(github.event.comment.body, 'vouch') ||

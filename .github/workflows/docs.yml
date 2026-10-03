@@ -27,6 +27,7 @@ jobs:
   check:
     name: "Check Docs Changed"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       changed: ${{ steps.decide.outputs.changed }}
     steps:
@@ -48,6 +49,7 @@ jobs:
   deploy-docs:
     name: "Deploy Documentation"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
     if: github.ref == 'refs/heads/main' && needs.check.outputs.changed == 'true'
     permissions:

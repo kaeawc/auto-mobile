@@ -16,6 +16,7 @@ permissions:
 jobs:
   prepare-version:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       release_commit: ${{ steps.commit.outputs.release_commit }}
       base_main_commit: ${{ steps.commit.outputs.base_main_commit }}
@@ -222,6 +223,7 @@ jobs:
 
   finalize-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs:
       [
         prepare-version,
@@ -321,6 +323,7 @@ jobs:
 
   verify-prepared-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs:
       [
         prepare-version,
@@ -507,6 +510,7 @@ jobs:
     if: ${{ always() }}
     needs: [verify-prepared-release]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

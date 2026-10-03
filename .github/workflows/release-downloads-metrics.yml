@@ -24,6 +24,7 @@ jobs:
   snapshot:
     name: "Snapshot download counts"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

@@ -6,7 +6,7 @@ import {
 } from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import { BaseVisualChange, ProgressCallback } from "../BaseVisualChange";
+import { BaseVisualChange, ProgressCallback, type DisplayFence } from "../BaseVisualChange";
 import {
   ActionableError,
   BootedDevice,
@@ -67,7 +67,7 @@ import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
 import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
 import { ScrollUntilVisible } from "./ScrollUntilVisible";
-import { buildContainerFromElement } from "../../utility/elementProperties";
+import { buildContainerFromElement, isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import {
   effectiveSwipeInsets,
@@ -91,6 +91,7 @@ const DISPLAY_SWIPE_OPTIONS = [
 ] as const;
 
 type AutoTargetDecision = {
+  element?: Element;
   container?: SwipeOnOptions["container"];
   warning?: string;
   scrollableCandidates?: ScrollableCandidate[];
@@ -326,15 +327,11 @@ export class SwipeOn extends BaseVisualChange {
       options: requestedOptions,
       observation,
     });
-    const bounds = this.selectedDisplayContainerBounds(options, observation);
-    if (options.container && !bounds) {
-      throw new ActionableError("Swipe container not found on selected display");
-    }
-    const swipeBounds =
-      options.includeSystemInsets === false
-        ? this.insetDisplaySwipeBounds({ observation, bounds })
-        : bounds;
-    const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, swipeBounds);
+    const { x1, y1, x2, y2, targetType, warning } = this.resolveDisplaySwipeCoordinates({
+      options,
+      decision,
+      observation,
+    });
     const duration = resolveSwipeDuration({ ...options, geometry: this.geometry });
     const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
     await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
@@ -365,15 +362,68 @@ export class SwipeOn extends BaseVisualChange {
     return this.withAutoTargetDecision({
       result: {
         success: true,
-        targetType: bounds ? "element" : "screen",
+        targetType,
         x1,
         y1,
         x2,
         y2,
         duration: totalDuration,
+        warning,
       },
       decision,
     });
+  }
+
+  private resolveDisplaySwipeCoordinates({
+    options,
+    decision,
+    observation,
+  }: {
+    options: SwipeOnOptions;
+    decision: AutoTargetDecision;
+    observation: ObserveResult;
+  }): Pick<SwipeOnResult, "x1" | "y1" | "x2" | "y2" | "targetType" | "warning"> {
+    if (decision.element && observation.viewHierarchy) {
+      const coordinates = this.resolveContainerSwipeCoordinates(
+        { ...options, direction: options.direction! },
+        observation.viewHierarchy,
+        decision.element,
+        observation,
+      );
+      return {
+        x1: coordinates.startX,
+        y1: coordinates.startY,
+        x2: coordinates.endX,
+        y2: coordinates.endY,
+        targetType: "element",
+        warning: coordinates.warning,
+      };
+    }
+    const bounds = this.selectedDisplayContainerBounds(options, observation);
+    if (options.container && !bounds) {
+      throw new ActionableError("Swipe container not found on selected display");
+    }
+    return {
+      ...displaySwipeCoordinates(
+        options,
+        observation,
+        this.resolveDisplaySwipeBounds(options, observation, bounds),
+      ),
+      targetType: bounds ? "element" : "screen",
+    };
+  }
+
+  private resolveDisplaySwipeBounds(
+    options: SwipeOnOptions,
+    observation: ObserveResult,
+    bounds?: Element["bounds"],
+  ): Element["bounds"] | undefined {
+    // Preserve explicit display-container geometry; automatic screen fallback
+    // uses available per-display insets unless the caller opts into system bars.
+    return options.includeSystemInsets === false ||
+      (options.autoTarget === true && !bounds && options.includeSystemInsets !== true)
+      ? this.insetDisplaySwipeBounds({ observation, bounds })
+      : bounds;
   }
 
   private selectedDisplayAutoTarget({
@@ -652,7 +702,7 @@ export class SwipeOn extends BaseVisualChange {
           });
           return options.lookFor
             ? await this.searchOnAndroidDisplay({ options, target, progress, signal })
-            : await this.observedInteraction(
+            : await this.observedSwipeInteraction(
                 () => this.executeOnAndroidDisplay({ options, target, signal }),
                 {
                   changeExpected: false,
@@ -723,6 +773,15 @@ export class SwipeOn extends BaseVisualChange {
       };
     }
     const container = buildContainerFromElement(element);
+    if (!container && this.device.platform === "android") {
+      logger.info(`[SwipeOn] Mode: element swipe (auto-target element has no usable identifier)`);
+      return {
+        element,
+        warning:
+          "Auto-targeted scrollable container lacks a usable identifier; swiping within its bounds without container metadata.",
+        scrollableCandidates: candidates,
+      };
+    }
     if (!container) {
       logger.info(`[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`);
       return {
@@ -775,14 +834,20 @@ export class SwipeOn extends BaseVisualChange {
       direction: options.direction,
       includeSystemInsets: options.includeSystemInsets,
     });
-    const result = decision.container
-      ? await this.executeElementSwipe(
-          { ...options, container: decision.container },
-          progress,
-          perf,
-          signal,
-        )
-      : await this.executeScreenSwipe(options, progress, perf, signal);
+    const result =
+      decision.element && context.observeResult
+        ? await this.executeElementSwipe(options, progress, perf, signal, {
+            element: decision.element,
+            observation: context.observeResult,
+          })
+        : decision.container
+          ? await this.executeElementSwipe(
+              { ...options, container: decision.container },
+              progress,
+              perf,
+              signal,
+            )
+          : await this.executeScreenSwipe(options, progress, perf, signal);
     return this.withAutoTargetDecision({ result, decision });
   }
 
@@ -953,6 +1018,48 @@ export class SwipeOn extends BaseVisualChange {
     };
   }
 
+  private async observedSwipeInteraction(
+    block: (observation: ObserveResult, fence?: DisplayFence) => Promise<SwipeOnResult>,
+    options: Parameters<BaseVisualChange["observedInteraction"]>[1],
+  ): Promise<SwipeOnResult> {
+    let previous: ObserveResult | null = null;
+    const result: SwipeOnResult = await this.observedInteraction(async (observation, fence) => {
+      previous = observation;
+      return block(observation, fence);
+    }, options);
+    if (this.device.platform !== "android") {
+      return result;
+    }
+    result.effect = this.deriveInteractionEffect(previous, result.observation);
+    if (
+      result.success &&
+      result.effect?.screenChanged === false &&
+      result.effect.basis !== "insufficient observation data"
+    ) {
+      result.warning = this.autoTargetSelector.mergeWarnings(
+        result.warning,
+        this.unchangedSwipeWarning(result, previous),
+      );
+    }
+    return result;
+  }
+
+  private unchangedSwipeWarning(result: SwipeOnResult, previous: ObserveResult | null): string {
+    const scrollables = previous?.viewHierarchy
+      ? this.finder.findScrollableElements(previous.viewHierarchy)
+      : [];
+    const regions =
+      result.element && isTruthyFlag(result.element.scrollable)
+        ? [result.element, ...scrollables]
+        : scrollables;
+    if (regions.some((element) => this.geometry.isPointInElement(element, result.x1, result.y1))) {
+      return "Swipe did not change the screen; the start point was inside the scrollable, which may already be at the end of the scrollable content.";
+    }
+    return regions.length > 0
+      ? "Swipe did not change the screen; the start point was outside every scrollable region, so the gesture geometry may have prevented scrolling."
+      : "Swipe did not change the screen; no scrollable region was found in the hierarchy.";
+  }
+
   private async executeScreenSwipe(
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
@@ -962,7 +1069,7 @@ export class SwipeOn extends BaseVisualChange {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
     let iosDispatchTimestamp: number | undefined;
 
-    return this.observedInteraction(
+    return this.observedSwipeInteraction(
       async (observeResult: ObserveResult, fence) => {
         throwIfAborted(signal);
         const insetOptions = {
@@ -1070,13 +1177,14 @@ export class SwipeOn extends BaseVisualChange {
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    selected?: { element: Element; observation: ObserveResult },
   ): Promise<SwipeOnResult> {
     logger.info(
       `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,
     );
     let iosDispatchTimestamp: number | undefined;
 
-    return this.observedInteraction(
+    return this.observedSwipeInteraction(
       async (observeResult: ObserveResult, fence) => {
         throwIfAborted(signal);
         const viewHierarchy = observeResult.viewHierarchy;
@@ -1085,9 +1193,11 @@ export class SwipeOn extends BaseVisualChange {
         }
 
         // Find the container element
-        const element = await perf.track("findElement", () =>
-          this.scrollUntilVisible.findTargetElement(options, viewHierarchy, 0, signal),
-        );
+        const element =
+          selected?.element ??
+          (await perf.track("findElement", () =>
+            this.scrollUntilVisible.findTargetElement(options, viewHierarchy, 0, signal),
+          ));
         throwIfAborted(signal);
 
         const { startX, startY, endX, endY, warning } = this.resolveContainerSwipeCoordinates(
@@ -1148,13 +1258,15 @@ export class SwipeOn extends BaseVisualChange {
         };
       },
       {
-        queryOptions: usesScopedSwipeContainer(options.container)
-          ? undefined
-          : {
-              text: options.container?.text,
-              elementId: options.container?.elementId,
-              containerElementId: undefined, // No nested container restriction
-            },
+        previousObservation: selected?.observation,
+        queryOptions:
+          selected || usesScopedSwipeContainer(options.container)
+            ? undefined
+            : {
+                text: options.container?.text,
+                elementId: options.container?.elementId,
+                containerElementId: undefined, // No nested container restriction
+              },
         changeExpected: false,
         display: options.display,
         timeoutMs: 500,

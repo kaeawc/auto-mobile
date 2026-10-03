@@ -132,6 +132,40 @@ describe("VideoRecorderService", () => {
     });
   });
 
+  for (const envKey of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {
+    test(`resolves the default archive lazily from ${envKey} and preserves overrides`, async () => {
+      const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+      const originalLegacyDataDir = process.env.AUTO_MOBILE_DATA_DIR;
+      try {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+        delete process.env.AUTO_MOBILE_DATA_DIR;
+        process.env[envKey] = archiveRoot;
+        const defaultService = new VideoRecorderService({
+          backend,
+          securePermissions: new FakeSecurePermissions(false),
+          idGenerator: new CountingIdGenerator("default"),
+        });
+        const recording = await defaultService.startRecording();
+        expect(path.dirname(path.dirname(recording.outputPath))).toBe(
+          path.join(archiveRoot, "video-archive"),
+        );
+        const explicitRecording = await service.startRecording();
+        expect(path.dirname(path.dirname(explicitRecording.outputPath))).toBe(archiveRoot);
+      } finally {
+        if (originalDataDir === undefined) {
+          delete process.env.AUTOMOBILE_DATA_DIR;
+        } else {
+          process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+        }
+        if (originalLegacyDataDir === undefined) {
+          delete process.env.AUTO_MOBILE_DATA_DIR;
+        } else {
+          process.env.AUTO_MOBILE_DATA_DIR = originalLegacyDataDir;
+        }
+      }
+    });
+  }
+
   test("force-stops an active capture and removes its handle", async () => {
     const recording = await service.startRecording();
 

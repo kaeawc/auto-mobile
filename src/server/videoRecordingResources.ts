@@ -7,19 +7,9 @@ import {
 import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingResourceUris";
 import { logger } from "../utils/logger";
 import * as fs from "fs/promises";
-import * as os from "os";
+import { getTempDir, TEMP_SUBDIRS } from "../utils/tempDir";
 import * as path from "path";
 import type { VideoRecordingMetadata } from "../models";
-
-/**
- * Absolute root every archived recording must live under. A DB row's
- * `file_path` is resolved against this and rejected if it escapes — closing the
- * arbitrary-file-read + base64-exfil vector where a poisoned/absolute
- * `file_path` would otherwise be read straight off disk (issue #4752, the
- * defense-in-depth confinement item). Mirrors `VideoRecorderService`'s archive
- * root so a legitimately-stored recording always resolves inside it.
- */
-export const DEFAULT_VIDEO_ARCHIVE_ROOT = path.join(os.homedir(), ".auto-mobile", "video-archive");
 
 /**
  * Resolve a stored file path and assert it is contained within `archiveRoot`.
@@ -61,7 +51,17 @@ const defaultVideoRecordingResourceStore: VideoRecordingResourceStore = {
   getById: getVideoRecordingMetadata,
   list: listVideoRecordings,
   readFile: fs.readFile,
-  archiveRoot: DEFAULT_VIDEO_ARCHIVE_ROOT,
+  /**
+   * Absolute root every archived recording must live under. A DB row's
+   * `file_path` is resolved against this and rejected if it escapes — closing the
+   * arbitrary-file-read + base64-exfil vector where a poisoned/absolute
+   * `file_path` would otherwise be read straight off disk (issue #4752, the
+   * defense-in-depth confinement item). Mirrors `VideoRecorderService`'s archive
+   * root so a legitimately-stored recording always resolves inside it.
+   */
+  get archiveRoot() {
+    return getTempDir(TEMP_SUBDIRS.VIDEO_ARCHIVE);
+  },
 };
 
 function getVideoMimeType(metadata: VideoRecordingMetadata): string {

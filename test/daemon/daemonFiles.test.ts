@@ -19,7 +19,23 @@ import {
 } from "../../src/daemon/daemonFiles";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
+import * as loggerModule from "../../src/utils/logger";
 import type { PidFileData } from "../../src/daemon/types";
+
+test("daemonFiles module registers its real retention readers without eager discovery", async () => {
+  const register = spyOn(loggerModule, "registerLogRetentionNamespaceSource");
+  try {
+    const files = await import("../../src/daemon/daemonFiles.ts?retention-wiring");
+    expect(register).toHaveBeenCalledWith({
+      listDaemonPidFilesSync: files.listDaemonPidFilesSync,
+      readPidFileDataSync: files.readPidFileDataSync,
+      readDaemonOwnerForRetentionSync: files.readDaemonOwnerForRetentionSync,
+      readDaemonLaunchLogOwnerTombstoneSync: files.readDaemonLaunchLogOwnerTombstoneSync,
+    });
+  } finally {
+    register.mockRestore();
+  }
+});
 
 describe("PidFileLiveDaemonSessionIdProvider", () => {
   test("returns session IDs only for discovered PID records with live processes", () => {

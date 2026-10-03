@@ -5,7 +5,11 @@ import fs from "fs";
 import path from "path";
 import { statAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
-import { pruneLogFiles, type DaemonPidFileEnumeration } from "./logPruner";
+import {
+  pruneLogFiles,
+  type DaemonPidFileEnumeration,
+  type LogRetentionNamespaceSource,
+} from "./logPruner";
 import {
   resolveAutomobileLogFormat,
   resolveAutomobileLogSink,
@@ -416,13 +420,28 @@ const MAX_LOG_FILES = 10;
 // host. A live process's active log has a recent mtime and is never touched.
 const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+let logRetentionNamespaceSource: LogRetentionNamespaceSource | undefined;
+
+export function registerLogRetentionNamespaceSource(source: LogRetentionNamespaceSource): void {
+  logRetentionNamespaceSource = source;
+}
+
+export function resetLogRetentionNamespaceSourceForTesting(): void {
+  logRetentionNamespaceSource = undefined;
+}
+
+function requireLogRetentionNamespaceSource(): LogRetentionNamespaceSource {
+  if (!logRetentionNamespaceSource) {
+    throw new Error("Log retention namespace source is not registered");
+  }
+  return logRetentionNamespaceSource;
+}
+
 // Whether a daemon is currently running (owns the pidfile and is alive). A
 // `daemon-launch-<pid>.log`'s fd is inherited by the detached daemon child, so
 // it must not be swept while that daemon is live even though the manager named
-// in the filename has exited (issue #6194). The daemon pidfile module is
-// required lazily for readPidFileDataSync and listDaemonPidFilesSync so this
-// foundational logger module keeps no static import of daemonFiles.ts (which
-// imports THIS module) and it is resolved only at sweep time.
+// in the filename has exited (issue #6194). Namespace discovery is supplied by
+// the daemon layer and resolved only at sweep time.
 //
 // Crucially this considers EVERY daemon namespace that could own a launch log
 // in the shared log dir — the pruning process's own pid file plus co-located
@@ -433,16 +452,15 @@ const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // to `pruneLogFiles` via `daemonPidFiles` + `readDaemonOwner` below.
 const isDaemonRunning = (): boolean => {
   try {
-    const { readPidFileDataSync, listDaemonPidFilesSync } =
-      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-    const { pidFiles, uncertain } = listDaemonPidFilesSync();
+    const source = requireLogRetentionNamespaceSource();
+    const { pidFiles, uncertain } = source.listDaemonPidFilesSync();
     // Enumeration incomplete (custom namespace / failed scan): a live daemon may
     // exist in a namespace we could not discover — retain rather than risk it.
     if (uncertain) {
       return true;
     }
     return pidFiles.some((pidFilePath) => {
-      const data = readPidFileDataSync(pidFilePath);
+      const data = source.readPidFileDataSync(pidFilePath);
       return data ? isProcessRunning(data.pid) : false;
     });
   } catch (error) {
@@ -455,18 +473,13 @@ const isDaemonRunning = (): boolean => {
 
 // Enumerate the daemon pid files of every namespace that could own a launch log
 // in this shared log dir (plus whether that enumeration is complete). Passed to
-// `pruneLogFiles` as a THUNK so the enumeration — and the `daemonFiles` require
-// it drives — is evaluated LAZILY at sweep time, never during this module's own
-// init. An eager call here reached `listDaemonPidFilesSync` before `export const
-// logger` (below) was initialized; its error path then touched `logger` in its
-// TDZ and aborted the import with a ReferenceError (issue #6194).
+// `pruneLogFiles` as a THUNK so discovery waits until sweep time, after the
+// asynchronous directory read. Registration itself performs no I/O (issue #6194).
 const daemonPidFiles = (): DaemonPidFileEnumeration => {
   try {
-    const { listDaemonPidFilesSync } =
-      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-    return listDaemonPidFilesSync();
+    return requireLogRetentionNamespaceSource().listDaemonPidFilesSync();
   } catch (error) {
-    // The pidfile module could not be resolved, so no namespace could be
+    // The namespace source is unavailable/failed, so no namespace could be
     // enumerated — carry uncertainty so `pruneLogFiles` retains launch logs.
     logger.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
     return { pidFiles: [], uncertain: true };
@@ -478,15 +491,19 @@ const readDaemonOwner = (pidFilePath: string) => {
   // returns undefined only for a confidently-absent file and THROWS on an
   // unreadable/malformed one, and that throw must propagate to `pruneLogFiles`'s
   // retain-on-ambiguity path rather than be flattened to "absent" (issue #6194).
-  const { readDaemonOwnerForRetentionSync } =
-    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-  return readDaemonOwnerForRetentionSync(pidFilePath);
+  return requireLogRetentionNamespaceSource().readDaemonOwnerForRetentionSync(pidFilePath);
 };
 
 const readDaemonLaunchLogOwnerTombstone = (launchLogPath: string) => {
-  const { readDaemonLaunchLogOwnerTombstoneSync } =
-    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-  return readDaemonLaunchLogOwnerTombstoneSync(launchLogPath);
+  return requireLogRetentionNamespaceSource().readDaemonLaunchLogOwnerTombstoneSync(launchLogPath);
+};
+
+/** The same lazy callbacks used by startup sweeping and size-based rotation. */
+export const logRetentionNamespaces = {
+  daemonPidFiles,
+  readDaemonOwner,
+  readDaemonLaunchLogOwnerTombstone,
+  isDaemonRunning,
 };
 
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
@@ -505,12 +522,8 @@ const pruneOldLogFiles = (): Promise<void> => {
     // Namespace-aware retention: read every co-located namespace's exact
     // launch-log ownership declaration (issue #6194).
     // Passed as the thunk itself (not `daemonPidFiles()`) so enumeration is
-    // deferred to sweep time — an eager call crashed the cyclic logger import
-    // before `logger` was initialized (issue #6194).
-    daemonPidFiles,
-    readDaemonOwner,
-    readDaemonLaunchLogOwnerTombstone,
-    isDaemonRunning,
+    // deferred to sweep time rather than during registration (issue #6194).
+    ...logRetentionNamespaces,
   });
 };
 

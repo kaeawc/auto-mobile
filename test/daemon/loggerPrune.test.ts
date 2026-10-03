@@ -1,8 +1,14 @@
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, expect, test, afterEach, mock, spyOn } from "bun:test";
 import { mkdtempSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { pruneLogFiles } from "../../src/utils/logPruner";
+import { pruneLogFiles, type LogRetentionNamespaceSource } from "../../src/utils/logPruner";
+import {
+  logRetentionNamespaces,
+  registerLogRetentionNamespaceSource,
+  resetLogRetentionNamespaceSourceForTesting,
+} from "../../src/utils/logger";
+import * as processLiveness from "../../src/utils/processLiveness";
 
 /**
  * Tests the REAL prune used by logger.ts (src/utils/logPruner.ts), which is
@@ -21,6 +27,7 @@ describe("pruneLogFiles", () => {
   }
 
   afterEach(() => {
+    resetLogRetentionNamespaceSourceForTesting();
     for (const dir of tempDirs) {
       try {
         const { rmSync } = require("node:fs");
@@ -30,6 +37,101 @@ describe("pruneLogFiles", () => {
       }
     }
     tempDirs.length = 0;
+  });
+
+  function fakeNamespaceSource(): LogRetentionNamespaceSource {
+    return {
+      listDaemonPidFilesSync: mock(() => ({ pidFiles: ["peer.pid"], uncertain: false })),
+      readPidFileDataSync: mock(() => ({ pid: 333 })),
+      readDaemonOwnerForRetentionSync: mock(() => ({ pid: 333, launchLogPath: null })),
+      readDaemonLaunchLogOwnerTombstoneSync: mock(() => undefined),
+    };
+  }
+
+  test("logger retention delegates enumeration, liveness, owners and tombstones to its source", () => {
+    const source = fakeNamespaceSource();
+    registerLogRetentionNamespaceSource(source);
+    const alive = spyOn(processLiveness, "isProcessRunning").mockReturnValue(true);
+    try {
+      expect(logRetentionNamespaces.daemonPidFiles()).toEqual({
+        pidFiles: ["peer.pid"],
+        uncertain: false,
+      });
+      expect(logRetentionNamespaces.isDaemonRunning()).toBe(true);
+      expect(source.readPidFileDataSync).toHaveBeenCalledWith("peer.pid");
+      expect(alive).toHaveBeenCalledWith(333);
+      expect(logRetentionNamespaces.readDaemonOwner("peer.pid")).toEqual({
+        pid: 333,
+        launchLogPath: null,
+      });
+      expect(
+        logRetentionNamespaces.readDaemonLaunchLogOwnerTombstone("launch.log"),
+      ).toBeUndefined();
+      expect(source.readDaemonOwnerForRetentionSync).toHaveBeenCalledWith("peer.pid");
+      expect(source.readDaemonLaunchLogOwnerTombstoneSync).toHaveBeenCalledWith("launch.log");
+    } finally {
+      alive.mockRestore();
+    }
+  });
+
+  test("unregistered logger retention fails closed and retains stale launch logs", async () => {
+    resetLogRetentionNamespaceSourceForTesting();
+    expect(logRetentionNamespaces.isDaemonRunning()).toBe(true);
+    expect(logRetentionNamespaces.daemonPidFiles()).toEqual({ pidFiles: [], uncertain: true });
+    expect(() => logRetentionNamespaces.readDaemonOwner("peer.pid")).toThrow("not registered");
+    expect(() => logRetentionNamespaces.readDaemonLaunchLogOwnerTombstone("launch.log")).toThrow(
+      "not registered",
+    );
+    const dir = createTempLogsDir();
+    writeFileSync(join(dir, "daemon-launch-222.log"), "held fd");
+    await pruneLogFiles({
+      dir,
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 0,
+      now: Date.now() + 1e9,
+      isProcessAlive: dead,
+      ...logRetentionNamespaces,
+    });
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+  });
+
+  test("registered logger retention preserves live owners and ambiguous reads", async () => {
+    const dir = createTempLogsDir();
+    const launchLog = join(dir, "daemon-launch-222.log");
+    writeFileSync(launchLog, "held fd");
+    const source = fakeNamespaceSource();
+    source.readDaemonOwnerForRetentionSync = () => ({ pid: 333, launchLogPath: launchLog });
+    registerLogRetentionNamespaceSource(source);
+    const sweep = () =>
+      pruneLogFiles({
+        dir,
+        ownPrefix: "stdio-111",
+        maxOwnFiles: 10,
+        abandonedMaxAgeMs: 0,
+        now: Date.now() + 1e9,
+        isProcessAlive: (pid) => pid === 333,
+        ...logRetentionNamespaces,
+      });
+    await sweep();
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+    source.readDaemonOwnerForRetentionSync = () => {
+      throw new Error("unreadable PID");
+    };
+    await sweep();
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+    source.readDaemonOwnerForRetentionSync = () => undefined;
+    source.readDaemonLaunchLogOwnerTombstoneSync = () => ({ pid: 333, launchLogPath: launchLog });
+    await sweep();
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+    source.readDaemonLaunchLogOwnerTombstoneSync = () => {
+      throw new Error("unreadable owner");
+    };
+    await sweep();
+    expect(readdirSync(dir)).toContain("daemon-launch-222.log");
+    expect(() => logRetentionNamespaces.readDaemonLaunchLogOwnerTombstone(launchLog)).toThrow(
+      "unreadable owner",
+    );
   });
 
   test("caps this process's own files and preserves the active stdio-<pid>.log", async () => {

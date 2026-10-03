@@ -403,9 +403,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     if (!(await this.canDiscoverIosLocally(options.signal))) {
       return [];
     }
+    const discoverySignal = combineWithAmbientAbort(options.signal);
     try {
-      return await this.simctl.listSimulatorImages();
+      return await this.simctl.listSimulatorImages(undefined, { signal: discoverySignal });
     } catch (error) {
+      discoverySignal?.throwIfAborted();
       logger.warn(`[DeviceManager] iOS simulator image discovery failed: ${error}`);
       if (!options.swallowDiscoveryErrors) {
         throw error;

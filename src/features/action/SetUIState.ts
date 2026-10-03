@@ -9,6 +9,8 @@ import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { InputTextMode } from "./InputText";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
+import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -205,7 +207,7 @@ const RESPONSE_HEADROOM_MS = 3_000;
 export class SetUIState extends BaseVisualChange {
   private fieldTypeDetector: FieldTypeDetector;
   private finder: ElementFinder;
-  private readonly iosSelector: ResolverElementSelector;
+  private readonly selector: ResolverElementSelector;
   private dependencies: SetUIStateDependencies;
 
   constructor(
@@ -215,7 +217,7 @@ export class SetUIState extends BaseVisualChange {
     finder: ElementFinder = new DefaultElementFinder(),
   ) {
     super(device, adb, dependencies.timer ?? defaultTimer);
-    this.iosSelector = new ResolverElementSelector(undefined, undefined, {
+    this.selector = new ResolverElementSelector(undefined, undefined, {
       platform: device.platform,
       iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
     });
@@ -1256,21 +1258,70 @@ export class SetUIState extends BaseVisualChange {
     if (selector.text) {
       if (this.device.platform === "ios") {
         return (
-          this.iosSelector.selectByText(viewHierarchy, selector.text, {
+          this.selector.selectByText(viewHierarchy, selector.text, {
             intentAction: "inspect",
             selectionIntent: "focus-input",
             screenSizeOptions: selector.screenSizeOptions,
           }).element ?? null
         );
       }
-      return this.finder.findElementByText(viewHierarchy, selector.text, undefined, true, false);
+      return this.findAndroidTextElement(selector.text, viewHierarchy, selector.screenSizeOptions);
     }
 
     if (selector.elementId) {
+      if (this.device.platform === "android" && selector.elementId.startsWith("s2-")) {
+        // The shared resolver deduplicates one field serialized in multiple roots.
+        return (
+          this.selector.selectByResourceId(viewHierarchy, selector.elementId, {
+            intentAction: "inspect",
+            screenSizeOptions: selector.screenSizeOptions,
+          }).element ?? null
+        );
+      }
       return this.finder.findElementByResourceId(viewHierarchy, selector.elementId);
     }
 
     return null;
+  }
+
+  private findAndroidTextElement(
+    text: string,
+    viewHierarchy: ViewHierarchyResult,
+    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
+  ): Element | null {
+    const matched = this.finder.findElementByText(viewHierarchy, text, undefined, true, false);
+    // Preserve legacy matching and all classified controls. Only an unclassified
+    // label may use the same bounded label-to-input promotion as sendKeys.
+    if (!matched || this.fieldTypeDetector.detect(matched) !== "unknown") {
+      return matched;
+    }
+    const identity = matched["resource-id"] || matched["view-id"];
+    const focusOptions = {
+      intentAction: "focus-input" as const,
+      screenSizeOptions,
+    };
+    let focused = identity
+      ? this.selector.selectByResourceId(viewHierarchy, identity, focusOptions)
+      : this.selector.selectByText(viewHierarchy, text, {
+          ...focusOptions,
+          partialMatch: true,
+          caseSensitive: false,
+        });
+    const source = getHierarchyNodeSource(matched);
+    if (identity && source !== getHierarchyNodeSource(focused.matchedElement ?? matched)) {
+      // Legacy text search prefers hierarchy; the resolver may choose a separately
+      // deserialized window copy. Retry that primary tree, then require exact source equality.
+      focused = this.selector.selectByResourceId(
+        { ...resolveViewHierarchyForSearch(viewHierarchy)!, windows: undefined },
+        identity,
+        focusOptions,
+      );
+    }
+    return source &&
+      focused.matchedElement &&
+      source === getHierarchyNodeSource(focused.matchedElement)
+      ? (focused.element ?? matched)
+      : matched;
   }
 
   /**

@@ -191,7 +191,7 @@ test.each(["TapOnElement", "TapAnyElement", "DragAndDrop", "SetUIState"] as cons
       TapOnElement: () => new TapOnElement(device, adb, { timer })["elementSelector"],
       TapAnyElement: () => new TapAnyElement(device, adb, { timer })["elementSelector"],
       DragAndDrop: () => new DragAndDrop(device, adb, timer)["selector"],
-      SetUIState: () => new SetUIState(device, adb, { timer })["iosSelector"],
+      SetUIState: () => new SetUIState(device, adb, { timer })["selector"],
     };
     // No size or platform options are supplied to the constructed selector.
     expect(selectors[action]().selectByText(capture, duoSelectionText).element?.bounds).toEqual(

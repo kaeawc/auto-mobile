@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { afterAll, afterEach, describe, it, expect, spyOn } from "bun:test";
 import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
 import { AndroidSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/AndroidSystemConfigurationAdapter";
 import { IosSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/IosSystemConfigurationAdapter";
@@ -8,6 +8,8 @@ import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { SystemConfigurationAdapter } from "../../../src/utils/interfaces/SystemConfigurationAdapter";
+
+import { logger } from "../../../src/utils/logger";
 
 /**
  * Sanity-check the platform-agnostic SystemConfigurationAdapter contract.
@@ -584,6 +586,51 @@ describe("SystemConfigurationAdapter", () => {
   });
 
   describe("IosSystemConfigurationAdapter behavior", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    afterEach(() => warn.mockClear());
+    afterAll(() => warn.mockRestore());
+
+    it("logs simulator write failures and preserves each typed failure", async () => {
+      const error = new Error("defaults write failed");
+      const exec = new FakeProcessExecutor();
+      exec.setCommandHandler("defaults write", () => {
+        throw error;
+      });
+      const adapter = new IosSystemConfigurationAdapter(iosSimulator, exec);
+      const cases = [
+        {
+          run: () => adapter.setLocale("ja-JP", {}),
+          field: { languageTag: "ja-JP" },
+          message: "Failed to set locale",
+        },
+        {
+          run: () => adapter.setTimeZone("Asia/Tokyo"),
+          field: { zoneId: "Asia/Tokyo" },
+          message: "Failed to set time zone",
+        },
+        {
+          run: () => adapter.set24HourFormat(true),
+          field: { enabled: true },
+          message: "Failed to set 24-hour format",
+        },
+        {
+          run: () => adapter.setCalendarSystem("japanese"),
+          field: { calendarSystem: "japanese" },
+          message: "Failed to set calendar system",
+        },
+      ];
+      for (const { run, field, message } of cases) {
+        warn.mockClear();
+        expect(await run()).toEqual({
+          success: false,
+          ...field,
+          error: `${message}: defaults write failed`,
+        });
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(`${message}: defaults write failed`, error);
+      }
+    });
+
     it("rejects physical iOS system configuration without executing commands", async () => {
       const exec = new FakeProcessExecutor();
       const adapter = new IosSystemConfigurationAdapter(iosPhysical, exec);

@@ -10,16 +10,8 @@ const ALLOW_LIST = new Map<string, string>([
   [RESOLVER, "canonical device kind resolver"],
   ["src/utils/ios-cmdline-tools/iosDeviceType.ts", "UDID predicate definition"],
   [
-    "src/ctrlProxy/IOSCtrlProxyManager.ts",
-    "pre-existing CtrlProxy capability gate; migrate in follow-up",
-  ],
-  [
     "src/features/debug/VisualHighlight.ts",
     "pre-existing highlight transport routing; migrate in follow-up",
-  ],
-  [
-    "src/features/device/SetPosture.ts",
-    "pre-existing posture capability gate; migrate in follow-up",
   ],
   [
     "src/features/observe/ObservationDisplay.ts",
@@ -37,34 +29,10 @@ const ALLOW_LIST = new Map<string, string>([
     "src/features/observe/ios/IOSCtrlProxyClient.ts",
     "pre-existing observation client capability gate; migrate in follow-up",
   ],
-  [
-    "src/features/utility/DeepLinkManager.ts",
-    "pre-existing deep-link capability gate; migrate in follow-up",
-  ],
   ["src/features/webrtc/IosH264Source.ts", "pre-existing capture routing; migrate in follow-up"],
   [
     "src/features/webrtc/h264CaptureSourceFactory.ts",
     "pre-existing capture audio capability gate; migrate in follow-up",
-  ],
-  [
-    "src/server/appFileService.ts",
-    "pre-existing file transport capability gates; migrate in follow-up",
-  ],
-  [
-    "src/server/sessionLogService.ts",
-    "pre-existing session log capability gate; migrate in follow-up",
-  ],
-  [
-    "src/server/storageCapabilityResources.ts",
-    "pre-existing storage capability classification; migrate in follow-up",
-  ],
-  [
-    "src/utils/deviceResourceController.ts",
-    "pre-existing device resource capability gate; migrate in follow-up",
-  ],
-  [
-    "src/utils/deviceResourceObserver.ts",
-    "pre-existing device resource observation gate; migrate in follow-up",
   ],
   [
     "src/utils/ios-cmdline-tools/DevicectlDeviceLister.ts",

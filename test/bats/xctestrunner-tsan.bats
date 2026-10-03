@@ -81,7 +81,7 @@ run_lane() {
 
 assert_stub_gone() {
   local pid
-  pid="$(cat "${TSAN_PID_FILE}")"
+  pid="$(cat "${1:-${TSAN_PID_FILE}}")"
   run kill -0 "${pid}"
   [ "$status" -ne 0 ]
 }
@@ -164,6 +164,49 @@ assert_stub_gone() {
   run_lane
   [ "$status" -eq 1 ]
   [[ "$output" == *'filter executed 0 tests'* ]]
+}
+
+@test "tail ignoring TERM is reaped promptly when Swift executes zero tests" {
+  export TSAN_MODE=zero TSAN_TAIL_PID_FILE="${BATS_TEST_TMPDIR}/tail.pid"
+  export XCTESTRUNNER_TSAN_TIMEOUT_SECONDS=30
+  TSAN_REAL_TAIL="$(command -v tail)"
+  export TSAN_REAL_TAIL
+  cat > "${fixture}/bin/tail" << 'STUB'
+#!/usr/bin/env bash
+if [[ ${3:-} != -f ]]; then
+  exec "${TSAN_REAL_TAIL}" "$@"
+fi
+trap '' TERM
+echo "$$" > "${TSAN_TAIL_PID_FILE}"
+deadline=$(($(date +%s) + 8))
+while (($(date +%s) < deadline)); do
+  sleep 0.1
+done
+STUB
+  # Make both instant Swift exits wait until their tail has installed its trap.
+  mv "${fixture}/bin/swift" "${fixture}/bin/swift-stub"
+  cat > "${fixture}/bin/swift" << 'STUB'
+#!/usr/bin/env bash
+SECONDS=0
+while [[ ! -s ${TSAN_TAIL_PID_FILE} ]] || ! kill -0 "$(cat "${TSAN_TAIL_PID_FILE}")" 2> /dev/null; do
+  if ((SECONDS >= 2)); then
+    echo 'tail stub did not become ready' >&2
+    exit 99
+  fi
+  sleep 0.01
+done
+exec "${0%/*}/swift-stub" "$@"
+STUB
+  chmod +x "${fixture}/bin/tail" "${fixture}/bin/swift"
+  local started elapsed
+  started=$(date +%s)
+  run_lane
+  elapsed=$(($(date +%s) - started))
+  printf 'elapsed=%ss; status=%s\n%s\n' "${elapsed}" "${status}" "${output}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'filter executed 0 tests'* ]]
+  [ "${elapsed}" -lt 4 ]
+  assert_stub_gone "${TSAN_TAIL_PID_FILE}"
 }
 
 @test "failed listing does not run tests" {

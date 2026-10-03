@@ -6,6 +6,10 @@ import Foundation
 public final class AutoMobileHangs: @unchecked Sendable {
     public static let shared = AutoMobileHangs()
 
+    private static let defaultHangThresholdMs: Double = 2000
+    private static let defaultPollIntervalMs: Double = 500
+    private static let maxProbeTimeoutMs: Double = 86_400_000
+
     private let lock = NSLock()
     private var bundleId: String?
     private var buffer: SdkEventBuffer?
@@ -13,19 +17,29 @@ public final class AutoMobileHangs: @unchecked Sendable {
     private var _isMonitoring = false
     private var monitorGeneration: UInt64 = 0
 
-    private var _hangThresholdMs: Double = 2000
-    private var _pollIntervalMs: Double = 500
+    private var _hangThresholdMs: Double = AutoMobileHangs.defaultHangThresholdMs
+    private var _pollIntervalMs: Double = AutoMobileHangs.defaultPollIntervalMs
 
     /// Threshold in milliseconds before a hang is reported. Default: 2000ms.
+    /// Non-finite or negative values use the default; zero is allowed.
     public var hangThresholdMs: Double {
         get { lock.lock(); defer { lock.unlock() }; return _hangThresholdMs }
-        set { lock.lock(); defer { lock.unlock() }; _hangThresholdMs = newValue }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _hangThresholdMs = newValue.isFinite && newValue >= 0 ? newValue : Self.defaultHangThresholdMs
+        }
     }
 
     /// Polling interval in milliseconds. Default: 500ms.
+    /// Non-finite or non-positive values use the default.
     public var pollIntervalMs: Double {
         get { lock.lock(); defer { lock.unlock() }; return _pollIntervalMs }
-        set { lock.lock(); defer { lock.unlock() }; _pollIntervalMs = newValue }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _pollIntervalMs = newValue.isFinite && newValue > 0 ? newValue : Self.defaultPollIntervalMs
+        }
     }
 
     // MARK: - Injectable seams (deterministic testing, #3622)
@@ -38,7 +52,8 @@ public final class AutoMobileHangs: @unchecked Sendable {
     var probeMainThread: (_ timeoutMs: Double) -> Bool = { timeoutMs in
         let semaphore = DispatchSemaphore(value: 0)
         DispatchQueue.main.async { semaphore.signal() }
-        return semaphore.wait(timeout: .now() + .milliseconds(Int(timeoutMs))) == .success
+        let boundedTimeoutMs = min(max(timeoutMs, 0), AutoMobileHangs.maxProbeTimeoutMs)
+        return semaphore.wait(timeout: .now() + .milliseconds(Int(boundedTimeoutMs))) == .success
     }
 
     /// Sleep for the given milliseconds. Overridden in tests.
@@ -156,7 +171,8 @@ public final class AutoMobileHangs: @unchecked Sendable {
     private func captureMainThreadStack() -> String? {
         let symbols = Thread.callStackSymbols
         if symbols.isEmpty { return nil }
-        return "Hang detected (watchdog thread stack — use MetricKit for main thread stack):\n" + symbols.joined(separator: "\n")
+        return "Hang detected (watchdog thread stack — use MetricKit for main thread stack):\n" + symbols
+            .joined(separator: "\n")
     }
 
     private func reportHang(durationMs: Double, stackTrace: String?) {
@@ -177,7 +193,7 @@ public final class AutoMobileHangs: @unchecked Sendable {
 
     // MARK: - Testing Support
 
-    internal func reset() {
+    func reset() {
         stopMonitoring()
         lock.lock()
         bundleId = nil

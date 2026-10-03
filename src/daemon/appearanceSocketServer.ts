@@ -18,6 +18,7 @@ import {
   triggerAppearanceSync,
 } from "./AppearanceSyncScheduler";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
 import { DaemonState } from "./daemonState";
 import type {
   AppearanceConfig,
@@ -70,6 +71,7 @@ export interface AppearanceSocketServerDependencies {
   resolveMode: (config: AppearanceConfig) => Promise<AppearanceMode>;
   applyToDevice: (device: BootedDevice, mode: AppearanceMode) => Promise<void>;
   triggerSync: () => Promise<void>;
+  isSyncEnabled?: () => boolean;
   applyDeadlineMs?: number;
 }
 
@@ -79,6 +81,7 @@ const defaultDependencies: AppearanceSocketServerDependencies = {
   resolveMode: resolveAppearanceMode,
   applyToDevice: applyAppearanceToDevice,
   triggerSync: triggerAppearanceSync,
+  isSyncEnabled: isAppearanceSyncEnabledFromEnvironment,
 };
 
 /**
@@ -139,6 +142,10 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
           result: {
             config,
             appliedMode: appliedMode ?? undefined,
+            ...(enabled &&
+            !(this.dependencies.isSyncEnabled ?? isAppearanceSyncEnabledFromEnvironment)()
+              ? { warning: "Automatic appearance sync is disabled by AUTOMOBILE_APPEARANCE_SYNC." }
+              : {}),
           },
         };
       }

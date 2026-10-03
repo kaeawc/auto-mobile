@@ -45,6 +45,7 @@ function fakeDependencies(applied: string[] = []): AppearanceSocketServerDepende
       applied.push(`${device.deviceId}:${mode}`);
     },
     triggerSync: async () => {},
+    isSyncEnabled: () => true,
   };
 }
 
@@ -131,6 +132,47 @@ describe("AppearanceSocketServer", () => {
     await server.startFake();
     socket = new FakeSocket();
   });
+
+  for (const { enabled, syncEnabled } of [
+    { enabled: true, syncEnabled: false },
+    { enabled: true, syncEnabled: true },
+    { enabled: false, syncEnabled: false },
+    { enabled: false, syncEnabled: true },
+  ]) {
+    it(`set_appearance_sync(${enabled}) reports the automatic sync decision (${syncEnabled})`, async () => {
+      const applied: string[] = [];
+      const dependencies = fakeDependencies(applied);
+      dependencies.isSyncEnabled = () => syncEnabled;
+      let syncs = 0;
+      dependencies.triggerSync = async () => {
+        syncs++;
+      };
+      server = new TestableAppearanceSocketServer(
+        timer,
+        { authorize: () => {}, isAuthenticationEnforced: () => false },
+        { ...emptyDeviceSource, getPooledDevices: () => [device("own")] },
+        dependencies,
+      );
+      await server.startFake();
+      await server.simulateLine(
+        socket,
+        JSON.stringify({ id: "sync-hint", command: "set_appearance_sync", params: { enabled } }),
+      );
+      const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0];
+      expect(response.success).toBe(true);
+      expect(response.result?.config?.syncWithHost).toBe(enabled);
+      expect(response.result?.appliedMode).toBe("light");
+      expect(applied).toEqual(["own:light"]);
+      expect(syncs).toBe(1);
+      if (enabled && !syncEnabled) {
+        expect(response.result?.warning).toBe(
+          "Automatic appearance sync is disabled by AUTOMOBILE_APPEARANCE_SYNC.",
+        );
+      } else {
+        expect(response.result).not.toHaveProperty("warning");
+      }
+    });
+  }
 
   describe("targeted request-chain bypass", () => {
     let applyGate: ReturnType<typeof Promise.withResolvers<void>>;

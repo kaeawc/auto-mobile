@@ -1701,7 +1701,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const candidate = distinctFocusedFields[0].element;
     return candidate &&
-      this.hasStableFocusIdentity(target, candidate, labelText) &&
+      (this.hasStableFocusIdentity(target, candidate, labelText) ||
+        this.hasEmptyTextFocusIdentity(target, candidate, nodes)) &&
       horizontalExtentNearlyEqual(
         target.bounds,
         candidate.bounds,
@@ -1709,6 +1710,41 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       )
       ? candidate
       : undefined;
+  }
+
+  private hasEmptyTextFocusIdentity(
+    target: Element,
+    candidate: Element,
+    nodes: readonly SearchableEntry[],
+  ): boolean {
+    // An empty Compose field can lose its merged label on focus (#8997).
+    // Only the sole focused field may use this fallback, at the original bounds.
+    if (
+      this.device.platform !== "android" ||
+      !isFocusEditableElement(target) ||
+      target.class !== candidate.class ||
+      !target.text ||
+      (candidate.text !== undefined && candidate.text !== "") ||
+      (["resource-id", "test-tag", "view-id"] as const).some((key) =>
+        [target[key], candidate[key]].some(
+          (value) => value && !(key === "view-id" && value.startsWith("s2-")),
+        ),
+      )
+    ) {
+      return false;
+    }
+    const sameBoundsFields = nodes.filter(
+      (node) =>
+        node.element &&
+        isFocusEditableElement(node.properties) &&
+        boundsNearlyEqual(
+          target.bounds,
+          node.element.bounds,
+          TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+        ),
+    );
+    const sources = new Set(sameBoundsFields.map((node) => node.source));
+    return sources.size === 1 && sameBoundsFields.some((node) => node.element === candidate);
   }
 
   private findFocusIdentifier(

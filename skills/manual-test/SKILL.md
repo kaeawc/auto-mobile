@@ -159,11 +159,20 @@ at a time to conserve context; never let two actors drive devices at once.
      1. **First-class local-build mode (recommended).** Set
         `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true`. The daemon then derives
         the expected SHA from your freshly built runner, pins it, and re-verifies
-        against that pinned value before launch (so a TOCTOU swap still fails
-        closed) — no SHA to hand-copy. It logs a loud WARN that the release-pinned
+        against that pinned value before launch (a hash change with unchanged
+        binary identity still fails closed) — no SHA to hand-copy. Rebuilding with
+        `scripts/ios/ctrl-proxy-build-for-testing.sh` is picked up on the next launch
+        without a daemon restart: the pin is re-derived when the binary's size or
+        mtime changes, with an INFO log showing the old and new short SHA.
+        It logs a loud WARN that the release-pinned
         guard is relaxed for the run. Run **without** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`
-        so the builder actually runs, and point
-        `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` at your build.
+        and point `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>`
+        at your build. Local-build mode never downloads or extracts the released
+        bundle, regardless of cache metadata or a vendored bundle override.
+        Missing or invalid local products fail with an actionable error naming
+        the expected derived-data/products path and the rebuild command:
+        `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root> bash scripts/ios/ctrl-proxy-build-for-testing.sh`.
+        Background prefetch records this error without crashing the daemon.
      2. **Explicit pinned SHA (manual).** Set
         `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=<64-hex>` (and
         `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=runner|xctest` to pick the
@@ -171,7 +180,8 @@ at a time to conserve context; never let two actors drive devices at once.
         active against _your_ value. The catch is chicken-and-egg: you learn the
         SHA only by launching once and reading the `Got:` value from the mismatch
         error, then re-launching with it. An explicit value here **overrides**
-        local-build mode, so unset it if you want auto-derivation.
+        local-build mode for hash verification only; it never enables a release
+        download in local-build mode. Unset it if you want auto-derivation.
 
      **SKIP-flag interaction:** with `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true` the
      iOS prefetch is disabled and the builder never launches a local runner — the

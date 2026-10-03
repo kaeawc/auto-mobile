@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -15,6 +16,7 @@ import {
 } from "../../src/server/mcpRecordingManager";
 
 interface ServerInternals {
+  handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
   mcpClients: Map<string, Client>;
   resetMcpClient(key: string): Promise<void>;
   acceptingRequests: boolean;
@@ -37,6 +39,49 @@ class RpcSocket extends FakeSocket {
 
 describe("daemon socket transport lifecycle", () => {
   afterEach(() => resetMcpRecordingState());
+
+  test("ide/status advertises structured session-not-found errors", async () => {
+    const server = new UnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      new FakeTimer(),
+    );
+    const internals = server as unknown as ServerInternals;
+    await expect(
+      internals.handleLocalSocketRequest({
+        id: "status-1",
+        type: "daemon_request",
+        method: "ide/status",
+        params: {},
+      }),
+    ).resolves.toMatchObject({ structuredSessionNotFound: true });
+  });
+
+  test("codes a missing socket session without changing its message", async () => {
+    const timer = new FakeTimer();
+    const server = new UnixSocketServer("/fake/socket", "http://127.0.0.1:1/mcp", undefined, timer);
+    const internals = server as unknown as ServerInternals;
+    await expect(
+      internals.handleRequest(
+        "missing",
+        new RpcSocket() as unknown as Socket,
+        {
+          id: "request-1",
+          type: "mcp_request",
+          method: "tools/list",
+          params: {},
+        },
+        timer.now(),
+      ),
+    ).resolves.toEqual({
+      id: "request-1",
+      type: "mcp_response",
+      success: false,
+      error: "Session not found",
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+    });
+  });
 
   for (const event of ["close", "error"]) {
     test(`socket ${event} drops only that socket's recording`, () => {

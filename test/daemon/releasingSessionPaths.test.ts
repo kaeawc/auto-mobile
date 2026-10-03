@@ -14,6 +14,7 @@ import {
   type MissingDeviceLivenessPoolPort,
 } from "../../src/daemon/missingDeviceLiveness";
 import { runDaemonCommand } from "../../src/daemon/manager";
+import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -23,6 +24,12 @@ import {
   releasingSessionId as sessionId,
   releasingDeviceId as deviceId,
 } from "../helpers/releasingSessionHarness";
+
+const notFound = {
+  success: false,
+  error: `Session not found: ${sessionId}`,
+  code: DAEMON_SESSION_NOT_FOUND_CODE,
+};
 
 describe("remaining paths during session release", () => {
   let h: ReturnType<typeof releasingSessionHarness>;
@@ -179,10 +186,7 @@ describe("remaining paths during session release", () => {
       },
     });
     await finish();
-    expect(await h.request("daemon/sessionInfo")).toEqual({
-      success: false,
-      error: `Session not found: ${sessionId}`,
-    });
+    expect(await h.request("daemon/sessionInfo")).toEqual(notFound);
   });
 
   test("activeSessions keeps teardown busy and adds only a positive releasing count", async () => {
@@ -214,10 +218,7 @@ describe("remaining paths during session release", () => {
         `test op rejected: session ${sessionId} is not an active daemon session (unknown or expired).`,
       );
     }
-    expect(await h.request("daemon/sessionInfo")).toEqual({
-      success: false,
-      error: `Session not found: ${sessionId}`,
-    });
+    expect(await h.request("daemon/sessionInfo")).toEqual(notFound);
     expect(await h.request("daemon/activeSessions")).toEqual({
       success: true,
       result: { activeSessions: 1, activeExecutions: 0, releasingSessions: 1 },
@@ -527,9 +528,6 @@ describe("remaining paths during session release", () => {
       success: true,
       result: { activeSessions: 0, activeExecutions: 0 },
     });
-    expect(await h.request("daemon/sessionInfo")).toEqual({
-      success: false,
-      error: `Session not found: ${sessionId}`,
-    });
+    expect(await h.request("daemon/sessionInfo")).toEqual(notFound);
   });
 });

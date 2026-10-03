@@ -10,6 +10,7 @@ import type { InputTextMode } from "./InputText";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -1299,7 +1300,7 @@ export class SetUIState extends BaseVisualChange {
       intentAction: "focus-input" as const,
       screenSizeOptions,
     };
-    const focused = identity
+    let focused = identity
       ? this.selector.selectByResourceId(viewHierarchy, identity, focusOptions)
       : this.selector.selectByText(viewHierarchy, text, {
           ...focusOptions,
@@ -1307,10 +1308,18 @@ export class SetUIState extends BaseVisualChange {
           caseSensitive: false,
         });
     const source = getHierarchyNodeSource(matched);
-    return identity ||
-      (source &&
-        focused.matchedElement &&
-        source === getHierarchyNodeSource(focused.matchedElement))
+    if (identity && source !== getHierarchyNodeSource(focused.matchedElement ?? matched)) {
+      // Legacy text search prefers hierarchy; the resolver may choose a separately
+      // deserialized window copy. Retry that primary tree, then require exact source equality.
+      focused = this.selector.selectByResourceId(
+        { ...resolveViewHierarchyForSearch(viewHierarchy)!, windows: undefined },
+        identity,
+        focusOptions,
+      );
+    }
+    return source &&
+      focused.matchedElement &&
+      source === getHierarchyNodeSource(focused.matchedElement)
       ? (focused.element ?? matched)
       : matched;
   }

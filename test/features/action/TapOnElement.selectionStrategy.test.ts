@@ -629,6 +629,192 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.success).toBe(true);
   });
 
+  test.each([false, true])(
+    "derived variant: captured focus survives uniform scroll (neighbour focused: %s)",
+    async (neighbourFocused) => {
+      const pre = loadFocusCapture("pre");
+      const post = loadFocusCapture("post");
+      const before = capturedFocusSelection();
+      const nodes = new SearchableHierarchy().project(post);
+      // Derived variant of the real capture: pan the entire tree by one row.
+      for (const node of nodes) {
+        if (node.bounds) {
+          node.source.bounds = {
+            ...node.bounds,
+            top: node.bounds.top - 168,
+            bottom: node.bounds.bottom - 168,
+          };
+        }
+        if (neighbourFocused && node.className === "android.widget.EditText") {
+          nodeAttributes(node.source).focused = node.bounds?.top === 1283 ? "true" : "false";
+        }
+      }
+      const { result, tapped } = await executeFocus(
+        before.element,
+        post,
+        before.element["view-id"],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {},
+        pre,
+      );
+      expect(tapped).toBe(true);
+      expect(result.focusVerified).toBe(!neighbourFocused);
+      expect(result.success).toBe(!neighbourFocused);
+      if (neighbourFocused) {
+        expect(result.error).toContain("Failed to confirm focus");
+        expect(result.error).toContain("could not be matched");
+      }
+    },
+  );
+
+  test.each([0, -168])(
+    "derived variant: confirms captured focus by ordinal alone with scroll delta %s",
+    async (delta) => {
+      const pre = loadFocusCapture("pre");
+      const post = loadFocusCapture("post");
+      // Derived variant: remove every editable's attached label, then pan the post tree.
+      for (const capture of [pre, post]) {
+        for (const field of new SearchableHierarchy()
+          .project(capture)
+          .filter((node) => node.className === "android.widget.EditText")) {
+          delete field.source.node;
+        }
+      }
+      for (const node of new SearchableHierarchy().project(post)) {
+        if (node.bounds) {
+          node.source.bounds = {
+            ...node.bounds,
+            top: node.bounds.top + delta,
+            bottom: node.bounds.bottom + delta,
+          };
+        }
+      }
+      const target = new SearchableHierarchy()
+        .project(pre)
+        .find((node) => node.className === "android.widget.EditText")!.element!;
+      const { result } = await executeFocus(
+        target,
+        post,
+        target["view-id"],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {},
+        pre,
+      );
+      expect(result.focusVerified).toBe(true);
+      expect(result.success).toBe(true);
+    },
+  );
+
+  test.each([
+    "ambiguous",
+    "width",
+    "height",
+    "hint",
+    "content-desc",
+    "label",
+    "ordinal",
+    "inconsistent scroll",
+  ])("derived variant: rejects captured empty field with %s identity", async (difference) => {
+    const pre = loadFocusCapture("pre");
+    const post = loadFocusCapture("post");
+    const preFields = new SearchableHierarchy()
+      .project(pre)
+      .filter((node) => node.className === "android.widget.EditText");
+    const postFields = new SearchableHierarchy()
+      .project(post)
+      .filter((node) => node.className === "android.widget.EditText");
+    // Derived variant: strip labels/IDs from captured fields, retaining real geometry.
+    if (["ambiguous", "ordinal", "inconsistent scroll"].includes(difference)) {
+      for (const field of [...preFields, ...postFields]) {
+        const attributes = nodeAttributes(field.source);
+        for (const key of [
+          "text",
+          "view-id",
+          "resource-id",
+          "test-tag",
+          "hint-text",
+          "content-desc",
+        ]) {
+          delete attributes[key];
+        }
+        delete field.source.node;
+        field.source.bounds = { ...field.bounds!, bottom: field.bounds!.top + 168 };
+      }
+    }
+    if (difference === "ambiguous") {
+      post.hierarchy = {
+        node: postFields
+          .filter((field) => field.rootGroup === 0)
+          .slice(0, 2)
+          .map((field) => field.source),
+      };
+      post.windows = undefined;
+    }
+    if (difference === "ordinal") {
+      for (const field of postFields) {
+        field.source.bounds = {
+          ...field.bounds!,
+          top: field.bounds!.top - 168,
+          bottom: field.bounds!.top,
+        };
+        nodeAttributes(field.source).focused = field.bounds?.top === 1283 ? "true" : "false";
+      }
+    }
+    if (difference === "inconsistent scroll") {
+      for (const field of postFields.filter((field) => field.bounds?.top === 1283)) {
+        field.source.bounds = { ...field.bounds!, top: 1263, bottom: 1431 };
+      }
+    }
+    const target = new SearchableHierarchy()
+      .project(pre)
+      .find((node) => node.className === "android.widget.EditText")!.element!;
+    for (const field of postFields.filter((field) => field.bounds?.top === 1115)) {
+      if (difference === "width") {
+        field.source.bounds = { ...field.bounds!, right: field.bounds!.right - 21 };
+      }
+      if (difference === "content-desc") {
+        target["content-desc"] = "First description";
+        nodeAttributes(field.source)["content-desc"] = "Other description";
+      }
+      if (difference === "height") {
+        field.source.bounds = { ...field.bounds!, bottom: field.bounds!.bottom + 21 };
+      }
+      if (difference === "hint") {
+        target["hint-text"] = "First hint";
+        nodeAttributes(field.source)["hint-text"] = "Other hint";
+      }
+      if (difference === "label") {
+        const children = new SearchableHierarchy().project(post);
+        for (const child of children.filter(
+          (child) => child.properties.text === "Basic Text Field",
+        )) {
+          nodeAttributes(child.source).text = "Other label";
+        }
+      }
+    }
+    const { result } = await executeFocus(
+      target,
+      post,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { text: "Basic Text Field" },
+      difference === "ambiguous" ? undefined : pre,
+    );
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to confirm focus");
+    expect(result.error).toContain("could not be matched");
+  });
+
   test.each(
     [
       "focus disagreement",

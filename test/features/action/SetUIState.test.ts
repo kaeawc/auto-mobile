@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { SetUIState } from "../../../src/features/action/SetUIState";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
+import { getHierarchyNodeSource } from "../../../src/features/observe/output/elementProvenance";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -140,6 +143,64 @@ describe("SetUIState", () => {
         expect(fakeTap.getCalls()[0].options).toEqual({ ...selector, action: "focus" });
         expect(fakeClear.getCallCount()).toBe(1);
         expect(fakeInput.getCalls().map((call) => call.text)).toEqual(["captured input"]);
+      },
+    );
+
+    test.each([false, true])(
+      "derived variant: label promotion preserves its source (shared resource ID: %s)",
+      async (sharedId) => {
+        const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+          readFileSync(
+            new URL(
+              "../../fixtures/android-focus/playground-text-field-pre-tap.json",
+              import.meta.url,
+            ),
+            "utf8",
+          ),
+        );
+        // Derived variant: retain the first two captured rows, with controlled label IDs.
+        const fields = new SearchableHierarchy()
+          .project(capture.viewHierarchy)
+          .filter((node) => node.className === "android.widget.EditText" && node.rootGroup === 0)
+          .slice(0, 2);
+        const hierarchy: ViewHierarchyResult = {
+          hierarchy: { node: fields.map((field) => field.source) },
+        };
+        const nodes = new SearchableHierarchy().project(hierarchy);
+        fields.forEach((field, index) => {
+          nodeAttributes(field.source)["resource-id"] =
+            index === 0 ? "field-first" : "field-second";
+          const label = nodes.find(
+            (node) =>
+              node.parentIndex === nodes.find((node) => node.source === field.source)!.index &&
+              node.properties.text,
+          )!;
+          label.source.bounds = field.bounds;
+          nodeAttributes(label.source).text = index === 0 ? "First" : "Second";
+          nodeAttributes(label.source)["resource-id"] = sharedId
+            ? "shared-label"
+            : `label-${index}`;
+        });
+        const resolver = new ResolverElementSelector();
+        const selected = resolver.selectByResourceId(
+          hierarchy,
+          sharedId ? "shared-label" : "label-1",
+          { intentAction: "focus-input" },
+        );
+        expect(selected.element?.["resource-id"]).toBe(sharedId ? "field-first" : "field-second");
+        expect(selected.matchedElement?.text).toBe(sharedId ? "First" : "Second");
+        expect(getHierarchyNodeSource(selected.matchedElement!)).toBeDefined();
+        fakeObserve.setResult(createObserveResult(hierarchy));
+        const detect = spyOn(fakeFieldTypeDetector, "detect");
+        const result = await createSetUIState().execute({
+          fields: [{ selector: { text: "Second" }, value: "new value" }],
+        });
+        expect(
+          detect.mock.calls.some(([element]) => element["resource-id"] === "field-first"),
+        ).toBe(false);
+        expect(result.success).toBe(!sharedId);
+        expect(fakeInput.getCallCount()).toBe(sharedId ? 0 : 1);
+        expect(fakeClear.getCallCount()).toBe(sharedId ? 0 : 1);
       },
     );
 

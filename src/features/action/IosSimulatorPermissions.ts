@@ -8,7 +8,12 @@ import {
 } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  resolveIosPermissionsBackend,
+  resolveIosPermissionsKind,
+  type IosPermissionsBackend,
+  type IosSimulatorPrivacyClient,
+} from "../../utils/ios-cmdline-tools/IosPermissionsBackend";
 import { withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
 import { getAbortSignal } from "../../utils/AbortContext";
 
@@ -51,9 +56,7 @@ export interface IosSimulatorPermissionQueryResult {
   error?: string;
 }
 
-export interface IosSimulatorPrivacyClient {
-  executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
-}
+export { type IosSimulatorPrivacyClient } from "../../utils/ios-cmdline-tools/IosPermissionsBackend";
 
 export { type TccPermissionReader } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 
@@ -89,7 +92,7 @@ export class SqliteTccPermissionReader extends SimulatorTccSqliteClient {
 }
 
 export function isIosSimulatorDevice(device: BootedDevice): boolean {
-  return isIosSimulatorUdid(device.deviceId);
+  return resolveIosPermissionsKind(device) === "simulator";
 }
 
 export function normalizePermissions(permissions: string[] | undefined): string[] {
@@ -126,7 +129,7 @@ function stateFromAllowed(value: number | null | undefined): IosSimulatorPermiss
 
 export class IosSimulatorPermissions {
   private device: BootedDevice;
-  private simctl: IosSimulatorPrivacyClient;
+  private readonly backend: IosPermissionsBackend;
   private tccReader: TccPermissionReader;
 
   constructor(
@@ -136,7 +139,10 @@ export class IosSimulatorPermissions {
     private readonly withPrivacyLock: typeof withDeviceReadinessLock = withDeviceReadinessLock,
   ) {
     this.device = device;
-    this.simctl = simctl || new SimCtlClient(device);
+    this.backend = resolveIosPermissionsBackend({
+      deviceId: device.deviceId,
+      simctl: simctl || new SimCtlClient(device),
+    });
     this.tccReader = tccReader || new SimulatorTccSqliteClient();
   }
 
@@ -156,7 +162,7 @@ export class IosSimulatorPermissions {
       );
     }
 
-    if (!isIosSimulatorDevice(this.device)) {
+    if (this.backend.kind === "physical") {
       return this.mutationFailure(
         action,
         normalizedAppId,
@@ -205,13 +211,11 @@ export class IosSimulatorPermissions {
     const results: IosSimulatorPermissionCommandResult[] = [];
     for (const permission of normalizedPermissions) {
       try {
-        const result = await this.simctl.executeCommandArgs([
-          "privacy",
-          this.device.deviceId,
+        const result = await this.backend.setPrivacy({
           action,
           permission,
-          normalizedAppId,
-        ]);
+          appId: normalizedAppId,
+        });
         results.push({ permission, success: true, stdout: result.stdout, stderr: result.stderr });
       } catch (error) {
         results.push({
@@ -253,7 +257,7 @@ export class IosSimulatorPermissions {
       );
     }
 
-    if (!isIosSimulatorDevice(this.device)) {
+    if (this.backend.kind === "physical") {
       return this.queryFailure(
         normalizedAppId,
         "iOS permission queries are only supported on simulators",

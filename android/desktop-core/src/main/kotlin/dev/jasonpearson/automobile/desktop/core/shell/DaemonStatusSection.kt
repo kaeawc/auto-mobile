@@ -37,7 +37,9 @@ fun DaemonStatusSection(
   var daemonStatus by remember { mutableStateOf<DaemonStatusResponse?>(null) }
   var socketPath by remember { mutableStateOf<String?>(null) }
 
-  val isConnected = daemonStatus != null
+  val status = daemonStatus
+  val currentSocketPath = socketPath
+  val isConnected = status != null
 
   LaunchedEffect(dataSourceMode) {
     if (dataSourceMode == DataSourceMode.Real) {
@@ -71,7 +73,7 @@ fun DaemonStatusSection(
     )
 
     if (expanded) {
-      if (socketPath != null) {
+      if (currentSocketPath != null) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
             "Socket",
@@ -81,7 +83,7 @@ fun DaemonStatusSection(
             softWrap = false,
           )
           Text(
-            socketPath!!,
+            currentSocketPath,
             fontSize = 11.sp,
             color = colors.text.normal.copy(alpha = 0.8f),
             maxLines = 1,
@@ -107,8 +109,7 @@ fun DaemonStatusSection(
         )
       }
 
-      if (isConnected) {
-        val status = daemonStatus!!
+      if (status != null) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           Text(
             "Version:",

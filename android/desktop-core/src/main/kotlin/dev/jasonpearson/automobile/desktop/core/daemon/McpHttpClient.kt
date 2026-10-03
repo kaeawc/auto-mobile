@@ -51,7 +51,11 @@ class McpHttpClient(
   override fun listResources(): List<McpResource> {
     ensureInitialized()
     val response = sendRequest("resources/list")
-    val result = json.decodeFromJsonElement(serializer<ListResourcesResult>(), response.result!!)
+    val result =
+      json.decodeFromJsonElement(
+        serializer<ListResourcesResult>(),
+        response.resultFor("resources/list"),
+      )
     return result.resources
   }
 
@@ -59,14 +63,18 @@ class McpHttpClient(
     ensureInitialized()
     val response = sendRequest("resources/list-templates")
     val result =
-      json.decodeFromJsonElement(serializer<ListResourceTemplatesResult>(), response.result!!)
+      json.decodeFromJsonElement(
+        serializer<ListResourceTemplatesResult>(),
+        response.resultFor("resources/list-templates"),
+      )
     return result.resourceTemplates
   }
 
   override fun listTools(): List<McpTool> {
     ensureInitialized()
     val response = sendRequest("tools/list")
-    val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
+    val result =
+      json.decodeFromJsonElement(serializer<ListToolsResult>(), response.resultFor("tools/list"))
     return result.tools
   }
 
@@ -77,7 +85,11 @@ class McpHttpClient(
         "resources/read",
         buildJsonObject { put("uri", JsonPrimitive(uri)) },
       )
-    val result = json.decodeFromJsonElement(serializer<ReadResourceResult>(), response.result!!)
+    val result =
+      json.decodeFromJsonElement(
+        serializer<ReadResourceResult>(),
+        response.resultFor("resources/read"),
+      )
     return result.contents
   }
 
@@ -500,12 +512,10 @@ class McpHttpClient(
     val builder =
       HttpRequest.newBuilder(URI.create(endpoint)).header("Content-Type", "application/json")
 
-    if (includeSession && sessionId != null) {
-      builder.header("mcp-session-id", sessionId!!)
+    if (includeSession) {
+      sessionId?.let { builder.header("mcp-session-id", it) }
     }
-    if (protocolVersion != null) {
-      builder.header("mcp-protocol-version", protocolVersion!!)
-    }
+    protocolVersion?.let { builder.header("mcp-protocol-version", it) }
     timeoutMs?.let { builder.timeout(Duration.ofMillis(it)) }
 
     val httpRequest = builder.POST(HttpRequest.BodyPublishers.ofString(requestBody)).build()
@@ -546,9 +556,7 @@ class McpHttpClient(
         "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
       )
     }
-    if (rpcResponse.result == null) {
-      throw McpConnectionException("MCP HTTP response missing result")
-    }
+    rpcResponse.resultFor(request.method)
     return rpcResponse
   }
 
@@ -562,3 +570,9 @@ class McpHttpClient(
         (e is McpConnectionException && e.message?.contains("server error") == true)
   }
 }
+
+internal fun JsonRpcResponse.resultFor(method: String): JsonElement =
+  result
+    ?: throw McpConnectionException(
+      "JSON-RPC $method response contained no result; check the MCP server response."
+    )

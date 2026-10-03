@@ -55,7 +55,11 @@ class McpStdioClient(
   override fun listResources(): List<McpResource> {
     ensureInitialized()
     val response = sendRequest("resources/list")
-    val result = json.decodeFromJsonElement(serializer<ListResourcesResult>(), response.result!!)
+    val result =
+      json.decodeFromJsonElement(
+        serializer<ListResourcesResult>(),
+        response.resultFor("resources/list"),
+      )
     return result.resources
   }
 
@@ -63,14 +67,18 @@ class McpStdioClient(
     ensureInitialized()
     val response = sendRequest("resources/list-templates")
     val result =
-      json.decodeFromJsonElement(serializer<ListResourceTemplatesResult>(), response.result!!)
+      json.decodeFromJsonElement(
+        serializer<ListResourceTemplatesResult>(),
+        response.resultFor("resources/list-templates"),
+      )
     return result.resourceTemplates
   }
 
   override fun listTools(): List<McpTool> {
     ensureInitialized()
     val response = sendRequest("tools/list")
-    val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
+    val result =
+      json.decodeFromJsonElement(serializer<ListToolsResult>(), response.resultFor("tools/list"))
     return result.tools
   }
 
@@ -81,7 +89,11 @@ class McpStdioClient(
         "resources/read",
         buildJsonObject { put("uri", JsonPrimitive(uri)) },
       )
-    val result = json.decodeFromJsonElement(serializer<ReadResourceResult>(), response.result!!)
+    val result =
+      json.decodeFromJsonElement(
+        serializer<ReadResourceResult>(),
+        response.resultFor("resources/read"),
+      )
     return result.contents
   }
 
@@ -516,7 +528,7 @@ class McpStdioClient(
 
       try {
         val expectedId = request.id?.jsonPrimitive?.content
-        val read = Callable { readResponse(currentReader, expectedId) }
+        val read = Callable { readResponse(currentReader, expectedId, request.method) }
         return responseReader.read(read, timeoutMs)
       } catch (_: java.util.concurrent.TimeoutException) {
         // BufferedReader.readLine() cannot be reliably interrupted. Its worker stays isolated on
@@ -537,7 +549,11 @@ class McpStdioClient(
     }
   }
 
-  private fun readResponse(currentReader: BufferedReader, expectedId: String?): JsonRpcResponse {
+  private fun readResponse(
+    currentReader: BufferedReader,
+    expectedId: String?,
+    method: String,
+  ): JsonRpcResponse {
     while (true) {
       val line = currentReader.readLine() ?: throw McpConnectionException("MCP stdio closed")
       if (line.isBlank()) continue
@@ -549,7 +565,7 @@ class McpStdioClient(
           "MCP stdio error ${response.error.code}: ${response.error.message}"
         )
       }
-      if (response.result == null) throw McpConnectionException("MCP stdio response missing result")
+      response.resultFor(method)
       return response
     }
   }

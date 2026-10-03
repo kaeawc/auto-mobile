@@ -38,6 +38,7 @@ const foldStates = fixture("foldpf-print-states.txt");
 const phoneStates = fixture("phone-states.txt");
 const closedState = fixture("foldpf-5-after-reset-state.txt");
 const openedState = fixture("foldpf-1-default-state.txt");
+const hingeAngleReadBack = fixture("hinge-angle0-get.txt");
 const rearState = fixture("foldpf-2-rear-display-override-state.txt");
 import { logger } from "../../../src/utils/logger";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
@@ -77,6 +78,7 @@ function makeFeature(
   observed: ObserveResult = observation,
 ) {
   timer.enableAutoAdvance();
+  adb.setCommandResponse("emu sensor get hinge-angle0", createExecResult(hingeAngleReadBack, ""));
   const adbFactory: AdbClientFactory = { create: () => adb };
   const tracker = new DisplayTransitionTracker(() => {});
   let observeCount = 0;
@@ -621,6 +623,161 @@ describe("SetPosture", () => {
   }
 
   describe("best effort hinge angles", () => {
+    function makeAndroidAngleHarness() {
+      const console = new FakeAndroidHingeAngleConsole();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(openedState, ""));
+      const tracker = new DisplayTransitionTracker(() => {});
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult({
+        ...observation,
+        display: { ...display, posture: "opened" },
+        displayRevision: tracker.revision("emulator-5554"),
+      });
+      const feature = new SetPosture(makeDevice(), {
+        androidHingeAngleConsole: console,
+        adbFactory: { create: () => adb },
+        observeFactory: () => observe,
+        transitionSink: tracker,
+        timer: new FakeTimer(),
+      });
+      return { feature, console, adb, observe };
+    }
+
+    test("Android mismatch warns with both angles while preserving a success-shaped result", async () => {
+      const h = makeAndroidAngleHarness();
+      h.console.readBackResult = { ok: true, degrees: 180 };
+      const result = await h.feature.executeHingeAngle(120);
+      expect(result).toMatchObject({
+        hingeAngle: 120,
+        observedHingeAngle: 180,
+        posture: "opened",
+        warnings: [
+          expect.stringContaining("requested 120 degrees but the emulator reports 180 degrees"),
+        ],
+      });
+      expect("status" in result).toBe(false);
+    });
+
+    test.each(["failure result", "command error"])(
+      "Android read-back %s warns and logs",
+      async (mode) => {
+        const h = makeAndroidAngleHarness();
+        if (mode === "failure result") {
+          h.console.readBackResult = { ok: false, reason: "KO: unknown sensor" };
+        } else {
+          h.console.readBackError = new Error("adb read timed out");
+        }
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await h.feature.executeHingeAngle(120);
+          expect(result).toMatchObject({
+            hingeAngle: 120,
+            warnings: [expect.stringContaining("Could not verify hinge angle:")],
+          });
+          expect("observedHingeAngle" in result).toBe(false);
+          expect("status" in result).toBe(false);
+          expect(warn).toHaveBeenCalled();
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test.each([119, 120, 121, undefined])(
+      "Android matching read-back %s has no warning",
+      async (actual) => {
+        const h = makeAndroidAngleHarness();
+        if (actual !== undefined) {
+          h.console.readBackResult = { ok: true, degrees: actual };
+        }
+        const signal = new AbortController().signal;
+        const result = await h.feature.executeHingeAngle(120, { signal });
+        expect(result).toMatchObject({ hingeAngle: 120, observedHingeAngle: actual ?? 120 });
+        expect("warnings" in result).toBe(false);
+        expect(h.console.readBackCalls).toEqual([{ signal }]);
+      },
+    );
+
+    test("Android abort during angle read-back propagates without further device work", async () => {
+      const h = makeAndroidAngleHarness();
+      const controller = new AbortController();
+      const started = Promise.withResolvers<void>();
+      const pending = Promise.withResolvers<{ ok: true; degrees: number }>();
+      const read = spyOn(h.console, "getHingeAngle").mockImplementation(async (_adb, options) => {
+        expect(options?.signal).toBe(controller.signal);
+        started.resolve();
+        return pending.promise;
+      });
+      const attempt = h.feature.executeHingeAngle(120, { signal: controller.signal });
+      const outcome = attempt.catch((error: unknown) => error);
+      try {
+        await started.promise;
+        controller.abort();
+        expect(await outcome).toBeInstanceOf(ActionableError);
+        expect(h.adb.getExecutedCommands()).toEqual([]);
+        expect(h.observe.getExecuteOptions()).toEqual([]);
+        expect(pendingPostureOperationCountForTest()).toBe(0);
+      } finally {
+        pending.resolve({ ok: true, degrees: 120 });
+        read.mockRestore();
+      }
+    });
+
+    test("Android read-back warnings merge with stale observation warnings", async () => {
+      const h = makeAndroidAngleHarness();
+      h.console.readBackResult = { ok: true, degrees: 180 };
+      h.observe.setObserveResult({ ...observation, displayRevision: undefined });
+      const result = await h.feature.executeHingeAngle(120);
+      expect("warnings" in result && result.warnings).toEqual([
+        expect.stringContaining("observation predates"),
+        expect.stringContaining("requested 120 degrees"),
+      ]);
+    });
+
+    test.each([119, 120, 121, 180, undefined])(
+      "iOS reported angle %s is compared with the request",
+      async (actual) => {
+        const h = makeIosFeature(duo, [
+          {
+            ...observation,
+            screenSize: { width: 2007, height: 2853 },
+            display: { ...display, posture: "half_opened" },
+          },
+        ]);
+        h.client.supportedCommands = ["set_hinge_angle"];
+        h.client.setHingeAngleResult({ success: true, angle: actual, totalTimeMs: 0 });
+        const result = await h.feature.executeHingeAngle(120);
+        expect(result).toMatchObject({ hingeAngle: 120, posture: "half_opened" });
+        expect("status" in result).toBe(false);
+        if (actual === undefined) {
+          expect(result).toMatchObject({
+            warnings: [
+              "Hinge angle not verifiable: the iPhone Duo runner did not report the resulting angle.",
+            ],
+          });
+          expect("observedHingeAngle" in result).toBe(false);
+        } else {
+          expect(result).toMatchObject({ observedHingeAngle: actual });
+          if (actual === 180) {
+            expect(result).toMatchObject({
+              warnings: [
+                expect.stringContaining(
+                  "requested 120 degrees but the iPhone Duo runner reports 180 degrees",
+                ),
+              ],
+            });
+          } else {
+            expect("warnings" in result).toBe(false);
+          }
+        }
+      },
+    );
+
     test.each([-1, 181, NaN, Infinity, -Infinity])(
       "direct angle %s is actionable",
       async (angle) => {
@@ -661,13 +818,28 @@ describe("SetPosture", () => {
           posture: "closed",
           display: { generation: 1 },
         });
-        expect("observedHingeAngle" in result).toBe(false);
+        expect(result).toMatchObject({ observedHingeAngle: 180 });
         expect(adb.getExecutedCommands()).toEqual([
           command,
+          "emu sensor get hinge-angle0",
           "shell cmd device_state print-states",
           "shell cmd device_state state",
         ]);
         expect(send.mock.calls[0]).toEqual([command, undefined, undefined, true, undefined]);
+        expect(send.mock.calls[1]).toEqual([
+          "emu sensor get hinge-angle0",
+          undefined,
+          undefined,
+          true,
+          undefined,
+        ]);
+        if (angle === 180) {
+          expect("warnings" in result).toBe(false);
+        } else {
+          expect(result).toMatchObject({
+            warnings: [expect.stringContaining(`requested ${angle} degrees`)],
+          });
+        }
         const postureAdb = new FakeAdbExecutor();
         postureAdb.setCommandResponse(
           "shell cmd device_state print-states",
@@ -847,6 +1019,10 @@ describe("SetPosture", () => {
         createExecResult(foldStates, ""),
       );
       adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+      adb.setCommandResponse(
+        "emu sensor get hinge-angle0",
+        createExecResult(hingeAngleReadBack, ""),
+      );
       const tracker = new DisplayTransitionTracker(() => {});
       const observed = new FakeObserveScreen();
       observed.setObserveResult({ ...observation, displayRevision: undefined });
@@ -1719,11 +1895,13 @@ for (const platform of ["ios", "android"] as const) {
         return createExecResult(
           command === "shell cmd device_state print-states"
             ? foldStates
-            : command === "shell cmd device_state state"
-              ? posture === "closed"
-                ? closedState
-                : openedState
-              : "",
+            : command === "emu sensor get hinge-angle0"
+              ? hingeAngleReadBack
+              : command === "shell cmd device_state state"
+                ? posture === "closed"
+                  ? closedState
+                  : openedState
+                : "",
           "",
         );
       });
@@ -1846,6 +2024,30 @@ for (const platform of ["ios", "android"] as const) {
         h.cleanup();
       }
     });
+
+    if (platform === "android") {
+      test("a later posture supersedes a hung angle read-back without returning a warning", async () => {
+        const h = harness();
+        const gate = h.block("emu sensor get hinge-angle0");
+        const first = h.create().executeHingeAngle(90);
+        const outcome = first.catch((error: unknown) => error);
+        await gate.started;
+        const second = h.create().execute("closed");
+        await drainMicrotasks();
+        h.timer.advanceTime(18_000);
+        await second;
+        gate.resolve();
+        h.timer.enableAutoAdvance();
+        try {
+          expect(await outcome).toMatchObject({
+            message: "Posture request cancelled; superseded by a later setPosture request",
+          });
+          expect(pendingPostureOperationCountForTest()).toBe(0);
+        } finally {
+          h.cleanup();
+        }
+      });
+    }
 
     test("queues all device work until the preceding operation finishes", async () => {
       const h = harness();

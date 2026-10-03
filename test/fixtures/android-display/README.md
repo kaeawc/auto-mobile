@@ -19,3 +19,5 @@ Captured output, not hand-written.
   6. `6-fold-from-closed-base-while-override`: `state 3`, then `emu fold`; stays 3 (bug).
   7. `7-unfold-from-closed-base-while-override`: then `emu unfold`; base OPENED, still 3 (bug).
   8. `8-after-reset-opened-base`: after `state reset`; state 2.
+
+- `hinge-angle0-get.txt`: captured `adb emu sensor get hinge-angle0` output on am-resizable API 36, issue #8947.

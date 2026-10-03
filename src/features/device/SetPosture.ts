@@ -19,6 +19,7 @@ import type { DisplayPanel } from "../../models/DisplayPanel";
 import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
 import { logger } from "../../utils/logger";
 import { displayInventoryOutcome } from "../../models/DeviceInfo";
 import {
@@ -29,6 +30,7 @@ import {
 import {
   AdbAndroidHingeAngleConsole,
   type AndroidHingeAngleConsole,
+  type AndroidHingeAngleReadbackResult,
 } from "./AndroidHingeAngleConsole";
 
 export const HINGE_ANGLE_MIN_DEGREES = 0;
@@ -620,6 +622,13 @@ export class SetPosture {
         message: `Emulator console rejected 'sensor set hinge-angle0 ${angle}': ${consoleResult.reason}. Hinge angle is best effort; the syntax is unconfirmed on real emulators. Nothing was changed.`,
       };
     }
+    const angleReadBack = await this.readAndroidHingeAngle(adb, operation);
+    assertCurrent();
+    const warning = angleReadBack.ok
+      ? Math.abs(angleReadBack.degrees - angle) > 1
+        ? `Hinge angle read-back mismatch: requested ${angle} degrees but the emulator reports ${angleReadBack.degrees} degrees. The emulator console returned OK but did not apply the angle (hinge angle is best effort).`
+        : undefined
+      : `Could not verify hinge angle: ${angleReadBack.reason}. The emulator console accepted the request but the angle was not read back.`;
     const states = await readAndroidStates(adb, operation);
     assertCurrent();
     const readBack = await this.readAndroidHingePosture(adb, states, operation);
@@ -629,7 +638,7 @@ export class SetPosture {
       ObservedAndroidDisplayCache.clear(this.device.deviceId);
       return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
     };
-    return this.observeFinalPosture(
+    const settled = await this.observeFinalPosture(
       {
         hingeAngle: angle,
         resolvePosture: (observation) => {
@@ -650,6 +659,41 @@ export class SetPosture {
       observe,
       operation,
     );
+    assertCurrent();
+    return withEpilogueWarning(
+      {
+        ...settled,
+        hingeAngle: angle,
+        ...(angleReadBack.ok ? { observedHingeAngle: angleReadBack.degrees } : {}),
+      },
+      warning,
+    );
+  }
+
+  private async readAndroidHingeAngle(
+    adb: ReturnType<AdbClientFactory["create"]>,
+    operation: PostureOperation,
+  ): Promise<AndroidHingeAngleReadbackResult> {
+    const { signal, assertCurrent } = operation;
+    assertCurrent();
+    throwIfAborted(signal);
+    try {
+      const result = await awaitWhileRequestIsLive(
+        this.androidHingeAngleConsole.getHingeAngle(adb, { signal }),
+        signal,
+      );
+      assertCurrent();
+      throwIfAborted(signal);
+      if (!result.ok) {
+        logger.warn(`[SetPosture] Could not verify hinge angle: ${result.reason}`);
+      }
+      return result;
+    } catch (error) {
+      assertCurrent();
+      throwIfAborted(signal);
+      logger.warn(`[SetPosture] Hinge angle read-back failed: ${errorMessage(error)}`, error);
+      return { ok: false, reason: errorMessage(error) };
+    }
   }
 
   private async readAndroidHingePosture(
@@ -770,11 +814,20 @@ export class SetPosture {
       operation,
     );
     assertCurrent();
-    return {
-      ...settled,
-      hingeAngle: angle,
-      ...(result.angle !== undefined ? { observedHingeAngle: result.angle } : {}),
-    };
+    const warning =
+      result.angle === undefined
+        ? "Hinge angle not verifiable: the iPhone Duo runner did not report the resulting angle."
+        : Math.abs(result.angle - angle) > 1
+          ? `Hinge angle read-back mismatch: requested ${angle} degrees but the iPhone Duo runner reports ${result.angle} degrees (hinge angle is best effort).`
+          : undefined;
+    return withEpilogueWarning(
+      {
+        ...settled,
+        hingeAngle: angle,
+        ...(result.angle !== undefined ? { observedHingeAngle: result.angle } : {}),
+      },
+      warning,
+    );
   }
 
   private validateRequest(

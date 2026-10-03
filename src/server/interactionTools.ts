@@ -2413,7 +2413,11 @@ export async function setPostureHandler(
       "status" in result
         ? result.message
         : result.hingeAngle !== undefined
-          ? `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
+          ? result.observedHingeAngle === undefined
+            ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture})`
+            : Math.abs(result.observedHingeAngle - result.hingeAngle) > 1
+              ? `Requested hinge angle ${result.hingeAngle} degrees; the device reports ${result.observedHingeAngle} degrees (posture ${result.posture})`
+              : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
           : `Set device posture to ${result.posture}`;
     return createStructuredToolResponse({ message, ...result });
   } catch (error) {
@@ -3501,7 +3505,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "setPosture",
-    "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console syntax is unconfirmed and detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android has no angle read-back; iOS reports the runner angle when present.",
+    "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console support is detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android strictly parses emu sensor get hinge-angle0 output as hinge-angle0 = <n>; iOS uses the runner angle. Both report observedHingeAngle when available and warn without failing when the resulting angle is unavailable or differs by more than 1 degree.",
     setPostureSchema,
     setPostureHandler,
     { defaultEnabled: false, outputSchema: setPostureResultSchema },

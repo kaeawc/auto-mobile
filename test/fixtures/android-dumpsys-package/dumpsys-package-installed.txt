@@ -1,0 +1,184 @@
+Activity Resolver Table:
+  Schemes:
+      automobile:
+        17cb3eb dev.jasonpearson.automobile.playground/.MainActivity filter 4f33fe1
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "automobile"
+          Authority: "playground": -1
+
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        17cb3eb dev.jasonpearson.automobile.playground/.MainActivity filter 3ac6548
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+
+Receiver Resolver Table:
+  Non-Data Actions:
+      androidx.profileinstaller.action.SAVE_PROFILE:
+        12d1ade dev.jasonpearson.automobile.playground/androidx.profileinstaller.ProfileInstallReceiver filter a092ed5
+          Action: "androidx.profileinstaller.action.SAVE_PROFILE"
+      dev.jasonpearson.automobile.playground.action.TEST_PROBE_NETWORK_CONTROL:
+        20ef106 dev.jasonpearson.automobile.playground/.NetworkControlContractProbeReceiver filter e70a3c7
+          Action: "dev.jasonpearson.automobile.playground.action.TEST_PROBE_NETWORK_CONTROL"
+      dev.jasonpearson.automobile.sdk.NOTIFICATION_POST:
+        d191792 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver filter 5c9b563
+          Action: "dev.jasonpearson.automobile.sdk.NOTIFICATION_POST"
+      dev.jasonpearson.automobile.sdk.NOTIFICATION_ACTION:
+        9b89560 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationActionReceiver filter 95b0a19
+          Action: "dev.jasonpearson.automobile.sdk.NOTIFICATION_ACTION"
+      androidx.profileinstaller.action.INSTALL_PROFILE:
+        12d1ade dev.jasonpearson.automobile.playground/androidx.profileinstaller.ProfileInstallReceiver filter 41844bf
+          Action: "androidx.profileinstaller.action.INSTALL_PROFILE"
+      androidx.profileinstaller.action.SKIP_FILE:
+        12d1ade dev.jasonpearson.automobile.playground/androidx.profileinstaller.ProfileInstallReceiver filter e01a78c
+          Action: "androidx.profileinstaller.action.SKIP_FILE"
+      androidx.profileinstaller.action.BENCHMARK_OPERATION:
+        12d1ade dev.jasonpearson.automobile.playground/androidx.profileinstaller.ProfileInstallReceiver filter fec06ea
+          Action: "androidx.profileinstaller.action.BENCHMARK_OPERATION"
+      dev.jasonpearson.automobile.playground.action.TEST_EMIT_SDK_NAVIGATION:
+        ac68df4 dev.jasonpearson.automobile.playground/.NavigationGraphContractReceiver filter 482f91d
+          Action: "dev.jasonpearson.automobile.playground.action.TEST_EMIT_SDK_NAVIGATION"
+
+Domain verification status:
+
+Permissions:
+  Permission [dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION] (482a02e):
+    sourcePackage=dev.jasonpearson.automobile.playground
+    uid=10216 gids=[] type=0 prot=signature
+    perm=PermissionInfo{1652761 dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION}
+    flags=0x0
+
+Registered ContentProviders:
+  dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.keystore.KeystoreStateProvider:
+    Provider{178286 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.keystore.KeystoreStateProvider}
+  dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspectorProvider:
+    Provider{d6b9747 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspectorProvider}
+  dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.database.DatabaseInspectorProvider:
+    Provider{6d13b74 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.database.DatabaseInspectorProvider}
+  dev.jasonpearson.automobile.playground/androidx.startup.InitializationProvider:
+    Provider{6ebd89d dev.jasonpearson.automobile.playground/androidx.startup.InitializationProvider}
+
+ContentProvider Authorities:
+  [dev.jasonpearson.automobile.playground.automobile.keystore]:
+    Provider{178286 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.keystore.KeystoreStateProvider}
+      applicationInfo=ApplicationInfo{a0067cf dev.jasonpearson.automobile.playground}
+  [dev.jasonpearson.automobile.playground.automobile.database]:
+    Provider{6d13b74 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.database.DatabaseInspectorProvider}
+      applicationInfo=ApplicationInfo{ae7755c dev.jasonpearson.automobile.playground}
+  [dev.jasonpearson.automobile.playground.automobile.sharedprefs]:
+    Provider{d6b9747 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspectorProvider}
+      applicationInfo=ApplicationInfo{b773065 dev.jasonpearson.automobile.playground}
+  [dev.jasonpearson.automobile.playground.androidx-startup]:
+    Provider{6ebd89d dev.jasonpearson.automobile.playground/androidx.startup.InitializationProvider}
+      applicationInfo=ApplicationInfo{59c913a dev.jasonpearson.automobile.playground}
+
+Key Set Manager:
+  [dev.jasonpearson.automobile.playground]
+      Signing KeySets: 62
+
+Packages:
+  Package [dev.jasonpearson.automobile.playground] (2865c5e):
+    appId=10216
+    pkg=Package{20e283f dev.jasonpearson.automobile.playground}
+    codePath=/data/app/~~wOAySU8ufJtVigtbafObbQ==/dev.jasonpearson.automobile.playground-EcdGAItZwN743immpJXtvw==
+    resourcePath=/data/app/~~wOAySU8ufJtVigtbafObbQ==/dev.jasonpearson.automobile.playground-EcdGAItZwN743immpJXtvw==
+    legacyNativeLibraryDir=/data/app/~~wOAySU8ufJtVigtbafObbQ==/dev.jasonpearson.automobile.playground-EcdGAItZwN743immpJXtvw==/lib
+    extractNativeLibs=false
+    primaryCpuAbi=arm64-v8a
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=1 minSdk=24 targetSdk=36
+    minExtensionVersions=[]
+    versionName=0.0.82-SNAPSHOT
+    hiddenApiEnforcementPolicy=2
+    usesNonSdkApi=false
+    splits=[base]
+    apkSigningVersion=2
+    flags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    forceQueryable=false
+    pageSizeCompat=0
+    scannedAsStoppedSystemApp=false
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    usesOptionalLibraries:
+      androidx.window.extensions
+      androidx.window.sidecar
+    usesLibraryFiles:
+      /system_ext/framework/androidx.window.extensions.jar
+      /system_ext/framework/androidx.window.sidecar.jar
+    timeStamp=2026-10-03 17:28:08
+    lastUpdateTime=2026-10-03 17:28:08
+    installerPackageName=null
+    installerPackageUid=-1
+    initiatingPackageName=com.android.shell
+    originatingPackageName=null
+    packageSource=1
+    appMetadataFilePath=null
+    appMetadataSource=0
+    signatures=PackageSignatures{4850c version:2, signatures:[5470e9a7], past signatures:[]}
+    installPermissionsFixed=false
+    pkgFlags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    declared permissions:
+      dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: prot=signature
+    requested permissions:
+      android.permission.INTERNET
+      dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+      android.permission.ACCESS_NETWORK_STATE
+      android.permission.WAKE_LOCK
+    install permissions:
+      android.permission.INTERNET: granted=true
+      dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: ceDataInode=573975 deDataInode=402044 installed=true hidden=false suspended=false distractionFlags=0 stopped=false notLaunched=false enabled=0 instant=false virtual=false quarantined=false
+      installReason=0
+      dataDir=/data/user/0/dev.jasonpearson.automobile.playground
+      firstInstallTime=2026-10-03 16:07:01
+      uninstallReason=0
+      overlay paths:
+        /product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      legacy overlay paths:
+        /product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      gids=[3003]
+      runtime permissions:
+
+Queries:
+  system apps queryable: false
+  queries via forceQueryable:
+  queries via package name:
+  queries via component:
+    com.google.android.settings.intelligence:
+      dev.jasonpearson.automobile.playground
+    com.google.android.as:
+      dev.jasonpearson.automobile.playground
+    com.google.android.apps.messaging:
+      dev.jasonpearson.automobile.playground
+    com.google.android.apps.accessibility.voiceaccess:
+      dev.jasonpearson.automobile.playground
+  queryable via interaction:
+    User 0:
+      [com.android.DeviceAsWebcam,com.android.localtransport,com.android.location.fused,com.android.settings,com.android.keychain,com.android.inputdevices,com.android.providers.settings,com.android.server.telecom,com.android.dynsystem,android,com.android.emulator.multidisplay]:
+        dev.jasonpearson.automobile.playground
+      com.google.android.gms:
+        dev.jasonpearson.automobile.playground
+      com.google.android.inputmethod.latin:
+        dev.jasonpearson.automobile.playground
+      dev.jasonpearson.automobile.ctrlproxy:
+        dev.jasonpearson.automobile.playground
+  queryable via uses-library:
+
+Dexopt state:
+  [dev.jasonpearson.automobile.playground]
+    path: /data/app/~~wOAySU8ufJtVigtbafObbQ==/dev.jasonpearson.automobile.playground-EcdGAItZwN743immpJXtvw==/base.apk
+      arm64: [status=run-from-apk] [reason=unknown] [primary-abi]
+        [location is error]
+
+Compiler stats:
+  [dev.jasonpearson.automobile.playground]
+    (No recorded stats)

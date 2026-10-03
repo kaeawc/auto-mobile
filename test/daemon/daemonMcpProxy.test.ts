@@ -251,6 +251,19 @@ describe("DaemonMcpProxy", () => {
     }
   });
 
+  test("rejects a zero heartbeat timeout but derives an interval for a positive timeout", async () => {
+    const config = {
+      clientFactory: () => new FakeDaemonClient(),
+      daemonManager: matchingDaemonManager(),
+      timer: new FakeTimer(),
+    };
+    expect(() => new DaemonMcpProxy({ ...config, heartbeatTimeoutMs: 0 })).toThrow(
+      "heartbeat timeout must be a positive finite number",
+    );
+    const proxy = new DaemonMcpProxy({ ...config, heartbeatTimeoutMs: 3 });
+    await proxy.close();
+  });
+
   describe("connection management", () => {
     test("connects to daemon on first request", async () => {
       const fakeClient = new FakeDaemonClient({
@@ -1303,6 +1316,45 @@ describe("DaemonMcpProxy", () => {
           expect(warnSpy).toHaveBeenCalled();
         } finally {
           warnSpy.mockRestore();
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("version restart cooldown expires at the exact boundary", async () => {
+        for (const offset of [-1, 0, 1]) {
+          const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+            runningVersion: OLDER_VERSION,
+            startedAt: 100_000 - (DAEMON_VERSION_RESTART_COOLDOWN_MS + offset),
+          });
+          try {
+            if (offset === -1) {
+              const error = await expectVersionMismatch(proxy.listTools());
+              expect(error.reason).toBe("cooldown");
+              expect(error.retryAfterMs).toBe(1);
+              expect(fakeManager.restartCalled).toBe(false);
+            } else {
+              await proxy.listTools();
+              expect(fakeManager.restartCalled).toBe(true);
+            }
+          } finally {
+            isAvailableSpy.mockRestore();
+            await proxy.close();
+          }
+        }
+      });
+
+      test("rejects numerically equal release bases with different strings without restarting", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          clientVersion: "1.0.0",
+          runningVersion: "1.0",
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          const error = await expectVersionMismatch(proxy.listTools());
+          expect(error.reason).toBe("daemonNewer");
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
         }
@@ -5711,6 +5763,28 @@ describe("DaemonMcpProxy", () => {
         warnSpy.mockRestore();
         isAvailableSpy.mockRestore();
         await proxy.close();
+      }
+    });
+
+    test("build restart cooldown expires at the exact boundary", async () => {
+      for (const offset of [-1, 0, 1]) {
+        const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+          startedAt: 100_000 - (DAEMON_VERSION_RESTART_COOLDOWN_MS + offset),
+        });
+        try {
+          if (offset === -1) {
+            const error = await expectBuildMismatch(proxy.listTools());
+            expect(error.reason).toBe("cooldown");
+            expect(error.retryAfterMs).toBe(1);
+            expect(fakeManager.restartCalled).toBe(false);
+          } else {
+            await proxy.listTools();
+            expect(fakeManager.restartCalled).toBe(true);
+          }
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
       }
     });
 

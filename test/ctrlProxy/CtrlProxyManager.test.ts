@@ -166,6 +166,59 @@ describe("CtrlProxyManager", function () {
       return AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
     }
 
+    // Mirror the production TTLs without exposing private cache state.
+    const negativeCacheTtl = 5_000;
+    const statusCacheTtl = 30 * 60 * 1_000;
+    const availabilityCacheTtl = 60 * 60 * 1_000;
+    const enabledCommand = "shell settings get secure enabled_accessibility_services";
+
+    test.each([
+      { method: "isInstalled", result: false, ttl: negativeCacheTtl, commands: [installedCommand] },
+      { method: "isInstalled", result: true, ttl: statusCacheTtl, commands: [installedCommand] },
+      { method: "isEnabled", result: false, ttl: negativeCacheTtl, commands: [enabledCommand] },
+      { method: "isEnabled", result: true, ttl: statusCacheTtl, commands: [enabledCommand] },
+      {
+        method: "isAvailable",
+        result: false,
+        ttl: negativeCacheTtl,
+        commands: [installedCommand, enabledCommand],
+      },
+      {
+        method: "isAvailable",
+        result: true,
+        ttl: availabilityCacheTtl,
+        commands: [installedCommand, enabledCommand],
+      },
+    ] as const)(
+      "$method cache expires exactly at TTL for $result",
+      async ({ method, result, ttl, commands }) => {
+        const timer = new FakeTimer();
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse(installedCommand, {
+          stdout: result ? `package:${AndroidCtrlProxyManager.PACKAGE}` : "",
+          stderr: "",
+        });
+        adb.setCommandResponse(enabledCommand, {
+          stdout: result ? ctrlProxyComponent : "",
+          stderr: "",
+        });
+        const manager = createManager(timer, adb);
+
+        await expect(manager[method]()).resolves.toBe(result);
+        timer.advanceTime(ttl - 1);
+        await expect(manager[method]()).resolves.toBe(result);
+        for (const command of commands) {
+          expect(adb.getCommandCalls().filter((call) => call.command === command)).toHaveLength(1);
+        }
+
+        timer.advanceTime(1);
+        await expect(manager[method]()).resolves.toBe(result);
+        for (const command of commands) {
+          expect(adb.getCommandCalls().filter((call) => call.command === command)).toHaveLength(2);
+        }
+      },
+    );
+
     test("caches a negative installation result briefly and re-probes after expiry", async () => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();

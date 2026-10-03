@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.formatUiNumber
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineState
@@ -1461,7 +1462,7 @@ private fun PerformanceSummary(event: TelemetryDisplayEvent.Performance, textCol
 @Composable
 private fun MemorySummary(event: TelemetryDisplayEvent.Memory, textColor: Color) {
   val status = if (event.passed) "PASS" else "FAIL"
-  val growth = event.javaHeapGrowthMb?.let { "+${"%.1f".format(it)}MB" } ?: ""
+  val growth = event.javaHeapGrowthMb?.let { "+${formatUiNumber("%.1f", it)}MB" } ?: ""
   val text = "[$status] ${event.packageName.substringAfterLast('.')} $growth"
   val color = if (event.passed) Color(0xFF51CF66) else Color(0xFFFF6B6B)
   Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)

@@ -51,10 +51,12 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.TestRecordingClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.formatUiNumber
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -2260,9 +2262,9 @@ private fun formatTime(ms: Long): String {
   val minutes = (ms / 1000) / 60
   val millis = (ms % 1000) / 10
   return if (minutes > 0) {
-    "%d:%02d.%02d".format(minutes, seconds, millis)
+    formatUiNumber("%d:%02d.%02d", minutes, seconds, millis)
   } else {
-    "%d.%02ds".format(seconds, millis)
+    formatUiNumber("%d.%02ds", seconds, millis)
   }
 }
 
@@ -2448,7 +2450,7 @@ private fun extractVideoFrame(videoPath: String, timeMs: Long): org.jetbrains.sk
 
     // Convert time to ffmpeg format (HH:MM:SS.mmm)
     val seconds = timeMs / 1000.0
-    val timeStr = String.format("%.3f", seconds)
+    val timeStr = String.format(Locale.ROOT, "%.3f", seconds)
 
     // Create temp file for the extracted frame
     val tempFile = java.io.File.createTempFile("video_frame_", ".png")

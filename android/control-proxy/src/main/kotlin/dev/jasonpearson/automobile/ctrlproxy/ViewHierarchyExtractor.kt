@@ -1360,7 +1360,7 @@ internal constructor(
    */
   private fun generateDeterministicUuid(path: String): String {
     val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(path.toByteArray())
-    val hex = bytes.take(16).joinToString("") { "%02x".format(it) }
+    val hex = bytes.take(16).joinToString("") { formatHexByte(it) }
     return "${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}"
   }
 

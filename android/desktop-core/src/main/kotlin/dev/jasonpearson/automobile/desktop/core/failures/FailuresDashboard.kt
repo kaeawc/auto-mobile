@@ -952,7 +952,7 @@ private fun EventTrendsSection(
       ) {
         StatBox(
           label = "Crashes",
-          value = formatNumber(totalCrashes),
+          value = formatCompactNumber(totalCrashes),
           color = FailureType.Crash.color,
           emoji = FailureType.Crash.icon,
           delta = if (crashDelta != 0) "${if (crashDelta > 0) "+" else ""}$crashDelta%" else null,
@@ -961,28 +961,29 @@ private fun EventTrendsSection(
         )
         StatBox(
           label = "ANRs",
-          value = formatNumber(totalAnrs),
+          value = formatCompactNumber(totalAnrs),
           color = FailureType.ANR.color,
           emoji = FailureType.ANR.icon,
           showLabel = showLabels,
         )
         StatBox(
           label = "Tool Errors",
-          value = formatNumber(totalToolFailures),
+          value = formatCompactNumber(totalToolFailures),
           color = FailureType.ToolCallFailure.color,
           emoji = FailureType.ToolCallFailure.icon,
           showLabel = showLabels,
         )
         StatBox(
           label = "Non-Fatal",
-          value = formatNumber(totalNonfatals),
+          value = formatCompactNumber(totalNonfatals),
           color = FailureType.NonFatal.color,
           emoji = FailureType.NonFatal.icon,
           showLabel = showLabels,
         )
         StatBox(
           label = "Total",
-          value = formatNumber(totalCrashes + totalAnrs + totalToolFailures + totalNonfatals),
+          value =
+            formatCompactNumber(totalCrashes + totalAnrs + totalToolFailures + totalNonfatals),
           color = colors.text.normal,
           emoji = "📊",
           showLabel = showLabels,
@@ -1793,13 +1794,6 @@ private fun OccurrenceRow(occurrence: FailureOccurrence) {
     }
   }
 }
-
-private fun formatNumber(value: Int): String =
-  when {
-    value >= 1_000_000 -> String.format("%.1f", value / 1_000_000.0).removeSuffix(".0") + "m"
-    value >= 1_000 -> String.format("%.1f", value / 1_000.0).removeSuffix(".0") + "k"
-    else -> value.toString()
-  }
 
 internal fun formatTimeAgo(timestamp: Long, clock: Clock = SystemClock): String {
   val diff = clock.nowMs() - timestamp

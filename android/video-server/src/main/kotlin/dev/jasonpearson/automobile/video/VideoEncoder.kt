@@ -25,7 +25,7 @@ class VideoEncoder(
   private val bitrate: Int,
   private val fps: Int,
 ) {
-  private var codec: MediaCodec? = null
+  @Volatile private var codec: MediaCodec? = null
 
   /** Input surface for the VirtualDisplay to render to. Available after [start]. */
   var inputSurface: Surface? = null
@@ -145,15 +145,19 @@ class VideoEncoder(
 
   /** Stop and release the encoder. */
   fun stop() {
-    codec?.let { encoder ->
-      try {
-        encoder.stop()
-      } catch (_: IllegalStateException) {
-        // Already stopped
-      }
-      encoder.release()
+    // Claim teardown once before releasing; concurrent stop calls see a cleared codec.
+    val encoder =
+      synchronized(this) {
+        val currentCodec = codec
+        codec = null
+        inputSurface = null
+        currentCodec
+      } ?: return
+    try {
+      encoder.stop()
+    } catch (_: IllegalStateException) {
+      // Already stopped
     }
-    codec = null
-    inputSurface = null
+    encoder.release()
   }
 }

@@ -8,7 +8,7 @@ import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
-import { promises as fsp } from "fs";
+import { promises as fsp, readFileSync } from "fs";
 import * as os from "os";
 import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
@@ -1328,7 +1328,7 @@ describe("LaunchApp", () => {
     }
   });
 
-  test("discovery skips package look-alikes and stops after the first literal result", async () => {
+  test("discovery queries first, skips package look-alikes and stops after the first literal result", async () => {
     fakeTimer.enableAutoAdvance();
     const controller = new AbortController();
     const perf = new DefaultPerformanceTracker(fakeTimer);
@@ -1351,12 +1351,10 @@ describe("LaunchApp", () => {
       stdout: "No activities found to run, monkey aborted",
       stderr: "",
     });
-    const firstCommand = `shell pm dump '${packageName}' | grep -A 5 -B 5 "android.intent.action.MAIN"`;
-    const secondCommand = `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep '${packageName}'`;
+    const firstCommand = `shell cmd package query-activities --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep '${packageName}'`;
     // Minimal input-shape probes, not claimed device captures.
-    fakeAdb.setCommandResponse(firstCommand, { stdout: "comXexampleXapp/.Main", stderr: "" });
-    fakeAdb.setCommandResponse(secondCommand, {
-      stdout: `${packageName}/.Discovered`,
+    fakeAdb.setCommandResponse(firstCommand, {
+      stdout: `comXexampleXapp/.Main ${packageName}/.Discovered`,
       stderr: "",
     });
 
@@ -1375,20 +1373,18 @@ describe("LaunchApp", () => {
         fakeAdb
           .getExecutedCommands()
           .filter((command) => command.includes("pm dump") || command.includes("query-activities")),
-      ).toEqual([firstCommand, secondCommand]);
-      for (const command of [firstCommand, secondCommand]) {
-        expect(executeSpy).toHaveBeenCalledWith(
-          command,
-          undefined,
-          undefined,
-          undefined,
-          controller.signal,
-        );
-      }
+      ).toEqual([firstCommand]);
+      expect(executeSpy).toHaveBeenCalledWith(
+        firstCommand,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      );
       const discoveryLabels = trackSpy.mock.calls
         .map(([label]) => label)
         .filter((label) => label.startsWith("activity") || label === "a11yLaunchIntent");
-      expect(discoveryLabels).toEqual(["activityApproach_1", "activityApproach_2"]);
+      expect(discoveryLabels).toEqual(["activityApproach_1"]);
     } finally {
       getInstanceSpy.mockRestore();
       executeSpy.mockRestore();
@@ -1582,7 +1578,7 @@ describe("LaunchApp", () => {
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${settingsPackageName}'`)).toBe(false);
   });
 
-  const performFallbackLaunch = () =>
+  const performFallbackLaunch = (launchPackage = packageName, userId = 0) =>
     (
       launchApp as unknown as {
         performLaunch(
@@ -1593,13 +1589,125 @@ describe("LaunchApp", () => {
           signal?: AbortSignal,
         ): Promise<{ success: boolean; activityName?: string }>;
       }
-    ).performLaunch(packageName, undefined, 0, new DefaultPerformanceTracker(fakeTimer));
+    ).performLaunch(launchPackage, undefined, userId, new DefaultPerformanceTracker(fakeTimer));
+
+  describe("ADB launcher fallback contract", () => {
+    let ctrlProxySpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+    const playgroundPackage = "dev.jasonpearson.automobile.playground";
+    const playground = readFileSync(
+      new URL(
+        "../../fixtures/android-launcher/dumpsys-package-playground-launcher.txt",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const egg = readFileSync(
+      new URL(
+        "../../fixtures/android-launcher/dumpsys-package-egg-no-launcher.txt",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    beforeEach(() => {
+      ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+        throw new Error("CtrlProxy unavailable in this fake-only test");
+      });
+      fakeAdb.setCommandResponse("shell am start", {
+        stdout: "Error: no launcher activity",
+        stderr: "",
+      });
+    });
+
+    afterEach(() => ctrlProxySpy.mockRestore());
+
+    test("monkey argv selects LAUNCHER without an unsupported user option", async () => {
+      const result = await performFallbackLaunch();
+      expect(result.activityName).toBe("monkey_launch");
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.startsWith("shell monkey")),
+      ).toEqual([`shell monkey -p '${packageName}' -c android.intent.category.LAUNCHER 1`]);
+    });
+
+    test("monkey is skipped for a nonzero user and discovery still runs", async () => {
+      const resultPromise = performFallbackLaunch(packageName, 10);
+      await expect(resultPromise).rejects.toBeInstanceOf(ActionableError);
+      expect(
+        fakeAdb.getExecutedCommands().some((command) => command.startsWith("shell monkey")),
+      ).toBe(false);
+      expect(
+        fakeAdb.getExecutedCommands().some((command) => command.includes("query-activities")),
+      ).toBe(true);
+    });
+
+    test("first discovery probe has MAIN LAUNCHER and the target user before pm dump", async () => {
+      fakeAdb.setCommandError("shell monkey", new Error("monkey unavailable in fake"));
+      await expect(performFallbackLaunch(packageName, 10)).rejects.toBeInstanceOf(ActionableError);
+      const probes = fakeAdb
+        .getExecutedCommands()
+        .filter(
+          (command) =>
+            command.includes("query-activities") ||
+            command.includes("pm dump") ||
+            command.includes("pm list packages -f"),
+        );
+      expect(probes[0]).toBe(
+        `shell cmd package query-activities --brief --user 10 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep '${packageName}'`,
+      );
+      expect(probes).toHaveLength(2);
+    });
+
+    test("pm dump is a full un-grepped last resort", async () => {
+      fakeAdb.setCommandError("shell monkey", new Error("monkey unavailable in fake"));
+      await expect(performFallbackLaunch()).rejects.toBeInstanceOf(ActionableError);
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("pm dump")),
+      ).toEqual([`shell pm dump '${packageName}'`]);
+    });
+
+    test("real playground dump launches its relative launcher component", async () => {
+      fakeAdb.setCommandError("shell monkey", new Error("monkey unavailable in fake"));
+      fakeAdb.setCommandResponse(`shell pm dump '${playgroundPackage}'`, {
+        stdout: playground,
+        stderr: "",
+      });
+      const result = await performFallbackLaunch(playgroundPackage);
+      expect(result.activityName).toBe(".MainActivity");
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) => command.includes("query-activities") || command.includes("pm dump")),
+      ).toEqual([
+        `shell cmd package query-activities --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep '${playgroundPackage}'`,
+        `shell pm dump '${playgroundPackage}'`,
+      ]);
+      expect(fakeAdb.getExecutedCommands()).toContain(
+        `shell am start --user 0 -n '${playgroundPackage}/.MainActivity'`,
+      );
+    });
+
+    test("real egg dump reaches the typed final launcher failure", async () => {
+      fakeAdb.setCommandError("shell monkey", new Error("monkey unavailable in fake"));
+      fakeAdb.setCommandResponse("shell pm dump 'com.android.egg'", { stdout: egg, stderr: "" });
+      const resultPromise = performFallbackLaunch("com.android.egg");
+      await expect(resultPromise).rejects.toBeInstanceOf(ActionableError);
+      await expect(resultPromise).rejects.toThrow(
+        "No launcher activity found and launcher intent failed",
+      );
+      expect(fakeAdb.getExecutedCommands()).toContain(
+        "shell am start --user 0 -n 'com.android.egg/com.android.egg.MainLauncherActivity'",
+      );
+    });
+  });
 
   const failLauncherResolver = () =>
-    fakeAdb.setCommandResponse("android.intent.category.LAUNCHER", {
-      stdout: "Error: no launcher activity",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+      {
+        stdout: "Error: no launcher activity",
+        stderr: "",
+      },
+    );
 
   test("monkey accepted and verified launches without trying later fallbacks", async () => {
     fakeTimer.enableAutoAdvance();
@@ -1737,10 +1845,13 @@ describe("LaunchApp", () => {
   });
 
   test("throws when every fallback reports a failure marker", async () => {
-    fakeAdb.setCommandResponseSequence("android.intent.category.LAUNCHER", [
-      { stdout: "Error: no launcher activity", stderr: "" },
-      { stdout: "Error: Activity not started, unable to resolve Intent", stderr: "" },
-    ]);
+    fakeAdb.setCommandResponseSequence(
+      "shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+      [
+        { stdout: "Error: no launcher activity", stderr: "" },
+        { stdout: "Error: Activity not started, unable to resolve Intent", stderr: "" },
+      ],
+    );
     fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
       stdout: "No activities found to run, monkey aborted",
       stderr: "",
@@ -1773,10 +1884,13 @@ describe("LaunchApp", () => {
     "accepted final launcher intent output %s uses the caller wait and observation",
     async (output) => {
       fakeTimer.enableAutoAdvance();
-      fakeAdb.setCommandResponseSequence("android.intent.category.LAUNCHER", [
-        { stdout: "Error: no launcher activity", stderr: "" },
-        { stdout: output, stderr: "" },
-      ]);
+      fakeAdb.setCommandResponseSequence(
+        "shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+        [
+          { stdout: "Error: no launcher activity", stderr: "" },
+          { stdout: output, stderr: "" },
+        ],
+      );
       fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
         stdout: "No activities found to run, monkey aborted",
         stderr: "",
@@ -1877,7 +1991,11 @@ describe("LaunchApp", () => {
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
     expect(coldBootCalls).toEqual([]);
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
+    expect(
+      fakeAdb.wasCommandExecuted(
+        `shell monkey -p '${packageName}' -c android.intent.category.LAUNCHER 1`,
+      ),
+    ).toBe(true);
   });
 
   test("waits for two matching fresh Android frames after clearing app data", async () => {
@@ -1965,7 +2083,7 @@ describe("LaunchApp", () => {
       userId: 0,
       error: "Failed to clear app data: Failed to clear application data: Failed",
     });
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(false);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(false);
   });
 
   test("does not launch Android when clearing app data fails for a stopped app", async () => {
@@ -1990,7 +2108,7 @@ describe("LaunchApp", () => {
       userId: 0,
       error: "Failed to clear app data: Failed to clear application data: Failed",
     });
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(false);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(false);
   });
 
   test("clears Android app data through the injected action before relaunch when not running", async () => {
@@ -2020,7 +2138,11 @@ describe("LaunchApp", () => {
 
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
+    expect(
+      fakeAdb.wasCommandExecuted(
+        `shell monkey -p '${packageName}' -c android.intent.category.LAUNCHER 1`,
+      ),
+    ).toBe(true);
   });
 
   test("cold boots Android through the injected action before relaunch", async () => {
@@ -2071,7 +2193,11 @@ describe("LaunchApp", () => {
         options: { skipObservation: true, userId: 0 },
       },
     ]);
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
+    expect(
+      fakeAdb.wasCommandExecuted(
+        `shell monkey -p '${packageName}' -c android.intent.category.LAUNCHER 1`,
+      ),
+    ).toBe(true);
   });
 
   test("does not launch Android when the injected cold boot fails", async () => {

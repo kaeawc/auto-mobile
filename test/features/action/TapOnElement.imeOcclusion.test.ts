@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import type { ObserveResult } from "../../../src/models";
+import type { ElementBounds, ObserveResult } from "../../../src/models";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
@@ -11,15 +11,35 @@ import {
   sharedBoundsImeHierarchy,
 } from "../../fixtures/observe/imeOcclusion";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { ActionableError } from "../../../src/models/ActionableError";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import {
+  capturedBounds,
+  iosKeyboardCapture,
+  iosKeyboardTabbarHierarchy,
+} from "../../fixtures/observe/iosKeyboardTabbar";
 
 async function executeAt(
   label: string,
-  withIme = true,
-  platform: "android" | "ios" = "android",
-  sameRoot = false,
-  fixture?: ViewHierarchyResult,
-  anonymous = false,
+  {
+    withIme = true,
+    platform = "android",
+    sameRoot = false,
+    fixture,
+    anonymous = false,
+    screenSize,
+    matchedBounds,
+    elementId,
+  }: {
+    withIme?: boolean;
+    platform?: "android" | "ios";
+    sameRoot?: boolean;
+    fixture?: ViewHierarchyResult;
+    anonymous?: boolean;
+    screenSize?: ObserveResult["screenSize"];
+    matchedBounds?: ElementBounds;
+    elementId?: string;
+  } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
   const keyboard = hierarchy.windows?.[0]?.hierarchy.node;
@@ -34,16 +54,14 @@ async function executeAt(
     hierarchy.hierarchy.node?.node?.push(keyboard);
     hierarchy.windows = [];
   }
-  const source =
-    hierarchy.hierarchy.node?.node?.find((node) => node.$?.text === label) ??
-    hierarchy.windows?.[0]?.hierarchy.node?.node?.find((node) => node.$?.text === label);
-  if (!source?.$?.bounds) {
+  const source = new DefaultElementParser()
+    .flattenViewHierarchy(hierarchy, { includeWindows: true })
+    .find(({ element }) => element.text === label)?.element;
+
+  if (!source?.bounds) {
     throw new Error(`Missing fixture node ${label}`);
   }
-  const element = new DefaultElementParser().parseNodeBounds(source);
-  if (!element) {
-    throw new Error(`Invalid fixture bounds for ${label}`);
-  }
+  const element = source;
   if (anonymous) {
     delete element.text;
     delete element["content-desc"];
@@ -56,24 +74,37 @@ async function executeAt(
       throw new Error("Unexpected ADB spawn");
     },
   }) as AdbExecutor;
+  const selector = new FakeElementSelector(element);
+  if (matchedBounds) {
+    selector.nextMatchedElement = { ...element, bounds: matchedBounds };
+  }
   const tap = new TapOnElement({ name: "test-device", platform, deviceId: "emulator-5554" }, adb, {
     timer,
-    elementSelector: new FakeElementSelector(element),
+    elementSelector: selector,
     tapStrategy: new FakeTapStrategy(),
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
   const observation: ObserveResult = {
     observationId: "ime-test",
     updatedAt: 1,
-    screenSize: { width: 400, height: 240 },
+    screenSize:
+      screenSize ??
+      (hierarchy.screenWidth && hierarchy.screenHeight
+        ? { width: hierarchy.screenWidth, height: hierarchy.screenHeight }
+        : { width: 400, height: 240 }),
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: hierarchy,
   };
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(observation)),
-    observation,
-  });
+  let actionError: unknown;
+  tap.observedInteraction = async (action) => {
+    try {
+      return { ...(await action(observation)), observation };
+    } catch (error) {
+      actionError = error;
+      throw error;
+    }
+  };
   tap.executeAndroidTap = async (_action, x, y) => {
     points.push({ x, y });
   };
@@ -87,32 +118,25 @@ async function executeAt(
   tap.captureTerminalObservationScreenshot = async () => {};
   tap.recordDeferredPredictionOutcome = async () => {};
   tap.enforceFreshnessConsistencyWithEffect = () => {};
-  const result = await tap.execute({ text: label, action: "tap" });
-  return { result, points };
+  const result = await tap.execute({
+    ...(elementId ? { elementId } : { text: label }),
+    action: "tap",
+  });
+  return { result, points, actionError };
 }
 
 describe("tapOn Android IME occlusion", () => {
   test("refuses text-selected app content behind an anonymous equal-bounds IME key", async () => {
-    const { result, points } = await executeAt(
-      "Continue as Guest",
-      true,
-      "android",
-      false,
-      sharedBoundsImeHierarchy(),
-    );
+    const { result, points } = await executeAt("Continue as Guest", {
+      fixture: sharedBoundsImeHierarchy(),
+    });
     expect(points).toEqual([]);
     expect(result.success).toBe(false);
     expect(result.error).toContain("covered by the soft keyboard");
   });
 
   test("allows a genuinely selected equal-bounds IME key", async () => {
-    const { result, points } = await executeAt(
-      "Q",
-      true,
-      "android",
-      false,
-      sharedBoundsImeHierarchy(),
-    );
+    const { result, points } = await executeAt("Q", { fixture: sharedBoundsImeHierarchy() });
     expect(result.success).toBe(true);
     expect(points).toEqual([{ x: 200, y: 175 }]);
   });
@@ -125,21 +149,14 @@ describe("tapOn Android IME occlusion", () => {
   });
 
   test("uses the caller text selector when the matched element has no label", async () => {
-    const { result, points } = await executeAt(
-      "Continue as Guest",
-      true,
-      "android",
-      false,
-      undefined,
-      true,
-    );
+    const { result, points } = await executeAt("Continue as Guest", { anonymous: true });
     expect(points).toEqual([]);
     expect(result.success).toBe(false);
     expect(result.error).toContain('"Continue as Guest"');
   });
 
   test("also protects an app sibling when the IME subtree shares its root group", async () => {
-    const { result, points } = await executeAt("Continue as Guest", true, "android", true);
+    const { result, points } = await executeAt("Continue as Guest", { sameRoot: true });
     expect(points).toEqual([]);
     expect(result.error).toContain("covered by the soft keyboard");
   });
@@ -157,14 +174,131 @@ describe("tapOn Android IME occlusion", () => {
   });
 
   test("without an IME the covered-position element taps normally", async () => {
-    const { result, points } = await executeAt("Continue as Guest", false);
+    const { result, points } = await executeAt("Continue as Guest", { withIme: false });
     expect(result.success).toBe(true);
     expect(points).toEqual([{ x: 200, y: 175 }]);
   });
 
-  test("iOS does not apply Android IME occlusion", async () => {
-    const { result, points } = await executeAt("Continue as Guest", true, "ios");
-    expect(result.success).toBe(true);
-    expect(points).toEqual([{ x: 200, y: 175 }]);
+  test("iOS also refuses app content covered by the keyboard", async () => {
+    const { result, points } = await executeAt("Continue as Guest", { platform: "ios" });
+    expect(result.success).toBe(false);
+    expect(points).toEqual([]);
+    expect(result.error).toContain("covered by the soft keyboard; dismiss the keyboard first.");
   });
+});
+
+async function executeCaptured(label: string, hierarchy = iosKeyboardTabbarHierarchy()) {
+  return executeAt(label, {
+    platform: "ios",
+    fixture: hierarchy,
+    screenSize: iosKeyboardCapture.screenSize,
+  });
+}
+
+const center = (row: typeof iosKeyboardCapture.demos) => ({
+  x: Math.floor((row.bounds[0] + row.bounds[2]) / 2),
+  y: Math.floor((row.bounds[1] + row.bounds[3]) / 2),
+});
+
+describe("iOS captured keyboard bottom strip (#9020)", () => {
+  test("Demos fails with an actionable keyboard error and no dispatched tap", async () => {
+    const { result, points, actionError } = await executeCaptured("Demos");
+    expect(actionError).toBeInstanceOf(ActionableError);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      'Target "Demos" is covered by the soft keyboard; dismiss the keyboard first.',
+    );
+    expect(points).toEqual([]);
+  });
+
+  test("uses observation screen size when hierarchy dimensions are absent", async () => {
+    const hierarchy = iosKeyboardTabbarHierarchy();
+    delete hierarchy.screenWidth;
+    delete hierarchy.screenHeight;
+    const { result, points } = await executeCaptured("Demos", hierarchy);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("covered by the soft keyboard");
+    expect(points).toEqual([]);
+  });
+
+  test("display-name field and predictions above the keyboard keep their centres", async () => {
+    for (const row of [iosKeyboardCapture.displayName, iosKeyboardCapture.predictions]) {
+      const { result, points } = await executeCaptured(row.label!);
+      expect(result.success).toBe(true);
+      expect(points).toEqual([center(row)]);
+    }
+  });
+
+  test("standalone UIKeyboardKey is still tappable", async () => {
+    const { result, points } = await executeCaptured("Q");
+    expect(result.success).toBe(true);
+    expect(points).toEqual([center(iosKeyboardCapture.ime)]);
+  });
+
+  test("buttons under UIKeyboard are exempt by provenance", async () => {
+    for (const row of [iosKeyboardCapture.emoji, iosKeyboardCapture.dictate]) {
+      const { result, points } = await executeCaptured(
+        row.label!,
+        iosKeyboardTabbarHierarchy(true),
+      );
+      expect(result.success).toBe(true);
+      expect(points).toEqual([center(row)]);
+    }
+  });
+
+  test("untagged Emoji and Dictate cannot be safely exempted by label", async () => {
+    for (const row of [iosKeyboardCapture.emoji, iosKeyboardCapture.dictate]) {
+      const { result, points } = await executeCaptured(row.label!);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("covered by the soft keyboard");
+      expect(points).toEqual([]);
+    }
+  });
+
+  test("partially covered iOS target taps the largest visible region", async () => {
+    const hierarchy = iosKeyboardTabbarHierarchy();
+    const bounds = capturedBounds(iosKeyboardCapture.demos);
+    const keyboardTop = iosKeyboardCapture.ime.bounds[1];
+    // Synthetic partial target: its centre is covered, but its top is exposed.
+    bounds.top = keyboardTop - (bounds.bottom - keyboardTop) / 2;
+    hierarchy.hierarchy.node!.node![0].$.bounds = bounds;
+    const { result, points } = await executeCaptured("Demos", hierarchy);
+    expect(result.success).toBe(true);
+    expect(points).toEqual([
+      { x: center(iosKeyboardCapture.demos).x, y: Math.floor((bounds.top + keyboardTop) / 2) },
+    ]);
+  });
+});
+
+// A promoted target's ordinary safe point can be outside its matched visible bounds.
+// The fallback must subtract the keyboard again instead of tapping the clipped centre.
+test("iOS visible-match fallback also avoids the docked keyboard", async () => {
+  const hierarchy = iosKeyboardTabbarHierarchy();
+  const original = capturedBounds(iosKeyboardCapture.demos);
+  hierarchy.hierarchy.node!.node![0].$.bounds = { ...original, top: 0 };
+  const keyboardTop = iosKeyboardCapture.ime.bounds[1];
+  const visible = { ...original, top: keyboardTop - (original.bottom - keyboardTop) / 2 };
+  const { result, points } = await executeAt("Demos", {
+    platform: "ios",
+    fixture: hierarchy,
+    screenSize: iosKeyboardCapture.screenSize,
+    matchedBounds: visible,
+  });
+  expect(result.success).toBe(true);
+  expect(points).toEqual([
+    { x: center(iosKeyboardCapture.demos).x, y: Math.floor((visible.top + keyboardTop) / 2) },
+  ]);
+});
+
+test("iOS elementId selection behind the docked keyboard dispatches no tap", async () => {
+  const { result, points, actionError } = await executeAt("Demos", {
+    platform: "ios",
+    fixture: iosKeyboardTabbarHierarchy(),
+    screenSize: iosKeyboardCapture.screenSize,
+    elementId: iosKeyboardCapture.demos.elementId,
+  });
+  expect(actionError).toBeInstanceOf(ActionableError);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("covered by the soft keyboard");
+  expect(points).toEqual([]);
 });

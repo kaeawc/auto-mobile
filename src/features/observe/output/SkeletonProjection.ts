@@ -754,6 +754,25 @@ export function getImeOccluder(elements: ObserveElements): ImeOccluder | undefin
   };
 }
 
+/** Action-only iOS geometry; skeleton projection retains measured keyboard bounds. */
+export function getIosImeOccluder(
+  occluder: ImeOccluder,
+  screenSize?: ObserveResult["screenSize"],
+): ImeOccluder {
+  if (
+    !screenSize ||
+    !Number.isFinite(screenSize.width) ||
+    !Number.isFinite(screenSize.height) ||
+    screenSize.width <= 0 ||
+    screenSize.height <= 0 ||
+    occluder.bounds[2] - occluder.bounds[0] < screenSize.width * 0.9
+  ) {
+    return occluder;
+  }
+  // Docked iOS key bounds omit the bottom emoji/dictation strip and side margins.
+  return { ...occluder, bounds: [0, occluder.bounds[1], screenSize.width, screenSize.height] };
+}
+
 function isBelowImeWindow(provenance: ElementProvenance | undefined, ime: ImeOccluder): boolean {
   if (
     ime.group !== undefined &&

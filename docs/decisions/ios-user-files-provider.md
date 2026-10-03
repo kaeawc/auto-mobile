@@ -1,8 +1,10 @@
 # iOS `user_files` provider
 
 Status: accepted for implementation in #5807. This decision records the
-research and simulator experiment from #5806; it does not add the production
-provider.
+research and simulator experiment from #5806. The TypeScript staging provider
+is implemented; the managed fixture app and production picker verifier are not
+yet shipped in this repo. Unit tests use injected fakes; no new device-backed
+verification is claimed here.
 
 ## Decision
 
@@ -59,11 +61,12 @@ app-container resources remain scoped to an explicit app id and container; they
 are not a Files-provider browsing API. The completion payload and the
 document-picker verifier are the observation surfaces for this domain.
 
-Until #5807 lands, the storage capability descriptor must continue to report
-iOS `user_files` as unsupported. Once its managed provider is registered, an
-iOS Simulator can report the capability as available only when the fixture app
-is installed and the provider seam resolves its container. Physical iOS remains
-unsupported regardless of `iosFileIntegration`.
+The registered provider permits iOS Simulator write/reset capabilities only
+when the managed fixture app is installed and its container is verified. The
+capability resource leaves this prerequisite unverified (partial); a known
+missing fixture or provider makes writes unavailable. Physical iOS remains
+unsupported regardless of `iosFileIntegration`. Picker visibility is still a
+separate effect, unavailable unless observed.
 
 ## Verification contract for #5807
 

@@ -93,15 +93,73 @@ describe("AC1: availability is queryable before invocation", () => {
   });
 });
 
-// AC2: Android-only user-visible storage and simulator-only app-container access.
+// AC2: platform-qualified user files and app-container access.
 describe("AC2: platform-qualified domains", () => {
-  it("user_files is unsupported on iOS (Android-only concept)", () => {
-    const report = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
-    const userFiles = report.domains.find((d) => d.domain === "user_files")!;
-    expect(userFiles.platformScope).toBe("android");
-    for (const op of userFiles.operations) {
-      expect(op.state).toBe("unsupported");
+  it.each([
+    [true, "supported"],
+    [false, "unavailable"],
+    [undefined, "partial"],
+  ] as const)(
+    "iOS user_files fixture installed=%p yields %s writes and reset",
+    (installed, state) => {
+      const report = computeStorageCapabilities(
+        ctx({ platform: "ios", deviceType: "simulator", iosFilesFixtureInstalled: installed }),
+      );
+      const userFiles = report.domains.find((d) => d.domain === "user_files")!;
+      expect(userFiles.platformScope).toBe("cross-platform");
+      expect(userFiles.portable).toBe(false);
+      expect(report.context.iosFilesFixtureInstalled).toBe(installed);
+      for (const operation of ["write", "namespace_reset"] as const) {
+        const capability = findOperationCapability(report, "user_files", operation)!;
+        expect(capability.state).toBe(state);
+        if (installed !== true) {
+          expect(capability.prerequisites).toContain("managed iOS Files fixture app installed");
+        }
+      }
+      for (const operation of ["list", "read"] as const) {
+        expect(findOperationCapability(report, "user_files", operation)?.state).toBe("unavailable");
+      }
+      expect(findOperationCapability(report, "user_files", "media_indexing")?.state).toBe(
+        "unsupported",
+      );
+    },
+  );
+
+  it("iOS user_files absent provider overrides verified fixture installation", () => {
+    const report = computeStorageCapabilities(
+      ctx({
+        platform: "ios",
+        deviceType: "simulator",
+        iosFilesFixtureInstalled: true,
+        providerCoverage: [],
+      }),
+    );
+    for (const operation of ["write", "namespace_reset"] as const) {
+      const capability = findOperationCapability(report, "user_files", operation)!;
+      expect(capability.state).toBe("unavailable");
+      expect(capability.reason).toContain("ios:user_files");
     }
+  });
+
+  it("physical iOS user_files remains unsupported even with generic integration and fixture flags", () => {
+    const report = computeStorageCapabilities(
+      ctx({
+        platform: "ios",
+        deviceType: "physical",
+        iosFileIntegration: true,
+        iosFilesFixtureInstalled: true,
+      }),
+    );
+    const userFiles = report.domains.find((d) => d.domain === "user_files")!;
+    for (const operation of userFiles.operations) {
+      expect(operation.state).toBe("unsupported");
+      expect(operation.reason).toContain("on-device fixture-app integration");
+    }
+    expect(
+      report.extensionPoints.find(
+        (entry) => entry.domain === "user_files" && entry.platform === "ios",
+      )?.description,
+    ).toContain("Simulator");
   });
 
   it("user_files listing, reading, and staging are available with an active Android profile", () => {

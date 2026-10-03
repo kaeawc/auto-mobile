@@ -870,7 +870,7 @@ subtree, or the whole active-window tree when owner-less.
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded Android user_files, or platform-qualified media_library. Opt-in discovery; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                            |
+| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Opt-in discovery; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                                    |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📥 <code>stageSharedStorage</code>                                                               | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 📥 <code>stageSharedStorageFixtures</code>                                                       | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -967,6 +967,22 @@ iOS Simulator app containers (`documents`, `library`, `cache`, or `tmp`):
 }
 ```
 
+iOS Simulator `user_files` uses the managed fixture app
+`dev.jasonpearson.automobile.FilesFixture`, which is **not yet shipped in this
+repo**. Install it before writing; missing-container resolution returns install
+guidance without a fallback or auto-install. The provider resolves its data
+container with `simctl get_app_container` and stages only
+`Documents/automobile/<namespace>/<relative destination>`; reset removes only
+that namespace. `host_stage: completed` confirms the copy, while
+`document_picker: unavailable` remains the default unless a verifier observes
+the exact destination. Physical iOS is unsupported without a future on-device
+fixture-app integration. There is no iOS `user_files` list/read resource.
+
+The accepted design records a picker experiment on iPhone 15 Pro Simulator,
+iOS 17.5, Xcode 26.3 (2026-08-28). This provider is unit-tested with fakes;
+the managed fixture app and production picker verification need a follow-up.
+See [the accepted design](decisions/ios-user-files-provider.md).
+
 Android user files (reset removes only this declared Downloads namespace;
 `indexMedia` requests indexing and defaults to false on the unified surface):
 
@@ -1016,7 +1032,9 @@ iOS Simulator media library (supported image/video files only; imports through
 ```
 
 Physical iOS has no production `putAppFile` app-container or media-library
-provider; user_files is Android-only. Media libraries have no list/read resource.
+provider. user_files writes support Android Downloads and iOS Simulator managed
+fixture-app namespaces; user_files list/read resources remain Android-only.
+Media libraries have no list/read resource.
 Use `storage/capabilities` for provider-derived operations and prerequisite states;
 inspect structured per-file `effects` for indexing/import/discoverability outcomes.
 These provider contracts do not establish device verification of legacy replacement.

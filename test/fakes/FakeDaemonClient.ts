@@ -70,6 +70,7 @@ export class FakeDaemonClient implements DaemonClientLike {
 
   readonly callToolProgressTokens: Array<string | number | undefined> = [];
   readonly callToolRequestIds: string[] = [];
+  readonly callToolSignals: Array<AbortSignal | undefined> = [];
   private readonly requestIdGenerator = new FakeIdGenerator();
 
   async callTool(
@@ -77,7 +78,10 @@ export class FakeDaemonClient implements DaemonClientLike {
     params: Record<string, any>,
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
+    signal?: AbortSignal,
   ): Promise<any> {
+    signal?.throwIfAborted();
+    this.callToolSignals.push(signal);
     const requestId = this.requestIdGenerator.next();
     this.callToolRequestIds.push(requestId);
     onRequestId?.(requestId);

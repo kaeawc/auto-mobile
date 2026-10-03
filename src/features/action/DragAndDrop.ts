@@ -209,9 +209,7 @@ export class DragAndDrop extends BaseVisualChange {
           );
         }
       } catch (error) {
-        if (this.device.platform === "ios") {
-          throwIfAborted(signal);
-        }
+        throwIfAborted(signal);
         logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
         return withStaleDisplay(
           { success: false, duration: 0, distance: 0, error: errorMessage(error) },
@@ -340,9 +338,7 @@ export class DragAndDrop extends BaseVisualChange {
       );
 
       perf.end();
-      if (this.device.platform === "ios") {
-        throwIfAborted(signal);
-      }
+      throwIfAborted(signal);
 
       return {
         ...result,
@@ -353,9 +349,7 @@ export class DragAndDrop extends BaseVisualChange {
       perf.end();
 
       logger.warn(`Drag and drop failed: ${errorMessage(error)}`, error);
-      if (this.device.platform === "ios") {
-        throwIfAborted(signal);
-      }
+      throwIfAborted(signal);
       if (error instanceof StaleDisplayError) {
         return withStaleDisplay({ success: false, duration: 0, distance: 0 }, error);
       }
@@ -386,9 +380,7 @@ export class DragAndDrop extends BaseVisualChange {
         }
       }
 
-      if (this.device.platform === "ios") {
-        throwIfAborted(signal);
-      }
+      throwIfAborted(signal);
       return { success: false, duration: 0, distance: 0, error: finalErrorMessage };
     }
   }

@@ -41,6 +41,9 @@
 # installed:
 #   adb shell dumpsys package dev.jasonpearson.automobile.ctrlproxy | grep versionName
 
+# The uninstaller is intentionally sourced only in a subshell; its PROJECT_ROOT
+# assignment must not change this watcher's root.
+# shellcheck disable=SC2031
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -251,12 +254,7 @@ reload_mcp_daemon() {
     if kill -0 "${daemon_pid}" 2>/dev/null; then
       log_warn "Daemon restart timed out, force killing..."
       kill -9 "${daemon_pid}" 2>/dev/null || true
-      # Also kill any daemon processes
-      local pids
-      pids=$(pgrep -f "auto-mobile.*--daemon-mode" 2>/dev/null || true)
-      if [[ -n "${pids}" ]]; then
-        echo "${pids}" | xargs kill -9 2>/dev/null || true
-      fi
+      stop_namespace_daemon_for_reload
     else
       # Check exit status of completed process
       local exit_status=0
@@ -268,21 +266,34 @@ reload_mcp_daemon() {
       fi
     fi
   else
-    local pids
-    pids=$(pgrep -f "auto-mobile.*--daemon-mode" 2>/dev/null || true)
-    if [[ -n "${pids}" ]]; then
-      log_info "Killing daemon processes: ${pids}"
-      echo "${pids}" | xargs kill 2>/dev/null || true
-      sleep 1
-      # Force kill if still running
-      pids=$(pgrep -f "auto-mobile.*--daemon-mode" 2>/dev/null || true)
-      if [[ -n "${pids}" ]]; then
-        log_warn "Force killing daemon processes..."
-        echo "${pids}" | xargs kill -9 2>/dev/null || true
-      fi
-    fi
+    stop_namespace_daemon_for_reload
   fi
 }
+
+# The development checkout includes the standalone uninstaller. Reuse its
+# namespace/PID/identity helpers in a subshell so its globals and traps stay local.
+stop_namespace_daemon_for_reload() (
+  export UNINSTALL_SH_SOURCE_ONLY=true
+  # shellcheck source=scripts/uninstall.sh
+  source "${PROJECT_ROOT}/scripts/uninstall.sh"
+  local pid_path record pid
+  pid_path=$(daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid)
+  [[ -f "${pid_path}" ]] || return 0
+  record=$(cat "${pid_path}") || return 0
+  pid=$(daemon_record_pid "${record}") || { log_warn "Invalid daemon PID record; use auto-mobile --daemon stop."; return 0; }
+  if ! daemon_pid_is_daemon "${pid}"; then
+    log_warn "Namespace PID ${pid} is not a live AutoMobile daemon; leaving it alone."
+    return 0
+  fi
+  kill -TERM "${pid}" 2>/dev/null || return 0
+  if ! wait_for_daemon_to_stop "${pid}"; then
+    # Recheck identity AND record before escalation: never kill a reused PID.
+    if [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]] && daemon_pid_is_daemon "${pid}"; then
+      log_warn "Namespace daemon did not stop within 10 seconds; sending KILL to PID ${pid}."
+      kill -KILL "${pid}" 2>/dev/null || true
+    fi
+  fi
+)
 
 # List TypeScript source files to watch
 list_ts_files() {
@@ -935,6 +946,10 @@ cleanup() {
 }
 
 # Parse command line arguments
+if [[ "${HOT_RELOAD_SH_SOURCE_ONLY:-}" == "true" ]]; then
+  return 0
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --device)

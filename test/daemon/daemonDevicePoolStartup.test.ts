@@ -129,6 +129,34 @@ describe("Daemon startup device discovery", () => {
     }
   });
 
+  test.each(["off", "0", "false", "no"])(
+    "appearance sync=%s prevents the daemon session-creation callback from syncing",
+    async (value) => {
+      const previousSync = process.env.AUTOMOBILE_APPEARANCE_SYNC;
+      process.env.AUTOMOBILE_APPEARANCE_SYNC = value;
+      const sync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
+        undefined,
+      );
+      const daemon = buildDaemon(new FakeTimer());
+      const pool = (daemon as unknown as DaemonStartupInternals).devicePool;
+      try {
+        await pool.initializeWithDevices([
+          { deviceId: "android-a", name: "Pixel A", platform: "android" },
+        ]);
+        await daemon.getSessionManager().createSession("session-a", "android-a", "android");
+        expect(sync).not.toHaveBeenCalled();
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+        sync.mockRestore();
+        if (previousSync === undefined) {
+          delete process.env.AUTOMOBILE_APPEARANCE_SYNC;
+        } else {
+          process.env.AUTOMOBILE_APPEARANCE_SYNC = previousSync;
+        }
+      }
+    },
+  );
+
   test("iOS pool removal suspends and stops its manager; reappearance rearms lazily", async () => {
     const timer = new FakeTimer();
     const daemon = buildDaemon(timer);

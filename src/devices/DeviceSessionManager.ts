@@ -44,7 +44,10 @@ import {
   createGlobalPerformanceTracker,
 } from "../utils/PerformanceTracker";
 import { storeSetupTiming } from "../server/ToolExecutionContext";
-import { applyAppearanceOnConnect } from "../utils/appearance/applyAppearanceOnConnect";
+import {
+  applyAppearanceOnConnect,
+  type AppearanceOnConnectDependencies,
+} from "../utils/appearance/applyAppearanceOnConnect";
 import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
@@ -360,6 +363,7 @@ export interface DeviceReadyOptions {
 }
 
 export interface DeviceSessionManagerOptions {
+  appearanceOnConnectDependencies?: Partial<AppearanceOnConnectDependencies>;
   admissionGate?: DeviceAdmissionGate;
   executionBinding?: DeviceExecutionBinding;
   runnerReadinessTimer?: Timer;
@@ -391,6 +395,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private _adb: AdbExecutor | undefined;
   private readonly idGenerator: IdGenerator;
+  private readonly appearanceOnConnectDependencies:
+    | Partial<AppearanceOnConnectDependencies>
+    | undefined;
 
   // Client recreation after an iOS device restart needs a fresh callback.
   private static pushUpdateListenersRegistered: WeakSet<IOSCtrlProxy> = new WeakSet();
@@ -406,6 +413,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
+    this.appearanceOnConnectDependencies = options.appearanceOnConnectDependencies;
     this.runnerReadinessTimeoutMs = options.runnerReadinessTimeoutMs;
     this.runnerProvisionTimeoutMs = options.runnerProvisionTimeoutMs;
     this.lifecycleCoordinator =
@@ -761,7 +769,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     this.setCurrentDevice(selectedDevice, resolvedPlatform);
     if (deviceSource !== "current") {
-      await applyAppearanceOnConnect(selectedDevice);
+      await applyAppearanceOnConnect(selectedDevice, this.appearanceOnConnectDependencies);
       await disableStylusHandwriting(selectedDevice, this.adbFactory);
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);

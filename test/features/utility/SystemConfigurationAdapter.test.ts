@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, it, expect, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, it, expect, spyOn, type Mock } from "bun:test";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
@@ -647,9 +647,11 @@ describe("SystemConfigurationAdapter", () => {
   });
 
   describe("IosSystemConfigurationAdapter behavior", () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    afterEach(() => warn.mockClear());
-    afterAll(() => warn.mockRestore());
+    let warn: Mock<typeof logger.warn>;
+    beforeEach(() => {
+      warn = spyOn(logger, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
 
     it("logs simulator write failures and preserves each typed failure", async () => {
       const error = new Error("defaults write failed");

@@ -15,6 +15,11 @@ export function runWithSelectedDisplayPin<T>(pin: SelectedDisplayPin | undefined
   return selection.run(pin, run);
 }
 
+/** Expose call-local provenance for actionable transition guidance. */
+export function selectedDisplayPin(): string | undefined {
+  return selection.getStore()?.pin;
+}
+
 /** Live routing may reject a physically inventoried panel before capture/input. */
 export function displayPinFailure(error: unknown): unknown {
   const selected = selection.getStore();

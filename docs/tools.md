@@ -95,8 +95,10 @@ or a device rebind that clears a pin. The next plain call after a clear omits
 Use `setActiveDevice({deviceId, sessionUuid, display})` to pin a panel key or role
 (`inner`, `cover`, `rear`, `external`) for that session and device. Omission leaves
 the pin unchanged; a string replaces it; `null` clears it. The selector must exist
-in the device's current inventory at set time. `"active"`, `"all"`, empty strings,
-and non-string values cannot be pinned. Display pins require an initialized
+in the same inventory used for observe and actions at set time. Ordinary single-display
+devices accept the fallback key `"0"`. On a single-display device, `"active"` resolves
+to the sole key and stores that key; on multi-display devices, `"active"` cannot be
+pinned. `"all"`, empty strings, and non-string values cannot be pinned. Display pins require an initialized
 daemon session and are unsupported in direct mode. The result additively reports
 `displayPin` (string or `null` for daemon sessions; omitted on the legacy path).
 Pins clear on session release or device rebind, survive observation cache

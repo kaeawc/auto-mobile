@@ -1,4 +1,4 @@
-import { displayPinFailure } from "../features/observe/SessionDisplayContext";
+import { displayPinFailure, selectedDisplayPin } from "../features/observe/SessionDisplayContext";
 import { PinnedDisplayUnavailableError } from "./PinnedDisplayError";
 import { ActionableError } from "./ActionableError";
 import type { BaseActionResult } from "./BaseActionResult";
@@ -13,8 +13,13 @@ export interface StaleDisplayDetails {
 /** One actionable refusal for coordinates crossing a display transition. */
 export class StaleDisplayError extends ActionableError {
   constructor(readonly details: StaleDisplayDetails) {
+    const pin = selectedDisplayPin();
+    const pinGuidance =
+      pin === undefined
+        ? ""
+        : ` If pinned display ${JSON.stringify(pin)} is unavailable, clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or change it with setActiveDevice {display: <available key or role>} before re-observing.`;
     super(
-      `Display changed since these coordinates were chosen (observed generation ${details.observedGeneration}, current generation ${details.currentGeneration}). Re-observe ${details.currentDisplayKey === undefined ? "the active panel" : `display "${details.currentDisplayKey}"`} and choose the target again before retrying.`,
+      `Display changed since these coordinates were chosen (observed generation ${details.observedGeneration}, current generation ${details.currentGeneration}).${pinGuidance} Re-observe ${details.currentDisplayKey === undefined ? "the active panel" : `display "${details.currentDisplayKey}"`} and choose the target again before retrying.`,
     );
     this.name = "StaleDisplayError";
   }

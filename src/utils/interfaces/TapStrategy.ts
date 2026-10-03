@@ -1,6 +1,15 @@
 import type { ViewHierarchyResult, ObserveResult } from "../../models";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
-import type { ViewHierarchy } from "../../features/observe/ViewHierarchy";
+/** Hierarchy transformations required by platform tap strategies. */
+export interface TapViewHierarchy {
+  filterViewHierarchy(hierarchy: ViewHierarchyResult): ViewHierarchyResult;
+  filterOffscreenNodes(
+    hierarchy: ViewHierarchyResult,
+    width: number,
+    height: number,
+    margin?: number,
+  ): ViewHierarchyResult;
+}
 
 /**
  * Platform-specific surface used by {@link TapOnElement} to keep its
@@ -19,7 +28,7 @@ export interface TapStrategy {
    */
   prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
-    viewHierarchy: ViewHierarchy,
+    viewHierarchy: TapViewHierarchy,
     screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null;
 

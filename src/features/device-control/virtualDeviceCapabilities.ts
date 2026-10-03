@@ -1,30 +1,16 @@
-/**
- * Versioned inventory contract for virtual-device hardware capabilities.
- *
- * Android identifiers preserve the corresponding Android feature names. iOS
- * Simulator identifiers are namespaced because they describe simulator control
- * surfaces rather than physical hardware.
- */
-export const VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION = 1 as const;
-
-export type VirtualDeviceCapabilityState = "available" | "unavailable" | "unsupported";
-
-export interface VirtualDeviceCapability {
-  /** Stable identifier suitable for automated matching. */
-  id: string;
-  /** Whether the capability is usable, configured off, or impossible on this platform. */
-  state: VirtualDeviceCapabilityState;
-  /** Where AutoMobile obtained the capability state. */
-  source: "avd_config" | "platform";
-  /** Explanation for a capability that cannot be enabled by device configuration. */
-  reason?: string;
-}
-
-export interface VirtualDeviceCapabilityInventory {
-  schemaVersion: typeof VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION;
-  /** Deduplicated, lexically ordered capability entries. */
-  capabilities: VirtualDeviceCapability[];
-}
+import {
+  VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+  type VirtualDeviceCapabilityState,
+  type VirtualDeviceCapability,
+  type VirtualDeviceCapabilityInventory,
+} from "../../models/virtualDeviceCapabilities";
+export {
+  VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+  iosSimulatorCapabilityInventory,
+  type VirtualDeviceCapabilityState,
+  type VirtualDeviceCapability,
+  type VirtualDeviceCapabilityInventory,
+} from "../../models/virtualDeviceCapabilities";
 
 const ANDROID_AVD_CAPABILITIES = [
   { configKey: "hw.camera.back", id: "android.hardware.camera", kind: "camera" },
@@ -75,69 +61,5 @@ export function buildAndroidAvdCapabilityInventory(
   return {
     schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
     capabilities: [...capabilities.values()].sort((left, right) => left.id.localeCompare(right.id)),
-  };
-}
-
-/**
- * Capabilities exposed by iOS Simulator independently of a running session.
- * `ios.simulator.biometric` corresponds to simctl biometric controls; NFC has
- * no simulator implementation and is explicit so clients do not infer support
- * from the device type.
- */
-export function iosSimulatorCapabilityInventory(
-  options: {
-    isAvailable?: boolean;
-    availabilityError?: string;
-    runtime?: string;
-  } = {},
-): VirtualDeviceCapabilityInventory {
-  const supportsBiometricControls =
-    options.runtime === undefined ||
-    options.runtime.startsWith("com.apple.CoreSimulator.SimRuntime.iOS-");
-  const biometricCapability: VirtualDeviceCapability = !supportsBiometricControls
-    ? {
-        id: "ios.simulator.biometric",
-        state: "unsupported",
-        source: "platform",
-        reason: "Biometric controls are only supported for iOS Simulator runtimes.",
-      }
-    : options.isAvailable === false
-      ? {
-          id: "ios.simulator.biometric",
-          state: "unavailable",
-          source: "platform",
-          reason: options.availabilityError ?? "The iOS Simulator runtime is unavailable.",
-        }
-      : { id: "ios.simulator.biometric", state: "available", source: "platform" };
-
-  return {
-    schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
-    capabilities: [
-      biometricCapability,
-      {
-        id: "ios.simulator.nfc",
-        state: "unsupported",
-        source: "platform",
-        reason: "iOS Simulator cannot emulate NFC hardware.",
-      },
-      {
-        id: "ios.simulator.doNotDisturb",
-        state: "unsupported",
-        source: "platform",
-        reason: "Do Not Disturb cannot be read or set on an iOS simulator.",
-      },
-      {
-        id: "ios.simulator.networkCondition",
-        state: "unsupported",
-        source: "platform",
-        reason: "Network-condition simulation is unavailable on iOS Simulator.",
-      },
-      {
-        id: "ios.simulator.connectivity",
-        state: "unsupported",
-        source: "platform",
-        reason: "iOS Simulator shares the host network stack and has no connectivity read verb.",
-      },
-    ],
   };
 }

@@ -1,7 +1,7 @@
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { ViewHierarchy } from "../../observe/ViewHierarchy";
+import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import type { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
@@ -26,7 +26,7 @@ export class AndroidTapStrategy implements TapStrategy {
 
   prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
-    viewHierarchy: ViewHierarchy,
+    viewHierarchy: TapViewHierarchy,
     _screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null {
     const filtered = viewHierarchy.filterViewHierarchy(rawHierarchy);

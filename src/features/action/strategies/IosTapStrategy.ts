@@ -1,6 +1,6 @@
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
-import type { ViewHierarchy } from "../../observe/ViewHierarchy";
+import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../../observe/ios";
@@ -26,7 +26,7 @@ export class IosTapStrategy implements TapStrategy {
 
   prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
-    viewHierarchy: ViewHierarchy,
+    viewHierarchy: TapViewHierarchy,
     screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null {
     if (!screenSize?.width || !screenSize?.height) {

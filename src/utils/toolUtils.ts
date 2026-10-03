@@ -2,7 +2,7 @@
  * Utility functions for tool handlers
  */
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
-import { deviceLostErrorFromAbortSignal } from "../server/deviceLossOutcome";
+import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {

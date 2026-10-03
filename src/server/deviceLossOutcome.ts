@@ -1,3 +1,9 @@
+import { isDeviceLostError, deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
+export {
+  isDeviceLostError,
+  deviceLostErrorFromAbortSignal,
+  rememberDeviceLossAbort,
+} from "../models/DeviceLostError";
 import {
   DeviceLostError,
   DEVICE_LOSS_OUTCOME_CODE,
@@ -7,7 +13,6 @@ import {
 
 export { DeviceLostError, DEVICE_LOSS_OUTCOME_CODE };
 export const DEVICE_LOSS_RESPONSE_HEADROOM_MS = 1_000;
-const deviceLossAbortErrors = new WeakMap<AbortSignal, DeviceLostError>();
 
 export interface DeviceLossOutcome {
   code: typeof DEVICE_LOSS_OUTCOME_CODE;
@@ -34,10 +39,6 @@ export interface DeviceLossOutcome {
   };
 }
 
-export function isDeviceLostError(error: unknown): error is DeviceLostError {
-  return error instanceof DeviceLostError;
-}
-
 export function deviceLostErrorFromCancellationReason(reason: string): DeviceLostError | undefined {
   if (!reason.startsWith("device-disconnected:")) {
     return undefined;
@@ -51,19 +52,6 @@ export function deviceLostErrorFromCancellationReason(reason: string): DeviceLos
       ? undefined
       : details.slice(incidentIndex + incidentDelimiter.length) || undefined;
   return deviceId ? new DeviceLostError(deviceId, reason, incidentId) : undefined;
-}
-
-/**
- * Bun can report an aborted signal while temporarily hiding `signal.reason`.
- * Keep the typed reason out of the runtime-owned signal object so downstream
- * cancellation checks retain the infrastructure outcome across runtimes.
- */
-export function rememberDeviceLossAbort(signal: AbortSignal, error: DeviceLostError): void {
-  deviceLossAbortErrors.set(signal, error);
-}
-
-export function deviceLostErrorFromAbortSignal(signal: AbortSignal): DeviceLostError | undefined {
-  return isDeviceLostError(signal.reason) ? signal.reason : deviceLossAbortErrors.get(signal);
 }
 
 export function throwDeviceLostFromAbortSignal(signal?: AbortSignal): void {

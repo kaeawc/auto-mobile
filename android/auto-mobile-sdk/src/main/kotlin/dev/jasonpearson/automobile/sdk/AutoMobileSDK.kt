@@ -160,14 +160,18 @@ object AutoMobileSDK {
           capabilityRegistry.isCapabilitySupported("network.control")
         }
 
-        // Create disk persistence for events
-        val eventPersistence = FileEventPersistence(File(appContext.cacheDir, "automobile_events"))
-        persistence = eventPersistence
-
         // Create drop counter for tracking event drops across the pipeline
         val counter = DefaultDropCounter()
         dropCounter = counter
         SdkEventBroadcaster.dropCounter = counter
+
+        // Construction is I/O-free; initialization and writes happen on the buffer executor.
+        val eventPersistence =
+          FileEventPersistence(
+            File(appContext.cacheDir, "automobile_events"),
+            dropCounter = counter,
+          )
+        persistence = eventPersistence
 
         // Create shared event buffer with broadcast flush callback and disk persistence
         lateinit var buffer: SdkEventBuffer
@@ -204,8 +208,8 @@ object AutoMobileSDK {
         // Replay pending batches and clean up old ones on the buffer's executor
         // to avoid blocking the calling thread with disk I/O.
         buffer.execute {
-          replayPendingBatches(appContext, eventPersistence)
           eventPersistence.cleanup()
+          replayPendingBatches(appContext, eventPersistence, buffer)
         }
 
         // Thread-safe subsystems — can initialize from any thread
@@ -589,8 +593,12 @@ object AutoMobileSDK {
    * Replay pending event batches from disk (events that survived process death). Each batch is
    * broadcast and removed on success; failures remain on disk.
    */
-  private fun replayPendingBatches(context: Context, persistence: EventPersistence) {
-    replayEventBatches(persistence) { events, complete ->
+  private fun replayPendingBatches(
+    context: Context,
+    persistence: EventPersistence,
+    buffer: SdkEventBuffer,
+  ) {
+    replayEventBatches(persistence, buffer::execute) { events, complete ->
       SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
     }
   }

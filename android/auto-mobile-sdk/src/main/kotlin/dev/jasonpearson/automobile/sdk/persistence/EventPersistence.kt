@@ -16,6 +16,9 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.events.DropCounter
+import dev.jasonpearson.automobile.sdk.events.DropReason
+import dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger
 import java.io.File
 import java.util.UUID
 import org.json.JSONArray
@@ -35,92 +38,248 @@ internal interface EventPersistence {
   /** Remove a successfully delivered batch by ID. */
   fun removeBatch(batchId: String)
 
+  /** Record a failed replay; return whether the batch is retained for another launch. */
+  fun recordReplayFailure(batchId: String): Boolean = true
+
   /** Remove batches older than [maxAgeDays]. */
   fun cleanup(maxAgeDays: Int = 7)
 }
 
 /**
- * File-based event persistence. One JSON file per batch. Files named:
- * events_{timestamp}_{uuid}.json for FIFO ordering.
+ * File-based event persistence, with no I/O until first use on a background executor.
+ *
+ * New files use events_s<20-digit sequence>_c<count>_a<attempts>_t<millis>_<uuid>.json. Sequences
+ * are recovered from disk on first use, then increase under this lock. Legacy
+ * events_<millis>_<uuid>.json files always sort before sequenced files, ordered by (millis,
+ * original name). On failure they become events_l<millis>_c<count>_a<attempts>_<original batch
+ * ID>.json, retaining that exact legacy ordering even when UUIDs contain underscores.
  */
 internal class FileEventPersistence(
   private val directory: File,
   private val clock: () -> Long = System::currentTimeMillis,
   private val uuidProvider: () -> String = { UUID.randomUUID().toString() },
-  // Bound disk growth during prolonged delivery outages, retaining the newest 100 batches.
   private val maxPendingBatches: Int = 100,
+  private val dropCounter: DropCounter? = null,
+  private val maxReplayAttempts: Int = 3,
+  private val fileOps: (File) -> Boolean = File::delete,
 ) : EventPersistence {
+
+  // Preserve the published three-argument JVM descriptor. Different parameter names avoid
+  // ambiguity with named Kotlin calls to the defaulted primary constructor.
+  constructor(
+    legacyDirectory: File,
+    legacyClock: () -> Long,
+    legacyUuidProvider: () -> String,
+  ) : this(
+    directory = legacyDirectory,
+    clock = legacyClock,
+    uuidProvider = legacyUuidProvider,
+    maxPendingBatches = 100,
+  )
+
+  private val logger = DefaultSdkLogger()
+  private var nextSequence: Long? = null
 
   init {
     require(maxPendingBatches > 0)
-    directory.mkdirs()
+    require(maxReplayAttempts > 0)
+  }
+
+  private data class BatchFile(
+    val file: File,
+    val sequence: Long?,
+    val timestamp: Long,
+    val count: Int?,
+    val attempts: Int,
+    val identity: String,
+  ) {
+    val batchId: String
+      get() = file.name.removePrefix("events_").removeSuffix(".json")
+  }
+
+  private val sequencedName = Regex("s(\\d{20})_c(\\d+)_a(\\d+)_t(-?\\d+)_(.+)")
+  private val retriedLegacyName = Regex("l(\\d+)_c(\\d+)_a(\\d+)_(.+)")
+
+  private fun parseFile(file: File): BatchFile? {
+    if (!file.name.startsWith("events_") || !file.name.endsWith(".json")) return null
+    val id = file.name.removePrefix("events_").removeSuffix(".json")
+    sequencedName.matchEntire(id)?.destructured?.let { (seq, count, attempts, time, uuid) ->
+      return BatchFile(
+        file,
+        seq.toLongOrNull() ?: return null,
+        time.toLongOrNull() ?: return null,
+        count.toIntOrNull() ?: return null,
+        attempts.toIntOrNull() ?: return null,
+        uuid,
+      )
+    }
+    retriedLegacyName.matchEntire(id)?.destructured?.let { (time, count, attempts, original) ->
+      return BatchFile(
+        file,
+        null,
+        time.toLongOrNull() ?: return null,
+        count.toIntOrNull() ?: return null,
+        attempts.toIntOrNull() ?: return null,
+        original,
+      )
+    }
+    val time = id.substringBefore('_').toLongOrNull() ?: return null
+    return BatchFile(file, null, time, null, 0, id)
+  }
+
+  private fun pendingFiles(): List<BatchFile> =
+    directory
+      .listFiles()
+      ?.mapNotNull(::parseFile)
+      ?.sortedWith(
+        compareBy<BatchFile> { it.sequence != null }
+          .thenBy { it.sequence ?: it.timestamp }
+          .thenBy { it.identity }
+      ) ?: emptyList()
+
+  private fun initializeSequence() {
+    if (nextSequence == null) {
+      nextSequence = (pendingFiles().mapNotNull { it.sequence }.maxOrNull() ?: 0) + 1
+    }
+  }
+
+  private fun allocateSequence(): Long {
+    initializeSequence()
+    val sequence = checkNotNull(nextSequence)
+    nextSequence = sequence + 1
+    return sequence
+  }
+
+  private fun eventCount(batch: BatchFile): Int =
+    batch.count
+      ?: try {
+        JSONArray(batch.file.readText()).length()
+      } catch (_: Exception) {
+        // Unreadable legacy batches have no count metadata; account for at least one lost event.
+        1
+      }
+
+  /** True also means already absent; only an actual deletion increments the counter. */
+  private fun deleteDropped(batch: BatchFile, reason: DropReason): Boolean {
+    if (!batch.file.exists()) return true
+    val count = eventCount(batch)
+    if (fileOps(batch.file)) {
+      dropCounter?.increment(reason, count)
+      return true
+    }
+    if (!batch.file.exists()) return true
+    logger.w("EventPersistence") {
+      "Could not delete pending batch ${batch.file.name}; retaining it"
+    }
+    return false
   }
 
   @Synchronized
   override fun persist(events: List<SdkEvent>): String? {
     if (events.isEmpty()) return null
-    val batchId = "${clock()}_${uuidProvider()}"
-    val file = File(directory, "events_$batchId.json")
-    return try {
-      file.writeText(serializeEvents(events))
-      val files =
-        directory
-          .listFiles { f ->
-            f.name.startsWith("events_") && f.name.endsWith(".json")
-          }
-          ?.sortedBy { it.name }
-          ?: run {
-            file.delete()
-            return null
-          }
-      for (oldest in files.take((files.size - maxPendingBatches).coerceAtLeast(0))) {
-        if (!oldest.delete()) {
-          file.delete()
-          return null
-        }
+    var file: File? = null
+    val batchId =
+      try {
+        val sequence = allocateSequence().toString().padStart(20, '0')
+        val id = "s${sequence}_c${events.size}_a0_t${clock()}_${uuidProvider()}"
+        // The host can clear its cache at any time, including after earlier successful writes.
+        directory.mkdirs()
+        val target = File(directory, "events_$id.json")
+        file = target
+        target.writeText(serializeEvents(events))
+        id
+      } catch (_: Exception) {
+        // A partial write is not a retained batch; report the failure to the buffer.
+        runCatching { file?.let(fileOps) }
+        return null
       }
-      if (file.exists()) batchId else null
-    } catch (_: Exception) {
-      // Disk persistence is best-effort; report failure without crashing the host.
-      runCatching { file.delete() }
-      null
+    try {
+      val files = pendingFiles()
+      var excess = files.size - maxPendingBatches
+      for (victim in files) {
+        if (excess <= 0) break
+        if (victim.batchId == batchId) continue
+        if (!deleteDropped(victim, DropReason.BUFFER_OVERFLOW)) break
+        excess--
+      }
+    } catch (error: Exception) {
+      // Eviction failure must never destroy the newly written batch.
+      logger.w("EventPersistence", error) { "Could not evict pending batches; keeping new batch" }
     }
+    return batchId
   }
 
-  override fun loadPending(): List<Pair<String, List<SdkEvent>>> {
-    val files =
-      directory.listFiles { f ->
-        f.name.startsWith("events_") && f.name.endsWith(".json")
-      } ?: return emptyList()
-
-    return files
-      .sortedBy { it.name }
-      .mapNotNull { file ->
+  @Synchronized
+  override fun loadPending(): List<Pair<String, List<SdkEvent>>> =
+    try {
+      initializeSequence()
+      pendingFiles().mapNotNull { batch ->
         try {
-          val events = deserializeEvents(file.readText())
-          val batchId = file.name.removePrefix("events_").removeSuffix(".json")
-          batchId to events
+          batch.batchId to deserializeEvents(batch.file.readText())
         } catch (_: Exception) {
-          file.delete() // corrupt file, remove it
+          // Corrupt files cannot replay; count only a file actually removed.
+          deleteDropped(batch, DropReason.DELIVERY_FAILED)
           null
         }
       }
-  }
+    } catch (error: Exception) {
+      logger.w("EventPersistence", error) { "Could not read pending batches; retaining files" }
+      emptyList()
+    }
 
+  @Synchronized
   override fun removeBatch(batchId: String) {
-    File(directory, "events_$batchId.json").delete()
+    try {
+      initializeSequence()
+      val file = File(directory, "events_$batchId.json")
+      if (!fileOps(file) && file.exists()) {
+        logger.w("EventPersistence") { "Could not remove delivered batch $batchId" }
+      }
+    } catch (error: Exception) {
+      logger.w("EventPersistence", error) { "Could not remove delivered batch $batchId" }
+    }
   }
 
+  @Synchronized
   override fun cleanup(maxAgeDays: Int) {
-    val cutoff = clock() - (maxAgeDays * 24 * 60 * 60 * 1000L)
-    directory
-      .listFiles { f -> f.name.startsWith("events_") }
-      ?.forEach { file ->
-        val timestamp = file.name.removePrefix("events_").substringBefore("_").toLongOrNull()
-        if (timestamp != null && timestamp < cutoff) {
-          file.delete()
+    try {
+      initializeSequence()
+      val cutoff = clock() - maxAgeDays * 24 * 60 * 60 * 1000L
+      pendingFiles()
+        .filter { it.timestamp < cutoff }
+        .forEach {
+          deleteDropped(it, DropReason.DELIVERY_FAILED)
+        }
+    } catch (error: Exception) {
+      logger.w("EventPersistence", error) { "Could not clean up pending batches; retaining files" }
+    }
+  }
+
+  @Synchronized
+  override fun recordReplayFailure(batchId: String): Boolean {
+    try {
+      initializeSequence()
+      val batch = parseFile(File(directory, "events_$batchId.json")) ?: return true
+      if (!batch.file.exists()) return false
+      val attempts = batch.attempts + 1
+      if (attempts >= maxReplayAttempts) return !deleteDropped(batch, DropReason.DELIVERY_FAILED)
+      val count = eventCount(batch)
+      val id =
+        if (batch.sequence == null) {
+          "l${batch.timestamp}_c${count}_a${attempts}_${batch.identity}"
+        } else {
+          val sequence = batch.sequence.toString().padStart(20, '0')
+          "s${sequence}_c${count}_a${attempts}_t${batch.timestamp}_${batch.identity}"
+        }
+      if (!batch.file.renameTo(File(directory, "events_$id.json"))) {
+        logger.w("EventPersistence") {
+          "Could not record replay failure for $batchId; retaining it"
         }
       }
+    } catch (error: Exception) {
+      logger.w("EventPersistence", error) { "Could not record replay failure; retaining batch" }
+    }
+    return true
   }
 
   internal fun serializeEvents(events: List<SdkEvent>): String {

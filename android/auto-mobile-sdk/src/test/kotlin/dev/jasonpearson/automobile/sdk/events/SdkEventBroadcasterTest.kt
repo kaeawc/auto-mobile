@@ -238,7 +238,7 @@ class SdkEventBroadcasterTest {
     val context = BroadcastContext {
       if (attempts++ == 0) throw IllegalStateException("retry")
     }
-    replayEventBatches(persistence) { events, complete ->
+    replayEventBatches(persistence, { it.run() }) { events, complete ->
       SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
     }
     assertTrue(persistence.removed.isEmpty())
@@ -253,7 +253,7 @@ class SdkEventBroadcasterTest {
     val counter = DefaultDropCounter()
     SdkEventBroadcaster.dropCounter = counter
     val context = BroadcastContext { throw IllegalStateException("unavailable") }
-    replayEventBatches(persistence) { events, complete ->
+    replayEventBatches(persistence, { it.run() }) { events, complete ->
       SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
     }
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
@@ -266,7 +266,7 @@ class SdkEventBroadcasterTest {
   fun `reset during replay retains original without repersisting`() {
     val persistence = RecordingPersistence()
     val context = BroadcastContext { throw IllegalStateException("unavailable") }
-    replayEventBatches(persistence) { events, complete ->
+    replayEventBatches(persistence, { it.run() }) { events, complete ->
       SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
     }
     SdkEventBroadcaster.reset()

@@ -16,7 +16,11 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.events.DefaultDropCounter
+import dev.jasonpearson.automobile.sdk.events.DropReason
+import java.io.File
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -64,7 +68,7 @@ class EventPersistenceTest {
     val persistence = createPersistence()
     val batchId = persistence.persist(listOf(makeLifecycleEvent("test")))
     assertNotNull(batchId)
-    assertEquals("1000_test-uuid", batchId)
+    assertEquals("s00000000000000000001_c1_a0_t1000_test-uuid", batchId)
   }
 
   @Test
@@ -583,13 +587,14 @@ class EventPersistenceTest {
     val persistence = ReplayPersistence(listOf("oldest" to first, "newest" to second))
     val submitted = mutableListOf<List<SdkEvent>>()
     val completions = mutableListOf<(Boolean) -> Unit>()
-    replayEventBatches(persistence) { events, complete ->
+    replayEventBatches(persistence, { it.run() }) { events, complete ->
       submitted.add(events)
       completions.add(complete)
     }
-    assertEquals(listOf(first, second), submitted)
+    assertEquals(listOf(first), submitted)
     assertTrue(persistence.removed.isEmpty())
     completions[0](true)
+    assertEquals(listOf(first, second), submitted)
     completions[1](false)
     assertEquals(listOf("oldest"), persistence.removed)
     assertEquals(0, persistence.persistCalls)
@@ -598,7 +603,7 @@ class EventPersistenceTest {
   @Test
   fun `replay submission failure keeps original without repersisting`() {
     val persistence = ReplayPersistence(listOf("id" to listOf(makeLifecycleEvent("one"))))
-    replayEventBatches(persistence) { _, _ -> throw IllegalStateException("failure") }
+    replayEventBatches(persistence, { it.run() }) { _, _ -> throw IllegalStateException("failure") }
     assertTrue(persistence.removed.isEmpty())
     assertEquals(0, persistence.persistCalls)
   }
@@ -619,7 +624,7 @@ class EventPersistenceTest {
         override fun cleanup(maxAgeDays: Int) {}
       }
     var submitted = false
-    replayEventBatches(unreadable) { _, _ -> submitted = true }
+    replayEventBatches(unreadable, { it.run() }) { _, _ -> submitted = true }
     assertTrue(!submitted)
     val unremovable =
       object : EventPersistence {
@@ -635,7 +640,352 @@ class EventPersistenceTest {
         override fun cleanup(maxAgeDays: Int) {}
       }
     var complete: ((Boolean) -> Unit)? = null
-    replayEventBatches(unremovable) { _, callback -> complete = callback }
+    replayEventBatches(unremovable, { it.run() }) { _, callback -> complete = callback }
     complete!!(true)
+  }
+
+  @Test
+  fun `constructor does no disk IO and missing directory reads as empty`() {
+    val directory = File(tempFolder.root, "not-created")
+    val persistence = FileEventPersistence(directory)
+    assertFalse(directory.exists())
+    assertTrue(persistence.loadPending().isEmpty())
+    persistence.cleanup()
+    assertFalse(directory.exists())
+  }
+
+  @Test
+  fun `constructor never invokes directory operations`() {
+    val directory =
+      object : File(tempFolder.root, "constructor-io") {
+        override fun mkdirs(): Boolean = error("Constructor must not create directories")
+
+        override fun listFiles(): Array<File>? = error("Constructor must not scan directories")
+      }
+    FileEventPersistence(directory)
+  }
+
+  @Test
+  fun `three argument JVM constructor remains available`() {
+    val constructor =
+      FileEventPersistence::class
+        .java
+        .getDeclaredConstructor(
+          File::class.java,
+          kotlin.jvm.functions.Function0::class.java,
+          kotlin.jvm.functions.Function0::class.java,
+        )
+    val persistence = constructor.newInstance(tempFolder.root, { 1000L }, { "legacy-call" })
+    assertNotNull(persistence.persist(listOf(makeLifecycleEvent("one"))))
+    assertEquals(1, persistence.loadPending().size)
+  }
+
+  @Test
+  fun `clock regression preserves arrival order and newest batch at cap one`() {
+    var now = 2000L
+    val counter = DefaultDropCounter()
+    val persistence =
+      FileEventPersistence(
+        tempFolder.root,
+        clock = { now },
+        maxPendingBatches = 1,
+        dropCounter = counter,
+      )
+    persistence.persist(List(3) { makeLifecycleEvent("old") })
+    now = 1000L
+    val newest = persistence.persist(listOf(makeLifecycleEvent("new")))
+    assertNotNull(newest)
+    assertEquals(listOf(newest), persistence.loadPending().map { it.first })
+    assertEquals(3L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
+  }
+
+  @Test
+  fun `clock regression preserves arrival order with room for both batches`() {
+    var now = 2000L
+    val persistence = FileEventPersistence(tempFolder.root, clock = { now })
+    val first = persistence.persist(listOf(makeLifecycleEvent("first")))
+    now = 1000L
+    val second = persistence.persist(listOf(makeLifecycleEvent("second")))
+    assertEquals(listOf(first, second), persistence.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `equal timestamps ignore opposite UUID order including underscores`() {
+    var uuid = "z_uuid-with-dash"
+    val persistence =
+      FileEventPersistence(tempFolder.root, clock = { 1000L }, uuidProvider = { uuid })
+    val first = persistence.persist(listOf(makeLifecycleEvent("first")))
+    uuid = "a_uuid-with-dash"
+    val second = persistence.persist(listOf(makeLifecycleEvent("second")))
+    assertEquals(listOf(first, second), persistence.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `sequence recovered across instances and lazily before first write`() {
+    val oldInstance = createPersistence(clock = { 2000L })
+    val newInstance = createPersistence(clock = { 1000L })
+    val first = oldInstance.persist(listOf(makeLifecycleEvent("first")))
+    val second = oldInstance.persist(listOf(makeLifecycleEvent("second")))
+    val third = newInstance.persist(listOf(makeLifecycleEvent("third")))
+    assertTrue(third!!.startsWith("s00000000000000000003_"))
+    assertEquals(listOf(first, second, third), newInstance.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `sequence initialized on first read survives removal of highest existing file`() {
+    val persistence = createPersistence()
+    persistence.persist(listOf(makeLifecycleEvent("first")))
+    val highest = persistence.persist(listOf(makeLifecycleEvent("second")))!!
+    val reloaded = createPersistence()
+    reloaded.loadPending()
+    reloaded.removeBatch(highest)
+    val newest = reloaded.persist(listOf(makeLifecycleEvent("third")))!!
+    assertTrue(newest.startsWith("s00000000000000000003_"))
+  }
+
+  private fun writeLegacy(id: String, events: List<SdkEvent>) {
+    File(tempFolder.root, "events_$id.json").writeText(createPersistence().serializeEvents(events))
+  }
+
+  @Test
+  fun `legacy files sort first numerically then by name and remain removable`() {
+    val persistence = createPersistence(clock = { 1L })
+    val newest = persistence.persist(listOf(makeLifecycleEvent("new")))
+    writeLegacy("20_z_uuid", listOf(makeLifecycleEvent("z")))
+    writeLegacy("20_a_uuid", listOf(makeLifecycleEvent("a")))
+    writeLegacy("9_b_uuid", listOf(makeLifecycleEvent("b")))
+    assertEquals(
+      listOf("9_b_uuid", "20_a_uuid", "20_z_uuid", newest),
+      persistence.loadPending().map { it.first },
+    )
+    persistence.removeBatch("20_a_uuid")
+    assertEquals(
+      listOf("9_b_uuid", "20_z_uuid", newest),
+      persistence.loadPending().map { it.first },
+    )
+  }
+
+  @Test
+  fun `cleanup counts aged out new and legacy event totals once`() {
+    var now = 1000L
+    val counter = DefaultDropCounter()
+    val persistence = FileEventPersistence(tempFolder.root, clock = { now }, dropCounter = counter)
+    persistence.persist(List(3) { makeLifecycleEvent("old") })
+    writeLegacy("1000_old_uuid", List(2) { makeLifecycleEvent("legacy") })
+    now += 8 * 24 * 60 * 60 * 1000L
+    val recent = persistence.persist(listOf(makeLifecycleEvent("recent")))
+    persistence.cleanup()
+    persistence.cleanup()
+    assertEquals(listOf(recent), persistence.loadPending().map { it.first })
+    assertEquals(5L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `corrupt files count encoded events or one unreadable legacy event`() {
+    val counter = DefaultDropCounter()
+    val persistence = FileEventPersistence(tempFolder.root, dropCounter = counter)
+    val id = persistence.persist(List(4) { makeLifecycleEvent("broken") })!!
+    File(tempFolder.root, "events_$id.json").writeText("invalid JSON")
+    File(tempFolder.root, "events_1000_corrupt.json").writeText("invalid JSON")
+    assertTrue(persistence.loadPending().isEmpty())
+    persistence.loadPending()
+    assertEquals(5L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `legacy cap eviction counts JSON array length`() {
+    val counter = DefaultDropCounter()
+    writeLegacy("900_legacy", List(3) { makeLifecycleEvent("old") })
+    val persistence =
+      FileEventPersistence(tempFolder.root, maxPendingBatches = 1, dropCounter = counter)
+    val retained = persistence.persist(listOf(makeLifecycleEvent("new")))
+    assertEquals(listOf(retained), persistence.loadPending().map { it.first })
+    assertEquals(3L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
+  }
+
+  @Test
+  fun `replay failures preserve order and persist attempts across instances until cap`() {
+    val counter = DefaultDropCounter()
+    fun instance() =
+      FileEventPersistence(
+        tempFolder.root,
+        clock = { 1000L },
+        dropCounter = counter,
+        maxReplayAttempts = 3,
+      )
+    val persistence = instance()
+    val first = persistence.persist(List(2) { makeLifecycleEvent("first") })!!
+    val second = persistence.persist(listOf(makeLifecycleEvent("second")))!!
+    assertTrue(persistence.recordReplayFailure(first))
+    val reloaded = instance()
+    val failedOnce = reloaded.loadPending().first().first
+    assertTrue(failedOnce.contains("_a1_"))
+    assertEquals(
+      listOf("first", "second"),
+      reloaded.loadPending().map {
+        (it.second.first() as SdkLifecycleEvent).kind
+      },
+    )
+    assertTrue(reloaded.recordReplayFailure(failedOnce))
+    val thirdInstance = instance()
+    val failedTwice = thirdInstance.loadPending().first().first
+    assertTrue(failedTwice.contains("_a2_"))
+    assertFalse(thirdInstance.recordReplayFailure(failedTwice))
+    assertEquals(listOf(second), thirdInstance.loadPending().map { it.first })
+    assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+    assertFalse(thirdInstance.recordReplayFailure(failedTwice))
+    assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `failed replay launches consume persisted attempts and drop at configured cap`() {
+    val counter = DefaultDropCounter()
+    fun instance() =
+      FileEventPersistence(tempFolder.root, dropCounter = counter, maxReplayAttempts = 3)
+    instance().persist(List(3) { makeLifecycleEvent("failed") })
+    repeat(3) { launch ->
+      val persistence = instance()
+      replayEventBatches(persistence, { it.run() }) { _, complete -> complete(false) }
+      assertEquals(if (launch == 2) 0 else 1, persistence.loadPending().size)
+    }
+    assertEquals(3L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `legacy replay rename retains exact legacy position and counts cap drop`() {
+    val counter = DefaultDropCounter()
+    val persistence =
+      FileEventPersistence(
+        tempFolder.root,
+        clock = { 1L },
+        dropCounter = counter,
+        maxReplayAttempts = 2,
+      )
+    writeLegacy("1000_z_with_underscores", List(2) { makeLifecycleEvent("z") })
+    writeLegacy("1000_a_with_underscores", listOf(makeLifecycleEvent("a")))
+    val newest = persistence.persist(listOf(makeLifecycleEvent("new")))!!
+    assertTrue(persistence.recordReplayFailure("1000_z_with_underscores"))
+    assertTrue(persistence.recordReplayFailure("1000_a_with_underscores"))
+    val reloaded =
+      FileEventPersistence(tempFolder.root, dropCounter = counter, maxReplayAttempts = 2)
+    val loaded = reloaded.loadPending()
+    assertEquals(
+      listOf("a", "z", "new"),
+      loaded.map { (it.second.first() as SdkLifecycleEvent).kind },
+    )
+    assertFalse(reloaded.recordReplayFailure(loaded[1].first))
+    assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+    reloaded.removeBatch(loaded[0].first)
+    assertEquals(listOf(newest), reloaded.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `cleanup uses original timestamp after legacy retry rename`() {
+    val counter = DefaultDropCounter()
+    writeLegacy("1000_legacy", List(2) { makeLifecycleEvent("old") })
+    val persistence =
+      FileEventPersistence(
+        tempFolder.root,
+        clock = { 8 * 24 * 60 * 60 * 1000L },
+        dropCounter = counter,
+      )
+    assertTrue(persistence.recordReplayFailure("1000_legacy"))
+    persistence.cleanup()
+    assertTrue(persistence.loadPending().isEmpty())
+    assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `failed eviction keeps new batch and stops at undeletable victim`() {
+    val counter = DefaultDropCounter()
+    var refuseDelete = false
+    val attempted = mutableListOf<String>()
+    val persistence =
+      FileEventPersistence(
+        tempFolder.root,
+        maxPendingBatches = 1,
+        dropCounter = counter,
+        fileOps = { file ->
+          attempted.add(file.name)
+          if (refuseDelete) false else file.delete()
+        },
+      )
+    val first = persistence.persist(listOf(makeLifecycleEvent("first")))!!
+    refuseDelete = true
+    val second = persistence.persist(listOf(makeLifecycleEvent("second")))!!
+    val third = persistence.persist(listOf(makeLifecycleEvent("third")))!!
+    assertEquals(listOf(first, second, third), persistence.loadPending().map { it.first })
+    assertEquals(listOf("events_$first.json", "events_$first.json"), attempted)
+    assertTrue(counter.snapshot().isEmpty())
+  }
+
+  @Test
+  fun `already gone eviction victim is success without a drop count`() {
+    val counter = DefaultDropCounter()
+    val persistence =
+      FileEventPersistence(
+        tempFolder.root,
+        maxPendingBatches = 1,
+        dropCounter = counter,
+        fileOps = { file ->
+          assertTrue(file.delete()) // Simulate another remover winning the race.
+          false
+        },
+      )
+    persistence.persist(List(3) { makeLifecycleEvent("old") })
+    val newest = persistence.persist(listOf(makeLifecycleEvent("new")))
+    assertEquals(listOf(newest), persistence.loadPending().map { it.first })
+    assertTrue(counter.snapshot().isEmpty())
+  }
+
+  @Test
+  fun `failed cleanup and corrupt deletion do not count retained files`() {
+    val counter = DefaultDropCounter()
+    var now = 1000L
+    val persistence =
+      FileEventPersistence(
+        tempFolder.root,
+        clock = { now },
+        dropCounter = counter,
+        fileOps = { false },
+      )
+    val id = persistence.persist(List(2) { makeLifecycleEvent("old") })!!
+    now = 2000L
+    persistence.cleanup(maxAgeDays = 0)
+    val file = File(tempFolder.root, "events_$id.json")
+    file.writeText("invalid JSON")
+    assertTrue(persistence.loadPending().isEmpty())
+    assertTrue(file.exists())
+    assertTrue(counter.snapshot().isEmpty())
+  }
+
+  @Test
+  fun `failed replay cap deletion retains batch without counting a drop`() {
+    val counter = DefaultDropCounter()
+    val persistence =
+      FileEventPersistence(
+        tempFolder.root,
+        maxReplayAttempts = 1,
+        dropCounter = counter,
+        fileOps = { false },
+      )
+    val id = persistence.persist(List(2) { makeLifecycleEvent("retained") })!!
+    assertTrue(persistence.recordReplayFailure(id))
+    assertEquals(listOf(id), persistence.loadPending().map { it.first })
+    assertTrue(counter.snapshot().isEmpty())
+  }
+
+  @Test
+  fun `persist recreates cache directory after it was cleared`() {
+    val directory = File(tempFolder.root, "cache")
+    val persistence = FileEventPersistence(directory, clock = { 1000L })
+    persistence.persist(listOf(makeLifecycleEvent("cleared")))
+    assertTrue(directory.deleteRecursively())
+    assertTrue(persistence.loadPending().isEmpty())
+    persistence.cleanup()
+    val id = persistence.persist(listOf(makeLifecycleEvent("retained")))
+    assertNotNull(id)
+    assertTrue(id.startsWith("s00000000000000000002_"))
+    assertEquals(listOf(id), persistence.loadPending().map { it.first })
   }
 }

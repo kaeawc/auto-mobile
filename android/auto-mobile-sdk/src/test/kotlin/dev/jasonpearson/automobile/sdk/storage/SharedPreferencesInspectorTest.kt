@@ -51,7 +51,10 @@ class SharedPreferencesInspectorTest {
       SharedPreferencesInspector.getDriver()
       fail("Expected SharedPreferencesError.NotInitialized")
     } catch (e: SharedPreferencesError.NotInitialized) {
-      assertTrue(e.message!!.contains("not initialized"))
+      assertEquals(
+        "SharedPreferencesInspector not initialized. Call AutoMobileSDK.initialize(context) first.",
+        e.message,
+      )
     }
   }
 

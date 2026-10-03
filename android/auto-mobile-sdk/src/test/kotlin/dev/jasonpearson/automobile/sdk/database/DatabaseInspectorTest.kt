@@ -29,6 +29,19 @@ class DatabaseInspectorTest {
   }
 
   @Test
+  fun `getDriver throws actionable NotInitialized before initialization`() {
+    try {
+      DatabaseInspector.getDriver()
+      throw AssertionError("Expected DatabaseError.NotInitialized")
+    } catch (error: DatabaseError.NotInitialized) {
+      assertEquals(
+        "DatabaseInspector not initialized. Call AutoMobileSDK.initialize(context) first.",
+        error.message,
+      )
+    }
+  }
+
+  @Test
   fun `registered driver names are removable`() {
     DatabaseInspector.registerDriver("room", fakeDriver)
 

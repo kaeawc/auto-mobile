@@ -7,6 +7,8 @@ import { registerObserveTools } from "../../src/server/observeTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import {
   registerInteractionTools,
+  setTapAnyElementFactory,
+  resetTapAnyElementFactory,
   setTapOnElementFactory,
   resetTapOnElementFactory,
   setSwipeOnFactory,
@@ -92,6 +94,7 @@ beforeEach(async () => {
   registerUtilityTools({ displayInventory: provider });
 });
 afterEach(() => {
+  resetTapAnyElementFactory();
   resetTapOnElementFactory();
   resetSwipeOnFactory();
   sessions.stopCleanupTimer();
@@ -415,7 +418,7 @@ test("live-panel rejection is typed as pin error", async () => {
   });
 });
 
-for (const name of ["observe", "tapOn", "swipeOn"] as const) {
+for (const name of ["observe", "tapOn", "tapAny", "swipeOn"] as const) {
   test(`${name} registered handler receives the effective panel and dispatches through its fake`, async () => {
     sessions.updateSessionCache("one", { ...{ displayPin: "inner" } });
     const executor = new FakeAdbExecutor();
@@ -447,6 +450,13 @@ for (const name of ["observe", "tapOn", "swipeOn"] as const) {
       }),
     });
     setTapOnElementFactory(() => ({
+      execute: async (options) => {
+        const observation = capture(options.display);
+        await executor.executeCommand(`tap panel ${observation.display.key}`);
+        return { success: true, action: "tap", element: {}, observation };
+      },
+    }));
+    setTapAnyElementFactory(() => ({
       execute: async (options) => {
         const observation = capture(options.display);
         await executor.executeCommand(`tap panel ${observation.display.key}`);
@@ -499,9 +509,9 @@ for (const name of ["observe", "tapOn", "swipeOn"] as const) {
       }
       expect(selectedPanels).toEqual(["inside", "outside", "outside"]);
       expect(executor.getExecutedCommands()).toEqual([
-        `${name === "observe" ? "capture" : name === "tapOn" ? "tap" : "swipe"} panel inside`,
-        `${name === "observe" ? "capture" : name === "tapOn" ? "tap" : "swipe"} panel outside`,
-        `${name === "observe" ? "capture" : name === "tapOn" ? "tap" : "swipe"} panel outside`,
+        `${name === "observe" ? "capture" : name === "tapOn" || name === "tapAny" ? "tap" : "swipe"} panel inside`,
+        `${name === "observe" ? "capture" : name === "tapOn" || name === "tapAny" ? "tap" : "swipe"} panel outside`,
+        `${name === "observe" ? "capture" : name === "tapOn" || name === "tapAny" ? "tap" : "swipe"} panel outside`,
       ]);
     } finally {
       notify.mockRestore();
@@ -666,7 +676,7 @@ test("each string pin update refreshes inventory and a disappeared role leaves t
   expect(provider.invalidations).toEqual([device.deviceId, device.deviceId]);
 });
 
-for (const name of ["observe", "tapOn", "swipeOn"]) {
+for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
   for (const scenario of ["no session", "no pin", "different device", "no display schema"]) {
     test(`${name} ${scenario} returns the identical frozen envelope without body reads or context changes`, async () => {
       sessions.setDisplayPin("one", scenario === "no pin" ? null : "inner");
@@ -929,7 +939,7 @@ test("pin clear restores the complete main response envelope on the next plain c
   expect(await select()).toEqual(createJSONToolResponse(payload));
 });
 
-for (const name of ["observe", "tapOn", "swipeOn"]) {
+for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
   for (const degraded of [false, true]) {
     test(`${name} unreadable inventory degraded=${degraded} is retryable and never dispatches`, async () => {
       sessions.setDisplayPin("one", "inner");
@@ -1024,7 +1034,7 @@ test("readable single and zero-panel inventories still report an absent pin", as
   }
 });
 
-for (const name of ["observe", "tapOn", "swipeOn"]) {
+for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
   test(`${name} no pin returns synchronous handler values unchanged`, () => {
     const value = Object.freeze({ success: true });
     expect(
@@ -1040,3 +1050,25 @@ for (const name of ["observe", "tapOn", "swipeOn"]) {
     ).toBe(value);
   });
 }
+
+test("registered tapAny missing pin reports typed details without dispatch", async () => {
+  sessions.setDisplayPin("one", "unplugged");
+  let dispatches = 0;
+  setTapAnyElementFactory(() => ({
+    execute: async () => {
+      dispatches++;
+      return { success: true, element: {} };
+    },
+  }));
+  registerInteractionTools();
+  const response = await ToolRegistry.callInternal("tapAny", {}, undefined, undefined, {
+    targetDevice: device,
+    sessionUuid: "one",
+  });
+  expect(response.isError).toBe(true);
+  expect(getStructuredPayload(response)).toMatchObject({
+    success: false,
+    pinnedDisplay: { pin: "unplugged" },
+  });
+  expect(dispatches).toBe(0);
+});

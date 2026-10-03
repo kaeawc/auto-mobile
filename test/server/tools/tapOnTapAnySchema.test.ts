@@ -500,3 +500,27 @@ test("handlers forward the complete nested scope and unique strategy", async () 
     resetTapAnyElementFactory();
   }
 });
+
+test("tapAny accepts and forwards display exactly like tapOn", async () => {
+  expect(tapAnySchema.parse({ display: "cover" })).toMatchObject({ display: "cover" });
+  const requests: TapAnyElementOptions[] = [];
+  setTapAnyElementFactory(() => ({
+    execute: async (options) => {
+      requests.push(options);
+      return { success: false, error: "injected failure", element: {} };
+    },
+  }));
+  try {
+    const args = { action: "tap" as const, display: "cover" };
+    await tapAnyHandler({ name: "fake", deviceId: "fake", platform: "android" }, args);
+    expect(requests[0]).toMatchObject({ display: "cover" });
+  } finally {
+    resetTapAnyElementFactory();
+  }
+});
+
+for (const key of ["subtext", "accessibilityLink", "focusFirst", "screenReaderNavigation"]) {
+  test(`tapAny display does not admit tapOn-only unsupported option ${key}`, () => {
+    expectRejectedKey(tapAnySchema, { display: "cover", [key]: true }, key);
+  });
+}

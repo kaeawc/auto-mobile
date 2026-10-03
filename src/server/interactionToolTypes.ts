@@ -108,6 +108,7 @@ export type TapAtArgs = TapAtOptions & {
 };
 
 export interface TapAnyArgs {
+  display?: string;
   container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;
   action: "tap" | "doubleTap" | "longPress";

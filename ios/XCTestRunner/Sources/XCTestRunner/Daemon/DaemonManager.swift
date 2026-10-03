@@ -36,6 +36,7 @@ public enum DaemonManager {
     }
 
     public static func isProcessRunning(pid: Int) -> Bool {
-        return kill(Int32(pid), 0) == 0
+        guard pid > 0, let processId = Int32(exactly: pid) else { return false }
+        return kill(processId, 0) == 0
     }
 }

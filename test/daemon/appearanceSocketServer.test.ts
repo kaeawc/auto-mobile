@@ -174,6 +174,51 @@ describe("AppearanceSocketServer", () => {
     });
   }
 
+  for (const { mode, syncEnabled } of [
+    { mode: "auto", syncEnabled: true },
+    { mode: "auto", syncEnabled: false },
+    { mode: "light", syncEnabled: false },
+    { mode: "light", syncEnabled: true },
+    { mode: "dark", syncEnabled: false },
+    { mode: "dark", syncEnabled: true },
+  ]) {
+    it(`set_appearance(${mode}) reports the automatic sync decision (${syncEnabled})`, async () => {
+      const applied: string[] = [];
+      const dependencies = fakeDependencies(applied);
+      dependencies.isSyncEnabled = () => syncEnabled;
+      let syncs = 0;
+      dependencies.triggerSync = async () => {
+        syncs++;
+      };
+      server = new TestableAppearanceSocketServer(
+        timer,
+        { authorize: () => {}, isAuthenticationEnforced: () => false },
+        { ...emptyDeviceSource, getPooledDevices: () => [device("own")] },
+        dependencies,
+      );
+      await server.startFake();
+      await server.simulateLine(
+        socket,
+        JSON.stringify({ id: "mode-hint", command: "set_appearance", params: { mode } }),
+      );
+      const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0];
+      const appliedMode = mode === "auto" ? "light" : mode;
+      expect(response.success).toBe(true);
+      expect(response.result?.config?.defaultMode).toBe(mode);
+      expect(response.result?.config?.syncWithHost).toBe(mode === "auto");
+      expect(response.result?.appliedMode).toBe(appliedMode);
+      expect(applied).toEqual([`own:${appliedMode}`]);
+      expect(syncs).toBe(1);
+      if (mode === "auto" && !syncEnabled) {
+        expect(response.result?.warning).toBe(
+          "Automatic appearance sync is disabled by AUTOMOBILE_APPEARANCE_SYNC.",
+        );
+      } else {
+        expect(response.result).not.toHaveProperty("warning");
+      }
+    });
+  }
+
   describe("targeted request-chain bypass", () => {
     let applyGate: ReturnType<typeof Promise.withResolvers<void>>;
     let configGate: ReturnType<typeof Promise.withResolvers<AppearanceConfig>> | undefined;

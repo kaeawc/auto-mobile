@@ -33,6 +33,8 @@ import {
 } from "./streamSocketAuth";
 
 const VALID_MODES = new Set(["light", "dark", "auto"]);
+const AUTOMATIC_SYNC_DISABLED_WARNING =
+  "Automatic appearance sync is disabled by AUTOMOBILE_APPEARANCE_SYNC.";
 
 export interface AppearanceDeviceSource {
   getPooledDevices(): BootedDevice[];
@@ -142,10 +144,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
           result: {
             config,
             appliedMode: appliedMode ?? undefined,
-            ...(enabled &&
-            !(this.dependencies.isSyncEnabled ?? isAppearanceSyncEnabledFromEnvironment)()
-              ? { warning: "Automatic appearance sync is disabled by AUTOMOBILE_APPEARANCE_SYNC." }
-              : {}),
+            ...this.automaticSyncWarning(enabled),
           },
         };
       }
@@ -169,6 +168,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
           result: {
             config,
             appliedMode: appliedMode ?? undefined,
+            ...this.automaticSyncWarning(normalizedMode === "auto"),
           },
         };
       }
@@ -184,6 +184,15 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       success: false,
       error,
     };
+  }
+
+  private automaticSyncWarning(
+    automaticSyncRequested: boolean,
+  ): { warning: string } | Record<string, never> {
+    return automaticSyncRequested &&
+      !(this.dependencies.isSyncEnabled ?? isAppearanceSyncEnabledFromEnvironment)()
+      ? { warning: AUTOMATIC_SYNC_DISABLED_WARNING }
+      : {};
   }
 
   private async applyToTargets(

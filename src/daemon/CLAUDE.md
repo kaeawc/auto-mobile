@@ -22,7 +22,7 @@ class MySocketServer extends RequestResponseSocketServer<MyRequest, MyResponse> 
 
 **Examples:** `videoRecordingSocketServer`, `deviceSnapshotSocketServer`, `testRecordingSocketServer`, `appearanceSocketServer`, `performanceStreamSocketServer`, `failuresStreamSocketServer`
 
-Requests are sequential per socket unless a subclass explicitly opts a safe control request out of the chain.
+Requests are sequential per socket unless a subclass explicitly opts a safe control request out of the chain, such as WebRTC `stop` or appearance's read-only `get_appearance_config`.
 
 ### Push Subscription Pattern
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Socket } from "node:net";
 import {
   AppearanceSocketServer,
@@ -114,6 +114,12 @@ class TestableAppearanceSocketServer extends AppearanceSocketServer {
   }
 }
 
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 30; i++) {
+    await Promise.resolve();
+  }
+}
+
 describe("AppearanceSocketServer", () => {
   let server: TestableAppearanceSocketServer;
   let timer: FakeTimer;
@@ -124,6 +130,200 @@ describe("AppearanceSocketServer", () => {
     server = new TestableAppearanceSocketServer(timer);
     await server.startFake();
     socket = new FakeSocket();
+  });
+
+  describe("targeted request-chain bypass", () => {
+    let applyGate: ReturnType<typeof Promise.withResolvers<void>>;
+    let configGate: ReturnType<typeof Promise.withResolvers<AppearanceConfig>> | undefined;
+    let dependencies: AppearanceSocketServerDependencies;
+    let applied: string[];
+    let updates: number;
+    let pendingRequests: Promise<void>[];
+
+    beforeEach(async () => {
+      applyGate = Promise.withResolvers<void>();
+      configGate = undefined;
+      applied = [];
+      updates = 0;
+      pendingRequests = [];
+      dependencies = fakeDependencies();
+      const updateConfig = dependencies.updateConfig;
+      dependencies.updateConfig = async (update) => {
+        updates++;
+        return updateConfig(update);
+      };
+      dependencies.applyToDevice = async (target, mode) => {
+        applied.push(`${target.deviceId}:${mode}`);
+        await applyGate.promise;
+      };
+      const manager = ownershipManager();
+      server = new TestableAppearanceSocketServer(
+        timer,
+        new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
+        ownedDeviceSource({ manager, pooled: ["own"] }),
+        dependencies,
+      );
+      await server.startFake();
+      // simulateLine awaits the chain, so retain its promise while the set is gated.
+      pendingRequests.push(
+        server.simulateLine(
+          socket,
+          JSON.stringify({
+            id: "set",
+            command: "set_appearance",
+            sessionUuid: "live",
+            mode: "dark",
+          }),
+        ),
+      );
+      await flushMicrotasks();
+      expect(applied).toEqual(["own:dark"]);
+      expect(socket.getWrittenMessages()).toEqual([]);
+    });
+
+    afterEach(async () => {
+      // Release gates even after a failed assertion, including during the unfixed run.
+      configGate?.resolve(initialConfig);
+      applyGate.resolve();
+      await Promise.all(pendingRequests);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    for (const field of ["command", "method"] as const) {
+      it(`answers get_appearance_config via ${field} before an in-flight set completes`, async () => {
+        pendingRequests.push(
+          server.simulateLine(
+            socket,
+            JSON.stringify({ id: "read", [field]: "get_appearance_config" }),
+          ),
+        );
+        await flushMicrotasks();
+        expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+          {
+            id: "read",
+            type: "appearance_response",
+            success: true,
+            result: { config: { ...initialConfig, defaultMode: "dark" } },
+          },
+        ]);
+        expect(applied).toEqual(["own:dark"]);
+
+        applyGate.resolve();
+        await Promise.all(pendingRequests);
+        expect(socket.getWrittenMessages<AppearanceSocketResponse>().map(({ id }) => id)).toEqual([
+          "read",
+          "set",
+        ]);
+        expect(socket.getWrittenMessages<AppearanceSocketResponse>()[1].success).toBe(true);
+      });
+    }
+
+    for (const command of ["set_appearance", "set_appearance_sync"] as const) {
+      it(`keeps ${command} ordered behind an in-flight set_appearance`, async () => {
+        pendingRequests.push(
+          server.simulateLine(
+            socket,
+            JSON.stringify({
+              id: "second",
+              command,
+              sessionUuid: "live",
+              mode: "light",
+              enabled: true,
+            }),
+          ),
+        );
+        await flushMicrotasks();
+        expect(updates).toBe(1);
+        expect(applied).toEqual(["own:dark"]);
+        expect(socket.getWrittenMessages()).toEqual([]);
+
+        applyGate.resolve();
+        await Promise.all(pendingRequests);
+        expect(updates).toBe(2);
+        expect(applied).toEqual(["own:dark", "own:light"]);
+        expect(
+          socket
+            .getWrittenMessages<AppearanceSocketResponse>()
+            .map(({ id, success }) => ({ id, success })),
+        ).toEqual([
+          { id: "set", success: true },
+          { id: "second", success: true },
+        ]);
+      });
+    }
+
+    it("returns a bypass handler error with the read request id while a set is in flight", async () => {
+      dependencies.getConfig = async () => {
+        throw new Error("config unavailable");
+      };
+      pendingRequests.push(
+        server.simulateLine(
+          socket,
+          JSON.stringify({ id: "failed-read", command: "get_appearance_config" }),
+        ),
+      );
+      await flushMicrotasks();
+      expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+        {
+          id: "failed-read",
+          type: "appearance_response",
+          success: false,
+          error: "config unavailable",
+        },
+      ]);
+    });
+
+    it("does not write when a socket is destroyed during a bypassed get_appearance_config", async () => {
+      configGate = Promise.withResolvers<AppearanceConfig>();
+      const gate = configGate;
+      let readStarted = false;
+      dependencies.getConfig = () => {
+        readStarted = true;
+        return gate.promise;
+      };
+      pendingRequests.push(
+        server.simulateLine(
+          socket,
+          JSON.stringify({ id: "destroyed-read", command: "get_appearance_config" }),
+        ),
+      );
+      await flushMicrotasks();
+      expect(readStarted).toBe(true);
+      socket.destroy();
+      configGate.resolve(initialConfig);
+      await flushMicrotasks();
+      expect(socket.getWrittenData()).toEqual([]);
+
+      applyGate.resolve();
+      await expect(Promise.all(pendingRequests)).resolves.toEqual([undefined, undefined]);
+      expect(socket.getWrittenData()).toEqual([]);
+    });
+
+    for (const request of [
+      { command: "bogus" },
+      {},
+      { command: "bogus", method: "get_appearance_config" },
+    ]) {
+      it(`keeps unsupported request ${JSON.stringify(request)} in the chain`, async () => {
+        pendingRequests.push(
+          server.simulateLine(socket, JSON.stringify({ id: "unsupported", ...request })),
+        );
+        await flushMicrotasks();
+        expect(socket.getWrittenMessages()).toEqual([]);
+
+        applyGate.resolve();
+        await Promise.all(pendingRequests);
+        expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+          expect.objectContaining({ id: "set", success: true }),
+          {
+            id: "unsupported",
+            type: "appearance_response",
+            success: false,
+            error: `Unsupported appearance command: ${request.command}`,
+          },
+        ]);
+      });
+    }
   });
 
   it("continues after a hung target's deadline and returns the applied mode", async () => {

@@ -11,3 +11,6 @@ internal fun formatMebibytes(bytes: Long, showNegative: Boolean = false): String
 
   return String.format(Locale.ROOT, "%.2f MiB", bytes / BYTES_PER_MEBIBYTE)
 }
+
+internal fun formatMemoryDeltaMb(deltaMb: Double): String =
+  String.format(Locale.ROOT, "%.2f", deltaMb)

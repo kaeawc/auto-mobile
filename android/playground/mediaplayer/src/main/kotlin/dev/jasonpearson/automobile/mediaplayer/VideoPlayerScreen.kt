@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
@@ -41,8 +44,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -113,114 +120,187 @@ fun VideoPlayerScreen(
   viewModel: MediaPlayerViewModel = viewModel(),
 ) {
   TrackRecomposition(id = "screen.videoPlayer", composableName = "VideoPlayerScreen") {
-    val context = LocalContext.current
-    val activity = LocalActivity.current
-    val player by viewModel.playerState.collectAsState()
-    val playbackError by viewModel.playbackError.collectAsState()
-    val shouldShowControls by viewModel.shouldShowControls.collectAsState()
+    val videoData = findVideoById(videoId)
+    if (videoData == null) {
+      VideoNotFound(videoId = videoId, onNavigateBack = onNavigateBack)
+    } else {
+      VideoPlayerContent(videoData, onNavigateBack, viewModel)
+    }
+  }
+}
 
-    // Sample video data based on videoId
-    // TODO: probably shouldn't assume video data id matches data
-    val videoData = VideoData.entries.first { it.id == videoId }
+fun findVideoById(videoId: String, catalogue: List<VideoData> = VideoData.entries): VideoData? =
+  catalogue.firstOrNull {
+    it.id == videoId
+  }
 
-    // Enable immersive mode
-    LaunchedEffect(Unit) {
+object VideoNotFoundSemantics {
+  const val CONTAINER_TAG = "video_not_found"
+  const val BACK_BUTTON_TAG = "video_not_found_back"
+  const val ICON_DESCRIPTION = "Video not found"
+  const val BACK_BUTTON_DESCRIPTION = "Go back"
+}
+
+@Composable
+fun VideoNotFound(videoId: String, onNavigateBack: () -> Unit, modifier: Modifier = Modifier) {
+  Box(
+    modifier =
+      modifier
+        .fillMaxSize()
+        .testTag(VideoNotFoundSemantics.CONTAINER_TAG)
+        .background(MaterialTheme.colorScheme.background)
+        .safeDrawingPadding()
+        .padding(24.dp),
+    contentAlignment = Alignment.Center,
+  ) {
+    Column(
+      modifier = Modifier.verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      Icon(
+        imageVector = Icons.Filled.Warning,
+        contentDescription = VideoNotFoundSemantics.ICON_DESCRIPTION,
+        modifier = Modifier.size(48.dp),
+        tint = MaterialTheme.colorScheme.error,
+      )
+      Text(
+        text = "Video not found",
+        fontSize = 20.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(top = 16.dp),
+      )
+      Text(
+        text = "Requested video: $videoId",
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(vertical = 16.dp),
+      )
+      Button(
+        onClick = onNavigateBack,
+        modifier =
+          Modifier.testTag(VideoNotFoundSemantics.BACK_BUTTON_TAG).semantics {
+            contentDescription = VideoNotFoundSemantics.BACK_BUTTON_DESCRIPTION
+          },
+      ) {
+        Text("Go back")
+      }
+    }
+  }
+}
+
+@Composable
+private fun VideoPlayerContent(
+  videoData: VideoData,
+  onNavigateBack: () -> Unit,
+  viewModel: MediaPlayerViewModel,
+) {
+  val context = LocalContext.current
+  val activity = LocalActivity.current
+  val player by viewModel.playerState.collectAsState()
+  val playbackError by viewModel.playbackError.collectAsState()
+  val shouldShowControls by viewModel.shouldShowControls.collectAsState()
+
+  // Enable immersive mode
+  LaunchedEffect(Unit) {
+    activity?.let { act ->
+      WindowCompat.setDecorFitsSystemWindows(act.window, false)
+      val windowInsetsController =
+        WindowCompat.getInsetsController(act.window, act.window.decorView)
+      windowInsetsController.apply {
+        hide(WindowInsetsCompat.Type.systemBars())
+        systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+      }
+    }
+  }
+
+  // Initialize player when video URL is provided
+  LaunchedEffect(videoData.videoResource) {
+    if (videoData.videoResource !is VideoResource.PlaceholderVideo) {
+      viewModel.initializePlayer(context, videoData.videoResource)
+    }
+  }
+
+  // Cleanup player and restore system UI on disposal
+  DisposableEffect(Unit) {
+    onDispose {
+      viewModel.savePlayerState()
+      viewModel.releasePlayer()
+      // Restore system bars when leaving video player
       activity?.let { act ->
-        WindowCompat.setDecorFitsSystemWindows(act.window, false)
+        WindowCompat.setDecorFitsSystemWindows(act.window, true)
         val windowInsetsController =
           WindowCompat.getInsetsController(act.window, act.window.decorView)
-        windowInsetsController.apply {
-          hide(WindowInsetsCompat.Type.systemBars())
-          systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
       }
     }
+  }
 
-    // Initialize player when video URL is provided
-    LaunchedEffect(videoData.videoResource) {
-      if (videoData.videoResource !is VideoResource.PlaceholderVideo) {
-        viewModel.initializePlayer(context, videoData.videoResource)
-      }
-    }
-
-    // Cleanup player and restore system UI on disposal
-    DisposableEffect(Unit) {
-      onDispose {
-        viewModel.savePlayerState()
-        viewModel.releasePlayer()
-        // Restore system bars when leaving video player
-        activity?.let { act ->
-          WindowCompat.setDecorFitsSystemWindows(act.window, true)
-          val windowInsetsController =
-            WindowCompat.getInsetsController(act.window, act.window.decorView)
-          windowInsetsController.show(WindowInsetsCompat.Type.systemBars())
-        }
-      }
-    }
-
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-      // Video content or thumbnail
-      if (playbackError == null && videoData.videoResource !is VideoResource.PlaceholderVideo) {
-        ExoPlayerView(
-          player = player,
-          showControls = shouldShowControls,
-          onControlsVisibilityChanged = { show ->
-            if (show) viewModel.showControls() else viewModel.hideControls()
-          },
-          modifier = Modifier.fillMaxSize(),
-        )
-      } else if (playbackError == null) {
-        // Show thumbnail for videos without URLs
-        AsyncImage(
-          model = videoData.thumbnailUrl,
-          contentDescription = videoData.title,
-          modifier = Modifier.fillMaxSize(),
-          contentScale = ContentScale.Crop,
-        )
-      } else {
-        // Show error if playback failed
-        playbackError?.let { error ->
-          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            ErrorMessage(
-              error = error,
-              onRetry = {
-                viewModel.clearError()
-                viewModel.initializePlayer(context, videoData.videoResource)
-              },
-            )
-          }
-        }
-      }
-
-      // Top bar with back button and title - Show only when controls are visible
-      if (shouldShowControls) {
-        Row(
-          modifier =
-            Modifier.fillMaxWidth()
-              .padding(16.dp)
-              .padding(top = 24.dp), // Additional top padding for status bar area
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          IconButton(
-            onClick = onNavigateBack,
-            modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-              tint = Color.White,
-            )
-          }
-
-          Spacer(modifier = Modifier.width(16.dp))
-
-          Text(
-            text = videoData.title,
-            color = Color.White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
+  Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    // Video content or thumbnail
+    if (playbackError == null && videoData.videoResource !is VideoResource.PlaceholderVideo) {
+      ExoPlayerView(
+        player = player,
+        showControls = shouldShowControls,
+        onControlsVisibilityChanged = { show ->
+          if (show) viewModel.showControls() else viewModel.hideControls()
+        },
+        modifier = Modifier.fillMaxSize(),
+      )
+    } else if (playbackError == null) {
+      // Show thumbnail for videos without URLs
+      AsyncImage(
+        model = videoData.thumbnailUrl,
+        contentDescription = videoData.title,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Crop,
+      )
+    } else {
+      // Show error if playback failed
+      playbackError?.let { error ->
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+          ErrorMessage(
+            error = error,
+            onRetry = {
+              viewModel.clearError()
+              viewModel.initializePlayer(context, videoData.videoResource)
+            },
           )
         }
+      }
+    }
+
+    // Top bar with back button and title - Show only when controls are visible
+    if (shouldShowControls) {
+      Row(
+        modifier =
+          Modifier.fillMaxWidth()
+            .padding(16.dp)
+            .padding(top = 24.dp), // Additional top padding for status bar area
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        IconButton(
+          onClick = onNavigateBack,
+          modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
+        ) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Back",
+            tint = Color.White,
+          )
+        }
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        Text(
+          text = videoData.title,
+          color = Color.White,
+          fontSize = 18.sp,
+          fontWeight = FontWeight.Bold,
+        )
       }
     }
   }

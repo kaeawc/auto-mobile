@@ -641,7 +641,7 @@ internal object DaemonSocketPaths {
     return try {
       if (!entryScript.exists()) return null
       val digest = MessageDigest.getInstance("SHA-256").digest(entryScript.readBytes())
-      digest.joinToString("") { "%02x".format(it) }.substring(0, 16)
+      digest.joinToString("") { formatHexByte(it) }.substring(0, 16)
     } catch (e: Exception) {
       null
     }

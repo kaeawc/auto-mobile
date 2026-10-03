@@ -121,7 +121,9 @@ jobs:
       # belt-and-suspenders, but it also warms the build cache before Conveyor runs.
       - name: "Build desktop jars"
         working-directory: android
-        run: ./gradlew :desktop-app:jar
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: ./gradlew :desktop-app:jar "-PdesktopPackageVersion=${PACKAGE_VERSION}"
 
       # Decode the Apple credentials to files only for a signed build. Left unset for the default
       # (self-signed) artifacts-only run, so no Apple secrets are needed to dispatch.

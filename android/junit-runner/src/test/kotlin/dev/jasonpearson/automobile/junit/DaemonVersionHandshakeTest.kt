@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.junit
 
 import java.io.File
 import java.security.MessageDigest
+import java.util.Locale
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -272,7 +273,7 @@ class DaemonVersionHandshakeTest {
       val expected =
         MessageDigest.getInstance("SHA-256")
           .digest(entryContent.toByteArray())
-          .joinToString("") { "%02x".format(it) }
+          .joinToString("") { "%02x".format(Locale.ROOT, it) }
           .substring(0, 16)
       assertEquals(expected, DaemonSocketPaths.resolveClientBuildId())
     } finally {

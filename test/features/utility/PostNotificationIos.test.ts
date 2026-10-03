@@ -1,13 +1,18 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { BootedDevice } from "../../../src/models";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+
+import { logger } from "../../../src/utils/logger";
 
 const SIM_UDID = "11111111-2222-3333-4444-555555555555";
 const PHYSICAL_UDID = "00008030001A2B3C4D5E6F7089ABCDEF01234567";
 
 describe("PostNotification - iOS Simulator", () => {
   let simctl: FakeSimCtlClient;
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  afterEach(() => warn.mockClear());
+  afterAll(() => warn.mockRestore());
 
   const makeDevice = (deviceId: string): BootedDevice =>
     ({ deviceId, platform: "ios" }) as BootedDevice;
@@ -19,6 +24,27 @@ describe("PostNotification - iOS Simulator", () => {
 
   beforeEach(() => {
     simctl = new FakeSimCtlClient();
+  });
+
+  test("logs unexpected push rejections and preserves the top-level failure", async () => {
+    const error = new Error("simctl rejected");
+    const push = spyOn(simctl, "pushNotification").mockRejectedValue(error);
+    try {
+      const result = await new PostNotification(makeDevice(SIM_UDID), null, null, simctl).execute({
+        title: "Hello",
+        body: "World",
+        appId: "com.example.App",
+      });
+      expect(result).toEqual({
+        success: false,
+        supported: false,
+        error: "Failed to post notification: simctl rejected",
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith("Failed to post notification: simctl rejected", error);
+    } finally {
+      push.mockRestore();
+    }
   });
 
   test("posts via simctl push on a simulator with appId", async () => {

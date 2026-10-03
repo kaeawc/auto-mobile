@@ -78,21 +78,6 @@ src/features/utility/ElementFinder.ts: error TS4104: The type 'readonly string[]
 src/features/utility/ElementFinder.ts: error TS4104: The type 'readonly string[]' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
 src/features/utility/ElementParser.ts: error TS2339: Property 'hierarchy' does not exist on type '{ windowLayer: number; }'.
 src/features/utility/ElementParser.ts: error TS2345: Argument of type 'ViewHierarchyWindowInfo[]' is not assignable to parameter of type '{ windowLayer: number; }[]'.
-src/index.ts: error TS2322: Type '["debug", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-src/index.ts: error TS2322: Type '["debug-perf", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-src/index.ts: error TS2322: Type '["mcp-recording", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-src/index.ts: error TS2322: Type '["mem-perf-audit", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-src/index.ts: error TS2322: Type '["predictive-ui", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-src/index.ts: error TS2322: Type '["raw-element-search", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-src/index.ts: error TS2322: Type '["ui-perf-mode", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 src/server/compactBoundsAdvertisement.ts: error TS2698: Spread types may only be created from object types.
 src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
 src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
@@ -123,7 +108,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 11 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.
 # swap-fp: 11 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'string | undefined' is not assignable to type 'null | string'.
 # swap-fp: 11 :: src/features/record/android/DualTrackRecorder.ts: error TS2322: Type 'A11ySource | AndroidCtrlProxyClient' is not assignable to type 'A11ySource'.
-# swap-fp: 11,11 :: src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
 # swap-fp: 11,11,13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 # swap-fp: 12,12 :: src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 # swap-fp: 12,12 :: src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
@@ -179,15 +163,8 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 67,73 :: src/features/utility/ElementFinder.ts: error TS4104: The type 'readonly string[]' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
 # swap-fp: 7 :: src/features/action/swipeon/SwipeOn.ts: error TS2322: Type 'AndroidCtrlProxyClient' is not assignable to type 'ScrollAccessibilityService'.
 # swap-fp: 7 :: src/features/observe/Idle.ts: error TS2741: Property 'updatedPrevTotalFrames' is missing in type '{ isStable: false; shouldUpdateLastNonIdleTime: true; updatedPrevMissedVsync: null; updatedPrevSlowUiThread: null; updatedPrevFrameDeadlineMissed: null; updatedFirstGfxInfoLog: false; }' but required in type 'UiStabilityResult'.
-# swap-fp: 7 :: src/index.ts: error TS2322: Type '["debug", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-# swap-fp: 7 :: src/index.ts: error TS2322: Type '["debug-perf", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-# swap-fp: 7 :: src/index.ts: error TS2322: Type '["mcp-recording", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-# swap-fp: 7 :: src/index.ts: error TS2322: Type '["mem-perf-audit", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-# swap-fp: 7 :: src/index.ts: error TS2322: Type '["predictive-ui", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-# swap-fp: 7 :: src/index.ts: error TS2322: Type '["raw-element-search", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-# swap-fp: 7 :: src/index.ts: error TS2322: Type '["ui-perf-mode", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
-# swap-fp: 7,7,7,7,9,9,9,9 :: src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
+# swap-fp: 7,11 :: src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 # swap-fp: 9 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.

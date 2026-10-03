@@ -31,18 +31,23 @@ If you have a question file an issue or discussion, but small contributions like
 
 ## Local Development
 
-| Platform | Script                                      |
-| -------- | ------------------------------------------- |
-| Android  | `./scripts/local-dev/android-hot-reload.sh` |
-| iOS      | `./scripts/local-dev/ios-hot-reload.sh`     |
+| Components                        | Script                                 |
+| --------------------------------- | -------------------------------------- |
+| Desktop, Android, iOS, MCP daemon | `bash scripts/local-dev/hot-reload.sh` |
+
+The four package scripts (`dev:android`, `dev:android:hot-reload`, `dev:ios`, and `dev:ios:hot-reload`) are aliases for this unified watcher; none limits the run to one platform.
 
 Options:
 
-- `--device <id>` - Target specific device (ADB device ID or simulator UDID)
-- `--skip-ai` - Run without AI agent prompt
-- `--once` - Build once and exit
+- `--device <id>` - Target a specific ADB device
+- `--simulator <udid>` - Target a specific iOS simulator
+- `--once` - Build all components once and exit
+- `--poll-interval <s>` - File watch interval in seconds (default: 2)
+- `--timeout <m>` - Background watcher timeout in minutes (default: 60)
+- `--manage-ios-runner` - Let the watcher own the CtrlProxy iOS runner lifecycle (default: the MCP daemon owns it)
+- `--help` - Show help
 
-Both scripts write logs to `scratch/`, auto-detect ports based on your git branch, and automatically enable debug flags (`AUTOMOBILE_DEBUG`, `AUTOMOBILE_DEBUG_PERF`).
+The script writes logs to `scratch/`, auto-detects ports based on your git branch, and automatically enables debug flags (`AUTOMOBILE_DEBUG`, `AUTOMOBILE_DEBUG_PERF`).
 
 **Verifying Setup**
 

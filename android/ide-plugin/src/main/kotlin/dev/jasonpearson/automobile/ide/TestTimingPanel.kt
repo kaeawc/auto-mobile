@@ -502,13 +502,13 @@ private fun normalizeTestMethodName(value: String): String {
 
 private fun formatDuration(durationMs: Int): String {
   if (durationMs >= 1000) {
-    return "${"%.2f".format(durationMs / 1000.0)}s"
+    return "${formatUiNumber("%.2f", durationMs / 1000.0)}s"
   }
   return "${durationMs}ms"
 }
 
 private fun formatRate(rate: Double): String {
-  return "${"%.1f".format(rate * 100)}%"
+  return "${formatUiNumber("%.1f", rate * 100)}%"
 }
 
 private fun formatTimestamp(value: String?): String {

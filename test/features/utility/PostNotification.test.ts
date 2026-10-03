@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -8,7 +8,11 @@ import os from "os";
 import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
+import { logger } from "../../../src/utils/logger";
+
 describe("PostNotification", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  afterAll(() => warn.mockRestore());
   let device: BootedDevice;
   let fakeAdb: FakeAdbExecutor;
   let fakeWindow: FakeWindow;
@@ -35,6 +39,7 @@ describe("PostNotification", () => {
   });
 
   afterEach(() => {
+    warn.mockClear();
     if (originalLaunchCwd === undefined) {
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
     } else {
@@ -48,6 +53,82 @@ describe("PostNotification", () => {
       stderr: "",
     });
   };
+
+  test("logs failures preparing SDK extras and preserves the Android failure", async () => {
+    const error = new Error("action unavailable");
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const result = await postNotification.execute({
+      title: "Hello",
+      body: "World",
+      appId: "com.example.app",
+      actions: [
+        {
+          get label(): string {
+            throw error;
+          },
+          actionId: "open",
+        },
+      ],
+    });
+    expect(result).toEqual({
+      success: false,
+      supported: false,
+      error: "Failed to post notification: action unavailable",
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("Failed to post notification: action unavailable", error);
+  });
+
+  test("logs missing host images and preserves the image failure", async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "automobile-notif-"));
+    const imagePath = path.join(tmpDir, "missing.png");
+    try {
+      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+        title: "Picture",
+        body: "Body",
+        imageType: "bigPicture",
+        imagePath,
+      });
+      expect(result).toEqual({
+        success: false,
+        supported: false,
+        imageType: "bigPicture",
+        error: `Image file not found at ${imagePath}`,
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toStartWith(`Image file not found at ${imagePath}: `);
+      expect(warn.mock.calls[0][1]).toBeInstanceOf(Error);
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("logs image push failures and preserves the image failure", async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "automobile-notif-"));
+    const imagePath = path.join(tmpDir, "image.png");
+    const error = new Error("push failed");
+    fakeAdb.setCommandError("push ", error);
+    try {
+      await writeFile(imagePath, "fake-image-content");
+      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+        title: "Picture",
+        body: "Body",
+        imageType: "bigPicture",
+        imagePath,
+      });
+      expect(result).toEqual({
+        success: false,
+        supported: false,
+        imageType: "bigPicture",
+        error: "Failed to push image to device: push failed",
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith("Failed to push image to device: push failed", error);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 
   test("posts via SDK receiver when available", async () => {
     configureReceiverProbe();

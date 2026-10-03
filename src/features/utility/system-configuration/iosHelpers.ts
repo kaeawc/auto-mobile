@@ -4,15 +4,14 @@
  * `IosSystemConfigurationAdapter` (for its locale/timezone/24h ops).
  */
 
-import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
 
 /**
- * Distinguish an iOS Simulator (8-4-4-4-12 UUID) from a physical iPhone
- * (e.g. `00008130-…`). Many system-configuration writes only work on
+ * Read the iOS device backend kind. Many system-configuration writes only work on
  * the Simulator, so callers gate on this.
  */
 export function isIosSimulator(deviceId: string): boolean {
-  return isIosSimulatorUdid(deviceId);
+  return resolveIosDeviceKind({ deviceId: deviceId }) === "simulator";
 }
 
 /** Compose an `xcrun simctl spawn <udid> <command>` shell line. */

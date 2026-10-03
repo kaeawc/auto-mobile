@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ActionableError } from "../../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
-import { isIosSimulatorUdid } from "./iosDeviceType";
+import { resolveIosDeviceKind } from "./IosDeviceKind";
 import {
   CORESIMULATOR_DEVICE_SET_PATH_ENV,
   DAEMON_LAUNCH_CWD_ENV,
@@ -51,6 +51,7 @@ export interface TccDatabaseFileSystem {
 }
 
 export interface SimulatorTccSqliteClientDependencies {
+  resolveKind?: typeof resolveIosDeviceKind;
   executor?: HostCommandExecutor;
   fileSystem?: TccDatabaseFileSystem;
   homeDirectory?: string;
@@ -221,6 +222,7 @@ function parsePermissionRows(output: string, deviceId: string): TccPermissionRow
  * classification together so permission actions never invoke sqlite directly.
  */
 export class SimulatorTccSqliteClient implements TccPermissionReader {
+  private readonly resolveKind: typeof resolveIosDeviceKind;
   private readonly executor: HostCommandExecutor;
   private readonly fileSystem: TccDatabaseFileSystem;
   private readonly homeDirectory: string;
@@ -229,6 +231,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
   private readonly timeoutMs: number;
 
   constructor(dependencies: SimulatorTccSqliteClientDependencies = {}) {
+    this.resolveKind = dependencies.resolveKind ?? resolveIosDeviceKind;
     this.executor = dependencies.executor ?? new DefaultHostCommandExecutor();
     this.fileSystem = dependencies.fileSystem ?? nodeFileSystem;
     this.homeDirectory = dependencies.homeDirectory ?? homedir();
@@ -295,7 +298,7 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     if (!normalizedDeviceId) {
       throw new ActionableError("Simulator TCC database lookup requires a non-empty device UDID");
     }
-    if (!isIosSimulatorUdid(normalizedDeviceId)) {
+    if (this.resolveKind({ deviceId: normalizedDeviceId }) === "physical") {
       throw new ActionableError(
         `Simulator TCC database lookup requires a simulator UDID, received ${normalizedDeviceId}`,
       );

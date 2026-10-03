@@ -4,7 +4,10 @@ import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceTy
 import { logger } from "../../../utils/logger";
 import { PlistClient } from "../../../utils/ios-cmdline-tools/PlistClient";
 import { parsePlist, type PlistValue } from "../../../utils/ios-cmdline-tools/XctestrunPlist";
-import { defaultDeviceSetRoot } from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+import {
+  defaultDeviceSetRoot,
+  type SimulatorDeviceSetEnvironment,
+} from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { NotificationPolicyAccessState } from "../NotificationPolicy";
 
 /**
@@ -187,12 +190,16 @@ export async function parseSettingsFromNestedXml(
 
 /**
  * Resolve a simulator's per-device data root the same way the TCC client does
- * (via `CORESIMULATOR_DEVICE_SET_PATH`, falling back to the default
- * CoreSimulator device set layout) rather than hard-coding the default
+ * ({@link defaultDeviceSetRoot} reads `CORESIMULATOR_DEVICE_SET_PATH`, falling
+ * back to the default CoreSimulator device set layout) rather than hard-coding the default
  * device set (issue #6583).
  */
-export function resolveDeviceDataRoot(udid: string, homeDirectory: string = os.homedir()): string {
-  return path.join(defaultDeviceSetRoot(homeDirectory), udid);
+export function resolveDeviceDataRoot(
+  udid: string,
+  homeDirectory: string = os.homedir(),
+  environment: SimulatorDeviceSetEnvironment = process.env,
+): string {
+  return path.join(defaultDeviceSetRoot(homeDirectory, environment), udid);
 }
 
 export class BulletinBoardAuthorizationReader implements IosNotificationAuthorizationReader {

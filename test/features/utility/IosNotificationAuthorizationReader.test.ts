@@ -1,3 +1,4 @@
+import { CORESIMULATOR_DEVICE_SET_PATH_ENV } from "../../../src/utils/workingDirectory";
 import { describe, expect, test } from "bun:test";
 import * as path from "path";
 import {
@@ -340,35 +341,18 @@ ${ordering.join("\n")}
 });
 
 describe("resolveDeviceDataRoot", () => {
-  const original = process.env.CORESIMULATOR_DEVICE_SET_PATH;
-  const restoreEnv = () => {
-    if (original === undefined) {
-      delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
-    } else {
-      process.env.CORESIMULATOR_DEVICE_SET_PATH = original;
-    }
-  };
-
-  test("honors CORESIMULATOR_DEVICE_SET_PATH when set", () => {
-    process.env.CORESIMULATOR_DEVICE_SET_PATH = "/custom/device-set";
-    try {
-      expect(resolveDeviceDataRoot(SIM_UDID, "/home/tester")).toBe(
-        path.join("/custom/device-set", SIM_UDID),
-      );
-    } finally {
-      restoreEnv();
-    }
+  test("honors the injected device-set environment", () => {
+    expect(
+      resolveDeviceDataRoot(SIM_UDID, "/home/tester", {
+        [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "/custom/device-set",
+      }),
+    ).toBe(path.join("/custom/device-set", SIM_UDID));
   });
 
   test("falls back to the default CoreSimulator device set layout", () => {
-    delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
-    try {
-      expect(resolveDeviceDataRoot(SIM_UDID, "/home/tester")).toBe(
-        path.join("/home/tester", "Library", "Developer", "CoreSimulator", "Devices", SIM_UDID),
-      );
-    } finally {
-      restoreEnv();
-    }
+    expect(resolveDeviceDataRoot(SIM_UDID, "/home/tester", {})).toBe(
+      path.join("/home/tester", "Library", "Developer", "CoreSimulator", "Devices", SIM_UDID),
+    );
   });
 });
 

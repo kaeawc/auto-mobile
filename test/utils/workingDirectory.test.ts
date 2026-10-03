@@ -1,73 +1,57 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import {
+  CORESIMULATOR_DEVICE_SET_PATH_ENV,
   DAEMON_LAUNCH_CWD_ENV,
   normalizeCoreSimulatorDeviceSetPathEnv,
 } from "../../src/utils/workingDirectory";
 
-function withDaemonLaunchCwd<T>(launchDirectory: string, run: () => T): T {
-  const previous = process.env[DAEMON_LAUNCH_CWD_ENV];
-  process.env[DAEMON_LAUNCH_CWD_ENV] = launchDirectory;
-  try {
-    return run();
-  } finally {
-    if (previous === undefined) {
-      delete process.env[DAEMON_LAUNCH_CWD_ENV];
-    } else {
-      process.env[DAEMON_LAUNCH_CWD_ENV] = previous;
-    }
-  }
-}
-
 describe("normalizeCoreSimulatorDeviceSetPathEnv", () => {
-  test("resolves a relative CORESIMULATOR_DEVICE_SET_PATH against the daemon launch directory", () => {
+  test("resolves a relative device-set path against the daemon launch directory", () => {
     const launchDirectory = resolve("launch-project");
     const env = {
-      CORESIMULATOR_DEVICE_SET_PATH: "custom-devices",
-      AUTOMOBILE_DAEMON_LAUNCH_CWD: launchDirectory,
+      [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "custom-devices",
+      [DAEMON_LAUNCH_CWD_ENV]: launchDirectory,
     };
 
     normalizeCoreSimulatorDeviceSetPathEnv(env);
 
-    expect(env.CORESIMULATOR_DEVICE_SET_PATH).toBe(join(launchDirectory, "custom-devices"));
+    expect(env[CORESIMULATOR_DEVICE_SET_PATH_ENV]).toBe(join(launchDirectory, "custom-devices"));
   });
 
-  test("leaves an already-absolute CORESIMULATOR_DEVICE_SET_PATH untouched", () => {
+  test("leaves an already-absolute device-set path untouched", () => {
     const absolutePath = resolve("/Volumes/CI/DeviceSets/job-7/Devices");
-    withDaemonLaunchCwd(resolve("launch-project"), () => {
-      const env = { CORESIMULATOR_DEVICE_SET_PATH: absolutePath };
+    const env = {
+      [CORESIMULATOR_DEVICE_SET_PATH_ENV]: absolutePath,
+      [DAEMON_LAUNCH_CWD_ENV]: resolve("launch-project"),
+    };
 
-      normalizeCoreSimulatorDeviceSetPathEnv(env);
+    normalizeCoreSimulatorDeviceSetPathEnv(env);
 
-      expect(env.CORESIMULATOR_DEVICE_SET_PATH).toBe(absolutePath);
-    });
+    expect(env[CORESIMULATOR_DEVICE_SET_PATH_ENV]).toBe(absolutePath);
   });
 
-  test("leaves a missing or blank CORESIMULATOR_DEVICE_SET_PATH untouched", () => {
-    const missing: { CORESIMULATOR_DEVICE_SET_PATH?: string } = {};
+  test("leaves a missing or blank device-set path untouched", () => {
+    const missing: { [CORESIMULATOR_DEVICE_SET_PATH_ENV]?: string } = {};
     normalizeCoreSimulatorDeviceSetPathEnv(missing);
-    expect(missing.CORESIMULATOR_DEVICE_SET_PATH).toBeUndefined();
+    expect(missing[CORESIMULATOR_DEVICE_SET_PATH_ENV]).toBeUndefined();
 
-    const blank = { CORESIMULATOR_DEVICE_SET_PATH: "   " };
+    const blank = { [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "   " };
     normalizeCoreSimulatorDeviceSetPathEnv(blank);
-    expect(blank.CORESIMULATOR_DEVICE_SET_PATH).toBe("   ");
+    expect(blank[CORESIMULATOR_DEVICE_SET_PATH_ENV]).toBe("   ");
   });
 
-  test("anchors a relative device set to the launch cwd carried by the injected env, not ambient", () => {
-    // The injected env is the single source of truth for BOTH the device-set
-    // path and the launch directory it resolves against; an ambient
-    // AUTOMOBILE_DAEMON_LAUNCH_CWD must not override the injected one.
+  test("anchors a relative device set to the launch cwd carried by the injected env", () => {
+    // The injected env supplies both the device-set path and launch directory.
     const injectedLaunch = resolve("/injected/launch/dir");
-    withDaemonLaunchCwd(resolve("/ambient/unused/dir"), () => {
-      const env = {
-        CORESIMULATOR_DEVICE_SET_PATH: "custom-devices",
-        AUTOMOBILE_DAEMON_LAUNCH_CWD: injectedLaunch,
-      };
+    const env = {
+      [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "custom-devices",
+      [DAEMON_LAUNCH_CWD_ENV]: injectedLaunch,
+    };
 
-      normalizeCoreSimulatorDeviceSetPathEnv(env);
+    normalizeCoreSimulatorDeviceSetPathEnv(env);
 
-      expect(env.CORESIMULATOR_DEVICE_SET_PATH).toBe(join(injectedLaunch, "custom-devices"));
-    });
+    expect(env[CORESIMULATOR_DEVICE_SET_PATH_ENV]).toBe(join(injectedLaunch, "custom-devices"));
   });
 
   test("normalizing before a chdir keeps a relative device set resolvable from any later cwd", () => {
@@ -81,11 +65,11 @@ describe("normalizeCoreSimulatorDeviceSetPathEnv", () => {
     // therefore chdir-invariant — before anything reads it.
     const launchDirectory = resolve("launch-project");
     const env = {
-      CORESIMULATOR_DEVICE_SET_PATH: "custom-devices",
-      AUTOMOBILE_DAEMON_LAUNCH_CWD: launchDirectory,
+      [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "custom-devices",
+      [DAEMON_LAUNCH_CWD_ENV]: launchDirectory,
     };
     normalizeCoreSimulatorDeviceSetPathEnv(env);
-    const resolvedForEveryConsumer = env.CORESIMULATOR_DEVICE_SET_PATH;
+    const resolvedForEveryConsumer = env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
 
     // Simulate reads from two different "current working directories" after a
     // daemon chdir — an already-absolute value ignores cwd entirely, so both

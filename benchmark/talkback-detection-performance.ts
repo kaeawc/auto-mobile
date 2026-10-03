@@ -3,7 +3,7 @@
  * Tests caching behavior and validates the <50ms overhead acceptance criterion
  */
 
-import { DefaultAccessibilityDetector } from "../src/utils/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../src/features/accessibility/AccessibilityDetector";
 import { FeatureFlagService } from "../src/features/featureFlags/FeatureFlagService";
 import { FakeTimer } from "../test/fakes/FakeTimer";
 import { SystemTimer } from "../src/utils/SystemTimer";

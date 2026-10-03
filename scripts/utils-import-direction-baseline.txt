@@ -1,4 +1,3 @@
-src/utils/AccessibilityDetector.ts -> src/features/featureFlags/FeatureFlagService
 src/utils/ContentHashProvider.ts -> src/features/observe/GetAppMetadata
 src/utils/DeviceSessionManager.ts -> src/daemon/deviceAdmissionGate
 src/utils/DeviceSessionManager.ts -> src/features/observe/ObserveScreen
@@ -11,8 +10,6 @@ src/utils/DeviceSessionManager.ts -> src/features/observe/ios
 src/utils/DeviceSessionManager.ts -> src/features/observe/ios/IOSCtrlProxyClient
 src/utils/DeviceSessionManager.ts -> src/server/ToolExecutionContext
 src/utils/DeviceSessionManager.ts -> src/server/deviceExecutionBinding
-src/utils/IosVoiceOverDetector.ts -> src/features/featureFlags/FeatureFlagService
-src/utils/IosVoiceOverDetector.ts -> src/features/observe/ios
 src/utils/KeepScreenAwakeManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
 src/utils/WorkProfileMonitor.ts -> src/db/installedAppsRepository
 src/utils/android-cmdline-tools/AdbClientFactory.ts -> src/daemon/deviceAdmissionGate
@@ -25,10 +22,7 @@ src/utils/appearance/AppearanceSyncScheduler.ts -> src/daemon/daemonState
 src/utils/appearance/AppearanceSyncScheduler.ts -> src/server/appearanceManager
 src/utils/appearance/applyAppearanceOnConnect.ts -> src/server/appearanceManager
 src/utils/configuredDeviceInventory.ts -> src/server/deviceDescription
-src/utils/interfaces/AccessibilityDetector.ts -> src/features/featureFlags/FeatureFlagService
 src/utils/interfaces/ElementSelector.ts -> src/features/utility/ElementResolver
-src/utils/interfaces/IosVoiceOverDetector.ts -> src/features/featureFlags/FeatureFlagService
-src/utils/interfaces/IosVoiceOverDetector.ts -> src/features/observe/ios
 src/utils/interfaces/PlatformClient.ts -> src/features/observe/interfaces/CtrlProxyClient
 src/utils/interfaces/SnapshotProvider.ts -> src/features/action/CaptureSnapshot
 src/utils/interfaces/SnapshotProvider.ts -> src/features/action/RestoreSnapshot

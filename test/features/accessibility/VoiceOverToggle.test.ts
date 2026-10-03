@@ -4,7 +4,7 @@ import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import { DefaultIosVoiceOverDetector } from "../../../src/utils/IosVoiceOverDetector";
+import { DefaultIosVoiceOverDetector } from "../../../src/features/accessibility/IosVoiceOverDetector";
 import type { BootedDevice } from "../../../src/models";
 
 const SIMULATOR_DEVICE: BootedDevice = {

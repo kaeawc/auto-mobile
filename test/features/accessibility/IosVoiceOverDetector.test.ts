@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DefaultIosVoiceOverDetector } from "../../src/utils/IosVoiceOverDetector";
-import { FakeTimer } from "../fakes/FakeTimer";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios";
-import type { CtrlProxyVoiceOverResult } from "../../src/features/observe/ios/types";
-import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import { DefaultIosVoiceOverDetector } from "../../../src/features/accessibility/IosVoiceOverDetector";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import type { IOSCtrlProxy } from "../../../src/features/observe/ios";
+import type { CtrlProxyVoiceOverResult } from "../../../src/features/observe/ios/types";
+import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 
 /**
  * Minimal fake IOSCtrlProxy for VoiceOver detection tests

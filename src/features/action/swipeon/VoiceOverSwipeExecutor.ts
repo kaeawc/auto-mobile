@@ -3,7 +3,7 @@ import { BootedDevice, Element, SwipeDirection } from "../../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { BoomerangConfig, GestureExecutor, VoiceOverSwipeRunner } from "./types";
-import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
+import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import type { IOSCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";

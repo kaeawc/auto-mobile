@@ -1,7 +1,7 @@
 import type {
   AccessibilityDetector,
   AccessibilityService,
-} from "../../src/utils/interfaces/AccessibilityDetector";
+} from "../../src/features/accessibility/interfaces/AccessibilityDetector";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 

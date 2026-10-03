@@ -1,17 +1,17 @@
-import { logger } from "./logger";
-import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
+import { logger } from "../../utils/logger";
+import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import type {
   AccessibilityDetector as IAccessibilityDetector,
   AccessibilityService,
 } from "./interfaces/AccessibilityDetector";
-import { SystemTimer, type Timer } from "./SystemTimer";
-import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import { TTLCache } from "./cache/Cache";
+import { SystemTimer, type Timer } from "../../utils/SystemTimer";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { TTLCache } from "../../utils/cache/Cache";
 import {
   CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT,
   CTRL_PROXY_PACKAGE,
-} from "../ctrlProxy/constants";
-import { errorMessage } from "./describeUnknownError";
+} from "../../ctrlProxy/constants";
+import { errorMessage } from "../../utils/describeUnknownError";
 
 const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
 const TALKBACK_SERVICE = "TalkBackService";

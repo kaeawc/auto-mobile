@@ -9,7 +9,7 @@
  *   4. Cache miss → calls CtrlProxy WebSocket, caches result
  */
 
-import { DefaultIosVoiceOverDetector } from "../src/utils/IosVoiceOverDetector";
+import { DefaultIosVoiceOverDetector } from "../src/features/accessibility/IosVoiceOverDetector";
 import { FeatureFlagService } from "../src/features/featureFlags/FeatureFlagService";
 import { FakeTimer } from "../test/fakes/FakeTimer";
 import { SystemTimer } from "../src/utils/SystemTimer";

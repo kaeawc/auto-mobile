@@ -1,9 +1,9 @@
-import { logger } from "./logger";
+import { logger } from "../../utils/logger";
 import type { IosVoiceOverDetector as IIosVoiceOverDetector } from "./interfaces/IosVoiceOverDetector";
-import { SystemTimer, type Timer } from "./SystemTimer";
-import type { IOSCtrlProxy } from "../features/observe/ios";
-import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import { TTLCache } from "./cache/Cache";
+import { SystemTimer, type Timer } from "../../utils/SystemTimer";
+import type { IOSCtrlProxy } from "../observe/ios";
+import type { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { TTLCache } from "../../utils/cache/Cache";
 
 /**
  * DefaultIosVoiceOverDetector handles detection of VoiceOver on iOS devices

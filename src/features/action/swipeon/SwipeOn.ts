@@ -34,8 +34,8 @@ import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { resolveSwipeDirection } from "./swipeOnUtils";
-import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../../utils/AccessibilityDetector";
+import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -78,7 +78,7 @@ import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordin
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
 import { IOSCtrlProxyClient } from "../../observe/ios";
-import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
+import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 const DISPLAY_SWIPE_OPTIONS = [

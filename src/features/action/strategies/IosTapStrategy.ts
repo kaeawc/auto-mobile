@@ -1,8 +1,8 @@
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { ViewHierarchy } from "../../observe/ViewHierarchy";
-import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
-import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
+import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
+import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";

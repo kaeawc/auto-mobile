@@ -576,7 +576,6 @@ function scheduleStartupLogSweep(state: StartupLogSweep): void {
       }
     });
   }, 0);
-  state.timeout.unref?.();
 }
 
 function createStartupLogSweep(timer: Timer, prune: () => Promise<void>): StartupLogSweep {
@@ -592,8 +591,9 @@ function createStartupLogSweep(timer: Timer, prune: () => Promise<void>): Startu
 }
 
 // Give module-load reader registration one event-loop turn without delaying
-// logger initialization or keeping short-lived CLI processes open. Logger-only
-// paths still get bounded, fail-closed cleanup. If daemonFiles loads later,
+// logger initialization. The zero-delay timer stays ref'd so even a short-lived
+// CLI process starts the sweep before exiting. Logger-only paths still get
+// bounded, fail-closed cleanup. If daemonFiles loads later,
 // registration schedules exactly one sweep with readers, even after the fallback.
 let startupLogSweep = logsDir ? createStartupLogSweep(defaultTimer, pruneOldLogFiles) : undefined;
 

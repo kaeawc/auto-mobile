@@ -78,6 +78,40 @@ describe("pruneLogFiles", () => {
     return { dir, timer, staleTime, source, prune, sweep };
   }
 
+  test("startup keeps its zero-delay timer ref'd and prunes after registration", async () => {
+    const { timer, source, prune } = startupFixture((pid) => pid === 333);
+    const scheduleTimeout = timer.setTimeout.bind(timer);
+    const cancelTimeout = timer.clearTimeout.bind(timer);
+    const handles = new Map<NodeJS.Timeout, NodeJS.Timeout>();
+    const unref = mock(function (this: NodeJS.Timeout) {
+      return this;
+    });
+    spyOn(timer, "setTimeout").mockImplementation((callback, ms) => {
+      const handle = { unref } as NodeJS.Timeout;
+      handles.set(handle, scheduleTimeout(callback, ms));
+      return handle;
+    });
+    spyOn(timer, "clearTimeout").mockImplementation((handle) => {
+      cancelTimeout(handles.get(handle) ?? handle);
+      handles.delete(handle);
+    });
+    resetLogRetentionNamespaceSourceForTesting({ timer, prune });
+
+    expect(timer.getPendingTimeouts()).toEqual([0]);
+    // Guard against a fast process exiting before the startup sweep starts.
+    expect(unref).not.toHaveBeenCalled();
+    expect(prune).not.toHaveBeenCalled();
+    registerLogRetentionNamespaceSource(source);
+    expect(prune).not.toHaveBeenCalled();
+    expect(source.listDaemonPidFilesSync).not.toHaveBeenCalled();
+    timer.advanceTime(0);
+    await flushLogRetentionStartupSweepForTesting();
+    expect(prune).toHaveBeenCalledTimes(1);
+    expect(source.readDaemonOwnerForRetentionSync).toHaveBeenCalledWith("peer.pid");
+    expect(unref).not.toHaveBeenCalled();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("startup defers pruning until registration and applies live-owner readers", async () => {
     const { dir, timer, source, prune } = startupFixture((pid) => pid === 333);
     await flushLogRetentionStartupSweepForTesting();

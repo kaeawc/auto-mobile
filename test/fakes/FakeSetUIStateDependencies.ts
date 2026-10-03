@@ -5,7 +5,10 @@ import { ClearTextResult } from "../../src/models/ClearTextResult";
 import { SwipeOnResult } from "../../src/models/SwipeOnResult";
 import { FieldType } from "../../src/models/SetUIStateResult";
 import { FieldTypeDetector } from "../../src/features/action/FieldTypeDetector";
-import type { ObserveScreen } from "../../src/features/observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../../src/features/observe/interfaces/ObserveScreen";
 
 /**
  * Interface for TapOnElement dependency
@@ -260,7 +263,8 @@ export class FakeSwipeOn implements SwipeOnLike {
 export class FakeObserveScreenForSetUIState implements ObserveScreen {
   private result: ObserveResult;
   private callCount: number = 0;
-  private resultFactory: (() => ObserveResult) | null = null;
+  private resultFactory: ((options?: ObserveScreenExecuteOptions) => ObserveResult) | null = null;
+  private executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
 
   constructor() {
     this.result = this.createDefaultResult();
@@ -275,18 +279,17 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
     };
   }
 
-  async execute(
-    _queryOptions?: any,
-    _perf?: any,
-    _skipWaitForFresh?: boolean,
-    _minTimestamp?: number,
-    _signal?: AbortSignal,
-  ): Promise<ObserveResult> {
+  async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     this.callCount++;
-    if (this.resultFactory) {
-      return this.resultFactory();
-    }
-    return this.result;
+    this.executeOptionsHistory.push({ ...(options ?? {}) });
+    options?.signal?.throwIfAborted();
+    const result = this.resultFactory ? this.resultFactory(options) : this.result;
+    options?.signal?.throwIfAborted();
+    return result;
+  }
+
+  getExecuteOptions(): ObserveScreenExecuteOptions[] {
+    return [...this.executeOptionsHistory];
   }
 
   setResult(result: ObserveResult): void {
@@ -294,7 +297,7 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
     this.resultFactory = null;
   }
 
-  setResultFactory(factory: () => ObserveResult): void {
+  setResultFactory(factory: (options?: ObserveScreenExecuteOptions) => ObserveResult): void {
     this.resultFactory = factory;
   }
 
@@ -322,6 +325,7 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
 
   reset(): void {
     this.callCount = 0;
+    this.executeOptionsHistory = [];
     this.result = this.createDefaultResult();
     this.resultFactory = null;
   }

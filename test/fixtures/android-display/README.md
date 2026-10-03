@@ -32,3 +32,11 @@ without taking another device capture.
 - `hinge-angle0-get-120.txt`: captured from am-fold-pixel10pf after `setPosture`
   with `hingeAngle: 120`, per issue #9018. Full 24-byte output:
   `hinge-angle0 = 120\r\nOK\r\n`.
+
+## Consistent Pixel 10 Pro Fold pair (API 36)
+
+See [fold-pixel10pf-api36](fold-pixel10pf-api36/README.md) for byte-exact open/closed
+captures from one boot, command provenance, and the missing `cmd display get-displays`
+coverage. The older `fold-displays.txt` cover ID `4619827259835644673` has undocumented
+provenance and is not corroborated by this consistent capture, whose cover ID is
+`4619827551948147201`.

@@ -71,13 +71,35 @@ describe("DeviceSnapshotStore", () => {
     }
   });
 
-  it("should default to the ~/.auto-mobile/snapshots base path", () => {
-    const defaultStore = new DeviceSnapshotStore();
-    expect(defaultStore.getBasePath()).toBe(path.join(os.homedir(), ".auto-mobile", "snapshots"));
-    // Guard against regressing to the historical hyphen-less ".automobile" typo,
-    // which orphaned snapshot state from the rest of ~/.auto-mobile (issue #5706).
-    expect(defaultStore.getBasePath()).not.toContain(path.join(".automobile", "snapshots"));
-  });
+  for (const envKey of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {
+    it(`resolves the default snapshot path lazily from ${envKey} and preserves overrides`, () => {
+      const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+      const originalLegacyDataDir = process.env.AUTO_MOBILE_DATA_DIR;
+      try {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+        delete process.env.AUTO_MOBILE_DATA_DIR;
+        process.env[envKey] = testBasePath;
+        expect(new DeviceSnapshotStore().getBasePath()).toBe(path.join(testBasePath, "snapshots"));
+        expect(store.getBasePath()).toBe(testBasePath);
+
+        process.env[envKey] = path.join(testBasePath, "another-root");
+        expect(new DeviceSnapshotStore().getBasePath()).toBe(
+          path.join(testBasePath, "another-root", "snapshots"),
+        );
+      } finally {
+        if (originalDataDir === undefined) {
+          delete process.env.AUTOMOBILE_DATA_DIR;
+        } else {
+          process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+        }
+        if (originalLegacyDataDir === undefined) {
+          delete process.env.AUTO_MOBILE_DATA_DIR;
+        } else {
+          process.env.AUTO_MOBILE_DATA_DIR = originalLegacyDataDir;
+        }
+      }
+    });
+  }
 
   describe("generateSnapshotName", () => {
     it("should generate a snapshot name with timestamp", () => {

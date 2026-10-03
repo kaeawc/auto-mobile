@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import type { Dirent } from "fs";
 import * as path from "path";
-import * as os from "os";
+import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
 import { logger } from "./logger";
 import { assertSafePathSegment } from "./snapshotNameValidation";
 import { toActionableError, type Platform } from "../models";
@@ -81,7 +81,7 @@ export class DeviceSnapshotStore {
     private readonly syncDirectory: (dirPath: string) => Promise<void> = syncDirectoryOnDisk,
     private readonly syncFile: (file: SyncableFile) => Promise<void> = (file) => file.sync(),
   ) {
-    this.basePath = customBasePath || path.join(os.homedir(), ".auto-mobile", "snapshots");
+    this.basePath = customBasePath || getTempDir(TEMP_SUBDIRS.SNAPSHOTS);
   }
 
   getBasePath(): string {

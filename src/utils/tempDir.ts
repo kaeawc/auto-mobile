@@ -189,6 +189,8 @@ export const TEMP_SUBDIRS = {
   LOGS: "logs",
   TOOL_LOGS: "tool_logs",
   SCREENSHOTS: "screenshots",
+  SNAPSHOTS: "snapshots",
+  VIDEO_ARCHIVE: "video-archive",
   NAVIGATION_SCREENSHOTS: "navigation-screenshots",
   VIEW_HIERARCHY: "view_hierarchy",
   OBSERVE_RESULTS: "observe_results",

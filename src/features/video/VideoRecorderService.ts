@@ -1,5 +1,5 @@
 import { promises as fsPromises, type Stats } from "node:fs";
-import os from "node:os";
+import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import path from "node:path";
 import type {
   VideoFormat,
@@ -249,8 +249,7 @@ export class VideoRecorderService {
 
   constructor(dependencies: VideoRecorderServiceDependencies) {
     this.backend = dependencies.backend;
-    this.archiveRoot =
-      dependencies.archiveRoot ?? path.join(os.homedir(), ".auto-mobile", "video-archive");
+    this.archiveRoot = dependencies.archiveRoot ?? getTempDir(TEMP_SUBDIRS.VIDEO_ARCHIVE);
     this.log = dependencies.logger ?? logger;
     this.idGenerator = normalizeIdGenerator(dependencies.idGenerator);
     this.now = dependencies.now ?? (() => new Date());

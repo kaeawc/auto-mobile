@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
+import os from "node:os";
+import { promises as fs } from "node:fs";
 import {
   assertWithinArchiveRoot,
   buildVideoResourceContent,
@@ -45,6 +47,58 @@ function store(overrides: Partial<VideoRecordingResourceStore> = {}): VideoRecor
 function parse(text: string | undefined): Record<string, unknown> {
   return JSON.parse(text ?? "{}");
 }
+
+describe("default archive root", () => {
+  for (const envKey of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {
+    test(`confines default resource reads to the current ${envKey} and preserves overrides`, async () => {
+      const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "video-resource-root-"));
+      const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+      const originalLegacyDataDir = process.env.AUTO_MOBILE_DATA_DIR;
+      try {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+        delete process.env.AUTO_MOBILE_DATA_DIR;
+        process.env[envKey] = dataDir;
+        const archiveRoot = path.join(dataDir, "video-archive");
+        const filePath = path.join(archiveRoot, "recording.mp4");
+        await fs.mkdir(archiveRoot);
+        await fs.writeFile(filePath, "isolated-video");
+
+        const content = await buildVideoResourceContent(
+          metadata({ filePath }),
+          VIDEO_RESOURCE_URIS.LATEST,
+        );
+        expect(content.blob).toBe(Buffer.from("isolated-video").toString("base64"));
+
+        process.env[envKey] = path.join(dataDir, "another-root");
+        const rejected = await buildVideoResourceContent(
+          metadata({ filePath }),
+          VIDEO_RESOURCE_URIS.LATEST,
+        );
+        expect(rejected.blob).toBeUndefined();
+        expect(parse(rejected.text).error).toContain("outside the archive root");
+
+        const explicit = await buildVideoResourceContent(
+          metadata({ filePath }),
+          VIDEO_RESOURCE_URIS.LATEST,
+          store({ archiveRoot }),
+        );
+        expect(explicit.blob).toBe(Buffer.from("video-bytes").toString("base64"));
+      } finally {
+        if (originalDataDir === undefined) {
+          delete process.env.AUTOMOBILE_DATA_DIR;
+        } else {
+          process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+        }
+        if (originalLegacyDataDir === undefined) {
+          delete process.env.AUTO_MOBILE_DATA_DIR;
+        } else {
+          process.env.AUTO_MOBILE_DATA_DIR = originalLegacyDataDir;
+        }
+        await fs.rm(dataDir, { recursive: true, force: true });
+      }
+    });
+  }
+});
 
 describe("getLatestVideoRecording", () => {
   test("reports that no recordings are available when the store is empty", async () => {

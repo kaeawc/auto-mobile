@@ -16,7 +16,7 @@ import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
   triggerAppearanceSync,
-} from "../utils/appearance/AppearanceSyncScheduler";
+} from "./AppearanceSyncScheduler";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DaemonState } from "./daemonState";
 import type {

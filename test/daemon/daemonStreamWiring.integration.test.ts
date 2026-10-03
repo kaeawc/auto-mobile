@@ -36,7 +36,7 @@ import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { logger } from "../../src/utils/logger";
-import * as appearanceSyncScheduler from "../../src/utils/appearance/AppearanceSyncScheduler";
+import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import type {
   OnNavigationGraphRequestedCallback,
   OnObservationRequestedCallback,

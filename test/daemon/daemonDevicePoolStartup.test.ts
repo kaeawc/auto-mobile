@@ -17,7 +17,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import * as appearanceSyncScheduler from "../../src/utils/appearance/AppearanceSyncScheduler";
+import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 
 interface DaemonStartupInternals {
   devicePool: DevicePool;

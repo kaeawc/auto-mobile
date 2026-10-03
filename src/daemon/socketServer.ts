@@ -4345,6 +4345,7 @@ export class UnixSocketServer {
       }
       case "ide/status": {
         return {
+          structuredSessionNotFound: true,
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
           // floating "latest" tag — external consumers must see exactly what the
           // daemon will fetch (#2746).

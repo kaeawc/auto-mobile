@@ -16,6 +16,7 @@ import {
 } from "../../src/server/mcpRecordingManager";
 
 interface ServerInternals {
+  handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
   mcpClients: Map<string, Client>;
   resetMcpClient(key: string): Promise<void>;
   acceptingRequests: boolean;
@@ -38,6 +39,24 @@ class RpcSocket extends FakeSocket {
 
 describe("daemon socket transport lifecycle", () => {
   afterEach(() => resetMcpRecordingState());
+
+  test("ide/status advertises structured session-not-found errors", async () => {
+    const server = new UnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      new FakeTimer(),
+    );
+    const internals = server as unknown as ServerInternals;
+    await expect(
+      internals.handleLocalSocketRequest({
+        id: "status-1",
+        type: "daemon_request",
+        method: "ide/status",
+        params: {},
+      }),
+    ).resolves.toMatchObject({ structuredSessionNotFound: true });
+  });
 
   test("codes a missing socket session without changing its message", async () => {
     const timer = new FakeTimer();

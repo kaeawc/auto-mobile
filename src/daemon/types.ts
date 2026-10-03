@@ -325,6 +325,8 @@ export interface DaemonStatus {
   buildId?: string;
   /** Whether this daemon generation is currently executing provisionDevice. */
   activeProvisioning?: boolean;
+  /** Missing socket sessions use DAEMON_SESSION_NOT_FOUND_CODE; tool messages are not evidence. */
+  structuredSessionNotFound?: boolean;
   /** Non-secret fingerprint of the acceptance discovery capability bound at startup. */
   acceptanceCapabilityFingerprint?: string | null;
   /**

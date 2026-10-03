@@ -2988,11 +2988,202 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test.each(
+      [
+        { structuredSessionNotFound: true, code: DAEMON_SESSION_NOT_FOUND_CODE, reconnect: true },
+        { structuredSessionNotFound: true, code: undefined, reconnect: false },
+        { structuredSessionNotFound: true, code: "other_failure", reconnect: false },
+        { structuredSessionNotFound: undefined, code: undefined, reconnect: true },
+      ].flatMap((scenario) =>
+        (scenario.reconnect ? ["observe"] : ["observe", "inputText"]).map((toolName) => ({
+          ...scenario,
+          toolName,
+        })),
+      ),
+    )("honors socket session-error capability: %j", async (scenario) => {
+      const error = Object.assign(
+        new ActionableError(
+          scenario.code === DAEMON_SESSION_NOT_FOUND_CODE
+            ? "Missing socket session"
+            : "Tool failed: Session not found",
+        ),
+        {
+          code: scenario.code,
+        },
+      );
+      const first = new ScriptedDaemonClient({ toolError: error });
+      const next = new ScriptedDaemonClient({ toolResult: { content: [] } });
+      const clients = [first, next];
+      const manager = matchingDaemonManager();
+      let statusProbes = 0;
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: manager,
+        daemonAvailabilityProbe: async () => true,
+        daemonStatusProbe: async () => {
+          statusProbes++;
+          return {
+            ...manager.statusResult,
+            ...(scenario.structuredSessionNotFound === undefined
+              ? {}
+              : { structuredSessionNotFound: scenario.structuredSessionNotFound }),
+          };
+        },
+        autoStartDaemon: false,
+        timer: new FakeTimer(),
+      });
+      try {
+        if (scenario.reconnect) {
+          await expect(proxy.callTool("observe", {})).resolves.toEqual({ content: [] });
+          expect(first.closeCallCount).toBe(1);
+          expect(next.callToolCalls).toHaveLength(1);
+        } else {
+          await expect(proxy.callTool(scenario.toolName, {})).rejects.toBe(error);
+          expect(first.closeCallCount).toBe(0);
+          expect(next.callToolCalls).toHaveLength(0);
+        }
+        expect(statusProbes).toBe(scenario.reconnect ? 2 : 1);
+      } finally {
+        await proxy.close();
+      }
+    });
+
+    test("keeps session-error capability when a tool notification invalidates status", async () => {
+      const error = new ActionableError("Tool failed: Session not found");
+      let failTool = false;
+      let statusProbes = 0;
+      const client = new FakeDaemonClient({
+        onCallTool: () => {
+          if (failTool) {
+            throw error;
+          }
+        },
+      });
+      const manager = matchingDaemonManager();
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: manager,
+        daemonAvailabilityProbe: async () => true,
+        daemonStatusProbe: async () => {
+          statusProbes++;
+          return { ...manager.statusResult, structuredSessionNotFound: true };
+        },
+        autoStartDaemon: false,
+        timer: new FakeTimer(),
+      });
+      try {
+        await proxy.callTool("observe", {});
+        client.emitNotification("notifications/tools/list_changed");
+        failTool = true;
+        await expect(proxy.callTool("inputText", {})).rejects.toBe(error);
+        expect(client.isConnected()).toBeTrue();
+        expect(statusProbes).toBe(1);
+      } finally {
+        await proxy.close();
+      }
+    });
+
+    test.each([true, undefined])(
+      "refreshes session-error capability after reconnect: %j",
+      async (initialCapability) => {
+        let capability = initialCapability;
+        const error = new ActionableError("Tool failed: Session not found");
+        const first = new FakeDaemonClient();
+        const second = new ScriptedDaemonClient({ toolError: error });
+        const third = new ScriptedDaemonClient({ toolResult: { content: [] } });
+        const clients = [first, second, third];
+        const manager = matchingDaemonManager();
+        // Matching PID metadata must not supply a capability the socket owner omits.
+        manager.statusResult = {
+          ...manager.statusResult,
+          buildId: "matching-build",
+          entryScript: "/fake/index.ts",
+          structuredSessionNotFound: true,
+        };
+        const socketStatus = { ...manager.statusResult };
+        delete socketStatus.structuredSessionNotFound;
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => clients.shift()!,
+          daemonManager: manager,
+          buildIdentity: { buildId: "matching-build", entryScript: "/fake/index.ts" },
+          daemonAvailabilityProbe: async () => true,
+          daemonStatusProbe: async () => ({
+            ...socketStatus,
+            ...(capability === undefined ? {} : { structuredSessionNotFound: capability }),
+          }),
+          autoStartDaemon: false,
+          timer: new FakeTimer(),
+        });
+        try {
+          await proxy.callTool("observe", {});
+          capability = initialCapability ? undefined : true;
+          first.emitConnectionClosed();
+          if (capability) {
+            await expect(proxy.callTool("observe", {})).rejects.toBe(error);
+            expect(second.closeCallCount).toBe(0);
+            expect(third.callToolCalls).toHaveLength(0);
+          } else {
+            await expect(proxy.callTool("observe", {})).resolves.toEqual({ content: [] });
+            expect(second.closeCallCount).toBe(1);
+            expect(third.callToolCalls).toHaveLength(1);
+          }
+        } finally {
+          await proxy.close();
+        }
+      },
+    );
+
+    test.each([true, undefined])(
+      "reads session-error capability after fake restart: %j",
+      async (initialCapability) => {
+        const error = new ActionableError("Tool failed: Session not found");
+        const first = new ScriptedDaemonClient({ toolError: error });
+        const next = new ScriptedDaemonClient({ toolResult: { content: [] } });
+        const clients = [first, next];
+        const manager = matchingDaemonManager();
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => clients.shift()!,
+          daemonManager: manager,
+          daemonAvailabilityProbe: async () => true,
+          daemonStatusProbe: async () => {
+            const capability = manager.restartCalled
+              ? initialCapability
+                ? undefined
+                : true
+              : initialCapability;
+            return {
+              ...manager.statusResult,
+              options: manager.restartCalled ? { debug: true } : {},
+              ...(capability === undefined ? {} : { structuredSessionNotFound: capability }),
+            };
+          },
+          daemonOptions: { debug: true },
+          autoStartDaemon: true,
+          timer: new FakeTimer(),
+        });
+        try {
+          if (initialCapability) {
+            await expect(proxy.callTool("observe", {})).resolves.toEqual({ content: [] });
+            expect(first.closeCallCount).toBe(1);
+            expect(next.callToolCalls).toHaveLength(1);
+          } else {
+            await expect(proxy.callTool("inputText", {})).rejects.toBe(error);
+            expect(first.closeCallCount).toBe(0);
+            expect(next.callToolCalls).toHaveLength(0);
+          }
+          expect(manager.restartCallCount).toBe(1);
+        } finally {
+          await proxy.close();
+        }
+      },
+    );
+
     test.each([
       { code: DAEMON_SESSION_NOT_FOUND_CODE, message: "Missing daemon session", reconnect: true },
       { code: undefined, message: "Session not found", reconnect: true },
       { code: "other_failure", message: "Session not found", reconnect: false },
       { code: -32603, message: "Session not found", reconnect: false },
+      { code: undefined, message: "Unrelated tool failure", reconnect: false },
     ])(
       "classifies session failure by code before message: %j",
       async ({ code, message, reconnect }) => {
@@ -3006,6 +3197,7 @@ describe("DaemonMcpProxy", () => {
           clientFactory: () => clients.shift()!,
           daemonManager: matchingDaemonManager(),
           autoStartDaemon: false,
+          timer: new FakeTimer(),
         });
         try {
           if (reconnect) {

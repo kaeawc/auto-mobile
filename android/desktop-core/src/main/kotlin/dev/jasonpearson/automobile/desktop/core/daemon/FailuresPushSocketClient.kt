@@ -17,6 +17,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -103,6 +105,7 @@ internal constructor(
   private val json = DaemonJson
   private val socket = AtomicReference<FailuresSocket?>()
   private val connectionLock = Any()
+  private val writeLock = ReentrantLock()
   private var connectionGeneration = 0L
   private var connectionJob: Job? = null
 
@@ -174,7 +177,20 @@ internal constructor(
           if (generation != connectionGeneration) return
           socket.set(openedSocket)
           _state.value = ConnectionState.Connected(subscribed = false)
-          subscribe(type, severity, openedSocket)
+        }
+        subscribe(type, severity, openedSocket)
+        synchronized(connectionLock) {
+          if (generation != connectionGeneration) return
+          _state.update { current ->
+            if (current is ConnectionState.Connected) {
+              current.copy(subscribed = true)
+            } else {
+              current
+            }
+          }
+          log.info(
+            "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})"
+          )
         }
         readMessages(openedSocket, generation) {
           // Accepting a socket is not healthy: reset only after a message is received.
@@ -227,7 +243,7 @@ internal constructor(
       if (previousState is ConnectionState.Connected && previousState.subscribed) {
         val request =
           FailuresPushRequest(id = UUID.randomUUID().toString(), command = "unsubscribe")
-        sendRequest(request, previousSocket)
+        sendRequestIfIdle(request, previousSocket)
       }
     } finally {
       cleanupConnection(previousSocket)
@@ -259,25 +275,35 @@ internal constructor(
 
     if (!sendRequest(request, currentSocket)) {
       throw IllegalStateException("Failed to send failures subscription")
-    } else {
-      _state.update { current ->
-        if (current is ConnectionState.Connected) {
-          current.copy(subscribed = true)
-        } else {
-          current
-        }
-      }
-      log.info(
-        "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})"
-      )
     }
   }
 
   private fun sendRequest(
     request: FailuresPushRequest,
-    currentSocket: FailuresSocket? = socket.get(),
+    currentSocket: FailuresSocket?,
   ): Boolean {
     currentSocket ?: return false
+    return writeLock.withLock { writeRequest(request, currentSocket) }
+  }
+
+  private fun sendRequestIfIdle(
+    request: FailuresPushRequest,
+    currentSocket: FailuresSocket?,
+  ): Boolean {
+    currentSocket ?: return false
+    if (!writeLock.tryLock()) return false
+    return try {
+      // Even a tiny unsubscribe can block if the OS send buffer is full with no active writer.
+      writeRequest(request, currentSocket)
+    } finally {
+      writeLock.unlock()
+    }
+  }
+
+  private fun writeRequest(
+    request: FailuresPushRequest,
+    currentSocket: FailuresSocket,
+  ): Boolean {
     return try {
       currentSocket.writeLine(json.encodeToString(serializer<FailuresPushRequest>(), request))
       true
@@ -299,16 +325,24 @@ internal constructor(
       val line = runInterruptible { currentSocket.readLine() } ?: return
       currentCoroutineContext().ensureActive()
       if (line.isBlank()) continue
-      synchronized(connectionLock) {
-        if (generation != connectionGeneration) return
-        onHealthy()
-        try {
-          handleMessage(line)
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          log.warn("Failed to parse failures push message: ${e.message}", e)
+      val needsPong =
+        synchronized(connectionLock) {
+          if (generation != connectionGeneration) return
+          onHealthy()
+          try {
+            handleMessage(line)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            log.warn("Failed to parse failures push message: ${e.message}", e)
+            false
+          }
         }
+      if (needsPong) {
+        synchronized(connectionLock) {
+          if (generation != connectionGeneration) return
+        }
+        sendPong(currentSocket)
       }
     }
   }
@@ -325,7 +359,7 @@ internal constructor(
     }
   }
 
-  private fun handleMessage(message: String) {
+  private fun handleMessage(message: String): Boolean {
     val response = json.decodeFromString(serializer<FailuresPushResponse>(), message)
 
     when (response.type) {
@@ -345,7 +379,7 @@ internal constructor(
       }
       "ping" -> {
         log.debug("Received ping, sending pong")
-        sendPong()
+        return true
       }
       "error" -> {
         rejectSession(response.error)
@@ -355,6 +389,7 @@ internal constructor(
         log.warn("Unknown message type: ${response.type}")
       }
     }
+    return false
   }
 
   private fun rejectSession(error: String?) {
@@ -365,13 +400,13 @@ internal constructor(
     }
   }
 
-  private fun sendPong() {
+  private fun sendPong(currentSocket: FailuresSocket) {
     val request =
       FailuresPushRequest(
         id = UUID.randomUUID().toString(),
         command = "pong",
       )
-    sendRequest(request)
+    sendRequest(request, currentSocket)
   }
 }
 

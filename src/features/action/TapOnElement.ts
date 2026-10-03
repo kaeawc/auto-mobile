@@ -134,7 +134,11 @@ import {
   PRE_RETRY_DELAY_MS,
 } from "./androidGhostTapRetry";
 import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
-import { getImeOccluderForElement, tapPointOutsideIme } from "../observe/output/SkeletonProjection";
+import {
+  getImeOccluderForElement,
+  getIosImeOccluder,
+  tapPointOutsideIme,
+} from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { getScreenBounds } from "../../utils/screenBounds";
 import { compareSelectionRank } from "../utility/selectionRank";
@@ -178,6 +182,11 @@ type TapVerificationOptions = TapOnElementOptions & {
   verification?: AndroidTapVerification;
   screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
 };
+
+interface TapPointContext {
+  options: TapOnElementOptions;
+  screenSize?: ObserveResult["screenSize"];
+}
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
@@ -590,16 +599,26 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.geometry.getElementCenter(element);
   }
 
+  private getImeOccluderForTap(
+    element: Element,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
+  ) {
+    const platform = this.device.platform;
+    if (platform !== "android" && platform !== "ios") {
+      return undefined;
+    }
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, platform);
+    const ime = elements && getImeOccluderForElement(elements, element);
+    return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
+  }
+
   private resolveImeSafeTapPoint(
     element: Element,
     hierarchy: ViewHierarchyResult,
-    options: TapOnElementOptions,
+    { options, screenSize }: TapPointContext,
   ): { x: number; y: number } {
-    if (this.device.platform !== "android") {
-      return this.resolveTapPoint(element);
-    }
-    const elements = new DefaultObserveElementCollector().collect(hierarchy, "android");
-    const ime = elements && getImeOccluderForElement(elements, element);
+    const ime = this.getImeOccluderForTap(element, hierarchy, screenSize);
     if (!ime) {
       return this.resolveTapPoint(element);
     }
@@ -1100,18 +1119,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     target: Element,
     hierarchy: ViewHierarchyResult,
     visibleBounds: ElementBounds,
-    options: TapOnElementOptions,
+    context: TapPointContext,
   ): { x: number; y: number } | null {
-    const point = this.resolveImeSafeTapPoint(target, hierarchy, options);
+    const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
     if (pointInTapBounds(point, visibleBounds)) {
       return point;
     }
     const { left, top, right, bottom } = visibleBounds;
-    const elements =
-      this.device.platform === "android"
-        ? new DefaultObserveElementCollector().collect(hierarchy, "android")
-        : null;
-    const ime = elements && getImeOccluderForElement(elements, target);
+    const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
     return ime
       ? tapPointOutsideIme([left, top, right, bottom], ime.bounds)
       : this.geometry.getElementCenter({ bounds: visibleBounds });
@@ -3089,7 +3104,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       options,
     );
     const point =
-      visibleBounds && this.resolveVisibleTapPoint(element, hierarchy, visibleBounds, options);
+      visibleBounds &&
+      this.resolveVisibleTapPoint(element, hierarchy, visibleBounds, {
+        options,
+        screenSize: target.observation.screenSize,
+      });
     if (!point) {
       throw new ActionableError("Matched element has no visible tap area on selected display");
     }
@@ -3619,12 +3638,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 "Scroll it into view with swipeOn, then retry tapOn.",
             );
           }
-          const tapPoint = this.resolveVisibleTapPoint(
-            tapElement,
-            viewHierarchy,
-            visibleBounds,
+          const tapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
             options,
-          );
+            screenSize,
+          });
           if (!tapPoint) {
             throw new ActionableError(
               "Matched element has no unobstructed visible tap area. " +
@@ -4171,12 +4188,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!retryTarget) {
       return;
     }
+    const retryScreenSize = this.getScreenSizeFromHierarchy(
+      probe.hierarchy,
+      retryOptions.screenSizeOptions,
+    );
     const retryBounds = this.visibleTapBounds(
       refreshedSelection.element
         ? refreshedSelection
         : (selection ?? { ...refreshedSelection, element: retryTarget }),
       probe.hierarchy,
-      this.getScreenSizeFromHierarchy(probe.hierarchy, retryOptions.screenSizeOptions),
+      retryScreenSize,
       retryOptions,
       retryTarget,
     );
@@ -4188,7 +4209,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const retryPoint = pointInTapBounds(tapPoint, retryBounds)
       ? tapPoint
-      : this.resolveVisibleTapPoint(retryTarget, probe.hierarchy, retryBounds, options);
+      : this.resolveVisibleTapPoint(retryTarget, probe.hierarchy, retryBounds, {
+          options,
+          screenSize: retryScreenSize,
+        });
     if (!retryPoint) {
       logger.warn(
         "[TapOnElement][retryIfNoChange] Refreshed target has no unobstructed tap point; skipping retry",

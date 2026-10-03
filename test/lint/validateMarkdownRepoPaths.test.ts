@@ -1,15 +1,18 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   markdownRepoFiles,
   scanMarkdownRepoPaths,
   staleMarkdownAllowlist,
+  trackedPathExists,
 } from "./markdownRepoPaths";
 
 const root = path.resolve(import.meta.dir, "../..");
 const allowlist: Readonly<Record<string, string>> = {
+  "android/local.properties":
+    "Gitignored local Gradle SDK config that each worktree copies from a working checkout.",
   "android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk":
     "Manual-test instructions refer to the APK produced by the Android build.",
   "android/playground/app/build/outputs/apk/debug/app-debug.apk":
@@ -19,10 +22,12 @@ const allowlist: Readonly<Record<string, string>> = {
 let failures: string[];
 let stale: string[];
 beforeAll(() => {
-  const files = markdownRepoFiles(() =>
-    execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" }).split("\0"),
-  );
-  const exists = (target: string): boolean => existsSync(path.join(root, target));
+  const tracked = execFileSync("git", ["ls-files", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+  }).split("\0");
+  const files = markdownRepoFiles(() => tracked);
+  const exists = trackedPathExists(tracked);
   const referenced = new Set<string>();
   failures = [];
   for (const file of files) {
@@ -42,6 +47,17 @@ beforeAll(() => {
 });
 
 describe("Markdown repository paths", () => {
+  test("resolves tracked files and ancestor directories with exact case", () => {
+    const exists = trackedPathExists(["docs/Guide.md", "docs/nested/page.md", ""]);
+    expect(exists("docs/Guide.md")).toBe(true);
+    expect(exists("docs/guide.md")).toBe(false);
+    expect(exists("docs")).toBe(true);
+    expect(exists("docs/")).toBe(true);
+    expect(exists("docs/nested")).toBe(true);
+    expect(exists("docs/untracked.md")).toBe(false);
+    expect(exists("")).toBe(false);
+  });
+
   test("enumerates scoped tracked Markdown through an injected file list", () => {
     expect(
       markdownRepoFiles(() => [

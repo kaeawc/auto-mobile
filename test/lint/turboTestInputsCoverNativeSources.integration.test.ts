@@ -458,6 +458,14 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           }
           const source = readFileSync(abs, "utf8");
           const record = (path: string): void => {
+            // The Markdown guard allowlists this gitignored SDK config without
+            // reading it. Its presence varies by checkout, so it is not a cache input.
+            if (
+              rel === "test/lint/validateMarkdownRepoPaths.test.ts" &&
+              path === "android/local.properties"
+            ) {
+              return;
+            }
             // SwiftPM's `.build` and Gradle's `build` outputs can exist after a
             // local native build but are never source inputs for a TS unit test.
             const segments = path.split("/");

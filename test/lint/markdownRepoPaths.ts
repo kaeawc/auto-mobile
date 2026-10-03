@@ -2,6 +2,23 @@ import path from "node:path";
 
 const REPO_PATH = /^(?:src|scripts|docs|android|ios|\.github|skills|test|schemas)\//;
 
+/** Resolve exact-case files and directories using only the tracked repository paths. */
+export function trackedPathExists(tracked: string[]): (target: string) => boolean {
+  const paths = new Set<string>();
+  for (const file of tracked) {
+    if (!file) {
+      continue;
+    }
+    paths.add(file);
+    let directory = path.posix.dirname(file);
+    while (directory !== ".") {
+      paths.add(directory);
+      directory = path.posix.dirname(directory);
+    }
+  }
+  return (target) => paths.has(target.replace(/\/$/, ""));
+}
+
 /** Keep tracked-file enumeration injectable; generated and scratch files stay out. */
 export function markdownRepoFiles(listTracked: () => string[]): string[] {
   return listTracked().filter(

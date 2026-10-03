@@ -14,7 +14,7 @@ import type {
   KeystoreDiscoveryState,
 } from "../features/storage/keystoreDiscovery";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { serverConfig } from "../utils/ServerConfig";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
@@ -54,7 +54,7 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
  */
 export function resolveDeviceType(device: BootedDevice): StorageDeviceType {
   if (device.platform === "ios") {
-    return isIosSimulatorUdid(device.deviceId) ? "simulator" : "physical";
+    return resolveIosDeviceKind({ deviceId: device.deviceId });
   }
   // Android AVDs report an `emulator-<port>` serial; everything else is physical.
   return device.deviceId.startsWith("emulator-") ? "emulator" : "physical";

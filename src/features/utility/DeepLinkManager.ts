@@ -37,7 +37,7 @@ import {
 } from "../observe/android/StableNodeIdentity";
 import { DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS } from "../action/ClearText";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import {
   AppBundleMetadataClient,
@@ -438,7 +438,7 @@ export class DeepLinkManager implements DeepLinkManager {
       const udid = this.device!.deviceId;
       logger.info(`[DeepLinkManager] Querying iOS deep links for bundle: ${bundleId}`);
 
-      if (!isIosSimulatorUdid(udid)) {
+      if (resolveIosDeviceKind({ deviceId: udid }) !== "simulator") {
         return this.emptyIosResult(
           bundleId,
           `Physical-device deep-link discovery for ${bundleId} is not yet implemented`,

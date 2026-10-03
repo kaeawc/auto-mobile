@@ -6,7 +6,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -551,7 +551,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
   }
 
   private requireSimulator(device: BootedDevice, action: string): void {
-    if (!isIosSimulatorUdid(device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
       throw new ActionableError(
         `iOS session logs are only supported on iOS simulators; cannot ${action} on ` +
           `${device.deviceId}, which looks like a physical iOS device.`,

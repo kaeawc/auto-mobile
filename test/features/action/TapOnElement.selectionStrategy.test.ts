@@ -62,6 +62,7 @@ async function executeFocus(
   testTag?: string,
   postSelectedIndex?: number,
   options: Partial<TapOnElementOptions> = {},
+  preTapHierarchy?: ViewHierarchyResult,
 ) {
   const fakeSelector = new FakeElementSelector(element);
   if (matchedElement || index !== undefined) {
@@ -71,6 +72,12 @@ async function executeFocus(
       indexInMatches: index,
       totalMatches: index === undefined ? 1 : index + 1,
     });
+  }
+  if (preTapHierarchy) {
+    const resolver = new ResolverElementSelector();
+    spyOn(fakeSelector, "selectByResourceId").mockImplementation((hierarchy, id, options) =>
+      resolver.selectByResourceId(hierarchy, id, { ...options, intentAction: "focus-input" }),
+    );
   }
   let tapped = false;
   const tapOnElement = new TapOnElement(
@@ -94,7 +101,9 @@ async function executeFocus(
   (tapOnElement as any).observedInteraction = async (
     action: (currentObservation: typeof observation) => Promise<Record<string, unknown>>,
   ) => {
-    const actionResult = await action({ viewHierarchy: { hierarchy: { node: {} } } });
+    const actionResult = await action({
+      viewHierarchy: preTapHierarchy ?? { hierarchy: { node: {} } },
+    });
     if (index !== undefined || postSelectedIndex !== undefined) {
       const resolvedIndex = index ?? postSelectedIndex ?? 0;
       const matches = new SearchableHierarchy()
@@ -564,6 +573,38 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.error).toContain("Failed to confirm focus");
   });
 
+  test.each(["Basic Text Field", "Email"])(
+    "confirms captured skeleton-ID focus only for the tapped field (%s) (#9094)",
+    async (label) => {
+      const pre = loadFocusCapture("pre");
+      const resolver = new ResolverElementSelector();
+      const target = resolver.selectByText(pre, label, { intentAction: "focus-input" }).element!;
+      const id = target["view-id"]!;
+      expect(id.startsWith("s2-")).toBe(true);
+      const selection = resolver.selectByResourceId(pre, id, { intentAction: "focus-input" });
+      expect(selection.element?.class).toBe("android.widget.EditText");
+      expect(selection.matchedElement?.text).not.toBe(label);
+      expect(selection.element?.focused).not.toBe("true");
+      const { result, tapped } = await executeFocus(
+        target,
+        loadFocusCapture("post"),
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {},
+        pre,
+      );
+      expect(tapped).toBe(true);
+      expect(result.focusVerified).toBe(label === "Basic Text Field");
+      expect(result.success).toBe(label === "Basic Text Field");
+      if (label === "Email") {
+        expect(result.error).toContain("Failed to confirm focus");
+      }
+    },
+  );
+
   test("verifies the captured empty Compose field across deserialized roots and s2 ID churn (#9017)", async () => {
     const before = capturedFocusSelection();
     const capture = loadFocusCapture("post");
@@ -588,54 +629,63 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.success).toBe(true);
   });
 
-  test.each([
-    "focus disagreement",
-    "Email also focused",
-    "different class",
-    "different stable ID",
-    "different bounds",
-  ])("rejects captured Compose focus with %s across roots (#9017)", async (difference) => {
-    const before = capturedFocusSelection();
-    const capture = loadFocusCapture("post");
-    const nodes = new SearchableHierarchy().project(capture);
-    const field = nodes.find((node) => node.element?.["view-id"] === "s2-ee780752c005afb8")!;
-    const attributes = nodeAttributes(field.source);
-    if (difference === "focus disagreement") {
-      attributes.focused = "false";
-    }
-    if (difference === "different class") {
-      attributes.class = "android.widget.AutoCompleteTextView";
-    }
-    if (difference === "different stable ID") {
-      attributes["view-id"] = "s2-other-field";
-    }
-    if (difference === "different bounds") {
-      field.source.bounds = [84, 1120, 996, 1267];
-    }
-    if (difference === "Email also focused") {
-      const emailFields = nodes.filter(
-        (node) => node.className === "android.widget.EditText" && node.bounds?.top === 1283,
-      );
-      expect(emailFields).toHaveLength(2);
-      for (const email of emailFields) {
-        nodeAttributes(email.source).focused = "true";
+  test.each(
+    [
+      "focus disagreement",
+      "Email also focused",
+      "different class",
+      "different stable ID",
+      "different bounds",
+    ].flatMap((difference) => [
+      { difference, skeletonId: false },
+      { difference, skeletonId: true },
+    ]),
+  )(
+    "rejects captured Compose focus with $difference (skeleton ID: $skeletonId) across roots (#9017, #9094)",
+    async ({ difference, skeletonId }) => {
+      const before = capturedFocusSelection();
+      const capture = loadFocusCapture("post");
+      const nodes = new SearchableHierarchy().project(capture);
+      const field = nodes.find((node) => node.element?.["view-id"] === "s2-ee780752c005afb8")!;
+      const attributes = nodeAttributes(field.source);
+      if (difference === "focus disagreement") {
+        attributes.focused = "false";
       }
-    }
-    const { result, tapped } = await executeFocus(
-      before.element,
-      capture,
-      undefined,
-      before.matchedElement,
-      undefined,
-      undefined,
-      undefined,
-      { text: "Basic Text Field" },
-    );
-    expect(tapped).toBe(true);
-    expect(result.focusVerified).toBe(false);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Failed to confirm focus");
-  });
+      if (difference === "different class") {
+        attributes.class = "android.widget.AutoCompleteTextView";
+      }
+      if (difference === "different stable ID") {
+        attributes["view-id"] = "s2-other-field";
+      }
+      if (difference === "different bounds") {
+        field.source.bounds = [84, 1120, 996, 1267];
+      }
+      if (difference === "Email also focused") {
+        const emailFields = nodes.filter(
+          (node) => node.className === "android.widget.EditText" && node.bounds?.top === 1283,
+        );
+        expect(emailFields).toHaveLength(2);
+        for (const email of emailFields) {
+          nodeAttributes(email.source).focused = "true";
+        }
+      }
+      const { result, tapped } = await executeFocus(
+        before.element,
+        capture,
+        skeletonId ? before.element["view-id"] : undefined,
+        skeletonId ? undefined : before.matchedElement,
+        undefined,
+        undefined,
+        undefined,
+        skeletonId ? {} : { text: "Basic Text Field" },
+        skeletonId ? loadFocusCapture("pre") : undefined,
+      );
+      expect(tapped).toBe(true);
+      expect(result.focusVerified).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Failed to confirm focus");
+    },
+  );
 
   test.each(["view-id", "test-tag"] as const)(
     "verifies an unchanged %s duplicated across deserialized roots (#9017)",

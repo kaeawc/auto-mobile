@@ -1759,7 +1759,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const candidate = distinctFocusedFields[0].element;
     return candidate &&
       (this.hasStableFocusIdentity(target, candidate, labelText) ||
-        this.hasEmptyTextFocusIdentity(target, candidate, nodes, labelText)) &&
+        this.hasEmptyTextFocusIdentity(target, candidate, nodes)) &&
       horizontalExtentNearlyEqual(
         target.bounds,
         candidate.bounds,
@@ -1773,15 +1773,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     target: Element,
     candidate: Element,
     nodes: readonly SearchableEntry[],
-    labelText?: string,
   ): boolean {
-    // An empty Compose field can lose its merged label on focus (#8997).
+    // An empty Compose field can lose its label or synthetic ID on focus (#8997, #9094).
     // Only the sole focused field may use this fallback, at the original bounds.
     if (
       this.device.platform !== "android" ||
       !isFocusEditableElement(target) ||
       target.class !== candidate.class ||
-      !(target.text || labelText) ||
       (candidate.text !== undefined && candidate.text !== "") ||
       (["resource-id", "test-tag", "view-id"] as const).some((key) =>
         [target[key], candidate[key]].some(

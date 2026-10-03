@@ -3,7 +3,7 @@ import { EventEmitter } from "events";
 import {
   DeviceSessionManager,
   DefaultDeviceClientProvider,
-} from "../../src/utils/DeviceSessionManager";
+} from "../../src/devices/DeviceSessionManager";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

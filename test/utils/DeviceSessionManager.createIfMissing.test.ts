@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

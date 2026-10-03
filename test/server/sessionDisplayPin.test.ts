@@ -31,7 +31,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import {
   createJSONToolResponse,
   createStructuredToolResponse,

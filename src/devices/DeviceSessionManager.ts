@@ -4,7 +4,7 @@ import {
   ambientDeviceExecutionBinding,
   type DeviceExecutionBinding,
 } from "../server/deviceExecutionBinding";
-import { errorMessage } from "./describeUnknownError";
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   ActionableError,
   BootedDevice,
@@ -16,56 +16,59 @@ import {
   assertAndroidImageRunningStateKnown,
   MultiPlatformDeviceManager,
   waitForDeviceReadyOrCancel,
-} from "../devices/deviceUtils";
+} from "./deviceUtils";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
-} from "./android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
-import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
+} from "../utils/android-cmdline-tools/AdbClientFactory";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { Window as WindowImpl } from "../features/observe/Window";
 import type { Window } from "../features/observe/interfaces/Window";
-import { logger } from "./logger";
+import { logger } from "../utils/logger";
 import { AndroidCtrlProxyManager, CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
-import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
-import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import { PlatformDeviceManager } from "./interfaces/DeviceUtils";
-import { getDeviceCreationGate } from "../devices/deviceCreationGate";
-import { createDefaultDeviceProvisioner } from "../devices/deviceProvisioning";
+import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
+import { getDeviceCreationGate } from "./deviceCreationGate";
+import { createDefaultDeviceProvisioner } from "./deviceProvisioning";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { IOSCtrlProxy } from "../features/observe/ios/IOSCtrlProxyClient";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreenCache } from "../features/observe/interfaces/ObserveScreenCache";
-import { createPerformanceTracker, createGlobalPerformanceTracker } from "./PerformanceTracker";
+import {
+  createPerformanceTracker,
+  createGlobalPerformanceTracker,
+} from "../utils/PerformanceTracker";
 import { storeSetupTiming } from "../server/ToolExecutionContext";
-import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
-import { disableStylusHandwriting } from "./disableStylusHandwriting";
-import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
+import { applyAppearanceOnConnect } from "../utils/appearance/applyAppearanceOnConnect";
+import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
+import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
-import { defaultTimer, type Timer } from "./SystemTimer";
-import { serverConfig } from "./ServerConfig";
-import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "./runnerReadinessConfig";
-import { trackProcess, waitForExit } from "./ChildProcessTracker";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { serverConfig } from "../utils/ServerConfig";
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
+import { trackProcess, waitForExit } from "../utils/ChildProcessTracker";
 import {
   getVirtualDeviceLifecycleCoordinator,
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
   type VirtualDeviceLifecycleLease,
-} from "../devices/virtualDeviceLifecycleCoordinator";
-import { runWithAbortSignal } from "./AbortContext";
+} from "./virtualDeviceLifecycleCoordinator";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import {
   compareIdentityEvidence,
   deriveEvidenceFromBootedDevice,
   type IdentityEvidence,
   isUnresolvedAndroidEmulatorName,
-} from "../devices/deviceIdentityEvidence";
-import { isAndroidEmulatorSerial } from "./androidSerial";
-import { throwIfProvisionedDeviceTransportRetired } from "./provisionedDeviceTransportFence";
-import { deviceReadinessLockKey, withDeviceReadinessLock } from "./deviceReadinessLock";
+} from "./deviceIdentityEvidence";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { throwIfProvisionedDeviceTransportRetired } from "../utils/provisionedDeviceTransportFence";
+import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
 
 /**
  * Render a device list for a "not found" error.

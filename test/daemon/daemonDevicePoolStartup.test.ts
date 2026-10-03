@@ -7,7 +7,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
-import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";

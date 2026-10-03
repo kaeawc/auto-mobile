@@ -1,15 +1,12 @@
 import {
   ambientDeviceExecutionBinding,
   type DeviceExecutionBinding,
-} from "../../server/deviceExecutionBinding";
+} from "../deviceExecutionBinding";
 import type { BootedDevice } from "../../models";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { AdbClient } from "./AdbClient";
 import type { RetryExecutor } from "../retry/RetryExecutor";
-import {
-  daemonDeviceAdmissionGate,
-  type DeviceAdmissionGate,
-} from "../../daemon/deviceAdmissionGate";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../deviceAdmissionGate";
 import { defaultEmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
 
 /**

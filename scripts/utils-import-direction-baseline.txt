@@ -12,10 +12,6 @@ src/utils/DeviceSessionManager.ts -> src/server/ToolExecutionContext
 src/utils/DeviceSessionManager.ts -> src/server/deviceExecutionBinding
 src/utils/KeepScreenAwakeManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
 src/utils/WorkProfileMonitor.ts -> src/db/installedAppsRepository
-src/utils/android-cmdline-tools/AdbClientFactory.ts -> src/daemon/deviceAdmissionGate
-src/utils/android-cmdline-tools/AdbClientFactory.ts -> src/server/deviceExecutionBinding
-src/utils/android-cmdline-tools/AndroidEmulatorClient.ts -> src/features/action/DeviceLockStore
-src/utils/android-cmdline-tools/AndroidEmulatorClient.ts -> src/features/action/WakeAndUnlock
 src/utils/android-cmdline-tools/AvdConfigReader.ts -> src/features/device-control/virtualDeviceCapabilities
 src/utils/androidSystemUiAnr.ts -> src/features/utility/ElementParser
 src/utils/appearance/AppearanceSyncScheduler.ts -> src/daemon/daemonState

@@ -18,7 +18,7 @@ import {
   TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
 } from "../features/action/TapAnyElement";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
-import { DeviceLockStore } from "../features/action/DeviceLockStore";
+import { DeviceLockStore } from "../devices/DeviceLockStore";
 import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
 import { SelectAllText } from "../features/action/SelectAllText";
 import { PressButton } from "../features/action/PressButton";

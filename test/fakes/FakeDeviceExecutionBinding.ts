@@ -1,4 +1,4 @@
-import type { DeviceExecutionBinding } from "../../src/server/deviceExecutionBinding";
+import type { DeviceExecutionBinding } from "../../src/utils/deviceExecutionBinding";
 import type { AmbientExecutionIdReader } from "../../src/utils/interfaces/AmbientExecutionIdReader";
 
 export class FakeDeviceExecutionBinding

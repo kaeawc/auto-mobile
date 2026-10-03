@@ -1,6 +1,6 @@
 import { logger } from "../utils/logger";
 import type { DeviceSessionRegistry } from "./deviceSessionRegistry";
-import type { DeviceAdmissionGate } from "./deviceAdmissionGate";
+import type { DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { ActionableError } from "../models/ActionableError";
 import type { RetiredDeviceSession } from "./deviceSessionRegistry";
 

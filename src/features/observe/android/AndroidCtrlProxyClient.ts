@@ -141,7 +141,7 @@ import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
-import { daemonDeviceAdmissionGate } from "../../../daemon/deviceAdmissionGate";
+import { daemonDeviceAdmissionGate } from "../../../utils/deviceAdmissionGate";
 import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";

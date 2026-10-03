@@ -189,6 +189,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
         assertEquals(1, description.strokeCount)
         assertEquals(index < segmentCount - 1, description.getStroke(0).willContinue())
         fixture.completeLastStroke()
+        if (index == 0) fixture.advanceDragWait()
       }
       assertEquals(before + segmentCount, fixture.shadow.gesturesDispatched.size)
     }

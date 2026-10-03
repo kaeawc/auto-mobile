@@ -66,9 +66,10 @@ class CtrlProxyDragDispatchTest {
   @Test
   fun `default drag dispatches one stroke per phase and reports only final completion`() {
     drag()
-    repeat(2) {
+    repeat(2) { index ->
       assertTrue(frames.isEmpty())
       shadow.complete()
+      if (index == 0) fixture.advanceDragWait()
     }
     assertTrue(frames.isEmpty())
     assertEquals(3, shadow.attempts.size)
@@ -76,12 +77,12 @@ class CtrlProxyDragDispatchTest {
     val press = shadow.attempts.first().gesture.getStroke(0)
     val pressPath = PathMeasure(press.path, false)
     assertEquals(600L, press.duration)
-    assertEquals(1f, pressPath.length, 0f)
+    assertEquals(0f, pressPath.length, 0f)
     val bounds = RectF()
     press.path.computeBounds(bounds, false)
-    assertEquals(RectF(10f, 20f, 10f, 21f), bounds)
+    assertEquals(RectF(10f, 20f, 10f, 20f), bounds)
     shadow.attempts[1].gesture.getStroke(0).path.computeBounds(bounds, false)
-    assertEquals(RectF(10f, 21f, 100f, 200f), bounds)
+    assertEquals(RectF(10f, 20f, 100f, 200f), bounds)
     shadow.complete()
     val result = Json.parseToJsonElement(frames.single()).jsonObject
     assertEquals("drag_result", result.getValue("type").jsonPrimitive.content)
@@ -103,21 +104,21 @@ class CtrlProxyDragDispatchTest {
   }
 
   @Test
-  fun `instant press completion lifts pointer and reports early completion failure`() {
+  fun `instant press completion waits before travel and then succeeds`() {
     drag()
     shadow.complete(0L)
     assertTrue(frames.isEmpty())
-    assertChain(listOf(true, false))
-    val release = shadow.attempts.last().gesture.getStroke(0)
-    assertEquals(1L, release.duration)
-    assertEquals(0f, PathMeasure(release.path, false).length, 0f)
-    shadow.complete(0L)
+    assertEquals(1, shadow.attempts.size)
+    val timer = fixture.service.dragDeadline as FakeGestureDeadline
+    assertEquals(600L, timer.tasks.last().delayMs)
+    ShadowSystemClock.advanceBy(Duration.ofMillis(600L))
+    timer.expire()
+    assertEquals(2, shadow.attempts.size)
+    repeat(2) { shadow.complete() }
+    assertChain(listOf(true, true, false))
     val result = Json.parseToJsonElement(frames.single()).jsonObject
-    assertFalse(result.getValue("success").jsonPrimitive.boolean)
-    assertEquals(
-      "Drag stroke completed early: 0ms of 600ms",
-      result.getValue("error").jsonPrimitive.content,
-    )
+    assertTrue(result.getValue("success").jsonPrimitive.boolean)
+    assertTrue(timer.tasks.all { it.cancelled })
   }
 
   @Test
@@ -127,7 +128,10 @@ class CtrlProxyDragDispatchTest {
       frames.clear()
       drag(press, hold)
       val count = 1 + (if (press > 0) 1 else 0) + (if (hold > 0) 1 else 0)
-      repeat(count - 1) { shadow.complete() }
+      repeat(count - 1) { index ->
+        shadow.complete()
+        if (index == 0 && press > 0) fixture.advanceDragWait()
+      }
       assertChain(List(count) { it < count - 1 })
       assertTrue(frames.isEmpty())
       shadow.complete()
@@ -141,6 +145,7 @@ class CtrlProxyDragDispatchTest {
   fun `mid chain cancellation dispatches terminating continuation and failed drag result`() {
     drag()
     shadow.complete()
+    fixture.advanceDragWait()
     shadow.cancel()
     assertReleaseThenFailure()
   }
@@ -150,6 +155,7 @@ class CtrlProxyDragDispatchTest {
     drag()
     shadow.failureOnAttempt = 2
     shadow.complete()
+    fixture.advanceDragWait()
     assertReleaseThenFailure(rejected = true)
   }
 
@@ -159,6 +165,7 @@ class CtrlProxyDragDispatchTest {
     shadow.failureOnAttempt = 2
     shadow.throwOnFailure = true
     shadow.complete()
+    fixture.advanceDragWait()
     assertReleaseThenFailure(rejected = true)
   }
 
@@ -166,6 +173,7 @@ class CtrlProxyDragDispatchTest {
   fun `mid chain timeout sends terminating continuation and failed drag result`() {
     drag()
     shadow.complete()
+    fixture.advanceDragWait()
     (fixture.service.dragDeadline as FakeGestureDeadline).expire()
     assertReleaseThenFailure()
   }

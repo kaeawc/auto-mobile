@@ -6404,7 +6404,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun computeCertificateAlias(certBytes: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(certBytes)
-    return digest.joinToString("") { "%02x".format(it) }
+    return digest.joinToString("") { formatHexByte(it) }
   }
 
   private fun writeCaCertToStorage(alias: String, certBytes: ByteArray): Boolean {

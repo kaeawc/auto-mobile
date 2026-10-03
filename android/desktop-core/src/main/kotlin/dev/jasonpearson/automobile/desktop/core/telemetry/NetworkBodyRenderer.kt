@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.formatUiNumber
 
 // JSON syntax colors
 private val JSON_KEY_COLOR = Color(0xFF82AAFF) // light blue
@@ -322,8 +323,8 @@ fun formatByteSize(bytes: Long): String =
   when {
     bytes < 0 -> "unknown"
     bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)} kB"
-    else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} MB"
+    bytes < 1024 * 1024 -> "${formatUiNumber("%.1f", bytes / 1024.0)} kB"
+    else -> "${formatUiNumber("%.1f", bytes / (1024.0 * 1024.0))} MB"
   }
 
 // --- JSON syntax colorizer ---

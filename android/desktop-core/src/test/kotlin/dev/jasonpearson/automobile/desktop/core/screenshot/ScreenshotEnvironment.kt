@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.screenshot
 
 import java.awt.image.BufferedImage
 import java.io.File
+import java.util.Locale
 import kotlin.test.fail
 import org.junit.Assume
 
@@ -101,7 +102,7 @@ object ScreenshotEnvironment {
       is ScreenshotComparator.Result.Mismatch ->
         fail(
           "Screenshot '$name' differs: ${result.differentPixelCount} pixels " +
-            "(${"%.4f".format(result.differentPixelRatio * 100)}%) exceed tolerance. " +
+            "(${"%.4f".format(Locale.ROOT, result.differentPixelRatio * 100)}%) exceed tolerance. " +
             "Diff: ${result.diffFile.path}, rejected: ${result.actualFile.path}. " +
             "If intentional, re-record with -D$RECORD_PROPERTY=true."
         )

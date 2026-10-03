@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.formatUiNumber
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.delay
 
@@ -589,7 +590,7 @@ private fun StatusBarStub(
     // Network throughput
     networkReqPerSec?.let { rps ->
       Text(
-        text = "${"%.0f".format(rps)} req/s",
+        text = "${formatUiNumber("%.0f", rps)} req/s",
         fontSize = 10.sp,
         color = colors.text.normal.copy(alpha = 0.6f),
       )
@@ -605,7 +606,7 @@ private fun StatusBarStub(
           else -> Color(0xFF4CAF50)
         }
       Text(
-        text = "CPU: ${"%.0f".format(cpu)}%",
+        text = "CPU: ${formatUiNumber("%.0f", cpu)}%",
         fontSize = 10.sp,
         color = cpuColor,
       )

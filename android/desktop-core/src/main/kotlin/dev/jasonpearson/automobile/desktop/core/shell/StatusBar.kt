@@ -16,6 +16,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.formatUiNumber
 import dev.jasonpearson.automobile.desktop.core.theme.DesktopTypography
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
@@ -84,7 +85,7 @@ fun StatusBar(
       }
       if (currentMemoryMb != null) {
         Text(
-          text = "${"%.0f".format(currentMemoryMb)} MB",
+          text = "${formatUiNumber("%.0f", currentMemoryMb)} MB",
           style = DesktopTypography.label,
           color = colors.text.normal.copy(alpha = 0.7f),
           lineHeight = 10.sp,

@@ -46,6 +46,45 @@ class WebRtcStreamSocketClientTest {
     )
 
   @Test
+  fun `a hung peer times out with the client label`() {
+    HungSocketServer().use { server ->
+      SocketRequestTask {
+        WebRtcStreamSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            requestTimeoutMs = 30,
+          )
+          .startStream("emulator-5554")
+      }
+        .use { task ->
+          server.awaitRequest()
+          val error = assertFailsWith<McpConnectionException> { task.result() }
+          assertTrue(error.message!!.contains("WebRTC stream"))
+          assertTrue(error.message!!.contains("timed out"))
+        }
+    }
+  }
+
+  @Test
+  fun `a normal reply with a custom timeout cancels the watchdog`() {
+    val watchdog = FakeSocketRequestWatchdog()
+    server("""{"action":"start","stream":$descriptorJson}""").use { server ->
+      SocketRequestTask {
+        WebRtcStreamSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            requestTimeoutMs = 1_000,
+            watchdog = watchdog,
+          )
+          .startStream("emulator-5554")
+      }
+        .use { task ->
+          val result = task.result()
+          assertEquals("stream-1", result?.streamId)
+        }
+    }
+    watchdog.assertCancelled(1_000)
+  }
+
+  @Test
   fun `start sends the action and device id`() {
     // The daemon returns stream/streams at the top level, not under `result`, so the harness's
     // result payload is unused here -- only the request assertions matter.

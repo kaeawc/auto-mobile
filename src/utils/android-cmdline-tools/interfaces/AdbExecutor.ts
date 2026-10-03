@@ -1,6 +1,23 @@
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../../models";
 import type { Readable, Writable } from "node:stream";
 
+export interface ForegroundApp {
+  packageName: string;
+  userId: number;
+  /** Resumed activity on the observed display, when dumpsys names it. */
+  activityName?: string;
+  /** Number of display-scoped activity sections in the dumpsys capture. */
+  displayCount?: number;
+}
+
+/**
+ * Known with app: null requires positive evidence that no foreground app exists.
+ * AdbClient currently has no such evidence and reports unreadable if no resumed activity parses.
+ */
+export type ForegroundAppReadResult =
+  | { state: "known"; app: ForegroundApp | null }
+  | { state: "unreadable"; error: string };
+
 /** The intentionally small process surface exposed by ADB streaming commands. */
 export interface AdbProcess {
   readonly stdin: Writable | null;
@@ -160,14 +177,17 @@ export interface AdbExecutor {
   getForegroundApp(
     signal?: AbortSignal,
     timeout?: number | { timeoutMs?: number; displayId?: number },
-  ): Promise<{
-    packageName: string;
-    userId: number;
-    /** Resumed activity on the observed display, when dumpsys names it. */
-    activityName?: string;
-    /** Number of display-scoped activity sections in the dumpsys capture. */
-    displayCount?: number;
-  } | null>;
+  ): Promise<ForegroundApp | null>;
+
+  /**
+   * Read foreground identity without treating command or parse failure as an empty foreground.
+   * Known with app: null requires positive evidence of no foreground app; AdbClient
+   * currently has none and reports unreadable when no resumed activity parses.
+   */
+  getForegroundAppChecked(
+    signal?: AbortSignal,
+    timeout?: number | { timeoutMs?: number; displayId?: number },
+  ): Promise<ForegroundAppReadResult>;
 
   /** Get device time in milliseconds. */
   getDeviceTimestampMs(): Promise<number>;

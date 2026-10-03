@@ -69,6 +69,10 @@ class FakeAdbExecutor implements AdbExecutor {
     return null;
   }
 
+  async getForegroundAppChecked(): Promise<{ state: "known"; app: null }> {
+    return { state: "known", app: null };
+  }
+
   async getAdbPathOnly(): Promise<string> {
     return "adb";
   }

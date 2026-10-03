@@ -22,7 +22,7 @@ import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../utils/H
 import { XcodeSigningManager } from "../utils/ios-cmdline-tools/XcodeSigning";
 import { XcodebuildClient, type Xcodebuild } from "../utils/ios-cmdline-tools/XcodebuildClient";
 import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
-import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { exponentialBackoff } from "../utils/Backoff";
 import { ForcedRestartBudget } from "./ForcedRestartBudget";
 import { DefaultProcessSupervisor, type ProcessSupervisor } from "../utils/ProcessSupervisor";
@@ -1954,7 +1954,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private isSimulator(): boolean {
     // Simulators have UUIDs like "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
     // physical devices have serial-style UDIDs.
-    return isIosSimulatorUdid(this.device.deviceId);
+    return resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
   }
 
   private useRemoteRunner(): boolean {

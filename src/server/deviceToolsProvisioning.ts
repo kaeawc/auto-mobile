@@ -32,7 +32,7 @@ import {
 import { type Timer } from "../utils/SystemTimer";
 import { combineAbortSignals } from "../utils/AbortContext";
 import { AdbDeviceOfflineError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
-import { RunnerReadinessError } from "../utils/RunnerReadinessService";
+import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import {
   deviceReadinessLockKey,
   trackDeviceAcquisitionReadiness,
@@ -108,7 +108,7 @@ import {
 } from "./deviceTools";
 import type { DeviceToolsDependencies, ProvisionDeviceArgs, StartDeviceArgs } from "./deviceTools";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
-import type { RunnerReadinessRequest } from "../utils/RunnerReadinessService";
+import type { RunnerReadinessRequest } from "../ctrlProxy/RunnerReadinessService";
 
 type ProvisioningHooks = {
   bindBootedDeviceSession: (

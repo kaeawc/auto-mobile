@@ -13,7 +13,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   createDefaultRunnerReadinessService,
   type RunnerReadinessService,
-} from "../../utils/RunnerReadinessService";
+} from "../../ctrlProxy/RunnerReadinessService";
 import { serverConfig } from "../../utils/ServerConfig";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";

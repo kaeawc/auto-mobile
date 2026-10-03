@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import iosFixture from "../../fixtures/observe/ios-fractional-bounds.json";
 import type { ViewHierarchyResult } from "../../../src/models";
-import type { RunnerReadinessRequest } from "../../../src/utils/RunnerReadinessService";
+import type { RunnerReadinessRequest } from "../../../src/ctrlProxy/RunnerReadinessService";
 import {
   ObservationReadServiceStart,
   daemonObservationServiceOwnershipGuard,

@@ -23,7 +23,7 @@ import {
   createDefaultRunnerReadinessService,
   RunnerReadinessError,
   type RunnerReadinessRequest,
-} from "../utils/RunnerReadinessService";
+} from "../ctrlProxy/RunnerReadinessService";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import type { Timer } from "../utils/SystemTimer";

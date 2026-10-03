@@ -134,7 +134,7 @@ import { unregisterDirectSessionsForStableIdentity } from "./directSessionDevice
 import {
   type RunnerReadinessRequest,
   SystemUiAnrRecoveryRequiredError,
-} from "../utils/RunnerReadinessService";
+} from "../ctrlProxy/RunnerReadinessService";
 import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,
   MAX_RUNNER_READINESS_TIMEOUT_MS,

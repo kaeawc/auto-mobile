@@ -12,7 +12,7 @@ import {
   type ReadinessClient,
   type ReadinessIosClient,
   type ReadinessIosManager,
-} from "../../src/utils/RunnerReadinessService";
+} from "../../src/ctrlProxy/RunnerReadinessService";
 import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,

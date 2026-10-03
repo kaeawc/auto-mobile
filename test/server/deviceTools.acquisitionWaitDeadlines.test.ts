@@ -16,7 +16,7 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

@@ -20,8 +20,6 @@ src/utils/DeviceSessionManager.ts -> src/server/deviceExecutionBinding
 src/utils/IosVoiceOverDetector.ts -> src/features/featureFlags/FeatureFlagService
 src/utils/IosVoiceOverDetector.ts -> src/features/observe/ios
 src/utils/KeepScreenAwakeManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
-src/utils/RunnerReadinessService.ts -> src/features/observe/android
-src/utils/RunnerReadinessService.ts -> src/features/observe/ios
 src/utils/WorkProfileMonitor.ts -> src/db/installedAppsRepository
 src/utils/android-cmdline-tools/AdbClientFactory.ts -> src/daemon/deviceAdmissionGate
 src/utils/android-cmdline-tools/AdbClientFactory.ts -> src/server/deviceExecutionBinding

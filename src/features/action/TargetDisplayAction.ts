@@ -13,6 +13,95 @@ import { displayTransitions, type DisplayTransitionReader } from "../observe/Dis
 import { resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+import { POSTURE_PANEL_ROLES, type DisplayPanel } from "../../models/DisplayPanel";
+import {
+  logicalDisplayIdForPanel,
+  parseAndroidDisplayInfos,
+  type AndroidDisplayInfo,
+} from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { selectedDisplayPin } from "../observe/SessionDisplayContext";
+
+/** Guidance for a known panel whose logical display is absent in this posture. */
+export function buildDisconnectedPanelMessage(
+  panelKey: string,
+  panelRole: DisplayPanel["role"],
+  connected: readonly { key: string; role?: DisplayPanel["role"] }[],
+  hasPostures: boolean,
+  pinned: boolean,
+): string {
+  const choices = connected.map(({ key, role }) => (role ? `${key} (${role})` : key)).join(", ");
+  const posture = POSTURE_PANEL_ROLES.find(([, role]) => role === panelRole)?.[0];
+  const postureRemedy = hasPostures
+    ? `; to make this panel available, change the device posture with ${posture ? `setPosture {posture: "${posture}"}` : "setPosture using a supported posture"}`
+    : "";
+  const pinRemedy = pinned
+    ? " Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly."
+    : "";
+  return `Display "${panelKey}" (${panelRole}) is not connected in the current posture. Connected panels: ${choices}. Target a connected panel, omit display, or use display: "active"${postureRemedy}.${pinRemedy}`;
+}
+
+async function readActionDisplayInfos(
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+): Promise<AndroidDisplayInfo[]> {
+  throwIfAborted(signal);
+  try {
+    const output = await adb.executeCommand(
+      "shell cmd display get-displays",
+      2000,
+      undefined,
+      true,
+      signal,
+    );
+    throwIfAborted(signal);
+    const infos = parseAndroidDisplayInfos(output.stdout);
+    if (!infos.length) {
+      // Older Android may not support this optional list; absence cannot prove disconnection.
+      logger.debug("Android action display list is empty; retaining prior-observation guidance.");
+    }
+    return infos;
+  } catch (error) {
+    throwIfAborted(signal);
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    logger.warn(`Unable to read Android action displays: ${errorMessage(error)}`, error);
+    return [];
+  }
+}
+
+function connectedActionPanels(infos: readonly AndroidDisplayInfo[], device: BootedDevice) {
+  return infos.map((info) => {
+    // Match logicalDisplayIdForPanel's physical-key extraction; that helper is not exported separately.
+    const key = info.uniqueId?.split(":").slice(1).join(":") || info.logicalId;
+    const role = device.displays?.panels.find((panel) => panel.key === key)?.role;
+    return { key, role };
+  });
+}
+
+async function assertActionPanelConnected(
+  device: BootedDevice,
+  panel: DisplayPanel,
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (device.platform !== "android" || !device.displays?.panels.length) {
+    return;
+  }
+  const infos = await readActionDisplayInfos(adb, signal);
+  if (!infos.length || logicalDisplayIdForPanel(infos, panel.key) !== undefined) {
+    return;
+  }
+  throw new ActionableError(
+    buildDisconnectedPanelMessage(
+      panel.key,
+      panel.role,
+      connectedActionPanels(infos, device),
+      device.displays.postures.length > 0,
+      selectedDisplayPin() !== undefined,
+    ),
+  );
+}
 
 export type RenderedObservationReader = (deviceId: string) =>
   | {
@@ -129,6 +218,7 @@ export async function prepareTargetDisplayAction(
       ? await observe.execute({ display, freshness: "cached-ok", signal })
       : undefined;
   if (previous?.display.key !== panel.key) {
+    await assertActionPanelConnected(device, panel, adb, signal);
     throw new ActionableError(
       `Coordinates for display "${panel.key}" require a prior observation of that panel. Re-observe display "${panel.key}" and retry.`,
     );

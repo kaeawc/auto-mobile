@@ -274,7 +274,7 @@ reload_mcp_daemon() {
 # namespace/PID/identity helpers in a subshell so its globals and traps stay local.
 stop_namespace_daemon_for_reload() (
   export UNINSTALL_SH_SOURCE_ONLY=true
-  # shellcheck source=scripts/uninstall.sh
+  # shellcheck disable=SC1091
   source "${PROJECT_ROOT}/scripts/uninstall.sh"
   local pid_path socket_path record pid
   socket_path=$(daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock)

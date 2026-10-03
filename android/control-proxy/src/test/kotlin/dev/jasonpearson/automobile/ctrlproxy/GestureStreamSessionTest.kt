@@ -50,7 +50,11 @@ class GestureStreamSessionTest {
 
   private class FakeStroke(val segment: GestureSegment)
 
-  private class FakeStrokeDispatcher : StrokeDispatcher<FakeStroke> {
+  private class FakeStrokeDispatcher(
+    private val initialError: Exception? = null,
+    private val continueError: Exception? = null,
+    private val dispatchError: Exception? = null,
+  ) : StrokeDispatcher<FakeStroke> {
     val dispatched = mutableListOf<GestureSegment>()
     val displays = mutableListOf<Int?>()
     var initialCount = 0
@@ -60,11 +64,13 @@ class GestureStreamSessionTest {
 
     override fun initialStroke(segment: GestureSegment): FakeStroke {
       initialCount++
+      initialError?.let { throw it }
       return FakeStroke(segment)
     }
 
     override fun continueStroke(previous: FakeStroke, segment: GestureSegment): FakeStroke {
       continueCount++
+      continueError?.let { throw it }
       return FakeStroke(segment)
     }
 
@@ -78,6 +84,7 @@ class GestureStreamSessionTest {
       displays.add(displayId)
       pendingComplete = onComplete
       pendingFail = onFailed
+      dispatchError?.let { throw it }
     }
 
     /** Fire the in-flight stroke's completion, driving the loop one step. */
@@ -199,6 +206,153 @@ class GestureStreamSessionTest {
     assertFalse(lift.willContinue)
 
     h.dispatcher.completeLast() // lift done -> Done
+    assertEquals(true, h.finishedSuccess)
+  }
+
+  @Test
+  fun `negative move coordinates are clamped on every dispatched endpoint`() {
+    for (target in listOf(GesturePoint(-5f, -7f), GesturePoint(-5f, 30f))) {
+      val h = Session()
+      h.session.start(10f, 10f)
+      h.dispatcher.completeLast()
+      h.session.move(target.x, target.y)
+
+      val clampedTarget = GesturePoint(0f, target.y.coerceAtLeast(0f))
+      assertEquals(GesturePoint(10f, 10f), h.dispatcher.dispatched[1].from)
+      assertEquals(clampedTarget, h.dispatcher.dispatched[1].to)
+      h.session.end(target.x, target.y, cancel = false)
+      h.dispatcher.completeLast()
+      assertEquals(clampedTarget, h.dispatcher.dispatched.last().from)
+      assertEquals(clampedTarget, h.dispatcher.dispatched.last().to)
+      h.dispatcher.completeLast()
+
+      assertTrue(
+        h.dispatcher.dispatched.all {
+          it.from.x >= 0f && it.from.y >= 0f && it.to.x >= 0f && it.to.y >= 0f
+        }
+      )
+      assertEquals(true, h.finishedSuccess)
+    }
+  }
+
+  @Test
+  fun `negative initial press and final lift are clamped and dispatched`() {
+    val h = Session()
+    h.session.start(-5f, -7f)
+    h.dispatcher.completeLast()
+    h.session.end(-5f, -7f, cancel = false)
+    h.dispatcher.completeLast()
+
+    assertEquals(2, h.dispatcher.dispatched.size)
+    assertTrue(
+      h.dispatcher.dispatched.all {
+        it.from == GesturePoint(0f, 0f) && it.to == GesturePoint(0f, 0f)
+      }
+    )
+    assertEquals(true, h.finishedSuccess)
+  }
+
+  @Test
+  fun `initial and continuation build exceptions finish once without escaping`() {
+    val message = "Path bounds must not be negative"
+    for (initial in listOf(true, false)) {
+      val error = IllegalArgumentException(message)
+      val dispatcher =
+        if (initial) FakeStrokeDispatcher(initialError = error)
+        else FakeStrokeDispatcher(continueError = error)
+      val h = Session(dispatcher)
+      h.session.start(10f, 10f)
+      if (!initial) {
+        h.session.move(20f, 30f)
+        h.dispatcher.completeLast()
+      }
+
+      assertEquals(1, h.finishCount)
+      assertEquals(false, h.finishedSuccess)
+      assertEquals(message, h.finishedError)
+      val dispatchedCount = h.dispatcher.dispatched.size
+      assertEquals(if (initial) 0 else 1, dispatchedCount)
+      h.session.move(40f, 50f)
+      h.session.end(40f, 50f, cancel = false)
+      assertEquals(dispatchedCount, h.dispatcher.dispatched.size)
+      assertEquals(1, h.finishCount)
+    }
+  }
+
+  @Test
+  fun `dispatch exceptions finish once even when stored callbacks fire later`() {
+    for (complete in listOf(true, false)) {
+      val h = Session(FakeStrokeDispatcher(dispatchError = IllegalStateException()))
+      h.session.start(10f, 10f)
+
+      assertEquals(1, h.finishCount)
+      assertEquals(false, h.finishedSuccess)
+      assertEquals("Failed to build streamed gesture stroke", h.finishedError)
+      h.session.move(20f, 30f)
+      h.session.end(20f, 30f, cancel = false)
+      if (complete) h.dispatcher.completeLast() else h.dispatcher.failLast("late failure")
+      assertEquals(1, h.dispatcher.dispatched.size)
+      assertEquals(1, h.finishCount)
+      assertEquals(false, h.finishedSuccess)
+      assertEquals("Failed to build streamed gesture stroke", h.finishedError)
+    }
+  }
+
+  @Test
+  fun `collapsed negative moves park and recover with a continuous stroke before lifting`() {
+    val h = Session()
+    h.session.start(0f, 0f)
+    h.dispatcher.completeLast()
+    h.session.move(-5f, -7f)
+    h.session.move(-10f, -20f)
+
+    assertEquals(1, h.dispatcher.dispatched.size)
+    assertEquals(0, h.dispatcher.continueCount)
+    assertEquals(0, h.finishCount)
+    assertNull(h.finishedSuccess)
+
+    h.session.move(20f, 20f)
+    assertEquals(2, h.dispatcher.dispatched.size)
+    assertEquals(GesturePoint(0f, 0f), h.dispatcher.dispatched[1].from)
+    assertEquals(GesturePoint(20f, 20f), h.dispatcher.dispatched[1].to)
+    h.session.end(20f, 20f, cancel = false)
+    h.dispatcher.completeLast()
+
+    val lift = h.dispatcher.dispatched.last()
+    assertEquals(3, h.dispatcher.dispatched.size)
+    assertEquals(GesturePoint(20f, 20f), lift.from)
+    assertEquals(lift.from, lift.to)
+    assertFalse(lift.willContinue)
+    h.dispatcher.completeLast()
+    assertEquals(1, h.finishCount)
+    assertEquals(true, h.finishedSuccess)
+  }
+
+  @Test
+  fun `in bounds movement and genuine holds retain their exact endpoints`() {
+    val h = Session()
+    h.session.start(10f, 10f)
+    h.dispatcher.completeLast()
+    h.session.move(20f, 30f)
+    h.dispatcher.completeLast()
+    h.session.move(20f, 30f)
+    assertTrue(h.dispatcher.dispatched.last().isHold)
+    assertTrue(h.dispatcher.dispatched.last().willContinue)
+    h.dispatcher.completeLast()
+    h.session.end(20f, 30f, cancel = false)
+    h.dispatcher.completeLast()
+
+    assertEquals(
+      listOf(
+        GesturePoint(10f, 10f) to GesturePoint(10f, 10f),
+        GesturePoint(10f, 10f) to GesturePoint(20f, 30f),
+        GesturePoint(20f, 30f) to GesturePoint(20f, 30f),
+        GesturePoint(20f, 30f) to GesturePoint(20f, 30f),
+      ),
+      h.dispatcher.dispatched.map { it.from to it.to },
+    )
+    assertEquals(1, h.dispatcher.initialCount)
+    assertEquals(3, h.dispatcher.continueCount)
     assertEquals(true, h.finishedSuccess)
   }
 

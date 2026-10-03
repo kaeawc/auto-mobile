@@ -1050,6 +1050,7 @@ export class DaemonClient {
     params: Record<string, any>,
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
+    signal?: AbortSignal,
   ): Promise<any> {
     return this.sendRequest(
       "tools/call",
@@ -1059,6 +1060,7 @@ export class DaemonClient {
       },
       progressToken,
       onRequestId,
+      signal,
     );
   }
 
@@ -1074,11 +1076,18 @@ export class DaemonClient {
     params: Record<string, any>,
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
+    signal?: AbortSignal,
   ): Promise<any> {
+    signal?.throwIfAborted();
     // Ensure we're connected
     if (!this.connected) {
       try {
-        await this.connect();
+        // The connection may be shared with siblings; abandon only this wait.
+        await raceWithDeadline(() => this.connect(), {
+          timer: this.timer,
+          signal,
+          label: `Daemon request ${method} connection`,
+        });
       } catch (error) {
         if (error instanceof DaemonUnavailableError) {
           throw new DaemonRequestNotDeliveredError(error.message, { cause: error });
@@ -1086,6 +1095,7 @@ export class DaemonClient {
         throw error;
       }
     }
+    signal?.throwIfAborted();
 
     const requestId = this.idGenerator.next();
 
@@ -1124,6 +1134,7 @@ export class DaemonClient {
         ? new ProgressExtendableDeadline(this.timer.now(), requestTimeoutMs)
         : undefined;
 
+    let removeAbortListener = () => {};
     return new Promise((resolve, reject) => {
       const timeout = this.scheduleRequestTimeout(requestId, toolName, requestTimeoutMs, reject);
 
@@ -1138,18 +1149,41 @@ export class DaemonClient {
         deadline,
         requestTimeoutMs,
         disconnectCause,
+        removeAbortListener: () => removeAbortListener(),
       });
       onRequestId?.(requestId);
 
-      if (!this.socket) {
+      if (!this.socket || signal?.aborted) {
         this.timer.clearTimeout(timeout);
         this.pendingRequests.delete(requestId);
-        reject(new DaemonRequestNotDeliveredError("Socket connection lost"));
+        reject(
+          signal?.aborted
+            ? signal.reason
+            : new DaemonRequestNotDeliveredError("Socket connection lost"),
+        );
         return;
       }
 
       this.socket.write(this.serializeRequestFrame(request));
-    });
+      if (signal) {
+        const onAbort = () => {
+          const pending = this.pendingRequests.get(requestId);
+          // A response or timeout may have won before this listener runs.
+          if (!pending) {
+            return;
+          }
+          this.timer.clearTimeout(pending.timeout);
+          this.pendingRequests.delete(requestId);
+          this.sendCancelFrame(requestId);
+          reject(signal.reason);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+        if (signal.aborted) {
+          onAbort();
+        }
+      }
+    }).finally(() => removeAbortListener());
   }
 
   /**
@@ -1321,6 +1355,7 @@ export interface DaemonClientLike {
     params: Record<string, any>,
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
+    signal?: AbortSignal,
   ): Promise<any>;
   readResource(uri: string, params?: Record<string, any>): Promise<any>;
   callDaemonMethod(

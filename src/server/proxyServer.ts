@@ -422,7 +422,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   // dispatch envelope (#6545).
   installToolCallDispatcher(server, {
     progressFailureMessage: "[ProxyServer] Failed to relay progress notification",
-    execute: async ({ name, args, progressToken, progress }) => {
+    execute: async ({ name, args, progressToken, progress, extra }) => {
       const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
 
       logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
@@ -439,9 +439,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         : undefined;
 
       try {
-        const result = await proxy.callTool(name, args, progressToken, onProgress);
+        const result = await proxy.callTool(name, args, progressToken, onProgress, extra.signal);
         return result;
       } catch (error) {
+        // The SDK suppresses responses for aborted requests. Do not turn a
+        // cancellation into a tool error result while that request unwinds.
+        extra.signal.throwIfAborted();
         return resolveCallToolErrorResult(error, name, hasOutputSchema);
       }
     },

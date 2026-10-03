@@ -2050,7 +2050,9 @@ export class DaemonMcpProxy {
     allowReleasedSession?: boolean,
     fenceSessionNotFoundOnRetry = true,
     nonIdempotentToolName?: string,
+    signal: AbortSignal = new AbortController().signal,
   ): Promise<T> {
+    signal.throwIfAborted();
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
@@ -2070,10 +2072,12 @@ export class DaemonMcpProxy {
       // has been dispatched. Give establishment the same single reconnect
       // attempt as a recoverable transport failure, preserving the fences.
       await this.ensureConnected();
+      signal.throwIfAborted();
       this.throwIfBoundSessionFenced(allowReleasedSession);
       established = true;
       return await operation();
     } catch (error) {
+      signal.throwIfAborted();
       if (this.closing) {
         throw error;
       }
@@ -2101,12 +2105,15 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${errorMessage(error)}`,
       );
       await this.resetConnection();
+      signal.throwIfAborted();
       this.throwIfBoundSessionFenced(allowReleasedSession);
       await this.ensureConnected();
+      signal.throwIfAborted();
       this.throwIfBoundSessionFenced(allowReleasedSession);
       try {
         return await operation();
       } catch (retryError) {
+        signal.throwIfAborted();
         this.throwIfBoundSessionFenced(allowReleasedSession);
         const sessionNotFoundFenceTarget = this.sessionNotFoundFenceTarget(
           retryError,
@@ -2566,7 +2573,9 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>,
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
+    signal?: AbortSignal,
   ): Promise<any> {
+    signal?.throwIfAborted();
     // These are daemon-internal routing markers. Never accept caller-controlled
     // values: only this proxy may add them after selecting its active binding.
     const callerArgs = { ...args };
@@ -2611,8 +2620,9 @@ export class DaemonMcpProxy {
     let registeredRequestId: string | undefined;
     let registeredClient: DaemonClientLike | undefined;
     try {
-      const result = await this.withRecoverableReconnect(
+      const forwarding = this.withRecoverableReconnect(
         () => {
+          signal?.throwIfAborted();
           this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
           const client = this.requireClient();
           return client.callTool(
@@ -2632,6 +2642,7 @@ export class DaemonMcpProxy {
                 listeners.set(requestId, { progressToken, listener: onProgress });
               }
             },
+            signal,
           );
         },
         forwardedSessionUuid,
@@ -2640,7 +2651,15 @@ export class DaemonMcpProxy {
         allowReleasedSession,
         true,
         nonIdempotentToolName(name),
+        signal,
       );
+      // Connection recovery is shared with siblings; cancel this wait and fence
+      // replay without aborting the shared connection attempt.
+      const result = await raceWithDeadline(forwarding, {
+        timer: this.timer,
+        signal,
+        label: `Daemon tool ${name}`,
+      });
       if (result?.isError) {
         // Provisioning retains its usable device session when optional resource
         // configuration fails. Own that result-minted session before returning
@@ -2666,6 +2685,7 @@ export class DaemonMcpProxy {
       this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
       return result;
     } catch (error) {
+      signal?.throwIfAborted();
       // The success-only rememberSessionUuid above never runs when the handler
       // rejects, but an admitted-then-rejected call still reached
       // getOrCreateSession() and refreshed the LIVE daemon session. Without

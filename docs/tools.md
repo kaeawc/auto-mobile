@@ -608,7 +608,7 @@ settled screenshot is eligible.
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state. |
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
-| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                                                                                                                 |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                                                            |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
@@ -697,9 +697,49 @@ ambiguity candidates. Scoped and unscoped endpoints can be mixed. These fields
 belong inside each endpoint, not at the top level; unknown endpoint keys and
 malformed recursive containers are rejected.
 
-This nested-scoping contract is not yet available for
-`swipeOn`/`lookFor`, `observe` subtree
-queries, or `waitFor`.
+`swipeOn.container` identifies the element to swipe within and accepts the same
+recursive container, per-level index, and selectionStrategy fields. `lookFor`
+accepts exactly one of `elementId` or `text`, plus its own recursive `container`
+and `selectionStrategy` (`first`, `random`, or `unique`; default `first`):
+
+```json
+{
+  "direction": "up",
+  "container": {
+    "elementId": "list",
+    "container": { "elementId": "panel_A" },
+    "selectionStrategy": "unique"
+  },
+  "lookFor": {
+    "text": "Target",
+    "container": { "elementId": "section" },
+    "selectionStrategy": "unique"
+  }
+}
+```
+
+The swipe container resolves before dispatch. A plain one-level container and
+unscoped lookFor keep their existing behaviour, including falling back to an
+auto-detected scrollable when the container misses during scroll-until-visible.
+Nested chains, selectionStrategy, or container index opt into scoped resolution:
+a swipe container miss or ambiguity fails before a gesture without automatic or
+global fallback. The outermost lookFor scope resolves within the swipe container,
+and every later level and leaf uses strict ancestry, traversing anonymous wrappers
+and allowing inert containers. With a scoped lookFor and a legacy swipe container,
+the swipe container keeps its existing fallback behaviour and constrains the
+lookFor chain only when it actually resolves in that observation. The complete
+scope is re-resolved on each search observation within the existing scroll budget. Missing lookFor scopes or targets remain scoped
+while scrolling and report a not-found error naming the scope; another list's
+match never satisfies the search. `unique` rejects ambiguity at every unindexed
+scope and the target, listing candidates before another gesture. A unique
+zero-match target keeps searching within the budget. Random scope selection is
+bound to the selected swipe container for each observation. Strategy fields
+belong inside `container` or `lookFor`; a strategy without a selector and
+malformed recursive selectors are rejected. Existing screen and simple selector
+calls retain their defaults.
+
+This nested-scoping contract is not yet available for `observe` subtree queries
+or `waitFor`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands. Each `key` command accepts at most 4 raw modifier entries

@@ -132,7 +132,6 @@ import {
 import { isTruthyFlag } from "../features/utility/elementProperties";
 import {
   createElementIdTextSelectorSchema,
-  elementContainerSchema,
   tapOnSelectorSchema,
   resolverSelectionStrategySchema,
   nestedElementContainerSchema,
@@ -728,10 +727,26 @@ const dragAndDropSelectorSchema = (label: "Source" | "Target") => {
     .describe(`${label} element`);
 };
 
-const swipeOnLookForSchema = createElementIdTextSelectorSchema({
+const swipeOnLookForSelector = createElementIdTextSelectorSchema({
   elementId: "ID of the element to look for",
   text: "Text to look for",
 });
+const swipeOnLookForScope = {
+  container: nestedElementContainerSchema
+    .optional()
+    .describe(
+      "Additional nested scope within the swipe container; re-resolved on every observation",
+    ),
+  selectionStrategy: resolverSelectionStrategySchema
+    .optional()
+    .describe(
+      "Target selection strategy (default: first); unique requires one target and every unindexed scope",
+    ),
+};
+const swipeOnLookForSchema = z.union([
+  swipeOnLookForSelector.options[0].extend(swipeOnLookForScope),
+  swipeOnLookForSelector.options[1].extend(swipeOnLookForScope),
+]);
 
 // #6613: dragAndDrop/swipeOn/pinchOn advertised
 // `additionalProperties: false` but were not `.strict()`, so an undeclared
@@ -790,7 +805,11 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .describe(
             "Use full screen including status/nav bars; with display, requires the selected Android panel's own available insets",
           ),
-        container: elementContainerSchema.optional().describe("Scope search to a container"),
+        container: nestedElementContainerSchema
+          .optional()
+          .describe(
+            "Nested swipe container scope; outermost resolves first, with per-level index and selectionStrategy",
+          ),
         autoTarget: z
           .boolean()
           .optional()

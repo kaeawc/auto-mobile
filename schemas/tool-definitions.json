@@ -25040,27 +25040,8 @@
           "type": "boolean"
         },
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
-          "description": "Scope search to a container",
-          "anyOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ]
+          "description": "Nested swipe container scope; outermost resolves first, with per-level index and selectionStrategy",
+          "$ref": "#/$defs/__schema0"
         },
         "autoTarget": {
           "description": "Auto-target scrollable containers (default: true; with Android display, opt-in)",
@@ -25077,25 +25058,47 @@
           "enum": ["swipeFingerTowardsDirection", "scrollTowardsDirection"]
         },
         "lookFor": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "ID of the element to look for",
-              "type": "string"
-            },
-            "text": {
-              "description": "Text to look for",
-              "type": "string"
-            }
-          },
           "description": "Element to find by scrolling; with display, observes and swipes only the selected Android panel",
           "anyOf": [
             {
-              "required": ["elementId"]
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "ID of the element to look for",
+                  "type": "string"
+                },
+                "container": {
+                  "description": "Additional nested scope within the swipe container; re-resolved on every observation",
+                  "$ref": "#/$defs/__schema0"
+                },
+                "selectionStrategy": {
+                  "description": "Target selection strategy (default: first); unique requires one target and every unindexed scope",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
             },
             {
-              "required": ["text"]
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Text to look for",
+                  "type": "string"
+                },
+                "container": {
+                  "description": "Additional nested scope within the swipe container; re-resolved on every observation",
+                  "$ref": "#/$defs/__schema0"
+                },
+                "selectionStrategy": {
+                  "description": "Target selection strategy (default: first); unique requires one target and every unindexed scope",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
             }
           ]
         },
@@ -25144,7 +25147,61 @@
         }
       },
       "required": ["direction"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {

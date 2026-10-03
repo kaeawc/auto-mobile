@@ -1,3 +1,4 @@
+import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
 import {
   withStaleDisplay,
   StaleDisplayError,
@@ -601,6 +602,12 @@ export class SwipeOn extends BaseVisualChange {
     if (!options.container || !observation.viewHierarchy) {
       return undefined;
     }
+    if (usesScopedSwipeContainer(options.container)) {
+      return this.scrollUntilVisible.resolveSwipeContainer(
+        observation.viewHierarchy,
+        options.container,
+      ).bounds;
+    }
     return this.scrollUntilVisible.resolveElement(
       observation.viewHierarchy,
       options.container,
@@ -1141,11 +1148,13 @@ export class SwipeOn extends BaseVisualChange {
         };
       },
       {
-        queryOptions: {
-          text: options.container?.text,
-          elementId: options.container?.elementId,
-          containerElementId: undefined, // No nested container restriction
-        },
+        queryOptions: usesScopedSwipeContainer(options.container)
+          ? undefined
+          : {
+              text: options.container?.text,
+              elementId: options.container?.elementId,
+              containerElementId: undefined, // No nested container restriction
+            },
         changeExpected: false,
         display: options.display,
         timeoutMs: 500,

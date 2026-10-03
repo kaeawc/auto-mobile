@@ -1,3 +1,4 @@
+import type { SwipeOnOptions } from "../models/SwipeOnOptions";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
 import type { TapAtOptions } from "../models/TapAtOptions";
 import type { DragAndDropTarget } from "../models/DragAndDropOptions";
@@ -131,17 +132,11 @@ export interface DragAndDropArgs {
 export interface SwipeOnArgs {
   display?: string;
   includeSystemInsets?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
   autoTarget?: boolean;
   direction: "up" | "down" | "left" | "right";
   gestureType?: "swipeFingerTowardsDirection" | "scrollTowardsDirection";
-  lookFor?: {
-    elementId?: string;
-    text?: string;
-  };
+  lookFor?: Omit<NonNullable<SwipeOnOptions["lookFor"]>, "maxTime">;
   boomerang?: boolean;
   apexPause?: number;
   returnSpeed?: number;

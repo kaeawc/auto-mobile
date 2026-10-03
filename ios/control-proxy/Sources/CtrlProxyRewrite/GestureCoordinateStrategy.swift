@@ -1,6 +1,6 @@
 import Foundation
 
-struct GestureSize: Equatable, Sendable {
+struct GestureSize: Equatable, Hashable, Sendable {
     let width: Double
     let height: Double
 
@@ -44,6 +44,18 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
     let observation: GestureSize
     let rotation: Int?
 
+    nonisolated func replacingScreen(_ screen: GestureSize) -> Self {
+        Self(app: app, screen: screen, observation: observation, rotation: rotation)
+    }
+
+    /// Correct only a runner-screen mismatch that disappears against the trusted screen.
+    nonisolated func resolvingSinglePanel(reference: GestureSize?) -> Self? {
+        guard hasMultiPanelMismatch(app: app, screen: screen),
+              let reference, reference.isValid,
+              !hasMultiPanelMismatch(app: app, screen: reference) else { return nil }
+        return replacingScreen(reference)
+    }
+
     /// Mirrors resolveIosObserveRotation: unknown cardinal orientation falls back to size.
     nonisolated static func observationRotation(_ rotation: Int?, size: GestureSize) -> Int? {
         guard size.isValid else { return nil }
@@ -53,6 +65,43 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
             return rotation
         }
         return size.width < size.height ? 0 : 1
+    }
+}
+
+/// Memoizes failures too, so an unavailable reference does not add IPC to every tap.
+@MainActor
+final class ReferenceScreenCache {
+    private struct Key: Hashable {
+        let app: GestureSize
+        let screen: GestureSize
+
+        init(_ geometry: GestureCoordinateGeometry) {
+            app = geometry.app
+            screen = geometry.screen
+        }
+    }
+
+    private struct Entry {
+        let screen: GestureSize?
+    }
+
+    private let reader: @MainActor () -> GestureSize?
+    private var entries: [Key: Entry] = [:]
+
+    init(reader: @escaping @MainActor () -> GestureSize?) { self.reader = reader }
+
+    func screen(for geometry: GestureCoordinateGeometry) -> GestureSize? {
+        let key = Key(geometry)
+        if let entry = entries[key] { return entry.screen }
+        let result = reader()
+        let screen = result.flatMap { $0.isValid ? $0 : nil }
+        entries[key] = Entry(screen: screen)
+        return screen
+    }
+
+    /// Forced legacy can consume a warm entry, but must never trigger a platform read.
+    func cachedScreen(for geometry: GestureCoordinateGeometry) -> GestureSize? {
+        entries[Key(geometry)]?.screen
     }
 }
 

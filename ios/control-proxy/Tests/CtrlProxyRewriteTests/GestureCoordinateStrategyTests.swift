@@ -218,3 +218,282 @@ final class GestureCoordinateStrategyTests: XCTestCase {
         }
     }
 }
+
+@MainActor
+private final class FakeReferenceScreenReader {
+    var result: GestureSize?
+    private(set) var reads = 0
+
+    init(result: GestureSize?) { self.result = result }
+
+    func read() -> GestureSize? {
+        reads += 1
+        return result
+    }
+}
+
+/// Mirrors the provider's early correction, live fallback, and cache-only forced-legacy path.
+@MainActor
+private final class FakeReferenceDisplayGestureProvider: DisplayGestureProviding {
+    let sample: GestureCoordinateGeometry
+    let cache: ReferenceScreenCache
+    var inventory: GestureDisplayInventory
+    private(set) var inventoryReads = 0
+    private(set) var geometryReads = 0
+    private(set) var liveGeometryReads = 0
+    private(set) var taps = 0
+    private(set) var touches: [DisplayTouch] = []
+
+    init(sample: GestureCoordinateGeometry, cache: ReferenceScreenCache, inventory: GestureDisplayInventory) {
+        self.sample = sample
+        self.cache = cache
+        self.inventory = inventory
+    }
+
+    var cachedGeometry: GestureCoordinateGeometry? {
+        sample.resolvingSinglePanel(reference: cache.cachedScreen(for: sample)) ?? sample
+    }
+
+    func geometry() throws -> GestureCoordinateGeometry? {
+        geometryReads += 1
+        guard hasMultiPanelMismatch(app: sample.app, screen: sample.screen) else { return sample }
+        let reference = cache.screen(for: sample)
+        if let corrected = sample.resolvingSinglePanel(reference: reference) { return corrected }
+        liveGeometryReads += 1
+        // The fake live frame/rotation stay unchanged; only the screen reference is substituted.
+        return sample.replacingScreen(reference ?? sample.screen)
+    }
+
+    func displayInventory() -> GestureDisplayInventory {
+        inventoryReads += 1
+        return inventory
+    }
+
+    func synthesize(_ touch: DisplayTouch) throws -> Bool {
+        touches.append(touch)
+        return true
+    }
+
+    func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection { selection }
+
+    func tap(_: GestureCoordinateSelection, duration _: TimeInterval) throws { taps += 1 }
+
+    func drag(
+        _: GestureCoordinateSelection, to _: GestureCoordinateSelection,
+        press _: TimeInterval, velocity _: Double?, hold _: TimeInterval
+    )
+        throws {}
+}
+
+@MainActor
+extension GestureCoordinateStrategyTests {
+    // Issue #9156 body: manual-test batch 10, main 93980d5ca, iPhone 18 Pro sim, iOS 27.0:
+    // app 402x874; runnerProcessUIScreenMain 320x480 (nativeBounds 960x1440, scale 3);
+    // screens [{displayId: 1, isMain: true}], mainDisplayId 1, applicationDisplayId 0.
+    // /tmp/mtb10/captures/ios-secure-field-focused.raw.json: screenSize 402x874 points,
+    // hierarchy root [0,0,402,874], rotation 0, screenScale 3, hence observation 402x874.
+    // Reference-reader results are test hypotheses: the SpringBoard frame on a real device/Duo
+    // was not captured, and the capture does not claim a SpringBoard frame measurement.
+    private var capturedIPhone: GestureCoordinateGeometry {
+        GestureCoordinateGeometry(
+            app: GestureSize(width: 402, height: 874), screen: GestureSize(width: 320, height: 480),
+            observation: GestureSize(width: 402, height: 874), rotation: 0
+        )
+    }
+
+    private var capturedMainOnlyInventory: GestureDisplayInventory {
+        GestureDisplayInventory(
+            screens: [.init(displayId: 1, isMain: true)], applicationDisplayId: 0, isPhoneIdiom: true
+        )
+    }
+
+    func testReferenceScreenCorrectsThreeCapturedIPhoneTapsAcrossProviders() throws {
+        let reader = FakeReferenceScreenReader(result: capturedIPhone.app)
+        let cache = ReferenceScreenCache { reader.read() }
+        for _ in 0 ..< 3 {
+            // Like GesturePerformer, construct a provider per gesture with the same process cache.
+            let provider = FakeReferenceDisplayGestureProvider(
+                sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
+            )
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: .zero, press: 0)
+            var diagnostics = TapDiagnostics(requested: .init(x: 0, y: 0, durationMs: 0))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertNil(diagnostics.deliveryWarning)
+            XCTAssertFalse(factory.mismatch)
+            XCTAssertEqual(provider.inventoryReads, 0)
+            XCTAssertEqual(provider.liveGeometryReads, 0)
+            XCTAssertEqual(provider.taps, 1)
+            XCTAssertEqual(delivery.selection.strategy, .legacy)
+            XCTAssertEqual(delivery.selection.reason, "singlePanel")
+            XCTAssertEqual(diagnostics.strategyReason, "singlePanel")
+            XCTAssertEqual(delivery.route, .xcuiCoordinate)
+            XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+            XCTAssertEqual(diagnostics.targetDisplayReason, "notSampled")
+        }
+        XCTAssertEqual(reader.reads, 1)
+    }
+
+    func testReferenceScreenPreservesUnfoldedDuoMismatchAndDisplayRouting() throws {
+        // Existing unfolded fixture and local [main] / [main, inner] inventory shapes from
+        // DisplayTargetedGestureTests; 466x678 is a hypothetical reference, not a Duo capture.
+        let main = TapDiagnostics.DisplayScreen(displayId: 1, isMain: true)
+        let inner = TapDiagnostics.DisplayScreen(displayId: 2, isMain: false)
+        for screens in [[main], [main, inner]] {
+            let reader = FakeReferenceScreenReader(result: unfolded.screen)
+            let cache = ReferenceScreenCache { reader.read() }
+            let provider = FakeReferenceDisplayGestureProvider(
+                sample: unfolded, cache: cache,
+                inventory: GestureDisplayInventory(screens: screens, applicationDisplayId: 0, isPhoneIdiom: true)
+            )
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: GesturePoint(x: 443, y: 202), press: 0)
+            var diagnostics = TapDiagnostics(requested: .init(x: 443, y: 202, durationMs: 0))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertTrue(factory.mismatch)
+            XCTAssertEqual(provider.inventoryReads, 1)
+            XCTAssertEqual(provider.liveGeometryReads, 1)
+            XCTAssertEqual(reader.reads, 1)
+            XCTAssertEqual(delivery.selection.reason, "multiPanelMismatch")
+            if screens.count == 1 {
+                XCTAssertEqual(delivery.selection.strategy, .appRelative)
+                XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+                XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+                XCTAssertEqual(diagnostics.targetDisplayReason, "noNonMainScreen")
+                XCTAssertTrue(provider.touches.isEmpty)
+            } else {
+                XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+                XCTAssertNil(diagnostics.deliveryWarning)
+                XCTAssertEqual(diagnostics.route, .displayTargetedRecord)
+                XCTAssertEqual(provider.touches.first?.displayId, 2)
+            }
+        }
+    }
+
+    func testFailedReferenceReadKeepsCapturedIPhoneWarningAndMemoizesNil() throws {
+        let reader = FakeReferenceScreenReader(result: nil)
+        let cache = ReferenceScreenCache { reader.read() }
+        let provider = FakeReferenceDisplayGestureProvider(
+            sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
+        )
+        for _ in 0 ..< 3 {
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: .zero, press: 0)
+            var diagnostics = TapDiagnostics(requested: .init(x: 0, y: 0, durationMs: 0))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertTrue(factory.mismatch)
+            XCTAssertEqual(delivery.selection.strategy, .legacy)
+            // Exact pre-fix reason captured in issue #9156's tap diagnostics.
+            XCTAssertEqual(delivery.selection.reason, "mappingUndefined(rotation=0,geometryOrPoint)")
+            XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+            XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+        }
+        XCTAssertNil(cache.cachedScreen(for: capturedIPhone))
+        XCTAssertEqual(reader.reads, 1)
+        XCTAssertEqual(provider.inventoryReads, 3)
+        XCTAssertEqual(provider.liveGeometryReads, 3)
+    }
+
+    func testInvalidReferenceSizesAreMemoizedAsNilAndKeepMismatch() throws {
+        for invalid in [
+            GestureSize(width: 0, height: 0), GestureSize(width: .nan, height: 874),
+            GestureSize(width: 402, height: .infinity), GestureSize(width: -1, height: 874),
+        ] {
+            let reader = FakeReferenceScreenReader(result: invalid)
+            let cache = ReferenceScreenCache { reader.read() }
+            let provider = FakeReferenceDisplayGestureProvider(
+                sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
+            )
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: .zero, press: 0)
+            var diagnostics = TapDiagnostics(requested: .init(x: 0, y: 0, durationMs: 0))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertTrue(factory.mismatch)
+            XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+            XCTAssertNil(cache.screen(for: capturedIPhone))
+            XCTAssertNil(cache.cachedScreen(for: capturedIPhone))
+            XCTAssertNil(capturedIPhone.resolvingSinglePanel(reference: invalid))
+            XCTAssertEqual(reader.reads, 1)
+        }
+    }
+
+    func testReferenceCacheKeysRawSizesAndCachedReadsNeverCallReader() throws {
+        let reader = FakeReferenceScreenReader(result: capturedIPhone.app)
+        let cache = ReferenceScreenCache { reader.read() }
+        let provider = FakeReferenceDisplayGestureProvider(
+            sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
+        )
+        XCTAssertNil(cache.cachedScreen(for: capturedIPhone))
+        XCTAssertEqual(provider.cachedGeometry, capturedIPhone)
+        XCTAssertEqual(reader.reads, 0)
+        XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+        XCTAssertEqual(cache.cachedScreen(for: capturedIPhone), capturedIPhone.app)
+        let corrected = try XCTUnwrap(provider.cachedGeometry)
+        XCTAssertEqual(corrected, capturedIPhone.replacingScreen(capturedIPhone.app))
+        XCTAssertEqual(corrected.observation, capturedIPhone.observation)
+        XCTAssertEqual(corrected.rotation, capturedIPhone.rotation)
+        XCTAssertEqual(reader.reads, 1)
+
+        // Synthetic transpose of the capture exercises a rotated raw app-size key.
+        let landscape = GestureCoordinateGeometry(
+            app: GestureSize(width: 874, height: 402), screen: capturedIPhone.screen,
+            observation: GestureSize(width: 874, height: 402), rotation: 1
+        )
+        XCTAssertNil(cache.cachedScreen(for: landscape))
+        XCTAssertEqual(reader.reads, 1)
+        reader.result = landscape.app
+        XCTAssertEqual(cache.screen(for: landscape), landscape.app)
+        XCTAssertEqual(cache.screen(for: landscape), landscape.app)
+        XCTAssertEqual(reader.reads, 2)
+
+        // A different raw screen also keys separately even with the same app size.
+        let otherScreen = capturedIPhone.replacingScreen(unfolded.screen)
+        XCTAssertNil(cache.cachedScreen(for: otherScreen))
+        XCTAssertEqual(reader.reads, 2)
+        reader.result = nil
+        XCTAssertNil(cache.screen(for: otherScreen))
+        XCTAssertNil(cache.screen(for: otherScreen))
+        XCTAssertEqual(cache.cachedScreen(for: capturedIPhone), capturedIPhone.app)
+        XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app)
+        XCTAssertEqual(reader.reads, 3)
+    }
+
+    func testReferenceResolutionCorrectsOnlyMatchingOrTransposedSinglePanelSizes() throws {
+        XCTAssertNil(folded.resolvingSinglePanel(reference: folded.screen))
+        XCTAssertNil(folded.resolvingSinglePanel(reference: unfolded.app))
+        for reference in [capturedIPhone.app, GestureSize(width: 874, height: 402)] {
+            let corrected = try XCTUnwrap(capturedIPhone.resolvingSinglePanel(reference: reference))
+            XCTAssertEqual(corrected, capturedIPhone.replacingScreen(reference))
+            XCTAssertFalse(hasMultiPanelMismatch(app: corrected.app, screen: corrected.screen))
+        }
+        XCTAssertNil(unfolded.resolvingSinglePanel(reference: unfolded.screen))
+        XCTAssertNil(capturedIPhone.resolvingSinglePanel(reference: capturedIPhone.screen))
+        XCTAssertNil(capturedIPhone.resolvingSinglePanel(reference: nil))
+    }
+
+    func testForcedLegacyUsesWarmReferenceAndKeepsColdWarningWithoutLiveReads() throws {
+        for warm in [true, false] {
+            let reader = FakeReferenceScreenReader(result: capturedIPhone.app)
+            let cache = ReferenceScreenCache { reader.read() }
+            if warm { XCTAssertEqual(cache.screen(for: capturedIPhone), capturedIPhone.app) }
+            let provider = FakeReferenceDisplayGestureProvider(
+                sample: capturedIPhone, cache: cache, inventory: capturedMainOnlyInventory
+            )
+            let readsBeforeForcedLegacy = reader.reads
+            let factory = try DisplayGestureFactory(provider: provider, forced: .legacy)
+            let delivery = try factory.deliver(start: .zero, press: 0, forced: .legacy)
+            var diagnostics = TapDiagnostics(requested: .init(x: 0, y: 0, durationMs: 0))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertEqual(factory.mismatch, !warm)
+            // The first-ever forced-legacy call may still warn: it cannot read SpringBoard to warm the cache.
+            XCTAssertEqual(diagnostics.deliveryWarning, warm ? nil : .eventDisplayMismatch)
+            XCTAssertEqual(delivery.selection.strategy, .legacy)
+            XCTAssertEqual(delivery.selection.reason, "forced")
+            XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+            XCTAssertEqual(provider.inventoryReads, warm ? 0 : 1)
+            XCTAssertEqual(provider.geometryReads, 0)
+            XCTAssertEqual(provider.liveGeometryReads, 0)
+            XCTAssertEqual(reader.reads - readsBeforeForcedLegacy, 0)
+        }
+    }
+}

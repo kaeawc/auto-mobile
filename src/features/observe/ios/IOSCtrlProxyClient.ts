@@ -622,9 +622,10 @@ function nullWhenAbsent<T>(value: T | null | undefined): T | null {
  * version/hash, so presence of all of these in `supportedCommands` is the runner
  * identity used by diagnostics (doctor) and the booted-devices resource to tell a
  * current runner from a stale one. Keep unreleased feature-gated commands out of
- * this list until they are present in the released runner registry. Append input
- * deliberately uses request_set_text as a compatibility fallback until its
- * dedicated command is released.
+ * this list until they are present in the released runner registry. Environment-
+ * restricted commands such as set_hinge_angle are filtered per environment by
+ * iosRunnerFeatureCommands.ts. Append input deliberately uses request_set_text
+ * as a compatibility fallback until its dedicated command is released.
  */
 export const IOS_RUNNER_FEATURE_COMMANDS = [
   "request_shake",
@@ -633,6 +634,7 @@ export const IOS_RUNNER_FEATURE_COMMANDS = [
   "add_highlight",
   "execute_sql",
   "set_network_mock_rules",
+  "set_hinge_angle",
 ] as const;
 
 /** Non-command wire capabilities advertised by runners built from this source revision. */

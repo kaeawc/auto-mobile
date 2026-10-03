@@ -10,7 +10,7 @@ import {
 
 describe("iOS runner feature commands", () => {
   const requirements: IosRunnerCommandRequirements = {
-    requiredCommands: [...IOS_RUNNER_FEATURE_COMMANDS, "set_hinge_angle", "set_voiceover_state"],
+    requiredCommands: [...IOS_RUNNER_FEATURE_COMMANDS, "set_voiceover_state"],
     applicability: IOS_RUNNER_COMMAND_APPLICABILITY,
   };
 
@@ -22,8 +22,16 @@ describe("iOS runner feature commands", () => {
     ).toEqual({ set_hinge_angle: "simulator", set_voiceover_state: "physical" });
   });
 
-  test("keeps set_hinge_angle outside the released feature gate (#8547)", () => {
-    expect([...IOS_RUNNER_FEATURE_COMMANDS]).not.toContain("set_hinge_angle");
+  const sharedCommands = IOS_RUNNER_FEATURE_COMMANDS.filter(
+    (command) => command !== "set_hinge_angle",
+  );
+
+  test("registers the released set_hinge_angle command with simulator-only default requirements", () => {
+    expect([...IOS_RUNNER_FEATURE_COMMANDS]).toContain("set_hinge_angle");
+    expect(getRequiredIosRunnerFeatureCommands("simulator")).toContain("set_hinge_angle");
+    expect(getRequiredIosRunnerFeatureCommands("physical")).not.toContain("set_hinge_angle");
+    expect(getRequiredIosRunnerFeatureCommands()).not.toContain("set_hinge_angle");
+    expect(getMissingIosRunnerFeatureCommands(new Set(sharedCommands), "physical")).toEqual([]);
   });
 
   const environments: (IosRunnerEnvironment | undefined)[] = ["simulator", "physical", undefined];
@@ -36,22 +44,18 @@ describe("iOS runner feature commands", () => {
             ? ["set_voiceover_state"]
             : [];
       expect(getRequiredIosRunnerFeatureCommands(environment, requirements)).toEqual([
-        ...IOS_RUNNER_FEATURE_COMMANDS,
+        ...sharedCommands,
         ...restricted,
       ]);
       expect(
-        getMissingIosRunnerFeatureCommands(
-          new Set(IOS_RUNNER_FEATURE_COMMANDS),
-          environment,
-          requirements,
-        ),
+        getMissingIosRunnerFeatureCommands(new Set(sharedCommands), environment, requirements),
       ).toEqual(restricted);
       for (const command of requirements.requiredCommands) {
         const advertised = new Set(
           requirements.requiredCommands.filter((value) => value !== command),
         );
         const expected =
-          new Set<string>(IOS_RUNNER_FEATURE_COMMANDS).has(command) || restricted.includes(command)
+          new Set<string>(sharedCommands).has(command) || restricted.includes(command)
             ? [command]
             : [];
         expect(getMissingIosRunnerFeatureCommands(advertised, environment, requirements)).toEqual(
@@ -59,7 +63,8 @@ describe("iOS runner feature commands", () => {
         );
       }
       expect(getRequiredIosRunnerFeatureCommands(environment)).toEqual([
-        ...IOS_RUNNER_FEATURE_COMMANDS,
+        ...sharedCommands,
+        ...(environment === "simulator" ? ["set_hinge_angle"] : []),
       ]);
     });
   }

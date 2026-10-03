@@ -1159,7 +1159,7 @@ describe("checkIosCtrlProxyRunner", () => {
   for (const environment of ["simulator", "physical", undefined] as const) {
     for (const missing of ["set_hinge_angle", "set_voiceover_state", "request_shake"] as const) {
       test(`classifies missing ${missing} on ${environment ?? "default simulator"}`, async () => {
-        const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_hinge_angle", "set_voiceover_state"];
+        const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_voiceover_state"];
         const stale =
           missing === "request_shake" ||
           (missing === "set_hinge_angle" && environment !== "physical") ||

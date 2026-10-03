@@ -1082,12 +1082,13 @@ observation produces `posture: "unknown"` and a human-readable `postureReason`.
 A known committed posture can be reported when the final observation's posture
 is unknown. No angle-to-posture thresholds are inferred.
 
-Arbitrary iOS angles require a connected runner advertising `set_hinge_angle`
-(#8547). A runner without that advertisement (including a missing handshake)
-returns unsupported and must be re-cut/updated; no hinge request is sent and no
-state changed. Physical iOS and non-foldable simulators retain their existing
-unsupported results. Named iOS postures retain the existing 0/130/180 mapping
-and are not gated by this new capability check. An angle's resulting posture
+Arbitrary iOS angles require a connected runner advertising `set_hinge_angle`,
+shipped in release 0.0.82. The stale-runner gate requires this command only on
+simulators. A runner without that advertisement (including a missing handshake)
+returns unsupported and must be updated to a runner that advertises it; no hinge
+request is sent and no state changed. Physical iOS and non-foldable simulators
+retain their existing unsupported results. Named iOS postures retain the existing
+0/130/180 mapping and are not gated by this new capability check. An angle's resulting posture
 comes from the observed active panel: cover reports closed, inner reports its
 observed posture (or opened if the inner panel is known but posture is unknown),
 and an indeterminate panel reports unknown with a reason.

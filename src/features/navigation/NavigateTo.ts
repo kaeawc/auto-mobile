@@ -73,7 +73,11 @@ export class NavigateTo {
     this.uiStateSetup = uiStateSetup;
     this.screenWaiter =
       screenWaiter ||
-      new DefaultScreenTransitionWaiter(this.navigationManager, NavigateTo.POLL_INTERVAL_MS);
+      new DefaultScreenTransitionWaiter(
+        this.navigationManager,
+        NavigateTo.POLL_INTERVAL_MS,
+        this.timer,
+      );
   }
 
   /**
@@ -209,6 +213,7 @@ export class NavigateTo {
 
       // Execute path
       const executedPath: string[] = [];
+      let reached = false;
 
       for (let i = 0; i < pathResult.path.length; i++) {
         const edge = pathResult.path[i];
@@ -282,8 +287,12 @@ export class NavigateTo {
         }
 
         // Wait for screen transition
-        const reached = await this.screenWaiter.waitForScreen(edge.to, NavigateTo.STEP_TIMEOUT_MS);
-        if (!reached) {
+        const stepReached = await this.screenWaiter.waitForScreen(
+          edge.to,
+          NavigateTo.STEP_TIMEOUT_MS,
+        );
+        reached = stepReached && edge.to === targetScreen;
+        if (!stepReached) {
           logger.warn(`[NAVIGATE_TO] Screen "${edge.to}" not reached within timeout`);
           // Continue anyway - navigation events might be delayed
         }
@@ -294,15 +303,20 @@ export class NavigateTo {
         await progress(
           pathResult.path.length,
           pathResult.path.length,
-          `Arrived at ${targetScreen}`,
+          reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
         );
       }
 
       perf.end();
+      const finalScreen = this.navigationManager.getCurrentScreen();
+      const message = reached
+        ? `Successfully navigated to "${targetScreen}"`
+        : `Navigation did not reach "${targetScreen}"${finalScreen ? `; currently on "${finalScreen}"` : ""}`;
       return {
-        success: true,
-        message: `Successfully navigated to "${targetScreen}"`,
-        currentScreen: this.navigationManager.getCurrentScreen(),
+        success: reached,
+        message,
+        ...(!reached ? { error: message } : {}),
+        currentScreen: finalScreen,
         targetScreen,
         stepsExecuted: executedPath.length,
         path: executedPath,

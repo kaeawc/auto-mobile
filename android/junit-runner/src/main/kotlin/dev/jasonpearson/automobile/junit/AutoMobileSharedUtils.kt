@@ -84,7 +84,14 @@ interface DeviceChecker {
  *
  * Uses a JVM-wide lock to prevent parallel test executors from racing on ADB server startup.
  */
-class DeviceAvailabilityChecker : DeviceChecker {
+class DeviceAvailabilityChecker
+@JvmOverloads
+constructor(
+  private val getenv: (String) -> String? = System::getenv,
+  private val commandExecutor: (List<String>, Long) -> CommandResult = { command, timeoutMs ->
+    AutoMobileSharedUtils.executeCommand(command, timeoutMs)
+  },
+) : DeviceChecker {
   @Volatile private var deviceCount = 0
 
   @Volatile private var checkComplete = false
@@ -122,7 +129,17 @@ class DeviceAvailabilityChecker : DeviceChecker {
   private fun checkDeviceAvailabilityLocked() {
     println("Checking for available Android devices...")
 
-    val command = listOf("${getAndroidHome()}/platform-tools/adb", "devices")
+    val androidHome = getAndroidHome()
+    if (androidHome == null) {
+      deviceCount = 0
+      lastError =
+        "ANDROID_HOME / ANDROID_SDK_ROOT is not set; cannot locate adb — treating as no devices available"
+      checkComplete = true
+      println("No devices found - AutoMobile tests will be skipped")
+      return
+    }
+
+    val command = listOf("$androidHome/platform-tools/adb", "devices")
     println("Running device check: ${command.joinToString(" ")}")
 
     var lastException: Exception? = null
@@ -244,15 +261,15 @@ class DeviceAvailabilityChecker : DeviceChecker {
   }
 
   private fun executeCommand(command: List<String>, timeoutMs: Long): CommandResult {
-    return AutoMobileSharedUtils.executeCommand(command, timeoutMs)
+    return commandExecutor(command, timeoutMs)
   }
 
-  private fun getAndroidHome(): String {
+  private fun getAndroidHome(): String? {
     val androidHome =
-      System.getenv("ANDROID_HOME")
-        ?: System.getenv("ANDROID_SDK_ROOT")
-        ?: System.getenv("ANDROID_SDK_HOME")
-        ?: throw IllegalStateException("ANDROID_HOME environment variable is not set")
+      getenv("ANDROID_HOME")
+        ?: getenv("ANDROID_SDK_ROOT")
+        ?: getenv("ANDROID_SDK_HOME")
+        ?: return null
 
     // Validate the path to prevent command injection
     // Phase 6: Use cached regex to avoid repeated compilation

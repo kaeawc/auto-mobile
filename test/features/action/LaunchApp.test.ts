@@ -1328,6 +1328,74 @@ describe("LaunchApp", () => {
     }
   });
 
+  test("discovery skips package look-alikes and stops after the first literal result", async () => {
+    fakeTimer.enableAutoAdvance();
+    const controller = new AbortController();
+    const perf = new DefaultPerformanceTracker(fakeTimer);
+    const trackSpy = spyOn(perf, "track");
+    const executeSpy = spyOn(fakeAdb, "executeCommand");
+    const discoveryLaunch = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+      performanceTrackerFactory: () => perf,
+    });
+    discoveryLaunch.awaitIdle = fakeAwaitIdle;
+    discoveryLaunch.observeScreen = fakeObserveScreen;
+    discoveryLaunch.window = fakeWindow;
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable in this fake-only test");
+    });
+    fakeAdb.setCommandResponse(
+      `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER '${packageName}'`,
+      { stdout: "Error: no launcher activity", stderr: "" },
+    );
+    fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+      stdout: "No activities found to run, monkey aborted",
+      stderr: "",
+    });
+    const firstCommand = `shell pm dump '${packageName}' | grep -A 5 -B 5 "android.intent.action.MAIN"`;
+    const secondCommand = `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep '${packageName}'`;
+    // Minimal input-shape probes, not claimed device captures.
+    fakeAdb.setCommandResponse(firstCommand, { stdout: "comXexampleXapp/.Main", stderr: "" });
+    fakeAdb.setCommandResponse(secondCommand, {
+      stdout: `${packageName}/.Discovered`,
+      stderr: "",
+    });
+
+    try {
+      const result = await discoveryLaunch.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      expect(result).toMatchObject({ success: true, activityName: ".Discovered" });
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) => command.includes("pm dump") || command.includes("query-activities")),
+      ).toEqual([firstCommand, secondCommand]);
+      for (const command of [firstCommand, secondCommand]) {
+        expect(executeSpy).toHaveBeenCalledWith(
+          command,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        );
+      }
+      const discoveryLabels = trackSpy.mock.calls
+        .map(([label]) => label)
+        .filter((label) => label.startsWith("activity") || label === "a11yLaunchIntent");
+      expect(discoveryLabels).toEqual(["activityApproach_1", "activityApproach_2"]);
+    } finally {
+      getInstanceSpy.mockRestore();
+      executeSpy.mockRestore();
+      trackSpy.mockRestore();
+    }
+  });
+
   test("resolves iOS hierarchy readiness via sync and unsubscribes the losing push", async () => {
     const iosDevice: BootedDevice = {
       name: "test-ios-device",

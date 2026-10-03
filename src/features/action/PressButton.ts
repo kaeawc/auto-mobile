@@ -8,7 +8,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
@@ -429,7 +429,9 @@ export class PressButton extends BaseVisualChange {
     throwIfAborted(signal);
     switch (button) {
       case "home":
-        if (isIosSimulatorUdid(this.device.deviceId)) {
+        if (
+          resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl }).kind === "simulator"
+        ) {
           await awaitWhileRequestIsLive(
             new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
               undefined,

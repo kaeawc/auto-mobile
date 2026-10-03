@@ -11,7 +11,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { deriveIosScreenIdentity } from "../observe/ios/IosScreenIdentity";
 import type { CtrlProxyHierarchy } from "../observe/ios/types";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
@@ -138,8 +138,8 @@ export class HomeScreen extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<void> {
     throwIfAborted(signal);
-    const simulator = isIosSimulatorUdid(this.device.deviceId);
-    if (!simulator) {
+    const backend = resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl });
+    if (backend.kind === "physical") {
       const client = IOSCtrlProxyClient.getInstance(this.device);
       const pressError = await awaitWhileRequestIsLive(
         this.tryIosRunnerHome(client, 5000, perf, frameContext),
@@ -156,10 +156,12 @@ export class HomeScreen extends BaseVisualChange {
     try {
       throwIfAborted(signal);
       await awaitWhileRequestIsLive(
-        this.simctl.executeCommandArgs(
-          ["launch", this.device.deviceId, "com.apple.springboard"],
-          Math.min(HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS, this.iosHomeRemainingMs(deadline)),
-        ),
+        backend.launchSpringboard({
+          timeoutMs: Math.min(
+            HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS,
+            this.iosHomeRemainingMs(deadline),
+          ),
+        }),
         signal,
       );
     } catch (error) {

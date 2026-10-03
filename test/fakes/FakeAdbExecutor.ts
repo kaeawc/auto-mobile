@@ -1,5 +1,6 @@
 import {
   AdbExecutor,
+  type ForegroundAppReadResult,
   type AdbExecuteOptions,
   type DeviceTimestampResult,
   type DeviceTimestampSource,
@@ -38,6 +39,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private deviceStates: AdbDeviceState[] = [];
   private users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
   private usersSequence: AndroidUser[][] | null = null;
+  private foregroundReadSequence: ForegroundAppReadResult[] = [];
   private foregroundApp: Awaited<ReturnType<AdbExecutor["getForegroundApp"]>> = null;
   private readonly displayForegroundApps = new Map<
     number,
@@ -178,6 +180,11 @@ export class FakeAdbExecutor implements AdbExecutor {
       return;
     }
     this.foregroundApp = app;
+  }
+
+  /** Checked reads consume this sequence and repeat its final result. */
+  setForegroundAppCheckedSequence(results: ForegroundAppReadResult[]): void {
+    this.foregroundReadSequence = [...results];
   }
 
   /**
@@ -472,6 +479,21 @@ export class FakeAdbExecutor implements AdbExecutor {
     return displayId === 0
       ? this.foregroundApp
       : (this.displayForegroundApps.get(displayId) ?? null);
+  }
+
+  async getForegroundAppChecked(
+    signal?: AbortSignal,
+    options?: number | { timeoutMs?: number; displayId?: number },
+  ): Promise<ForegroundAppReadResult> {
+    if (this.throwOnAbortedSignal) {
+      signal?.throwIfAborted();
+    }
+    if (this.foregroundReadSequence.length > 0) {
+      return this.foregroundReadSequence.length > 1
+        ? this.foregroundReadSequence.shift()!
+        : this.foregroundReadSequence[0];
+    }
+    return { state: "known", app: await this.getForegroundApp(signal, options) };
   }
 
   async getDeviceTimestampMs(): Promise<number> {

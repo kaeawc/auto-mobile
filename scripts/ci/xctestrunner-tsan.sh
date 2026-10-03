@@ -76,7 +76,8 @@ stop_run() {
 }
 stop_tail() {
   if [[ -n ${tail_pid} ]]; then
-    if kill "${tail_pid}" 2> /dev/null; then :; fi
+    # KILL avoids a lost TERM before exec; cat below preserves the full transcript.
+    if kill -KILL "${tail_pid}" 2> /dev/null; then :; fi
     if wait "${tail_pid}" 2> /dev/null; then :; fi
     tail_pid=""
   fi

@@ -1488,6 +1488,10 @@ export class DevicePool {
     return this.refreshCoordinator.refreshDevices();
   }
 
+  refreshDevicesWithOutcome(): Promise<DevicePoolRefreshResult> {
+    return this.refreshDevicesInternal(false);
+  }
+
   /** @internal Test support for checking removal-stamp retention. */
   getDeviceRemovalStampCountForTest(): number {
     return this.refreshCoordinator.getDeviceRemovalStampCountForTest();

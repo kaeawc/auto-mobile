@@ -19,7 +19,7 @@ async function flushUntil(condition: () => boolean): Promise<void> {
   throw new Error("Condition did not settle within 100 microtasks");
 }
 
-function harness() {
+function harness(trackingFailure?: unknown) {
   const timer = new FakeTimer();
   const devices = new Map<string, PooledDevice>();
   const starts = new Map<string, number>();
@@ -61,6 +61,9 @@ function harness() {
     nextDeviceIncarnation: () => 1,
     setDeviceSessionTracking: async () => {
       calls.push("track");
+      if (trackingFailure !== undefined) {
+        throw trackingFailure;
+      }
     },
     clearAutoStartSuppressionForBootedDevice: () => {
       calls.push("unsuppress");
@@ -100,6 +103,45 @@ function harness() {
 }
 
 describe("DevicePoolRefresh", () => {
+  test("reports a tracking persistence failure instead of a successful empty refresh", async () => {
+    const h = harness(new Error("tracking persistence unavailable"));
+    expect(await h.refresh.refreshDevicesInternal(false)).toEqual({
+      addedCount: 0,
+      failure: "tracking persistence unavailable",
+    });
+    expect(h.calls).not.toContain("ready");
+    expect(h.refresh.getDeviceRemovalStampCountForTest()).toBe(0);
+  });
+
+  test("reports a non-Error refresh failure with its reason", async () => {
+    const h = harness("tracking write rejected");
+    expect(await h.refresh.refreshDevicesInternal(false)).toEqual({
+      addedCount: 0,
+      failure: "tracking write rejected",
+    });
+  });
+
+  test("keeps partial discovery errors separate from refresh failures", async () => {
+    const h = harness();
+    const discoveryErrors: BootedDeviceDiscovery["discoveryErrors"] = {
+      ios: { code: "failed", message: "simctl unavailable" },
+    };
+    const discovery: BootedDeviceDiscovery = {
+      devices: [booted],
+      succeededPlatforms: new Set<Platform>(["android"]),
+      discoveryErrors,
+    };
+    h.setDiscovery(discovery);
+    expect(await h.refresh.refreshDevicesInternal(false)).toEqual({
+      addedCount: 1,
+      completeness: { succeededPlatforms: discovery.succeededPlatforms },
+    });
+    expect(discovery.discoveryErrors).toBe(discoveryErrors);
+    expect(discovery.discoveryErrors).toEqual({
+      ios: { code: "failed", message: "simctl unavailable" },
+    });
+  });
+
   test("adds a discovery result and tracks it before notifying readiness", async () => {
     const h = harness();
     h.timer.advanceTime(42);

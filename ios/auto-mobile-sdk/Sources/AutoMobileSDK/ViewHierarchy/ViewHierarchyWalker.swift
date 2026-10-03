@@ -4,30 +4,34 @@
     /// Walks the live UIView hierarchy in-process, extracting rich properties
     /// not available through XCUITest's accessibility service.
     ///
-    /// Must be called on the main thread (UIView access requirement).
+    /// Off-main callers hop synchronously onto main; main-thread callers run inline.
     /// Patterns borrowed from Slack's AccessibilityAuditor.
     public enum ViewHierarchyWalker {
-        // MARK: - Configuration
-
-        private static let maxDepth = 30
-
         // MARK: - Public API
 
         /// Walk the entire view hierarchy and return a snapshot.
         ///
-        /// Reads UIKit (`UIApplication`/`UIScreen`/the view tree), which is main-thread
-        /// only. Host apps may call this SDK from any thread, so this enforces the
-        /// requirement rather than doing undefined off-main UIKit work: a debug build
-        /// asserts (surfacing the misuse in development), and any build called off the
-        /// main thread hops onto it synchronously. A main-thread caller runs inline
-        /// (the `Thread.isMainThread` guard avoids a `DispatchQueue.main.sync` self-deadlock).
+        /// Reads UIKit (`UIApplication`/`UIScreen`/the view tree) on main.
+        /// Off-main callers hop synchronously onto main; main-thread callers run
+        /// inline to avoid a `DispatchQueue.main.sync` self-deadlock.
         public static func walk(bundleId: String? = nil) -> SdkViewHierarchy {
-            assert(Thread.isMainThread, "ViewHierarchyWalker.walk(bundleId:) must be called on the main thread")
+            // Keep the operation inline: forwarding an actor-isolated closure
+            // through a nonisolated helper introduces a closure-transfer diagnostic.
             if Thread.isMainThread {
-                return walk(in: visibleKeyWindow(), bundleId: bundleId)
+                return MainActor.assumeIsolated {
+                    ViewHierarchyWalkerMainActor.walk(
+                        in: ViewHierarchyWalkerMainActor.visibleKeyWindow(),
+                        bundleId: bundleId
+                    )
+                }
             }
             return DispatchQueue.main.sync {
-                walk(in: visibleKeyWindow(), bundleId: bundleId)
+                MainActor.assumeIsolated {
+                    ViewHierarchyWalkerMainActor.walk(
+                        in: ViewHierarchyWalkerMainActor.visibleKeyWindow(),
+                        bundleId: bundleId
+                    )
+                }
             }
         }
 
@@ -36,38 +40,16 @@
         /// tests use this so a snapshot doesn't depend on which of several windows
         /// (app, overlays) the global key-window heuristic happens to pick.
         static func walk(window: UIWindow, bundleId: String? = nil) -> SdkViewHierarchy {
-            walk(in: window, bundleId: bundleId)
-        }
-
-        private static func walk(in keyWindow: UIWindow?, bundleId: String?) -> SdkViewHierarchy {
-            let scale = Float(UIScreen.main.scale)
-            let screenBounds = UIScreen.main.bounds
-            let screenWidth = Int(screenBounds.width)
-            let screenHeight = Int(screenBounds.height)
-
-            let rootNode = keyWindow.flatMap(walkWindow)
-            let safeAreaInsets = keyWindow.map {
-                SdkEdgeInsets(
-                    top: Double($0.safeAreaInsets.top),
-                    right: Double($0.safeAreaInsets.right),
-                    bottom: Double($0.safeAreaInsets.bottom),
-                    left: Double($0.safeAreaInsets.left)
-                )
+            if Thread.isMainThread {
+                return MainActor.assumeIsolated {
+                    ViewHierarchyWalkerMainActor.walk(in: window, bundleId: bundleId)
+                }
             }
-            let systemChrome = keyWindow.flatMap(systemChrome(for:))
-
-            return SdkViewHierarchy(
-                bundleId: bundleId,
-                screenScale: scale,
-                screenWidth: screenWidth,
-                screenHeight: screenHeight,
-                safeAreaInsets: safeAreaInsets,
-                // UIKit safe-area values include non-cutout system UI and do not
-                // distinguish a notch from Dynamic Island. Do not infer either.
-                displayCutoutInfo: .unknown,
-                systemChrome: systemChrome,
-                root: rootNode
-            )
+            return DispatchQueue.main.sync {
+                MainActor.assumeIsolated {
+                    ViewHierarchyWalkerMainActor.walk(in: window, bundleId: bundleId)
+                }
+            }
         }
 
         /// Compute a hierarchy hash for change detection.
@@ -112,9 +94,84 @@
             return hasher.finalize()
         }
 
+        static func systemChrome(
+            statusBarHidden: Bool,
+            homeIndicatorAutoHideRequested: Bool?
+        )
+            -> SdkSystemChrome
+        {
+            return SdkSystemChrome(
+                visibility: statusBarHidden ? "hidden" : "visible",
+                statusBar: statusBarHidden ? "hidden" : "visible",
+                homeIndicatorAutoHideRequested: homeIndicatorAutoHideRequested,
+                source: "ios-status-bar-manager"
+            )
+        }
+
+        // MARK: - Structural Hash
+
+        private static func hashNode(_ node: SdkViewNode, into hasher: inout Hasher, depth: Int) {
+            guard depth < 15 else { return }
+            hasher.combine(node.className)
+            hasher.combine(node.accessibilityLabel)
+            hasher.combine(node.accessibilityIdentifier)
+            hasher.combine(node.isAccessibilityElement)
+            hasher.combine(node.accessibilityElementsHidden)
+            hasher.combine(node.accessibilityTraits)
+            hasher.combine(node.accessibilityCustomActions)
+            hasher.combine(node.isHidden)
+            hasher.combine(node.isUserInteractionEnabled)
+            hasher.combine(node.hasTapTarget)
+            if let children = node.children {
+                hasher.combine(children.count)
+                for child in children {
+                    hashNode(child, into: &hasher, depth: depth + 1)
+                }
+            }
+        }
+    }
+
+    /// UIKit access is confined to the main actor behind the synchronous facade.
+    @MainActor
+    enum ViewHierarchyWalkerMainActor {
+        // MARK: - Configuration
+
+        private static let maxDepth = 30
+
+        static func walk(in keyWindow: UIWindow?, bundleId: String?) -> SdkViewHierarchy {
+            let scale = Float(UIScreen.main.scale)
+            let screenBounds = UIScreen.main.bounds
+            let screenWidth = Int(screenBounds.width)
+            let screenHeight = Int(screenBounds.height)
+
+            let rootNode = keyWindow.flatMap(walkWindow)
+            let safeAreaInsets = keyWindow.map {
+                SdkEdgeInsets(
+                    top: Double($0.safeAreaInsets.top),
+                    right: Double($0.safeAreaInsets.right),
+                    bottom: Double($0.safeAreaInsets.bottom),
+                    left: Double($0.safeAreaInsets.left)
+                )
+            }
+            let systemChrome = keyWindow.flatMap(systemChrome(for:))
+
+            return SdkViewHierarchy(
+                bundleId: bundleId,
+                screenScale: scale,
+                screenWidth: screenWidth,
+                screenHeight: screenHeight,
+                safeAreaInsets: safeAreaInsets,
+                // UIKit safe-area values include non-cutout system UI and do not
+                // distinguish a notch from Dynamic Island. Do not infer either.
+                displayCutoutInfo: .unknown,
+                systemChrome: systemChrome,
+                root: rootNode
+            )
+        }
+
         // MARK: - Window Enumeration
 
-        private static func visibleKeyWindow() -> UIWindow? {
+        static func visibleKeyWindow() -> UIWindow? {
             let windows: [UIWindow]
             if #available(iOS 15.0, *) {
                 windows = UIApplication.shared.connectedScenes
@@ -153,23 +210,9 @@
             let statusBarHidden = statusBarManager.isStatusBarHidden
             let homeIndicatorAutoHideRequested = visibleViewController(from: window.rootViewController)?
                 .prefersHomeIndicatorAutoHidden
-            return systemChrome(
+            return ViewHierarchyWalker.systemChrome(
                 statusBarHidden: statusBarHidden,
                 homeIndicatorAutoHideRequested: homeIndicatorAutoHideRequested
-            )
-        }
-
-        static func systemChrome(
-            statusBarHidden: Bool,
-            homeIndicatorAutoHideRequested: Bool?
-        )
-            -> SdkSystemChrome
-        {
-            return SdkSystemChrome(
-                visibility: statusBarHidden ? "hidden" : "visible",
-                statusBar: statusBarHidden ? "hidden" : "visible",
-                homeIndicatorAutoHideRequested: homeIndicatorAutoHideRequested,
-                source: "ios-status-bar-manager"
             )
         }
 
@@ -784,28 +827,6 @@
                 format: "#%02X%02X%02X%02X",
                 Int(r * 255), Int(g * 255), Int(b * 255), Int(a * 255)
             )
-        }
-
-        // MARK: - Structural Hash
-
-        private static func hashNode(_ node: SdkViewNode, into hasher: inout Hasher, depth: Int) {
-            guard depth < 15 else { return }
-            hasher.combine(node.className)
-            hasher.combine(node.accessibilityLabel)
-            hasher.combine(node.accessibilityIdentifier)
-            hasher.combine(node.isAccessibilityElement)
-            hasher.combine(node.accessibilityElementsHidden)
-            hasher.combine(node.accessibilityTraits)
-            hasher.combine(node.accessibilityCustomActions)
-            hasher.combine(node.isHidden)
-            hasher.combine(node.isUserInteractionEnabled)
-            hasher.combine(node.hasTapTarget)
-            if let children = node.children {
-                hasher.combine(children.count)
-                for child in children {
-                    hashNode(child, into: &hasher, depth: depth + 1)
-                }
-            }
         }
     }
 #endif

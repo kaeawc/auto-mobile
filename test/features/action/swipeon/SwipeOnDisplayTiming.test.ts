@@ -60,7 +60,13 @@ function harness({
     ctrl as unknown as AndroidCtrlProxyClient,
   );
   const observe = new FakeObserveScreen();
-  observe.setObserveResult(observation);
+  // iOS captures do not carry Android logical display ids. Without this,
+  // the canonical size resolver correctly refuses an unidentified size fallback.
+  const platformObservation =
+    platform === "ios"
+      ? { ...observation, viewHierarchy: { ...observation.viewHierarchy!, displayId: undefined } }
+      : observation;
+  observe.setObserveResult(platformObservation);
   const gesture = new FakeGestureExecutor();
   let revision = 0;
   const transitions: DisplayTransitionReader = {
@@ -75,11 +81,11 @@ function harness({
     executeGesture: gesture,
     accessibilityDetector: new FakeAccessibilityDetector(),
     iosVoiceOverDetector: new FakeIosVoiceOverDetector(),
-    lastRenderedObservation: () => observation,
+    lastRenderedObservation: () => platformObservation,
     displayTransitions: transitions,
   });
   // Isolate dispatch timing from BaseVisualChange's unrelated post-observe polling.
-  action.observedInteraction = async (run) => run(observation);
+  action.observedInteraction = async (run) => run(platformObservation);
   const commands = () => adb.getAllCommands().filter((command) => command.includes("touchscreen"));
   const legs = () =>
     route === "ctrlproxy"

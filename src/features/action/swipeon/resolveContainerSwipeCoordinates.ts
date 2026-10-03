@@ -1,32 +1,43 @@
 import { Element, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
+import { insetSwipeBounds, iosSwipeStartWarning } from "./iosChromeInsets";
 import type { OverlayAnalyzer, SwipeOnResolvedOptions } from "./types";
 
-export function resolveContainerSwipeCoordinates(
-  geometry: ElementGeometry,
-  overlayDetector: OverlayAnalyzer,
-  options: SwipeOnResolvedOptions,
-  viewHierarchy: ViewHierarchyResult,
-  containerElement: Element,
-  observeResult: ObserveResult,
-): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
-  // Apply system insets to container bounds when includeSystemInsets is false (default)
-  let effectiveBounds = containerElement.bounds;
-  if (options.includeSystemInsets !== true && observeResult.systemInsets) {
-    const insets = observeResult.systemInsets;
-    effectiveBounds = {
-      left: Math.max(containerElement.bounds.left, insets.left),
-      top: Math.max(containerElement.bounds.top, insets.top),
-      right: Math.min(
-        containerElement.bounds.right,
-        (observeResult.screenSize?.width ?? containerElement.bounds.right) - insets.right,
-      ),
-      bottom: Math.min(
-        containerElement.bounds.bottom,
-        (observeResult.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom,
-      ),
-    };
-  }
+export function resolveContainerSwipeCoordinates({
+  geometry,
+  overlayDetector,
+  options,
+  viewHierarchy,
+  containerElement,
+  observeResult,
+  platform,
+}: {
+  geometry: ElementGeometry;
+  overlayDetector: OverlayAnalyzer;
+  options: SwipeOnResolvedOptions;
+  viewHierarchy: ViewHierarchyResult;
+  containerElement: Element;
+  observeResult: ObserveResult;
+  platform?: "android" | "ios";
+}): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
+  const insetOptions = {
+    observation: observeResult,
+    platform,
+    includeSystemInsets: options.includeSystemInsets,
+  };
+  const effectiveBounds = insetSwipeBounds({ ...insetOptions, bounds: containerElement.bounds });
+  const withChromeWarning = (swipe: {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    warning?: string;
+  }) => {
+    const warning = iosSwipeStartWarning({ ...insetOptions, ...swipe });
+    return warning
+      ? { ...swipe, warning: [swipe.warning, warning].filter(Boolean).join(" ") }
+      : swipe;
+  };
 
   const defaultSwipe = geometry.getSwipeWithinBounds(options.direction, effectiveBounds);
 
@@ -36,7 +47,7 @@ export function resolveContainerSwipeCoordinates(
     containerElement,
   );
   if (overlayCandidates.length === 0) {
-    return defaultSwipe;
+    return withChromeWarning(defaultSwipe);
   }
 
   const allOverlayBounds = overlayCandidates.map((overlay) => overlay.overlapBounds);
@@ -47,11 +58,11 @@ export function resolveContainerSwipeCoordinates(
   );
 
   if (!safeSwipe) {
-    return {
+    return withChromeWarning({
       ...defaultSwipe,
       warning: "No unobstructed swipe area found; using container bounds.",
-    };
+    });
   }
 
-  return safeSwipe;
+  return withChromeWarning(safeSwipe);
 }

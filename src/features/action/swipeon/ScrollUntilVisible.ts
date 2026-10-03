@@ -37,6 +37,12 @@ import {
 } from "./types";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { getScreenBounds } from "../../../utils/screenBounds";
+import {
+  effectiveSwipeInsets,
+  insetSwipeBounds,
+  iosSwipeStartWarning,
+  swipeScreenSize,
+} from "./iosChromeInsets";
 import { exponentialBackoff } from "../../../utils/Backoff";
 import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/scrollIdle";
 import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
@@ -348,6 +354,12 @@ export class ScrollUntilVisible {
       const activeDirection = reverseMode ? reverseDirection : options.direction;
       const activeDuration = this.deps.getDuration(reverseMode ? reverseOptions : lookForOptions);
       const { startX, startY, endX, endY } = activeCoords;
+      const chromeStartWarning = iosSwipeStartWarning({
+        observation: lastObservation,
+        platform: this.deps.device.platform,
+        startX: Math.floor(startX),
+        startY: Math.floor(startY),
+      });
       logger.info(
         `[SwipeOn] Swipe: direction=${activeDirection}, coords=(${Math.floor(startX)},${Math.floor(startY)})→(${Math.floor(endX)},${Math.floor(endY)}), duration=${activeDuration}ms`,
       );
@@ -498,6 +510,13 @@ export class ScrollUntilVisible {
         lastObservation,
         containerElement,
       );
+
+      if (!fingerprintChanged && chromeStartWarning) {
+        perf.end();
+        throw new ActionableError(
+          `${chromeStartWarning} Cannot determine end of container from this swipe. Retry without includeSystemInsets.`,
+        );
+      }
 
       // A second stale unchanged capture is still not end-of-list evidence.
       if (!fingerprintChanged && lastObservation.freshness?.isFresh !== false) {
@@ -724,9 +743,10 @@ export class ScrollUntilVisible {
     observation: ObserveResult;
     includeSystemInsets?: boolean;
   }): Element {
-    const screenSize = observation.screenSize || { width: 1080, height: 1920 };
+    const insetOptions = { observation, platform: this.deps.device.platform, includeSystemInsets };
+    const screenSize = swipeScreenSize(insetOptions) || { width: 1080, height: 1920 };
     return {
-      bounds: getScreenBounds(screenSize, observation.systemInsets, includeSystemInsets),
+      bounds: getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions)),
       scrollable: true,
     } as Element;
   }
@@ -826,22 +846,12 @@ export class ScrollUntilVisible {
     containerElement: Element,
     observation: ObserveResult,
   ): Element["bounds"] {
-    if (options.includeSystemInsets === true || !observation.systemInsets) {
-      return containerElement.bounds;
-    }
-    const insets = observation.systemInsets;
-    return {
-      left: Math.max(containerElement.bounds.left, insets.left),
-      top: Math.max(containerElement.bounds.top, insets.top),
-      right: Math.min(
-        containerElement.bounds.right,
-        (observation.screenSize?.width ?? containerElement.bounds.right) - insets.right,
-      ),
-      bottom: Math.min(
-        containerElement.bounds.bottom,
-        (observation.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom,
-      ),
-    };
+    return insetSwipeBounds({
+      observation,
+      platform: this.deps.device.platform,
+      includeSystemInsets: options.includeSystemInsets,
+      bounds: containerElement.bounds,
+    });
   }
 
   private resolveContainerSwipeCoordinates(
@@ -850,13 +860,14 @@ export class ScrollUntilVisible {
     containerElement: Element,
     observeResult: ObserveResult,
   ): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
-    return resolveContainerSwipeCoordinates(
-      this.deps.geometry,
-      this.deps.overlayDetector,
+    return resolveContainerSwipeCoordinates({
+      geometry: this.deps.geometry,
+      overlayDetector: this.deps.overlayDetector,
       options,
       viewHierarchy,
       containerElement,
       observeResult,
-    );
+      platform: this.deps.device.platform,
+    });
   }
 }

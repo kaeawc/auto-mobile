@@ -1,3 +1,8 @@
+import { identifyObservedHierarchy } from "../../../../src/features/observe/HierarchyCapture";
+import {
+  loadAndroidHomeObserve,
+  loadIosRemindersNoiseObservePair,
+} from "../../../fixtures/observe/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { resolveContainerSwipeCoordinates } from "../../../../src/features/action/swipeon/resolveContainerSwipeCoordinates";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -53,14 +58,17 @@ describe("resolveContainerSwipeCoordinates system-inset math", () => {
     // 2000px-tall screen with a 126px bottom gesture bar. The safe boundary is
     // 2000 - 126 = 1874, well below the container, so the container should be
     // untouched. The old buggy math did min(400, 2000) - 126 = 274, chopping 126px.
-    const result = resolveContainerSwipeCoordinates(
+    const result = resolveContainerSwipeCoordinates({
       geometry,
-      noOverlayAnalyzer,
-      options("up"),
-      emptyHierarchy,
-      containerElement(bounds(100, 100, 900, 400)),
-      observe({ width: 1000, height: 2000 }, { top: 0, right: 0, bottom: 126, left: 0 }),
-    );
+      overlayDetector: noOverlayAnalyzer,
+      options: options("up"),
+      viewHierarchy: emptyHierarchy,
+      containerElement: containerElement(bounds(100, 100, 900, 400)),
+      observeResult: observe(
+        { width: 1000, height: 2000 },
+        { top: 0, right: 0, bottom: 126, left: 0 },
+      ),
+    });
 
     // With effective bounds == container bounds, an "up" swipe stays within [100, 400].
     expect(result.startY).toBeLessThanOrEqual(400);
@@ -75,14 +83,17 @@ describe("resolveContainerSwipeCoordinates system-inset math", () => {
     // min(350, 1000) - 200 = 150, which is < left (300): inverted bounds ->
     // negative-width swipe. The safe boundary 1000 - 200 = 800 is far right of
     // the container, so the container's own right edge should win.
-    const result = resolveContainerSwipeCoordinates(
+    const result = resolveContainerSwipeCoordinates({
       geometry,
-      noOverlayAnalyzer,
-      options("right"),
-      emptyHierarchy,
-      containerElement(bounds(300, 100, 350, 400)),
-      observe({ width: 1000, height: 2000 }, { top: 0, right: 200, bottom: 0, left: 0 }),
-    );
+      overlayDetector: noOverlayAnalyzer,
+      options: options("right"),
+      viewHierarchy: emptyHierarchy,
+      containerElement: containerElement(bounds(300, 100, 350, 400)),
+      observeResult: observe(
+        { width: 1000, height: 2000 },
+        { top: 0, right: 200, bottom: 0, left: 0 },
+      ),
+    });
 
     // A "right" swipe must go left -> right with non-negative extent.
     expect(result.endX).toBeGreaterThanOrEqual(result.startX);
@@ -94,17 +105,89 @@ describe("resolveContainerSwipeCoordinates system-inset math", () => {
     // Container extends into the bottom inset (bottom=1950 > safe 1874). The
     // effective bottom should be clamped to 1874, so the swipe stays out of the
     // gesture bar.
-    const result = resolveContainerSwipeCoordinates(
+    const result = resolveContainerSwipeCoordinates({
       geometry,
-      noOverlayAnalyzer,
-      options("down"),
-      emptyHierarchy,
-      containerElement(bounds(100, 100, 900, 1950)),
-      observe({ width: 1000, height: 2000 }, { top: 0, right: 0, bottom: 126, left: 0 }),
-    );
+      overlayDetector: noOverlayAnalyzer,
+      options: options("down"),
+      viewHierarchy: emptyHierarchy,
+      containerElement: containerElement(bounds(100, 100, 900, 1950)),
+      observeResult: observe(
+        { width: 1000, height: 2000 },
+        { top: 0, right: 0, bottom: 126, left: 0 },
+      ),
+    });
 
     // "down" ends at bottom - 10% of height; with bottom clamped to 1874 the end
     // must not reach into the inset region below 1874.
     expect(result.endY).toBeLessThanOrEqual(1874);
+  });
+});
+
+describe("iOS chrome with unavailable system insets", () => {
+  test("keeps a full-screen down swipe between the navigation bar and toolbar", () => {
+    const fixture = loadIosRemindersNoiseObservePair().after;
+    const viewHierarchy = fixture.viewHierarchy!;
+    identifyObservedHierarchy("ios", viewHierarchy, "fresh");
+    const observation = { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
+    const result = resolveContainerSwipeCoordinates({
+      geometry,
+      overlayDetector: noOverlayAnalyzer,
+      options: options("down"),
+      viewHierarchy: viewHierarchy,
+      containerElement: containerElement(bounds(0, 0, 393, 852)),
+      observeResult: observation,
+    });
+    expect(result.startY).toBeGreaterThanOrEqual(104);
+    expect(result.endY).toBeLessThanOrEqual(772);
+  });
+});
+
+describe("chrome-free container intersection", () => {
+  test("preserves Android fixture coordinates and observed insets", () => {
+    const fixture = loadAndroidHomeObserve().observe;
+    const container = containerElement(
+      bounds(0, 0, fixture.screenSize.width, fixture.screenSize.height),
+    );
+    const observation = { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
+    expect(
+      resolveContainerSwipeCoordinates({
+        geometry,
+        overlayDetector: noOverlayAnalyzer,
+        options: options("down"),
+        viewHierarchy: fixture.viewHierarchy!,
+        containerElement: container,
+        observeResult: observation,
+        platform: "android",
+      }),
+    ).toEqual(geometry.getSwipeWithinBounds("down", container.bounds));
+  });
+  test("preserves a partial iOS container entirely between the bars", () => {
+    const fixture = loadIosRemindersNoiseObservePair().after;
+    const container = containerElement(bounds(20, 150, 350, 600));
+    expect(
+      resolveContainerSwipeCoordinates({
+        geometry,
+        overlayDetector: noOverlayAnalyzer,
+        options: options("down"),
+        viewHierarchy: fixture.viewHierarchy!,
+        containerElement: container,
+        observeResult: { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } },
+        platform: "ios",
+      }),
+    ).toEqual(geometry.getSwipeWithinBounds("down", container.bounds));
+  });
+  test("refuses a container with no chrome-free intersection", () => {
+    const fixture = loadIosRemindersNoiseObservePair().after;
+    expect(() =>
+      resolveContainerSwipeCoordinates({
+        geometry,
+        overlayDetector: noOverlayAnalyzer,
+        options: options("down"),
+        viewHierarchy: fixture.viewHierarchy!,
+        containerElement: containerElement(bounds(0, 59, 393, 104)),
+        observeResult: { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } },
+        platform: "ios",
+      }),
+    ).toThrow("no area outside iOS system chrome");
   });
 });

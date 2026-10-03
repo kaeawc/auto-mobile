@@ -1,6 +1,8 @@
 import { Element, ObserveResult, SwipeDirection, SwipeOnOptions } from "../../../models";
 import { boundsArea, boundsEqual } from "../../../utils/bounds";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../../utils/screenBounds";
+import { getHierarchySnapshot } from "../../observe/HierarchyCapture";
+import { effectiveSwipeInsets, swipeScreenSize } from "./iosChromeInsets";
 import { AutoTargetSelectorService } from "./types";
 
 export class AutoTargetSelector implements AutoTargetSelectorService {
@@ -48,12 +50,25 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
     return width >= height;
   }
 
-  getScreenBounds(observeResult: ObserveResult): Element["bounds"] | null {
-    if (!observeResult.screenSize) {
+  getScreenBounds(
+    observeResult: ObserveResult,
+    options: { platform?: "android" | "ios"; includeSystemInsets?: boolean } = {},
+  ): Element["bounds"] | null {
+    const platform =
+      options.platform ?? getHierarchySnapshot(observeResult.viewHierarchy)?.platform;
+    const insetOptions = {
+      observation: observeResult,
+      platform,
+      // Android auto-target selection has always compared against inset screen
+      // bounds, regardless of the eventual gesture's includeSystemInsets option.
+      includeSystemInsets: platform === "ios" ? options.includeSystemInsets : undefined,
+    };
+    const screenSize = swipeScreenSize(insetOptions);
+    if (!screenSize) {
       return null;
     }
 
-    return getScreenBoundsFromSize(observeResult.screenSize, observeResult.systemInsets);
+    return getScreenBoundsFromSize(screenSize, effectiveSwipeInsets(insetOptions));
   }
 
   describeContainer(container: SwipeOnOptions["container"]): string {

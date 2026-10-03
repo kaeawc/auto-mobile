@@ -1,3 +1,6 @@
+import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
+import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
+import type { ElementGeometry } from "../../../../src/utils/interfaces/ElementGeometry";
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
@@ -60,6 +63,8 @@ function makeScrollUntilVisible({
   terminalEvidence,
   resolver,
   onInteraction,
+  device = DEVICE,
+  geometry,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -74,6 +79,8 @@ function makeScrollUntilVisible({
   terminalEvidence?: ObserveResult[];
   resolver?: ElementResolver;
   onInteraction?: () => void;
+  device?: BootedDevice;
+  geometry?: ElementGeometry;
 }): ScrollUntilVisible {
   let callIdx = 0;
 
@@ -101,15 +108,16 @@ function makeScrollUntilVisible({
   };
 
   return new ScrollUntilVisible({
-    device: DEVICE,
+    device,
     resolver: resolver ?? new FakeScrollElementResolver(finder),
-    geometry: fakeGeometry,
+    geometry: geometry ?? fakeGeometry,
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
     accessibilityDetector,
     adb: new FakeAdbClient() as any,
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
+    voiceOverExecutor: talkBackExecutor,
     timer,
     getDuration: getDuration ?? (() => 300),
     resolveBoomerangConfig: () => undefined,
@@ -883,4 +891,66 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
     scope,
   );
   expect(found?.["resource-id"]).toBe("com.app:id/login");
+});
+
+describe("iOS chrome scroll-end guard", () => {
+  for (const includeSystemInsets of [true, false]) {
+    test(`does not label an unchanged navigation-bar swipe as end (includeSystemInsets=${includeSystemInsets})`, async () => {
+      const fixture = loadIosRemindersNoiseObservePair().after;
+      const observation = { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const finder = new FakeElementFinder();
+      finder.nextScrollableContainer = { bounds: { left: 0, top: 0, right: 393, bottom: 852 } };
+      const executor = new FakeTalkBackSwipeExecutor();
+      const geometry = new FakeElementGeometry();
+      geometry.swipeResult = { startX: 196, startY: 85, endX: 196, endY: 766 };
+      const scroll = makeScrollUntilVisible({
+        device: { ...DEVICE, platform: "ios" },
+        geometry: includeSystemInsets ? new DefaultElementGeometry() : geometry,
+        accessibilityDetector: new FakeAccessibilityDetector(),
+        finder,
+        timer,
+        accessibilityService: new FakeScrollAccessibilityService(),
+        observeResults: [observation],
+        talkBackExecutor: executor,
+      });
+      await expect(
+        scroll.execute({
+          direction: "down",
+          includeSystemInsets,
+          lookFor: { text: "General", maxTime: 5000 },
+        }),
+      ).rejects.toThrow("swipe started in the navigation bar");
+      expect(executor.getCallCount()).toBe(1);
+    });
+  }
+  test("uses chrome-free bounds for screen fallback and reverse recovery", async () => {
+    const fixture = loadIosRemindersNoiseObservePair().after;
+    const observation = { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const executor = new FakeTalkBackSwipeExecutor();
+    const scroll = makeScrollUntilVisible({
+      device: { ...DEVICE, platform: "ios" },
+      geometry: new DefaultElementGeometry(),
+      accessibilityDetector: new FakeAccessibilityDetector(),
+      finder: new FakeElementFinder(),
+      timer,
+      accessibilityService: new FakeScrollAccessibilityService(),
+      observeResults: [observation],
+      talkBackExecutor: executor,
+    });
+    await expect(
+      scroll.execute({ direction: "down", lookFor: { text: "General", maxTime: 5000 } }),
+    ).rejects.toThrow("Scroll reached end of container");
+    const swipes = executor.getSwipeCalls();
+    expect(swipes).toHaveLength(2);
+    for (const swipe of swipes) {
+      expect(swipe.y1).toBeGreaterThanOrEqual(104);
+      expect(swipe.y1).toBeLessThanOrEqual(772);
+      expect(swipe.y2).toBeGreaterThanOrEqual(104);
+      expect(swipe.y2).toBeLessThanOrEqual(772);
+    }
+  });
 });

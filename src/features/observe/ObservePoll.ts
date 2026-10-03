@@ -1,7 +1,7 @@
 import type { ObserveResult } from "../../models";
 import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import { Timer } from "../../utils/SystemTimer";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
 import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
@@ -17,9 +17,8 @@ export interface ObservePollOptions {
   display?: string;
   /**
    * Hard budget in ms. Mandatory: the loop stops scheduling polls once elapsed
-   * time reaches it. It can overshoot by up to one `pollMs` plus one observe, so
-   * `waitMs` may exceed `timeoutMs` slightly — the budget bounds the loop, it is
-   * not an exact deadline.
+   * time reaches it. Poll sleeps are capped at the remaining budget; terminal
+   * work may outlive the loop budget, so `waitMs` can still exceed `timeoutMs`.
    */
   timeoutMs: number;
   /** Poll interval in ms between observations. */
@@ -530,6 +529,9 @@ export async function pollObserveUntil(
       );
     }
 
-    await timer.sleep(options.pollMs);
+    await awaitWhileRequestIsLive(
+      timer.sleep(Math.min(options.pollMs, Math.max(0, options.timeoutMs - (timer.now() - start)))),
+      options.signal,
+    );
   }
 }

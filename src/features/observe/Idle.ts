@@ -15,6 +15,12 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
 import { shellQuote } from "../../utils/shellQuote";
 
+/**
+ * Never starve a rotation read with a nearly-spent budget. A wedged dumpsys
+ * can overshoot the budget by at most this floor instead of the 15 s ADB default.
+ */
+export const ROTATION_READ_FLOOR_MS = 1000;
+
 export class Idle {
   private adb: AdbExecutor;
   private timer: Timer;
@@ -99,10 +105,12 @@ export class Idle {
 
   /**
    * Check rotation status against target
+   * Read even at the deadline, but only continue polling if the read finishes before it.
    * @param targetRotation - The expected rotation value
    * @param startTime - When rotation checking started
    * @param timeoutMs - Maximum time to wait for rotation
    * @param perf - Optional performance tracker
+   * @param signal - Optional cancellation signal
    * @returns Object containing rotation check results
    */
   async getRotationStatus(
@@ -110,15 +118,21 @@ export class Idle {
     startTime: number,
     timeoutMs: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<RotationCheckResult> {
-    const currentElapsed = this.timer.now() - startTime;
-    const shouldContinue = currentElapsed < timeoutMs;
-
     try {
       // Check the current rotation through window manager service
-      const { stdout } = await perf.track("adbDumpsysWindowRotation", () =>
-        this.adb.executeCommand('shell dumpsys window | grep -i "mRotation="'),
-      );
+      const { stdout } = await perf.track("adbDumpsysWindowRotation", () => {
+        signal?.throwIfAborted();
+        const remainingBudgetMs = startTime + timeoutMs - this.timer.now();
+        return this.adb.executeCommand(
+          'shell dumpsys window | grep -i "mRotation="',
+          Math.max(remainingBudgetMs, ROTATION_READ_FLOOR_MS),
+          undefined,
+          undefined,
+          signal,
+        );
+      });
       // parseWindowManagerRotation selects the authoritative display rotation
       // and skips stale/unrelated `mRotation=` occurrences elsewhere in the
       // dump (e.g. a cached TaskSnapshot) — see issue #6199.
@@ -128,7 +142,9 @@ export class Idle {
         logger.debug(`Current rotation: ${currentRotation}, target: ${targetRotation}`);
 
         if (currentRotation === targetRotation) {
-          logger.debug(`Rotation to ${targetRotation} complete, took ${currentElapsed}ms`);
+          logger.debug(
+            `Rotation to ${targetRotation} complete, took ${this.timer.now() - startTime}ms`,
+          );
           return {
             rotationComplete: true,
             currentRotation,
@@ -139,23 +155,24 @@ export class Idle {
         return {
           rotationComplete: false,
           currentRotation,
-          shouldContinue,
+          shouldContinue: this.timer.now() - startTime < timeoutMs,
         };
       }
 
       return {
         rotationComplete: false,
         currentRotation: null,
-        shouldContinue,
+        shouldContinue: this.timer.now() - startTime < timeoutMs,
       };
     } catch (err) {
+      signal?.throwIfAborted();
       // Continue polling on error, but trace it — otherwise a real ADB failure
       // is indistinguishable from a genuine "not idle" reading.
       logger.debug(`Rotation idle check failed, treating as not-yet-idle: ${err}`);
       return {
         rotationComplete: false,
         currentRotation: null,
-        shouldContinue,
+        shouldContinue: this.timer.now() - startTime < timeoutMs,
       };
     }
   }

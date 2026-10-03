@@ -21,12 +21,13 @@ const HOISTED_ENVELOPE_FIELDS = {
 export function writeToolEnvelopePayload(
   view: ToolEnvelopeView,
   payload: Record<string, unknown>,
+  serializedText?: string,
 ): void {
   if (view.hasStructured) {
     view.envelope.structuredContent = payload;
   }
   if (view.textPart) {
-    view.textPart.text = stringifyToolResponse(payload);
+    view.textPart.text = serializedText ?? stringifyToolResponse(payload);
   }
   syncHoistedEnvelopeFields(view.envelope, payload);
 }

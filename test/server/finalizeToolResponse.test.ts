@@ -3552,9 +3552,7 @@ describe("finalizeToolResponse", () => {
 
       // The artifact is advertised as the COMPLETE result, so it must round-trip
       // what would have been served — `extras` included. The spill hands the
-      // writer the unstripped payload and nothing else; persisting it whole is
-      // the WRITER's contract (see toolOutputArtifactWriter.test.ts), so no call
-      // site re-serializes on its own (#6870 review).
+      // writer the unstripped payload and its cached complete rendering.
       test("hands the artifact writer the extras-bearing payload itself", () => {
         const writer = new FakeObservationArtifactWriter();
         finalizeToolResponse(
@@ -3566,7 +3564,7 @@ describe("finalizeToolResponse", () => {
         );
 
         expect(writer.writes).toHaveLength(1);
-        expect(writer.writes[0].serialized).toBeUndefined();
+        expect(writer.writes[0].serialized).toBe(JSON.stringify(writer.writes[0].data));
         expect(writer.writes[0].data).toMatchObject({
           detail: { extras: { accessibility: "x".repeat(70_000) } },
         });
@@ -3746,7 +3744,12 @@ describe("finalizeToolResponse", () => {
         graphSummary: { hostCount: 1 },
       });
       expect(writer.writes).toEqual([
-        { tool: "getNetworkGraph", payload: "NetworkGraph", data: payload.graph },
+        {
+          tool: "getNetworkGraph",
+          payload: "NetworkGraph",
+          data: payload.graph,
+          serialized: JSON.stringify(payload.graph),
+        },
       ]);
       expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
     });

@@ -49,6 +49,11 @@ import {
   isLaunchPermissionDialogObservation,
 } from "./launchObservationPackages";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
+import {
+  parseFallbackMainActivities,
+  parseLauncherActivities,
+  resolveComponentActivity,
+} from "./launcherActivityParsing";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -208,156 +213,29 @@ export class LaunchApp extends BaseVisualChange {
   ): Promise<string[]> {
     this.assertLaunchNotAborted(signal);
     logger.info("extractLauncherActivities");
-    const activities: string[] = [];
-
-    // Try the WebSocket-backed PackageManager launch intent first.
-    try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const result = perf
-        ? await perf.track("a11yLaunchIntent", () => a11y.requestLaunchIntent(packageName, 3000))
-        : await a11y.requestLaunchIntent(packageName, 3000);
-      this.assertLaunchNotAborted(signal);
-      if (result.success && result.componentName) {
-        // componentName is "package/.Activity" or "package/com.foo.Activity"
-        const slash = result.componentName.indexOf("/");
-        if (slash >= 0) {
-          let activity = result.componentName.slice(slash + 1);
-          if (activity.startsWith(".")) {
-            activity = packageName + activity;
-          }
-          activities.push(activity);
-          logger.info(`[LaunchApp] Resolved launcher activity via a11y: ${activity}`);
-          return activities;
-        }
-      }
-    } catch (error) {
-      this.assertLaunchNotAborted(signal);
-      logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
+    const resolvedActivities = await this.tryResolveViaCtrlProxy(packageName, perf, signal);
+    if (resolvedActivities) {
+      return resolvedActivities;
     }
+    const activities: string[] = [];
 
     try {
       logger.info(`[LaunchApp] Extracting launcher activities for ${packageName}`);
-
-      // Try multiple approaches to find the main activity
-      const approaches = [
-        // Approach 1: Direct pm dump with specific grep
-        `shell pm dump ${shellQuote(packageName)} | grep -A 5 -B 5 "android.intent.action.MAIN"`,
-        // Approach 2: Query resolver activities
-        `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
-        // Approach 3: Direct pm list activities
-        `shell pm list packages -f ${shellQuote(packageName)} && pm dump ${shellQuote(packageName)} | grep -A 10 "Activity filter"`,
-      ];
-
+      const approaches = this.buildActivityApproachCommands(packageName);
       for (let i = 0; i < approaches.length; i++) {
         this.assertLaunchNotAborted(signal);
-        try {
-          logger.info(`[LaunchApp] Trying approach ${i + 1}: ${approaches[i]}`);
-          const result = perf
-            ? await perf.track(`activityApproach_${i + 1}`, () =>
-                this.adb.executeCommand(approaches[i], undefined, undefined, undefined, signal),
-              )
-            : await this.adb.executeCommand(approaches[i], undefined, undefined, undefined, signal);
-          this.assertLaunchNotAborted(signal);
-          logger.info(
-            `[LaunchApp] Approach ${i + 1} result: ${result.stdout.length} chars of output`,
-          );
-
-          if (result.stdout.trim()) {
-            // Extract activity name from various patterns
-            const patterns = [
-              // Pattern 1: "packageName/activityName"
-              new RegExp(`${packageName}/([^\\s]+)`, "g"),
-              // Pattern 2: Activity class names
-              new RegExp(`${packageName}\\.[^\\s]*Activity[^\\s]*`, "g"),
-              // Pattern 3: Full class names in the package
-              new RegExp(`${packageName}\\.[^\\s]+`, "g"),
-            ];
-
-            for (const pattern of patterns) {
-              const matches = result.stdout.match(pattern);
-              if (matches) {
-                logger.info(
-                  `[LaunchApp] Found ${matches.length} potential activities with pattern: ${pattern}`,
-                );
-                for (const match of matches) {
-                  if (match.includes("/")) {
-                    const activityName = match.split("/")[1];
-                    if (activityName && !activities.includes(activityName)) {
-                      activities.push(activityName);
-                      logger.info(`[LaunchApp] Added activity: ${activityName}`);
-                    }
-                  } else if (match.startsWith(packageName + ".")) {
-                    const activityName = match;
-                    if (!activities.includes(activityName)) {
-                      activities.push(activityName);
-                      logger.info(`[LaunchApp] Added full activity name: ${activityName}`);
-                    }
-                  }
-                }
-              }
-            }
-
-            if (activities.length > 0) {
-              logger.info(
-                `[LaunchApp] Successfully found ${activities.length} activities using approach ${i + 1}`,
-              );
-              break;
-            }
-          }
-        } catch (error) {
-          this.assertLaunchNotAborted(signal);
-          logger.warn(`[LaunchApp] Approach ${i + 1} failed:`, error);
+        activities.push(
+          ...(await this.runActivityApproach(approaches[i], i, packageName, perf, signal)),
+        );
+        if (activities.length > 0) {
+          break;
         }
       }
 
-      // If no activities found, try a simpler approach
       if (activities.length === 0) {
         this.assertLaunchNotAborted(signal);
         logger.info(`[LaunchApp] No activities found, trying fallback approach`);
-        try {
-          const simpleResult = perf
-            ? await perf.track("activityFallback", () =>
-                this.adb.executeCommand(
-                  `shell pm dump ${shellQuote(packageName)}`,
-                  undefined,
-                  undefined,
-                  undefined,
-                  signal,
-                ),
-              )
-            : await this.adb.executeCommand(
-                `shell pm dump ${shellQuote(packageName)}`,
-                undefined,
-                undefined,
-                undefined,
-                signal,
-              );
-          this.assertLaunchNotAborted(signal);
-          const lines = simpleResult.stdout.split("\n");
-
-          for (const line of lines) {
-            if (
-              line.includes("android.intent.action.MAIN") ||
-              line.includes("MainActivity") ||
-              line.includes(".Main")
-            ) {
-              logger.info(`[LaunchApp] Found potential main activity line: ${line.trim()}`);
-              // Look for activity names in surrounding lines
-              const activityMatch = line.match(new RegExp(`${packageName}[^\\s]*`, "g"));
-              if (activityMatch) {
-                for (const match of activityMatch) {
-                  if (!activities.includes(match)) {
-                    activities.push(match);
-                    logger.info(`[LaunchApp] Added fallback activity: ${match}`);
-                  }
-                }
-              }
-            }
-          }
-        } catch (error) {
-          this.assertLaunchNotAborted(signal);
-          logger.warn(`[LaunchApp] Fallback approach failed:`, error);
-        }
+        activities.push(...(await this.runActivityFallback(packageName, perf, signal)));
       }
     } catch (error) {
       this.assertLaunchNotAborted(signal);
@@ -366,6 +244,111 @@ export class LaunchApp extends BaseVisualChange {
 
     logger.info(`[LaunchApp] Final activities list: [${activities.join(", ")}]`);
     return activities;
+  }
+
+  private async tryResolveViaCtrlProxy(
+    packageName: string,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<string[] | undefined> {
+    // Try the WebSocket-backed PackageManager launch intent first.
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = perf
+        ? await perf.track("a11yLaunchIntent", () => a11y.requestLaunchIntent(packageName, 3000))
+        : await a11y.requestLaunchIntent(packageName, 3000);
+      this.assertLaunchNotAborted(signal);
+      if (result.success && result.componentName) {
+        const activity = resolveComponentActivity(result.componentName, packageName);
+        if (activity !== undefined) {
+          logger.info(`[LaunchApp] Resolved launcher activity via a11y: ${activity}`);
+          return [activity];
+        }
+      }
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
+    }
+    return undefined;
+  }
+
+  private buildActivityApproachCommands(packageName: string): string[] {
+    return [
+      // Approach 1: Direct pm dump with specific grep
+      `shell pm dump ${shellQuote(packageName)} | grep -A 5 -B 5 "android.intent.action.MAIN"`,
+      // Approach 2: Query resolver activities
+      `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
+      // Approach 3: Direct pm list activities
+      `shell pm list packages -f ${shellQuote(packageName)} && pm dump ${shellQuote(packageName)} | grep -A 10 "Activity filter"`,
+    ];
+  }
+
+  private async runActivityApproach(
+    command: string,
+    index: number,
+    packageName: string,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    try {
+      logger.info(`[LaunchApp] Trying approach ${index + 1}: ${command}`);
+      const result = perf
+        ? await perf.track(`activityApproach_${index + 1}`, () =>
+            this.adb.executeCommand(command, undefined, undefined, undefined, signal),
+          )
+        : await this.adb.executeCommand(command, undefined, undefined, undefined, signal);
+      this.assertLaunchNotAborted(signal);
+      logger.info(
+        `[LaunchApp] Approach ${index + 1} result: ${result.stdout.length} chars of output`,
+      );
+      const activities = parseLauncherActivities(result.stdout, packageName);
+      if (activities.length > 0) {
+        logger.info(
+          `[LaunchApp] Successfully found ${activities.length} activities using approach ${index + 1}`,
+        );
+      }
+      return activities;
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      logger.warn(`[LaunchApp] Approach ${index + 1} failed:`, error);
+    }
+    return [];
+  }
+
+  private async runActivityFallback(
+    packageName: string,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    try {
+      const simpleResult = perf
+        ? await perf.track("activityFallback", () =>
+            this.adb.executeCommand(
+              `shell pm dump ${shellQuote(packageName)}`,
+              undefined,
+              undefined,
+              undefined,
+              signal,
+            ),
+          )
+        : await this.adb.executeCommand(
+            `shell pm dump ${shellQuote(packageName)}`,
+            undefined,
+            undefined,
+            undefined,
+            signal,
+          );
+      this.assertLaunchNotAborted(signal);
+      const activities = parseFallbackMainActivities(simpleResult.stdout, packageName);
+      for (const activity of activities) {
+        logger.info(`[LaunchApp] Added fallback activity: ${activity}`);
+      }
+      return activities;
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      logger.warn(`[LaunchApp] Fallback approach failed:`, error);
+    }
+    return [];
   }
 
   /**
@@ -557,27 +540,24 @@ export class LaunchApp extends BaseVisualChange {
 
             if (!launchResult.success) {
               logger.warn(`[LaunchApp] launch failed: ${launchResult.error ?? "unknown error"}`);
+            }
 
-              // Only check installed apps on the fallback path, and only on
-              // simulators — simctl listapps is slow (~2s) and returns nothing for
-              // a physical device, where devicectl's launch error is authoritative.
-              if (!isSystemBundleId && simulator) {
-                const installedAppsResult = await perf.track("checkInstalled", () =>
-                  this.installedAppsProvider.listInstalledApps(signal),
-                );
-                this.assertLaunchNotAborted(signal);
-                if (
-                  installedAppsResult.successful &&
-                  !installedAppsResult.apps.includes(bundleId)
-                ) {
-                  logger.info("App is not installed");
-                  perf.end();
-                  return {
-                    success: false,
-                    packageName: bundleId,
-                    error: "App is not installed",
-                  };
-                }
+            // Only check installed apps on the fallback path, and only on
+            // simulators — simctl listapps is slow (~2s) and returns nothing for
+            // a physical device, where devicectl's launch error is authoritative.
+            if (!launchResult.success && !isSystemBundleId && simulator) {
+              const installedAppsResult = await perf.track("checkInstalled", () =>
+                this.installedAppsProvider.listInstalledApps(signal),
+              );
+              this.assertLaunchNotAborted(signal);
+              if (installedAppsResult.successful && !installedAppsResult.apps.includes(bundleId)) {
+                logger.info("App is not installed");
+                perf.end();
+                return {
+                  success: false,
+                  packageName: bundleId,
+                  error: "App is not installed",
+                };
               }
             }
           }

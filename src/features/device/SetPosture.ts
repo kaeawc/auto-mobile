@@ -13,7 +13,7 @@ import {
   type AndroidDeviceState,
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { DisplayPanel } from "../../models/DisplayPanel";
 import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
@@ -986,7 +986,7 @@ export class SetPosture {
     requested: RequestedPosture,
     displayPreset?: DisplayPreset,
   ): number | SetPostureUnsupportedResult {
-    if (!isIosSimulatorUdid(this.device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) !== "simulator") {
       return {
         status: "unsupported",
         message: "Physical iOS hinge posture can only be read, not set.",

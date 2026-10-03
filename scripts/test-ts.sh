@@ -9,6 +9,9 @@
 #   coverage    Complete unit lane with LCOV coverage.
 #   all         Unit, host integration, then stress.
 #
+# AUTOMOBILE_UNIT_RANDOM_SEED=N runs the complete unit lane in one shared
+# process with randomized order (nightly advisory cross-file leak diagnostic).
+#
 # Device/SFU integration files remain environment-gated and are enabled by
 # their dedicated package scripts and workflows.
 set -euo pipefail
@@ -255,6 +258,61 @@ for ((arg_index = 0; arg_index < ${#args[@]}; arg_index += 1)); do
   fi
 done
 
+# Both the ordinary shards and the randomized diagnostic consume this list.
+discover_unit_test_files() {
+  local file
+  while IFS= read -r file; do
+    case "$file" in
+      *.integration.test.ts | test/stress/*) ;;
+      *) printf '%s\n' "$file" ;;
+    esac
+  done < <(find test -type f -name '*.test.ts' -print | sort)
+}
+
+# Markdown backticks are literal formatting, not shell substitutions.
+# shellcheck disable=SC2016
+randomized_failure_summary() {
+  local status="$?"
+  if [[ "$status" -ne 0 && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      printf '### Randomized unit lane failed (exit %s)\n\n' "$status"
+      printf 'Seed: `%s`\n\n' "$AUTOMOBILE_UNIT_RANDOM_SEED"
+      printf 'Reproduce the same unit file list:\n```bash\n'
+      printf 'AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_RANDOM_SEED=%s bash scripts/test-ts.sh unit\n' "$AUTOMOBILE_UNIT_RANDOM_SEED"
+      printf '```\nEquivalent Bun invocation (explicit unit files):\n```bash\n'
+      printf 'bun test --randomize --seed=%s <files>\n```\n' "$AUTOMOBILE_UNIT_RANDOM_SEED"
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+run_randomized_unit() {
+  local seed="$AUTOMOBILE_UNIT_RANDOM_SEED"
+  local file
+  local test_files=()
+  validate_positive_integer "AUTOMOBILE_UNIT_RANDOM_SEED" "$seed"
+  if [[ "${#seed}" -gt 10 ]] || ((10#$seed > 4294967295)); then
+    echo "AUTOMOBILE_UNIT_RANDOM_SEED must fit Bun's unsigned 32-bit seed." >&2
+    exit 2
+  fi
+  printf 'test-ts: randomized unit lane seed=%s\n' "$seed"
+  trap randomized_failure_summary EXIT
+  if [[ "$has_test_targets" -ne 0 || "${#passthrough_args[@]}" -ne 0 ]]; then
+    echo "Randomized unit lane requires the complete unit file list and no extra arguments." >&2
+    exit 2
+  fi
+  while IFS= read -r file; do
+    test_files+=("$file")
+  done < <(discover_unit_test_files)
+  if [[ "${#test_files[@]}" -eq 0 ]]; then
+    echo "No unit test files discovered" >&2
+    exit 1
+  fi
+  # Intentionally omit --isolate, --parallel and sharding: sibling files must
+  # share module/global state for this diagnostic to expose cross-file leaks.
+  run_test_command bun test --timeout "$per_test_timeout_ms" \
+    --randomize "--seed=$seed" "${test_files[@]}"
+}
+
 run_unit_shards() {
   local shard_mode="$1"
   local changed_ref="${2:-}"
@@ -270,11 +328,8 @@ run_unit_shards() {
     mkdir -p "$AUTOMOBILE_UNIT_JUNIT_DIR"
   fi
   while IFS= read -r file; do
-    case "$file" in
-      *.integration.test.ts | test/stress/*) ;;
-      *) test_files+=("$file") ;;
-    esac
-  done < <(find test -type f -name '*.test.ts' -print | sort)
+    test_files+=("$file")
+  done < <(discover_unit_test_files)
 
   if [[ "${#test_files[@]}" -eq 0 ]]; then
     echo "No unit test files discovered" >&2
@@ -421,6 +476,10 @@ fi
 
 case "$mode" in
   unit)
+    if [[ -n "${AUTOMOBILE_UNIT_RANDOM_SEED:-}" ]]; then
+      run_randomized_unit
+      exit $?
+    fi
     printf 'test-ts: unit lane cores=%s workers=%s\n' "$cores" "$unit_workers" >&2
     if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
       echo "Unit test targets cannot include other lanes." >&2

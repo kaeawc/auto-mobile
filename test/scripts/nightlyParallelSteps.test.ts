@@ -145,3 +145,37 @@ describe("nightly unit diagnostics", () => {
     }
   });
 });
+
+describe("nightly randomized unit diagnostic", () => {
+  const jobId = "node-randomized-unit-tests";
+  const nightly = loadWorkflow(WORKFLOW);
+  const job = nightly.jobs?.[jobId];
+  const steps = loadJobSteps(WORKFLOW, jobId);
+
+  test("is bounded, advisory, independent and exclusive to nightly", () => {
+    expect(job).toHaveProperty("continue-on-error", true);
+    expect(job?.["runs-on"]).toBe("ubuntu-latest");
+    expect(job?.["timeout-minutes"]).toBe(15);
+    expect(job?.needs).toBeUndefined();
+    for (const other of Object.values(nightly.jobs ?? {})) {
+      expect(Array.isArray(other?.needs) ? other.needs : [other?.needs]).not.toContain(jobId);
+    }
+    for (const file of ["pull_request.yml", "merge.yml"]) {
+      expect(loadWorkflow(`.github/workflows/${file}`).jobs?.[jobId]).toBeUndefined();
+    }
+  });
+
+  test("runs the canonical selector with a reproducible run-derived seed", () => {
+    expect(stepNamed(steps, "Setup Bun")?.with?.["bun-version"]).toBe("1.3.14");
+    expect(stepNamed(steps, "Install Bun dependencies")?.run).toBe(
+      "scripts/ci/install-bun-deps.sh",
+    );
+    const run = stepNamed(steps, "Run randomized unit lane");
+    expect(run?.run).toBe("bash scripts/test-ts.sh unit");
+    expect(run?.env?.AUTOMOBILE_TEST_MODE).toBe("true");
+    expect(run?.env?.AUTOMOBILE_UNIT_RANDOM_SEED).toBe("${{ github.run_number }}");
+    expect(Number(run?.env?.AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS)).toBeLessThan(
+      (job?.["timeout-minutes"] ?? 0) * 60,
+    );
+  });
+});

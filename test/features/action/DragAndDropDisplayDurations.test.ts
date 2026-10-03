@@ -3,6 +3,8 @@ import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
+import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { throwIfAborted } from "../../../src/utils/toolUtils";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -78,7 +80,7 @@ function fixture(options: { supportsDisplay: boolean; display?: string }) {
     AndroidCtrlProxyClient.removeInstance(device.deviceId);
     displayTransitions.reset(device.deviceId);
   });
-  return { action, adb, drag, capability };
+  return { action, adb, drag, capability, observe, observation, invalidate };
 }
 
 const restorers: Array<() => void> = [];
@@ -89,6 +91,155 @@ afterEach(() => {
 });
 
 const endpoints = { source: { text: "Source" }, target: { text: "Target" } };
+
+describe("dragAndDrop Android explicit-display cancellation", () => {
+  test("rethrows abort during display preflight without checking capabilities or dragging", async () => {
+    const { action, adb, drag, capability, observe, observation } = fixture({
+      supportsDisplay: true,
+      display: "external",
+    });
+    const controller = new AbortController();
+    const preflight = spyOn(observe, "execute").mockImplementation(async (options) => {
+      expect(options).toMatchObject({ display: "external", signal: controller.signal });
+      controller.abort();
+      throwIfAborted(options?.signal);
+      return observation;
+    });
+    restorers.push(() => preflight.mockRestore());
+
+    await expect(
+      action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+    ).rejects.toThrow("Operation cancelled");
+    expect(preflight).toHaveBeenCalledTimes(1);
+    expect(capability).not.toHaveBeenCalled();
+    expect(drag).not.toHaveBeenCalled();
+    expect(adb.getAllCommands()).toEqual([]);
+  });
+
+  test("rethrows abort during the capability check without dispatching a drag", async () => {
+    const { action, adb, drag, capability, observe, invalidate } = fixture({
+      supportsDisplay: true,
+      display: "external",
+    });
+    const controller = new AbortController();
+    capability.mockImplementation(async () => {
+      controller.abort();
+      return true;
+    });
+
+    await expect(
+      action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+    ).rejects.toThrow("Operation cancelled");
+    expect(capability).toHaveBeenCalledWith("gesture_display_id_v1");
+    expect(drag).not.toHaveBeenCalled();
+    expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
+    expect(observe.getExecuteCallCount()).toBe(1);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  test.each(["returns failure", "rejects"] as const)(
+    "rethrows abort when the drag request %s without observing afterward",
+    async (reply) => {
+      const { action, adb, drag, observe, invalidate } = fixture({
+        supportsDisplay: true,
+        display: "external",
+      });
+      const controller = new AbortController();
+      drag.mockImplementation(async (...args) => {
+        expect(args[9]).toBe(controller.signal);
+        expect(args[10]).toBe(2);
+        controller.abort();
+        if (reply === "rejects") {
+          throw new Error("Drag request cancelled");
+        }
+        return { success: false, totalTimeMs: 0, error: "Drag request cancelled" };
+      });
+
+      await expect(
+        action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+      ).rejects.toThrow("Operation cancelled");
+      expect(drag).toHaveBeenCalledTimes(1);
+      expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
+      expect(observe.getExecuteCallCount()).toBe(1);
+      expect(invalidate).not.toHaveBeenCalled();
+    },
+  );
+
+  test("rethrows abort forwarded to the adb fallback without observing afterward", async () => {
+    const { action, adb, drag, observe, invalidate } = fixture({
+      supportsDisplay: false,
+      display: "external",
+    });
+    const controller = new AbortController();
+    const input = spyOn(adb, "execute").mockImplementation(async (args, options) => {
+      expect(args).toEqual(["shell", "input touchscreen -d 2 draganddrop 50 40 150 140 300"]);
+      expect(options?.signal).toBe(controller.signal);
+      await options?.beforeDispatch?.(options.timeoutMs);
+      controller.abort();
+      throw new Error("adb request cancelled");
+    });
+    restorers.push(() => input.mockRestore());
+
+    await expect(
+      action.execute({ ...endpoints, display: "external" }, undefined, controller.signal),
+    ).rejects.toThrow("Operation cancelled");
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(drag).not.toHaveBeenCalled();
+    expect(observe.getExecuteCallCount()).toBe(1);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  test("preserves a non-aborted drag failure", async () => {
+    const { action, drag, observe, invalidate } = fixture({
+      supportsDisplay: true,
+      display: "external",
+    });
+    const controller = new AbortController();
+    drag.mockResolvedValue({ success: false, totalTimeMs: 0, error: "boom" });
+
+    const result = await action.execute(
+      { ...endpoints, display: "external" },
+      undefined,
+      controller.signal,
+    );
+    expect(controller.signal.aborted).toBe(false);
+    expect(result).toEqual({ success: false, duration: 0, distance: 0, error: "boom" });
+    expect(drag).toHaveBeenCalledTimes(1);
+    expect(observe.getExecuteCallCount()).toBe(1);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  test("preserves stale-display details for a non-aborted failure", async () => {
+    const { action, adb, drag, capability } = fixture({
+      supportsDisplay: true,
+      display: "external",
+    });
+    const controller = new AbortController();
+    const stale = new StaleDisplayError({
+      observedGeneration: 1,
+      currentGeneration: 2,
+      currentDisplayKey: "internal",
+      retry: "observe",
+    });
+    capability.mockRejectedValue(stale);
+
+    const result = await action.execute(
+      { ...endpoints, display: "external" },
+      undefined,
+      controller.signal,
+    );
+    expect(controller.signal.aborted).toBe(false);
+    expect(result).toEqual({
+      success: false,
+      duration: 0,
+      distance: 0,
+      error: stale.message,
+      staleDisplay: stale.details,
+    });
+    expect(drag).not.toHaveBeenCalled();
+    expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
+  });
+});
 
 describe("dragAndDrop display durations", () => {
   for (const display of [undefined, "external"]) {

@@ -1,8 +1,12 @@
 import { type Kysely, sql } from "kysely";
-import { asMigratorDb } from "../migratorSchema";
+
+// Keep raw migrations independent of app modules that are not shipped beside them.
+interface SqliteCatalogSchema {
+  sqlite_master: { type: string; name: string };
+}
 
 async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
-  const result = await asMigratorDb(db)
+  const result = await (db as Kysely<SqliteCatalogSchema>)
     .selectFrom("sqlite_master")
     .select("name")
     .where("type", "=", "table")

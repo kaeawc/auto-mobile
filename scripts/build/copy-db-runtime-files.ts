@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
-const DB_RUNTIME_FILES = ["eventTables.ts"] as const;
+export const DB_RUNTIME_FILES = ["eventTables.ts"] as const;
 
 export interface CopyDatabaseRuntimeFilesOptions {
   projectRoot: string;

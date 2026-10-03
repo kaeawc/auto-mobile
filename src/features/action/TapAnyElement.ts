@@ -697,9 +697,12 @@ export class TapAnyElement extends BaseVisualChange {
         ),
       (postTapHierarchy) => this.hashViewHierarchy(postTapHierarchy),
       preTapHash,
+      signal,
     );
     if (probe.status === "unavailable") {
-      logger.warn("[TapAnyElement] Post-tap refresh returned no hierarchy; skipping retry");
+      logger.warn(
+        "[TapAnyElement] Tap hierarchy unreadable or could not be fingerprinted; skipping retry",
+      );
       return;
     }
     if (probe.status === "changed") {

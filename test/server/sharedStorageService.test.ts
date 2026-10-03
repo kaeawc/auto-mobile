@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { logger } from "../../src/utils/logger";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   createSharedStorageServiceForTesting,
   type SharedStorageFileSystem,
@@ -344,6 +345,53 @@ describe("SharedStorageService", () => {
     ).rejects.toThrow("conflicts with a nested fixture");
     expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
   });
+
+  for (const cleanupFails of [false, true]) {
+    test(`cleans a failed inline write and preserves its error (cleanup fails: ${cleanupFails})`, async () => {
+      const original = new Error("disk full");
+      const cleanupError = new Error("cleanup denied");
+      const removed: string[] = [];
+      const fileSystem: SharedStorageFileSystem = {
+        stat: async () => {
+          throw new Error("not used");
+        },
+        mkdtemp: async () => "/fake/shared-write",
+        writeFileBuffer: async () => {
+          throw original;
+        },
+        rm: async (path) => {
+          removed.push(path);
+          if (cleanupFails) {
+            throw cleanupError;
+          }
+        },
+      };
+      const adbFactory = new FakeAdbClientFactory();
+      const service = createSharedStorageServiceForTesting({ fileSystem, adbFactory });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await expect(
+          service.stage({
+            device: androidDevice,
+            namespace: "run-42",
+            files: [{ contentText: "hello", destinationPath: "file.txt" }],
+          }),
+        ).rejects.toBe(original);
+        expect(removed).toEqual(["/fake/shared-write"]);
+        expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
+        if (cleanupFails) {
+          expect(warn).toHaveBeenCalledWith(
+            "Failed to remove inline shared-storage directory: cleanup denied",
+            cleanupError,
+          );
+        } else {
+          expect(warn).not.toHaveBeenCalled();
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
 
   test("cleans inline fixture directories when active user resolution fails", async () => {
     const removed: string[] = [];

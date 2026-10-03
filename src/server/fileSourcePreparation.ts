@@ -2,6 +2,8 @@ import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionableError } from "../models";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 export interface FileSourcePreparationArgs {
@@ -71,11 +73,24 @@ export async function prepareFileSource(
       ? Buffer.from(args.contentBase64, "base64")
       : Buffer.from(args.contentText ?? "", "utf8");
   const dir = await fileSystem.mkdtemp(join(tmpdir(), "automobile-app-file-"));
-  const tempPath = join(dir, "content");
-  await fileSystem.writeFileBuffer(tempPath, buffer);
-  return {
-    path: tempPath,
-    byteCount: buffer.byteLength,
-    cleanup: async () => fileSystem.rm(dir),
-  };
+  try {
+    const tempPath = join(dir, "content");
+    await fileSystem.writeFileBuffer(tempPath, buffer);
+    return {
+      path: tempPath,
+      byteCount: buffer.byteLength,
+      cleanup: async () => fileSystem.rm(dir),
+    };
+  } catch (error) {
+    try {
+      await fileSystem.rm(dir);
+    } catch (cleanupError) {
+      // Cleanup failure must not mask the original preparation error.
+      logger.warn(
+        `Failed to remove inline app file directory: ${errorMessage(cleanupError)}`,
+        cleanupError,
+      );
+    }
+    throw error;
+  }
 }

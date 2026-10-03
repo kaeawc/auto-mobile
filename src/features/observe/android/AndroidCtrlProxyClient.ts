@@ -3996,7 +3996,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
-      this.loggerInstance.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
+      const logger = this.loggerInstance;
+      // The local alias keeps the injected logger visible to the catch-convention lint rule.
+      logger.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -4065,10 +4067,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
-      this.loggerInstance.warn(
-        `[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`,
-        error,
-      );
+      const logger = this.loggerInstance;
+      logger.warn(`[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -4171,7 +4171,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await promise;
     } catch (error) {
-      this.loggerInstance.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);
+      const logger = this.loggerInstance;
+      logger.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -6223,8 +6224,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         screenshotFallbackReason: fallbackReason,
       };
     } catch (error) {
+      const logger = this.loggerInstance;
       const message = errorMessage(error);
-      this.loggerInstance.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
+      logger.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
       return { success: false, error: `ADB screencap failed: ${message}` };
     }
   }

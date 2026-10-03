@@ -32,7 +32,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
-import { SystemUiAnrRecoveryRequiredError } from "../../src/utils/RunnerReadinessService";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 
 async function harness(deviceUtils?: FakeDeviceUtils) {
   const db = new Kysely<Database>({

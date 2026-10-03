@@ -41,7 +41,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
-import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {

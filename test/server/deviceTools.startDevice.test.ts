@@ -28,7 +28,7 @@ import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../../src/utils/runnerReadinessConfig";
-import { SystemUiAnrRecoveryRequiredError } from "../../src/utils/RunnerReadinessService";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,

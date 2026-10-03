@@ -44,7 +44,7 @@ import { storeSetupTiming } from "../server/ToolExecutionContext";
 import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
 import { disableStylusHandwriting } from "./disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
-import { RunnerReadinessError, RunnerReadinessService } from "./RunnerReadinessService";
+import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { serverConfig } from "./ServerConfig";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "./runnerReadinessConfig";

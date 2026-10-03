@@ -29,6 +29,237 @@ final class SdkHierarchyServerTests: XCTestCase {
         wait(for: [ready], timeout: 5)
     }
 
+    func testExactRequestLineRoutes() {
+        let routes: [(String, SdkHierarchyServer.Route)] = [
+            ("GET /hierarchy", .cachedHierarchy),
+            ("GET /hierarchy/fresh", .freshHierarchy),
+            ("GET /health", .health),
+            ("POST /network/mock", .networkMock),
+            ("POST /network/error-simulation", .networkErrorSimulation),
+            ("POST /network/fault-rules", .networkFaultRules),
+            ("POST /highlight", .highlight),
+            ("POST /db/execute", .dbExecute),
+            ("POST /db/list", .dbList),
+            ("POST /db/capabilities", .dbCapabilities),
+            ("POST /db/tables", .dbTables),
+            ("POST /db/table-data", .dbTableData),
+            ("POST /db/table-structure", .dbTableStructure),
+            ("POST /preferences", .preferences),
+        ]
+        for (request, route) in routes {
+            XCTAssertEqual(SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"), .matched(route), request)
+        }
+    }
+
+    func testRequestLineStripsQueryAndFragment() {
+        XCTAssertEqual(
+            SdkHierarchyServer.route(forRequestLine: "GET /health?x=GET%20/hierarchy/fresh HTTP/1.1"),
+            .matched(.health)
+        )
+        XCTAssertEqual(
+            SdkHierarchyServer.route(forRequestLine: "GET /hierarchy?fresh=1#x HTTP/1.1"),
+            .matched(.cachedHierarchy)
+        )
+        XCTAssertEqual(
+            SdkHierarchyServer.route(forRequestLine: "GET /health#fragment?query HTTP/1.1"),
+            .matched(.health)
+        )
+    }
+
+    func testRequestLineRequiresExactPath() {
+        for path in ["/hierarchyX", "/hierarchy/freshX", "/hierarchy/", "/unknown"] {
+            XCTAssertEqual(SdkHierarchyServer.route(forRequestLine: "GET \(path) HTTP/1.1"), .notFound, path)
+        }
+    }
+
+    func testRequestLineReportsAllowedMethod() {
+        let requests = [("POST /health", "GET"), ("GET /db/execute", "POST"), ("POST /hierarchy", "GET")]
+        for (request, method) in requests {
+            XCTAssertEqual(
+                SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"),
+                .methodNotAllowed(allowed: [method]), request
+            )
+        }
+    }
+
+    func testMalformedRequestLines() {
+        for request in [
+            "",
+            "GET",
+            "GET /health",
+            "GET /health HTTP/1.1 extra",
+            "GET health HTTP/1.1",
+            "GET  /health HTTP/1.1",
+            " GET /health HTTP/1.1",
+            "GET /health ",
+        ] {
+            XCTAssertEqual(SdkHierarchyServer.route(forRequestLine: request), .malformed, request)
+        }
+    }
+
+    func testHealthQueryCannotSelectFreshHierarchy() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let response = try roundTrip(
+                port: port, head: "GET /health?x=GET%20/hierarchy/fresh HTTP/1.1\r\nHost: localhost\r\n\r\n", body: ""
+            )
+            try assertHealthResponse(response)
+        }
+    }
+
+    func testHealthIgnoresRouteTextInHeadersAndBody() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let payload = "GET /hierarchy/fresh POST /db/execute"
+            let response = try roundTrip(
+                port: port,
+                head: "GET /health HTTP/1.1\r\nX-Note: POST /db/execute GET /hierarchy/fresh\r\n"
+                    + "Content-Length: \(payload.utf8.count)\r\n\r\n",
+                body: payload
+            )
+            try assertHealthResponse(response)
+        }
+    }
+
+    func testHierarchySuffixReturnsNotFound() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let response = try roundTrip(port: port, head: "GET /hierarchyX HTTP/1.1\r\n\r\n", body: "")
+            assertErrorResponse(response, status: "404 Not Found", error: "not_found")
+        }
+    }
+
+    func testHealthWrongMethodReturnsAllowHeader() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let response = try roundTrip(port: port, head: "POST /health HTTP/1.1\r\n\r\n", body: "")
+            assertErrorResponse(response, status: "405 Method Not Allowed", error: "method_not_allowed")
+            XCTAssertTrue(response.contains("\r\nAllow: GET\r\n"), response)
+        }
+    }
+
+    func testDatabaseWrongMethodReturnsAllowHeader() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let response = try roundTrip(port: port, head: "GET /db/execute HTTP/1.1\r\n\r\n", body: "")
+            assertErrorResponse(response, status: "405 Method Not Allowed", error: "method_not_allowed")
+            XCTAssertTrue(response.contains("\r\nAllow: POST\r\n"), response)
+        }
+    }
+
+    func testMalformedRequestLineReturnsBadRequest() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let response = try roundTrip(port: port, head: "GET /health HTTP/1.1 extra\r\n\r\n", body: "")
+            assertErrorResponse(response, status: "400 Bad Request", error: "bad_request")
+        }
+    }
+
+    func testOversizedUnterminatedHeaderClosesWith431() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let head = "GET /health HTTP/1.1\r\nX-Pad: " +
+                String(repeating: "x", count: SdkHierarchyServer.maxHeaderBytes + 4096)
+            let response = try roundTrip(port: port, head: head, body: "")
+            assertErrorResponse(
+                response,
+                status: "431 Request Header Fields Too Large",
+                error: "request_header_fields_too_large"
+            )
+        }
+    }
+
+    func testOversizedFragmentedHeaderClosesWith431() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            // roundTrip sends these in separate writes without closing the client write side.
+            let head = "GET /health HTTP/1.1\r\nX-Pad: " + String(repeating: "x", count: 8192)
+            let tail = String(repeating: "x", count: SdkHierarchyServer.maxHeaderBytes)
+            let response = try roundTrip(port: port, head: head, body: tail)
+            assertErrorResponse(
+                response,
+                status: "431 Request Header Fields Too Large",
+                error: "request_header_fields_too_large"
+            )
+        }
+    }
+
+    func testOversizedTerminatedHeaderClosesWith431() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let head = "GET /health HTTP/1.1\r\nX-Pad: "
+                + String(repeating: "x", count: SdkHierarchyServer.maxHeaderBytes + 4096) + "\r\n\r\n"
+            let response = try roundTrip(port: port, head: head, body: "")
+            assertErrorResponse(
+                response,
+                status: "431 Request Header Fields Too Large",
+                error: "request_header_fields_too_large"
+            )
+        }
+    }
+
+    func testHeaderExactlyAtLimitRoutesNormally() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let prefix = "GET /health HTTP/1.1\r\nX-Pad: "
+            let header = prefix + String(repeating: "x", count: SdkHierarchyServer.maxHeaderBytes - prefix.utf8.count)
+            XCTAssertEqual(header.utf8.count, SdkHierarchyServer.maxHeaderBytes)
+            let response = try roundTrip(port: port, head: header + "\r\n\r\n", body: "")
+            try assertHealthResponse(response)
+        }
+    }
+
+    func testBelowLimitHeaderWithLargeBodyRoutesNormally() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let prefix = "GET /health HTTP/1.1\r\nContent-Length: 32768\r\nX-Pad: "
+            let header = prefix + String(
+                repeating: "x",
+                count: SdkHierarchyServer.maxHeaderBytes - 16 - prefix.utf8.count
+            )
+            let response = try roundTrip(
+                port: port,
+                head: header + "\r\n\r\n" + String(repeating: "x", count: 32768), body: ""
+            )
+            try assertHealthResponse(response)
+        }
+    }
+
+    func testRoutingErrorsRetainForegroundGate() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker(isApplicationActive: false)) { port in
+            let response = try roundTrip(port: port, head: "POST /unknown HTTP/1.1 extra\r\n\r\n", body: "")
+            assertErrorResponse(response, status: "409 Conflict", error: "app_not_active")
+        }
+    }
+
+    private struct HealthStatus: Decodable {
+        let status: String
+    }
+
+    func testWrongMethodRetainsForegroundGate() throws {
+        try withRunningServer(tracker: FakeHierarchyTracker(isApplicationActive: false)) { port in
+            let response = try roundTrip(port: port, head: "POST /health HTTP/1.1\r\n\r\n", body: "")
+            assertErrorResponse(response, status: "409 Conflict", error: "app_not_active")
+        }
+    }
+
+    func testIdentityGatePrecedesForegroundAndMalformedRouting() throws {
+        let udid = "ABCDEF00-1234-4567-89AB-000000000001"
+        let tracker = FakeHierarchyTracker(isApplicationActive: false)
+        let identity = SdkSimulatorIdentity(environment: ["SIMULATOR_UDID": udid])
+        try withRunningServer(tracker: tracker, identity: identity) { port in
+            let response = try roundTrip(
+                port: port,
+                head: "POST /health HTTP/1.1 extra\r\nX-AutoMobile-Simulator-Udid: wrong\r\n\r\n", body: ""
+            )
+            XCTAssertTrue(response.hasPrefix("HTTP/1.1 409 Conflict"), response)
+            let body = try XCTUnwrap(response.components(separatedBy: "\r\n\r\n").last)
+            let payload = try JSONDecoder().decode([String: String].self, from: Data(body.utf8))
+            XCTAssertEqual(payload, ["error": "wrong_simulator", "expectedUdid": udid, "actualUdid": "wrong"])
+        }
+    }
+
+    private func assertHealthResponse(_ response: String) throws {
+        XCTAssertTrue(response.hasPrefix("HTTP/1.1 200 OK"), response)
+        let body = try XCTUnwrap(response.components(separatedBy: "\r\n\r\n").last)
+        let payload = try JSONDecoder().decode(HealthStatus.self, from: Data(body.utf8))
+        XCTAssertEqual(payload.status, "ok")
+    }
+
+    private func assertErrorResponse(_ response: String, status: String, error: String) {
+        XCTAssertTrue(response.hasPrefix("HTTP/1.1 \(status)"), response)
+        XCTAssertEqual(response.components(separatedBy: "\r\n\r\n").last, "{\"error\":\"\(error)\"}")
+    }
+
     private final class FakeHierarchyTracker: SdkHierarchyServing {
         var bundleId: String? {
             "test.bundle"

@@ -36,7 +36,57 @@
         static let port: UInt16 = 8766
         static let bindFailureLogPrefix = "[AutoMobileSDK] SDK_SERVER_BIND_FAILED"
         private static let httpHeaderDelimiter = Data("\r\n\r\n".utf8)
+        static let maxHeaderBytes = 16 * 1024
         private static let maxHttpBodyBytes = 1024 * 1024
+
+        enum Route: String, Sendable {
+            case cachedHierarchy = "/hierarchy"
+            case freshHierarchy = "/hierarchy/fresh"
+            case health = "/health"
+            case networkMock = "/network/mock"
+            case networkErrorSimulation = "/network/error-simulation"
+            case networkFaultRules = "/network/fault-rules"
+            case highlight = "/highlight"
+            case dbExecute = "/db/execute"
+            case dbList = "/db/list"
+            case dbCapabilities = "/db/capabilities"
+            case dbTables = "/db/tables"
+            case dbTableData = "/db/table-data"
+            case dbTableStructure = "/db/table-structure"
+            case preferences = "/preferences"
+
+            var method: String {
+                switch self {
+                case .cachedHierarchy, .freshHierarchy, .health: return "GET"
+                default: return "POST"
+                }
+            }
+        }
+
+        enum RouteMatch: Equatable, Sendable {
+            case matched(Route)
+            case notFound
+            case methodNotAllowed(allowed: [String])
+            case malformed
+        }
+
+        static func route(forRequestLine requestLine: String) -> RouteMatch {
+            // Reject malformed request lines with the same 400 bad_request as body handlers.
+            let parts = requestLine.split(separator: " ", omittingEmptySubsequences: false)
+            guard parts.count == 3, parts.allSatisfy({ !$0.isEmpty }), parts[1].hasPrefix("/") else {
+                return .malformed
+            }
+            let path = parts[1].prefix { $0 != "?" && $0 != "#" }
+            guard let route = Route(rawValue: String(path)) else { return .notFound }
+            guard parts[0] == route.method else { return .methodNotAllowed(allowed: [route.method]) }
+            return .matched(route)
+        }
+
+        private enum HttpHeaderReadResult: Sendable {
+            case complete(Data)
+            case tooLarge
+            case failed
+        }
 
         private let lock: any NSLocking
         private var listener: (any SdkHierarchyListener)?
@@ -226,13 +276,26 @@
                     return
                 }
 
-                self.readCompleteHttpHeaders(connection, initialData: data) { [weak self] requestData in
+                self.readCompleteHttpHeaders(connection, initialData: data) { [weak self] result in
                     guard let self = self else {
                         connection.cancel()
                         return
                     }
-                    guard let requestData = requestData,
-                          let headerData = Self.httpHeaderData(from: requestData),
+                    let requestData: Data
+                    switch result {
+                    case let .complete(data):
+                        requestData = data
+                    case .tooLarge:
+                        self.sendResponse(
+                            connection, statusCode: 431,
+                            body: Data("{\"error\":\"request_header_fields_too_large\"}".utf8)
+                        )
+                        return
+                    case .failed:
+                        connection.cancel()
+                        return
+                    }
+                    guard let headerData = Self.httpHeaderData(from: requestData),
                           let request = String(data: headerData, encoding: .utf8)
                     else {
                         connection.cancel()
@@ -242,50 +305,73 @@
                     if let rejection = self.authorizeRequest(headers: request, execute: {
                         guard self.requireApplicationActive(connection) else { return }
 
-                        if request.contains("GET /hierarchy/fresh") {
-                            self.handleFreshHierarchy(connection)
-                        } else if request.contains("GET /hierarchy") {
-                            self.handleCachedHierarchy(connection)
-                        } else if request.contains("GET /health") {
-                            self.handleHealth(connection)
-                        } else if request.contains("POST /network/mock") {
-                            self.handleNetworkMock(connection, initialData: requestData)
-                        } else if request.contains("POST /network/error-simulation") {
-                            self.handleNetworkErrorSimulation(connection, initialData: requestData)
-                        } else if request.contains("POST /network/fault-rules") {
-                            self.handleNetworkFaultRules(connection, initialData: requestData)
-                        } else if request.contains("POST /highlight") {
-                            self.handleHighlight(connection, initialData: requestData)
-                        } else if request.contains("POST /db/execute") {
-                            self.handleBodyRoute(connection, initialData: requestData) {
-                                self.databaseRouteHandler.handleExecuteSql(body: $0)
-                            }
-                        } else if request.contains("POST /db/list") {
-                            self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
-                        } else if request.contains("POST /db/capabilities") {
-                            self.sendRouteResponse(connection, self.databaseRouteHandler.handleCapabilities())
-                        } else if request.contains("POST /db/tables") {
-                            self.handleBodyRoute(connection, initialData: requestData) {
-                                self.databaseRouteHandler.handleListTables(body: $0)
-                            }
-                        } else if request.contains("POST /db/table-data") {
-                            self.handleBodyRoute(connection, initialData: requestData) {
-                                self.databaseRouteHandler.handleTableData(body: $0)
-                            }
-                        } else if request.contains("POST /db/table-structure") {
-                            self.handleBodyRoute(connection, initialData: requestData) {
-                                self.databaseRouteHandler.handleTableStructure(body: $0)
-                            }
-                        } else if request.contains("POST /preferences") {
-                            self.handleBodyRoute(connection, initialData: requestData) {
-                                self.preferenceRouteHandler.handle(body: $0)
-                            }
-                        } else {
+                        // Preserve identity authorization first, then the foreground gate, then routing.
+                        // Unknown, wrong-method, and malformed requests retain the existing gate responses.
+                        let requestLine = request.components(separatedBy: "\r\n")[0]
+                        switch Self.route(forRequestLine: requestLine) {
+                        case let .matched(route):
+                            self.dispatch(route, connection: connection, requestData: requestData)
+                        case .notFound:
                             self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
+                        case let .methodNotAllowed(allowed):
+                            self.sendResponse(
+                                connection, statusCode: 405,
+                                body: Data("{\"error\":\"method_not_allowed\"}".utf8),
+                                extraHeaders: [("Allow", allowed.joined(separator: ", "))]
+                            )
+                        case .malformed:
+                            self.sendResponse(
+                                connection,
+                                statusCode: 400,
+                                body: Data("{\"error\":\"bad_request\"}".utf8)
+                            )
                         }
                     }) {
                         self.sendRouteResponse(connection, rejection)
                     }
+                }
+            }
+        }
+
+        private func dispatch(_ route: Route, connection: NWConnection, requestData: Data) {
+            switch route {
+            case .freshHierarchy:
+                handleFreshHierarchy(connection)
+            case .cachedHierarchy:
+                handleCachedHierarchy(connection)
+            case .health:
+                handleHealth(connection)
+            case .networkMock:
+                handleNetworkMock(connection, initialData: requestData)
+            case .networkErrorSimulation:
+                handleNetworkErrorSimulation(connection, initialData: requestData)
+            case .networkFaultRules:
+                handleNetworkFaultRules(connection, initialData: requestData)
+            case .highlight:
+                handleHighlight(connection, initialData: requestData)
+            case .dbExecute:
+                handleBodyRoute(connection, initialData: requestData) {
+                    self.databaseRouteHandler.handleExecuteSql(body: $0)
+                }
+            case .dbList:
+                sendRouteResponse(connection, databaseRouteHandler.handleListDatabases())
+            case .dbCapabilities:
+                sendRouteResponse(connection, databaseRouteHandler.handleCapabilities())
+            case .dbTables:
+                handleBodyRoute(connection, initialData: requestData) {
+                    self.databaseRouteHandler.handleListTables(body: $0)
+                }
+            case .dbTableData:
+                handleBodyRoute(connection, initialData: requestData) {
+                    self.databaseRouteHandler.handleTableData(body: $0)
+                }
+            case .dbTableStructure:
+                handleBodyRoute(connection, initialData: requestData) {
+                    self.databaseRouteHandler.handleTableStructure(body: $0)
+                }
+            case .preferences:
+                handleBodyRoute(connection, initialData: requestData) {
+                    self.preferenceRouteHandler.handle(body: $0)
                 }
             }
         }
@@ -484,39 +570,33 @@
         private func readCompleteHttpHeaders(
             _ connection: NWConnection,
             initialData: Data,
-            completion: @escaping @Sendable (Data?) -> Void
+            completion: @escaping @Sendable (HttpHeaderReadResult) -> Void
         ) {
-            if initialData.range(of: Self.httpHeaderDelimiter) != nil {
-                completion(initialData)
+            if let delimiter = initialData.range(of: Self.httpHeaderDelimiter) {
+                let headerBytes = initialData.distance(from: initialData.startIndex, to: delimiter.lowerBound)
+                completion(headerBytes > Self.maxHeaderBytes ? .tooLarge : .complete(initialData))
+                return
+            }
+            guard initialData.count <= Self.maxHeaderBytes else {
+                completion(.tooLarge)
                 return
             }
 
             connection
                 .receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
-                    if error != nil {
-                        completion(nil)
+                    guard error == nil, let self else {
+                        completion(.failed)
                         return
                     }
-
                     var nextData = initialData
-                    if let data = data {
-                        nextData.append(data)
-                    }
-
-                    if nextData.range(of: Self.httpHeaderDelimiter) != nil {
-                        completion(nextData)
+                    if let data { nextData.append(data) }
+                    // Inspect appended bytes even on EOF, so oversized headers always get 431.
+                    if isComplete, nextData.range(of: Self.httpHeaderDelimiter) == nil,
+                       nextData.count <= Self.maxHeaderBytes
+                    {
+                        completion(.failed)
                         return
                     }
-                    if isComplete {
-                        completion(nil)
-                        return
-                    }
-
-                    guard let self = self else {
-                        completion(nil)
-                        return
-                    }
-
                     self.readCompleteHttpHeaders(connection, initialData: nextData, completion: completion)
                 }
         }
@@ -625,14 +705,18 @@
             return Data(data[..<range.lowerBound])
         }
 
-        private func sendResponse(_ connection: NWConnection, statusCode: Int, body: Data?) {
+        private func sendResponse(
+            _ connection: NWConnection, statusCode: Int, body: Data?, extraHeaders: [(String, String)] = []
+        ) {
             let statusText: String
             switch statusCode {
             case 200: statusText = "OK"
             case 204: statusText = "No Content"
             case 400: statusText = "Bad Request"
             case 404: statusText = "Not Found"
+            case 405: statusText = "Method Not Allowed"
             case 409: statusText = "Conflict"
+            case 431: statusText = "Request Header Fields Too Large"
             case 500: statusText = "Internal Server Error"
             case 503: statusText = "Service Unavailable"
             default: statusText = "Unknown"
@@ -643,6 +727,9 @@
             header += "Content-Type: application/json\r\n"
             header += "Content-Length: \(bodyData.count)\r\n"
             header += "Connection: close\r\n"
+            for (name, value) in extraHeaders {
+                header += "\(name): \(value)\r\n"
+            }
             header += "\r\n"
 
             var responseData = Data(header.utf8)

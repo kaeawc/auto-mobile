@@ -44,7 +44,7 @@ extension SCWindow: @retroactive @unchecked Sendable {}
 /// reconfiguration so frames don't get cropped.
 ///
 /// `@unchecked Sendable`: every mutable frame-path field (`_pipeline`, `_stream`,
-/// `_configuredPixelWidth/Height`) is `stateLock`-guarded, and
+/// `_audioOutputAttached`, `_configuredPixelWidth/Height`) is `stateLock`-guarded, and
 /// `fps`, `audioEnabled`, `windowID`, `configuredPixelFormat`, and
 /// `startCaptureDeadlineSeconds` are set once in `start()` before frames flow, then
 /// read-only. This lets the ScreenCaptureKit callbacks and the reconfigure task
@@ -75,6 +75,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// one place. Guarded by `stateLock`.
     private var _pipeline: EncodePipeline?
     private var _stream: CaptureStream?
+    /// Tracks successful attachment even when tests call `beginCapture` directly.
+    private var _audioOutputAttached = false
     private var _configuredPixelWidth = 0
     private var _configuredPixelHeight = 0
     private var _overlaySourceRect = CGRect.zero
@@ -211,6 +213,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         if audio {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+            stateLock.withLock { _audioOutputAttached = true }
         }
         try await startCapture(stream)
         self.stream = stream
@@ -225,34 +228,11 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// capture task is left to be reaped by process exit, which the parent
     /// triggers immediately after seeing the `error:` diagnostic.
     private func startCapture(_ stream: CaptureStream) async throws {
-        let race = StartRaceState()
-        // Snapshot the deadline into a Sendable local so the unstructured tasks
-        // below capture a value rather than the non-Sendable session.
-        let deadlineSeconds = startCaptureDeadlineSeconds
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let capture = Task {
-                do {
-                    try await stream.startCapture()
-                    if race.finish() {
-                        continuation.resume()
-                    }
-                } catch {
-                    if race.finish() {
-                        continuation.resume(throwing: error)
-                    }
-                }
-            }
-            Task {
-                let deadlineNanos = UInt64(deadlineSeconds * 1_000_000_000)
-                try? await Task.sleep(nanoseconds: deadlineNanos)
-                if race.finish() {
-                    capture.cancel()
-                    continuation.resume(
-                        throwing: StartCaptureTimeoutError(deadlineSeconds: deadlineSeconds)
-                    )
-                }
-            }
-        }
+        try await raceStartCapture(
+            deadlineSeconds: startCaptureDeadlineSeconds,
+            sleep: { try await Task.sleep(nanoseconds: $0) },
+            capture: { try await stream.startCapture() }
+        )
     }
 
     func stop() async {
@@ -261,13 +241,15 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         // Scoped `withLock` (not `lock()`/`unlock()`): the latter is unavailable from
         // an async context in the Swift 6 language mode, and scoped locking also makes
         // it structurally impossible to hold the lock across the `await` below.
-        let (pipeline, stream): (EncodePipeline?, CaptureStream?) = stateLock.withLock {
+        let (pipeline, stream, audioOutputAttached): (EncodePipeline?, CaptureStream?, Bool) = stateLock.withLock {
             let pipeline = _pipeline
             let stream = _stream
+            let audioOutputAttached = _audioOutputAttached
+            _audioOutputAttached = false
             _pipeline = nil
             _stream = nil
             lastIdleMarkerUptime = nil
-            return (pipeline, stream)
+            return (pipeline, stream, audioOutputAttached)
         }
 
         // Tear the encoder down ON the frame queue so it cannot overlap an in-flight
@@ -282,8 +264,25 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         guard let stream = stream else { return }
         // removeStreamOutput breaks the SCStream → self retain cycle so the
         // session is collectable even before SCStream itself goes away.
-        try? stream.removeStreamOutput(self, type: .screen)
-        try? await stream.stopCapture()
+        // Teardown is best-effort: diagnose each failure and continue with the
+        // remaining outputs and stream shutdown.
+        do {
+            try stream.removeStreamOutput(self, type: .screen)
+        } catch {
+            diagnosticSink("warn: failed to remove screen stream output: \(error)\n")
+        }
+        if audioOutputAttached {
+            do {
+                try stream.removeStreamOutput(self, type: .audio)
+            } catch {
+                diagnosticSink("warn: failed to remove audio stream output: \(error)\n")
+            }
+        }
+        do {
+            try await stream.stopCapture()
+        } catch {
+            diagnosticSink("warn: failed to stop stream capture: \(error)\n")
+        }
     }
 
     // MARK: - SCStreamOutput
@@ -646,12 +645,86 @@ struct StartCaptureTimeoutError: Error, CustomStringConvertible {
     }
 }
 
+/// Unstructured tasks let a timeout abandon a capture that ignores cancellation.
+/// The injected sleeper makes cancellation observable without a real deadline wait.
+func raceStartCapture(
+    deadlineSeconds: TimeInterval,
+    sleep: @escaping @Sendable (UInt64) async throws -> Void,
+    capture: @escaping @Sendable () async throws -> Void
+)
+    async throws
+{
+    let race = StartRaceState()
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        let sleeper = Task {
+            do {
+                try await sleep(UInt64(deadlineSeconds * 1_000_000_000))
+            } catch {
+                // Cancellation (or another sleep failure) is not a deadline expiry.
+                return
+            }
+            if race.finish() {
+                race.cancelCapture()
+                continuation.resume(throwing: StartCaptureTimeoutError(deadlineSeconds: deadlineSeconds))
+            }
+        }
+        let captureTask = Task {
+            do {
+                try await capture()
+                if race.finish() {
+                    race.clearCapture()
+                    sleeper.cancel()
+                    continuation.resume()
+                }
+            } catch {
+                if race.finish() {
+                    race.clearCapture()
+                    sleeper.cancel()
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        race.installCapture(captureTask)
+    }
+}
+
 /// Single-winner guard for the `startCapture()` deadline race. `finish()`
 /// returns `true` exactly once, so the checked continuation is resumed by
-/// whichever arm — capture or timeout — completes first.
+/// whichever arm — capture or timeout — completes first. All task-handle state
+/// is also lock-guarded: timeout can request cancellation before installation,
+/// and a completed capture must not retain its own task through this state.
 final class StartRaceState: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
+    private var captureTask: Task<Void, Never>?
+    private var captureCancelled = false
+    private var captureCompleted = false
+
+    func installCapture(_ task: Task<Void, Never>) {
+        let shouldCancel = lock.withLock {
+            if captureCancelled { return true }
+            if !captureCompleted { captureTask = task }
+            return false
+        }
+        if shouldCancel { task.cancel() }
+    }
+
+    func clearCapture() {
+        lock.withLock {
+            captureCompleted = true
+            captureTask = nil
+        }
+    }
+
+    func cancelCapture() {
+        let task = lock.withLock {
+            captureCancelled = true
+            let task = captureTask
+            captureTask = nil
+            return task
+        }
+        task?.cancel()
+    }
 
     func finish() -> Bool {
         lock.lock()

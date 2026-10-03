@@ -44,6 +44,11 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         private(set) var startCaptureCallCount = 0
         private(set) var stopCaptureCallCount = 0
         private(set) var removedScreenOutput = false
+        private(set) var removedAudioOutput = false
+        private(set) var teardownCalls: [String] = []
+        var removeScreenOutputError: Error?
+        var removeAudioOutputError: Error?
+        var stopCaptureError: Error?
         private(set) var updatedConfigurations: [SCStreamConfiguration] = []
 
         var startCaptureError: Error?
@@ -79,6 +84,13 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         func removeStreamOutput(_: SCStreamOutput, type: SCStreamOutputType) throws {
             if type == .screen {
                 removedScreenOutput = true
+                teardownCalls.append("screen")
+                if let error = removeScreenOutputError { throw error }
+            }
+            if type == .audio {
+                removedAudioOutput = true
+                teardownCalls.append("audio")
+                if let error = removeAudioOutputError { throw error }
             }
         }
 
@@ -98,6 +110,8 @@ final class SimulatorCaptureSessionTests: XCTestCase {
 
         func stopCapture() async throws {
             stopCaptureCallCount += 1
+            teardownCalls.append("stop")
+            if let error = stopCaptureError { throw error }
         }
 
         func updateConfiguration(_ configuration: SCStreamConfiguration) async throws {
@@ -114,6 +128,41 @@ final class SimulatorCaptureSessionTests: XCTestCase {
             }
             if let error = updateConfigurationError {
                 throw error
+            }
+        }
+    }
+
+    /// AsyncStream supplies cancellation-aware parking and a buffered startup
+    /// handshake. Immutable stream/continuation handles are safe across tasks;
+    /// XCTestExpectation synchronizes the cancellation observation.
+    private final class CancellationProbe: @unchecked Sendable {
+        let cancelled = XCTestExpectation(description: "parked task observed cancellation")
+        private let started: AsyncStream<Void>
+        private let startedContinuation: AsyncStream<Void>.Continuation
+
+        init() {
+            let signal = AsyncStream<Void>.makeStream()
+            started = signal.stream
+            startedContinuation = signal.continuation
+        }
+
+        func waitUntilStarted() async {
+            var iterator = started.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+
+        func park() async throws {
+            let parked = AsyncStream<Void>.makeStream()
+            defer { parked.continuation.finish() }
+            startedContinuation.yield(())
+            startedContinuation.finish()
+            var iterator = parked.stream.makeAsyncIterator()
+            _ = await iterator.next()
+            do {
+                try Task.checkCancellation()
+            } catch is CancellationError {
+                cancelled.fulfill()
+                throw CancellationError()
             }
         }
     }
@@ -238,6 +287,91 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         await session.stop()
 
         XCTAssertNil(session.stream)
+    }
+
+    func testStopAfterAudioCaptureRemovesBothOutputsInOrderAndIsIdempotent() async throws {
+        let diagnostics = DiagnosticRecorder()
+        let session = makeSession(diagnostics: diagnostics)
+        let fake = FakeCaptureStream()
+        try await session.beginCapture(with: fake, audio: true)
+
+        await session.stop()
+
+        XCTAssertTrue(fake.removedScreenOutput)
+        XCTAssertTrue(fake.removedAudioOutput)
+        XCTAssertEqual(fake.teardownCalls, ["screen", "audio", "stop"])
+        XCTAssertEqual(fake.stopCaptureCallCount, 1)
+        XCTAssertNil(session.stream)
+        await session.stop()
+        XCTAssertEqual(fake.teardownCalls, ["screen", "audio", "stop"])
+        XCTAssertEqual(fake.stopCaptureCallCount, 1)
+        XCTAssertTrue(diagnostics.lines.isEmpty)
+    }
+
+    func testStopAfterScreenOnlyCaptureDoesNotRemoveAudioOutput() async throws {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+        let fake = FakeCaptureStream()
+        try await session.beginCapture(with: fake, audio: false)
+
+        await session.stop()
+
+        XCTAssertTrue(fake.removedScreenOutput)
+        XCTAssertFalse(fake.removedAudioOutput)
+        XCTAssertEqual(fake.teardownCalls, ["screen", "stop"])
+        XCTAssertEqual(fake.stopCaptureCallCount, 1)
+    }
+
+    func testStopReportsScreenRemovalFailureAndContinuesTeardown() async throws {
+        let diagnostics = DiagnosticRecorder()
+        let session = makeSession(diagnostics: diagnostics)
+        let fake = FakeCaptureStream()
+        let error = StubError(id: 71)
+        fake.removeScreenOutputError = error
+        try await session.beginCapture(with: fake, audio: true)
+
+        await session.stop()
+
+        XCTAssertTrue(fake.removedScreenOutput)
+        XCTAssertTrue(fake.removedAudioOutput)
+        XCTAssertEqual(fake.teardownCalls, ["screen", "audio", "stop"])
+        XCTAssertEqual(fake.stopCaptureCallCount, 1)
+        XCTAssertEqual(diagnostics.lines, ["warn: failed to remove screen stream output: \(error)\n"])
+        await session.stop()
+        XCTAssertEqual(fake.teardownCalls, ["screen", "audio", "stop"])
+        XCTAssertEqual(fake.stopCaptureCallCount, 1)
+        XCTAssertEqual(diagnostics.lines.count, 1)
+    }
+
+    func testStopReportsAudioRemovalFailureAndContinuesTeardown() async throws {
+        let diagnostics = DiagnosticRecorder()
+        let session = makeSession(diagnostics: diagnostics)
+        let fake = FakeCaptureStream()
+        let error = StubError(id: 72)
+        fake.removeAudioOutputError = error
+        try await session.beginCapture(with: fake, audio: true)
+
+        await session.stop()
+
+        XCTAssertTrue(fake.removedScreenOutput)
+        XCTAssertTrue(fake.removedAudioOutput)
+        XCTAssertEqual(fake.teardownCalls, ["screen", "audio", "stop"])
+        XCTAssertEqual(fake.stopCaptureCallCount, 1)
+        XCTAssertEqual(diagnostics.lines, ["warn: failed to remove audio stream output: \(error)\n"])
+    }
+
+    func testStopReportsStopCaptureFailure() async throws {
+        let diagnostics = DiagnosticRecorder()
+        let session = makeSession(diagnostics: diagnostics)
+        let fake = FakeCaptureStream()
+        let error = StubError(id: 73)
+        fake.stopCaptureError = error
+        try await session.beginCapture(with: fake, audio: false)
+
+        await session.stop()
+
+        XCTAssertEqual(fake.teardownCalls, ["screen", "stop"])
+        XCTAssertEqual(fake.stopCaptureCallCount, 1)
+        XCTAssertEqual(diagnostics.lines, ["warn: failed to stop stream capture: \(error)\n"])
     }
 
     // MARK: - Fatal-error handling
@@ -408,6 +542,81 @@ final class SimulatorCaptureSessionTests: XCTestCase {
     }
 
     // MARK: - Bounded startCapture() deadline (issue #4350 / #4764)
+
+    func testStartRaceSuccessCancelsSleeperWithoutTimingOut() async throws {
+        let sleeper = CancellationProbe()
+        try await raceStartCapture(
+            deadlineSeconds: 14,
+            sleep: { _ in try await sleeper.park() },
+            capture: { await sleeper.waitUntilStarted() }
+        )
+
+        await fulfillment(of: [sleeper.cancelled], timeout: 0.05)
+    }
+
+    func testStartRaceImmediateSuccessCancelsSleeper() async throws {
+        let sleeper = CancellationProbe()
+        try await raceStartCapture(
+            deadlineSeconds: 14,
+            sleep: { _ in try await sleeper.park() },
+            capture: {}
+        )
+
+        await fulfillment(of: [sleeper.cancelled], timeout: 0.05)
+    }
+
+    func testStartRaceFailurePropagatesErrorAndCancelsSleeper() async {
+        let sleeper = CancellationProbe()
+        do {
+            try await raceStartCapture(
+                deadlineSeconds: 14,
+                sleep: { _ in try await sleeper.park() },
+                capture: {
+                    await sleeper.waitUntilStarted()
+                    throw StubError(id: 74)
+                }
+            )
+            XCTFail("capture failure should propagate")
+        } catch {
+            XCTAssertEqual(error as? StubError, StubError(id: 74))
+        }
+
+        await fulfillment(of: [sleeper.cancelled], timeout: 0.05)
+    }
+
+    func testStartRaceTimeoutCancelsCapture() async {
+        let capture = CancellationProbe()
+        do {
+            try await raceStartCapture(
+                deadlineSeconds: 14,
+                sleep: { _ in await capture.waitUntilStarted() },
+                capture: { try await capture.park() }
+            )
+            XCTFail("deadline expiry should time out")
+        } catch let error as StartCaptureTimeoutError {
+            XCTAssertEqual(error.deadlineSeconds, 14)
+        } catch {
+            XCTFail("unexpected error type: \(error)")
+        }
+
+        await fulfillment(of: [capture.cancelled], timeout: 0.05)
+    }
+
+    func testStartRaceImmediateTimeoutCancelsCaptureBeforeOrAfterInstallation() async {
+        let capture = CancellationProbe()
+        do {
+            try await raceStartCapture(
+                deadlineSeconds: 14,
+                sleep: { _ in },
+                capture: { try await capture.park() }
+            )
+            XCTFail("deadline expiry should time out")
+        } catch {
+            XCTAssertTrue(error is StartCaptureTimeoutError)
+        }
+
+        await fulfillment(of: [capture.cancelled], timeout: 0.05)
+    }
 
     /// A `startCapture()` that hangs inside ScreenCaptureKit start must be
     /// surfaced as a specific `StartCaptureTimeoutError` — the greppable

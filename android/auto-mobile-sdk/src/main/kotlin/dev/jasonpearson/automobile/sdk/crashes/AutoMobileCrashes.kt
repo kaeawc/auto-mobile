@@ -115,13 +115,19 @@ object AutoMobileCrashes {
   private class AutoMobileExceptionHandler : Thread.UncaughtExceptionHandler {
     private val originalHandler = AutoMobileCrashes.originalHandler
 
+    @Suppress("TooGenericExceptionCaught")
     override fun uncaughtException(thread: Thread, throwable: Throwable) {
-      if (AutoMobileSDK.isTrackingEnabled) {
-        try {
+      try {
+        if (AutoMobileSDK.isTrackingEnabled) {
           // Broadcast the crash before the app terminates
           broadcastCrash(thread, throwable)
-        } catch (e: Exception) {
-          AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast crash" }
+        }
+      } catch (t: Throwable) {
+        // SDK reporting failures can be swallowed safely because the host handler must still run.
+        try {
+          AutoMobileSDK.logger.e(TAG, t) { "Failed to broadcast crash" }
+        } catch (_: Throwable) {
+          // Logging is best-effort; swallowing its failure preserves the host's crash handling.
         }
       }
 
@@ -129,7 +135,7 @@ object AutoMobileCrashes {
       // This ensures the app terminates normally and system crash dialogs appear
       try {
         originalHandler?.uncaughtException(thread, throwable)
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         // Original handler threw — ensure process terminates
         Runtime.getRuntime().exit(1)
       }

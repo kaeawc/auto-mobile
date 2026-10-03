@@ -51,6 +51,11 @@ export interface AutoTargetSelectorService {
     direction: SwipeDirection,
   ): Element | null;
 
+  pickLargestDirectionMatchingScrollable(
+    scrollables: Element[],
+    direction: SwipeDirection,
+  ): Element | null;
+
   getScreenBounds(
     observeResult: ObserveResult,
     options?: { platform?: "android" | "ios"; includeSystemInsets?: boolean },
@@ -79,7 +84,6 @@ export interface TalkBackSwipeRunner {
 export interface OverlayAnalyzer {
   collectOverlayCandidates(
     viewHierarchy: ViewHierarchyResult,
-    container: SwipeOnOptions["container"] | undefined,
     containerElement: Element,
   ): OverlayCandidate[];
 

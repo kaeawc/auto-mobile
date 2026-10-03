@@ -27,6 +27,15 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
     return this.pickLargestScrollable(candidates);
   }
 
+  pickLargestDirectionMatchingScrollable(
+    scrollables: Element[],
+    direction: SwipeDirection,
+  ): Element | null {
+    return this.pickLargestScrollable(
+      scrollables.filter((element) => this.matchesDirection(element, direction)),
+    );
+  }
+
   pickLargestScrollable(scrollables: Element[]): Element | null {
     if (scrollables.length === 0) {
       return null;

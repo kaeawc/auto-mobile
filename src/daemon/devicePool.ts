@@ -44,7 +44,7 @@ import {
   type DeviceRecoveryPolicy,
   isDeviceSessionContinuityEnabled,
 } from "./poolConfig";
-import { DeviceSessionRepository, deviceRestartReleaseReason } from "../db/deviceSessionRepository";
+import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../devices/androidDeviceReboot";
 import {
   DeviceCriteriaMatcher,

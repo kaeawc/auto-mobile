@@ -50,6 +50,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
@@ -592,6 +593,34 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val gestureThread by lazy { gestureThreadFactory() }
   private val gestureHandler: Handler
     get() = gestureThread.handler
+
+  internal var dragDeadline: GestureDeadline = GestureDeadline { delayMs, onTimeout ->
+    val task = Runnable { onTimeout() }
+    check(gestureHandler.postDelayed(task, delayMs)) { "Gesture thread rejected drag deadline" }
+    val cancel: () -> Unit = { gestureHandler.removeCallbacks(task) }
+    cancel
+  }
+
+  internal var dragResultReporter: (String?, GestureDispatchOutcome) -> Unit =
+    { requestId, outcome ->
+      if (outcome.completed) {
+        Log.d(
+          TAG,
+          "Drag completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
+        )
+      } else {
+        Log.w(TAG, "Drag failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+      }
+      launchRequestScope(requestId) {
+        broadcastDragResult(
+          requestId,
+          outcome.completed,
+          outcome.error,
+          outcome.totalTimeMs,
+          outcome.gestureTimeMs,
+        )
+      }
+    }
 
   private val gestureStreamRouter =
     GestureStreamRouter(
@@ -1978,6 +2007,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       onComplete: () -> Unit,
       onFailed: (error: String) -> Unit,
       displayId: Int?,
+    ) = dispatchContinuing(stroke, onComplete, onFailed, onFailed, displayId)
+
+    override fun dispatchContinuing(
+      stroke: GestureDescription.StrokeDescription,
+      onComplete: () -> Unit,
+      onFailed: (error: String) -> Unit,
+      onRejected: (error: String) -> Unit,
+      displayId: Int?,
     ) {
       val gesture = gestureBuilder(displayId).addStroke(stroke).build()
       val dispatched =
@@ -1994,10 +2031,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           )
         } catch (e: Exception) {
           Log.e(TAG, "Error dispatching streamed gesture stroke", e)
-          onFailed(e.message ?: "Failed to dispatch streamed gesture stroke")
+          onRejected(e.message ?: "Failed to dispatch streamed gesture stroke")
           return
         }
-      if (!dispatched) onFailed("Failed to dispatch streamed gesture stroke")
+      if (!dispatched) onRejected("Failed to dispatch streamed gesture stroke")
     }
 
     private fun GestureSegment.toPath(): Path =
@@ -4162,10 +4199,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       TAG,
       "performDrag: ($x1, $y1) -> ($x2, $y2) press=${pressDurationMs}ms drag=${dragDurationMs}ms hold=${holdDurationMs}ms",
     )
-    perfProvider.serial("performDrag")
+    // Chained callbacks cross threads. Own these entries by request rather than leaving an IO
+    // thread's perf stack open and trying to close it from the gesture thread.
+    val dragPerf =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        MutablePerfEntry("performDrag", startTime, requestId).apply {
+          children.add(MutablePerfEntry("buildPath", System.currentTimeMillis(), requestId))
+        }
+      } else null
+    if (dragPerf == null) perfProvider.serial("performDrag")
 
     try {
-      perfProvider.startOperation("buildPath")
+      if (dragPerf == null) perfProvider.startOperation("buildPath")
       val gestureBuilder = gestureBuilder(displayId)
       val startX = x1.toFloat()
       val startY = y1.toFloat()
@@ -4188,101 +4233,58 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           TAG,
           "Legacy (<API 26) single-stroke drag: ($startX, $startY) -> ($endX, $endY), duration=${totalDurationMs}ms",
         )
-      } else if (pressDurationMs > 0) {
-        // Phase 1: Press and hold at start position
-        // Use zero-length path (moveTo + lineTo same point) for stationary touch
-        val pressPath =
-          Path().apply {
-            moveTo(startX, startY)
-            lineTo(startX, startY) // Zero-length path = stationary touch
-          }
-        val pressStroke = GestureDescription.StrokeDescription(pressPath, 0, pressDurationMs, true)
-        gestureBuilder.addStroke(pressStroke)
-        Log.d(
-          TAG,
-          "Stroke 1 (press): stationary at ($startX, $startY), startTime=0ms, duration=${pressDurationMs}ms, willContinue=true",
-        )
-
-        // Phase 2: Drag from start to end with 8 segments for more intermediate touch events
-        val dragPath =
-          Path().apply {
-            moveTo(startX, startY)
-            // Split the drag into 8 segments with variation in both X and Y to ensure hit
-            // detection
-            for (i in 1..8) {
-              val t = i / 8.0f
-              val baseX = startX + (endX - startX) * t
-              val baseY = startY + (endY - startY) * t
-              // Add alternating offsets to create a wavy path in both dimensions
-              val xOffset = if (i % 2 == 0) 10f else -10f
-              val yOffset = if (i % 2 == 0) -10f else 10f
-              val x = baseX + xOffset
-              val y = baseY + yOffset
-              lineTo(x, y)
-            }
-          }
-        val dragStroke =
-          GestureDescription.StrokeDescription(
-            dragPath,
+      } else {
+        val plan =
+          dragStrokePlan(
+            GesturePoint(startX, startY),
+            GesturePoint(endX, endY),
             pressDurationMs,
             dragDurationMs,
-            holdDurationMs > 0,
+            holdDurationMs,
           )
-        gestureBuilder.addStroke(dragStroke)
-        Log.d(
-          TAG,
-          "Stroke 2 (drag): ($startX, $startY) -> ($endX, $endY), startTime=${pressDurationMs}ms, duration=${dragDurationMs}ms, willContinue=${holdDurationMs > 0}",
-        )
-
-        if (holdDurationMs > 0) {
-          // Phase 3: Hold at end position
-          val holdPath =
-            Path().apply {
-              moveTo(endX, endY)
-              lineTo(endX, endY) // Zero-length path = stationary touch
-            }
-          val holdStroke =
-            GestureDescription.StrokeDescription(
-              holdPath,
-              pressDurationMs + dragDurationMs,
-              holdDurationMs,
-              false,
+        val ownedPerf = requireNotNull(dragPerf)
+        val gestureBuiltTime = System.currentTimeMillis()
+        ownedPerf.children.single().endTime = gestureBuiltTime
+        val dispatchPerf = MutablePerfEntry("dispatchGesture", gestureBuiltTime, requestId)
+        val lifecycle =
+          GestureDispatchLifecycle(
+            startTimeMs = startTime,
+            gestureBuiltTimeMs = gestureBuiltTime,
+            nowMs = { System.currentTimeMillis() },
+            startOperation = { ownedPerf.children.add(dispatchPerf) },
+            endOperation = { dispatchPerf.endTime = System.currentTimeMillis() },
+            endPerfBlock = {
+              ownedPerf.endTime = System.currentTimeMillis()
+              perfProvider.complete(ownedPerf)
+            },
+          )
+        rememberedInsert = null
+        lifecycle.startDispatch()
+        val onResult: (GestureDispatchOutcome) -> Unit = { dragResultReporter(requestId, it) }
+        val posted = gestureThread.post {
+          // Check once immediately before DOWN; this gesture's own events may advance the token.
+          if (frameContext != null && frameContext != currentFrameContext()) {
+            lifecycle.failed(
+              IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
+              onResult,
             )
-          gestureBuilder.addStroke(holdStroke)
-          Log.d(
-            TAG,
-            "Stroke 3 (hold): stationary at ($endX, $endY), startTime=${pressDurationMs + dragDurationMs}ms, duration=${holdDurationMs}ms, willContinue=false",
-          )
-        }
-      } else {
-        // Single stroke drag without initial press
-        val dragPath =
-          Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
+          } else {
+            DragStrokeSession(
+                plan = plan,
+                dispatcher = AccessibilityStrokeDispatcher(),
+                deadline = dragDeadline,
+                displayId = displayId,
+                logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
+                onFinished = { success, error ->
+                  if (success) lifecycle.completed(onResult = onResult)
+                  else lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
+                },
+              )
+              .start()
           }
-        val dragStroke =
-          GestureDescription.StrokeDescription(dragPath, 0, dragDurationMs, holdDurationMs > 0)
-        gestureBuilder.addStroke(dragStroke)
-        Log.d(
-          TAG,
-          "Single stroke drag: ($startX, $startY) -> ($endX, $endY), startTime=0ms, duration=${dragDurationMs}ms, willContinue=${holdDurationMs > 0}",
-        )
-
-        if (holdDurationMs > 0) {
-          val holdPath =
-            Path().apply {
-              moveTo(endX, endY)
-              lineTo(endX, endY)
-            }
-          val holdStroke =
-            GestureDescription.StrokeDescription(holdPath, dragDurationMs, holdDurationMs, false)
-          gestureBuilder.addStroke(holdStroke)
-          Log.d(
-            TAG,
-            "Hold after drag: stationary at ($endX, $endY), startTime=${dragDurationMs}ms, duration=${holdDurationMs}ms, willContinue=false",
-          )
         }
+        if (!posted) lifecycle.notDispatched(onResult)
+        return
       }
       val gesture = gestureBuilder.build()
       perfProvider.endOperation("buildPath")
@@ -4298,34 +4300,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         gestureBuiltTime,
         frameContext,
       ) { outcome ->
-        if (outcome.completed) {
-          Log.d(
-            TAG,
-            "Drag completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
-          )
-          launchRequestScope(requestId) {
-            broadcastDragResult(
-              requestId,
-              true,
-              null,
-              outcome.totalTimeMs,
-              outcome.gestureTimeMs,
-            )
-          }
-        } else {
-          Log.w(TAG, "Drag failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          launchRequestScope(requestId) {
-            broadcastDragResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
-          }
-        }
+        dragResultReporter(requestId, outcome)
       }
     } catch (e: Exception) {
-      perfProvider.end() // end performDrag block
       val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing drag", e)
-      launchRequestScope(requestId) {
-        broadcastDragResult(requestId, false, e.message, errorTime - startTime, null)
+      if (dragPerf == null) perfProvider.end()
+      else {
+        dragPerf.children.forEach { if (it.endTime == null) it.endTime = errorTime }
+        dragPerf.endTime = errorTime
+        perfProvider.complete(dragPerf)
       }
+      Log.e(TAG, "Error performing drag", e)
+      dragResultReporter(
+        requestId,
+        GestureDispatchOutcome(
+          false,
+          errorTime - startTime,
+          null,
+          e.message ?: "Failed to perform drag",
+        ),
+      )
     }
   }
 

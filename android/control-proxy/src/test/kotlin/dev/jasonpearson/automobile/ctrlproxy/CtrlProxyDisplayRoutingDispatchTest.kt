@@ -101,7 +101,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
 
   @Test
   fun `drag dispatches to explicit displays and defaults when absent`() {
-    assertAtomicRouting(strokeCount = 3) { displayId ->
+    assertChainedRouting(segmentCount = 3) { displayId ->
       fixture.actions.requestDrag(
         "drag",
         100.0,
@@ -175,6 +175,22 @@ class CtrlProxyDisplayRoutingDispatchTest {
       assertEquals(strokeCount, description.strokeCount)
       duration?.let { assertEquals(it, description.getStroke(0).duration) }
       fixture.cancelLastStroke()
+    }
+  }
+
+  private fun assertChainedRouting(segmentCount: Int, request: (Int?) -> Unit) {
+    for (displayId in listOf(2, Display.DEFAULT_DISPLAY, null)) {
+      val before = fixture.shadow.gesturesDispatched.size
+      request(displayId)
+      repeat(segmentCount) { index ->
+        assertEquals(before + index + 1, fixture.shadow.gesturesDispatched.size)
+        val description = fixture.shadow.gesturesDispatched.last().description()
+        assertEquals(displayId ?: Display.DEFAULT_DISPLAY, description.displayId)
+        assertEquals(1, description.strokeCount)
+        assertEquals(index < segmentCount - 1, description.getStroke(0).willContinue())
+        fixture.completeLastStroke()
+      }
+      assertEquals(before + segmentCount, fixture.shadow.gesturesDispatched.size)
     }
   }
 

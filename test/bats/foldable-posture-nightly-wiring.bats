@@ -340,6 +340,11 @@ wiring_requires_yq() {
   [ "$(yq -r '.jobs.foldable-posture-tests.steps[] | select(.name == "Diagnose foldable emulator shared libraries") | .run' "$NIGHTLY")" = 'bash scripts/android/prepare-foldable-emulator.sh --check-emulator-libs' ]
 }
 
+@test "nightly foldable matrix requires a conscious change to re-add resizable" {
+  wiring_requires_yq
+  [ "$(yq -o=json -I=0 '.jobs.foldable-posture-tests.strategy.matrix.profile' "$NIGHTLY")" = '["pixel_10_pro_fold"]' ]
+}
+
 @test "nightly foldable lane remains advisory with Resizable windowed" {
   wiring_requires_yq
   [ "$(yq -r '.jobs.foldable-posture-tests.continue-on-error' "$NIGHTLY")" = true ]

@@ -1,5 +1,5 @@
 import type { ExecResult } from "../../models";
-import { isIosSimulatorUdid } from "./iosDeviceType";
+import { resolveIosDeviceKind } from "./IosDeviceKind";
 
 export interface IosSimulatorPrivacyClient {
   executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
@@ -24,7 +24,7 @@ export interface IosPermissionsBackend {
 export function resolveIosPermissionsKind(options: {
   deviceId: string;
 }): IosPermissionsBackend["kind"] {
-  return isIosSimulatorUdid(options.deviceId) ? "simulator" : "physical";
+  return resolveIosDeviceKind(options);
 }
 
 export class SimulatorIosPermissionsBackend implements IosPermissionsBackend {

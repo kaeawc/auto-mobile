@@ -10,7 +10,7 @@ import type { Window as WindowInterface } from "../observe/interfaces/Window";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import path from "path";
@@ -135,8 +135,8 @@ export class PostNotification {
       };
     }
 
-    // simctl push is simulator-only. Use the repo's UDID-shape convention (NOT device.source).
-    if (!isIosSimulatorUdid(this.device.deviceId)) {
+    // simctl push is simulator-only. Gate on the device backend kind.
+    if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "physical") {
       return {
         success: false,
         supported: false,

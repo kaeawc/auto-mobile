@@ -8,7 +8,7 @@ import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,
 } from "../../utils/HostCommandExecutor";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 
@@ -164,7 +164,7 @@ export class VoiceOverToggle {
   }
 
   private isSimulator(): boolean {
-    return isIosSimulatorUdid(this.device.deviceId);
+    return resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
   }
 
   /**

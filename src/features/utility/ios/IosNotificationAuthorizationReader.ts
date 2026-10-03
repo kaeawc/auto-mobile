@@ -1,6 +1,6 @@
 import * as os from "os";
 import * as path from "path";
-import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
 import { logger } from "../../../utils/logger";
 import { PlistClient } from "../../../utils/ios-cmdline-tools/PlistClient";
 import { parsePlist, type PlistValue } from "../../../utils/ios-cmdline-tools/XctestrunPlist";
@@ -206,7 +206,7 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
   constructor(private readonly deps: BulletinBoardReaderDeps) {}
 
   async read(deviceId: string, bundleId: string): Promise<NotificationPolicyAccessState> {
-    if (!isIosSimulatorUdid(deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: deviceId }) === "physical") {
       return {
         supported: false,
         method: "unsupported",

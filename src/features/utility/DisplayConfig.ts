@@ -8,7 +8,7 @@ import type { BootedDevice } from "../../models";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../../utils/logger";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 
 /**
@@ -262,7 +262,7 @@ export class DisplayConfig {
 
   /** iOS simulators expose `simctl`/`defaults`; physical iOS devices expose neither. */
   private isIosSimulator(): boolean {
-    return isIosSimulatorUdid(this.device.deviceId);
+    return resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
   }
 
   private support(): DisplayConfigSupport {

@@ -64,7 +64,7 @@ const IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const ANDROID_COLD_FRAME_TIMEOUT_MS = 2_500;
 const ANDROID_COLD_FRAME_POLL_MS = 150;
 
-function amStartReportedFailure(stdout: string, stderr: string): boolean {
+export function amStartReportedFailure(stdout: string, stderr: string): boolean {
   return (
     /^Error(?::| type \d+)/m.test(`${stdout}\n${stderr}`) ||
     /does not exist/i.test(`${stdout}\n${stderr}`)

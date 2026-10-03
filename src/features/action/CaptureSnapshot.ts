@@ -1,4 +1,8 @@
-import { resolveIosSnapshotAppListBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+import {
+  resolveIosSnapshotBackend,
+  type IosSnapshotBackend,
+  type IosSimulatorSnapshotBackend,
+} from "../../utils/ios-cmdline-tools/IosSnapshotBackend";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   BootedDevice,
@@ -27,15 +31,8 @@ import {
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { assertSafeSnapshotName } from "../../utils/snapshotNameValidation";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import {
-  getAppDataContainerPath,
-  IOS_APP_DATA_FOLDERS,
-} from "../../utils/ios-cmdline-tools/iosAppContainer";
-import {
-  captureIosSettings,
-  type IosSettingsSnapshot,
-} from "../../utils/ios-cmdline-tools/iosSettings";
+import { IOS_APP_DATA_FOLDERS } from "../../utils/ios-cmdline-tools/iosAppContainer";
+import type { IosSettingsSnapshot } from "../../utils/ios-cmdline-tools/iosSettings";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
@@ -79,7 +76,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
   private store: DeviceSnapshotStore;
-  private simctl: SimCtlClient;
+  private iosSnapshotBackend: IosSnapshotBackend;
 
   constructor(
     device: BootedDevice,
@@ -94,7 +91,16 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     this.adb = adbFactory.create(device);
     this.emulator = emulator || new AndroidEmulatorClient();
     this.store = store;
-    this.simctl = simctl || new SimCtlClient(device);
+    this.iosSnapshotBackend = resolveIosSnapshotBackend(device.deviceId, {
+      simctl: simctl || new SimCtlClient(device),
+    });
+  }
+
+  private get simulatorSnapshotBackend(): IosSimulatorSnapshotBackend {
+    if (this.iosSnapshotBackend.kind === "physical") {
+      throw new Error("Snapshot app listing is not supported for physical iOS devices");
+    }
+    return this.iosSnapshotBackend;
   }
 
   /**
@@ -121,7 +127,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         // simctl for metadata/settings/app-container operations, which only works on a
         // Simulator. Reject a physical iPhone with an actionable error rather than
         // producing a partial, simctl-transport-failed snapshot.
-        if (isIosPhysicalUdid(this.device.deviceId)) {
+        if (this.iosSnapshotBackend.kind === "physical") {
           throw new ActionableError(
             `Device snapshots are not supported on physical iOS devices (${this.device.deviceId}); ` +
               "they require a Simulator (simctl).",
@@ -423,7 +429,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
     let iosSettings: IosSettingsSnapshot | undefined;
     if (includeSettings) {
-      iosSettings = await captureIosSettings(this.simctl, this.device.deviceId);
+      iosSettings = await this.simulatorSnapshotBackend.captureSettings();
     }
 
     const appDataBackup = includeAppData
@@ -529,11 +535,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       }
 
       try {
-        const containerPath = await getAppDataContainerPath(
-          this.simctl,
-          this.device.deviceId,
-          bundleId,
-        );
+        const containerPath = await this.simulatorSnapshotBackend.getAppDataContainerPath(bundleId);
         if (!containerPath) {
           logger.warn(`[iOS] ${bundleId} has no data container; skipping app data capture`);
           skippedPackages.push(bundleId);
@@ -609,13 +611,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private async getInstalledIosBundleIds(): Promise<Set<string>> {
     let apps: IosInstalledAppRecord[];
     try {
-      const backend = resolveIosSnapshotAppListBackend(this.device.deviceId, {
-        simctl: this.simctl,
-      });
-      if (!backend) {
-        throw new Error("Snapshot app listing is not supported for physical iOS devices");
-      }
-      apps = await backend.listApps();
+      apps = await this.simulatorSnapshotBackend.listAppsOrThrow();
     } catch (error) {
       throw toActionableError(error, "Failed to list installed iOS apps to validate appBundleIds");
     }
@@ -649,7 +645,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
   private async getIosDeviceMetadata(): Promise<{ deviceType?: string; osVersion?: string }> {
     try {
-      const deviceInfo = await this.simctl.getDeviceInfo(this.device.deviceId);
+      const deviceInfo = await this.simulatorSnapshotBackend.getDeviceInfo();
       if (!deviceInfo) {
         return {};
       }
@@ -658,7 +654,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       let osVersion: string | undefined = deviceInfo.os_version;
 
       if (!osVersion && deviceInfo.runtime) {
-        const runtimes = await this.simctl.getRuntimes();
+        const runtimes = await this.simulatorSnapshotBackend.getRuntimes();
         const runtime = runtimes.find((entry) => entry.identifier === deviceInfo.runtime);
         osVersion = runtime?.version || runtime?.name;
       }

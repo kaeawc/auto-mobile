@@ -18,7 +18,7 @@ import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Fake implementation of CtrlProxy for testing
@@ -26,6 +26,25 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * Tracks method calls for test assertions
  */
 export class FakeCtrlProxy implements AndroidCtrlProxy {
+  constructor(private readonly timer: Timer = defaultTimer) {}
+
+  private nodeActionSelectorsSupported = true;
+  private nodeActionHistory: Array<{
+    action: string;
+    selector: AccessibilityNodeSelector;
+    timeoutMs: number;
+    perf?: PerformanceTracker;
+    signal?: AbortSignal;
+  }> = [];
+
+  setSupportsNodeActionSelectors(supported: boolean): void {
+    this.nodeActionSelectorsSupported = supported;
+  }
+
+  getNodeActionHistory() {
+    return this.nodeActionHistory.map((entry) => ({ ...entry, selector: { ...entry.selector } }));
+  }
+
   private readonly supportedCommands = new Set<string>();
   setSupportedCommands(commands: readonly string[]): void {
     this.supportedCommands.clear();
@@ -265,7 +284,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   /**
-   * Configure the result returned by requestAction
+   * Configure the result returned by requestAction and requestNodeAction
    * @param result - The action result to return (or null for default success)
    */
   setActionResult(result: A11yActionResult | null): void {
@@ -452,6 +471,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.setTextHistory = [];
     this.imeActionHistory = [];
     this.actionHistory = [];
+    this.nodeActionHistory = [];
     this.twoFingerSwipeHistory = [];
     this.screenshotRequestCount = 0;
     this.hierarchyRequestCount = 0;
@@ -461,7 +481,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private async applyDelay(operation: string): Promise<void> {
     const delay = this.operationDelays.get(operation);
     if (delay && delay > 0) {
-      await defaultTimer.sleep(delay);
+      await this.timer.sleep(delay);
     }
   }
 
@@ -835,8 +855,31 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async supportsNodeActionSelectors(): Promise<boolean> {
-    return true;
+  async requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    await this.applyDelay("requestNodeAction");
+    this.checkFailure("requestNodeAction");
+    this.nodeActionHistory.push({ action, selector: { ...selector }, timeoutMs, perf, signal });
+    return (
+      this.actionResult ?? {
+        success: true,
+        action,
+        totalTimeMs: 100,
+        perfTiming: this.performanceTiming || undefined,
+      }
+    );
+  }
+
+  async supportsNodeActionSelectors(
+    _perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+  ): Promise<boolean> {
+    return this.nodeActionSelectorsSupported;
   }
 
   async supportsAccessibilityLinkActivation(): Promise<boolean> {

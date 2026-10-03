@@ -1,9 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { logger } from "../../../src/utils/logger";
+import type { Element } from "../../../src/models";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
@@ -506,3 +509,75 @@ test.each([false, true])(
     expect(result.captureId).toBe(snapshot?.captureId);
   },
 );
+
+describe("TapAnyElement node long press fallbacks", () => {
+  function setup(advertised = true) {
+    const element: Element = {
+      ...makeElement(),
+      "test-tag": "widget_42",
+      actions: advertised ? ["long_click"] : [],
+    };
+    const proxy = new FakeCtrlProxy();
+    const adb = new FakeAdbClient();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const tapAny = new TapAnyElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+      adb,
+      {
+        timer,
+        elementSelector: new FakeElementSelector(element),
+        accessibilityService: proxy,
+        accessibilityDetector: new FakeAccessibilityDetector(),
+      },
+    );
+    tapAny.observedInteraction = (action) =>
+      action({
+        viewHierarchy: { hierarchy: { node: {} } },
+        screenSize: { width: 500, height: 500 },
+      });
+    tapAny.setRefreshViewHierarchyForTesting(async () => null);
+    return { proxy, adb, tapAny };
+  }
+
+  test("uses coordinates without attempting a node action when selector support is unavailable", async () => {
+    const { proxy, adb, tapAny } = setup();
+    proxy.setSupportsNodeActionSelectors(false);
+    expect((await tapAny.execute({ action: "longPress", duration: 1200 })).success).toBe(true);
+    expect(proxy.getNodeActionHistory()).toEqual([]);
+    expect(adb.getAllCommands()).toEqual(["shell input touchscreen swipe 60 45 60 45 1200"]);
+  });
+
+  test("reports failed advertised long_click without coordinate fallback", async () => {
+    const { proxy, adb, tapAny } = setup();
+    proxy.setActionResult({
+      success: false,
+      action: "long_click",
+      totalTimeMs: 1,
+      error: "rejected",
+    });
+    const result = await tapAny.execute({ action: "longPress" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Semantic long press failed for the selected element: rejected");
+    expect(proxy.getNodeActionHistory()).toHaveLength(1);
+    expect(adb.getAllCommands()).toEqual([]);
+  });
+
+  test.each([false, true])(
+    "logs a thrown node action and falls back (advertised=%s)",
+    async (advertised) => {
+      const { proxy, adb, tapAny } = setup(advertised);
+      proxy.setFailureMode("requestNodeAction", new Error("runner disconnected"));
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect((await tapAny.execute({ action: "longPress", duration: 1200 })).success).toBe(true);
+        expect(warning).toHaveBeenCalledWith(
+          "[TapAnyElement] Accessibility long click error: Error: runner disconnected",
+        );
+        expect(adb.getAllCommands()).toEqual(["shell input touchscreen swipe 60 45 60 45 1200"]);
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+});

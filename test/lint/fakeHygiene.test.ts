@@ -34,8 +34,8 @@ const ALLOWLIST: Record<string, string[]> = {
     "timer: Timer = defaultTimer,",
   ],
   "FakeCtrlProxy.ts": [
-    'import { defaultTimer } from "../../src/utils/SystemTimer";',
-    "await defaultTimer.sleep(delay);",
+    'import { defaultTimer, Timer } from "../../src/utils/SystemTimer";',
+    "constructor(private readonly timer: Timer = defaultTimer) {}",
     "timestamp: Date.now(),",
   ],
   "FakeObserveCacheStore.ts": [

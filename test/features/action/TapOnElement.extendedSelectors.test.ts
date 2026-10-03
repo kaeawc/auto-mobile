@@ -1,8 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import type { Element } from "../../../src/models";
+import { logger } from "../../../src/utils/logger";
 
 const createTapOnElement = (selector: FakeElementSelector) => {
   return new TapOnElement(
@@ -350,65 +354,103 @@ describe("TapOnElement extended selectors", () => {
   });
 
   describe("Android long press node selectors", () => {
-    const testTagElement = {
+    const testTagElement: Element = {
+      ...makeElement(),
       "test-tag": "message_row_42",
       actions: ["long_click"],
-      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-    } as any;
+    };
+
+    function setup() {
+      const proxy = new FakeCtrlProxy();
+      const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        proxy as unknown as AndroidCtrlProxyClient,
+      );
+      let tapOn: TapOnElement;
+      try {
+        tapOn = createDefaultTapOnElement();
+      } finally {
+        clientSpy.mockRestore();
+      }
+      const internals = tapOn as unknown as {
+        adb: FakeAdbClient;
+        executeAndroidLongPress(
+          x: number,
+          y: number,
+          duration: number,
+          element: Element,
+        ): Promise<void>;
+      };
+      return { proxy, internals };
+    }
 
     test("uses ACTION_LONG_CLICK with a stable test-tag selector", async () => {
-      const tapOn = createDefaultTapOnElement();
-      const nodeActions: unknown[] = [];
-      const service = {
-        supportsNodeActionSelectors: async () => true,
-        requestNodeAction: async (_action: string, selector: unknown) => {
-          nodeActions.push(selector);
-          return longClickResult(true);
-        },
-        requestAction: async () => longClickResult(true),
-      };
-      (tapOn as any).accessibilityService = service;
-
-      await (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement);
-
-      expect(nodeActions).toEqual([{ testTag: "message_row_42" }]);
-      expect((tapOn as any).adb.getAllCommands()).toEqual([]);
+      const { proxy, internals } = setup();
+      await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
+      expect(proxy.getNodeActionHistory()).toMatchObject([
+        { action: "long_click", selector: { testTag: "message_row_42" } },
+      ]);
+      expect(internals.adb.getAllCommands()).toEqual([]);
     });
 
     test("falls back to coordinates when a legacy runner lacks node selector support", async () => {
-      const tapOn = createDefaultTapOnElement();
-      const service = {
-        supportsNodeActionSelectors: async () => false,
-        requestNodeAction: async () => longClickResult(true),
-        requestAction: async () => longClickResult(true),
-      };
-      (tapOn as any).accessibilityService = service;
-
-      await (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement);
-
-      expect((tapOn as any).adb.getAllCommands()).toEqual([
+      const { proxy, internals } = setup();
+      proxy.setSupportsNodeActionSelectors(false);
+      await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
+      expect(proxy.getNodeActionHistory()).toEqual([]);
+      expect(internals.adb.getAllCommands()).toEqual([
         "shell input touchscreen swipe 50 25 50 25 1000",
       ]);
     });
 
     test("does not fall back after an advertised semantic long click fails", async () => {
-      const tapOn = createDefaultTapOnElement();
-      const nodeActions: unknown[] = [];
-      const service = {
-        supportsNodeActionSelectors: async () => true,
-        requestNodeAction: async (_action: string, selector: unknown) => {
-          nodeActions.push(selector);
-          return longClickResult(false, "service unavailable");
-        },
-        requestAction: async () => longClickResult(true),
-      };
-      (tapOn as any).accessibilityService = service;
-
-      await expect(
-        (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement),
-      ).rejects.toThrow("Semantic long press failed for the selected element: service unavailable");
-      expect(nodeActions).toEqual([{ testTag: "message_row_42" }]);
-      expect((tapOn as any).adb.getAllCommands()).toEqual([]);
+      const { proxy, internals } = setup();
+      proxy.setActionResult(longClickResult(false, "service unavailable"));
+      await expect(internals.executeAndroidLongPress(50, 25, 1000, testTagElement)).rejects.toThrow(
+        "Semantic long press failed for the selected element: service unavailable",
+      );
+      expect(proxy.getNodeActionHistory()).toHaveLength(1);
+      expect(internals.adb.getAllCommands()).toEqual([]);
     });
+
+    test("falls back after a failed unadvertised semantic long click", async () => {
+      const { proxy, internals } = setup();
+      proxy.setActionResult(longClickResult(false, "not supported"));
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await internals.executeAndroidLongPress(50, 25, 1000, { ...testTagElement, actions: [] });
+        expect(warning).toHaveBeenCalledWith(
+          "[TapOnElement] Accessibility long click failed: not supported",
+        );
+        expect(proxy.getNodeActionHistory()).toHaveLength(1);
+        expect(internals.adb.getAllCommands()).toEqual([
+          "shell input touchscreen swipe 50 25 50 25 1000",
+        ]);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    test.each([false, true])(
+      "logs a thrown node action and falls back (advertised=%s)",
+      async (advertised) => {
+        const { proxy, internals } = setup();
+        proxy.setFailureMode("requestNodeAction", new Error("runner disconnected"));
+        const warning = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          await internals.executeAndroidLongPress(50, 25, 1000, {
+            ...testTagElement,
+            actions: advertised ? ["long_click"] : [],
+          });
+          expect(warning).toHaveBeenCalledWith(
+            "[TapOnElement] Accessibility long click error: Error: runner disconnected",
+          );
+          expect(internals.adb.getAllCommands()).toEqual([
+            "shell input touchscreen swipe 50 25 50 25 1000",
+          ]);
+        } finally {
+          warning.mockRestore();
+        }
+      },
+    );
   });
 });

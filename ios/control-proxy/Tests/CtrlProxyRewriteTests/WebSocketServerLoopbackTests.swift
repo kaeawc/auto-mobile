@@ -60,11 +60,11 @@ private final class LoopbackFixture {
     }
 
     func close(_ client: LoopbackClient, absentIndex: Int? = nil) throws {
-        // Production replies with an empty close, even for a close carrying status 1000.
+        // The close reply echoes the client's status 1000.
         try client.send(LoopbackClient.encode(Data([0x03, 0xE8]), opcode: 8))
         let close = try client.frame()
         XCTAssertEqual(close.opcode, 8)
-        XCTAssertTrue(close.payload.isEmpty)
+        XCTAssertEqual(close.payload, Data([0x03, 0xE8]))
         try client.expectEnd(allowError: true)
         if let absentIndex { try loopbackWait(absent[absentIndex]) }
     }

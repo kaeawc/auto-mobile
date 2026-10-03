@@ -8,12 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins the encode-loop shutdown-race fix for issue #4748: the shutdown hook nulls `streamWriter`
- * (and `audioCapture`) on a separate thread while the encode loop reads them. Before the fix the
- * loop dereferenced `streamWriter!!`, so a concurrent null between the `while (running)` check and
- * the deref threw a spurious [NullPointerException]. The loop now snapshots the volatile field via
- * [VideoServer.encodeLoopSnapshot] and breaks on null (`?: break`), exiting cleanly during
- * teardown.
+ * Pins the writer shutdown-race fix for issue #4748 and the encoder snapshot: the shutdown hook
+ * nulls `streamWriter` and `encoder` on a separate thread while the encode loop reads them. Each
+ * iteration snapshots the writer and then the encoder after any rotation swap, using
+ * [VideoServer.encodeLoopSnapshot] and breaking on null (`?: break`). A captured encoder remains
+ * available as a local even when its field is cleared. [VideoServer.isShutdownRace] distinguishes a
+ * released-codec state error during intentional shutdown from errors that must propagate.
  *
  * These are deterministic contract tests for that snapshot seam — no threads, no timing — so they
  * exercise the exact null-tolerance the loop relies on without flaking under CI's timing/CPU.
@@ -21,6 +21,15 @@ import org.junit.Test
 class VideoServerEncodeLoopTest {
   /** Stand-in for the concrete `VideoStreamWriter` so the test stays free of Android framework. */
   private class Writer
+
+  /** Stand-in for the final MediaCodec wrapper; never constructs an Android framework class. */
+  private class Encoder {
+    var completedIterations = 0
+
+    fun completeIteration() {
+      completedIterations++
+    }
+  }
 
   @Test
   fun snapshotReturnsFieldWhenPresentAndNullWhenClearedByShutdown() {
@@ -57,6 +66,99 @@ class VideoServerEncodeLoopTest {
 
     assertEquals("loop should run twice on the live writer before shutdown nulls it", 2, iterations)
     assertTrue("loop should exit via the null snapshot, not a deref throw", brokeOnNull)
+  }
+
+  @Test
+  fun encoderSnapshotReturnsExactInstanceWhenPresent() {
+    val encoder = Encoder()
+
+    val currentEncoder = VideoServer.encodeLoopSnapshot(encoder)
+
+    assertSame(encoder, currentEncoder)
+    currentEncoder?.completeIteration()
+    assertEquals(1, encoder.completedIterations)
+  }
+
+  @Test
+  fun encodeLoopExitsWhenEncoderIsNullAtLoopTop() {
+    val encoder: Encoder? = null
+    var iterations = 0
+
+    while (true) {
+      val currentEncoder = VideoServer.encodeLoopSnapshot(encoder) ?: break
+      currentEncoder.completeIteration()
+      iterations++
+    }
+
+    assertEquals(0, iterations)
+  }
+
+  @Test
+  fun encoderClearedMidIterationUsesSnapshotThenExitsOnNextIteration() {
+    val originalEncoder = Encoder()
+    var encoder: Encoder? = originalEncoder
+    var iterations = 0
+
+    while (true) {
+      val currentEncoder = VideoServer.encodeLoopSnapshot(encoder) ?: break
+      // Model shutdown clearing the field after the iteration has captured its encoder.
+      encoder = null
+      assertSame(originalEncoder, currentEncoder)
+      currentEncoder.completeIteration()
+      iterations++
+    }
+
+    assertEquals(1, iterations)
+    assertEquals(1, originalEncoder.completedIterations)
+    assertNull(VideoServer.encodeLoopSnapshot(encoder))
+  }
+
+  @Test
+  fun encoderSnapshotAfterRotationUsesReplacementOnNextIteration() {
+    val originalEncoder = Encoder()
+    val replacementEncoder = Encoder()
+    var encoder: Encoder? = originalEncoder
+    var rotationPending = false
+    val observed = mutableListOf<Encoder>()
+
+    while (observed.size < 2) {
+      // Mirror production: apply the pending rotation before taking the encoder snapshot.
+      if (rotationPending) {
+        rotationPending = false
+        encoder = replacementEncoder
+      }
+      val currentEncoder = VideoServer.encodeLoopSnapshot(encoder) ?: break
+      observed.add(currentEncoder)
+      currentEncoder.completeIteration()
+      rotationPending = true
+    }
+
+    assertEquals(2, observed.size)
+    assertSame(originalEncoder, observed[0])
+    assertSame(replacementEncoder, observed[1])
+    assertEquals(1, originalEncoder.completedIterations)
+    assertEquals(1, replacementEncoder.completedIterations)
+  }
+
+  @Test
+  fun releasedCodecStateErrorDuringShutdownIsCleanExit() {
+    assertTrue(
+      VideoServer.isShutdownRace(running = false, error = IllegalStateException("released"))
+    )
+  }
+
+  @Test
+  fun codecStateErrorWhileRunningMustPropagate() {
+    assertFalse(
+      VideoServer.isShutdownRace(running = true, error = IllegalStateException("released"))
+    )
+  }
+
+  @Test
+  fun otherErrorsMustPropagateEvenDuringShutdown() {
+    assertFalse(VideoServer.isShutdownRace(running = false, error = NullPointerException()))
+    assertFalse(VideoServer.isShutdownRace(running = false, error = IllegalArgumentException()))
+    assertFalse(VideoServer.isShutdownRace(running = true, error = IllegalArgumentException()))
   }
 
   @Test

@@ -353,34 +353,48 @@ object VideoServer {
         rotationPending = false
         swapCaptureForRotation(quality, sizeOverride, bitrate, fps, heartbeat)
       }
-      val index = encoder!!.dequeueOutputBuffer(bufferInfo, 100_000) // 100ms timeout
-      if (index >= 0) {
-        val buffer = encoder!!.getOutputBuffer(index)
-        if (buffer != null) {
-          val success = currentWriter.writePacket(buffer, bufferInfo)
-          if (!success) {
-            println("Client disconnected")
+      // Snapshot after a rotation swap so this iteration uses the replacement encoder.
+      val currentEncoder = encodeLoopSnapshot(encoder) ?: break
+      try {
+        val index = currentEncoder.dequeueOutputBuffer(bufferInfo, 100_000) // 100ms timeout
+        if (index >= 0) {
+          val buffer = currentEncoder.getOutputBuffer(index)
+          if (buffer != null) {
+            val success = currentWriter.writePacket(buffer, bufferInfo)
+            if (!success) {
+              println("Client disconnected")
+              break
+            }
+            if (
+              shouldCountVideoStatsFrame(
+                isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+              )
+            ) {
+              stats.onFrame(bufferInfo.size)
+            }
+          }
+          currentEncoder.releaseOutputBuffer(index)
+          heartbeat.onFrameEmitted()
+
+          // Check for end of stream
+          if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+            println("End of stream")
             break
           }
-          if (
-            shouldCountVideoStatsFrame(
-              isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
-            )
-          ) {
-            stats.onFrame(bufferInfo.size)
-          }
         }
-        encoder!!.releaseOutputBuffer(index)
-        heartbeat.onFrameEmitted()
 
-        // Check for end of stream
-        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-          println("End of stream")
-          break
+        recoverFromFrameDrop(
+          currentWriter::consumeDropGap,
+          currentEncoder::requestKeyFrame,
+          heartbeat,
+        )
+      } catch (error: IllegalStateException) {
+        // Shutdown may release the captured codec while an encoder call is in progress.
+        if (!isShutdownRace(running, error)) {
+          throw error
         }
+        break
       }
-
-      recoverFromFrameDrop(currentWriter::consumeDropGap, encoder!!::requestKeyFrame, heartbeat)
 
       // Backstop the encoder's own idle repeats: if the mirror has gone quiet (or a
       // keyframe request produced nothing), nudge it into re-submitting a fresh frame.
@@ -456,8 +470,10 @@ object VideoServer {
     // Atomic w.r.t. the writer: clear the stale replay cache before the old encoder is gone so no
     // reconnecting client can be replayed a new-SPS/old-IDR mismatch mid-swap.
     streamWriter?.resetReplayCacheForResize()
-    capture?.stop()
-    encoder?.stop()
+    val oldCapture = capture
+    val oldEncoder = encoder
+    oldCapture?.stop()
+    oldEncoder?.stop()
     createEncoderAndCapture(newWidth, newHeight, displayInfo.densityDpi, bitrate, fps)
     // Nudge a prompt fresh IDR so a static post-rotation screen does not starve viewers.
     heartbeat.onKeyFrameRequested()
@@ -470,6 +486,10 @@ object VideoServer {
    * null-tolerance is unit-testable without the Android capture stack.
    */
   internal fun <T : Any> encodeLoopSnapshot(field: T?): T? = field
+
+  /** Only a released-codec state error during intentional shutdown is a clean loop exit. */
+  internal fun isShutdownRace(running: Boolean, error: Throwable): Boolean =
+    !running && error is IllegalStateException
 
   internal fun shouldCountVideoStatsFrame(isCodecConfig: Boolean): Boolean = !isCodecConfig
 
@@ -496,14 +516,20 @@ object VideoServer {
     rotationMonitor?.stop()
     audioCapture?.stop()
     streamWriter?.stop()
-    capture?.stop()
-    encoder?.stop()
+    // Atomically detach the pair so concurrent shutdown calls cannot stop it twice.
+    val (oldCapture, oldEncoder) =
+      synchronized(this) {
+        val detached = capture to encoder
+        capture = null
+        encoder = null
+        detached
+      }
+    oldCapture?.stop()
+    oldEncoder?.stop()
 
     rotationMonitor = null
     audioCapture = null
     streamWriter = null
-    capture = null
-    encoder = null
     sessionLease?.stop()
     sessionLease = null
 

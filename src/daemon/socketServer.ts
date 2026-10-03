@@ -5396,8 +5396,8 @@ export class UnixSocketServer {
 
         const inputKey = new InputKey(targetDevice);
         return args.frameContext === undefined
-          ? await inputKey.press(args.key, remainingTimeoutMs)
-          : await inputKey.press(args.key, remainingTimeoutMs, args.frameContext);
+          ? await inputKey.press(args.key, remainingTimeoutMs, undefined, [], { signal })
+          : await inputKey.press(args.key, remainingTimeoutMs, args.frameContext, [], { signal });
       },
     );
 

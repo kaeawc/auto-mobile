@@ -137,7 +137,9 @@ describe("UnixSocketServer input/key", () => {
       success: true,
       key: "enter",
     });
-    expect(press).toHaveBeenCalledWith("enter", 1234);
+    expect(press).toHaveBeenCalledWith("enter", 1234, undefined, [], {
+      signal: expect.any(AbortSignal),
+    });
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -167,7 +169,9 @@ describe("UnixSocketServer input/key", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("enter", 30_000, "frame-1");
+    expect(press).toHaveBeenCalledWith("enter", 30_000, "frame-1", [], {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   test("returns one clear unsupported-platform response for iOS", async () => {

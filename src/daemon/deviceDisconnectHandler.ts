@@ -48,6 +48,10 @@ export interface DeviceDisconnectPoolPort {
     incidentId: string | undefined,
     outcome: "not-attempted" | "exhausted",
   ): Promise<void>;
+  refreshEmulatorLossRecoverySettlement(
+    incidentId: string | undefined,
+    fallbackOutcome: "exhausted",
+  ): Promise<void>;
   getRecoveryPolicy(): DeviceRecoveryPolicy;
   isAndroidEmulatorActiveRelaunchEligible(
     device: PooledDevice,
@@ -129,14 +133,21 @@ export class DeviceDisconnectHandler {
     deviceId: string,
     device: PooledDevice | undefined,
     mayBeStaleSignal: boolean,
+    incidentId: string | undefined,
   ): Promise<boolean> {
-    if (device && this.pool.isReservedForShutdown(device)) {
-      // killDevice owns this captured incarnation until its bounded disappearance
-      // check retires it (or hands a replacement to the pool). A concurrent
-      // monitor signal must not release its session or consume its marker.
-      return true;
+    try {
+      if (device && this.pool.isReservedForShutdown(device)) {
+        // killDevice owns this captured incarnation until its bounded disappearance
+        // check retires it (or hands a replacement to the pool). A concurrent
+        // monitor signal must not release its session or consume its marker.
+        return true;
+      }
+      return await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal);
+    } catch (error) {
+      await this.refreshFailedDisconnectRecovery(deviceId, incidentId, error);
+      this.pool.settleEmulatorLossIncident(incidentId);
+      throw error;
     }
-    return await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal);
   }
 
   async removeDisconnectedDevice(
@@ -150,7 +161,7 @@ export class DeviceDisconnectHandler {
       await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
-    if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal)) {
+    if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal, incidentId)) {
       await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
@@ -198,11 +209,9 @@ export class DeviceDisconnectHandler {
     device: PooledDevice,
     incidentId: string | undefined,
   ): Promise<void> {
-    let recoveryCompleted = false;
     try {
       const recoveryWasAttempted = this.pool.shouldRebootDisconnectedAndroidDevice(device);
       const recovered = await this.pool.rebootDisconnectedAndroidDevice(device, incidentId);
-      recoveryCompleted = recoveryWasAttempted;
       if (recovered || this.hasReplacementDisconnectedDevice(device)) {
         await this.completeRecoveryIfNotAttempted(incidentId, recoveryWasAttempted);
         return;
@@ -212,14 +221,28 @@ export class DeviceDisconnectHandler {
       await this.completeRecoveryIfNotAttempted(incidentId, recoveryWasAttempted);
     } catch (error) {
       // Plain reboot has no deferred incident owner; preserve any coordinator outcome.
-      if (!recoveryCompleted) {
-        await this.pool.completeEmulatorLossRecovery(incidentId, "exhausted");
-      }
-      logger.warn(`[DevicePool] Disconnect cleanup failed for ${device.id}`, error);
+      await this.refreshFailedDisconnectRecovery(device.id, incidentId, error);
       throw error;
     } finally {
       this.pool.settleEmulatorLossIncident(incidentId);
     }
+  }
+
+  private async refreshFailedDisconnectRecovery(
+    deviceId: string,
+    incidentId: string | undefined,
+    error: unknown,
+  ): Promise<void> {
+    try {
+      await this.pool.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
+    } catch (settlementError) {
+      // Diagnostics persistence must not replace the original cleanup failure.
+      logger.warn(
+        `[DevicePool] Failed to refresh disconnect incident for ${deviceId}`,
+        settlementError,
+      );
+    }
+    logger.warn(`[DevicePool] Disconnect cleanup failed for ${deviceId}`, error);
   }
 
   private matchesExpectedDisconnectedDevice(

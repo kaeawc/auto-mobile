@@ -416,7 +416,7 @@ export class MissingDeviceLiveness {
     } = options;
     const abortReason = this.shouldAbortEvictionUpfront(device, reason, identityObservation);
     if (abortReason) {
-      if (incidentId && abortReason === "stale") {
+      if (incidentId) {
         await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
       }
       return;

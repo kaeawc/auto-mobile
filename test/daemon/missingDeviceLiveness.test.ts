@@ -369,6 +369,21 @@ describe("MissingDeviceLiveness", () => {
     expect(h.devices.get(deviceId)).toBe(device);
   });
 
+  test("finishes a supplied incident when shutdown reservation aborts eviction", async () => {
+    const h = harness();
+    const device = pooled();
+    h.devices.set(deviceId, device);
+    h.setReserved();
+    await h.liveness.evictMissingPooledDevice(device, "absent", {
+      attemptDeviceLossRecovery: true,
+      incidentId: "incident",
+    });
+    expect(h.calls).toEqual(["finish incident"]);
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
+    expect(h.devices.get(deviceId)).toBe(device);
+  });
+
   test("releases an assigned session before removing its device", async () => {
     const h = harness();
     const device = pooled();
@@ -453,7 +468,8 @@ describe("MissingDeviceLiveness", () => {
           lockPoolRemoval,
         }),
       ).rejects.toBe(failure);
-      expect(h.outcomes.at(-1)).toBe("exhausted");
+      expect(h.outcomes).toEqual(["not-attempted", "exhausted"]);
+      expect(h.calls).toEqual(["record", "finish preparation", "complete", "complete", "settle"]);
       expect(h.settlements).toEqual(["incident"]);
     },
   );

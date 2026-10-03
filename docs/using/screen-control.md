@@ -21,11 +21,17 @@ This page assumes you already have a device coordinate to send.
 ### Request envelope
 
 ```json
-{ "id": "1", "type": "daemon_request", "method": "input/tap", "params": {}, "timeoutMs": 10000 }
+{
+  "id": "1",
+  "type": "daemon_request",
+  "method": "input/tap",
+  "params": { "platform": "android", "x": 540, "y": 960 },
+  "timeoutMs": 10000
+}
 ```
 
 `type` is `"daemon_request"` for every input command. `timeoutMs` is optional
-(default 60000).
+(default 30000 milliseconds for input commands).
 
 ### Response envelope
 
@@ -37,34 +43,55 @@ On failure `success` is `false` and `error` holds a human-readable message.
 
 ## Input commands
 
-Every command's `params` takes `platform` (`"android"` or `"ios"`) and an
-optional `deviceId` — omit `deviceId` to target the daemon's active device. All
-coordinates are **canonical device pixels**.
+Every command requires `platform`. Tap, swipe, pressButton, and typeText accept
+`"android"` or `"ios"`; gestures and `input/key` require `"android"`.
+`deviceId` is an optional string: when it
+is omitted, the daemon uses the socket session's autolocked device for that
+platform, otherwise the single booted device of that platform. With multiple
+booted devices and no autolock, you must supply `deviceId`; with none, the
+request fails. All coordinates are finite numbers in **canonical device pixels**.
 
-| `method`                                                        | `params`                                                  |
-| --------------------------------------------------------------- | --------------------------------------------------------- |
-| `input/tap`                                                     | `x`, `y`, `duration?`                                     |
-| `input/swipe`                                                   | `startX`, `startY`, `endX`, `endY`, `durationMs`          |
-| `input/pressButton`                                             | `button` (e.g. `back`, `home`, `recent`)                  |
-| `input/key`                                                     | `key` (e.g. `enter`, `tab`, `arrow_up`) — Android only    |
-| `input/typeText`                                                | `text`, `append`, `submit`                                |
-| `input/gestureStart` · `input/gestureMove` · `input/gestureEnd` | `gestureId`, `x`, `y`, `cancel?` — Android streaming drag |
+In the table, `?` marks optional parameters.
+
+| `method`             | `params`                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `input/tap`          | `platform`, `deviceId?`, `x`, `y`, `duration?`, `frameContext?`                                                                               |
+| `input/swipe`        | `platform`, `deviceId?`, `startX`, `startY`, `endX`, `endY`, `durationMs?`, `frameContext?`                                                   |
+| `input/pressButton`  | `platform`, `deviceId?`, `button`, `frameContext?` (e.g. `home`, `back`, `menu`, `power`, `volume_up`, `volume_down`, `recent`, `app_switch`) |
+| `input/key`          | `platform`, `deviceId?`, `key`, `frameContext?` (e.g. `enter`, `tab`, `arrow_up`) — Android only                                              |
+| `input/typeText`     | `platform`, `deviceId?`, `text`, `mode?`, `submit?`, `frameContext?`                                                                          |
+| `input/gestureStart` | `platform`, `deviceId?`, `gestureId`, `x`, `y`, `cancel?` — Android streaming drag                                                            |
+| `input/gestureMove`  | `platform`, `deviceId?`, `gestureId`, `x`, `y`, `cancel?` — Android streaming drag                                                            |
+| `input/gestureEnd`   | `platform`, `deviceId?`, `gestureId`, `x`, `y`, `cancel?` — Android streaming drag                                                            |
+
+`duration` for taps is an optional finite number. `durationMs` for swipes is
+optional, defaults to 300 milliseconds, and must be between 1 and 60000 when
+provided. `app_switch` is an alias of `recent`.
+
+All three gesture methods require a non-empty string `gestureId` and numeric
+`x`/`y`. Send a start, moves, and an end with the same `gestureId`. The parser
+accepts an optional boolean `cancel` on all three, defaulting to false, but only
+`gestureEnd` forwards it to the runner; start and move ignore it.
 
 Two rules to get right:
 
-- **`input/typeText` should set `append: true`** for per-keystroke typing. The
-  default replaces the whole field, so appending one character at a time would
-  otherwise wipe existing text on each keystroke.
-- **`frameContext` is optional but recommended.** Pass the id of the frame you
-  mapped the coordinate against (from the device data stream); the daemon then
-  rejects the command if that frame is stale, catching a tap mapped through an
-  out-of-date screenshot. Omit it and the staleness guard is skipped.
+- **`input/typeText` should set `mode: "append"`** for per-keystroke typing.
+  This is the only accepted value of `mode`; omit it to replace the whole field.
+  `text` must be a non-empty string. `submit` is an optional boolean, defaulting
+  to false.
+- **`frameContext` is optional but recommended for tap, swipe, typeText,
+  pressButton, and key.** Pass the non-empty context string reported by the
+  device data stream for the frame you used. The daemon rejects the command if
+  the newest device context differs or is unavailable; observe a fresh frame
+  before retrying. Omit it and this check is skipped. Gesture commands do not
+  validate or enforce `frameContext`.
 
 ## Client examples
 
-Each example connects to the socket, sends one `input/tap`, reads the response
-line, and checks `success`. Swipes, buttons, keys, and text use the same
-envelope with a different `method` and `params`.
+Each example shows how to connect to the socket, send one `input/tap`, and read
+a response. Inspect `success` before treating the input as successful. Swipes,
+buttons, keys, and text use the same envelope with a different `method` and
+`params`.
 
 <div class="content-tabs" markdown>
 
@@ -213,7 +240,7 @@ Swap `method` and `params` in the same envelope:
 ```json
 {"id":"2","type":"daemon_request","method":"input/swipe","params":{"platform":"android","startX":540,"startY":1600,"endX":540,"endY":400,"durationMs":300}}
 {"id":"3","type":"daemon_request","method":"input/pressButton","params":{"platform":"android","button":"back"}}
-{"id":"4","type":"daemon_request","method":"input/typeText","params":{"platform":"android","text":"hello","append":true,"submit":false}}
+{"id":"4","type":"daemon_request","method":"input/typeText","params":{"platform":"android","text":"hello","mode":"append","submit":false}}
 ```
 
 The reference client that ties click/drag/keyboard mapping to these commands is

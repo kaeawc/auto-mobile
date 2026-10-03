@@ -14,6 +14,8 @@ import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
 
 describe("authoritative iOS local builds", () => {
+  const originalTimestamp = new Date("2026-01-01T00:00:00Z");
+  const rebuiltTimestamp = new Date("2026-01-01T00:00:01Z");
   const envKeys = [
     "AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD",
     "AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH",
@@ -99,10 +101,10 @@ describe("authoritative iOS local builds", () => {
       }
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
+        await fs.utimes(binary, originalTimestamp, originalTimestamp);
         await builder.verifyRunnerBinaryBeforeLaunch("simulator");
-        const original = await fs.stat(binary);
         await fs.writeFile(binary, "rebuilt runner with a different size");
-        await fs.utimes(binary, original.atime, new Date(original.mtimeMs + 1000));
+        await fs.utimes(binary, rebuiltTimestamp, rebuiltTimestamp);
         downloader.runnerChecksum = downloader.legacyRunnerChecksum = "b".repeat(64);
         await builder.verifyRunnerBinaryBeforeLaunch("simulator");
         expect(info).toHaveBeenCalledWith(expect.stringContaining("New local build detected"), {
@@ -126,9 +128,9 @@ describe("authoritative iOS local builds", () => {
     if (!binary) {
       throw new Error("Missing fixture runner binary");
     }
+    await fs.utimes(binary, originalTimestamp, originalTimestamp);
     await builder.verifyRunnerBinaryBeforeLaunch("simulator");
-    const original = await fs.stat(binary);
-    await fs.utimes(binary, original.atime, new Date(original.mtimeMs + 1000));
+    await fs.utimes(binary, originalTimestamp, rebuiltTimestamp);
     downloader.runnerChecksum = "rebuilt-sha";
     await builder.verifyRunnerBinaryBeforeLaunch("simulator");
   });
@@ -201,8 +203,8 @@ describe("authoritative iOS local builds", () => {
     await placeLocalProducts();
     const deviceXctestrun = path.join(productsDir, "AutoMobileTest_iphoneos.xctestrun");
     await fs.writeFile(deviceXctestrun, "partial device");
-    const simulator = await fs.stat(xctestrunPath);
-    await fs.utimes(deviceXctestrun, simulator.atime, new Date(simulator.mtimeMs + 1000));
+    await fs.utimes(xctestrunPath, originalTimestamp, originalTimestamp);
+    await fs.utimes(deviceXctestrun, rebuiltTimestamp, rebuiltTimestamp);
     expect(await builder.needsRebuild()).toBe(false);
     const result = await builder.build();
     expect(result.success).toBe(true);

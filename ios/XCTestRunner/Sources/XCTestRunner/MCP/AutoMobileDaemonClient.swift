@@ -189,7 +189,7 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         guard let params = try JSONSerialization.jsonObject(with: params) as? [String: Any],
               let payload = Self.encodeRequestLine(
                   id: id, method: method, params: params,
-                  timeoutMs: Int(timeout * 1000), clientVersion: clientVersion
+                  timeoutMs: TimeoutConversion.milliseconds(forSeconds: timeout), clientVersion: clientVersion
               )
         else { throw MCPClientError.requestFailed("Failed to encode daemon request") }
         let connection = currentConnection()

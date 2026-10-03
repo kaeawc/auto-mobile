@@ -105,8 +105,12 @@ export class PressButton extends BaseVisualChange {
 
   // Buttons that can be handled via accessibility service global actions
   private static readonly GLOBAL_ACTION_BUTTONS = new Set(["back", "home", "recent"]);
-  private static readonly IOS_NAVIGATION_BUTTONS = new Set(["home", "back", "recent"]);
-  private static readonly IOS_HARDWARE_BUTTONS = new Set(["volume_up", "volume_down", "power"]);
+  static readonly IOS_NAVIGATION_BUTTONS: ReadonlySet<string> = new Set(["home", "back", "recent"]);
+  static readonly IOS_HARDWARE_BUTTONS: ReadonlySet<string> = new Set([
+    "volume_up",
+    "volume_down",
+    "power",
+  ]);
 
   /**
    * Execute Android-specific button press.

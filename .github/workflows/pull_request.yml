@@ -79,9 +79,14 @@ jobs:
               /^\.lycherc\.toml$/         // .lycherc.toml
             ];
 
+            // Tests under test/lint read these contracts.
+            // Doc-only edits must still run Node tests.
+            const testGuardedDocs = ["docs/using/screen-control.md"];
+
             // Check if a file matches any documentation pattern
             const isDocFile = (filename) => {
-              return docPatterns.some(pattern => pattern.test(filename));
+              return !testGuardedDocs.includes(filename) &&
+                docPatterns.some(pattern => pattern.test(filename));
             };
 
             // Check if ALL files are documentation files
@@ -178,7 +183,11 @@ jobs:
               /^mkdocs\.yml$/,
               /^\.lycherc\.toml$/
             ];
-            const isDocFile = (filename) => docPatterns.some(pattern => pattern.test(filename));
+            // Keep auto-chore consistent with docs_only for test-guarded docs.
+            const testGuardedDocs = ["docs/using/screen-control.md"];
+            const isDocFile = (filename) =>
+              !testGuardedDocs.includes(filename) &&
+              docPatterns.some(pattern => pattern.test(filename));
 
             const labelNames = labels.map(label => label.name);
             const sameRepo = pr.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`;

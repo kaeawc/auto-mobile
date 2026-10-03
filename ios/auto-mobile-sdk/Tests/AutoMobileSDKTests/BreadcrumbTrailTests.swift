@@ -1,11 +1,10 @@
 // swiftlint:disable force_unwrapping
 // Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
 
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class BreadcrumbTrailTests: XCTestCase {
-
     func testAddAndSnapshot() {
         let trail = BreadcrumbTrail(maxSize: 10)
         trail.add(Breadcrumb(category: .navigation, message: "HomeScreen"))
@@ -19,11 +18,33 @@ final class BreadcrumbTrailTests: XCTestCase {
         XCTAssertEqual(crumbs[1].message, "Button tapped")
     }
 
+    func testZeroMaxSizeKeepsNoBreadcrumbs() {
+        let trail = BreadcrumbTrail(maxSize: 0)
+        XCTAssertTrue(trail.snapshot().isEmpty)
+
+        for index in 0 ..< 3 {
+            trail.add(Breadcrumb(timestamp: 1000, category: .custom, message: "msg-\(index)"))
+        }
+
+        XCTAssertTrue(trail.snapshot().isEmpty)
+    }
+
+    func testNegativeMaxSizeKeepsNoBreadcrumbs() {
+        let trail = BreadcrumbTrail(maxSize: -5)
+        XCTAssertTrue(trail.snapshot().isEmpty)
+
+        for index in 0 ..< 3 {
+            trail.add(Breadcrumb(timestamp: 1000, category: .custom, message: "msg-\(index)"))
+        }
+
+        XCTAssertTrue(trail.snapshot().isEmpty)
+    }
+
     func testRingBufferOverflow() {
         let maxSize = 5
         let trail = BreadcrumbTrail(maxSize: maxSize)
 
-        for i in 0..<(maxSize + 10) {
+        for i in 0 ..< (maxSize + 10) {
             trail.add(Breadcrumb(category: .custom, message: "msg-\(i)"))
         }
 
@@ -60,7 +81,7 @@ final class BreadcrumbTrailTests: XCTestCase {
         let iterations = 100
         let group = DispatchGroup()
 
-        for i in 0..<iterations {
+        for i in 0 ..< iterations {
             group.enter()
             DispatchQueue.global().async {
                 trail.add(Breadcrumb(category: .custom, message: "concurrent-\(i)"))

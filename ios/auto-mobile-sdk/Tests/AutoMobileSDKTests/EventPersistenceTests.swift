@@ -1,11 +1,10 @@
 // swiftlint:disable force_unwrapping force_try
 // Force-unwrap/force-try are idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
 
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class EventPersistenceTests: XCTestCase {
-
     private var tempDir: URL!
     private var persistence: FileEventPersistence!
     private var fakeDateProvider: FakeDateProvider!
@@ -14,7 +13,7 @@ final class EventPersistenceTests: XCTestCase {
         super.setUp()
         tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("event_persistence_tests_\(UUID().uuidString)")
-        fakeDateProvider = FakeDateProvider(initialDate: Date())
+        fakeDateProvider = FakeDateProvider()
         persistence = FileEventPersistence(directory: tempDir, dateProvider: fakeDateProvider)
     }
 
@@ -199,7 +198,115 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertFalse(remaining[0].lastPathComponent.contains("OLD"))
     }
 
+    func testCleanupWithNegativeAgeKeepsOldAndFreshBatches() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let event = SdkInteractionEvent(timestamp: 1000, interactionType: "keep", properties: [:])
+        fakeDateProvider.set(now.addingTimeInterval(-8 * 24 * 60 * 60))
+        let oldBatchId = persistence.persist([event])!
+        fakeDateProvider.set(now)
+        let freshBatchId = persistence.persist([event])!
+
+        persistence.cleanup(maxAgeDays: -1)
+
+        XCTAssertEqual(persistence.loadPending().map { $0.batchId }, [oldBatchId, freshBatchId])
+    }
+
+    func testCleanupWithZeroAgeKeepsBatchExactlyAtNow() {
+        fakeDateProvider.set(Date(timeIntervalSince1970: 1_700_000_000))
+        let oldFile = tempDir.appendingPathComponent("events_1699999999999_OLD.json")
+        let currentFile = tempDir.appendingPathComponent("events_1700000000000_NOW.json")
+        let event = SdkInteractionEvent(timestamp: 1000, interactionType: "boundary", properties: [:])
+        let envelope = try! SdkEventEnvelope(event)
+        let persisted = [PersistedEvent(eventType: envelope.eventType, payload: envelope.payload)]
+        let data = try! JSONEncoder().encode(persisted)
+        try! data.write(to: oldFile)
+        try! data.write(to: currentFile)
+
+        persistence.cleanup(maxAgeDays: 0)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: currentFile.path))
+        XCTAssertEqual(persistence.loadPending().map { $0.batchId }, ["1700000000000_NOW"])
+    }
+
+    func testCleanupWithMaximumAgeKeepsAllBatches() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let event = SdkInteractionEvent(timestamp: 1000, interactionType: "keep", properties: [:])
+        fakeDateProvider.set(now.addingTimeInterval(-8 * 24 * 60 * 60))
+        let oldBatchId = persistence.persist([event])!
+        fakeDateProvider.set(now)
+        let freshBatchId = persistence.persist([event])!
+
+        persistence.cleanup(maxAgeDays: Int.max)
+
+        XCTAssertEqual(persistence.loadPending().map { $0.batchId }, [oldBatchId, freshBatchId])
+    }
+
     // MARK: - Corrupt File Handling
+
+    func testTransientReadFailureKeepsBatchForRetry() {
+        let event = SdkInteractionEvent(timestamp: 1000, interactionType: "retry", properties: [:])
+        let batchId = persistence.persist([event])!
+        let fileURL = tempDir.appendingPathComponent("events_\(batchId).json")
+        let failingPersistence = FileEventPersistence(
+            directory: tempDir,
+            dateProvider: fakeDateProvider,
+            readData: { _ in throw CocoaError(.fileReadNoPermission) }
+        )
+
+        XCTAssertTrue(failingPersistence.loadPending().isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        let retryPersistence = FileEventPersistence(directory: tempDir, dateProvider: fakeDateProvider)
+        let pending = retryPersistence.loadPending()
+        XCTAssertEqual(pending.map { $0.batchId }, [batchId])
+        XCTAssertEqual((pending.first?.events.first as? SdkInteractionEvent)?.interactionType, "retry")
+    }
+
+    func testVanishedFileIsSkippedWhileOtherBatchLoads() {
+        let event = SdkInteractionEvent(timestamp: 1000, interactionType: "available", properties: [:])
+        let missingBatchId = persistence.persist([event])!
+        let availableBatchId = persistence.persist([event])!
+        let missingFile = tempDir.appendingPathComponent("events_\(missingBatchId).json")
+        let readingPersistence = FileEventPersistence(
+            directory: tempDir,
+            dateProvider: fakeDateProvider,
+            readData: { fileURL in
+                if fileURL.lastPathComponent == missingFile.lastPathComponent {
+                    try FileManager.default.removeItem(at: fileURL)
+                    throw CocoaError(.fileReadNoSuchFile)
+                }
+                return try Data(contentsOf: fileURL)
+            }
+        )
+
+        let pending = readingPersistence.loadPending()
+
+        XCTAssertEqual(pending.map { $0.batchId }, [availableBatchId])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingFile.path))
+    }
+
+    func testCorruptFileIsDeletedWhileUnreadableBatchIsKept() {
+        let event = SdkInteractionEvent(timestamp: 1000, interactionType: "unreadable", properties: [:])
+        let batchId = persistence.persist([event])!
+        let unreadableFile = tempDir.appendingPathComponent("events_\(batchId).json")
+        let corruptFile = tempDir.appendingPathComponent("events_999_CORRUPT.json")
+        try! Data("not valid json".utf8).write(to: corruptFile)
+        let readingPersistence = FileEventPersistence(
+            directory: tempDir,
+            dateProvider: fakeDateProvider,
+            readData: { fileURL in
+                if fileURL.lastPathComponent == unreadableFile.lastPathComponent {
+                    throw CocoaError(.fileReadNoPermission)
+                }
+                return try Data(contentsOf: fileURL)
+            }
+        )
+
+        XCTAssertTrue(readingPersistence.loadPending().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: corruptFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unreadableFile.path))
+    }
 
     func testCorruptFileIsRemovedOnLoad() {
         let corruptFile = tempDir.appendingPathComponent("events_999_CORRUPT.json")

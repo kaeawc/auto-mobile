@@ -34,18 +34,21 @@ public protocol BreadcrumbTracking: AnyObject, Sendable {
 }
 
 /// Thread-safe ring buffer of recent breadcrumbs.
+/// A nonpositive maximum size keeps no breadcrumbs.
 public final class BreadcrumbTrail: BreadcrumbTracking, Sendable {
     private let maxSize: Int
     private let buffer: OSAllocatedUnfairLock<[Breadcrumb]>
 
+    /// Create a trail with at most maxSize breadcrumbs; nonpositive values keep none.
     public init(maxSize: Int = 100) {
-        self.maxSize = maxSize
+        self.maxSize = max(maxSize, 0)
         var initialBuffer: [Breadcrumb] = []
-        initialBuffer.reserveCapacity(maxSize)
+        initialBuffer.reserveCapacity(self.maxSize)
         buffer = OSAllocatedUnfairLock(initialState: initialBuffer)
     }
 
     public func add(_ breadcrumb: Breadcrumb) {
+        guard maxSize > 0 else { return }
         buffer.withLock { buffer in
             if buffer.count >= maxSize {
                 buffer.removeFirst()

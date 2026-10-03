@@ -308,6 +308,16 @@ Audio-dependent workflows can now run headless.
 Further Android work and the measurement protocol are tracked in
 [Android emulator optimization](android-emulator-optimization.md).
 
+Provisioned Android transport retirement uses a process-wide fence in `src/utils`.
+Its store contract lives beside the fence; the DB layer constructs the durable
+default with `ProvisionedDeviceTransportTombstoneRepository`. Daemon construction,
+MCP tool registration (including direct/stdio startup), and CLI tool registration
+install it before device-session use. Installation preserves an existing fence
+and does not open the DB until use, retaining startup ownership and migration
+ordering. An unwired production holder throws; only tests default/reset to an
+in-memory fence. Durable tombstones survive process restart and prevent a retired
+emulator transport from identifying a later device.
+
 ## VM snapshot incarnation lifecycle
 
 An Android VM restore advances the pooled incarnation and synchronously calls

@@ -23,4 +23,3 @@ src/utils/plan/PlanExecutor.ts -> src/daemon/daemonState
 src/utils/plan/PlanExecutor.ts -> src/server/deviceLossOutcome
 src/utils/plan/PlanExecutor.ts -> src/server/toolParamError
 src/utils/plan/PlanExecutor.ts -> src/server/toolRegistry
-src/utils/provisionedDeviceTransportFence.ts -> src/db/provisionedDeviceTransportTombstoneRepository

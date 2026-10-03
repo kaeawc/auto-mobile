@@ -217,7 +217,8 @@ async function assertStaleTap(sessionUuid: string, previous: ObserveResult): Pro
   const old = tapPoint(previous);
   const stale = await tapAt(sessionUuid, old.x, old.y);
   expect(stale.success).toBe(false);
-  expect(stale.error).toContain("Re-observe the active panel");
+  expect(stale.error).toContain("Display changed since these coordinates were chosen");
+  expect(stale.error).toContain("Re-observe");
 }
 
 async function assertFreshTap(sessionUuid: string, current: ObserveResult): Promise<void> {

@@ -704,7 +704,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [pixel_10_pro_fold, resizable]
+        # Resizable AVD ignores fold/posture/hinge commands (setPosture read-back
+        # fails; #8947, nightly run 37090697468). Re-add resizable to this list
+        # once the AVD or a preset-only tool path exists to re-enable it.
+        profile: [pixel_10_pro_fold]
     env:
       AUTOMOBILE_FOLDABLE_LANE: "1"
       AUTOMOBILE_FOLDABLE_PROFILE: ${{ matrix.profile }}

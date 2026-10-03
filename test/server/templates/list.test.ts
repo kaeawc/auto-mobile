@@ -12,6 +12,21 @@ describe("MCP Templates List", () => {
   beforeAll(async () => {
     // Keep the cold server import outside each unit test's timing budget.
     await import("../../../src/server/index");
+
+    // Warm cold fixture setup outside JUnit timing while keeping per-test isolation.
+    ToolRegistry.clearTools();
+    const restoreWarmupHermeticServer = installHermeticServerFixture();
+    const warmupFixture = new McpTestFixture();
+    try {
+      await warmupFixture.setup();
+    } finally {
+      try {
+        await warmupFixture.teardown();
+      } finally {
+        restoreWarmupHermeticServer();
+        ToolRegistry.clearTools();
+      }
+    }
   });
 
   beforeEach(async () => {

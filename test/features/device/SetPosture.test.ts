@@ -648,6 +648,64 @@ describe("SetPosture", () => {
       return { feature, console, adb, observe };
     }
 
+    test.each([
+      ["hinge-angle0-get.txt", 180],
+      ["hinge-angle0-get-120.txt", 120],
+    ] as const)("Android captured %s verifies a request for 120", async (name, actual) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(openedState, ""));
+      const { feature } = makeFeature(makeDevice(), adb, new FakeTimer(), {
+        ...observation,
+        display: { ...display, posture: "opened" },
+      });
+      adb.setCommandResponse("emu sensor get hinge-angle0", createExecResult(fixture(name), ""));
+      const result = await feature.executeHingeAngle(120);
+      expect(result).toMatchObject({ hingeAngle: 120, observedHingeAngle: actual });
+      if (actual === 180) {
+        expect(result).toMatchObject({
+          warnings: [
+            "Hinge angle read-back mismatch: requested 120 degrees but the emulator reports 180 degrees. The emulator console returned OK but did not apply the angle (hinge angle is best effort).",
+          ],
+        });
+      } else {
+        expect("warnings" in result).toBe(false);
+      }
+    });
+
+    test("Android KO read-back warns that the requested angle could not be verified", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(openedState, ""));
+      const { feature } = makeFeature(makeDevice(), adb, new FakeTimer(), {
+        ...observation,
+        display: { ...display, posture: "opened" },
+      });
+      adb.setCommandResponse(
+        "emu sensor get hinge-angle0",
+        createExecResult("KO: unknown sensor\r\n", ""),
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await feature.executeHingeAngle(120);
+        expect(result).toMatchObject({
+          hingeAngle: 120,
+          warnings: [
+            "Could not verify hinge angle: KO: unknown sensor. The emulator console accepted the request but the angle was not read back.",
+          ],
+        });
+        expect("observedHingeAngle" in result).toBe(false);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     test("Android mismatch warns with both angles while preserving a success-shaped result", async () => {
       const h = makeAndroidAngleHarness();
       h.console.readBackResult = { ok: true, degrees: 180 };

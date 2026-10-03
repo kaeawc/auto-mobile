@@ -7,12 +7,16 @@ export type AndroidHingeAngleReadbackResult =
   | { ok: true; degrees: number }
   | { ok: false; reason: string };
 
-/** Parse only the captured single-line sensor format; never infer an angle. */
+/** Parse one sensor value with an optional console OK trailer; never infer an angle. */
 export function parseEmulatorHingeAngleReadback(stdout: string): AndroidHingeAngleReadbackResult {
   const lines = stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  // Like console acknowledgements, only a trimmed OK line terminates success here.
+  if (lines.at(-1) === "OK") {
+    lines.pop();
+  }
   if (lines.length !== 1) {
     return { ok: false, reason: "Expected exactly one non-empty hinge-angle0 read-back line" };
   }

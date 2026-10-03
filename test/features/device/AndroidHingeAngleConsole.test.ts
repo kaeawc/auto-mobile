@@ -11,18 +11,31 @@ import { createExecResult } from "../../../src/utils/execResult";
 const fixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
 const captured = fixture("hinge-angle0-get.txt");
+const captured120 = fixture("hinge-angle0-get-120.txt");
 
 describe("Android hinge angle read-back", () => {
-  test.each([captured, captured.replace(/\n/g, "\r\n"), captured.trimEnd() + "  \n"])(
-    "parses captured output %j",
-    (stdout) => {
-      expect(parseEmulatorHingeAngleReadback(stdout)).toEqual({ ok: true, degrees: 180 });
-    },
-  );
+  test.each([
+    [captured, 180],
+    [captured120, 120],
+    [captured.replace(/\r\n/g, "\n"), 180],
+    [captured + "  \r\n\t\n", 180],
+    [captured.replace("OK\r\n", ""), 180],
+    ["  hinge-angle0 = 180  \n  OK  \n", 180],
+  ] as const)("parses captured output %j as %s", (stdout, degrees) => {
+    expect(parseEmulatorHingeAngleReadback(stdout)).toEqual({ ok: true, degrees });
+  });
   test.each([
     "",
     "KO: unknown sensor",
     captured + captured,
+    "hinge-angle0 = 180\nhinge-angle0 = 120\n",
+    "OK\r\n" + captured,
+    captured + "unexpected text\n",
+    "OK\r\n",
+    "hinge-angle0 = 180\nOK: accepted\n",
+    "hinge-angle0 = 180\nOK\nOK\n",
+    "hinge-angle0 = 180\nKO: unknown sensor\n",
+    captured + "KO: unknown sensor\n",
     "hinge-angle1 = 180",
     "hinge-angle0 = unknown",
     "hinge-angle0 = " + "9".repeat(400),

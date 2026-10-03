@@ -20,4 +20,15 @@ Captured output, not hand-written.
   7. `7-unfold-from-closed-base-while-override`: then `emu unfold`; base OPENED, still 3 (bug).
   8. `8-after-reset-opened-base`: after `state reset`; state 2.
 
-- `hinge-angle0-get.txt`: captured `adb emu sensor get hinge-angle0` output on am-resizable API 36, issue #8947.
+## hinge-angle0 (issues #8947, #9018)
+
+These bytes are the recorded real captures supplied in issue #9018, reproduced here
+without taking another device capture.
+
+- `hinge-angle0-get.txt`: `adb emu sensor get hinge-angle0` on am-resizable API 36,
+  reporting 180 after requesting 120. The earlier fixture was a truncated capture
+  (`head -1`) missing the console's `OK` trailer. It has been corrected to the full
+  24-byte output: `hinge-angle0 = 180\r\nOK\r\n`.
+- `hinge-angle0-get-120.txt`: captured from am-fold-pixel10pf after `setPosture`
+  with `hingeAngle: 120`, per issue #9018. Full 24-byte output:
+  `hinge-angle0 = 120\r\nOK\r\n`.

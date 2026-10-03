@@ -64,8 +64,18 @@ class FakeLogStream extends EventEmitter {
 class WritableFakeLogStream extends FakeLogStream {
   destroyed = false;
   writable = true;
+  writesAfterEnd = 0;
 
   write(_chunk: unknown, callback?: (error: Error | null) => void): boolean {
+    if (this.ended) {
+      this.writesAfterEnd++;
+      const error = new Error("write after end");
+      queueMicrotask(() => {
+        this.failClose(error);
+        callback?.(error);
+      });
+      return false;
+    }
     queueMicrotask(() => callback?.(null));
     return true;
   }
@@ -313,6 +323,98 @@ describe("closeLogStream bounded close policy (#6700)", () => {
 });
 
 describe("logger closeAfterFlush lifecycle", () => {
+  test("degrades a late write while closeAfterFlush waits for descriptor release", async () => {
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(streams);
+    const timer = new FakeTimer();
+    const setTimeoutSpy = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
+      timer.setTimeout(callback, ms),
+    );
+    const clearTimeoutSpy = spyOn(defaultTimer, "clearTimeout").mockImplementation((handle) =>
+      timer.clearTimeout(handle),
+    );
+    const endStarted = new Promise<void>((resolve) => {
+      spyOn(streams[0], "end").mockImplementation(() => {
+        streams[0].ended = true;
+        resolve();
+      });
+    });
+    const stderr: string[] = [];
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
+      chunk: unknown,
+      callback?: (error?: Error | null) => void,
+    ) => {
+      stderr.push(String(chunk));
+      callback?.(null);
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      const closing = mod.logger.closeAfterFlush(timer);
+      await endStarted;
+      mod.logger.info("late");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(1);
+      streams[0].emitClose();
+
+      await expect(closing).resolves.toBeUndefined();
+      expect(streams[0].writesAfterEnd).toBe(0);
+      expect(streams).toHaveLength(1);
+      expect(stderr.some((line) => line.includes("[INFO] late"))).toBeTrue();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      streams[0].emitClose();
+      stderrSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      restore();
+    }
+  });
+
+  test("detaches before synchronous close and reopens only after descriptor release", async () => {
+    class DelayedCloseStream extends WritableFakeLogStream {
+      override end(): void {
+        this.ended = true;
+      }
+    }
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(streams, () => new DelayedCloseStream());
+    const timer = new FakeTimer();
+    const setTimeoutSpy = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
+      timer.setTimeout(callback, ms),
+    );
+    const clearTimeoutSpy = spyOn(defaultTimer, "clearTimeout").mockImplementation((handle) =>
+      timer.clearTimeout(handle),
+    );
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
+      _chunk: unknown,
+      callback?: (error?: Error | null) => void,
+    ) => {
+      callback?.(null);
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      mod.logger.close();
+      mod.logger.info("late after synchronous close");
+      await mod.logger.flush();
+      expect(streams[0].writesAfterEnd).toBe(0);
+      expect(streams).toHaveLength(1);
+
+      streams[0].emitClose();
+      mod.logger.info("after descriptor release");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(2);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      mod.logger.close();
+      streams.forEach((stream) => stream.emitClose());
+      stderrSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      restore();
+    }
+  });
+
   test("a late error and close from stream A cannot release stream B's reopen barrier", async () => {
     const streams: WritableFakeLogStream[] = [];
     const { mod, restore } = await fileLoggerWithStreams(streams);

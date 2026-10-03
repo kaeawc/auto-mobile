@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
+  closeLoggerAfterCommittedResult,
   exitAfterSuccessfulDaemonCommand,
   type CompletedDaemonCommandLogger,
   type DaemonCommandProcessTerminator,
@@ -34,6 +35,33 @@ class FakeDaemonCommandProcessTerminator implements DaemonCommandProcessTerminat
     this.exitCodes.push(exitCode);
   }
 }
+
+describe("closeLoggerAfterCommittedResult", () => {
+  test("warns and flushes without throwing when logger teardown rejects", async () => {
+    const logger = new FakeCompletedDaemonCommandLogger(new Error("write after end"));
+
+    await expect(closeLoggerAfterCommittedResult(logger)).resolves.toBeUndefined();
+
+    expect(logger.warnings).toEqual([
+      "Daemon command completed successfully, but logger teardown failed; exiting 0: write after end",
+    ]);
+  });
+
+  test("resolves silently when logger teardown succeeds", async () => {
+    const logger = new FakeCompletedDaemonCommandLogger();
+    const warnSpy = spyOn(logger, "warn");
+    const flushSpy = spyOn(logger, "flush");
+    try {
+      await expect(closeLoggerAfterCommittedResult(logger)).resolves.toBeUndefined();
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(flushSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      flushSpy.mockRestore();
+    }
+  });
+});
 
 describe("exitAfterSuccessfulDaemonCommand", () => {
   test("keeps a committed heartbeat at exit 0 when overlapping prefetch logging rejects teardown", async () => {

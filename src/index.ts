@@ -36,7 +36,10 @@ import { WEBRTC_ENV } from "./features/webrtc/webrtcStreamingConfig";
 import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import { parseArgs } from "./cli/parseArgs";
 import { terminateCliProcess } from "./cli/termination";
-import { exitAfterSuccessfulDaemonCommand } from "./cli/daemonCommandExit";
+import {
+  closeLoggerAfterCommittedResult,
+  exitAfterSuccessfulDaemonCommand,
+} from "./cli/daemonCommandExit";
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
@@ -556,8 +559,8 @@ async function main() {
       });
       // Exit explicitly after daemon command completes to prevent process from hanging
       // Same issue as CLI mode - event loop may have pending operations
-      await logger.closeAfterFlush();
-      process.exit(0);
+      await exitAfterSuccessfulDaemonCommand(logger, process);
+      return;
     }
 
     // Single source of truth for the startup options handed to the daemon,
@@ -627,7 +630,7 @@ async function main() {
       // CRITICAL: Exit explicitly after CLI command completes to prevent process from hanging
       // The event loop may have pending operations (ADB connections, file descriptors) that
       // prevent Node.js from exiting naturally. Force exit with code 0 to ensure clean termination.
-      await logger.closeAfterFlush();
+      await closeLoggerAfterCommittedResult(logger);
       if (termination) {
         // A failed bounded repair has already reported its complete structured
         // result and waited for destructive lifecycle cleanup. Its abandoned

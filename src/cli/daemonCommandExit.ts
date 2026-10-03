@@ -13,15 +13,14 @@ export interface DaemonCommandProcessTerminator {
 }
 
 /**
- * Exit a daemon command that has already completed successfully.
+ * Close the logger after the command result has already been committed.
  *
  * A late write from detached best-effort startup work can make logger teardown
  * reject after the command has committed. That teardown error must be visible,
  * but cannot turn the command result into a failure.
  */
-export async function exitAfterSuccessfulDaemonCommand(
+export async function closeLoggerAfterCommittedResult(
   logger: CompletedDaemonCommandLogger,
-  terminator: DaemonCommandProcessTerminator,
 ): Promise<void> {
   try {
     await logger.closeAfterFlush();
@@ -31,5 +30,13 @@ export async function exitAfterSuccessfulDaemonCommand(
     );
     await logger.flush();
   }
+}
+
+/** Exit a daemon command that has already completed successfully. */
+export async function exitAfterSuccessfulDaemonCommand(
+  logger: CompletedDaemonCommandLogger,
+  terminator: DaemonCommandProcessTerminator,
+): Promise<void> {
+  await closeLoggerAfterCommittedResult(logger);
   terminator.exit(0);
 }

@@ -924,12 +924,13 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
 const closeCurrentLogStream = async (timer: Timer = defaultTimer): Promise<void> => {
   if (logStream) {
     const closingStream = logStream;
+    // Late records must degrade until close confirms release of the old descriptor.
+    logStream = undefined;
+    deferReopenUntilClose(closingStream, timer);
     try {
       await closeLogStream(closingStream, timer);
     } finally {
-      if (logStream === closingStream) {
-        logStream = undefined;
-      }
+      // Keep an unconfirmed close bounded even when the close attempt times out.
       deferReopenUntilClose(closingStream, timer);
     }
   }
@@ -1029,7 +1030,12 @@ export const logger: Logger = {
    * Flushes queued writes and closes the log stream.
    */
   close(): void {
-    logStream?.end();
+    const closingStream = logStream;
+    logStream = undefined;
+    if (closingStream) {
+      deferReopenUntilClose(closingStream);
+      closingStream.end();
+    }
   },
 
   async closeAfterFlush(timer: Timer = defaultTimer): Promise<void> {

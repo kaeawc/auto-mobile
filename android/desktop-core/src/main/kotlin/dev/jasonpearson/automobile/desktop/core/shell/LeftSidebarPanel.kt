@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.shell
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -8,11 +9,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
+import dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
@@ -35,6 +39,13 @@ fun LeftSidebarPanel(
   favoriteDeviceIds: Set<String> = emptySet(),
   onToggleFavorite: ((deviceId: String) -> Unit)? = null,
   modifier: Modifier = Modifier,
+  bootedDevices: List<BootedDeviceInfo>? = null,
+  onRetryDetection: (() -> Unit)? = null,
+  onKillDevice: ((String) -> Unit)? = null,
+  onOpenSettings: (() -> Unit)? = null,
+  availableDevicesContent: (@Composable () -> Unit)? = null,
+  daemonStatusProvider: (suspend () -> DaemonStatusResponse?)? = null,
+  daemonSocketPath: String? = null,
 ) {
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
@@ -52,11 +63,16 @@ fun LeftSidebarPanel(
       dataSourceMode = dataSourceMode,
       onDataSourceModeChanged = onDataSourceModeChanged,
       onProcessConnected = onProcessConnected,
+      connectedProcess = connectedProcess,
+      onRetryDetection = onRetryDetection,
       modifier = Modifier.fillMaxWidth(),
     )
 
     DaemonStatusSection(
       dataSourceMode = dataSourceMode,
+      statusProvider = daemonStatusProvider,
+      providedSocketPath = daemonSocketPath,
+      refreshKey = connectedProcess,
       modifier = Modifier.fillMaxWidth(),
     )
 
@@ -69,8 +85,12 @@ fun LeftSidebarPanel(
       onDeviceAction = onDeviceAction,
       favoriteDeviceIds = favoriteDeviceIds,
       onToggleFavorite = onToggleFavorite,
+      devices = bootedDevices,
+      onKillDevice = onKillDevice,
       modifier = Modifier.fillMaxWidth(),
     )
+
+    availableDevicesContent?.invoke()
 
     AppFilterSection(
       installedApps = installedApps,
@@ -78,5 +98,12 @@ fun LeftSidebarPanel(
       onAppSelected = onAppSelected,
       modifier = Modifier.fillMaxWidth(),
     )
+    onOpenSettings?.let { openSettings ->
+      Text(
+        "\u2699 Settings",
+        color = colors.text.normal,
+        modifier = Modifier.clickable(onClick = openSettings).padding(vertical = 4.dp),
+      )
+    }
   }
 }

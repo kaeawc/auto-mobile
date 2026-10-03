@@ -41,6 +41,74 @@ fun McpConnectionSection(
   onDataSourceModeChanged: (DataSourceMode) -> Unit,
   onProcessConnected: (McpProcess?) -> Unit,
   modifier: Modifier = Modifier,
+  connectedProcess: McpProcess? = null,
+  onRetryDetection: (() -> Unit)? = null,
+) {
+  if (onRetryDetection != null) {
+    McpConnectionStatus(
+      dataSourceMode,
+      onDataSourceModeChanged,
+      connectedProcess,
+      onRetryDetection,
+      modifier,
+    )
+  } else {
+    DetectedMcpConnectionSection(
+      dataSourceMode,
+      onDataSourceModeChanged,
+      onProcessConnected,
+      modifier,
+    )
+  }
+}
+
+/** Render host-owned connection state without launching a second process detector. */
+@Composable
+private fun McpConnectionStatus(
+  dataSourceMode: DataSourceMode,
+  onDataSourceModeChanged: (DataSourceMode) -> Unit,
+  connectedProcess: McpProcess?,
+  onRetryDetection: () -> Unit,
+  modifier: Modifier,
+) {
+  val colors = SharedTheme.globalColors
+  Column(modifier = modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text("Data Source", color = colors.text.normal, fontSize = 14.sp)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      listOf(DataSourceMode.Real, DataSourceMode.Fake).forEach { mode ->
+        Text(
+          if (mode == DataSourceMode.Real) "Real" else "Fake",
+          color =
+            if (mode == dataSourceMode) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+          modifier =
+            Modifier.clickable { onDataSourceModeChanged(mode) }.pointerHoverIcon(PointerIcon.Hand),
+        )
+      }
+    }
+    Text("MCP Connection", color = colors.text.normal, fontSize = 14.sp)
+    if (connectedProcess != null) {
+      Text("Connected: ${connectedProcess.name}", color = colors.text.info, fontSize = 12.sp)
+      Text("PID: ${connectedProcess.pid}", color = colors.text.normal, fontSize = 11.sp)
+    } else {
+      Text("Not connected", color = colors.text.warning, fontSize = 12.sp)
+      if (dataSourceMode == DataSourceMode.Real) {
+        Text(
+          "Retry Detection",
+          color = colors.text.info,
+          modifier =
+            Modifier.clickable(onClick = onRetryDetection).pointerHoverIcon(PointerIcon.Hand),
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun DetectedMcpConnectionSection(
+  dataSourceMode: DataSourceMode,
+  onDataSourceModeChanged: (DataSourceMode) -> Unit,
+  onProcessConnected: (McpProcess?) -> Unit,
+  modifier: Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val useRealData = dataSourceMode == DataSourceMode.Real

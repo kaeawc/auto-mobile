@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -27,11 +26,15 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
@@ -55,6 +58,8 @@ fun DeviceListSection(
   favoriteDeviceIds: Set<String> = emptySet(),
   onToggleFavorite: ((deviceId: String) -> Unit)? = null,
   modifier: Modifier = Modifier,
+  devices: List<BootedDeviceInfo>? = null,
+  onKillDevice: ((String) -> Unit)? = null,
 ) {
   val colors = SharedTheme.globalColors
   var expanded by remember { mutableStateOf(true) }
@@ -63,7 +68,13 @@ fun DeviceListSection(
   var error by remember { mutableStateOf<String?>(null) }
 
   // Fetch devices -- re-run when the data-source mode or connected process changes
-  LaunchedEffect(dataSourceMode, connectedProcess) {
+  LaunchedEffect(dataSourceMode, connectedProcess, devices) {
+    if (devices != null) {
+      bootedDevices = devices
+      isLoading = false
+      error = null
+      return@LaunchedEffect
+    }
     isLoading = true
     error = null
     val client =
@@ -76,7 +87,10 @@ fun DeviceListSection(
               )
             }
           dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient(daemonClient)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+          throw e
         } catch (e: Exception) {
+          LoggerFactory.getLogger("DeviceListSection").warn("Failed to connect to daemon", e)
           error = e.message ?: "Failed to connect to daemon"
           isLoading = false
           return@LaunchedEffect
@@ -95,11 +109,16 @@ fun DeviceListSection(
           bootedDevices = parsed?.devices ?: emptyList()
         }
         is ResourceReadResult.Error -> {
+          LoggerFactory.getLogger("DeviceListSection")
+            .warn("Failed to fetch devices: ${result.message}")
           error = result.message
         }
       }
       withContext(Dispatchers.IO) { client.close() }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+      throw e
     } catch (e: Exception) {
+      LoggerFactory.getLogger("DeviceListSection").warn("Failed to fetch devices", e)
       error = e.message ?: "Failed to fetch devices"
     }
     isLoading = false
@@ -186,6 +205,8 @@ fun DeviceListSection(
             onDeviceAction = onDeviceAction,
             favoriteDeviceIds = favoriteDeviceIds,
             onToggleFavorite = onToggleFavorite,
+            onKillDevice = onKillDevice,
+            showUnavailableActions = devices == null,
           )
         }
         if (iosDevices.isNotEmpty()) {
@@ -198,6 +219,8 @@ fun DeviceListSection(
             onDeviceAction = onDeviceAction,
             favoriteDeviceIds = favoriteDeviceIds,
             onToggleFavorite = onToggleFavorite,
+            onKillDevice = onKillDevice,
+            showUnavailableActions = devices == null,
           )
         }
       }
@@ -215,6 +238,8 @@ private fun DevicePlatformGroup(
   onDeviceAction: ((deviceId: String, action: String) -> Unit)?,
   favoriteDeviceIds: Set<String>,
   onToggleFavorite: ((deviceId: String) -> Unit)?,
+  onKillDevice: ((String) -> Unit)?,
+  showUnavailableActions: Boolean,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -233,11 +258,21 @@ private fun DevicePlatformGroup(
         isSelected = deviceId == activeDeviceId,
         isFavorite = deviceId in favoriteDeviceIds,
         onSelect = { onDeviceSelected(deviceId, device.name) },
-        onToggleFavorite = { onToggleFavorite?.invoke(deviceId) },
+        // Preserve legacy affordances for self-fetching callers; host-owned lists only show
+        // actions that the host can perform.
+        onToggleFavorite =
+          if (onToggleFavorite != null || showUnavailableActions) {
+            {
+              onToggleFavorite?.invoke(deviceId)
+            }
+          } else null,
+        onKillDevice = onKillDevice?.let { callback -> { callback(deviceId) } },
         onDeviceAction =
-          onDeviceAction?.let { callback ->
-            { action: String -> callback(deviceId, action) }
-          },
+          if (onDeviceAction != null || showUnavailableActions) {
+            { action: String ->
+              onDeviceAction?.invoke(deviceId, action)
+            }
+          } else null,
       )
     }
   }
@@ -250,7 +285,8 @@ private fun DeviceRow(
   isSelected: Boolean,
   isFavorite: Boolean,
   onSelect: () -> Unit,
-  onToggleFavorite: () -> Unit,
+  onToggleFavorite: (() -> Unit)?,
+  onKillDevice: (() -> Unit)?,
   onDeviceAction: ((String) -> Unit)?,
 ) {
   val colors = SharedTheme.globalColors
@@ -264,9 +300,10 @@ private fun DeviceRow(
             if (isSelected) colors.outlines.focused.copy(alpha = 0.12f) else Color.Transparent,
             RoundedCornerShape(4.dp),
           )
+          .semantics { selected = isSelected }
           .clickable { onSelect() }
           .onPointerEvent(PointerEventType.Press) { event ->
-            if (event.button == PointerButton.Secondary) {
+            if (onDeviceAction != null && event.button == PointerButton.Secondary) {
               showContextMenu = true
             }
           }
@@ -275,15 +312,17 @@ private fun DeviceRow(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text(
-        if (isFavorite) "\u2605" else "\u2606",
-        fontSize = 12.sp,
-        color = if (isFavorite) Color(0xFFFFC107) else colors.text.normal.copy(alpha = 0.3f),
-        modifier =
-          Modifier.clickable { onToggleFavorite() }
-            .pointerHoverIcon(PointerIcon.Hand)
-            .padding(end = 4.dp),
-      )
+      if (onToggleFavorite != null) {
+        Text(
+          if (isFavorite) "\u2605" else "\u2606",
+          fontSize = 12.sp,
+          color = if (isFavorite) Color(0xFFFFC107) else colors.text.normal.copy(alpha = 0.3f),
+          modifier =
+            Modifier.clickable { onToggleFavorite() }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(end = 4.dp),
+        )
+      }
 
       Column(modifier = Modifier.weight(1f)) {
         Text(
@@ -309,6 +348,17 @@ private fun DeviceRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
+        onKillDevice?.let { kill ->
+          Text(
+            "\u23F9",
+            color = colors.text.error,
+            modifier =
+              Modifier.semantics { contentDescription = "Kill ${device.name}" }
+                .clickable(onClick = kill)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(4.dp),
+          )
+        }
         if (isSelected) {
           Text(
             "\u2713",

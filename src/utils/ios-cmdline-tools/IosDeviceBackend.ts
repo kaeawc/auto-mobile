@@ -8,11 +8,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import type { ClearAppDataResult } from "../../models";
 import { errorMessage } from "../describeUnknownError";
-import {
-  getAppDataContainerPath,
-  IOS_APP_DATA_FOLDERS,
-  terminateAppIfRunning,
-} from "./iosAppContainer";
+import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "./iosAppContainerData";
 
 /** The iOS operation currently shared by simulator and physical-device actions. */
 export interface IosDeviceBackend {
@@ -334,7 +330,7 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
     logger.info(`[iOS] Clearing app data for ${bundleId} on simulator ${this.deviceId}`);
 
     // The container can't be safely wiped while the app holds open file handles.
-    await terminateAppIfRunning(this.deps.simctl, this.deviceId, bundleId);
+    await resolveIosLenientTerminateBackend(this.deviceId, this.deps).terminateApp(bundleId);
 
     const containerPath = await getAppDataContainerPath(this.deps.simctl, this.deviceId, bundleId);
     if (!containerPath) {
@@ -571,4 +567,67 @@ export function resolveIosOpenUrlBackend(
   return isIosSimulatorUdid(deviceId)
     ? new SimulatorIosOpenUrlBackend(deviceId, deps.createSimctl)
     : new PhysicalIosOpenUrlBackend(deviceId, deps.createDeviceUrlLauncher);
+}
+
+/** Legacy simulator listings preserve SimCtlClient's warning and empty-array fallback. */
+export interface IosLenientAppListBackend {
+  readonly kind: "simulator";
+  listApps(): Promise<Record<string, unknown>[]>;
+}
+
+export interface IosLenientAppListBackendDeps {
+  simctl: Pick<SimCtlClient, "listApps">;
+}
+
+export function resolveIosLenientAppListBackend(
+  deviceId: string | undefined,
+  deps: IosLenientAppListBackendDeps,
+): IosLenientAppListBackend {
+  // These callers always used simctl, including unknown IDs. Forward undefined
+  // unchanged so the bound SimCtlClient remains responsible for its fallback.
+  return {
+    kind: "simulator",
+    listApps: () => deps.simctl.listApps(deviceId),
+  };
+}
+
+export interface IosLenientTerminateBackend {
+  readonly kind: "simulator";
+  terminateApp(bundleId: string): Promise<void>;
+}
+
+export function resolveIosLenientTerminateBackend(
+  deviceId: string,
+  deps: Pick<IosTerminateBackendDeps, "simctl">,
+): IosLenientTerminateBackend {
+  const backend = new SimulatorIosTerminateBackend(deviceId, deps.simctl);
+  return {
+    kind: "simulator",
+    async terminateApp(bundleId) {
+      try {
+        await backend.terminateApp(bundleId);
+      } catch (error) {
+        // A not-running app is expected here; preserve the legacy warn-and-continue contract.
+        logger.warn(`[iOS] Failed to terminate ${bundleId}: ${error}`);
+      }
+    },
+  };
+}
+
+export interface IosMetadataBackendDeps extends IosLenientAppListBackendDeps {
+  deviceAppManager: {
+    getInstalledAppInfo(
+      deviceId: string,
+      bundleId: string,
+    ): Promise<Record<string, unknown> | null>;
+  };
+}
+
+/** Metadata consumers retain their existing simulator/physical selection policy. */
+export function resolveIosMetadataBackend(deps: IosMetadataBackendDeps): IosAppMetadataSource {
+  return {
+    listApps: (deviceId) => resolveIosLenientAppListBackend(deviceId, deps).listApps(),
+    getPhysicalDeviceAppInfo: (deviceId, bundleId) =>
+      deps.deviceAppManager.getInstalledAppInfo(deviceId, bundleId),
+  };
 }

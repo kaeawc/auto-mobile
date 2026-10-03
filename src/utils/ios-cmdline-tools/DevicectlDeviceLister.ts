@@ -3,7 +3,7 @@ import { trackAmbient } from "../PerfContext";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { ExecResult } from "../../models";
-import type { CheckResult } from "../../doctor/types";
+import type { CheckResult } from "../../models/CheckResult";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { errorMessage } from "../describeUnknownError";
 import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";

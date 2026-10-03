@@ -38,6 +38,7 @@ jobs:
   build:
     name: "Build CtrlProxy APK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       sha256: ${{ steps.checksum.outputs.sha256 }}
     steps:

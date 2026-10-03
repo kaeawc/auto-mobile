@@ -18,6 +18,7 @@ jobs:
   build-desktop-core:
     name: "Build Desktop Core Module"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: android
@@ -40,6 +41,7 @@ jobs:
     # Disabled: consistently >1 minute on merge and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: build-desktop-core
     defaults:
       run:
@@ -82,6 +84,7 @@ jobs:
     # Disabled: consistently >1 minute on merge and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: android/ide-plugin
@@ -123,6 +126,7 @@ jobs:
     # Disabled with IDE plugin build on merge cleanup.
     if: ${{ false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build-ide-plugin
     defaults:
       run:
@@ -153,6 +157,7 @@ jobs:
     # Disabled: desktop app merge validation is expensive and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -180,6 +185,7 @@ jobs:
     # Disabled with desktop app merge cleanup.
     if: ${{ false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: build-desktop-app
     defaults:
       run:
@@ -208,6 +214,7 @@ jobs:
   validate-xml:
     name: "Validate XML"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -224,6 +231,7 @@ jobs:
   ktfmt:
     name: "ktfmt"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -247,6 +255,7 @@ jobs:
   oxfmt:
     name: "oxfmt"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -272,6 +281,7 @@ jobs:
   detekt:
     name: "Detekt"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -307,6 +317,7 @@ jobs:
   validate-shell-scripts:
     name: "Validate Shell Scripts"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -542,6 +553,7 @@ jobs:
   validate-mkdocs-nav:
     name: "Validate MkDocs Navigation"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -575,6 +587,7 @@ jobs:
   validate-claude-plugin:
     name: "Validate Claude Plugin"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -589,6 +602,7 @@ jobs:
   validate-documentation-links:
     name: "Validate Documentation Links"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -636,6 +650,7 @@ jobs:
   installer-minimal:
     name: "Installer Minimal (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     env:
       # ffmpeg is a large, slow install (it has timed out this job) and video
       # recording is not exercised here — skip it.
@@ -801,6 +816,7 @@ jobs:
     # Disabled: merge-only iOS validation is expensive and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ${{ matrix.config.runner }}
+    timeout-minutes: 45
     env:
       IOS_SIGNING_ENABLED: ${{ secrets.IOS_CERTIFICATE_BASE64 != '' }}
       MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 != '' }}
@@ -875,6 +891,7 @@ jobs:
     # Disabled with iOS merge cleanup.
     if: ${{ false }}
     runs-on: ${{ matrix.config.runner }}
+    timeout-minutes: 45
     needs: ios-swift-build
     strategy:
       fail-fast: false
@@ -922,6 +939,7 @@ jobs:
     # Disabled with iOS merge cleanup.
     if: ${{ false }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       matrix:
         runner: [macos-26]
@@ -940,6 +958,7 @@ jobs:
   ios-xcode-build:
     name: "Build Xcode Projects (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
+    timeout-minutes: 45
     needs: ios-xcodegen
     strategy:
       fail-fast: false
@@ -1012,6 +1031,7 @@ jobs:
   junit-runner-unit-tests:
     name: "Run JUnit Runner Unit Tests"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: android
@@ -1039,6 +1059,7 @@ jobs:
   junit-runner-kotlin-consumer-compatibility:
     name: "JUnit Runner Kotlin Consumer Compatibility"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1217,6 +1238,7 @@ jobs:
     # Disabled: consistently >1 minute on merge and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: android
@@ -1243,6 +1265,7 @@ jobs:
     # Disabled: consistently >1 minute on merge and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: android
@@ -1275,6 +1298,7 @@ jobs:
   build-android-control-proxy:
     name: "Build CtrlProxy APK"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: android
@@ -1313,6 +1337,7 @@ jobs:
     # Disabled: consistently >1 minute on merge and not required for release/docs publishing.
     if: ${{ false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: android
@@ -1376,6 +1401,7 @@ jobs:
   ts-code-coverage:
     name: "TypeScript Code Coverage"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1407,6 +1433,7 @@ jobs:
   kotlin-code-coverage:
     name: "Kotlin Code Coverage"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1534,6 +1561,7 @@ jobs:
   benchmark-context-thresholds:
     name: "Benchmark MCP Context Baselines"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1579,6 +1607,7 @@ jobs:
   update-readme-badges:
     name: "Update README Test Count Badges"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     # Serialize badge pushes so two merges can't race to push a badge commit to
     # main at once (issue #3590). cancel-in-progress:false lets a queued run wait

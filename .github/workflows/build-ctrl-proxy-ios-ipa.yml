@@ -30,6 +30,7 @@ jobs:
   build:
     name: "Build CtrlProxy iOS IPA"
     runs-on: macos-26
+    timeout-minutes: 30
     outputs:
       sha256: ${{ steps.checksum.outputs.ipa_sha256 }}
       runner_sha256: ${{ steps.checksum.outputs.runner_sha256 }}

@@ -20,6 +20,7 @@ jobs:
   detect-dead-code:
     name: "Detect TypeScript Dead Code"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

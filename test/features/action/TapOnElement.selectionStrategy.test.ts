@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../../src/features/utility/viewHierarchySearch";
@@ -8,6 +10,7 @@ import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 
 const editableElement = (focus: Record<string, unknown>) => ({
@@ -19,6 +22,36 @@ const editableElement = (focus: Record<string, unknown>) => ({
 });
 
 afterEach(() => serverConfig.setRawElementSearchEnabled(false));
+
+function loadFocusCapture(moment: "pre" | "post"): ViewHierarchyResult {
+  const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+    readFileSync(
+      new URL(
+        `../../fixtures/android-focus/playground-text-field-${moment}-tap.json`,
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  return capture.viewHierarchy;
+}
+
+function capturedFocusSelection() {
+  const selection = new ResolverElementSelector().selectByText(
+    loadFocusCapture("pre"),
+    "Basic Text Field",
+    { intentAction: "focus-input" },
+  );
+  if (!selection.element) {
+    throw new Error("Captured Basic Text Field did not resolve to an input");
+  }
+  expect(selection.element.class).toBe("android.widget.EditText");
+  expect(selection.element.bounds).toEqual({ left: 84, top: 1115, right: 996, bottom: 1262 });
+  expect(selection.element["view-id"]).toBe("s2-0a67f33121084cd4");
+  expect(selection.element.text).toBeUndefined();
+  expect(selection.matchedElement?.text).toBe("Basic Text Field");
+  return { ...selection, element: selection.element };
+}
 
 async function executeFocus(
   element: Element,
@@ -530,6 +563,108 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("Failed to confirm focus");
   });
+
+  test("verifies the captured empty Compose field across deserialized roots and s2 ID churn (#9017)", async () => {
+    const before = capturedFocusSelection();
+    const capture = loadFocusCapture("post");
+    const fields = new SearchableHierarchy()
+      .project(capture)
+      .filter((node) => node.element?.["view-id"] === "s2-ee780752c005afb8");
+    expect(fields).toHaveLength(2);
+    expect(fields[0].source).not.toBe(fields[1].source);
+    expect(fields[0].rootGroup).not.toBe(fields[1].rootGroup);
+    const { result, tapped } = await executeFocus(
+      before.element,
+      capture,
+      undefined,
+      before.matchedElement,
+      undefined,
+      undefined,
+      undefined,
+      { text: "Basic Text Field" },
+    );
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test.each([
+    "focus disagreement",
+    "Email also focused",
+    "different class",
+    "different stable ID",
+    "different bounds",
+  ])("rejects captured Compose focus with %s across roots (#9017)", async (difference) => {
+    const before = capturedFocusSelection();
+    const capture = loadFocusCapture("post");
+    const nodes = new SearchableHierarchy().project(capture);
+    const field = nodes.find((node) => node.element?.["view-id"] === "s2-ee780752c005afb8")!;
+    const attributes = nodeAttributes(field.source);
+    if (difference === "focus disagreement") {
+      attributes.focused = "false";
+    }
+    if (difference === "different class") {
+      attributes.class = "android.widget.AutoCompleteTextView";
+    }
+    if (difference === "different stable ID") {
+      attributes["view-id"] = "s2-other-field";
+    }
+    if (difference === "different bounds") {
+      field.source.bounds = [84, 1120, 996, 1267];
+    }
+    if (difference === "Email also focused") {
+      const emailFields = nodes.filter(
+        (node) => node.className === "android.widget.EditText" && node.bounds?.top === 1283,
+      );
+      expect(emailFields).toHaveLength(2);
+      for (const email of emailFields) {
+        nodeAttributes(email.source).focused = "true";
+      }
+    }
+    const { result, tapped } = await executeFocus(
+      before.element,
+      capture,
+      undefined,
+      before.matchedElement,
+      undefined,
+      undefined,
+      undefined,
+      { text: "Basic Text Field" },
+    );
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to confirm focus");
+  });
+
+  test.each(["view-id", "test-tag"] as const)(
+    "verifies an unchanged %s duplicated across deserialized roots (#9017)",
+    async (key) => {
+      const before = editableElement({
+        "resource-id": undefined,
+        [key]: "field-id",
+        focused: false,
+      });
+      const capture: ViewHierarchyResult = JSON.parse(
+        JSON.stringify({
+          hierarchy: { node: { ...before, focused: true } },
+          windows: [{ windowLayer: 1, hierarchy: { ...before, focused: true } }],
+        }),
+      );
+      const { result } = await executeFocus(
+        before,
+        capture,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { selectionStrategy: "unique" },
+      );
+      expect(result.focusVerified).toBe(true);
+      expect(result.success).toBe(true);
+    },
+  );
 
   test("verifies an empty Compose field within the bounds epsilon despite linked roots and s2 ID churn (#8997)", async () => {
     const before = emptyComposeField({ "view-id": "s2-before" });

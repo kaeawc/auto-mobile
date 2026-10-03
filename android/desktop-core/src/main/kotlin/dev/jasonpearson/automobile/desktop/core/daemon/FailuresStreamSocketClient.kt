@@ -12,15 +12,7 @@ import dev.jasonpearson.automobile.desktop.core.failures.FailureType
 import dev.jasonpearson.automobile.desktop.core.failures.ScreenBreakdown
 import dev.jasonpearson.automobile.desktop.core.failures.StackTraceElement
 import dev.jasonpearson.automobile.desktop.core.failures.VersionBreakdown
-import java.io.BufferedReader
-import java.io.BufferedWriter
 import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
-import java.nio.channels.SocketChannel
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -350,10 +342,23 @@ data class FailureOccurrenceDto(
 )
 
 /** Socket client for failures streaming */
-class FailuresStreamSocketClient(
+class FailuresStreamSocketClient
+internal constructor(
   private val socketPathValue: String = FailuresStreamSocketPaths.socketPath(),
   private val json: Json = DaemonJson,
+  private val requestTimeoutMs: Long = FAILURES_STREAM_REQUEST_TIMEOUT_MS,
+  private val watchdog: SocketRequestWatchdog,
 ) : FailuresStreamClient {
+  constructor(
+    socketPathValue: String = FailuresStreamSocketPaths.socketPath(),
+    json: Json = DaemonJson,
+    requestTimeoutMs: Long = FAILURES_STREAM_REQUEST_TIMEOUT_MS,
+  ) : this(
+    socketPathValue,
+    json,
+    requestTimeoutMs,
+    SharedSocketRequestWatchdog,
+  )
 
   override fun pollNotifications(
     request: FailuresNotificationsRequest
@@ -393,22 +398,16 @@ class FailuresStreamSocketClient(
   private inline fun <reified T> sendRequest(requestJson: String): T {
     ensureSocketExists()
 
-    val address = UnixDomainSocketAddress.of(socketPathValue)
-    SocketChannel.open(address).use { channel ->
-      val reader =
-        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
-      val writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-        )
+    val line =
+      oneShotSocketRequest(
+        socketPath = socketPathValue,
+        requestLine = requestJson,
+        timeoutMs = requestTimeoutMs,
+        label = "Failures stream",
+        watchdog = watchdog,
+      )
 
-      writer.write(requestJson)
-      writer.newLine()
-      writer.flush()
-
-      val line = reader.readLine() ?: throw McpConnectionException("Failures stream socket closed")
-      return json.decodeFromString(line)
-    }
+    return json.decodeFromString(line)
   }
 
   private fun ensureSocketExists() {

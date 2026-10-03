@@ -1,16 +1,41 @@
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { supplementAndroidHierarchy } from "../../../src/features/action/AndroidHierarchyFallback";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { logger } from "../../../src/utils/logger";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const path = "/data/local/tmp/automobile-hierarchy-test.xml";
 const xml = (body: string) => `<?xml version="1.0"?><hierarchy rotation="0">${body}</hierarchy>`;
 const node = (text: string, bounds = "[0,0][100,100]", id = "com.test:id/row") =>
   `<node package="com.test" class="android.widget.Button" resource-id="${id}" text="${text}" bounds="${bounds}" clickable="true"/>`;
+class ControlledCleanupAdb extends FakeAdbClient {
+  readonly cleanup = Promise.withResolvers<void>();
+  cleanupStarted = false;
+  cleanupCompleted = false;
+
+  constructor(private readonly onDump: () => void = () => {}) {
+    super();
+  }
+
+  override async execute(args: string[], options?: AdbExecuteOptions) {
+    const result = await super.execute(args, options);
+    if (args.join(" ") === `shell uiautomator dump ${path}`) {
+      this.onDump();
+    }
+    if (args.join(" ") === `shell rm -f ${path}`) {
+      this.cleanupStarted = true;
+      await this.cleanup.promise;
+      this.cleanupCompleted = true;
+    }
+    return result;
+  }
+}
+
 function fixture(
   contents = xml(node("Missing")),
   adb = new FakeAdbClient(),
@@ -61,26 +86,28 @@ describe("Android hierarchy fallback", () => {
     expect(cleanup?.timeoutMs).toBeGreaterThanOrEqual(1000);
     expect(cleanup?.noRetry).toBe(true);
   });
-  test("cleans up when the dump exhausts the request deadline", async () => {
+  test("returns immediately when the dump consumes the deadline, with cleanup still pending", async () => {
     const timer = new FakeTimer();
-    class DeadlineConsumingAdb extends FakeAdbClient {
-      override async execute(args: string[], options?: AdbExecuteOptions) {
-        const result = await super.execute(args, options);
-        if (args.join(" ") === `shell uiautomator dump ${path}`) {
-          timer.advanceTime(1001);
-        }
-        return result;
-      }
-    }
-    const adb = new DeadlineConsumingAdb();
+    const adb = new ControlledCleanupAdb(() => timer.advanceTime(1000));
     const { run, original } = fixture(undefined, adb, timer);
-    expect(await run()).toBe(original);
-    expect(adb.wasCommandExecuted(`shell cat ${path}`)).toBe(false);
-    expect(adb.wasCommandExecuted(`shell rm -f ${path}`)).toBe(true);
-    const cleanup = adb.getLastCommandCall();
-    expect(cleanup?.timeoutMs).toBeGreaterThanOrEqual(1000);
-    expect(cleanup?.timeoutMs).toBeLessThanOrEqual(2000);
-    expect(cleanup?.noRetry).toBe(true);
+    let returned = false;
+    const result = run().then((value) => {
+      returned = true;
+      return value;
+    });
+    try {
+      await drainUntil(() => returned, { description: "deadline-exhausted result" });
+      expect(await result).toBe(original);
+      expect(timer.now()).toBe(1000);
+      expect(adb.cleanupStarted).toBe(true);
+      expect(adb.cleanupCompleted).toBe(false);
+      expect(adb.wasCommandExecuted(`shell cat ${path}`)).toBe(false);
+      expect(adb.getLastCommandCall()?.timeoutMs).toBe(1500);
+      expect(adb.getLastCommandCall()?.noRetry).toBe(true);
+    } finally {
+      adb.cleanup.resolve();
+      await result;
+    }
   });
   test("cleanup failure preserves the supplemented result", async () => {
     const { run, adb } = fixture();
@@ -94,36 +121,135 @@ describe("Android hierarchy fallback", () => {
     ).toBe(true);
     expect(adb.wasCommandExecuted(`shell rm -f ${path}`)).toBe(true);
   });
-  test("cancellation during a dump still attempts cleanup within its grace budget", async () => {
-    const timer = new FakeTimer();
+  test("rejects cancellation during a dump before cleanup resolves", async () => {
     const controller = new AbortController();
-    class CancellingAdb extends FakeAdbClient {
-      override async execute(args: string[], options?: AdbExecuteOptions) {
-        const result = await super.execute(args, options);
-        if (args.join(" ") === `shell uiautomator dump ${path}`) {
-          timer.advanceTime(1001);
-          controller.abort();
-        }
-        if (args.join(" ") === `shell rm -f ${path}`) {
-          timer.advanceTime(options?.timeoutMs ?? 0);
-          throw new Error("cleanup timed out");
-        }
-        return result;
-      }
+    const adb = new ControlledCleanupAdb(() => controller.abort());
+    const { run, timer } = fixture(undefined, adb);
+    let rejected = false;
+    const result = run(controller.signal).catch((error: unknown) => {
+      rejected = true;
+      return error;
+    });
+    try {
+      await drainUntil(() => rejected, { description: "dump cancellation" });
+      expect(await result).toMatchObject({ message: "Operation cancelled" });
+      expect(adb.cleanupStarted).toBe(true);
+      expect(adb.cleanupCompleted).toBe(false);
+      expect(timer.now()).toBe(0);
+      expect(adb.wasCommandExecuted(`shell cat ${path}`)).toBe(false);
+      const cleanup = adb.getLastCommandCall();
+      expect(cleanup?.signal).toBeDefined();
+      expect(cleanup?.signal?.aborted).toBe(false);
+      expect(cleanup?.signal).not.toBe(controller.signal);
+      expect(cleanup?.noRetry).toBe(true);
+      expect(cleanup?.timeoutMs).toBe(1500);
+    } finally {
+      adb.cleanup.resolve();
+      await result;
     }
-    const adb = new CancellingAdb();
+  });
+  test("awaits in-budget cleanup before returning", async () => {
+    const adb = new ControlledCleanupAdb();
+    const { run, timer } = fixture(undefined, adb);
+    let returned = false;
+    const result = run().then((value) => {
+      returned = true;
+      return value;
+    });
+    try {
+      await drainUntil(() => adb.cleanupStarted, { description: "cleanup dispatch" });
+      await drainMicrotasks(30);
+      expect(returned).toBe(false);
+      expect(adb.cleanupCompleted).toBe(false);
+      adb.cleanup.resolve();
+      expect((await result).sources).toContain("uiautomator");
+      expect(adb.cleanupCompleted).toBe(true);
+      expect(timer.now()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      adb.cleanup.resolve();
+      await result;
+    }
+  });
+  test("stops awaiting slow cleanup at the remaining request deadline", async () => {
+    const timer = new FakeTimer();
+    const adb = new ControlledCleanupAdb(() => timer.advanceTime(400));
     const { run } = fixture(undefined, adb, timer);
-    await expect(run(controller.signal)).rejects.toThrow("Operation cancelled");
-    expect(adb.wasCommandExecuted(`shell cat ${path}`)).toBe(false);
-    expect(adb.wasCommandExecuted(`shell rm -f ${path}`)).toBe(true);
-    const cleanup = adb.getLastCommandCall();
-    expect(cleanup?.signal).toBeDefined();
-    expect(cleanup?.signal?.aborted).toBe(false);
-    expect(cleanup?.signal).not.toBe(controller.signal);
-    expect(cleanup?.noRetry).toBe(true);
-    expect(cleanup?.timeoutMs).toBeGreaterThanOrEqual(1000);
-    expect(cleanup?.timeoutMs).toBeLessThanOrEqual(2000);
-    expect(timer.now() - 1001).toBe(cleanup?.timeoutMs);
+    let returned = false;
+    const result = run().then((value) => {
+      returned = true;
+      return value;
+    });
+    try {
+      await drainUntil(() => adb.cleanupStarted, { description: "slow cleanup dispatch" });
+      timer.advanceTime(599);
+      await drainMicrotasks(30);
+      expect(returned).toBe(false);
+      timer.advanceTime(1);
+      await drainUntil(() => returned, { description: "cleanup wait deadline" });
+      expect((await result).sources).toContain("uiautomator");
+      expect(timer.now()).toBe(1000);
+      expect(adb.cleanupCompleted).toBe(false);
+      expect(adb.getLastCommandCall()?.timeoutMs).toBe(1500);
+      expect(adb.getLastCommandCall()?.signal?.aborted).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      adb.cleanup.resolve();
+      await result;
+    }
+  });
+  test("consumes and logs a detached cleanup rejection after returning", async () => {
+    const timer = new FakeTimer();
+    const adb = new ControlledCleanupAdb(() => timer.advanceTime(1000));
+    const { run, original } = fixture(undefined, adb, timer);
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    let returned = false;
+    const result = run().then((value) => {
+      returned = true;
+      return value;
+    });
+    try {
+      await drainUntil(() => returned, { description: "result before cleanup rejection" });
+      expect(await result).toBe(original);
+      expect(adb.cleanupCompleted).toBe(false);
+      const failure = new Error("late cleanup failure");
+      adb.cleanup.reject(failure);
+      await drainUntil(() => debug.mock.calls.some((call) => call[1] === failure), {
+        description: "detached rejection log",
+      });
+      expect(debug).toHaveBeenCalledWith(
+        "[HierarchyFallback] Could not remove temporary dump",
+        failure,
+      );
+      await drainMicrotasks(30);
+    } finally {
+      adb.cleanup.resolve();
+      await result;
+      debug.mockRestore();
+    }
+  });
+  test("cancellation during cleanup stops waiting without aborting removal", async () => {
+    const controller = new AbortController();
+    const adb = new ControlledCleanupAdb();
+    const { run, timer } = fixture(undefined, adb);
+    let rejected = false;
+    const result = run(controller.signal).catch((error: unknown) => {
+      rejected = true;
+      return error;
+    });
+    try {
+      await drainUntil(() => adb.cleanupStarted, { description: "cleanup before cancellation" });
+      controller.abort();
+      await drainUntil(() => rejected, { description: "cancellation during cleanup" });
+      expect(await result).toMatchObject({ message: "Operation cancelled" });
+      expect(adb.cleanupCompleted).toBe(false);
+      expect(adb.getLastCommandCall()?.signal?.aborted).toBe(false);
+      expect(timer.now()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      adb.cleanup.resolve();
+      await result;
+    }
   });
   test("deduplicates matching native nodes but retains repeated IDs at other bounds", async () => {
     const { original, run } = fixture(xml(node("Same") + node("Other", "[0,100][100,200]")));

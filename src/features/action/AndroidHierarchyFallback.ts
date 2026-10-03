@@ -5,6 +5,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import type { Timer } from "../../utils/SystemTimer";
 import { parseBounds } from "../../utils/bounds";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
 import { DefaultElementParser } from "../utility/ElementParser";
 
@@ -151,22 +152,45 @@ export async function supplementAndroidHierarchy(
     logger.debug("[HierarchyFallback] Could not supplement incomplete CtrlProxy hierarchy", error);
     return original;
   } finally {
-    await removeDump(deps, path);
+    await removeDump(deps, path, deadline, signal);
   }
 }
 
-async function removeDump(deps: AndroidHierarchyFallbackDeps, path: string): Promise<void> {
-  try {
-    await deps.adb.execute(["shell", "rm", "-f", path], {
+async function removeDump(
+  deps: AndroidHierarchyFallbackDeps,
+  path: string,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const cleanup = deps.adb
+    .execute(["shell", "rm", "-f", path], {
       timeoutMs: DUMP_CLEANUP_TIMEOUT_MS,
       // Override ADB's ambient request signal so cancellation still permits bounded cleanup.
       signal: new AbortController().signal,
       noRetry: true,
+    })
+    .catch((error: unknown) => {
+      // Best-effort temporary-file removal must not replace the capture result or cancellation.
+      logger.debug("[HierarchyFallback] Could not remove temporary dump", error);
+    });
+  const remaining = deadline - deps.timer.now();
+  if (signal?.aborted || remaining <= 0) {
+    void cleanup;
+    throwIfAborted(signal);
+    return;
+  }
+  try {
+    await raceWithDeadline(cleanup, {
+      timer: deps.timer,
+      timeoutMs: remaining,
+      signal,
+      label: "Hierarchy fallback cleanup wait",
     });
   } catch (error) {
-    // Best-effort removal of a temporary dump must not replace the capture result or cancellation.
-    logger.debug("[HierarchyFallback] Could not remove temporary dump", error);
+    // Cleanup has its own budget and rejection handler, so ending this wait safely detaches it.
+    logger.debug("[HierarchyFallback] Stopped waiting for temporary dump cleanup", error);
   }
+  throwIfAborted(signal);
 }
 
 function dumpPath(idGenerator: IdGenerator = defaultIdGenerator): string {

@@ -1,5 +1,10 @@
 package dev.jasonpearson.automobile.junit
 
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -130,13 +135,57 @@ class DaemonHeartbeatTest {
   }
 
   @Test
-  fun `blank command result caches the user name fallback`() {
-    assertCachedFallback(" \n")
+  fun `blank command result retries and caches the successful uid`() {
+    assertRetriesAfterFailure(" \n")
   }
 
   @Test
-  fun `failed command caches the user name fallback`() {
-    assertCachedFallback(null)
+  fun `failed command retries and caches the successful uid`() {
+    assertRetriesAfterFailure(null)
+  }
+
+  @Test
+  fun `concurrent first calls cache one successful uid resolution`() {
+    val threadCount = 8
+    val ready = CountDownLatch(threadCount)
+    val start = CountDownLatch(1)
+    val commandCalls = AtomicInteger()
+    val results = ConcurrentLinkedQueue<String>()
+    val failures = ConcurrentLinkedQueue<Throwable>()
+    val resolver =
+      DaemonUserIdResolver(
+        osName = { "Linux" },
+        userName = { throw AssertionError("Successful UID must not use the fallback") },
+        runCommand = {
+          commandCalls.incrementAndGet()
+          "501"
+        },
+      )
+    val threads =
+      List(threadCount) {
+        thread(isDaemon = true) {
+          try {
+            ready.countDown()
+            assertTrue("Start gate must open", start.await(5, TimeUnit.SECONDS))
+            results.add(resolver.userId)
+          } catch (failure: Throwable) {
+            failures.add(failure)
+          }
+        }
+      }
+
+    try {
+      assertTrue("Workers must reach the start gate", ready.await(5, TimeUnit.SECONDS))
+    } finally {
+      start.countDown()
+      threads.forEach { it.join(5000) }
+    }
+
+    threads.forEach { assertFalse("Worker must finish", it.isAlive) }
+    failures.peek()?.let { throw AssertionError("UID resolution thread failed", it) }
+    assertEquals(threadCount, results.size)
+    results.forEach { assertEquals("501", it) }
+    assertEquals(1, commandCalls.get())
   }
 
   @Test
@@ -159,7 +208,7 @@ class DaemonHeartbeatTest {
     assertEquals(1, userNameCalls)
   }
 
-  private fun assertCachedFallback(commandResult: String?) {
+  private fun assertRetriesAfterFailure(firstCommandResult: String?) {
     var commandCalls = 0
     var userNameCalls = 0
     val resolver =
@@ -172,15 +221,19 @@ class DaemonHeartbeatTest {
         runCommand = {
           assertEquals(listOf("id", "-u"), it)
           commandCalls++
-          commandResult
+          if (commandCalls == 1) firstCommandResult else "501"
         },
       )
 
-    repeat(50) {
-      assertEquals("fallback-user", resolver.userId)
-      assertEquals("/tmp/auto-mobile-daemon-fallback-user.pid", resolver.pidPath())
-    }
+    assertEquals("/tmp/auto-mobile-daemon-fallback-user.pid", resolver.pidPath())
     assertEquals(1, commandCalls)
+    assertEquals(1, userNameCalls)
+    assertEquals("501", resolver.userId)
+    repeat(50) {
+      assertEquals("501", resolver.userId)
+      assertEquals("/tmp/auto-mobile-daemon-501.pid", resolver.pidPath())
+    }
+    assertEquals(2, commandCalls)
     assertEquals(1, userNameCalls)
   }
 

@@ -19,20 +19,30 @@ internal class DaemonUserIdResolver(
         process.inputStream.bufferedReader().use { it.readText().trim() }
       }
     } catch (_: Exception) {
-      // Command failure safely falls back to the cached user name.
+      // Safe to swallow: this call uses an uncached user name fallback; a later call retries.
       null
     }
   },
 ) {
-  val userId: String by
-    lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-      if (osName().lowercase().contains("win")) {
-        userName()
-      } else {
-        // Keep id -u to match DaemonSocketClient's PID path; JVM UID APIs may differ.
-        runCommand(listOf("id", "-u"))?.trim()?.takeIf { it.isNotEmpty() } ?: userName()
+  private val resolutionLock = Any()
+  private var cachedUserId: String? = null
+
+  val userId: String
+    get() =
+      synchronized(resolutionLock) {
+        cachedUserId?.let {
+          return@synchronized it
+        }
+        if (osName().lowercase().contains("win")) {
+          userName().also { cachedUserId = it }
+        } else {
+          // Keep id -u to match DaemonSocketClient's PID path; JVM UID APIs may differ.
+          runCommand(listOf("id", "-u"))
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.also { cachedUserId = it } ?: userName()
+        }
       }
-    }
 
   fun pidPath(): String = "/tmp/auto-mobile-daemon-$userId.pid"
 }

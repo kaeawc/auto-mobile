@@ -2,6 +2,40 @@
 import XCTest
 
 final class HangsTests: XCTestCase {
+    func testHangThresholdRejectsNonFiniteAndNegativeValues() {
+        let hangs = AutoMobileHangs.makeTestInstance()
+
+        for value in [Double.nan, .infinity, -.infinity, -5] {
+            hangs.hangThresholdMs = value
+            XCTAssertEqual(hangs.hangThresholdMs, 2000)
+        }
+    }
+
+    func testHangThresholdPreservesValidValuesIncludingZero() {
+        let hangs = AutoMobileHangs.makeTestInstance()
+
+        hangs.hangThresholdMs = 1234
+        XCTAssertEqual(hangs.hangThresholdMs, 1234)
+        hangs.hangThresholdMs = 0
+        XCTAssertEqual(hangs.hangThresholdMs, 0)
+    }
+
+    func testPollIntervalRejectsNonFiniteAndNonPositiveValues() {
+        let hangs = AutoMobileHangs.makeTestInstance()
+
+        for value in [Double.nan, .infinity, -.infinity, -5, 0] {
+            hangs.pollIntervalMs = value
+            XCTAssertEqual(hangs.pollIntervalMs, 500)
+        }
+    }
+
+    func testPollIntervalPreservesValidValues() {
+        let hangs = AutoMobileHangs.makeTestInstance()
+
+        hangs.pollIntervalMs = 1234
+        XCTAssertEqual(hangs.pollIntervalMs, 1234)
+    }
+
     /// A responsive main thread (probe succeeds within threshold) reports no hang.
     func testResponsiveThreadReportsNoHang() {
         let hangs = AutoMobileHangs.makeTestInstance()
@@ -39,7 +73,7 @@ final class HangsTests: XCTestCase {
         let duration = hangs.runWatchdogCycle(shouldContinue: { true })
 
         XCTAssertEqual(duration, 1000) // single event spanning the whole hang
-        XCTAssertEqual(probeCalls, 4)  // 1 detection probe + 3 recovery probes
+        XCTAssertEqual(probeCalls, 4) // 1 detection probe + 3 recovery probes
     }
 
     /// If monitoring stops (or the app is being torn down) before the thread
@@ -59,7 +93,7 @@ final class HangsTests: XCTestCase {
     /// crash (they were unsynchronized `public var`s read on the watchdog thread).
     func testThresholdAccessorsAreThreadSafe() {
         let hangs = AutoMobileHangs.makeTestInstance()
-        DispatchQueue.concurrentPerform(iterations: 1_000) { i in
+        DispatchQueue.concurrentPerform(iterations: 1000) { i in
             hangs.hangThresholdMs = Double(i)
             _ = hangs.hangThresholdMs
             hangs.pollIntervalMs = Double(i)

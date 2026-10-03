@@ -9,7 +9,13 @@ export const visibleNavigationRow = { left: 16, top: 120, right: 386, bottom: 19
 // Synthetic issue #9096 geometry. No capture of the obscured Demos row exists in the repo.
 export function syntheticNavigationHierarchy(
   row: ElementBounds = coveredNavigationRow,
-  { navButton = false, bottomBar = false, keyboard = false } = {},
+  {
+    navButton = false,
+    bottomBar = false,
+    keyboard = false,
+    navBarBottom = 116,
+    keyboardTop = 600,
+  } = {},
 ): ViewHierarchyResult {
   return {
     screenWidth: navigationScreen.width,
@@ -29,7 +35,10 @@ export function syntheticNavigationHierarchy(
             ],
           },
           {
-            $: { class: "UINavigationBar", bounds: { left: 0, top: 62, right: 402, bottom: 116 } },
+            $: {
+              class: "UINavigationBar",
+              bounds: { left: 0, top: 62, right: 402, bottom: navBarBottom },
+            },
             node: navButton
               ? [
                   {
@@ -55,7 +64,7 @@ export function syntheticNavigationHierarchy(
                 {
                   $: {
                     class: "UIKeyboard",
-                    bounds: { left: 0, top: 600, right: 402, bottom: 874 },
+                    bounds: { left: 0, top: keyboardTop, right: 402, bottom: 874 },
                   },
                   node: [
                     {
@@ -63,7 +72,7 @@ export function syntheticNavigationHierarchy(
                         class: "UIKeyboardKey",
                         text: "Q",
                         clickable: true,
-                        bounds: { left: 0, top: 600, right: 402, bottom: 850 },
+                        bounds: { left: 0, top: keyboardTop, right: 402, bottom: 850 },
                       },
                     },
                   ],
@@ -75,3 +84,11 @@ export function syntheticNavigationHierarchy(
     },
   };
 }
+
+export const navigationExposureCases = [
+  { name: "one point", navBarBottom: 116, bottom: 117, point: null },
+  { name: "exactly four points", navBarBottom: 116, bottom: 120, point: { x: 201, y: 118 } },
+  { name: "forty points", navBarBottom: 116, bottom: 156, point: { x: 201, y: 136 } },
+  { name: "just under four points", navBarBottom: 116, bottom: 119.75, point: null },
+  { name: "fractional sliver", navBarBottom: 103.66666666666667, bottom: 104, point: null },
+] as const;

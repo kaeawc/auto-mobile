@@ -907,26 +907,49 @@ export class ScrollUntilVisible {
       right: Math.min(containerBounds.right, safe.right),
       bottom: Math.min(containerBounds.bottom, safe.bottom),
     };
+    // The dispatchability minimum belongs to the element, never to the viewport.
+    const exposed = clipIosChromeBounds({
+      bounds: element.bounds,
+      hierarchy,
+      screen,
+      elements: [element],
+      forTapTarget: true,
+    }).bounds;
+    if (!exposed) {
+      return false;
+    }
     const viewport = clipIosChromeBounds({ bounds, hierarchy, screen, elements: [element] }).bounds;
     if (!viewport) {
       return false;
     }
     const visible = {
-      left: Math.max(element.bounds.left, viewport.left),
-      top: Math.max(element.bounds.top, viewport.top),
-      right: Math.min(element.bounds.right, viewport.right),
-      bottom: Math.min(element.bounds.bottom, viewport.bottom),
+      left: Math.max(exposed.left, viewport.left),
+      top: Math.max(exposed.top, viewport.top),
+      right: Math.min(exposed.right, viewport.right),
+      bottom: Math.min(exposed.bottom, viewport.bottom),
     };
-    if (visible.left >= visible.right || visible.top >= visible.bottom) {
-      return false;
-    }
     const { left, top, right, bottom } = visible;
     // A partial match is found when the exposed portion has a dispatchable tap point.
-    const point = ime
-      ? tapPointOutsideIme([left, top, right, bottom], getIosImeOccluder(ime, screen).bounds)
-      : this.deps.geometry.getElementCenter({ bounds: visible });
-    return (
-      point !== null && this.deps.geometry.isPointInElement({ bounds: visible }, point.x, point.y)
+    const imeBounds = ime && getIosImeOccluder(ime, screen).bounds;
+    const center = this.deps.geometry.getElementCenter({ bounds: visible });
+    const candidates = imeBounds
+      ? [tapPointOutsideIme([left, top, right, bottom], imeBounds), center]
+      : [center];
+    return candidates.some(
+      (point) =>
+        point !== null &&
+        Number.isInteger(point.x) &&
+        Number.isInteger(point.y) &&
+        this.deps.geometry.isPointInElement({ bounds: visible }, point.x, point.y) &&
+        point.x < right &&
+        point.y < bottom &&
+        !(
+          imeBounds &&
+          point.x >= imeBounds[0] &&
+          point.x < imeBounds[2] &&
+          point.y >= imeBounds[1] &&
+          point.y < imeBounds[3]
+        ),
     );
   }
 

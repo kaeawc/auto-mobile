@@ -14,6 +14,31 @@ import { getScreenBounds } from "../../../utils/screenBounds";
 import { boundsEqual } from "../../../utils/bounds";
 import { getHierarchyNodeSource } from "../../observe/output/elementProvenance";
 
+/**
+ * A chrome-exposed sliver thinner than a few points cannot be reliably hit;
+ * rounding the centre to integer coordinates can push the tap back into the bar.
+ */
+export const IOS_MIN_EXPOSED_TAP_HEIGHT_POINTS = 4;
+
+/** Only chrome-reduced elements need the minimum; ordinary thin dividers remain valid. */
+export function hasDispatchableExposedTapPoint(
+  exposed: ElementBounds,
+  original: ElementBounds,
+): boolean {
+  if (boundsEqual(exposed, original)) {
+    return true;
+  }
+  const x = Math.floor((exposed.left + exposed.right) / 2);
+  const y = Math.floor((exposed.top + exposed.bottom) / 2);
+  return (
+    exposed.bottom - exposed.top >= IOS_MIN_EXPOSED_TAP_HEIGHT_POINTS &&
+    Math.ceil(exposed.left) <= x &&
+    x < exposed.right &&
+    Math.ceil(exposed.top) <= y &&
+    y < exposed.bottom
+  );
+}
+
 const zeroInsets = (): ObservationEdgeInsets => ({ top: 0, right: 0, bottom: 0, left: 0 });
 const navigationBars = new Set(["UINavigationBar", "XCUIElementTypeNavigationBar"]);
 const bottomBars = new Set([
@@ -145,6 +170,30 @@ function chromeCoversTarget(
   return true;
 }
 
+/** Check captured chrome with the same target/foreground exemptions as clipping. */
+export function isIosTapPointCoveredByChrome({
+  point,
+  hierarchy,
+  screen,
+  elements,
+}: {
+  point: { x: number; y: number };
+  hierarchy: ViewHierarchyResult;
+  screen: ScreenSize;
+  elements: readonly Element[];
+}): boolean {
+  const nodes = new SearchableHierarchy().project(hierarchy);
+  const target = chromeTargetNode(nodes, elements);
+  return iosChromeFrames(hierarchy, screen, nodes).some(
+    (frame) =>
+      point.x >= frame.bounds.left &&
+      point.x < frame.bounds.right &&
+      point.y >= frame.bounds.top &&
+      point.y < frame.bounds.bottom &&
+      chromeCoversTarget(frame, target, nodes),
+  );
+}
+
 /** Clip app content at captured chrome edges; chrome descendants and foreground windows are exempt. */
 export function clipIosChromeBounds({
   bounds,
@@ -152,29 +201,35 @@ export function clipIosChromeBounds({
   screen,
   elements = [],
   regions,
+  forTapTarget = false,
 }: {
   bounds: ElementBounds;
   hierarchy: ViewHierarchyResult;
   screen: ScreenSize;
   elements?: readonly Element[];
   regions?: readonly ChromeFrame["region"][];
+  /** Opt in for elements only; viewport/container clipping keeps its existing geometry. */
+  forTapTarget?: boolean;
 }): { bounds: ElementBounds | null; coveredBy?: ChromeFrame["region"] } {
   const nodes = new SearchableHierarchy().project(hierarchy);
   const target = chromeTargetNode(nodes, elements);
   let visible = bounds;
-  for (const frame of iosChromeFrames(hierarchy, screen, nodes)) {
-    if (regions && !regions.includes(frame.region)) {
-      continue;
-    }
+  let clippedBy: ChromeFrame["region"] | undefined;
+  const frames = iosChromeFrames(hierarchy, screen, nodes).filter(
+    (frame) =>
+      (!regions || regions.includes(frame.region)) && chromeCoversTarget(frame, target, nodes),
+  );
+  for (const frame of frames) {
     const bar = frame.bounds;
     const overlaps =
       bar.left < visible.right &&
       bar.right > visible.left &&
       bar.top < visible.bottom &&
       bar.bottom > visible.top;
-    if (!overlaps || !chromeCoversTarget(frame, target, nodes)) {
+    if (!overlaps) {
       continue;
     }
+    clippedBy = frame.region;
     visible =
       frame.region === "bottom toolbar or tab bar"
         ? { ...visible, bottom: Math.min(visible.bottom, bar.top) }
@@ -182,6 +237,9 @@ export function clipIosChromeBounds({
     if (visible.top >= visible.bottom) {
       return { bounds: null, coveredBy: frame.region };
     }
+  }
+  if (forTapTarget && !hasDispatchableExposedTapPoint(visible, bounds)) {
+    return { bounds: null, coveredBy: clippedBy };
   }
   return { bounds: visible };
 }

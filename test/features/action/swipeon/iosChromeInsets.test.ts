@@ -2,6 +2,9 @@ import { SearchableHierarchy } from "../../../../src/features/utility/Searchable
 import { nodeAttributes } from "../../../../src/models/ViewHierarchyResult";
 import { describe, expect, test } from "bun:test";
 import {
+  IOS_MIN_EXPOSED_TAP_HEIGHT_POINTS,
+  hasDispatchableExposedTapPoint,
+  isIosTapPointCoveredByChrome,
   deriveIosChromeInsets,
   clipIosChromeBounds,
   effectiveSwipeInsets,
@@ -14,6 +17,13 @@ import {
   loadIosRemindersNoiseObservePair,
 } from "../../../fixtures/observe/observeFixture";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
+
+import {
+  navigationExposureCases,
+  navigationScreen,
+  partialNavigationRow,
+  syntheticNavigationHierarchy,
+} from "../../../fixtures/observe/iosNavigationOcclusion";
 
 const zero = { top: 0, right: 0, bottom: 0, left: 0 };
 const pair = loadIosRemindersNoiseObservePair();
@@ -180,4 +190,86 @@ test("Android auto-target retains inset screen comparison when the gesture inclu
       includeSystemInsets: true,
     }),
   ).toEqual({ left: 5, top: 20, right: 388, bottom: 822 });
+});
+
+for (const { name, navBarBottom, bottom, point } of navigationExposureCases) {
+  test(`element-only chrome clipping rejects undispatchable strip: ${name}`, () => {
+    const bounds = { ...partialNavigationRow, top: 90, bottom };
+    const hierarchy = syntheticNavigationHierarchy(bounds, { navBarBottom });
+    const options = { bounds, hierarchy, screen: navigationScreen };
+    expect(clipIosChromeBounds(options).bounds).toEqual({ ...bounds, top: navBarBottom });
+    expect(clipIosChromeBounds({ ...options, forTapTarget: true })).toEqual(
+      point
+        ? { bounds: { ...bounds, top: navBarBottom } }
+        : { bounds: null, coveredBy: "navigation bar" },
+    );
+  });
+}
+
+test("minimum applies only to chrome-reduced elements, including integer x dispatchability", () => {
+  const thin = { ...partialNavigationRow, top: 200, bottom: 201 };
+  expect(
+    clipIosChromeBounds({
+      bounds: thin,
+      hierarchy: syntheticNavigationHierarchy(thin),
+      screen: navigationScreen,
+      forTapTarget: true,
+    }).bounds,
+  ).toEqual(thin);
+  const narrow = { left: 16.3, right: 16.8, top: 110, bottom: 120 };
+  expect(
+    clipIosChromeBounds({
+      bounds: narrow,
+      hierarchy: syntheticNavigationHierarchy(narrow),
+      screen: navigationScreen,
+      forTapTarget: true,
+    }),
+  ).toEqual({ bounds: null, coveredBy: "navigation bar" });
+});
+
+test("shared exposed-point rule uses the documented minimum and integer centres on both axes", () => {
+  expect(IOS_MIN_EXPOSED_TAP_HEIGHT_POINTS).toBe(4);
+  for (const { navBarBottom, bottom, point } of navigationExposureCases) {
+    const original = { ...partialNavigationRow, top: 90, bottom };
+    expect(hasDispatchableExposedTapPoint({ ...original, top: navBarBottom }, original)).toBe(
+      point !== null,
+    );
+  }
+  const original = { left: 16.3, right: 16.8, top: 110, bottom: 120 };
+  expect(hasDispatchableExposedTapPoint({ ...original, top: 116 }, original)).toBe(false);
+  expect(hasDispatchableExposedTapPoint(original, original)).toBe(true);
+});
+
+test("existing fractional fixture preserves its control and checks the fractional chrome edge", () => {
+  // observeFixture documents this as representative, not a real capture; no row crosses its bar.
+  const hierarchy = fractional.viewHierarchy!;
+  const screen = swipeScreenSize({ observation: fractional, platform: "ios" })!;
+  const control = new SearchableHierarchy()
+    .project(hierarchy)
+    .find((node) => node.nativeId === "new-reminder" || node.nodeKey === "new-reminder")!;
+  expect(
+    clipIosChromeBounds({
+      bounds: control.bounds!,
+      hierarchy,
+      screen,
+      elements: [control.element!],
+      forTapTarget: true,
+    }).bounds,
+  ).toEqual(control.bounds!);
+  expect(
+    isIosTapPointCoveredByChrome({
+      point: { x: 196, y: 103 },
+      hierarchy,
+      screen,
+      elements: [control.element!],
+    }),
+  ).toBe(true);
+  expect(
+    isIosTapPointCoveredByChrome({
+      point: { x: 196, y: 104 },
+      hierarchy,
+      screen,
+      elements: [control.element!],
+    }),
+  ).toBe(false);
 });

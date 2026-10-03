@@ -7,6 +7,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
+  navigationExposureCases,
   coveredNavigationRow,
   partialNavigationRow,
   visibleNavigationRow,
@@ -126,4 +127,71 @@ describe("tapOn synthetic iOS navigation occlusion (#9096)", () => {
     expect(android.points).toEqual([{ x: 201, y: 70 }]);
     expect((await run(hierarchy)).points).toEqual([]);
   });
+});
+
+for (const { name, navBarBottom, bottom, point } of navigationExposureCases) {
+  test(`tapOn exposed navigation strip: ${name}`, async () => {
+    const { result, points } = await run(
+      syntheticNavigationHierarchy({ ...partialNavigationRow, top: 90, bottom }, { navBarBottom }),
+    );
+    expect(result.success).toBe(point !== null);
+    expect(points).toEqual(point ? [point] : []);
+    if (!point) {
+      expect(result.error).toContain(
+        'Target "Forms & Input" is covered by the navigation bar; scroll it into view with swipeOn, then retry tapOn.',
+      );
+    }
+  });
+}
+
+test("unclipped one-point divider keeps its tap on both platforms", async () => {
+  for (const platform of ["ios", "android"] as const) {
+    const { result, points } = await run(
+      syntheticNavigationHierarchy({ ...visibleNavigationRow, top: 200, bottom: 201 }),
+      { platform },
+    );
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 201, y: 200 }]);
+  }
+});
+
+test("navigation and keyboard clipping validate the fallback point outside both", async () => {
+  const { result, points } = await run(
+    syntheticNavigationHierarchy(
+      { ...partialNavigationRow, top: 110, bottom: 650 },
+      { keyboard: true, keyboardTop: 120.5 },
+    ),
+  );
+  expect(result.success).toBe(true);
+  expect(points).toEqual([{ x: 201, y: 118 }]);
+  expect(points[0].y).toBeGreaterThanOrEqual(116);
+  expect(points[0].y).toBeLessThan(120.5);
+});
+
+test("no integer point between fractional navigation and keyboard edges refuses dispatch", async () => {
+  const { result, points } = await run(
+    syntheticNavigationHierarchy(
+      { ...partialNavigationRow, top: 110, bottom: 650 },
+      { navBarBottom: 116.2, keyboard: true, keyboardTop: 116.4 },
+    ),
+  );
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("no unobstructed visible tap area");
+  expect(points).toEqual([]);
+});
+
+test("unclipped fractional width with no integer tap point fails safely only on iOS", async () => {
+  const hierarchy = syntheticNavigationHierarchy({
+    left: 16.3,
+    right: 16.8,
+    top: 200,
+    bottom: 201,
+  });
+  const ios = await run(hierarchy);
+  expect(ios.result.success).toBe(false);
+  expect(ios.result.error).toContain("no unobstructed visible tap area");
+  expect(ios.points).toEqual([]);
+  const android = await run(hierarchy, { platform: "android" });
+  expect(android.result.success).toBe(true);
+  expect(android.points).toEqual([{ x: 16, y: 200 }]);
 });

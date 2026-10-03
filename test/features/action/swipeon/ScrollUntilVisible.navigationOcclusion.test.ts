@@ -10,6 +10,7 @@ import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessi
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import {
+  navigationExposureCases,
   coveredNavigationRow,
   partialNavigationRow,
   visibleNavigationRow,
@@ -167,4 +168,51 @@ describe("scroll-until-visible synthetic iOS navigation occlusion (#9096)", () =
     expect((await harness(sequence, "android").execute()).scrollIterations).toBe(0);
     expect((await harness(sequence).execute()).scrollIterations).toBe(1);
   });
+});
+
+for (const { name, navBarBottom, bottom, point } of navigationExposureCases) {
+  test(`swipeOn exposed navigation strip: ${name}`, async () => {
+    const h = harness([
+      syntheticNavigationHierarchy({ ...partialNavigationRow, top: 90, bottom }, { navBarBottom }),
+      syntheticNavigationHierarchy(visibleNavigationRow),
+    ]);
+    const result = await h.execute();
+    expect(result.found).toBe(true);
+    expect(result.scrollIterations).toBe(point ? 0 : 1);
+    expect(h.swipeCount()).toBe(point ? 0 : 1);
+  });
+}
+
+test("swipeOn still finds unclipped one-point dividers on both platforms", async () => {
+  for (const platform of ["ios", "android"] as const) {
+    const h = harness(
+      [syntheticNavigationHierarchy({ ...visibleNavigationRow, top: 200, bottom: 201 })],
+      platform,
+    );
+    expect(await h.execute()).toMatchObject({ found: true, scrollIterations: 0 });
+  }
+});
+
+test("swipeOn agrees with tapOn between navigation and keyboard edges", async () => {
+  for (const { navBarBottom, keyboardTop, iterations } of [
+    { navBarBottom: 116, keyboardTop: 120.5, iterations: 0 },
+    { navBarBottom: 116.2, keyboardTop: 116.4, iterations: 1 },
+  ]) {
+    const h = harness([
+      syntheticNavigationHierarchy(
+        { ...partialNavigationRow, top: 110, bottom: 650 },
+        { navBarBottom, keyboard: true, keyboardTop },
+      ),
+      syntheticNavigationHierarchy(visibleNavigationRow),
+    ]);
+    expect((await h.execute()).scrollIterations).toBe(iterations);
+  }
+});
+
+test("swipeOn rejects an unclipped fractional width with no integer tap point", async () => {
+  const h = harness([
+    syntheticNavigationHierarchy({ left: 16.3, right: 16.8, top: 200, bottom: 201 }),
+    syntheticNavigationHierarchy(visibleNavigationRow),
+  ]);
+  expect((await h.execute()).scrollIterations).toBe(1);
 });

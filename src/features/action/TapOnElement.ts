@@ -142,7 +142,7 @@ import {
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { getScreenBounds } from "../../utils/screenBounds";
 import { compareSelectionRank } from "../utility/selectionRank";
-import { clipIosChromeBounds } from "./swipeon/iosChromeInsets";
+import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
 
 function intersectTapBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
   const bounds = {
@@ -185,6 +185,7 @@ type TapVerificationOptions = TapOnElementOptions & {
 };
 
 interface TapPointContext {
+  chromeElements?: readonly Element[];
   options: TapOnElementOptions;
   screenSize?: ObserveResult["screenSize"];
 }
@@ -1084,6 +1085,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       screen: screenSize,
       elements,
       regions: ["navigation bar"],
+      forTapTarget: true,
     });
   }
 
@@ -1127,13 +1129,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!visible || this.device.platform !== "ios") {
       return visible;
     }
-    const belowNavigationBar = this.navigationTapBounds(visible, hierarchy, screenSize, [
-      matchForTap,
-      target,
-    ]).bounds;
+    const belowChrome = clipIosChromeBounds({
+      bounds: visible,
+      hierarchy,
+      screen: screenSize,
+      elements: [matchForTap, target],
+      forTapTarget: true,
+    }).bounds;
     const belowStatusBar =
-      belowNavigationBar &&
-      this.clipBelowStatusBar(belowNavigationBar, matchForTap, target, hierarchy, screenSize);
+      belowChrome &&
+      this.clipBelowStatusBar(belowChrome, matchForTap, target, hierarchy, screenSize);
     return belowStatusBar
       ? this.clipBelowTabBars(belowStatusBar, matchForTap, target, hierarchy, screenSize)
       : null;
@@ -1158,21 +1163,53 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     context: TapPointContext,
   ): { x: number; y: number } | null {
     const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    const navClipped = this.navigationTapBounds(target.bounds, hierarchy, context.screenSize, [
-      target,
-    ]).bounds;
-    if (
-      navClipped &&
-      boundsEqual(navClipped, target.bounds) &&
-      pointInTapBounds(point, visibleBounds)
-    ) {
+    if (this.device.platform !== "ios" && pointInTapBounds(point, visibleBounds)) {
       return point;
     }
     const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
-    return ime
-      ? tapPointOutsideIme([left, top, right, bottom], ime.bounds)
-      : this.geometry.getElementCenter({ bounds: visibleBounds });
+    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
+    if (this.device.platform !== "ios") {
+      return ime ? exposedImePoint : this.geometry.getElementCenter({ bounds: visibleBounds });
+    }
+    const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });
+    const chromeElements = context.chromeElements ?? [target];
+    const navClipped = this.navigationTapBounds(
+      target.bounds,
+      hierarchy,
+      context.screenSize,
+      chromeElements,
+    ).bounds;
+    if (!navClipped) {
+      return null;
+    }
+    const candidates = boundsEqual(navClipped, target.bounds)
+      ? [point, exposedImePoint, exposedCenter]
+      : [exposedImePoint, exposedCenter, point];
+    const imeBounds = ime && {
+      left: ime.bounds[0],
+      top: ime.bounds[1],
+      right: ime.bounds[2],
+      bottom: ime.bounds[3],
+    };
+    return (
+      candidates.find(
+        (candidate) =>
+          candidate !== null &&
+          Number.isInteger(candidate.x) &&
+          Number.isInteger(candidate.y) &&
+          pointInTapBounds(candidate, visibleBounds) &&
+          pointInTapBounds(candidate, target.bounds) &&
+          (!imeBounds || !pointInTapBounds(candidate, imeBounds)) &&
+          (!isUsableScreenSize(context.screenSize) ||
+            !isIosTapPointCoveredByChrome({
+              point: candidate,
+              hierarchy,
+              screen: context.screenSize,
+              elements: chromeElements,
+            })),
+      ) ?? null
+    );
   }
 
   private clipBelowStatusBar(
@@ -3679,18 +3716,30 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           );
           if (!visibleBounds) {
             throw new ActionableError(
-              "Matched element has no visible tap area on this screen. " +
-                "Scroll it into view with swipeOn, then retry tapOn.",
+              this.isCoveredByNavigationBar(finalSelection, viewHierarchy, screenSize)
+                ? this.invisibleMatchError(finalSelection, options, viewHierarchy, screenSize)
+                : "Matched element has no visible tap area on this screen. " +
+                    "Scroll it into view with swipeOn, then retry tapOn.",
             );
           }
           const tapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
             options,
             screenSize,
+            chromeElements: [
+              this.matchedTapElement(
+                finalSelection,
+                tapElement,
+                requestedAction === "focus" ? { ...options, action: "focus" } : options,
+              ),
+              tapElement,
+            ],
           });
           if (!tapPoint) {
             throw new ActionableError(
-              "Matched element has no unobstructed visible tap area. " +
-                "Dismiss the keyboard or scroll it into view, then retry tapOn.",
+              this.isCoveredByNavigationBar(finalSelection, viewHierarchy, screenSize)
+                ? this.invisibleMatchError(finalSelection, options, viewHierarchy, screenSize)
+                : "Matched element has no unobstructed visible tap area. " +
+                    "Dismiss the keyboard or scroll it into view, then retry tapOn.",
             );
           }
           const tapBounds = tapElement.bounds;

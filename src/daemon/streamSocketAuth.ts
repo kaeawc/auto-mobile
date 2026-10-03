@@ -14,9 +14,12 @@ import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/s
  * device screen to an attacker-controlled WHIP server or silently subscribe to
  * the raw H.264 stream (issue #4751). This module extends the SAME session
  * identity mechanism the main daemon socket uses (issue #4655): a request must
- * carry a `sessionUuid` that resolves to a live daemon session, and it may only
- * target a device that is unowned or owned by that same session — a subscriber
- * cannot ride along on another session's capture.
+ * carry a `sessionUuid` resolving to a live, non-releasing device session.
+ * Video relay subscribe and WebRTC start explicitly admit read-only viewers on
+ * any device; the owning session attaches with owner kind. Viewers cannot mutate
+ * an owner's capture or control. Other callers retain strict device scope, and
+ * registration-only observer sessions are not admitted on these two transports.
+ * See streamSubscriptionPolicy.ts for the shared subscription lifecycle rule.
  *
  * Enforcement is on by default; `AUTOMOBILE_DAEMON_STREAM_AUTH=0` disables it,
  * mirroring the daemon handshake's `AUTOMOBILE_DAEMON_HANDSHAKE`-style opt-out
@@ -43,6 +46,8 @@ export interface StreamAuthorizeInput {
   sessionUuid?: string;
   /** Target device, when the request names one. */
   deviceId?: string;
+  /** Video relay/WebRTC admission only: a live non-owner may attach read-only. */
+  admitViewer?: boolean;
   /** Rechecks of an attached subscriber require its session to still own the device. */
   requireOwnership?: boolean;
 }
@@ -51,7 +56,7 @@ export interface StreamSocketAuthenticator {
   /**
    * Authorize a stream control request. Throws {@link ActionableError} when the
    * request is unauthenticated, names an unknown/expired session, or targets a
-   * device bound to a different session.
+   * device bound to a different session unless read-only viewer admission is enabled.
    */
   authorize(input: StreamAuthorizeInput): void;
   /** Structured live identity/ownership query; does not alter admission authorization. */
@@ -65,10 +70,9 @@ export interface StreamSocketAuthenticator {
 /** Check the device selected by discovery before starting device-side work. */
 export function authorizeResolvedDevice(
   authenticator: StreamSocketAuthenticator,
-  sessionUuid: string | undefined,
-  resolvedDeviceId: string,
+  options: StreamAuthorizeInput & { deviceId: string },
 ): void {
-  authenticator.authorize({ sessionUuid, deviceId: resolvedDeviceId });
+  authenticator.authorize(options);
 }
 
 function authEnforced(env: NodeJS.ProcessEnv): boolean {
@@ -79,7 +83,8 @@ function authEnforced(env: NodeJS.ProcessEnv): boolean {
 /**
  * Authenticates against the daemon's live session registry. A request must
  * carry a `sessionUuid` resolving to an active session; when it also names a
- * device, that device must be unowned or owned by the same base session.
+ * device, strict scope requires it to be unowned or owned by the same base session.
+ * Only explicit viewer admission relaxes scope; requireOwnership always stays strict.
  */
 export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticator {
   constructor(
@@ -121,30 +126,19 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     const base = resolveToolSelectionBaseSessionUuid(uuid, manager) ?? uuid;
     const session = manager.getSession(base);
     const sessionExists = !!session && !isSessionReleasing(manager, base, session);
+    const owner = deviceId ? manager.getSessionForDevice(deviceId) : null;
     return {
       authEnabled: true,
       sessionExists,
-      ownsDevice: sessionExists && this.sessionOwnsDevice({ manager, base, deviceId }),
+      ownsDevice:
+        sessionExists &&
+        !!owner &&
+        (resolveToolSelectionBaseSessionUuid(owner, manager) ?? owner) === base,
+      hasDeviceOwner: !!owner,
     };
   }
 
-  private sessionOwnsDevice({
-    manager,
-    base,
-    deviceId,
-  }: {
-    manager: StreamAuthSessionManager;
-    base: string;
-    deviceId?: string;
-  }): boolean {
-    const owner = deviceId ? manager.getSessionForDevice(deviceId) : null;
-    if (!owner) {
-      return false;
-    }
-    return (resolveToolSelectionBaseSessionUuid(owner, manager) ?? owner) === base;
-  }
-
-  authorize({ sessionUuid, deviceId, requireOwnership }: StreamAuthorizeInput): void {
+  authorize({ sessionUuid, deviceId, requireOwnership, admitViewer }: StreamAuthorizeInput): void {
     if (!this.isAuthenticationEnforced()) {
       // Auth-off subscribers may have no session, so ownership changes cannot revoke them.
       return;
@@ -186,7 +180,13 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     }
 
     if (deviceId) {
-      this.assertDeviceScope(sessionManager, deviceId, baseSessionUuid, requireOwnership);
+      this.assertDeviceScope({
+        sessionManager,
+        deviceId,
+        baseSessionUuid,
+        requireOwnership,
+        admitViewer: !!session && admitViewer,
+      });
     }
   }
 
@@ -199,15 +199,25 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
   }
 
   /**
-   * Initial subscribers may target an unowned device; attached subscribers
-   * must retain ownership by their base session on every ownership change.
+   * Viewer admission relaxes scope only for verified device sessions. Explicit
+   * ownership checks remain strict, including after a viewer was admitted.
    */
-  private assertDeviceScope(
-    sessionManager: StreamAuthSessionManager,
-    deviceId: string,
-    baseSessionUuid: string,
+  private assertDeviceScope({
+    sessionManager,
+    deviceId,
+    baseSessionUuid,
     requireOwnership = false,
-  ): void {
+    admitViewer = false,
+  }: {
+    sessionManager: StreamAuthSessionManager;
+    deviceId: string;
+    baseSessionUuid: string;
+    requireOwnership?: boolean;
+    admitViewer?: boolean;
+  }): void {
+    if (admitViewer && !requireOwnership) {
+      return;
+    }
     const owner = sessionManager.getSessionForDevice(deviceId) ?? undefined;
     if (!owner) {
       if (requireOwnership) {

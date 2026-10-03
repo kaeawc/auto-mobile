@@ -63,9 +63,9 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
  * This socket has no push channel: typed ends are reported on the next request carrying
  * the lease. These optional
  * fields are additive for older clients; start remains a fresh admission.
- * errorCode is viewer_read_only for stream control by viewers, or viewer_stream_active
- * when a new owner's start conflicts with parameters on another session's viewer stream
- * (stop it first). Parameter errors name keys only, never values or tokens.
+ * errorCode is viewer_read_only for stream control by viewers. An owner's start whose
+ * parameters differ from a viewer-created stream replaces it, ending those viewers with
+ * stopped_by_owner. Parameter errors name keys only, never values or tokens.
  */
 export interface WebRtcStreamSocketResponse extends SocketResponse {
   type: "webrtc_stream_response";

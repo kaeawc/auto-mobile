@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from "node:util";
-import { ViewerStreamActiveError } from "./ViewerStreamActiveError";
 import {
   decideOwnershipChange,
   decideLifecycleEvent,
@@ -330,24 +329,6 @@ function differingConfigKeys(
   const requested = resolveWebRtcStreamingConfig(overrides);
   const keys = Object.keys(record.config) as Array<keyof typeof requested>;
   return keys.filter((key) => !isDeepStrictEqual(record.config[key], requested[key]));
-}
-
-function assertOwnerAttachCompatible(
-  record: WebRtcStreamRecord,
-  request: StartWebRtcStreamRequest,
-): void {
-  if (
-    !request.ownsDevice ||
-    [...record.leases.values()].some(
-      (lease) => lease.kind !== "viewer" || lease.sessionUuid === request.sessionUuid,
-    )
-  ) {
-    return;
-  }
-  const differingKeys = differingConfigKeys(record, request.overrides);
-  if (differingKeys.length > 0) {
-    throw new ViewerStreamActiveError({ differingKeys });
-  }
 }
 
 export function getWebRtcStreamDeviceIds(): string[] {
@@ -992,6 +973,29 @@ async function prepareAndPublish(record: WebRtcStreamRecord): Promise<void> {
   }
 }
 
+async function attachOrReplaceWebRtcStream(
+  existing: WebRtcStreamRecord,
+  request: StartWebRtcStreamRequest,
+): Promise<WebRtcStreamDescriptor> {
+  if (request.ownsDevice && differingConfigKeys(existing, request.overrides).length > 0) {
+    // Reuse owner-stop cleanup and its bounded teardown; viewers cannot veto replacement.
+    await stopWebRtcStreamAsOwner({
+      streamId: existing.streamId,
+      sessionUuid: request.sessionUuid,
+    });
+    return startWebRtcStream({ ...request, leaseId: undefined, subscriptionKind: "owner" });
+  }
+  return describeRecord(
+    existing,
+    acquireLease(existing, {
+      requestedLeaseId: request.leaseId,
+      sessionUuid: request.sessionUuid,
+      subscriptionKind: request.subscriptionKind,
+      mintIfUnknown: true,
+    }),
+  );
+}
+
 /**
  * Start publishing a device's screen to the configured coordination server over
  * WHIP. Android capture prefers the persistent on-device encoder and falls back
@@ -1005,16 +1009,7 @@ export async function startWebRtcStream(
   const requestReceived = dependencies.now().toISOString();
   const existing = activeStreamForDevice(request.device.deviceId);
   if (existing) {
-    assertOwnerAttachCompatible(existing, request);
-    return describeRecord(
-      existing,
-      acquireLease(existing, {
-        requestedLeaseId: request.leaseId,
-        sessionUuid: request.sessionUuid,
-        subscriptionKind: request.subscriptionKind,
-        mintIfUnknown: true,
-      }),
-    );
+    return attachOrReplaceWebRtcStream(existing, request);
   }
 
   const config = resolveWebRtcStreamingConfig(request.overrides);

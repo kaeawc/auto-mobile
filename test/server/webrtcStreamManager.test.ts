@@ -2037,7 +2037,7 @@ describe("WebRTC own-lease and owner control regressions", () => {
     { iosSimulatorFps: 24 },
     { audioEnabled: true },
     { trickleIce: true },
-  ])("all resolved config fields guard new owner attach: %j", async (overrides) => {
+  ])("all resolved config fields yield to new owner attach: %j", async (overrides) => {
     installFakes();
     setWebRtcStreamManagerDependencies({ timer: new FakeTimer() });
     await startWebRtcStream({
@@ -2046,17 +2046,16 @@ describe("WebRTC own-lease and owner control regressions", () => {
       subscriptionKind: "viewer",
       overrides: { whipEndpoint: ENDPOINT },
     });
-    await expect(
-      startWebRtcStream({
-        device: ANDROID,
-        sessionUuid: "b",
-        ownsDevice: true,
-        overrides: { whipEndpoint: ENDPOINT, ...overrides },
-      }),
-    ).rejects.toMatchObject({ code: "viewer_stream_active" });
+    const owner = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "b",
+      ownsDevice: true,
+      overrides: { whipEndpoint: ENDPOINT, ...overrides },
+    });
+    expect(owner.failure).toBeNull();
     expect(listWebRtcStreams()[0].consumerCount).toBe(1);
   });
-  test("existing owner lease retains attach behavior with differing parameters", async () => {
+  test("owner parameters replace capture even with an existing lease", async () => {
     installFakes();
     setWebRtcStreamManagerDependencies({ timer: new FakeTimer() });
     const first = await startWebRtcStream({
@@ -2071,7 +2070,7 @@ describe("WebRTC own-lease and owner control regressions", () => {
       ownsDevice: true,
       overrides: { whipEndpoint: ENDPOINT, bitrateKbps: 777 },
     });
-    expect(second.streamId).toBe(first.streamId);
-    expect(second.consumerCount).toBe(2);
+    expect(second.streamId).not.toBe(first.streamId);
+    expect(second.consumerCount).toBe(1);
   });
 });

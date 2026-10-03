@@ -8,6 +8,13 @@ import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketT
 import { ActionableError } from "../../src/models";
 import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
 import type { TestRecordingDeviceResolution } from "../../src/daemon/testRecordingSocketServer";
+import {
+  getTestRecordingStatus,
+  startTestRecording,
+  stopTestRecording,
+} from "../../src/server/testRecordingManager";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice } from "../../src/models";
 
 /**
@@ -223,4 +230,44 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
     expect(response.success).toBe(true);
     expect(calls).toEqual([{ sessionUuid: "live", deviceId: undefined }]);
   });
+});
+
+test("recording stop cannot disguise another device as the caller's own", async () => {
+  const timer = new FakeTimer();
+  let stops = 0;
+  const recorder = {
+    start: async () => {},
+    stop: async () => {
+      stops++;
+      return { steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 };
+    },
+    stepCount: 1,
+  };
+  const active = await startTestRecording(
+    { deviceId: "other-device", platform: "android", name: "Fake" },
+    timer,
+    new CountingIdGenerator(),
+    () => recorder,
+  );
+  const auth = new SessionScopedStreamAuthenticator(
+    () => ({
+      getSession: () => ({}),
+      getSessionForDevice: (id) => (id === "own-device" ? "live" : "other"),
+      getDeviceLabels: () => undefined,
+    }),
+    "test recording",
+    {},
+  );
+  const server = new TestableServer(undefined, timer, auth);
+  try {
+    await expect(
+      server.invoke({ command: "stop", sessionUuid: "live", deviceId: "own-device" }),
+    ).rejects.toThrow(/different daemon session|not found/);
+    expect(stops).toBe(0);
+    expect(getTestRecordingStatus(timer)?.recordingId).toBe(active.recordingId);
+  } finally {
+    if (getTestRecordingStatus(timer)) {
+      await stopTestRecording(active.recordingId, "cleanup", timer);
+    }
+  }
 });

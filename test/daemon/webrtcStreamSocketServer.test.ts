@@ -123,6 +123,7 @@ let started: Array<{
   device: BootedDevice;
   streamId?: string;
   overrides?: WebRtcStreamingOverrides;
+  subscriptionKind?: "owner" | "viewer";
 }> = [];
 let stopped: string[] = [];
 
@@ -138,6 +139,7 @@ function makeDeps(
         device: request.device,
         streamId: request.streamId,
         overrides: request.overrides,
+        subscriptionKind: request.subscriptionKind,
       });
       const d = descriptor(streamId);
       active.set(streamId, d);
@@ -916,7 +918,7 @@ describe("WebRtcStreamSocketServer", () => {
       expect(identities).toEqual(["session-1:phone", "session-1:phone"]);
     });
 
-    test("rejects targeting a device owned by another session", async () => {
+    test("admits a viewer targeting a device owned by another session", async () => {
       const server = enforcingServer(
         fakeSessionManager({ getSessionForDevice: () => "other-session" }),
       );
@@ -929,12 +931,12 @@ describe("WebRtcStreamSocketServer", () => {
         whipEndpoint: "https://coord/whip",
       });
       const response = lastResponse(socket);
-      expect(response.success).toBe(false);
-      expect(response.error).toContain("different daemon session");
-      expect(started).toHaveLength(0);
+      expect(response).toMatchObject({ success: true, subscriptionKind: "viewer" });
+      expect(started).toHaveLength(1);
+      expect(started[0].subscriptionKind).toBe("viewer");
     });
 
-    test("rejects an omitted deviceId when the resolved device belongs to another session", async () => {
+    test("admits a viewer with omitted deviceId when another session owns the resolved device", async () => {
       const server = enforcingServer(
         fakeSessionManager({ getSessionForDevice: () => "other-session" }),
       );
@@ -945,9 +947,9 @@ describe("WebRtcStreamSocketServer", () => {
         sessionUuid: "session-1",
         whipEndpoint: "https://coord/whip",
       });
-      expect(lastResponse(socket).success).toBe(false);
-      expect(lastResponse(socket).error).toContain("different daemon session");
-      expect(started).toHaveLength(0);
+      expect(lastResponse(socket)).toMatchObject({ success: true, subscriptionKind: "viewer" });
+      expect(started).toHaveLength(1);
+      expect(started[0].subscriptionKind).toBe("viewer");
     });
 
     test("accepts an omitted deviceId when the resolved device belongs to the caller", async () => {

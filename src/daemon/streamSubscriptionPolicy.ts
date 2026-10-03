@@ -1,14 +1,18 @@
 import { ActionableError } from "../models/ActionableError";
 
 /**
- * Shared relay/WebRTC rule: admission stays transport-specific and unchanged. A live viewer
- * survives ownership changes; a live owner losing its device becomes a read-only viewer. The
- * subscribing identity ending terminates either kind. Device removal, VM restore, identity
- * quarantine and daemon shutdown terminate both kinds. Auth-off skips ownership reconciliation entirely.
+ * Shared relay/WebRTC rule: any live, non-releasing device session may attach read-only
+ * to any device; its owner session has owner kind. Registration-only observer sessions
+ * are not admitted. Viewers cannot mutate an owner's capture parameters or control.
+ * A live viewer survives ownership changes; an owner losing its device becomes a
+ * read-only viewer. The subscribing identity ending terminates either kind. Device
+ * removal, VM restore, identity quarantine and daemon shutdown terminate both kinds.
+ * Auth-off skips ownership reconciliation entirely and retains legacy hint/control behavior.
  * WebRTC lease holders may release/renew their own leases without stream control authority.
- * Device owners may stop all WebRTC leases (stopped_by_owner); this is neither a lifecycle
- * event nor an ownership-change outcome. Relay control/admission remains unchanged.
- * Subscribe-time capture hints are admission parameters for both kinds, not control messages.
+ * Device owners may stop all WebRTC leases (stopped_by_owner); the relay has no owner stop.
+ * Relay viewer hints are ignored while the device has an owner; a first owner join
+ * replaces viewer-created hints and size. Fresh WebRTC viewers use capture defaults;
+ * owner parameter changes replace capture and end other leases with stopped_by_owner.
  */
 export type StreamSubscriptionKind = "owner" | "viewer";
 export type StreamSubscriptionLifecycleEndReason =
@@ -25,6 +29,8 @@ export interface StreamSubscriptionIdentity {
   /** False for an unknown, expired, unavailable or currently releasing identity. */
   sessionExists: boolean;
   ownsDevice: boolean;
+  /** Internal admission fact for relay hints; absent legacy facts fail closed for viewers. */
+  hasDeviceOwner?: boolean;
 }
 export type StreamSubscriptionDecision =
   | { action: "keep" }

@@ -24,14 +24,14 @@ const countBoxes = (html: string): number => (html.match(/class="am-box"/g) || [
 
 describe("renderObserveAppHtml", () => {
   test("renders one overlay box per flattened element (Android fixture)", () => {
-    const html = renderObserveAppHtml(androidObserve());
+    const html = renderObserveAppHtml({ observe: androidObserve() });
     // viewBox is the bounds coordinate space, so boxes align regardless of screenshot resolution.
     expect(html).toContain('viewBox="0 0 1080 2400"');
     expect(countBoxes(html)).toBe(58);
   });
 
   test("preserves fractional iOS bounds (issue #3206) — Android + iOS hierarchy shape", () => {
-    const html = renderObserveAppHtml(iosObserve());
+    const html = renderObserveAppHtml({ observe: iosObserve() });
     expect(html).toContain('viewBox="0 0 393 852"');
     expect(countBoxes(html)).toBe(4);
     // Fractional child coordinates must not be truncated to integers.
@@ -40,16 +40,22 @@ describe("renderObserveAppHtml", () => {
 
   test("embeds the screenshot as an inline <image> when provided, and omits it otherwise", () => {
     const dataUri = "data:image/png;base64,QUJD";
-    const withShot = renderObserveAppHtml(iosObserve(), dataUri);
+    const withShot = renderObserveAppHtml({
+      observe: iosObserve(),
+      screenshot: { dataUri, expiresAt: 600000 },
+    });
     expect(withShot).toContain("<image");
     expect(withShot).toContain(dataUri);
 
-    const noShot = renderObserveAppHtml(iosObserve());
+    const noShot = renderObserveAppHtml({ observe: iosObserve() });
     expect(noShot).not.toContain("<image");
   });
 
   test("is fully self-contained — no external fetch, CDN, or remote script", () => {
-    const html = renderObserveAppHtml(androidObserve(), "data:image/png;base64,QUJD");
+    const html = renderObserveAppHtml({
+      observe: androidObserve(),
+      screenshot: { dataUri: "data:image/png;base64,QUJD", expiresAt: 600000 },
+    });
     // No fetchable external references: no remote scripts, no http(s)/protocol-relative
     // src/href, no CSS url()/@import, no fetch().
     expect(html).not.toMatch(/<script\s+[^>]*\bsrc=/i);
@@ -63,12 +69,12 @@ describe("renderObserveAppHtml", () => {
   });
 
   test("is theme-aware (light + dark)", () => {
-    expect(renderObserveAppHtml(iosObserve())).toContain("prefers-color-scheme");
+    expect(renderObserveAppHtml({ observe: iosObserve() })).toContain("prefers-color-scheme");
   });
 
   test("degrades to an empty state without a view hierarchy (no throw)", () => {
     const empty = { screenSize: { width: 100, height: 200 } } as unknown as ObserveResult;
-    const html = renderObserveAppHtml(empty);
+    const html = renderObserveAppHtml({ observe: empty });
     expect(html).toContain("data-observe-app");
     expect(countBoxes(html)).toBe(0);
   });
@@ -76,8 +82,10 @@ describe("renderObserveAppHtml", () => {
 
 describe("registerObserveAppResource", () => {
   const fakeSource: ObserveAppDataSource = {
-    getLatestObserve: async () => iosObserve(),
-    getLatestScreenshotDataUri: async () => "data:image/png;base64,QUJD",
+    getObservation: async () => ({
+      observe: iosObserve(),
+      screenshot: { dataUri: "data:image/png;base64,QUJD", expiresAt: 600000 },
+    }),
   };
 
   beforeEach(() => {
@@ -85,65 +93,72 @@ describe("registerObserveAppResource", () => {
   });
 
   test("advertises ui://automobile/observe with the MCP App mime type", () => {
-    registerObserveAppResource(fakeSource);
+    registerObserveAppResource({ dataSource: fakeSource });
     const def = ResourceRegistry.getResourceDefinitions().find(
       (d) => d.uri === OBSERVE_APP_RESOURCE_URI,
     );
     expect(def).toBeDefined();
     expect(def?.mimeType).toBe(MCP_APP_MIME_TYPE);
+    expect(def?.description).not.toContain("Interactive");
+    expect(def?.description).toContain("when it is still retained");
   });
 
   test("handler renders app HTML from the data source (screenshot inlined)", async () => {
-    registerObserveAppResource(fakeSource);
+    registerObserveAppResource({ dataSource: fakeSource });
     const content = await ResourceRegistry.getResource(OBSERVE_APP_RESOURCE_URI)!.handler();
     expect(content.mimeType).toBe(MCP_APP_MIME_TYPE);
     expect(content.text).toContain("data-observe-app");
     expect(content.text).toContain("data:image/png;base64,QUJD");
     expect(content.text).toContain('viewBox="0 0 393 852"');
+    expect(content.text).toContain('data-screenshot="present"');
+  });
+
+  test("sessionless production reads explicitly report no session-bound observation", async () => {
+    registerObserveAppResource();
+    const content = await ResourceRegistry.getResource(OBSERVE_APP_RESOURCE_URI)!.handler();
+    expect(content.text).toContain("No session-bound observation is available");
+    expect(content.text).not.toContain("<image");
   });
 });
 
 describe("ui:// resource resolves through the MCP read path (scheme guard)", () => {
   let fixture: McpTestFixture;
 
-  beforeEach(() => {
+  beforeAll(async () => {
     ResourceRegistry.clearResources();
-  });
-
-  test("resources/list advertises it and resources/read returns app HTML", async () => {
     fixture = new McpTestFixture();
     await fixture.setup();
-    try {
-      const { client } = fixture.getContext();
+  });
+  afterAll(async () => fixture.teardown());
 
-      const listSchema = z.object({
-        resources: z.array(z.object({ uri: z.string(), mimeType: z.string().optional() })),
-      });
-      const list = await client.request({ method: "resources/list", params: {} }, listSchema);
-      const listed = list.resources.find((r) => r.uri === OBSERVE_APP_RESOURCE_URI);
-      expect(listed).toBeDefined();
-      expect(listed?.mimeType).toBe(MCP_APP_MIME_TYPE);
+  test("resources/list advertises it and resources/read returns app HTML", async () => {
+    const { client } = fixture.getContext();
 
-      const readSchema = z.object({
-        contents: z.array(
-          z.object({
-            uri: z.string(),
-            mimeType: z.string().optional(),
-            text: z.string().optional(),
-          }),
-        ),
-      });
-      const read = await client.request(
-        { method: "resources/read", params: { uri: OBSERVE_APP_RESOURCE_URI } },
-        readSchema,
-      );
-      expect(read.contents).toHaveLength(1);
-      expect(read.contents[0].mimeType).toBe(MCP_APP_MIME_TYPE);
-      // Empty-state or populated — either way the app root renders (guard let ui:// through).
-      expect(read.contents[0].text).toContain("data-observe-app");
-    } finally {
-      await fixture.teardown();
-    }
+    const listSchema = z.object({
+      resources: z.array(z.object({ uri: z.string(), mimeType: z.string().optional() })),
+    });
+    const list = await client.request({ method: "resources/list", params: {} }, listSchema);
+    const listed = list.resources.find((r) => r.uri === OBSERVE_APP_RESOURCE_URI);
+    expect(listed).toBeDefined();
+    expect(listed?.mimeType).toBe(MCP_APP_MIME_TYPE);
+
+    const readSchema = z.object({
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
+    });
+    const read = await client.request(
+      { method: "resources/read", params: { uri: OBSERVE_APP_RESOURCE_URI } },
+      readSchema,
+    );
+    expect(read.contents).toHaveLength(1);
+    expect(read.contents[0].mimeType).toBe(MCP_APP_MIME_TYPE);
+    // Empty-state or populated — either way the app root renders (guard let ui:// through).
+    expect(read.contents[0].text).toContain("data-observe-app");
   });
 });
 

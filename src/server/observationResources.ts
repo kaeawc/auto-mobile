@@ -16,15 +16,14 @@ import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
 import { errorMessage } from "../utils/describeUnknownError";
 import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
-import { detectImageMimeType } from "../utils/screenshot/imageHeaderDimensions";
+import {
+  readRetainedScreenshot,
+  screenshotMimeType,
+  type ScreenshotFileSystem,
+} from "./retainedScreenshot";
 import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
 import { OBSERVATION_SCREENSHOT_URI_TEMPLATE } from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
-
-interface ScreenshotFileSystem {
-  stat(path: string): Promise<{ isFile(): boolean }>;
-  readFile(path: string): Promise<Buffer>;
-}
 
 let screenshotFileSystem: ScreenshotFileSystem = realFs;
 
@@ -58,20 +57,6 @@ export function setSessionScreenshotResourceDependencies(
 
 export function resetSessionScreenshotResourceDependencies(): void {
   sessionScreenshotResourceDependencies = defaultSessionScreenshotResourceDependencies;
-}
-
-function screenshotMimeType(path: string, imageBuffer: Buffer): string {
-  const detected = detectImageMimeType(imageBuffer);
-  if (detected) {
-    return detected;
-  }
-  if (path.endsWith(".webp")) {
-    return "image/webp";
-  }
-  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) {
-    return "image/jpeg";
-  }
-  return "image/png";
 }
 
 // Resource URIs
@@ -391,16 +376,18 @@ async function getObservationScreenshot(params: Record<string, string>): Promise
       };
     }
 
-    await screenshotPathProtection.protect(screenshotPath);
-    const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
+    const image = await readRetainedScreenshot({
+      path: screenshotPath,
+      fileSystem: screenshotFileSystem,
+    });
     if (!matchesObservationId(deviceId, observationId)) {
       return observationScreenshotUnknownError(uri, deviceId, observationId);
     }
 
     return {
       uri,
-      mimeType: screenshotMimeType(screenshotPath, imageBuffer),
-      blob: imageBuffer.toString("base64"),
+      mimeType: image.mimeType,
+      blob: image.data,
     };
   } catch (error) {
     logger.error(

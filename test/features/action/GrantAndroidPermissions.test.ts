@@ -3,6 +3,8 @@ import { BootedDevice } from "../../../src/models";
 import { GrantAndroidPermissions } from "../../../src/features/action/GrantAndroidPermissions";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeRecordingPerformanceTracker } from "../../fakes/FakeRecordingPerformanceTracker";
 
 const androidDevice: BootedDevice = {
   name: "emu",
@@ -11,6 +13,30 @@ const androidDevice: BootedDevice = {
 };
 
 describe("GrantAndroidPermissions", () => {
+  test("ends the performance block exactly once when target-user resolution throws", async () => {
+    const adb = new FakeAdbExecutor();
+    const failure = new Error("adb offline during user resolution");
+    adb.getForegroundApp = async () => {
+      throw failure;
+    };
+    const perf = new FakeRecordingPerformanceTracker();
+    const action = new GrantAndroidPermissions(
+      androidDevice,
+      new FakeAdbClientFactory(adb),
+      () => perf,
+    );
+
+    await expect(
+      action.execute("com.example.app", {
+        permissions: ["android.permission.CAMERA"],
+      }),
+    ).rejects.toBe(failure);
+
+    expect(perf.serialNames).toEqual(["changeAndroidPermissions"]);
+    expect(perf.endCalls).toBe(1);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
   test("returns error on empty permissions", async () => {
     const factory = new FakeAdbClientFactory();
     const action = new GrantAndroidPermissions(androidDevice, factory);

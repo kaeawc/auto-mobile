@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.os.Handler
 import android.os.Looper
+import java.time.Duration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -9,6 +10,7 @@ import kotlinx.coroutines.cancel
 import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowAccessibilityService
+import org.robolectric.shadows.ShadowSystemClock
 import org.robolectric.util.ReflectionHelpers
 
 /**
@@ -70,7 +72,15 @@ internal class CtrlProxyGestureServiceFixture {
 
   fun completeLastStroke() {
     val dispatch = shadow.gesturesDispatched.last()
+    // Moving and final strokes complete after their planned duration in routing tests.
+    ShadowSystemClock.advanceBy(Duration.ofMillis(dispatch.description().getStroke(0).duration))
     dispatch.callback().onCompleted(dispatch.description())
+  }
+
+  fun advanceDragWait() {
+    val timer = service.dragDeadline as FakeGestureDeadline
+    ShadowSystemClock.advanceBy(Duration.ofMillis(timer.tasks.last().delayMs))
+    timer.expire()
   }
 
   fun cancelLastStroke() {

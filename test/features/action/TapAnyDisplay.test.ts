@@ -4,7 +4,7 @@ import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { runWithSelectedDisplayPin } from "../../../src/features/observe/SessionDisplayContext";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import type { BootedDevice, TapAnyElementOptions } from "../../../src/models";
+import type { BootedDevice, TapAnyElementOptions, ViewHierarchyNode } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
@@ -70,16 +70,29 @@ function harness(ctrlProxy: boolean, targetDevice = device) {
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const capability = spyOn(client, "supportsCommand").mockResolvedValue(ctrlProxy);
   const dispatches: Array<number | undefined> = [];
+  let onDispatch = () => {};
   const tap = spyOn(client, "requestTapCoordinates").mockImplementation(async (...args) => {
     args[9]?.();
     dispatches.push(args[8]);
+    onDispatch();
     return { success: true };
   });
   restores.push(
     () => capability.mockRestore(),
     () => tap.mockRestore(),
   );
-  return { action, adb, capture, observe, observation, transitions, dispatches };
+  return {
+    action,
+    adb,
+    capture,
+    observe,
+    observation,
+    transitions,
+    dispatches,
+    onDispatch: (callback: () => void) => {
+      onDispatch = callback;
+    },
+  };
 }
 
 for (const ctrlProxy of [false, true]) {
@@ -120,6 +133,17 @@ for (const ctrlProxy of [false, true]) {
     );
   });
 }
+
+test("tapAny unreadable post-tap fingerprint skips second dispatch", async () => {
+  const h = harness(true);
+  h.onDispatch(() => {
+    const node: ViewHierarchyNode = {};
+    node.node = [node];
+    h.observation.viewHierarchy!.hierarchy.node = node;
+  });
+  expect((await h.action.execute({ action: "tap", display: "cover" })).success).toBe(true);
+  expect(h.dispatches).toEqual([3]);
+});
 
 test("tapAny wrong-panel retry capture fails stale without another dispatch", async () => {
   const h = harness(true);

@@ -260,6 +260,17 @@ describe("tapOn display verification", () => {
         expect((await h.execute({ [option]: true })).success).toBe(true);
         expect(h.dispatches.length).toBe(1);
       });
+      test(`${route} ${option}: unreadable post-tap fingerprint skips retry`, async () => {
+        const h = harness(ctrlProxy);
+        const unreadable = hierarchy();
+        const node = unreadable.hierarchy.node!;
+        node.node = [node];
+        h.capture.read = () => (h.dispatches.length ? unreadable : hierarchy());
+        expect((await h.execute({ [option]: true })).success).toBe(true);
+        expect(h.dispatches).toHaveLength(1);
+        expect(h.timer.getSleepHistory()).toContain(POST_TAP_SETTLE_MS);
+        expect(h.timer.getSleepHistory()).not.toContain(PRE_RETRY_DELAY_MS);
+      });
     }
     test(`${route} preTapStability: waits for targeted bounds and taps refreshed point`, async () => {
       const h = harness(ctrlProxy);

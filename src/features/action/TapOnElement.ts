@@ -4135,7 +4135,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   async retryTapIfNoChange(
-    preTapHash: string,
+    preTapHash: string | null,
     tapPoint: { x: number; y: number },
     action: string,
     longPressDuration: number,
@@ -4151,16 +4151,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       this.tapVerificationRefresh({ refresh: options.verification?.refresh, screenSize, signal }),
       (hierarchy) => this.hashViewHierarchy(hierarchy),
       preTapHash,
+      signal,
     );
 
     if (probe.status === "unavailable") {
-      // Refresh timed out — we can't tell whether the tap registered. A retry
+      // Hierarchy unreadable — we can't tell whether the tap registered. A retry
       // here is more likely to land on a transitioning screen and bounce us
       // off-path than to recover a real ghost tap. Bail and let the next
       // step's waitFor/observe surface a real failure.
       logger.warn(
-        `[TapOnElement][retryIfNoChange] Post-tap refresh returned no hierarchy ` +
-          `within ${POST_TAP_REFRESH_TIMEOUT_MS}ms — skipping retry (likely activity transition in progress)`,
+        `[TapOnElement][retryIfNoChange] Tap hierarchy unreadable or could not be fingerprinted ` +
+          `(post-tap refresh budget ${POST_TAP_REFRESH_TIMEOUT_MS}ms) — skipping retry`,
       );
       return;
     }

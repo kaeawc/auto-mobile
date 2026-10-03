@@ -81,6 +81,8 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
 
   private async fetch(key: string, entry: InventoryEntry, device: BootedDevice): Promise<void> {
     try {
+      // Let hydrate store the pending promise before a source can throw synchronously.
+      await Promise.resolve();
       const source = device.platform === "android" ? this.androidSource : this.iosSource;
       // The shared read has its own bounded source timeout, not a caller's signal.
       const result = await source.read(device);
@@ -98,7 +100,9 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
         entry.retryAt = this.timer.now() + this.failureRetryMs;
       }
     } finally {
-      entry.pending = undefined;
+      if (this.entries.get(key) === entry) {
+        entry.pending = undefined;
+      }
     }
   }
 

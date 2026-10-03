@@ -26,3 +26,17 @@ internal data class ExpandableListState(
   fun <T> visible(section: FailureSection, items: List<T>, limit: Int = 5): List<T> =
     if (isExpanded(section)) items else items.take(limit)
 }
+
+internal fun expansionLinkLabel(
+  noun: String,
+  loadedCount: Int,
+  totalCount: Int,
+  expanded: Boolean,
+  limit: Int = 5,
+): String? =
+  when {
+    expanded -> "Show less"
+    loadedCount <= limit -> null
+    totalCount > loadedCount -> "Show $loadedCount of $totalCount $noun"
+    else -> "View all $loadedCount $noun"
+  }

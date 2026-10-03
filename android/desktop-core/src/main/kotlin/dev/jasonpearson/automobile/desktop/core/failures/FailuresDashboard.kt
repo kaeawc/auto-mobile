@@ -1252,14 +1252,17 @@ internal fun FailureDetailView(
           CaptureCard(capture = capture)
         }
       }
-      if (failure.recentCaptures.size > 5) {
-        ViewAllLink(
-          if (expandedState.isExpanded(FailureSection.Captures)) "Show less"
-          else "View all ${failure.recentCaptures.size} captures"
-        ) {
-          expandedState = expandedState.toggle(FailureSection.Captures)
+      // The daemon caps captures at 5 (src/db/failureAnalyticsRepository.ts).
+      // Offer expansion only beyond the preview limit; no capture total is available.
+      expansionLinkLabel(
+          noun = "captures",
+          loadedCount = failure.recentCaptures.size,
+          totalCount = failure.recentCaptures.size,
+          expanded = expandedState.isExpanded(FailureSection.Captures),
+        )
+        ?.let { label ->
+          ViewAllLink(label) { expandedState = expandedState.toggle(FailureSection.Captures) }
         }
-      }
       Spacer(Modifier.height(16.dp))
     }
 
@@ -1429,14 +1432,17 @@ internal fun FailureDetailView(
           occurrence ->
           OccurrenceRow(occurrence = occurrence)
         }
-        if (failure.sampleOccurrences.size > 5) {
-          ViewAllLink(
-            if (expandedState.isExpanded(FailureSection.Occurrences)) "Show less"
-            else "View all ${failure.totalCount} occurrences"
-          ) {
-            expandedState = expandedState.toggle(FailureSection.Occurrences)
+        // The daemon caps sample occurrences at 6 (src/db/failureAnalyticsRepository.ts).
+        // Offer expansion only beyond the preview limit and label partial lists as N of TOTAL.
+        expansionLinkLabel(
+            noun = "occurrences",
+            loadedCount = failure.sampleOccurrences.size,
+            totalCount = failure.totalCount,
+            expanded = expandedState.isExpanded(FailureSection.Occurrences),
+          )
+          ?.let { label ->
+            ViewAllLink(label) { expandedState = expandedState.toggle(FailureSection.Occurrences) }
           }
-        }
       }
     }
 

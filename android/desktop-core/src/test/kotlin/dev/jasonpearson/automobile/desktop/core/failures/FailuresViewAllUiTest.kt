@@ -35,6 +35,49 @@ class FailuresViewAllUiTest {
     assertExpansion(FailureSection.Occurrences, "occurrences", "occurrence-6")
 
   @Test
+  fun `sample occurrences show loaded count without promising all occurrences`() =
+    runComposeUiTest {
+      setContent {
+        MaterialTheme {
+          FailureDetailView(
+            fixture(FailureSection.Occurrences, totalCount = 42),
+            {},
+            {},
+            {},
+            { _, _ -> },
+          )
+        }
+      }
+      onNodeWithText("occurrence-6").assertDoesNotExist()
+      onNodeWithText("Show 6 of 42 occurrences →").assertExists()
+      onNodeWithText("View all 42 occurrences", substring = true).assertDoesNotExist()
+      onNodeWithText("Show 6 of 42 occurrences →").performScrollTo().performClick()
+      onNodeWithText("occurrence-6").performScrollTo().assertIsDisplayed()
+      onNodeWithText("Show less →").assertExists()
+    }
+
+  @Test
+  fun `sample occurrences at preview limit have no expansion link`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        FailureDetailView(
+          fixture(FailureSection.Occurrences, totalCount = 42, rowCount = 5),
+          {},
+          {},
+          {},
+          { _, _ -> },
+        )
+      }
+    }
+    for (row in 1..5) {
+      onNodeWithText("occurrence-$row").performScrollTo().assertIsDisplayed()
+    }
+    onNodeWithText("View all", substring = true).assertDoesNotExist()
+    onNodeWithText("Show 6 of", substring = true).assertDoesNotExist()
+    onNodeWithText("Show less", substring = true).assertDoesNotExist()
+  }
+
+  @Test
   fun `error codes expand and collapse`() =
     assertExpansion(FailureSection.ErrorCodes, "error codes", "code-6")
 
@@ -98,8 +141,12 @@ class FailuresViewAllUiTest {
       onNodeWithText("View all 6 $label →").assertExists()
     }
 
-  private fun fixture(section: FailureSection): FailureGroup {
-    val rows = (1..6).toList()
+  private fun fixture(
+    section: FailureSection,
+    totalCount: Int = 6,
+    rowCount: Int = 6,
+  ): FailureGroup {
+    val rows = (1..rowCount).toList()
     return FailureGroup(
       id = "failure",
       type = FailureType.ToolCallFailure,
@@ -108,7 +155,7 @@ class FailuresViewAllUiTest {
       message = "message",
       firstOccurrence = 0L,
       lastOccurrence = 0L,
-      totalCount = 6,
+      totalCount = totalCount,
       uniqueSessions = 1,
       severity = FailureSeverity.High,
       deviceBreakdown =

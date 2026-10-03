@@ -1,6 +1,6 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { DeepLinkManager } from "../../utils/DeepLinkManager";
+import { DeepLinkManager } from "./DeepLinkManager";
 import { BootedDevice, DeepLinkResult } from "../../models";
 
 export class GetDeepLinks {

@@ -4,7 +4,7 @@ import {
   ViewHierarchyResult,
   BootedDevice,
 } from "../../src/models";
-import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
+import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 
 /**
  * Fake implementation of DeepLinkManager for testing

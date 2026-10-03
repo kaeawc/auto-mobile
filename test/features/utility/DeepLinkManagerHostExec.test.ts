@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { createDefaultHostExec } from "../../src/utils/DeepLinkManager";
+import { createDefaultHostExec } from "../../../src/features/utility/DeepLinkManager";
 import {
   DefaultHostCommandExecutor,
   type ExecFileWithChild,
-} from "../../src/utils/HostCommandExecutor";
+} from "../../../src/utils/HostCommandExecutor";
 
 describe("DeepLinkManager default host exec", () => {
   test("passes argv and maxBuffer through the seam and closes stdin", async () => {

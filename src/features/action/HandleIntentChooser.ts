@@ -1,7 +1,7 @@
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import { DeepLinkManager } from "../../utils/DeepLinkManager";
+import { DeepLinkManager } from "../utility/DeepLinkManager";
 import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";

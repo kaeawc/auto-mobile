@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { DeepLinkManager, type HostExec } from "../../src/utils/DeepLinkManager";
-import type { PlistReader } from "../../src/utils/ios-cmdline-tools/PlistClient";
-import type { BootedDevice, ExecResult } from "../../src/models";
-import type { AppBundleMetadata } from "../../src/utils/ios-cmdline-tools/AppBundleMetadataClient";
-import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { DeepLinkManager, type HostExec } from "../../../src/features/utility/DeepLinkManager";
+import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
+import type { BootedDevice, ExecResult } from "../../../src/models";
+import type { AppBundleMetadata } from "../../../src/utils/ios-cmdline-tools/AppBundleMetadataClient";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
 const SIM_UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
 const PHYSICAL_UDID = "00008110-000A1234567890AB";

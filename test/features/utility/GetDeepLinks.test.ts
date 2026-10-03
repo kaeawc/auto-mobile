@@ -1,6 +1,6 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { GetDeepLinks } from "../../../src/features/utility/GetDeepLinks";
-import { DeepLinkManager } from "../../../src/utils/DeepLinkManager";
+import { DeepLinkManager } from "../../../src/features/utility/DeepLinkManager";
 import { DeepLinkResult } from "../../../src/models";
 
 describe("GetDeepLinks", () => {

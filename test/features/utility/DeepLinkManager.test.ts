@@ -1,10 +1,10 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
-import { ViewHierarchyResult, BootedDevice } from "../../src/models";
-import { DefaultElementParser } from "../../src/features/utility/ElementParser";
-import { DefaultElementGeometry } from "../../src/features/utility/ElementGeometry";
-import { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { DeepLinkManager } from "../../../src/features/utility/DeepLinkManager";
+import { ViewHierarchyResult, BootedDevice } from "../../../src/models";
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
+import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 describe("DeepLinkManager", () => {
   let deepLinkManager: DeepLinkManager;

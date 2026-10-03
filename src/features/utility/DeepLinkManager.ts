@@ -1,14 +1,17 @@
-import { awaitWhileRequestIsLive, throwIfAborted } from "./toolUtils";
-import { errorMessage } from "./describeUnknownError";
-import { DefaultHostCommandExecutor, type HostProcessExecutor } from "./HostCommandExecutor";
-import { logger } from "./logger";
-import { shellQuote } from "./shellQuote";
-import { outputReportsMissingPackage } from "./android-cmdline-tools/shellOutputHeuristics";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  DefaultHostCommandExecutor,
+  type HostProcessExecutor,
+} from "../../utils/HostCommandExecutor";
+import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
+import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
-} from "./android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   DeepLinkResult,
   IntentFilter,
@@ -18,28 +21,28 @@ import {
   BootedDevice,
   IosInfoPlist,
   ExecResult,
-} from "../models";
-import type { ElementParser } from "./interfaces/ElementParser";
-import type { ElementGeometry } from "./interfaces/ElementGeometry";
-import type { Element } from "../models/Element";
-import { nodeBounds } from "../models/ViewHierarchyResult";
-import type { Timer } from "./interfaces/Timer";
-import { defaultTimer } from "./SystemTimer";
-import { DefaultElementParser } from "../features/utility/ElementParser";
-import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
-import { ViewHierarchy } from "../features/observe/ViewHierarchy";
+} from "../../models";
+import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
+import type { Element } from "../../models/Element";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
+import type { Timer } from "../../utils/interfaces/Timer";
+import { defaultTimer } from "../../utils/SystemTimer";
+import { DefaultElementParser } from "./ElementParser";
+import { DefaultElementGeometry } from "./ElementGeometry";
+import { ViewHierarchy } from "../observe/ViewHierarchy";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_PREFIX,
-} from "../features/observe/android/StableNodeIdentity";
-import { DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS } from "../features/action/ClearText";
-import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
-import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
+} from "../observe/android/StableNodeIdentity";
+import { DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS } from "../action/ClearText";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import {
   AppBundleMetadataClient,
   type AppBundleMetadata,
-} from "./ios-cmdline-tools/AppBundleMetadataClient";
+} from "../../utils/ios-cmdline-tools/AppBundleMetadataClient";
 
 /**
  * Runs a host program (NOT `xcrun simctl`) **by argv, never via a shell**. Used
@@ -251,7 +254,7 @@ export async function resolveChooserActivityLabel(
 
 const defaultChooserAppMetadata: ChooserAppMetadata = {
   async getLabel(device, packageName, signal) {
-    const { resolveAppLabel } = await import("../server/systemTrayHelpers");
+    const { resolveAppLabel } = await import("../../server/systemTrayHelpers");
     throwIfAborted(signal);
     return resolveAppLabel(device, packageName, signal);
   },

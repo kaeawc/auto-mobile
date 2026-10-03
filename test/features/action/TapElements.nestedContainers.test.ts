@@ -340,7 +340,7 @@ test("a leaf index overrides uniqueness while unindexed outer scopes stay unique
   expect(ambiguous.taps()).toBe(0);
 });
 
-test("unique never promotes an inert leaf onto its immediate container", async () => {
+test("unique finds an inert leaf but refuses bounds outside its container", async () => {
   const leaf = node("remove", [], 40);
   leaf.attrs.clickable = false;
   const item = node("item_42", [node("", [leaf])]);
@@ -349,7 +349,7 @@ test("unique never promotes an inert leaf onto its immediate container", async (
   const h = harness("tapOn", hierarchy);
   const result = await h.execute();
   expect(result.success).toBe(false);
-  expect(result.error).toContain("Target not found within container");
+  expect(result.error).toContain("has no visible tap area");
   expect(h.taps()).toBe(0);
 });
 test("unbounded containers remain valid scope nodes across anonymous wrappers", async () => {

@@ -113,10 +113,10 @@ test("tap and highlight agree on scoped default target and ranked explicit indic
     container,
     intentAction: "highlight",
   });
-  expect(tap.element?.["resource-id"]).toBe("second");
-  // Highlight can intentionally target a bounded inert label; tap eligibility is distinct.
+  // Scoped taps can use an inert match's own bounds, just like highlight.
+  expect(tap.element?.["resource-id"]).toBe("label");
   expect(highlight.element?.["resource-id"]).toBe("label");
   expect(
     selector.selectByText(hierarchy, "Save", { container, index: 0 }).element?.["resource-id"],
-  ).toBe("second");
+  ).toBe("label");
 });

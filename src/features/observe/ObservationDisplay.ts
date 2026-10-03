@@ -1,6 +1,6 @@
 import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
 import { POSTURE_PANEL_ROLES, type Posture } from "../../models/DisplayPanel";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   parseAndroidCommittedStateIdentifier,
@@ -120,7 +120,7 @@ export class ObservedAndroidDisplayCache {
     if (
       remembered === undefined ||
       (device.displays?.panels.length ?? 0) < 2 ||
-      !isIosSimulatorUdid(device.deviceId) ||
+      resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator" ||
       (panel !== undefined && (panel.key !== remembered.key || panel.role !== remembered.role))
     ) {
       rememberedIosPostures.delete(device.deviceId);

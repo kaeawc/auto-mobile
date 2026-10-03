@@ -32,7 +32,7 @@ import {
 } from "./ScreenshotPathProtection";
 import { IOSCtrlProxyClient } from "./ios";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
@@ -213,7 +213,7 @@ export class TakeScreenshot implements ScreenshotService {
     if (client?.isConnected()) {
       return client.requestScreenshotForObserver(10000, signal);
     }
-    if (isIosSimulatorUdid(this.device.deviceId)) {
+    if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator") {
       return this.captureSimulatorObserverScreenshot(signal);
     }
     const daemon = DaemonState.getInstance();

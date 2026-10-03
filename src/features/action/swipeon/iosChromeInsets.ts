@@ -1,5 +1,6 @@
 import {
   ActionableError,
+  type Element,
   type ElementBounds,
   type ObserveResult,
   type ViewHierarchyResult,
@@ -10,6 +11,8 @@ import { getHierarchySnapshot } from "../../observe/HierarchyCapture";
 import { screenSizeForOffscreenCheck } from "../../utility/ElementGeometry";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { getScreenBounds } from "../../../utils/screenBounds";
+import { boundsEqual } from "../../../utils/bounds";
+import { getHierarchyNodeSource } from "../../observe/output/elementProvenance";
 
 const zeroInsets = (): ObservationEdgeInsets => ({ top: 0, right: 0, bottom: 0, left: 0 });
 const navigationBars = new Set(["UINavigationBar", "XCUIElementTypeNavigationBar"]);
@@ -23,6 +26,7 @@ const bottomBars = new Set([
 interface ChromeFrame {
   bounds: ElementBounds;
   region: "navigation bar" | "status bar" | "bottom toolbar or tab bar";
+  node: SearchableEntry;
 }
 
 function visibleChromeNode(node: SearchableEntry): boolean {
@@ -78,22 +82,108 @@ function chromeRegion(
 function iosChromeFrames(
   hierarchy: ViewHierarchyResult | undefined,
   screen?: ScreenSize,
+  nodes = hierarchy ? new SearchableHierarchy().project(hierarchy) : [],
 ): ChromeFrame[] {
   if (!hierarchy || !screen) {
     return [];
   }
   const frames: ChromeFrame[] = [];
-  for (const node of new SearchableHierarchy().project(hierarchy)) {
+  for (const node of nodes) {
     const bounds = node.bounds;
     if (!visibleChromeNode(node) || !chromeBoundsOnScreen(bounds, screen)) {
       continue;
     }
     const region = chromeRegion(node.className ?? "", bounds, screen);
     if (region) {
-      frames.push({ bounds, region });
+      frames.push({ bounds, region, node });
     }
   }
   return frames;
+}
+
+function chromeTargetNode(
+  nodes: readonly SearchableEntry[],
+  elements: readonly Element[],
+): SearchableEntry | undefined {
+  for (const element of elements) {
+    const source = getHierarchyNodeSource(element);
+    const node =
+      (source && nodes.find((entry) => entry.source === source)) ||
+      nodes.find(
+        (entry) =>
+          entry.bounds &&
+          boundsEqual(entry.bounds, element.bounds) &&
+          entry.nativeId === element["resource-id"] &&
+          entry.nodeKey === element["view-id"],
+      );
+    if (node) {
+      return node;
+    }
+  }
+  return undefined;
+}
+
+function chromeCoversTarget(
+  frame: ChromeFrame,
+  target: SearchableEntry | undefined,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  // A bar itself is a chrome target, even when another same-kind frame overlaps it.
+  if (target && target.className === frame.node.className) {
+    return false;
+  }
+  if (target && frame.node.windowRank > target.windowRank) {
+    return false;
+  }
+  let current = target;
+  while (current) {
+    if (current === frame.node) {
+      return false;
+    }
+    current = current.parentIndex === undefined ? undefined : nodes[current.parentIndex];
+  }
+  return true;
+}
+
+/** Clip app content at captured chrome edges; chrome descendants and foreground windows are exempt. */
+export function clipIosChromeBounds({
+  bounds,
+  hierarchy,
+  screen,
+  elements = [],
+  regions,
+}: {
+  bounds: ElementBounds;
+  hierarchy: ViewHierarchyResult;
+  screen: ScreenSize;
+  elements?: readonly Element[];
+  regions?: readonly ChromeFrame["region"][];
+}): { bounds: ElementBounds | null; coveredBy?: ChromeFrame["region"] } {
+  const nodes = new SearchableHierarchy().project(hierarchy);
+  const target = chromeTargetNode(nodes, elements);
+  let visible = bounds;
+  for (const frame of iosChromeFrames(hierarchy, screen, nodes)) {
+    if (regions && !regions.includes(frame.region)) {
+      continue;
+    }
+    const bar = frame.bounds;
+    const overlaps =
+      bar.left < visible.right &&
+      bar.right > visible.left &&
+      bar.top < visible.bottom &&
+      bar.bottom > visible.top;
+    if (!overlaps || !chromeCoversTarget(frame, target, nodes)) {
+      continue;
+    }
+    visible =
+      frame.region === "bottom toolbar or tab bar"
+        ? { ...visible, bottom: Math.min(visible.bottom, bar.top) }
+        : { ...visible, top: Math.max(visible.top, bar.bottom) };
+    if (visible.top >= visible.bottom) {
+      return { bounds: null, coveredBy: frame.region };
+    }
+  }
+  return { bounds: visible };
 }
 
 /** Pure, best-effort chrome geometry in the captured iOS point coordinate space. */

@@ -3,6 +3,7 @@ import { nodeAttributes } from "../../../../src/models/ViewHierarchyResult";
 import { describe, expect, test } from "bun:test";
 import {
   deriveIosChromeInsets,
+  clipIosChromeBounds,
   effectiveSwipeInsets,
   iosSwipeStartWarning,
   swipeScreenSize,
@@ -17,6 +18,30 @@ import { AutoTargetSelector } from "../../../../src/features/action/swipeon/Auto
 const zero = { top: 0, right: 0, bottom: 0, left: 0 };
 const pair = loadIosRemindersNoiseObservePair();
 const fractional = loadIosFractionalObserve();
+
+describe("shared iOS chrome clipping", () => {
+  for (const [name, observation] of Object.entries({ fractional, ...pair })) {
+    test(`clips content at the captured ${name} navigation edge, exempting its own controls`, () => {
+      const hierarchy = observation.viewHierarchy!;
+      const screen = swipeScreenSize({ observation, platform: "ios" })!;
+      const nodes = new SearchableHierarchy().project(hierarchy);
+      const nav = nodes.find((node) => node.className?.endsWith("NavigationBar"))!;
+      // Synthetic content bounds inside a real captured bar; this is not a captured row.
+      expect(clipIosChromeBounds({ bounds: nav.bounds!, hierarchy, screen }).coveredBy).toBe(
+        "navigation bar",
+      );
+      const title = nodes.find((node) => node.parentIndex === nav.index && node.element) ?? nav;
+      expect(
+        clipIosChromeBounds({
+          bounds: title.bounds!,
+          hierarchy,
+          screen,
+          elements: [title.element!],
+        }).bounds,
+      ).toEqual(title.bounds!);
+    });
+  }
+});
 
 describe("iOS chrome inset derivation", () => {
   for (const [name, observation] of Object.entries(pair)) {

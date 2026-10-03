@@ -45,6 +45,8 @@ import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordin
 import { getScreenBounds } from "../../../utils/screenBounds";
 import {
   effectiveSwipeInsets,
+  clipIosChromeBounds,
+  deriveIosChromeInsets,
   insetSwipeBounds,
   iosSwipeStartWarning,
   swipeScreenSize,
@@ -54,6 +56,12 @@ import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/s
 import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { DefaultObserveElementCollector } from "../../observe/ObserveElementCollector";
+import {
+  getImeOccluderForElement,
+  getIosImeOccluder,
+  tapPointOutsideIme,
+} from "../../observe/output/SkeletonProjection";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
@@ -311,7 +319,10 @@ export class ScrollUntilVisible {
       ),
     );
 
-    if (foundElement && !this.isElementWithinContainer(foundElement, containerElement.bounds)) {
+    if (
+      foundElement &&
+      !this.isElementWithinContainer(foundElement, containerElement.bounds, lastObservation)
+    ) {
       logger.info(
         `[SwipeOn] Found ${target} initially but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), will scroll`,
       );
@@ -586,7 +597,10 @@ export class ScrollUntilVisible {
         containerElement,
       );
 
-      if (foundElement && !this.isElementWithinContainer(foundElement, containerElement.bounds)) {
+      if (
+        foundElement &&
+        !this.isElementWithinContainer(foundElement, containerElement.bounds, lastObservation)
+      ) {
         logger.info(
           `[SwipeOn] Found ${target} but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), continuing scroll`,
         );
@@ -845,14 +859,74 @@ export class ScrollUntilVisible {
   private isElementWithinContainer(
     element: Element,
     containerBounds: { top: number; bottom: number; left: number; right: number },
+    observation: ObserveResult,
   ): boolean {
     const centerY = (element.bounds.top + element.bounds.bottom) / 2;
     const centerX = (element.bounds.left + element.bounds.right) / 2;
-    return (
+    const centerWithinContainer =
       centerY >= containerBounds.top &&
       centerY <= containerBounds.bottom &&
       centerX >= containerBounds.left &&
-      centerX <= containerBounds.right
+      centerX <= containerBounds.right;
+    return this.deps.device.platform === "ios"
+      ? this.isIosElementWithinContainer(
+          element,
+          containerBounds,
+          observation,
+          centerWithinContainer,
+        )
+      : centerWithinContainer;
+  }
+
+  private isIosElementWithinContainer(
+    element: Element,
+    containerBounds: Element["bounds"],
+    observation: ObserveResult,
+    centerWithinContainer: boolean,
+  ): boolean {
+    const hierarchy = observation.viewHierarchy;
+    const screen = swipeScreenSize({ observation, platform: "ios" });
+    if (!hierarchy || !screen) {
+      return centerWithinContainer;
+    }
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios");
+    const ime = elements && getImeOccluderForElement(elements, element);
+    const chromeInsets = deriveIosChromeInsets(hierarchy, {
+      observationScreenSize: observation.screenSize,
+    });
+    // Without captured occluders, preserve the legacy centre-in-container test.
+    // A content-only hierarchy root need not describe the full iOS screen.
+    if (!ime && !Object.values(chromeInsets).some((inset) => inset > 0)) {
+      return centerWithinContainer;
+    }
+    // includeSystemInsets affects the gesture, never whether a covered target is found.
+    const safe = getScreenBounds(screen, observation.systemInsets ?? hierarchy.systemInsets);
+    const bounds = {
+      left: Math.max(containerBounds.left, safe.left),
+      top: Math.max(containerBounds.top, safe.top),
+      right: Math.min(containerBounds.right, safe.right),
+      bottom: Math.min(containerBounds.bottom, safe.bottom),
+    };
+    const viewport = clipIosChromeBounds({ bounds, hierarchy, screen, elements: [element] }).bounds;
+    if (!viewport) {
+      return false;
+    }
+    const visible = {
+      left: Math.max(element.bounds.left, viewport.left),
+      top: Math.max(element.bounds.top, viewport.top),
+      right: Math.min(element.bounds.right, viewport.right),
+      bottom: Math.min(element.bounds.bottom, viewport.bottom),
+    };
+    if (visible.left >= visible.right || visible.top >= visible.bottom) {
+      return false;
+    }
+    const { left, top, right, bottom } = visible;
+    // A partial match is found when the exposed portion has a dispatchable tap point.
+    const point = ime
+      ? tapPointOutsideIme([left, top, right, bottom], getIosImeOccluder(ime, screen).bounds)
+      : this.deps.geometry.getElementCenter({ bounds: visible });
+    return (
+      point !== null && this.deps.geometry.isPointInElement({ bounds: visible }, point.x, point.y)
     );
   }
 

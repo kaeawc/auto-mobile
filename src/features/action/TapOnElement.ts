@@ -142,6 +142,7 @@ import {
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { getScreenBounds } from "../../utils/screenBounds";
 import { compareSelectionRank } from "../utility/selectionRank";
+import { clipIosChromeBounds } from "./swipeon/iosChromeInsets";
 
 function intersectTapBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
   const bounds = {
@@ -1054,12 +1055,52 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private invisibleMatchError(
     selection: ElementSelectionResult,
     options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
   ): string {
     const matched = selection.matchedElement ?? selection.element;
+    if (this.isCoveredByNavigationBar(selection, hierarchy, screenSize)) {
+      return `Target ${JSON.stringify(matched?.text ?? options.text ?? options.elementId ?? "target")} is covered by the navigation bar; scroll it into view with swipeOn, then retry tapOn.`;
+    }
     return (
       `Matched element ${JSON.stringify(matched?.text ?? options.text ?? options.elementId ?? "target")} ` +
       `has no visible tap area (bounds ${JSON.stringify(matched?.bounds)}). ` +
       "Scroll it into view with swipeOn, then retry tapOn."
+    );
+  }
+
+  private navigationTapBounds(
+    bounds: ElementBounds,
+    hierarchy: ViewHierarchyResult,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    elements: readonly Element[],
+  ): ReturnType<typeof clipIosChromeBounds> {
+    if (this.device.platform !== "ios" || !isUsableScreenSize(screenSize)) {
+      return { bounds };
+    }
+    return clipIosChromeBounds({
+      bounds,
+      hierarchy,
+      screen: screenSize,
+      elements,
+      regions: ["navigation bar"],
+    });
+  }
+
+  private isCoveredByNavigationBar(
+    selection: ElementSelectionResult,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
+  ): boolean {
+    const target = selection.element ?? selection.matchedElement;
+    if (!target) {
+      return false;
+    }
+    const matched = selection.matchedElement ?? target;
+    const overlap = intersectTapBounds(target.bounds, matched.bounds);
+    return (
+      !!overlap &&
+      !!this.navigationTapBounds(overlap, hierarchy, screenSize, [matched, target]).coveredBy
     );
   }
 
@@ -1077,27 +1118,22 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const matched = this.matchedTapElement(selection, target, options);
     const matchedBounds = matched.bounds;
     const matchForTap = hasTapArea(matchedBounds) ? matched : target;
-    const overlap = intersectTapBounds(target.bounds, matchForTap.bounds);
-    // Some injected/legacy captures omit screen dimensions. In that case we
-    // still constrain the point to the matched/actionable overlap; live observe
-    // supplies dimensions for the viewport and chrome checks.
-    const screen = isUsableScreenSize(screenSize)
-      ? getScreenBounds(screenSize, undefined, true)
-      : undefined;
-    const visible = overlap && screen ? intersectTapBounds(overlap, screen) : overlap;
-    if (!visible) {
-      return null;
-    }
-    if (!isUsableScreenSize(screenSize) || this.device.platform !== "ios") {
+    let visible = intersectTapBounds(target.bounds, matchForTap.bounds);
+    // Legacy captures without dimensions still constrain the matched/actionable overlap.
+    if (!visible || !isUsableScreenSize(screenSize)) {
       return visible;
     }
-    const belowStatusBar = this.clipBelowStatusBar(
-      visible,
+    visible = intersectTapBounds(visible, getScreenBounds(screenSize, undefined, true));
+    if (!visible || this.device.platform !== "ios") {
+      return visible;
+    }
+    const belowNavigationBar = this.navigationTapBounds(visible, hierarchy, screenSize, [
       matchForTap,
       target,
-      hierarchy,
-      screenSize,
-    );
+    ]).bounds;
+    const belowStatusBar =
+      belowNavigationBar &&
+      this.clipBelowStatusBar(belowNavigationBar, matchForTap, target, hierarchy, screenSize);
     return belowStatusBar
       ? this.clipBelowTabBars(belowStatusBar, matchForTap, target, hierarchy, screenSize)
       : null;
@@ -1122,7 +1158,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     context: TapPointContext,
   ): { x: number; y: number } | null {
     const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    if (pointInTapBounds(point, visibleBounds)) {
+    const navClipped = this.navigationTapBounds(target.bounds, hierarchy, context.screenSize, [
+      target,
+    ]).bounds;
+    if (
+      navClipped &&
+      boundsEqual(navClipped, target.bounds) &&
+      pointInTapBounds(point, visibleBounds)
+    ) {
       return point;
     }
     const { left, top, right, bottom } = visibleBounds;
@@ -2470,10 +2513,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       latestViewHierarchy,
     );
     let selection = initialSearch.selection;
+    const invisibleError = () =>
+      this.invisibleMatchError(selection, options, latestViewHierarchy, latestScreenSize);
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
     if (!element && selection.matchedElement) {
-      visibilityError = this.invisibleMatchError(selection, options);
+      visibilityError = invisibleError();
     }
 
     if (
@@ -2481,7 +2526,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       this.isElementTapTargetOffScreen(selection, latestViewHierarchy, latestScreenSize, options)
     ) {
       if (element) {
-        visibilityError = this.invisibleMatchError(selection, options);
+        visibilityError = invisibleError();
         logger.warn(
           `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
             `bounds=${JSON.stringify(element.bounds)}, ` +
@@ -2547,13 +2592,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         element = selection.element;
         containerFoundEver = containerFoundEver || searchResult.containerFound;
         if (!element && selection.matchedElement) {
-          visibilityError = this.invisibleMatchError(selection, options);
+          visibilityError = invisibleError();
         }
         if (
           element &&
           this.isElementTapTargetOffScreen(selection, refreshedHierarchy, latestScreenSize, options)
         ) {
-          visibilityError = this.invisibleMatchError(selection, options);
+          visibilityError = invisibleError();
           logger.warn(
             `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
               `bounds=${JSON.stringify(element.bounds)}`,

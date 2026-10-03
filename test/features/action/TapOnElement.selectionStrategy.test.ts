@@ -8,6 +8,7 @@ import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 
 const editableElement = (focus: Record<string, unknown>) => ({
   text: "Phone number",
@@ -20,18 +21,19 @@ const editableElement = (focus: Record<string, unknown>) => ({
 afterEach(() => serverConfig.setRawElementSearchEnabled(false));
 
 async function executeFocus(
-  element: ReturnType<typeof editableElement>,
+  element: Element,
   postTapHierarchy: ViewHierarchyResult = { hierarchy: { node: {} } },
   elementId?: string,
   matchedElement?: Element,
   index?: number,
   testTag?: string,
   postSelectedIndex?: number,
+  options: Partial<TapOnElementOptions> = {},
 ) {
-  const fakeSelector = new FakeElementSelector(element as any);
+  const fakeSelector = new FakeElementSelector(element);
   if (matchedElement || index !== undefined) {
     fakeSelector.setNextSelection({
-      element: element as Element,
+      element,
       matchedElement,
       indexInMatches: index,
       totalMatches: index === undefined ? 1 : index + 1,
@@ -93,14 +95,16 @@ async function executeFocus(
   (tapOnElement as any).recordDeferredPredictionOutcome = async () => {};
   (tapOnElement as any).enforceFreshnessConsistencyWithEffect = () => {};
 
-  const result = await tapOnElement.execute(
-    elementId
+  const result = await tapOnElement.execute({
+    ...(elementId
       ? { elementId, index, action: "focus" }
       : testTag
         ? { testTag, index, action: "focus" }
-        : { text: "Phone", index, action: "focus" },
-  );
-  return { result, tapped };
+        : { text: "Phone", index, action: "focus" }),
+    ...options,
+    action: "focus",
+  });
+  return { result, tapped, fakeSelector };
 }
 
 describe("TapOnElement selectionStrategy", () => {
@@ -403,6 +407,151 @@ describe("TapOnElement selectionStrategy", () => {
     expect(tapped).toBe(true);
     expect(result.success).toBe(true);
     expect(result.focusVerified).toBe(true);
+  });
+
+  const emptyComposeField = (properties: Partial<Element> = {}): Element => ({
+    class: "android.widget.EditText",
+    text: "Basic Text Field",
+    bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
+    focused: false,
+    ...properties,
+  });
+
+  test.each([
+    { name: "unscoped", options: {} },
+    {
+      name: "container + unique",
+      options: { container: { text: "Basic Text Fields" }, selectionStrategy: "unique" as const },
+    },
+  ])(
+    "verifies empty Compose field after its merged label disappears ($name, #8997)",
+    async ({ options }) => {
+      for (const text of ["", undefined]) {
+        const before = emptyComposeField();
+        const after = emptyComposeField({
+          text,
+          focused: true,
+          node: [
+            { class: "android.widget.TextView", text: "Basic Text Field", bounds: before.bounds },
+          ],
+        });
+        const { result, tapped, fakeSelector } = await executeFocus(
+          before,
+          { hierarchy: { node: after } },
+          undefined,
+          before,
+          undefined,
+          undefined,
+          undefined,
+          { text: "Basic Text Field", ...options },
+        );
+
+        expect(tapped).toBe(true);
+        expect(result.focusVerified).toBe(true);
+        expect(result.success).toBe(true);
+        expect(fakeSelector.lastStrategy).toBe(options.selectionStrategy);
+        expect(fakeSelector.textCalls).toEqual(["Basic Text Field"]);
+      }
+    },
+  );
+
+  test.each([
+    {
+      name: "different bounds",
+      fields: [
+        emptyComposeField({
+          text: "",
+          focused: true,
+          bounds: { left: 84, top: 1300, right: 996, bottom: 1447 },
+        }),
+      ],
+    },
+    {
+      name: "two focused fields",
+      fields: [
+        emptyComposeField({ text: "", focused: true }),
+        emptyComposeField({
+          text: "",
+          focused: true,
+          bounds: { left: 84, top: 1300, right: 996, bottom: 1447 },
+        }),
+      ],
+    },
+    {
+      name: "two same-bounds focused fields",
+      fields: [
+        emptyComposeField({ text: "", focused: true }),
+        emptyComposeField({ text: "", focused: true }),
+      ],
+    },
+    {
+      name: "two same-bounds editable candidates",
+      fields: [emptyComposeField({ text: "", focused: true }), emptyComposeField({ text: "" })],
+    },
+    {
+      name: "different editable class",
+      fields: [
+        emptyComposeField({
+          text: "",
+          focused: true,
+          class: "android.widget.AutoCompleteTextView",
+        }),
+      ],
+    },
+    {
+      name: "changed stable resource ID",
+      fields: [
+        emptyComposeField({ text: "", focused: true, "resource-id": "com.example:id/other" }),
+      ],
+    },
+    {
+      name: "a stable view ID on a replacement",
+      fields: [emptyComposeField({ text: "", focused: true, "view-id": "other-field" })],
+    },
+    {
+      name: "a test tag on a replacement",
+      fields: [emptyComposeField({ text: "", focused: true, "test-tag": "other-field" })],
+    },
+  ])("rejects empty Compose focus with $name (#8997)", async ({ fields }) => {
+    const before = emptyComposeField();
+    const { result, tapped } = await executeFocus(
+      before,
+      { hierarchy: { node: fields } },
+      undefined,
+      before,
+      undefined,
+      undefined,
+      undefined,
+      { text: "Basic Text Field" },
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to confirm focus");
+  });
+
+  test("verifies an empty Compose field within the bounds epsilon despite linked roots and s2 ID churn (#8997)", async () => {
+    const before = emptyComposeField({ "view-id": "s2-before" });
+    const after = emptyComposeField({
+      text: undefined,
+      focused: true,
+      "view-id": "s2-after",
+      bounds: { left: 87, top: 1118, right: 999, bottom: 1265 },
+    });
+    const { result } = await executeFocus(
+      before,
+      { hierarchy: { node: after }, windows: [{ windowLayer: 1, hierarchy: after }] },
+      undefined,
+      before,
+      undefined,
+      undefined,
+      undefined,
+      { text: "Basic Text Field" },
+    );
+
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
   });
 
   test("verifies focus on an empty EditText when its s2 id is unchanged (PR #7780 review)", async () => {

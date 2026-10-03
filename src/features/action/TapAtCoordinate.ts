@@ -1,6 +1,9 @@
 import { normalizedAxis } from "./coordinateAxis";
 import { resolveImageRelativePoint } from "./imageRelativePoint";
-import { resolveCoordinateTapCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
+import {
+  resolveCoordinateTapCtrlProxyTimeoutMs,
+  resolveGestureCtrlProxyTimeoutMs,
+} from "./gestureTransportTimeout";
 import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -35,6 +38,7 @@ import {
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
   isStaleFrameContextRejection,
+  indeterminateTapError,
 } from "./coordinateTapDispatch";
 
 import {
@@ -301,7 +305,7 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
 export class TapAtCoordinate extends BaseVisualChange {
-  private readonly androidClient: CoordinateTapClient & {
+  private readonly androidClient: CoordinateTapClient<() => void> & {
     supportsCommand?: (name: string) => Promise<boolean>;
   };
   private readonly iosClient: CoordinateTapClient;
@@ -747,6 +751,10 @@ export class TapAtCoordinate extends BaseVisualChange {
     if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
       throwIfAborted(signal);
       assertCurrent?.();
+      let dispatched = false;
+      const onDispatch = () => {
+        dispatched = true;
+      };
       const result = await this.androidClient.requestTapCoordinates(
         point.x,
         point.y,
@@ -754,19 +762,25 @@ export class TapAtCoordinate extends BaseVisualChange {
         resolveCoordinateTapCtrlProxyTimeoutMs(duration),
         undefined,
         undefined,
-        undefined,
+        onDispatch,
         signal,
         displayId === 0 ? undefined : displayId,
         assertCurrent,
       );
       throwIfAborted(signal);
       if (!result.success) {
+        if (dispatched) {
+          throw indeterminateTapError(result.error);
+        }
         throw new ActionableError(result.error ?? "Android tap failed");
       }
     } else {
       throwIfAborted(signal);
       assertCurrent?.();
-      await executeTouchscreenInput(this.adb, command, displayId, signal, assertCurrent);
+      await executeTouchscreenInput(this.adb, command, displayId, signal, assertCurrent, {
+        timeoutMs:
+          duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
+      });
     }
   }
 

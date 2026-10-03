@@ -1,4 +1,7 @@
-import { resolveCoordinateTapCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
+import {
+  resolveCoordinateTapCtrlProxyTimeoutMs,
+  resolveGestureCtrlProxyTimeoutMs,
+} from "./gestureTransportTimeout";
 import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
@@ -27,7 +30,7 @@ export function isStaleFrameContextRejection(error: string | undefined): boolean
   return typeof error === "string" && error.toLowerCase().includes("stale frame context");
 }
 
-function indeterminateTapError(error: string | undefined): ActionableError {
+export function indeterminateTapError(error: string | undefined): ActionableError {
   return new ActionableError(
     `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${error ?? "unknown error"}). Do not retry automatically.`,
   );
@@ -107,6 +110,7 @@ export async function dispatchAndroidCoordinateTap(
     undefined,
     signal,
     assertCurrent,
+    { timeoutMs: durationMs >= 500 ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined },
   );
 }
 
@@ -179,6 +183,10 @@ export async function androidDisplayTapDispatch(
         target.displayId,
         signal,
         target.assertCurrent,
+        {
+          timeoutMs:
+            options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
+        },
       );
     }
     context.onDispatched();

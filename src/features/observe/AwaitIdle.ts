@@ -54,7 +54,7 @@ export class AwaitIdle implements AwaitIdleInterface {
     while (true) {
       throwIfAborted(signal);
       const rotationResult = await awaitWhileRequestIsLive(
-        this.idle.getRotationStatus(targetRotation, startTime, timeoutMs),
+        this.idle.getRotationStatus(targetRotation, startTime, timeoutMs, undefined, signal),
         signal,
       );
 

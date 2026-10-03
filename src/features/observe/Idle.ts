@@ -14,6 +14,7 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
 import { shellQuote } from "../../utils/shellQuote";
+import { withRemainingBudget } from "../../utils/withRemainingBudget";
 
 export class Idle {
   private adb: AdbExecutor;
@@ -103,6 +104,7 @@ export class Idle {
    * @param startTime - When rotation checking started
    * @param timeoutMs - Maximum time to wait for rotation
    * @param perf - Optional performance tracker
+   * @param signal - Optional cancellation signal
    * @returns Object containing rotation check results
    */
   async getRotationStatus(
@@ -110,6 +112,7 @@ export class Idle {
     startTime: number,
     timeoutMs: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<RotationCheckResult> {
     const currentElapsed = this.timer.now() - startTime;
     const shouldContinue = currentElapsed < timeoutMs;
@@ -117,7 +120,19 @@ export class Idle {
     try {
       // Check the current rotation through window manager service
       const { stdout } = await perf.track("adbDumpsysWindowRotation", () =>
-        this.adb.executeCommand('shell dumpsys window | grep -i "mRotation="'),
+        withRemainingBudget(
+          startTime + timeoutMs,
+          this.timer,
+          signal,
+          (activeSignal, remainingMs) =>
+            this.adb.executeCommand(
+              'shell dumpsys window | grep -i "mRotation="',
+              remainingMs,
+              undefined,
+              undefined,
+              activeSignal,
+            ),
+        ),
       );
       // parseWindowManagerRotation selects the authoritative display rotation
       // and skips stale/unrelated `mRotation=` occurrences elsewhere in the
@@ -149,6 +164,7 @@ export class Idle {
         shouldContinue,
       };
     } catch (err) {
+      signal?.throwIfAborted();
       // Continue polling on error, but trace it — otherwise a real ADB failure
       // is indistinguishable from a genuine "not idle" reading.
       logger.debug(`Rotation idle check failed, treating as not-yet-idle: ${err}`);

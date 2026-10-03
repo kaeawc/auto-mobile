@@ -643,6 +643,38 @@ describe("Idle - Unit Tests", function () {
   });
 
   describe("getRotationStatus error handling", function () {
+    test("rejects an aborted signal instead of returning a rotation status", async function () {
+      const timer = new FakeTimer();
+      const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+      const adb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const reason = new Error("rotation cancelled");
+      controller.abort(reason);
+      const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
+
+      await expect(
+        rotationIdle.getRotationStatus(1, timer.now(), 100, undefined, controller.signal),
+      ).rejects.toBe(reason);
+      expect(adb.getCommandCalls()).toEqual([]);
+    });
+
+    test("rethrows cancellation when the ADB read fails after an abort", async function () {
+      const timer = new FakeTimer();
+      const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+      const adb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const reason = new Error("rotation cancelled");
+      adb.executeCommand = async () => {
+        controller.abort(reason);
+        throw new Error("adb: device offline");
+      };
+      const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
+
+      await expect(
+        rotationIdle.getRotationStatus(1, timer.now(), 100, undefined, controller.signal),
+      ).rejects.toBe(reason);
+    });
+
     // Regression for #3595: an ADB failure during the rotation check was
     // swallowed with no trace, making it indistinguishable from a genuine
     // "not yet idle" reading. It must now leave a debug trace.

@@ -29,6 +29,16 @@ STUB
   # Bash uses a builtin kill; PATH alone cannot intercept it.
   kill() { printf 'kill %s\n' "$*" >> "${PROCESS_CALLS}"; return 1; }
   export -f kill
+  for tool in nc sleep; do
+    cat > "${STUB_BIN}/${tool}" <<'STUB'
+#!/usr/bin/env bash
+# Never connect or wait on the host. nc refusal is the default probe result.
+[[ -z "${NC_MESSAGE:-}" ]] || printf '%s\n' "${NC_MESSAGE}" >&2
+[[ "${0##*/}" == nc ]] && exit "${NC_STATUS:-1}"
+exit 0
+STUB
+    chmod +x "${STUB_BIN}/${tool}"
+  done
   export PATH="${STUB_BIN}:${PATH}"
   export UNINSTALL_SH_SOURCE_ONLY=true
   source "${BATS_TEST_DIRNAME}/../../scripts/uninstall.sh"
@@ -37,8 +47,7 @@ STUB
   export AUTOMOBILE_DAEMON_STOP_WAIT_ATTEMPTS=1 AUTOMOBILE_DAEMON_STOP_POLL_INTERVAL=0
   export SIGNALS="${TEST_ROOT}/signals" ALIVE="${TEST_ROOT}/alive"
   : > "${SIGNALS}"
-  sleep 60 &
-  OWN_PID=$!
+  OWN_PID=424242
   export OWN_PID
   touch "${ALIVE}"
   kill() {
@@ -56,7 +65,7 @@ STUB
 #!/usr/bin/env bash
 printf 'ps %s\n' "$*" >> "${PROCESS_CALLS}"
 [[ "$1" == -p && "$2" == "${OWN_PID}" && -e "${ALIVE}" ]] || exit 1
-printf '%s\n' "${PID_COMMAND:-/opt/auto-mobile/dist/src/index.js --daemon-mode}"
+printf '%s\n' "${PID_COMMAND:-/opt/auto-mobile/dist/src/index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH}}"
 STUB
   chmod +x "${STUB_BIN}/ps"
   write_record
@@ -70,9 +79,6 @@ write_record() {
 }
 
 teardown() {
-  # This is the only real signal: the sleep created by this test, by exact PID.
-  builtin kill -TERM "${OWN_PID}" 2>/dev/null || true
-  wait "${OWN_PID}" 2>/dev/null || true
   ! grep -Eq '^(pkill|killall|pgrep) ' "${PROCESS_CALLS}"
 }
 
@@ -107,7 +113,8 @@ teardown() {
   export AUTOMOBILE_DAEMON_PID_FILE_PATH="custom.pid"
   export AUTOMOBILE_DAEMON_SOCKET_PATH="custom.sock"
   export AUTO_MOBILE_DAEMON_PID_FILE_PATH="ignored.pid"
-  cp "${TEST_ROOT}/daemon.pid" "${TEST_ROOT}/custom.pid"
+  printf '{"pid":%s,"socketPath":"%s"}\n' "${OWN_PID}" "${TEST_ROOT}/custom.sock" > "${TEST_ROOT}/custom.pid"
+  export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=${TEST_ROOT}/custom.sock"
   touch "${TEST_ROOT}/custom.sock"
   run stop_daemon
   [ ! -e "${TEST_ROOT}/custom.pid" ]
@@ -170,9 +177,17 @@ teardown() {
 }
 
 @test "without jq JSON is retained and a strict legacy PID can be stopped" {
-  command_exists() { [[ "$1" != jq ]]; }
+  local no_jq="${TEST_ROOT}/no-jq" tool
+  mkdir -p "${no_jq}"
+  for tool in bash cat rm ps grep; do
+    ln -s "$(command -v "${tool}")" "${no_jq}/${tool}"
+  done
+  export PATH="${no_jq}"
   run stop_daemon
-  [[ "$output" == *"valid PID record"* ]]
+  [[ "$output" == *"jq is required"*"${AUTOMOBILE_DAEMON_PID_FILE_PATH}"*"auto-mobile --daemon stop"* ]]
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+  [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [ ! -s "${SIGNALS}" ]
   printf '%s\n' "${OWN_PID}" > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
   run stop_daemon
   [ "$(cat "${SIGNALS}")" = "-TERM ${OWN_PID}" ]
@@ -222,4 +237,189 @@ teardown() {
   [ ! -s "${SIGNALS}" ]
   [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
   [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+}
+
+@test "another namespace marker never grants ownership" {
+  export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH}2"
+  run stop_daemon
+  [ ! -s "${SIGNALS}" ]
+  [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [[ "$output" == *"auto-mobile --daemon stop"* ]]
+}
+
+# Bind only a BATS_TEST_TMPDIR socket; the child uses exported kill and PATH
+# ps/nc stubs. Nothing probes the user's namespace.
+stop_with_test_socket() {
+  rm -f "${AUTOMOBILE_DAEMON_SOCKET_PATH}"
+  export SCRIPT="${BATS_TEST_DIRNAME}/../../scripts/uninstall.sh" UNINSTALL_SH_SOURCE_ONLY=true
+  bun -e '
+    import { createServer } from "node:net";
+    import { spawnSync } from "node:child_process";
+    const server = createServer();
+    server.listen(process.env.AUTOMOBILE_DAEMON_SOCKET_PATH, () => {
+      const child = spawnSync("bash", ["-c", "source \"$SCRIPT\"; stop_daemon"], { encoding: "utf8" });
+      process.stdout.write(child.stdout);
+      server.close();
+      process.exitCode = child.status ?? 1;
+    });
+  '
+}
+
+@test "unmarked older daemon requires matching record and a Unix socket" {
+  export PID_COMMAND="bun index.js --daemon-mode"
+  run stop_with_test_socket
+  [ "$status" -eq 0 ]
+  [ "$(cat "${SIGNALS}")" = "-TERM ${OWN_PID}" ]
+}
+
+@test "unmarked daemon without a socket is left alone" {
+  export PID_COMMAND="bun index.js --daemon-mode"
+  run stop_daemon
+  [ ! -s "${SIGNALS}" ]
+  [[ "$output" == *"auto-mobile --daemon stop"* ]]
+}
+
+@test "foreign record is retained even with matching argv or a dead PID" {
+  printf '{"pid":%s,"socketPath":"/foreign.sock"}' "${OWN_PID}" > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
+  run stop_daemon
+  [[ "$output" == *"Foreign daemon PID record"* ]]
+  [ ! -s "${SIGNALS}" ]
+  rm "${ALIVE}"
+  run stop_daemon
+  [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+}
+
+@test "ambiguous invalid and malformed markers fail closed" {
+  local argv
+  for argv in \
+    "--daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH} --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH}" \
+    "--daemon-socket-path=" \
+    "--daemon-socket-path --other" \
+    "--daemon-socket-path=%ZZ" \
+    "--daemon-socket-path=%C0%AF" \
+    "--daemon-socket-path=%ED%A0%80" \
+    "--daemon-socket-path=%F4%90%80%80" \
+    "--daemon-socket-path=%00" \
+    "--daemon-socket-path='${AUTOMOBILE_DAEMON_SOCKET_PATH}"; do
+    export PID_COMMAND="bun index.js --daemon-mode ${argv}"
+    run stop_daemon
+    [ ! -s "${SIGNALS}" ]
+    [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  done
+}
+
+@test "name substring and daemon-mode alone are not identity" {
+  printf '{"pid":%s}' "${OWN_PID}" > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"
+  export PID_COMMAND="/fake/auto-mobile-pretender --daemon-mode"
+  run stop_daemon
+  [ ! -s "${SIGNALS}" ]
+}
+
+@test "quoted raw split marker and percent encoded marker match full tokens" {
+  local marker
+  for marker in "--daemon-socket-path '${AUTOMOBILE_DAEMON_SOCKET_PATH}'" \
+    "--daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH//\//%2F}"; do
+    touch "${ALIVE}"
+    write_record
+    export PID_COMMAND="bun index.js '--daemon-mode' ${marker}"
+    run stop_daemon
+    [ "$status" -eq 0 ]
+    [ ! -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  done
+  [ "$(wc -l < "${SIGNALS}" | tr -d ' ')" = 2 ]
+}
+
+@test "dead PID with accepting socket retains socket and record" {
+  rm "${ALIVE}"
+  export NC_STATUS=0
+  run stop_daemon
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+  [ -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [[ "$output" == *"still accepts"*"auto-mobile --daemon stop"* ]]
+}
+
+@test "dead PID without nc retires only the stale PID record" {
+  rm "${ALIVE}"
+  command_exists() { [[ "$1" != nc ]] && command -v "$1" >/dev/null 2>&1; }
+  run stop_daemon
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+  [ ! -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [[ "$output" == *"auto-mobile --daemon stop"* ]]
+}
+
+@test "inconclusive socket probe retains socket and retires stale record" {
+  rm "${ALIVE}"
+  export NC_STATUS=2
+  run stop_daemon
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+  [ ! -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+}
+
+@test "uninstall checks identity again immediately before TERM" {
+  local reads="${TEST_ROOT}/reads"
+  ps() {
+    if [[ -e "${reads}" ]]; then printf 'bun index.js --daemon-mode --daemon-socket-path=/foreign.sock';
+    else touch "${reads}"; printf '%s' "bun index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH}"; fi
+  }
+  run stop_daemon
+  [ ! -s "${SIGNALS}" ]
+  [[ "$output" == *"identity changed"* ]]
+}
+
+@test "hot reload rejects another namespace and rechecks before KILL" {
+  export HOT_RELOAD_SH_SOURCE_ONLY=true IGNORE_TERM=true
+  source "${BATS_TEST_DIRNAME}/../../scripts/local-dev/hot-reload.sh"
+  export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=/foreign.sock"
+  run stop_namespace_daemon_for_reload
+  [ ! -s "${SIGNALS}" ]
+  unset PID_COMMAND
+  # The sourced helper calls this injected poll seam before escalation.
+  sleep() { export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=/foreign.sock"; }
+  export -f sleep
+  run stop_namespace_daemon_for_reload
+  [ "$(cat "${SIGNALS}")" = "-TERM ${OWN_PID}" ]
+}
+
+@test "nc usage failure is inconclusive even with exit one" {
+  rm "${ALIVE}"
+  export NC_STATUS=1 NC_MESSAGE="nc: invalid option -- z"
+  run stop_daemon
+  [ -e "${AUTOMOBILE_DAEMON_SOCKET_PATH}" ]
+  [ ! -e "${AUTOMOBILE_DAEMON_PID_FILE_PATH}" ]
+  [[ "$output" == *"auto-mobile --daemon stop"* ]]
+}
+
+@test "hot reload verifies again before TERM and retains a replaced record before KILL" {
+  export HOT_RELOAD_SH_SOURCE_ONLY=true IGNORE_TERM=true READS="${TEST_ROOT}/reads"
+  source "${BATS_TEST_DIRNAME}/../../scripts/local-dev/hot-reload.sh"
+  ps() {
+    if [[ -e "${READS}" ]]; then printf 'bun index.js --daemon-mode --daemon-socket-path=/foreign.sock';
+    else touch "${READS}"; printf '%s' "bun index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH}"; fi
+  }
+  export -f ps
+  run stop_namespace_daemon_for_reload
+  [ ! -s "${SIGNALS}" ]
+  unset -f ps
+  sleep() { printf '{"pid":424243,"socketPath":"/foreign.sock"}' > "${AUTOMOBILE_DAEMON_PID_FILE_PATH}"; }
+  export -f sleep
+  run stop_namespace_daemon_for_reload
+  [ "$(cat "${SIGNALS}")" = "-TERM ${OWN_PID}" ]
+  [[ "$(cat "${AUTOMOBILE_DAEMON_PID_FILE_PATH}")" == *424243* ]]
+}
+
+@test "marker decoder preserves full path and rejects truncated UTF8" {
+  local marker decoded
+  for marker in '%C3' '%E2%82' '%F0%80%80%80' '%FF' '%2'; do
+    run daemon_decode_socket_marker "${marker}"
+    [ "$status" -ne 0 ]
+  done
+  decoded=$(daemon_decode_socket_marker '%2Ftmp%2F%C3%A9.sock')
+  [ "${decoded}" = "/tmp/é.sock" ]
+  # Raw absolute markers are used as-is, even with literal percent characters.
+  decoded=$(daemon_decode_socket_marker '/tmp/%ZZ.sock')
+  [ "${decoded}" = "/tmp/%ZZ.sock" ]
+  export PID_COMMAND="bun index.js --daemon-mode --daemon-socket-path=${AUTOMOBILE_DAEMON_SOCKET_PATH//\//%2F}%0A"
+  run stop_daemon
+  [ ! -s "${SIGNALS}" ]
 }

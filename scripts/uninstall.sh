@@ -600,11 +600,112 @@ daemon_record_pid() {
     printf '%s\n' "$((10#${pid}))"
 }
 
+# Mirror processTable.ts parseDaemonSocketPath: adjacent quoted/unquoted pieces
+# form one token; quotes have no escape semantics in flattened ps argv.
+# Manager always adds --daemon-socket-path=<encodeURIComponent(socketPath)>:
+# default: --daemon-mode --daemon-socket-path=%2Ftmp%2Fauto-mobile-daemon-<uid>.sock
+# override /a.sock: --daemon-mode --daemon-socket-path=%2Fa.sock
+# No executable-name substring is ownership evidence.
+daemon_command_tokens() {
+    local text="$1" char quote="" token="" active=false index
+    DAEMON_ARGV=()
+    for ((index = 0; index < ${#text}; index++)); do
+        char="${text:index:1}"
+        if [[ -n "${quote}" ]]; then
+            if [[ "${char}" == "${quote}" ]]; then quote=""; else token+="${char}"; fi
+        elif [[ "${char}" == "'" || "${char}" == '"' ]]; then
+            quote="${char}"; active=true
+        elif [[ "${char}" == [[:space:]] ]]; then
+            if [[ "${active}" == true ]]; then DAEMON_ARGV+=("${token}"); token=""; active=false; fi
+        else
+            token+="${char}"; active=true
+        fi
+    done
+    [[ -z "${quote}" ]] || return 1
+    if [[ "${active}" == true ]]; then DAEMON_ARGV+=("${token}"); fi
+    return 0
+}
+
+# decodeURIComponent validates percent escapes and UTF-8 (including overlong,
+# surrogate and out-of-range sequences). Bash cannot represent NUL in a path;
+# reject it rather than silently truncating ownership evidence. No eval/printf %b
+# of caller text: only validated hex bytes reach printf.
+daemon_decode_socket_marker() {
+    local value="$1" result="" char hex byte remaining=0 low=128 high=191 index
+    local LC_ALL=C
+    if [[ "${value}" == /* || "${value}" == \\* || "${value}" =~ ^[A-Za-z]:[/\\] ]]; then
+        printf '%s' "${value}"; return 0
+    fi
+    for ((index = 0; index < ${#value}; index++)); do
+        char="${value:index:1}"
+        if [[ "${char}" != % ]]; then
+            (( remaining == 0 )) || return 1
+            result+="${char}"; continue
+        fi
+        hex="${value:index+1:2}"
+        [[ ${#hex} -eq 2 && "${hex}" != *[!0-9a-fA-F]* ]] || return 1
+        byte=$((16#${hex})); index=$((index + 2))
+        (( byte != 0 )) || return 1
+        if (( remaining > 0 )); then
+            (( byte >= low && byte <= high )) || return 1
+            remaining=$((remaining - 1)); low=128; high=191
+        elif (( byte < 128 )); then :
+        elif (( byte >= 194 && byte <= 223 )); then remaining=1
+        elif (( byte >= 224 && byte <= 239 )); then
+            remaining=2
+            if (( byte == 224 )); then low=160; elif (( byte == 237 )); then high=159; fi
+        elif (( byte >= 240 && byte <= 244 )); then
+            remaining=3
+            if (( byte == 240 )); then low=144; elif (( byte == 244 )); then high=143; fi
+        else return 1
+        fi
+        printf -v char '%b' "\\x${hex}"
+        result+="${char}"
+    done
+    (( remaining == 0 )) || return 1
+    printf '%s' "${result}"
+}
+
+# A JSON socketPath, when present, must match even for a dead recorded PID.
+# Legacy numeric records and JSON without socketPath need argv ownership instead.
+daemon_record_matches_namespace() {
+    local record="$1" socket_path="$2"
+    [[ "${record}" != *'{'* ]] && return 0
+    command_exists jq || return 1
+    printf '%s' "${record}" | jq -e --arg socket "${socket_path}" \
+        'type == "object" and ((has("socketPath") | not) or .socketPath == $socket)' >/dev/null 2>&1
+}
+
 daemon_pid_is_daemon() {
-    local command_line
-    kill -0 "$1" 2>/dev/null || return 1
-    command_line=$(ps -p "$1" -o command= 2>/dev/null) || return 1
-    [[ "${command_line}" =~ (^|[[:space:]])--daemon-mode($|[[:space:]]) && "${command_line}" == *auto-mobile* ]]
+    local pid="$1" record="$2" socket_path="$3" pid_path="$4" command_line token marker="" markers=0 mode=false index
+    [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]] || return 1
+    daemon_record_matches_namespace "${record}" "${socket_path}" || return 1
+    kill -0 "${pid}" 2>/dev/null || return 1
+    command_line=$(ps -p "${pid}" -o command= 2>/dev/null) || return 1
+    [[ -n "${command_line}" ]] || return 1
+    local DAEMON_ARGV=()
+    daemon_command_tokens "${command_line}" || return 1
+    for ((index = 0; index < ${#DAEMON_ARGV[@]}; index++)); do
+        token="${DAEMON_ARGV[index]}"
+        [[ "${token}" != --daemon-mode ]] || mode=true
+        if [[ "${token}" == --daemon-socket-path ]]; then
+            markers=$((markers + 1)); marker="${DAEMON_ARGV[index+1]-}"
+        elif [[ "${token}" == --daemon-socket-path=* ]]; then
+            markers=$((markers + 1)); marker="${token#--daemon-socket-path=}"
+        fi
+    done
+    [[ "${mode}" == true ]] || return 1
+    if (( markers == 0 )); then
+        # Only unmarked older launches may use the record + actual socket fallback.
+        [[ -S "${socket_path}" ]] && command_exists jq || return 1
+        printf '%s' "${record}" | jq -e --arg socket "${socket_path}" \
+            'type == "object" and .socketPath == $socket' >/dev/null 2>&1
+    else
+        (( markers == 1 )) && [[ -n "${marker}" && "${marker}" != --* ]] || return 1
+        marker=$(daemon_decode_socket_marker "${marker}" && printf .) || return 1
+        marker="${marker%.}"
+        [[ "${marker}" == "${socket_path}" ]]
+    fi
 }
 
 # A failed kill probe alone could mean permission denied. Preserve the files
@@ -637,7 +738,7 @@ detect_daemon() {
     DAEMON_RUNNING=false
     if [[ -S "${socket_path}" ]]; then
         DAEMON_RUNNING=true
-    elif [[ -f "${pid_path}" ]] && record=$(cat "${pid_path}") && pid=$(daemon_record_pid "${record}") && daemon_pid_is_daemon "${pid}"; then
+    elif [[ -f "${pid_path}" ]] && record=$(cat "${pid_path}") && pid=$(daemon_record_pid "${record}") && daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
         DAEMON_RUNNING=true
     fi
     return 0
@@ -861,6 +962,10 @@ stop_daemon() {
     local socket_path pid_path record pid current_record
     socket_path=$(daemon_path AUTOMOBILE_DAEMON_SOCKET_PATH AUTO_MOBILE_DAEMON_SOCKET_PATH sock)
     pid_path=$(daemon_path AUTOMOBILE_DAEMON_PID_FILE_PATH AUTO_MOBILE_DAEMON_PID_FILE_PATH pid)
+    if [[ -f "${pid_path}" ]] && record=$(cat "${pid_path}") && [[ "${record}" == *'{'* || "${record}" == *'['* ]] && ! command_exists jq; then
+        log_warn "jq is required to read the PID record at ${pid_path}; use auto-mobile --daemon stop. Leaving namespace files in place."
+        return 0
+    fi
     if [[ ! -f "${pid_path}" ]] || ! record=$(cat "${pid_path}") || ! pid=$(daemon_record_pid "${record}"); then
         if [[ -e "${socket_path}" || -S "${socket_path}" || -e "${pid_path}" ]]; then
             log_warn "A daemon may be running without a valid PID record; use auto-mobile --daemon stop. Leaving namespace files in place."
@@ -870,17 +975,44 @@ stop_daemon() {
         return 0
     fi
 
+    if ! daemon_record_matches_namespace "${record}" "${socket_path}"; then
+        log_warn "Foreign daemon PID record at ${pid_path}; leaving files in place. Use auto-mobile --daemon stop."
+        return 0
+    fi
     if daemon_pid_present "${pid}"; then
-        if ! daemon_pid_is_daemon "${pid}"; then
+        if ! daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
             log_warn "PID record is stale or PID ${pid} is not an AutoMobile daemon; leaving files in place. Use auto-mobile --daemon stop."
             return 0
         fi
         log_info "Stopping MCP daemon (PID ${pid})..."
+        if ! daemon_pid_is_daemon "${pid}" "${record}" "${socket_path}" "${pid_path}"; then
+            log_warn "Daemon identity changed; leaving files in place. Use auto-mobile --daemon stop."
+            return 0
+        fi
         if ! kill -TERM "${pid}" 2>/dev/null || ! wait_for_daemon_to_stop "${pid}"; then
             log_warn "MCP daemon did not stop within 10 seconds; leaving files in place. Use auto-mobile --daemon stop."
             return 0
         fi
     else
+        if [[ -e "${socket_path}" || -S "${socket_path}" ]]; then
+            local probe_status=2 probe_output=""
+            if command_exists nc; then
+                probe_output=$(LC_ALL=C nc -U -z -w 1 "${socket_path}" 2>&1) && probe_status=0 || probe_status=$?
+                # A usage/permission/unsupported-option diagnostic is not refusal.
+                if [[ "${probe_status}" == 1 && -n "${probe_output}" && "${probe_output}" != *"Connection refused"* ]]; then
+                    probe_status=2
+                fi
+            fi
+            if [[ "${probe_status}" == 0 ]]; then
+                log_warn "Namespace socket still accepts connections; leaving socket and PID record in place. Use auto-mobile --daemon stop."
+                return 0
+            elif [[ "${probe_status}" != 1 ]]; then
+                # Missing/unsupported nc is inconclusive. Retire only our stale record.
+                if [[ "$(cat "${pid_path}" 2>/dev/null)" == "${record}" ]]; then rm -f "${pid_path}"; fi
+                log_warn "Cannot verify stale namespace socket; leaving socket in place. Use auto-mobile --daemon stop."
+                return 0
+            fi
+        fi
         log_info "MCP daemon not running; removing stale namespace files"
     fi
 

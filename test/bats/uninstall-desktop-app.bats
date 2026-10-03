@@ -44,6 +44,15 @@ STUB
   # Bash uses a builtin kill; PATH alone cannot intercept it.
   kill() { printf 'kill %s\n' "$*" >> "${PROCESS_CALLS}"; return 1; }
   export -f kill
+  for tool in nc sleep; do
+    cat > "${STUB_BIN}/${tool}" <<'STUB'
+#!/usr/bin/env bash
+# Never connect or wait on the host. nc refusal is the default probe result.
+[[ "${0##*/}" == nc ]] && exit "${NC_STATUS:-1}"
+exit 0
+STUB
+    chmod +x "${STUB_BIN}/${tool}"
+  done
   export PATH="${STUB_BIN}:${PATH}"
   # Block package-manager mutations even if the host has the CLI installed.
   for tool in bun npm claude; do

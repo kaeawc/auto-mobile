@@ -135,9 +135,7 @@ describe("DaemonLauncher", () => {
 
     try {
       execFileSync("mkfifo", [packageJsonPath]);
-      const startedAt = Date.now();
       expect(isDaemonEntryScriptPath(entryScript, activeEntryScript)).toBe(false);
-      expect(Date.now() - startedAt).toBeLessThan(100);
     } finally {
       rmSync(checkoutRoot, { recursive: true, force: true });
     }

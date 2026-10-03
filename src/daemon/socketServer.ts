@@ -25,6 +25,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
+  DAEMON_SESSION_NOT_FOUND_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -1600,6 +1601,7 @@ export class UnixSocketServer {
         type: "mcp_response",
         success: false,
         error: "Session not found",
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
       };
     }
 
@@ -4343,6 +4345,7 @@ export class UnixSocketServer {
       }
       case "ide/status": {
         return {
+          structuredSessionNotFound: true,
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
           // floating "latest" tag — external consumers must see exactly what the
           // daemon will fetch (#2746).

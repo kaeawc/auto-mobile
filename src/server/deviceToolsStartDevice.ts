@@ -4,7 +4,7 @@ import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
-import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../devices/deviceBootService";
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";

@@ -6,7 +6,7 @@ import {
   MAX_OBSERVER_SESSION_ID_LENGTH,
   type ObserverSessionStore,
 } from "./observerSessionRegistry";
-import { DaemonRequest } from "./types";
+import { DAEMON_SESSION_NOT_FOUND_CODE, DaemonRequest } from "./types";
 import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
@@ -109,6 +109,7 @@ export type DaemonMethodResult = {
   success: boolean;
   result?: Record<string, unknown>;
   error?: string;
+  code?: typeof DAEMON_SESSION_NOT_FOUND_CODE;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -228,6 +229,7 @@ export async function handleDaemonRequest(
         return {
           success: false,
           error: `Session not found: ${sessionId}`,
+          code: DAEMON_SESSION_NOT_FOUND_CODE,
         };
       }
       const livenessOwnerToken =
@@ -255,7 +257,11 @@ export async function handleDaemonRequest(
           currentSession !== session ||
           isSessionReleasing(manager, sessionId, currentSession)
         ) {
-          return { success: false, error: `Session not found: ${sessionId}` };
+          return {
+            success: false,
+            error: `Session not found: ${sessionId}`,
+            code: DAEMON_SESSION_NOT_FOUND_CODE,
+          };
         }
         if (!ownsLiveness) {
           // A stale reconnect must be a complete liveness no-op: it cannot
@@ -362,6 +368,7 @@ export async function handleDaemonRequest(
         return {
           success: false,
           error: `Session not found: ${sessionId}`,
+          code: DAEMON_SESSION_NOT_FOUND_CODE,
         };
       }
       return {

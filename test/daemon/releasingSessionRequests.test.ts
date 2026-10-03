@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
-import type { DaemonRequest } from "../../src/daemon/types";
+import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -20,7 +20,11 @@ import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 
 const sessionId = "00000000-0000-4000-8000-000000000001";
 const deviceId = "emulator-fake";
-const notFound = { success: false, error: `Session not found: ${sessionId}` };
+const notFound = {
+  success: false,
+  error: `Session not found: ${sessionId}`,
+  code: DAEMON_SESSION_NOT_FOUND_CODE,
+};
 const released = {
   success: true,
   result: { message: `Session ${sessionId} released`, device: deviceId, alreadyReleased: false },

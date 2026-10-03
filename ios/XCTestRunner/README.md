@@ -15,7 +15,7 @@ The XCTest Runner provides XCTest integration for iOS automation, mirroring the 
 
 ## Architecture
 
-Based on the design documented in `docs/design-docs/plat/ios/xctestrunner.md`, this component:
+This component:
 
 1. Provides `AutoMobileTestCase` base class for plan-based tests
 2. Wraps plan execution with `AutoMobilePlanExecutor`

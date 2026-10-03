@@ -717,7 +717,7 @@ export class LaunchApp extends BaseVisualChange {
 
       let winner: string;
       try {
-        winner = await raceWithDeadline(Promise.race([pushPromise, syncPromise]), {
+        winner = await raceWithDeadline([pushPromise, syncPromise], {
           timer: this.timer,
           signal,
           label: "iOS hierarchy readiness",

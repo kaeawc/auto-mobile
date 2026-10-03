@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../../src/daemon/constants";
+import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -160,6 +161,7 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
 
     const error = await pending.catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(McpOverloadError);
+    expect(error).toMatchObject({ code: "daemon_overloaded" });
     expect((error as McpOverloadError).failure).toMatchObject({
       code: "daemon_overloaded",
       retryable: true,
@@ -167,6 +169,33 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     });
     await client.close();
   });
+
+  test.each([DAEMON_SESSION_NOT_FOUND_CODE, "other_failure", -32603, undefined])(
+    "preserves response code %s and unchanged session error text",
+    async (code) => {
+      const client = createConnectedClient(fakeTimer, new CountingIdGenerator("req"), []);
+      const pending = client.callDaemonMethod("daemon/sessionInfo", { sessionId: "missing" });
+      (client as unknown as DaemonClientFrameInternals).handleData(
+        Buffer.from(
+          JSON.stringify({
+            id: "req-1",
+            type: "mcp_response",
+            success: false,
+            error: "Session not found: missing",
+            ...(code === undefined ? {} : { code }),
+          }) + "\n",
+        ),
+      );
+      const error: unknown = await pending.catch((cause: unknown) => cause);
+      expect(error).toMatchObject({ message: "Session not found: missing" });
+      if (code === undefined) {
+        expect(error).not.toHaveProperty("code");
+      } else {
+        expect(error).toMatchObject({ code });
+      }
+      await client.close();
+    },
+  );
 
   test("restores the daemon's original request failure cause", async () => {
     const idGenerator = new CountingIdGenerator("req");

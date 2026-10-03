@@ -167,12 +167,8 @@ All components have been scaffolded with:
 
 ## Documentation
 
-- **Design Docs**: `docs/design-docs/plat/ios/`
-  - `index.md` - Architecture overview
-  - `simctl.md` - Simulator lifecycle
-  - `xctestrunner.md` - XCTest integration
-
-- **Installation**: `docs/install/plat/ios.md`
+- **XCTest CI integration**: `docs/design-docs/plat/ios/xctestrunner/ci-integration.md`
+- **Setup**: See [System Requirements](#system-requirements) above.
 
 ## Contributing
 

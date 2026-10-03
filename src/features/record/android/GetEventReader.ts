@@ -1,3 +1,4 @@
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
 import type {
   AdbExecutor,
@@ -15,6 +16,7 @@ interface GetEventReaderOptions {
   scaler: CoordScaler;
   /** Display density in dp multiplier (e.g. 2.75 for 440dpi) */
   density: number;
+  timer?: Timer;
 }
 
 /**
@@ -27,17 +29,24 @@ export class GetEventReader implements GestureEmitter {
   private child: AdbProcess | null = null;
   private starting = false;
 
-  constructor(private readonly opts: GetEventReaderOptions) {}
+  private generation = 0;
+  private cleanupChild: (() => void) | null = null;
+  private readonly timer: Timer;
+
+  constructor(private readonly opts: GetEventReaderOptions) {
+    this.timer = opts.timer ?? defaultTimer;
+  }
 
   start(onGesture: (event: GestureEvent) => void, onError?: (err: Error) => void): void {
     if (this.child || this.starting) {
       return;
     } // already running
     this.starting = true;
-    void this.startProcess(onGesture, onError);
+    void this.startProcess(++this.generation, onGesture, onError);
   }
 
   private async startProcess(
+    generation: number,
     onGesture: (event: GestureEvent) => void,
     onError?: (err: Error) => void,
   ): Promise<void> {
@@ -49,15 +58,18 @@ export class GetEventReader implements GestureEmitter {
     logger.debug(`[GetEventReader] Spawning: ${args.join(" ")}`);
     try {
       const child = await this.opts.adb.spawn(args);
-      if (!this.starting) {
+      if (!this.starting || generation !== this.generation) {
+        child.on("error", () => {});
         child.kill();
         return;
       }
       this.child = child;
     } catch (error) {
-      this.starting = false;
       const normalized = error instanceof Error ? error : new Error(String(error));
       logger.error(`[GetEventReader] spawn error: ${normalized.message}`);
+      if (generation === this.generation) {
+        this.starting = false;
+      }
       onError?.(normalized);
       return;
     }
@@ -69,7 +81,7 @@ export class GetEventReader implements GestureEmitter {
 
     let lineBuffer = "";
 
-    child.stdout.on("data", (data: Buffer) => {
+    const onData = (data: Buffer): void => {
       lineBuffer += data.toString();
       const lines = lineBuffer.split("\n");
       // Keep the incomplete last fragment in the buffer
@@ -79,7 +91,7 @@ export class GetEventReader implements GestureEmitter {
         if (!line.trim()) {
           continue;
         }
-        const arrivedAt = Date.now();
+        const arrivedAt = this.timer.now();
         const result = reconstructor.feedLine(line, arrivedAt);
         if (!result) {
           continue;
@@ -95,30 +107,57 @@ export class GetEventReader implements GestureEmitter {
           onGesture(result);
         }
       }
-    });
+    };
 
-    child.stderr.on("data", (data: Buffer) => {
+    const onStderr = (data: Buffer): void => {
       logger.debug(`[GetEventReader] stderr: ${data.toString().trim()}`);
-    });
+    };
 
-    child.on("error", (err: Error) => {
-      logger.error(`[GetEventReader] spawn error: ${err.message}`);
-      onError?.(err);
-    });
-
-    child.on("exit", (code: number | null) => {
-      if (code !== null && code !== 0) {
-        logger.warn(`[GetEventReader] getevent exited with code ${code}`);
+    const cleanup = (): void => {
+      lineBuffer = "";
+      child.stdout.off("data", onData);
+      child.stderr.off("data", onStderr);
+      // EventEmitter throws on late errors without a listener, even after teardown.
+      child.on("error", ignoreError);
+      child.off("error", onChildError);
+      child.off("exit", onExit);
+      if (this.child === child) {
+        this.child = null;
+        this.cleanupChild = null;
       }
-      this.child = null;
-    });
+    };
+    const ignoreError = (): void => {};
+    const onChildError = (err: Error): void => {
+      cleanup();
+      logger.warn(`[GetEventReader] process error: ${err.message}`);
+      onError?.(err);
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      cleanup();
+      if ((code !== null && code !== 0) || signal) {
+        const error = new Error(
+          `[GetEventReader] getevent exited with ${signal ? `signal ${signal}` : `code ${code}`}`,
+        );
+        logger.warn(error.message);
+        onError?.(error);
+      }
+    };
+
+    this.cleanupChild = cleanup;
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onStderr);
+    child.on("error", onChildError);
+    child.on("exit", onExit);
   }
 
   stop(): void {
     this.starting = false;
-    if (this.child && !this.child.killed) {
+    ++this.generation;
+    const child = this.child;
+    this.cleanupChild?.();
+    if (child && !child.killed) {
       logger.debug("[GetEventReader] Stopping getevent process");
-      this.child.kill();
+      child.kill();
     }
     this.child = null;
   }

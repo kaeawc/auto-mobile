@@ -36,6 +36,7 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "./constants";
 import {
+  DAEMON_SESSION_NOT_FOUND_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   type DaemonNotification,
   type DaemonOptions,
@@ -756,6 +757,8 @@ export class DaemonMcpProxy {
   private readonly daemonStatusProbe?: () => Promise<DaemonStatus>;
   private readonly daemonAvailabilityProbe: (socketPath: string) => Promise<boolean>;
   private reconciliationSnapshot?: Promise<DaemonStatus>;
+  // Connection-scoped: tools/list_changed invalidates status, but does not replace its daemon.
+  private structuredSessionNotFound = false;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
   private readonly heartbeatLeashMs: number;
@@ -1017,6 +1020,7 @@ export class DaemonMcpProxy {
   private async doConnect(): Promise<void> {
     this.throwIfClosing();
     this.reconciliationSnapshot = undefined;
+    this.structuredSessionNotFound = false;
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     // This is an observation-only probe (issue #6140: isAvailable never touches
@@ -1042,6 +1046,13 @@ export class DaemonMcpProxy {
       await this.ensureStartupOptionsMatch();
     }
 
+    // Reuse the socket status already read by reconciliation, after any restart.
+    // Custom transports without a socket status probe retain legacy compatibility.
+    if (this.daemonStatusProbe) {
+      const status = await this.reconciliationStatus();
+      this.structuredSessionNotFound = status.structuredSessionNotFound === true;
+    }
+
     // Create and connect client
     this.throwIfClosing();
     this.client = this.clientFactory();
@@ -1049,9 +1060,9 @@ export class DaemonMcpProxy {
     // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
     // supports it. The handler is registered BEFORE connect so no early frame
     // is dropped; the opt-in subscription request goes out after connect.
-    const supportsNotifications =
-      typeof client.onNotification === "function" &&
-      typeof client.subscribeToNotifications === "function";
+    const supportsNotifications = [client.onNotification, client.subscribeToNotifications].every(
+      (method) => typeof method === "function",
+    );
     if (supportsNotifications) {
       this.notificationUnsubscribe?.();
       this.notificationUnsubscribe = client.onNotification!((notification) =>
@@ -1604,7 +1615,10 @@ export class DaemonMcpProxy {
       actualBuild.entryScript.length > 0 &&
       recorded.buildId === actualBuild.buildId &&
       recorded.entryScript === actualBuild.entryScript;
-    return matchesRecord ? { ...recorded, ...actual } : actual;
+    // Only the socket owner can advertise support, even when PID metadata matches.
+    return matchesRecord
+      ? { ...recorded, ...actual, structuredSessionNotFound: actual.structuredSessionNotFound }
+      : actual;
   }
 
   private assertAutomaticRestartAllowed(status: DaemonStatus, reason: string): void {
@@ -2201,8 +2215,19 @@ export class DaemonMcpProxy {
   }
 
   private isDaemonSessionNotFoundError(error: unknown): boolean {
-    const message = errorMessage(error);
-    return message.includes("Session not found");
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code !== undefined
+    ) {
+      return error.code === DAEMON_SESSION_NOT_FOUND_CODE;
+    }
+    if (this.structuredSessionNotFound) {
+      return false;
+    }
+    // Older daemons return only the bare message, without a structured error code.
+    return errorMessage(error).includes("Session not found");
   }
 
   private isPreDispatchDaemonSessionError(error: unknown): boolean {
@@ -2238,6 +2263,7 @@ export class DaemonMcpProxy {
     const staleClient = this.client;
     this.connected = false;
     this.client = null;
+    this.structuredSessionNotFound = false;
     this.notificationUnsubscribe?.();
     this.notificationUnsubscribe = null;
     this.connectionClosedUnsubscribe?.();
@@ -3915,6 +3941,7 @@ export class DaemonMcpProxy {
    */
   async close(): Promise<void> {
     this.closing = true;
+    this.structuredSessionNotFound = false;
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();

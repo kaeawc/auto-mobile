@@ -300,42 +300,10 @@ jobs:
           IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
           VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
           SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Extract changelog for this version if it exists
-          if [ -f CHANGELOG.md ]; then
-            NOTES=$(awk -v version="$VERSION" '
-              $0 ~ "^## \\[v?"version"\\]" {in_section=1; next}
-              in_section && $0 ~ "^## \\[" {exit}
-              in_section {print}
-            ' CHANGELOG.md | sed '/^$/d')
-            if [ -z "$NOTES" ]; then
-              NOTES="Release v${VERSION}"
-            fi
-          else
-            NOTES="Release v${VERSION}"
-          fi
-
-          # Add checksum to notes. Each section is a single-line concatenation of
-          # adjacent quoted strings ("..."$'\n\n'"..."). Do NOT split these across
-          # backslash-continued lines: the continuation indentation inserts an
-          # unquoted space between tokens, which ends the NOTES= assignment early
-          # and makes bash try to run the remainder as a command (exit 127). The
-          # Desktop App line below is the canonical form to match.
-          NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'"Download the APK from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## CtrlProxy iOS IPA"$'\n\n'"**SHA256 Checksum:** \`${IPA_CHECKSUM}\`"$'\n\n'"Download the IPA from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## video-server jar"$'\n\n'"**SHA256 Checksum:** \`${VIDEO_JAR_CHECKSUM}\`"$'\n\n'"Download automobile-video.jar from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## macOS screen-capture-helper"$'\n\n'"**SHA256 Checksum:** \`${SCREEN_CAPTURE_HELPER_CHECKSUM}\`"$'\n\n'"Download screen-capture-helper-macos-universal.zip from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## Desktop App"$'\n\n'"Native installers are attached below: macOS \`.dmg\` (signed & notarized), Windows \`.msi\`, and Linux \`.deb\`."
-
-          # Save to file for GitHub release
-          echo "$NOTES" > release_notes.txt
-
-          # Also output for later steps
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bun scripts/release/build-release-notes.ts
 
       - name: Build TypeScript package
         run: bun run build

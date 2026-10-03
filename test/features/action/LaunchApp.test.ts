@@ -1328,17 +1328,12 @@ describe("LaunchApp", () => {
     }
   });
 
-  test("aborts and unsubscribes while waiting for an iOS hierarchy race", async () => {
+  test("resolves iOS hierarchy readiness via sync and unsubscribes the losing push", async () => {
     const iosDevice: BootedDevice = {
       name: "test-ios-device",
       platform: "ios",
       deviceId: "11111111-1111-1111-1111-111111111111",
     };
-    const controller = new AbortController();
-    const deviceLoss = new DeviceLostError(
-      iosDevice.deviceId,
-      `device-disconnected:${iosDevice.deviceId}`,
-    );
     let unsubscribeCount = 0;
     const client = {
       async getLatestHierarchy() {
@@ -1346,38 +1341,86 @@ describe("LaunchApp", () => {
       },
       onPushUpdate() {
         return () => {
-          unsubscribeCount += 1;
+          unsubscribeCount++;
         };
       },
       async requestHierarchySync() {
-        return await new Promise<never>(() => {});
+        return { hierarchy: { packageName } };
       },
     };
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
       client as unknown as IOSCtrlProxyClient,
     );
-    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, null, fakeTimer);
-
+    const info = spyOn(logger, "info");
+    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, null, fakeTimer);
     try {
-      const wait = (
+      await (
         iosLaunchApp as unknown as {
-          waitForIosHierarchyReady(
-            timeoutMs: number,
-            expectedPackageName: string,
-            signal: AbortSignal,
-          ): Promise<void>;
+          waitForIosHierarchyReady(timeoutMs: number, expectedPackageName: string): Promise<void>;
         }
-      ).waitForIosHierarchyReady(5_000, packageName, controller.signal);
-      await Promise.resolve();
-      controller.abort(deviceLoss);
-
-      await expect(wait).rejects.toBe(deviceLoss);
+      ).waitForIosHierarchyReady(5_000, packageName);
+      expect(info).toHaveBeenCalledWith(expect.stringContaining("iOS hierarchy ready via sync"));
       expect(unsubscribeCount).toBe(1);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     } finally {
+      info.mockRestore();
       getInstanceSpy.mockRestore();
     }
   });
+
+  test.each(["device loss", "default abort"])(
+    "aborts and unsubscribes during an iOS hierarchy race (%s)",
+    async (reason) => {
+      const iosDevice: BootedDevice = {
+        name: "test-ios-device",
+        platform: "ios",
+        deviceId: "11111111-1111-1111-1111-111111111111",
+      };
+      const controller = new AbortController();
+      const deviceLoss = new DeviceLostError(
+        iosDevice.deviceId,
+        `device-disconnected:${iosDevice.deviceId}`,
+      );
+      let unsubscribeCount = 0;
+      const client = {
+        async getLatestHierarchy() {
+          return null;
+        },
+        onPushUpdate() {
+          return () => {
+            unsubscribeCount += 1;
+          };
+        },
+        async requestHierarchySync() {
+          return await new Promise<never>(() => {});
+        },
+      };
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        client as unknown as IOSCtrlProxyClient,
+      );
+      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, null, fakeTimer);
+
+      try {
+        const wait = (
+          iosLaunchApp as unknown as {
+            waitForIosHierarchyReady(
+              timeoutMs: number,
+              expectedPackageName: string,
+              signal: AbortSignal,
+            ): Promise<void>;
+          }
+        ).waitForIosHierarchyReady(5_000, packageName, controller.signal);
+        await Promise.resolve();
+        controller.abort(reason === "device loss" ? deviceLoss : undefined);
+
+        await expect(wait).rejects.toBe(controller.signal.reason);
+        expect(unsubscribeCount).toBe(1);
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    },
+  );
 
   test("keeps waiting for an iOS push when the first sync still reports the previous app", async () => {
     const iosDevice: BootedDevice = {
@@ -1404,7 +1447,8 @@ describe("LaunchApp", () => {
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
       client as unknown as IOSCtrlProxyClient,
     );
-    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, null, fakeTimer);
+    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, null, fakeTimer);
+    const info = spyOn(logger, "info");
 
     try {
       let settled = false;
@@ -1424,10 +1468,12 @@ describe("LaunchApp", () => {
 
       pushUpdate?.({ packageName });
       await wait;
+      expect(info).toHaveBeenCalledWith(expect.stringContaining("iOS hierarchy ready via push"));
 
       expect(unsubscribeCount).toBe(1);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     } finally {
+      info.mockRestore();
       getInstanceSpy.mockRestore();
     }
   });

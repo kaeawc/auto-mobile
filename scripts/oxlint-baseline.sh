@@ -61,7 +61,7 @@ fi
 # The oxlint rule codes gated by this ratchet (including max-params and
 # max-lines-per-function). Kept in lock-step with the "warn"
 # rules in .oxlintrc.json.
-RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-raw-promise-race) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)"
+RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)"
 
 # Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the
 # BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED

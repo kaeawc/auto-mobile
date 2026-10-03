@@ -1076,7 +1076,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     server.once("exit", onServerExit);
     server.once("error", onServerError);
     try {
-      const socket = await Promise.race([connection, serverFailure]);
+      const socket = await raceWithDeadline([connection, serverFailure], {
+        timer: this.timer,
+        label: "video-server connection",
+      });
       connectionWon = true;
       if (!this.running) {
         socket.destroy();
@@ -1112,10 +1115,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       // unavailable audio source would look like a successful start followed by a
       // reconnect-looping post-start failure.
       if (this.options.audioEnabled) {
-        await Promise.race([
-          Promise.all([streamingStarted, startupAudioReady]),
-          startupSocketFailure,
-        ]);
+        await raceWithDeadline<[void | null, void | null] | null>(
+          [
+            Promise.all([streamingStarted, startupAudioReady]),
+            Promise.resolve(startupSocketFailure),
+          ],
+          { timer: this.timer, label: "video-server audio startup" },
+        );
         if (!this.running) {
           return;
         }

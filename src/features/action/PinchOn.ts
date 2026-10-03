@@ -1,3 +1,4 @@
+import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import type { Timer } from "../../utils/SystemTimer";
@@ -6,7 +7,7 @@ import type { DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
@@ -241,21 +242,21 @@ export class PinchOn extends BaseVisualChange {
         displayTarget?.assertCurrent();
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         fence?.assertCurrent();
-        const result = await AndroidCtrlProxyClient.getInstance(
-          this.device,
-          this.adbFactory,
-        ).requestPinch(
-          centerX,
-          centerY,
-          distanceStart,
-          distanceEnd,
-          rotationDegrees,
-          duration,
-          5000,
-          perf,
+        const result = await awaitWhileRequestIsLive(
+          AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory).requestPinch(
+            centerX,
+            centerY,
+            distanceStart,
+            distanceEnd,
+            rotationDegrees,
+            duration,
+            resolveGestureCtrlProxyTimeoutMs(duration),
+            perf,
+            signal,
+            displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
+            displayTarget?.assertCurrent,
+          ),
           signal,
-          displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
-          displayTarget?.assertCurrent,
         );
         throwIfAborted(signal);
         displayTarget?.assertCurrent();
@@ -267,16 +268,20 @@ export class PinchOn extends BaseVisualChange {
           if (this.device.platform === "ios") {
             // Once beforeSend lands, also pass this as the dispatch's beforeSend.
             fence?.assertCurrent();
-            const result = await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
-              centerX,
-              centerY,
-              distanceStart,
-              distanceEnd,
-              rotationDegrees,
-              duration,
-              5000,
-              perf,
+            const result = await awaitWhileRequestIsLive(
+              IOSCtrlProxyClient.getInstance(this.device).requestPinch(
+                centerX,
+                centerY,
+                distanceStart,
+                distanceEnd,
+                rotationDegrees,
+                duration,
+                resolveGestureCtrlProxyTimeoutMs(duration),
+                perf,
+              ),
+              signal,
             );
+            throwIfAborted(signal);
             if (result.success) {
               iosDispatchTimestamp = this.timer.now();
               IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
@@ -326,7 +331,10 @@ export class PinchOn extends BaseVisualChange {
           container: target.container,
           warning: target.warning,
           observation: pinchResult.observation,
-          error: pinchResult.error,
+          // sendCommand's timeout result means dispatch completed without a confirmed reply.
+          error: pinchResult.error?.startsWith("Pinch timed out after ")
+            ? `Pinch outcome is indeterminate: the request was dispatched but no result was confirmed (${pinchResult.error}). Do not retry automatically.`
+            : pinchResult.error,
         };
       }
 

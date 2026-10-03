@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
 import java.util.Base64
+import java.util.Locale
 import org.junit.After
 import org.junit.AfterClass
 import org.junit.Assert.assertTrue
@@ -101,6 +102,6 @@ class JUnitRunnerMemoryTest {
 
   private fun formatBytes(bytes: Long): String {
     val mb = bytes.toDouble() / (1024.0 * 1024.0)
-    return String.format("%.2f MiB", mb)
+    return String.format(Locale.ROOT, "%.2f MiB", mb)
   }
 }

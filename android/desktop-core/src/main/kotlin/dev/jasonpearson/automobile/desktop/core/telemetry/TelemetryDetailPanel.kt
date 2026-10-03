@@ -46,6 +46,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.clipboard.LocalClipboardWriter
+import dev.jasonpearson.automobile.desktop.core.formatUiNumber
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.shell.InspectorTabBar
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -1260,7 +1261,7 @@ private fun PerformanceDetail(event: TelemetryDisplayEvent.Performance, textColo
   event.jankFrames?.let { DetailRow("Jank Frames", "$it", textColor) }
   event.touchLatencyMs?.let { DetailRow("Touch Latency", "${it.toInt()} ms", textColor) }
   event.memoryUsageMb?.let { DetailRow("Memory", "${it.toInt()} MB", textColor) }
-  event.cpuUsagePercent?.let { DetailRow("CPU", "${"%.1f".format(it)}%", textColor) }
+  event.cpuUsagePercent?.let { DetailRow("CPU", "${formatUiNumber("%.1f", it)}%", textColor) }
 }
 
 @Composable
@@ -1286,10 +1287,10 @@ private fun MemoryDetail(event: TelemetryDisplayEvent.Memory, textColor: Color) 
   }
   DetailRow("Package", event.packageName, textColor)
   event.javaHeapGrowthMb?.let {
-    DetailRow("Java Heap Growth", "${"%.2f".format(it)} MB", textColor)
+    DetailRow("Java Heap Growth", "${formatUiNumber("%.2f", it)} MB", textColor)
   }
   event.nativeHeapGrowthMb?.let {
-    DetailRow("Native Heap Growth", "${"%.2f".format(it)} MB", textColor)
+    DetailRow("Native Heap Growth", "${formatUiNumber("%.2f", it)} MB", textColor)
   }
   event.gcCount?.let { DetailRow("GC Count", "$it", textColor) }
   event.gcDurationMs?.let { DetailRow("GC Duration", "${it}ms", textColor) }

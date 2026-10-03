@@ -81,7 +81,7 @@ internal object MemoryMonitor {
     if (logEnabled) {
       val status = if (success) "PASS" else "FAIL"
       val message =
-        "AutoMobileRunner: Memory $status $label heapUsedDelta=${String.format("%.2f", deltaMb)} MiB " +
+        "AutoMobileRunner: Memory $status $label heapUsedDelta=${formatMemoryDeltaMb(deltaMb)} MiB " +
           "(start=${formatBytes(startSnapshot.heapUsedBytes)}, end=${formatBytes(endSnapshot.heapUsedBytes)})"
       println(message)
     }

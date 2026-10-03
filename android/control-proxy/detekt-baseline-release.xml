@@ -2,8 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ImplicitDefaultLocale:CtrlProxy.kt:CtrlProxy$"%02x".format(it)</ID>
-    <ID>ImplicitDefaultLocale:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$"%02x".format(it)</ID>
     <ID>UnnecessaryNotNullOperator:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy!!</ID>
     <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$event.text?.joinToString("") { it.toString() }</ID>
     <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$resolvedAlias?.let { deleteCaCertFromStorage(it) }</ID>

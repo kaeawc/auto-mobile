@@ -497,18 +497,18 @@ export interface SubscribeStorageMessage {
 /**
  * `@SerialName("unsubscribe_storage")` → `UnsubscribeStorage`.
  *
- * PRE-EXISTING LATENT BUG: the TS client sends only `subscriptionId` (a "packageName:fileName"
- * string), but the device handler needs `packageName`/`fileName` — so every unsubscribe currently
- * no-ops on the device (times out client-side). This type documents the wire message as it is
- * actually sent today; fixing the payload/handler is tracked as a separate device-side task. Do
- * not "fix" this here (it would change the wire and require a coordinated device change).
- * See the Kotlin `UnsubscribeStorage` doc comment for the device-side view.
+ * The TS client sends only `subscriptionId` as the storage identifier: the "<packageName>:<fileName>"
+ * id exactly as returned in `subscribe_storage_result`. The Kotlin handler in
+ * `CtrlProxyMessageHandler.kt` resolves it through `StorageSubscription.parseId` in
+ * `StorageModels.kt`, splitting on the FIRST ':' so file names may contain ':'.
+ * The device also accepts explicit `packageName` and `fileName`; when both are supplied they
+ * take precedence over `subscriptionId`, but the TS client does not send them. A malformed id
+ * is logged and ignored device-side. `CtrlProxyMessageHandlerTest.kt` pins these rules, and
+ * `CtrlProxyStorage.test.ts` pins the TS wire shape and subscribe-to-unsubscribe id flow.
  */
 export interface UnsubscribeStorageMessage {
   type: "unsubscribe_storage";
   requestId: string;
-  // TODO(#2752 follow-up): also send packageName/fileName so the device can resolve the
-  // subscription; today only subscriptionId is sent and the device unsubscribe no-ops.
   subscriptionId: string;
 }
 

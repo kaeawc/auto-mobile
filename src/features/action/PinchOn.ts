@@ -32,7 +32,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { boundsArea, clamp } from "../../utils/bounds";
+import { boundsArea, boundsEqual, clamp, intersectBounds } from "../../utils/bounds";
 import { buildContainerFromElement, isTruthyFlag } from "../utility/elementProperties";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../utils/screenBounds";
 import {
@@ -51,6 +51,11 @@ export const PINCH_DURATION_MAX_MS = 10000;
 
 export const PINCH_DISTANCE_EXCLUSIVE_MIN = 0;
 export const PINCH_SCALE_EXCLUSIVE_MIN = 0;
+export const PINCH_MIN_DISTANCE_PX = 10;
+export const PINCH_MAX_DISTANCE_RATIO = 0.9;
+export const PINCH_MIN_VISIBLE_DIMENSION_PX = Math.ceil(
+  PINCH_MIN_DISTANCE_PX / PINCH_MAX_DISTANCE_RATIO,
+);
 
 type PinchTarget = {
   bounds: Element["bounds"];
@@ -434,24 +439,26 @@ export class PinchOn extends BaseVisualChange {
     const { observeResult, snapshot } = await this.pinchTargetHierarchy(signal, displayObservation);
 
     const screenBounds = this.getScreenBounds(observeResult, options.includeSystemInsets);
+    let target: PinchTarget = {
+      bounds: screenBounds,
+      targetType: "screen",
+    };
 
     if (options.container) {
       const containerElement = this.findContainerElement(options.container, snapshot);
       if (!containerElement) {
         throw new ActionableError("Container element not found for pinchOn");
       }
-      return {
+      target = {
         bounds: containerElement.bounds,
         targetType: "container",
         container: options.container,
       };
-    }
-
-    if (options.autoTarget !== false) {
+    } else if (options.autoTarget !== false) {
       const autoTarget = this.selectAutoTargetElement(snapshot, screenBounds);
       if (autoTarget) {
         const container = buildContainerFromElement(autoTarget);
-        return {
+        target = {
           bounds: autoTarget.bounds,
           targetType: "container",
           container: container ?? undefined,
@@ -462,10 +469,19 @@ export class PinchOn extends BaseVisualChange {
       }
     }
 
-    return {
-      bounds: screenBounds,
-      targetType: "screen",
-    };
+    const visibleBounds = intersectBounds(target.bounds, screenBounds);
+    const visibleWidth = visibleBounds ? visibleBounds.right - visibleBounds.left : 0;
+    const visibleHeight = visibleBounds ? visibleBounds.bottom - visibleBounds.top : 0;
+    if (
+      !visibleBounds ||
+      (!boundsEqual(visibleBounds, target.bounds) &&
+        Math.min(visibleWidth, visibleHeight) < PINCH_MIN_VISIBLE_DIMENSION_PX)
+    ) {
+      throw new ActionableError(
+        `pinchOn target has visible size ${visibleWidth}x${visibleHeight}; minimum ${PINCH_MIN_VISIBLE_DIMENSION_PX}px per dimension is required for clipped content. Please scroll/zoom the content into view, or pick a container/elementId that is visible on screen.`,
+      );
+    }
+    return { ...target, bounds: visibleBounds };
   }
 
   private async pinchTargetHierarchy(signal?: AbortSignal, displayObservation?: ObserveResult) {
@@ -621,8 +637,8 @@ export class PinchOn extends BaseVisualChange {
     const height = Math.max(1, bounds.bottom - bounds.top);
     const minDimension = Math.min(width, height);
 
-    const maxDistance = minDimension * 0.9;
-    const minDistance = Math.max(10, minDimension * 0.1);
+    const maxDistance = minDimension * PINCH_MAX_DISTANCE_RATIO;
+    const minDistance = Math.max(PINCH_MIN_DISTANCE_PX, minDimension * 0.1);
 
     let distanceStart = options.distanceStart ?? null;
     let distanceEnd = options.distanceEnd ?? null;

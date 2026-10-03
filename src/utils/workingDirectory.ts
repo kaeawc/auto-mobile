@@ -4,6 +4,12 @@ import path from "node:path";
 
 export const DAEMON_LAUNCH_CWD_ENV = "AUTOMOBILE_DAEMON_LAUNCH_CWD";
 
+/**
+ * UNVERIFIED against a real toolchain (#6900). A future rename (or switch to
+ * simctl --set) is a one-line change here.
+ */
+export const CORESIMULATOR_DEVICE_SET_PATH_ENV = "CORESIMULATOR_DEVICE_SET_PATH";
+
 export function safeProcessCwd(fallback: string = "/"): string {
   try {
     return process.cwd();
@@ -40,8 +46,9 @@ export function resolvePathFromDaemonLaunchWorkingDirectory(
 }
 
 /**
- * Rewrites a RELATIVE `CORESIMULATOR_DEVICE_SET_PATH` on the given env map to
- * an absolute path anchored at the daemon launch directory, in place.
+ * Rewrites a RELATIVE `CORESIMULATOR_DEVICE_SET_PATH` on the given env map
+ * ({@link CORESIMULATOR_DEVICE_SET_PATH_ENV}) to an absolute path anchored
+ * at the daemon launch directory, in place.
  *
  * Must run before `Daemon.start()` calls `process.chdir()`. Two independent
  * consumers read this variable after startup: `SimCtlClient` (which spawns
@@ -57,11 +64,11 @@ export function resolvePathFromDaemonLaunchWorkingDirectory(
  * daemon's current working directory at read time.
  */
 export function normalizeCoreSimulatorDeviceSetPathEnv(env: NodeJS.ProcessEnv = process.env): void {
-  const deviceSetPath = env.CORESIMULATOR_DEVICE_SET_PATH?.trim();
+  const deviceSetPath = env[CORESIMULATOR_DEVICE_SET_PATH_ENV]?.trim();
   if (deviceSetPath) {
     // Resolve the anchor against the SAME env the path came from, so an injected
     // env is the single source of truth for both the path and its launch cwd.
-    env.CORESIMULATOR_DEVICE_SET_PATH = resolvePathFromDaemonLaunchWorkingDirectory(
+    env[CORESIMULATOR_DEVICE_SET_PATH_ENV] = resolvePathFromDaemonLaunchWorkingDirectory(
       deviceSetPath,
       env,
     );

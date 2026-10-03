@@ -7,6 +7,7 @@ import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCom
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { isIosSimulatorUdid } from "./iosDeviceType";
 import {
+  CORESIMULATOR_DEVICE_SET_PATH_ENV,
   DAEMON_LAUNCH_CWD_ENV,
   resolvePathFromDaemonLaunchWorkingDirectory,
 } from "../workingDirectory";
@@ -56,7 +57,8 @@ export interface SimulatorTccSqliteClientDependencies {
   /**
    * Root directory containing the `<deviceId>/data/...` layout for a
    * CoreSimulator device set. Defaults to `CORESIMULATOR_DEVICE_SET_PATH`
-   * when set, otherwise the default `~/Library/Developer/CoreSimulator/Devices`
+   * ({@link CORESIMULATOR_DEVICE_SET_PATH_ENV}) when set, otherwise the default
+   * `~/Library/Developer/CoreSimulator/Devices`
    * layout. Inject an override in tests to simulate a custom device set
    * (e.g. CI runners that isolate simulator state per job).
    */
@@ -80,13 +82,14 @@ const nodeFileSystem: TccDatabaseFileSystem = { stat };
  * assignable to `NodeJS.ProcessEnv`-typed parameters in `workingDirectory`.
  */
 export type SimulatorDeviceSetEnvironment = {
-  CORESIMULATOR_DEVICE_SET_PATH?: string;
+  [CORESIMULATOR_DEVICE_SET_PATH_ENV]?: string;
   [DAEMON_LAUNCH_CWD_ENV]?: string;
 };
 
 /**
  * Resolve the CoreSimulator device set root: `CORESIMULATOR_DEVICE_SET_PATH`
- * when set, otherwise the default `~/Library/Developer/CoreSimulator/Devices`
+ * ({@link CORESIMULATOR_DEVICE_SET_PATH_ENV}) when set, otherwise the default
+ * `~/Library/Developer/CoreSimulator/Devices`
  * layout. Shared by every reader that needs a simulator's per-device data
  * root (issue #6583) so the "honor a custom device set" fix lives in one
  * place instead of being re-derived per call site. `environment` defaults to
@@ -96,9 +99,9 @@ export type SimulatorDeviceSetEnvironment = {
  */
 export function defaultDeviceSetRoot(
   homeDirectory: string,
-  environment: { CORESIMULATOR_DEVICE_SET_PATH?: string } = process.env,
+  environment: SimulatorDeviceSetEnvironment = process.env,
 ): string {
-  const configured = environment.CORESIMULATOR_DEVICE_SET_PATH?.trim();
+  const configured = environment[CORESIMULATOR_DEVICE_SET_PATH_ENV]?.trim();
   return configured
     ? configured
     : join(homeDirectory, "Library", "Developer", "CoreSimulator", "Devices");

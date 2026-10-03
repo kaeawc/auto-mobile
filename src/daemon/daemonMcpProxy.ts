@@ -36,6 +36,7 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "./constants";
 import {
+  DAEMON_SESSION_NOT_FOUND_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   type DaemonNotification,
   type DaemonOptions,
@@ -2201,8 +2202,16 @@ export class DaemonMcpProxy {
   }
 
   private isDaemonSessionNotFoundError(error: unknown): boolean {
-    const message = errorMessage(error);
-    return message.includes("Session not found");
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code !== undefined
+    ) {
+      return error.code === DAEMON_SESSION_NOT_FOUND_CODE;
+    }
+    // Older daemons return only the bare message, without a structured error code.
+    return errorMessage(error).includes("Session not found");
   }
 
   private isPreDispatchDaemonSessionError(error: unknown): boolean {

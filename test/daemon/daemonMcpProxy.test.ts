@@ -17,6 +17,7 @@ import {
   type DaemonClientLike,
 } from "../../src/daemon/client";
 import type { DaemonRestartResult } from "../../src/daemon/manager";
+import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
 import {
@@ -2986,6 +2987,43 @@ describe("DaemonMcpProxy", () => {
         await proxy.close();
       }
     });
+
+    test.each([
+      { code: DAEMON_SESSION_NOT_FOUND_CODE, message: "Missing daemon session", reconnect: true },
+      { code: undefined, message: "Session not found", reconnect: true },
+      { code: "other_failure", message: "Session not found", reconnect: false },
+      { code: -32603, message: "Session not found", reconnect: false },
+    ])(
+      "classifies session failure by code before message: %j",
+      async ({ code, message, reconnect }) => {
+        const error =
+          code === undefined ? new Error(message) : Object.assign(new Error(message), { code });
+        const staleClient = new ScriptedDaemonClient({ toolError: error });
+        const freshClient = new ScriptedDaemonClient({ toolResult: { content: [] } });
+        const clients = [staleClient, freshClient];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => clients.shift()!,
+          daemonManager: matchingDaemonManager(),
+          autoStartDaemon: false,
+        });
+        try {
+          if (reconnect) {
+            await expect(proxy.callTool("observe", {})).resolves.toEqual({ content: [] });
+            expect(staleClient.closeCallCount).toBe(1);
+            expect(freshClient.callToolCalls).toHaveLength(1);
+          } else {
+            await expect(proxy.callTool("observe", {})).rejects.toThrow(message);
+            expect(staleClient.closeCallCount).toBe(0);
+            expect(freshClient.callToolCalls).toHaveLength(0);
+          }
+          expect(staleClient.callToolCalls).toHaveLength(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      },
+    );
 
     test("callTool surfaces second session failure after one reconnect retry", async () => {
       const firstClient = new ScriptedDaemonClient({

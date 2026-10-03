@@ -25,6 +25,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
+  DAEMON_SESSION_NOT_FOUND_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -1600,6 +1601,7 @@ export class UnixSocketServer {
         type: "mcp_response",
         success: false,
         error: "Session not found",
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
       };
     }
 

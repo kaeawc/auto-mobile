@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, spyOn } from "bun:test";
 import {
   DualTrackRecorder,
   MERGE_WINDOW_MS,
@@ -10,6 +10,7 @@ import type {
   A11ySource,
 } from "../../../../src/features/record/android/types";
 import type { BootedDevice } from "../../../../src/models";
+import { logger } from "../../../../src/utils/logger";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
 import type { RawTouchFrame } from "../../../../src/features/record/android/types";
@@ -113,17 +114,291 @@ describe("DualTrackRecorder", () => {
     fakeGestures = new FakeGestureEmitter();
     fakeA11y = new FakeA11ySource();
     fakeTimer = new FakeTimer();
-    fakeTimer.enableAutoAdvance();
     recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+  });
+
+  // Issue #9142 supplies measured host delays, not a captured getevent +
+  // interaction trace fixture. These deterministic cases exercise those timings.
+  test.each([220, 360])("tap merges an accessibility tap delayed by %d ms", async (delay) => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(delay);
+    expect(recorder.stepCount).toBe(0);
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    expect(recorder.stepCount).toBe(1);
+    const { steps } = await recorder.stop();
+    expect(steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+    ]);
+  });
+
+  test.each(["tap", "doubleTap", "longPress"] as const)(
+    "unmatched %s records coordinates at the deadline exactly once",
+    async (type) => {
+      await recorder.start();
+      fakeGestures.emit({
+        type,
+        arrivedAt: fakeTimer.now(),
+        screenX: 342,
+        screenY: 891,
+        ...(type === "longPress" ? { durationMs: 800 } : {}),
+      });
+      fakeTimer.advanceTime(MERGE_WINDOW_MS - 1);
+      expect(recorder.stepCount).toBe(0);
+      fakeTimer.advanceTime(1);
+      expect(recorder.stepCount).toBe(1);
+      const { steps } = await recorder.stop();
+      expect(steps).toEqual([
+        {
+          tool: "tapAt",
+          params: {
+            x: 342,
+            y: 891,
+            action: type,
+            ...(type === "longPress" ? { durationMs: 800 } : {}),
+          },
+        },
+      ]);
+    },
+  );
+
+  test.each(["same", "different"])(
+    "two quick taps pair with interleaved events on %s targets in gesture order",
+    async (targets) => {
+      await recorder.start();
+      const second =
+        targets === "same"
+          ? TAP_ELEMENT
+          : {
+              "resource-id": "com.example:id/second",
+              bounds: { left: 600, top: 860, right: 700, bottom: 920 },
+            };
+      fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+      fakeTimer.advanceTime(50);
+      fakeGestures.emit({
+        type: "tap",
+        arrivedAt: 50,
+        screenX: targets === "same" ? 350 : 650,
+        screenY: 891,
+      });
+      fakeTimer.advanceTime(220);
+      fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+      expect(recorder.stepCount).toBe(1);
+      fakeTimer.advanceTime(50);
+      fakeA11y.emit({ type: "tap", timestamp: 50, element: second });
+      expect(recorder.stepCount).toBe(2);
+      const { steps } = await recorder.stop();
+      expect(steps.map((step) => step.params.elementId)).toEqual([
+        TAP_ELEMENT["resource-id"],
+        second["resource-id"],
+      ]);
+      expect(steps.every((step) => step.tool === "tapOn")).toBe(true);
+    },
+  );
+
+  test.each(["tap", "doubleTap"] as const)(
+    "Compose stateChange alone identifies a %s",
+    async (type) => {
+      await recorder.start();
+      fakeGestures.emit({ type, arrivedAt: 0, screenX: 342, screenY: 891 });
+      fakeTimer.advanceTime(360);
+      fakeA11y.emit({
+        type: "stateChange",
+        timestamp: 0,
+        element: { ...TAP_ELEMENT, clickable: true },
+      });
+      expect(recorder.stepCount).toBe(1);
+      expect((await recorder.stop()).steps).toEqual([
+        { tool: "tapOn", params: { action: type, elementId: TAP_ELEMENT["resource-id"] } },
+      ]);
+    },
+  );
+
+  test("a buffered genuine tap takes precedence over stateChange candidates", async () => {
+    await recorder.start();
+    fakeA11y.emit({
+      type: "stateChange",
+      timestamp: 0,
+      element: {
+        ...TAP_ELEMENT,
+        "resource-id": "com.example:id/state",
+      },
+    });
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+    ]);
+  });
+
+  test.each(["longPress", "swipe"] as const)("stateChange does not match %s", async (type) => {
+    await recorder.start();
+    fakeGestures.emit({
+      type,
+      arrivedAt: 0,
+      screenX: 342,
+      screenY: 891,
+      ...(type === "swipe" ? { startX: 342, startY: 891, direction: "up" as const } : {}),
+    });
+    fakeA11y.emit({ type: "stateChange", timestamp: 0, element: TAP_ELEMENT });
+    expect(recorder.stepCount).toBe(0);
+    const { steps } = await recorder.stop();
+    expect(steps[0].tool).toBe(type === "swipe" ? "swipeOn" : "tapAt");
+    expect(steps[0].params.elementId).toBeUndefined();
+    expect(steps[0].params.container).toBeUndefined();
+  });
+
+  test("a late accessibility event cannot replace a timed-out tap or seed the next tap", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS + 10);
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    fakeTimer.advanceTime(10);
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: 342, screenY: 891 });
+    const { steps } = await recorder.stop();
+    expect(steps).toEqual([
+      { tool: "tapAt", params: { x: 342, y: 891, action: "tap" } },
+      { tool: "tapAt", params: { x: 342, y: 891, action: "tap" } },
+    ]);
+  });
+
+  test("unmatched swipe records direction and logs start coordinates", async () => {
+    await recorder.start();
+    const warning = spyOn(logger, "warn");
+    try {
+      fakeGestures.emit({
+        type: "swipe",
+        arrivedAt: 0,
+        direction: "up",
+        speed: "fast",
+        startX: 500,
+        startY: 800,
+        endX: 500,
+        endY: 200,
+      });
+      fakeTimer.advanceTime(MERGE_WINDOW_MS);
+      expect((await recorder.stop()).steps).toEqual([
+        { tool: "swipeOn", params: { direction: "up", speed: "fast" } },
+      ]);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("at (500, 800)"));
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("unmatched swipe without direction warns with start coordinates", async () => {
+    await recorder.start();
+    const warning = spyOn(logger, "warn");
+    try {
+      fakeGestures.emit({ type: "swipe", arrivedAt: 0, startX: 500, startY: 800 });
+      expect((await recorder.stop()).steps).toEqual([]);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("at (500, 800)"));
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("no swipe direction"));
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("matching bounds without a selector still preserve the touch", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: { bounds: TAP_ELEMENT.bounds } });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapAt", params: { x: 342, y: 891, action: "tap" } },
+    ]);
+  });
+
+  test("doubleTap upgrades an earlier coordinate fallback with delayed delivery", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    fakeGestures.emit({
+      type: "doubleTap",
+      arrivedAt: 150,
+      firstTapArrivedAt: 0,
+      screenX: 342,
+      screenY: 891,
+    });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapAt", params: { x: 342, y: 891, action: "doubleTap" } },
+    ]);
+  });
+
+  test.each([
+    [400, 500],
+    [12000, 10000],
+  ])(
+    "coordinate longPress duration %d is bounded to tapAt's contract (%d)",
+    async (durationMs, expectedDuration) => {
+      await recorder.start();
+      fakeGestures.emit({
+        type: "longPress",
+        arrivedAt: 0,
+        screenX: 342,
+        screenY: 891,
+        durationMs,
+      });
+      expect((await recorder.stop()).steps).toEqual([
+        {
+          tool: "tapAt",
+          params: { x: 342, y: 891, action: "longPress", durationMs: expectedDuration },
+        },
+      ]);
+    },
+  );
+
+  test("buffered stateChange outside the tap bounds cannot identify the tap", async () => {
+    await recorder.start();
+    fakeA11y.emit({ type: "stateChange", timestamp: 0, element: TAP_ELEMENT });
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 10, screenY: 10 });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapAt", params: { x: 10, y: 10, action: "tap" } },
+    ]);
+  });
+
+  test("an incoming genuine tap takes precedence over a buffered stateChange", async () => {
+    await recorder.start();
+    fakeA11y.emit({
+      type: "stateChange",
+      timestamp: 0,
+      element: {
+        ...TAP_ELEMENT,
+        "resource-id": "com.example:id/state",
+      },
+    });
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(220);
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+    ]);
+  });
+
+  test("a buffered genuine tap takes precedence over an incoming stateChange", async () => {
+    await recorder.start();
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(220);
+    fakeA11y.emit({
+      type: "stateChange",
+      timestamp: 0,
+      element: {
+        ...TAP_ELEMENT,
+        "resource-id": "com.example:id/state",
+      },
+    });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+    ]);
   });
 
   test("tap gesture + matching A11y element → tapOn step", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "tap", arrivedAt: Date.now(), screenX: 342, screenY: 891 });
-    fakeA11y.emit({ type: "tap", timestamp: Date.now(), element: TAP_ELEMENT });
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: 342, screenY: 891 });
+    fakeA11y.emit({ type: "tap", timestamp: fakeTimer.now(), element: TAP_ELEMENT });
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
     expect(steps).toHaveLength(1);
@@ -135,10 +410,14 @@ describe("DualTrackRecorder", () => {
   test("doubleTap gesture + matching A11y element → tapOn doubleTap step", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "doubleTap", arrivedAt: Date.now(), screenX: 342, screenY: 891 });
-    fakeA11y.emit({ type: "tap", timestamp: Date.now(), element: TAP_ELEMENT });
+    fakeGestures.emit({
+      type: "doubleTap",
+      arrivedAt: fakeTimer.now(),
+      screenX: 342,
+      screenY: 891,
+    });
+    fakeA11y.emit({ type: "tap", timestamp: fakeTimer.now(), element: TAP_ELEMENT });
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
     expect(steps[0].tool).toBe("tapOn");
@@ -184,16 +463,14 @@ describe("DualTrackRecorder", () => {
     });
   });
 
-  test("doubleTap can use the pair's only click after the first merge window expires", async () => {
+  test("doubleTap can use the pair's delayed only click while the first tap is pending", async () => {
     fakeTimer = new FakeTimer();
     recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
     await recorder.start();
 
     fakeGestures.emit({ type: "tap", arrivedAt: 50, screenX: 500, screenY: 500 });
-    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    fakeTimer.advanceTime(150);
     expect(recorder.stepCount).toBe(0);
-
-    fakeTimer.setCurrentTime(150);
     fakeGestures.emit({
       type: "doubleTap",
       arrivedAt: 150,
@@ -201,6 +478,7 @@ describe("DualTrackRecorder", () => {
       screenX: 500,
       screenY: 500,
     });
+    fakeTimer.advanceTime(360);
     fakeA11y.emit({
       type: "tap",
       timestamp: 150,
@@ -217,10 +495,14 @@ describe("DualTrackRecorder", () => {
   test("longPress gesture + matching A11y element → tapOn longPress step", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "longPress", arrivedAt: Date.now(), screenX: 342, screenY: 891 });
-    fakeA11y.emit({ type: "longPress", timestamp: Date.now(), element: TAP_ELEMENT });
+    fakeGestures.emit({
+      type: "longPress",
+      arrivedAt: fakeTimer.now(),
+      screenX: 342,
+      screenY: 891,
+    });
+    fakeA11y.emit({ type: "longPress", timestamp: fakeTimer.now(), element: TAP_ELEMENT });
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
     expect(steps[0].tool).toBe("tapOn");
@@ -232,7 +514,7 @@ describe("DualTrackRecorder", () => {
 
     fakeGestures.emit({
       type: "swipe",
-      arrivedAt: Date.now(),
+      arrivedAt: fakeTimer.now(),
       direction: "up",
       startX: 500,
       startY: 800,
@@ -241,7 +523,7 @@ describe("DualTrackRecorder", () => {
     });
     fakeA11y.emit({
       type: "scroll",
-      timestamp: Date.now(),
+      timestamp: fakeTimer.now(),
       element: {
         "resource-id": "com.example:id/list",
         bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
@@ -250,7 +532,6 @@ describe("DualTrackRecorder", () => {
       scrollDeltaY: 100,
     });
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
     expect(steps[0].tool).toBe("swipeOn");
@@ -261,7 +542,12 @@ describe("DualTrackRecorder", () => {
   test("pinch emits pinchOn immediately without waiting for A11y", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "pinch", arrivedAt: Date.now(), pinchDirection: "in", scale: 0.5 });
+    fakeGestures.emit({
+      type: "pinch",
+      arrivedAt: fakeTimer.now(),
+      pinchDirection: "in",
+      scale: 0.5,
+    });
 
     const { steps } = await recorder.stop();
 
@@ -274,7 +560,7 @@ describe("DualTrackRecorder", () => {
   test("pressButton emits immediately without waiting for A11y", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "pressButton", arrivedAt: Date.now(), button: "back" });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
 
     const { steps } = await recorder.stop();
 
@@ -288,7 +574,7 @@ describe("DualTrackRecorder", () => {
 
     fakeA11y.emit({
       type: "inputText",
-      timestamp: Date.now(),
+      timestamp: fakeTimer.now(),
       text: "hello@example.com",
       element: { "resource-id": "com.example:id/email_field" },
     });
@@ -346,21 +632,20 @@ describe("DualTrackRecorder", () => {
     await recorder.start();
 
     // A11y event arrives first (goes into buffer), then gesture arrives at a far-away coord
-    fakeA11y.emit({ type: "tap", timestamp: Date.now(), element: TAP_ELEMENT });
-    fakeGestures.emit({ type: "tap", arrivedAt: Date.now(), screenX: 10, screenY: 10 }); // far from TAP_ELEMENT bounds
+    fakeA11y.emit({ type: "tap", timestamp: fakeTimer.now(), element: TAP_ELEMENT });
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: 10, screenY: 10 }); // far from TAP_ELEMENT bounds
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
-    // Step should be dropped: gesture coords don't hit element bounds even though types match
-    expect(steps).toHaveLength(0);
+    // The unrelated element must not replace the coordinate target.
+    expect(steps).toEqual([{ tool: "tapAt", params: { x: 10, y: 10, action: "tap" } }]);
   });
 
   test("buffered A11y event older than 2×MERGE_WINDOW_MS is pruned and not matched", async () => {
     await recorder.start();
 
     // A11y event received at host time 0 (receivedAt = 0)
-    fakeA11y.emit({ type: "tap", timestamp: Date.now(), element: TAP_ELEMENT });
+    fakeA11y.emit({ type: "tap", timestamp: fakeTimer.now(), element: TAP_ELEMENT });
 
     // Simulate time passing on the host — A11y event is now older than MAX_BUFFER_AGE_MS
     fakeTimer.setCurrentTime(MERGE_WINDOW_MS * 2 + 10);
@@ -368,24 +653,21 @@ describe("DualTrackRecorder", () => {
     // Gesture arrives well after the A11y event was buffered
     fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: 342, screenY: 891 });
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
-    // receivedAt=0 is more than 2×MERGE_WINDOW_MS ago; event pruned, step dropped
-    expect(steps).toHaveLength(0);
+    // The stale selector must not replace the coordinate target.
+    expect(steps).toEqual([{ tool: "tapAt", params: { x: 342, y: 891, action: "tap" } }]);
   });
 
-  test("tap with no matching A11y element is skipped", async () => {
+  test("stop flushes a tap with no matching A11y element as tapAt", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "tap", arrivedAt: Date.now(), screenX: 50, screenY: 50 });
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: 50, screenY: 50 });
     // No A11y event emitted
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
-    // Step is dropped because no element identity
-    expect(steps).toHaveLength(0);
+    expect(steps).toEqual([{ tool: "tapAt", params: { x: 50, y: 50, action: "tap" } }]);
   });
 
   test("inputText coalescing skipped when intervening step exists", async () => {
@@ -394,7 +676,7 @@ describe("DualTrackRecorder", () => {
     const element = { "resource-id": "com.example:id/search" };
     fakeA11y.emit({ type: "inputText", timestamp: 100, text: "hello", element });
     // Intervening tap
-    fakeGestures.emit({ type: "pressButton", arrivedAt: Date.now(), button: "back" });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
     // Second edit on the same field — must NOT coalesce with first
     fakeA11y.emit({ type: "inputText", timestamp: 200, text: "world", element });
 
@@ -410,9 +692,9 @@ describe("DualTrackRecorder", () => {
   test("windowChange A11y events are not emitted as steps", async () => {
     await recorder.start();
 
-    fakeA11y.emit({ type: "windowChange", timestamp: Date.now(), packageName: "com.example" });
+    fakeA11y.emit({ type: "windowChange", timestamp: fakeTimer.now(), packageName: "com.example" });
     // Also add a real step to ensure we're tracking correctly
-    fakeGestures.emit({ type: "pressButton", arrivedAt: Date.now(), button: "home" });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "home" });
 
     const { steps } = await recorder.stop();
 
@@ -423,8 +705,8 @@ describe("DualTrackRecorder", () => {
   test("multiple independent gestures produce multiple steps", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "pressButton", arrivedAt: Date.now(), button: "back" });
-    fakeGestures.emit({ type: "pressButton", arrivedAt: Date.now(), button: "home" });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "home" });
 
     const { steps } = await recorder.stop();
 
@@ -435,7 +717,7 @@ describe("DualTrackRecorder", () => {
 
   test("stopTestRecording returns correct step count", async () => {
     await recorder.start();
-    fakeGestures.emit({ type: "pressButton", arrivedAt: Date.now(), button: "back" });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
     const { stepCount } = await recorder.stop();
     expect(stepCount).toBe(1);
   });
@@ -443,17 +725,16 @@ describe("DualTrackRecorder", () => {
   test("A11y event with text element using content-desc falls back to text selector", async () => {
     await recorder.start();
 
-    fakeGestures.emit({ type: "tap", arrivedAt: Date.now(), screenX: 250, screenY: 400 });
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: 250, screenY: 400 });
     fakeA11y.emit({
       type: "tap",
-      timestamp: Date.now(),
+      timestamp: fakeTimer.now(),
       element: {
         "content-desc": "Sign in",
         bounds: { left: 200, top: 380, right: 400, bottom: 420 },
       },
     });
 
-    await new Promise<void>((r) => setImmediate(r));
     const { steps } = await recorder.stop();
 
     expect(steps[0].tool).toBe("tapOn");

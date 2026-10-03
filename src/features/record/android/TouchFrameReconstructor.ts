@@ -25,6 +25,7 @@ const KEY_TO_BUTTON: Record<string, GestureEvent["button"]> = {
 export class TouchFrameReconstructor {
   private slots: Map<number, TouchSlot> = new Map();
   private currentSlot = 0;
+  private releasedSlots = new Set<number>();
 
   /**
    * Feed one text line from `getevent -lt` stdout.
@@ -73,7 +74,8 @@ export class TouchFrameReconstructor {
         if (evValue === "ffffffff") {
           // Finger lifted — mark slot as released
           const slot = this.slots.get(this.currentSlot);
-          if (slot) {
+          if (slot && slot.trackingId >= 0) {
+            this.releasedSlots.add(slot.slotId);
             slot.trackingId = -1;
           }
         } else {
@@ -128,15 +130,15 @@ export class TouchFrameReconstructor {
     for (const [, slot] of this.slots) {
       if (slot.trackingId >= 0) {
         activeSlots.push({ ...slot });
-      } else {
+      } else if (this.releasedSlots.has(slot.slotId)) {
         releasedSlots.push(slot.slotId);
       }
     }
 
-    // Remove released slots from state so they don't appear in future frames
-    for (const slotId of releasedSlots) {
-      this.slots.delete(slotId);
-    }
+    this.releasedSlots.clear();
+
+    // Protocol B retains each slot's axes and pressure after contact release.
+    // Release notifications are per-frame; inactive slots stay out of activeSlots.
 
     return { arrivedAt, activeSlots, releasedSlots };
   }

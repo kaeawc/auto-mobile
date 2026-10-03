@@ -6,6 +6,7 @@ import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverTouchNode } from "./TouchNodeDiscovery";
 import { buildAxisRanges, buildScaler, queryDensity, queryRotation } from "./AxisRanges";
+import { LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "../../action/tapAtGesture";
 import { GetEventReader } from "./GetEventReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 
@@ -30,9 +31,13 @@ interface PendingGesture {
 
 /**
  * How long to wait for a CtrlProxy event to pair with a getevent gesture.
- * If no A11y event arrives within this window, the gesture step is dropped with a warning.
+ * Issue #9142 measured 222–361 ms from touch-up to host receipt, including the
+ * service's 100 ms notificationTimeout and the WebSocket hop. 750 ms gives
+ * roughly twice the observed maximum while bounding unrelated-event pairing.
+ * CtrlProxy notificationTimeout is a separate service-side follow-up, unchanged here.
+ * Unmatched gestures fall back to coordinates/direction when this deadline expires.
  */
-export const MERGE_WINDOW_MS = 100;
+export const MERGE_WINDOW_MS = 750;
 
 /**
  * Merges GestureEvents from getevent with InteractionEvents from the CtrlProxy
@@ -184,7 +189,7 @@ export class DualTrackRecorder {
         priorTap.resolved = true;
       }
       const step = priorTap?.stepIndex === undefined ? undefined : this.steps[priorTap.stepIndex];
-      if (step?.tool === "tapOn" && step.params.action === "tap") {
+      if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
         step.params.action = "doubleTap";
         return;
       }
@@ -221,23 +226,26 @@ export class DualTrackRecorder {
       (p) =>
         !p.resolved &&
         isCompatibleType(p.gesture.type, event.type) &&
-        this.timer.now() - p.arrivedAt <= MERGE_WINDOW_MS &&
         gestureHitsElement(p.gesture, event.element),
     );
 
     if (matched) {
-      matched.resolved = true;
-      const step = buildMergedStep(matched.gesture, event);
-      if (step) {
-        matched.stepIndex = this.steps.length;
-        this.steps.push(step);
-      }
-    } else {
+      // find() pairs by receipt order and target: the oldest unresolved match wins.
+      this.resolveGesture(matched, event);
+    } else if (
+      !this.pendingGestures.some(
+        (p) =>
+          p.resolved &&
+          isCompatibleType(p.gesture.type, event.type) &&
+          gestureHitsElement(p.gesture, event.element),
+      )
+    ) {
+      // A late event for an already resolved touch must not seed the next touch.
       this.bufferedInteractions.push({ ...event, receivedAt: this.timer.now() });
     }
   }
 
-  private resolveGesture(pending: PendingGesture): void {
+  private resolveGesture(pending: PendingGesture, interaction?: ReceivedInteraction): void {
     if (pending.resolved) {
       return;
     }
@@ -251,24 +259,33 @@ export class DualTrackRecorder {
       (e) => now - e.receivedAt <= MAX_BUFFER_AGE_MS,
     );
 
-    // Try to match against a buffered A11y interaction — require type + hit-test
-    const idx = this.bufferedInteractions.findIndex(
-      (e) =>
-        isCompatibleType(pending.gesture.type, e.type) &&
-        gestureHitsElement(pending.gesture, e.element),
-    );
-
-    if (idx >= 0) {
-      const event = this.bufferedInteractions.splice(idx, 1)[0];
-      const step = buildMergedStep(pending.gesture, event);
-      if (step) {
-        pending.stepIndex = this.steps.length;
-        this.steps.push(step);
-      }
-    } else {
+    // Prefer a genuine click over Compose stateChange when both are available.
+    const matches = (e: ReceivedInteraction & { receivedAt: number }) =>
+      Math.abs(e.receivedAt - pending.arrivedAt) <= MERGE_WINDOW_MS &&
+      isCompatibleType(pending.gesture.type, e.type) &&
+      gestureHitsElement(pending.gesture, e.element);
+    const tapIndex = this.bufferedInteractions.findIndex((e) => e.type === "tap" && matches(e));
+    const idx = tapIndex >= 0 ? tapIndex : this.bufferedInteractions.findIndex(matches);
+    const event =
+      interaction?.type === "tap" || idx < 0
+        ? interaction
+        : this.bufferedInteractions.splice(idx, 1)[0];
+    const step = buildMergedStep(pending.gesture, event);
+    if (step) {
+      pending.stepIndex = this.steps.length;
+      this.steps.push(step);
+    }
+    if (!event || !buildSelector(event.element) || !step) {
+      const gesture = pending.gesture;
+      const [x, y] =
+        gesture.type === "swipe"
+          ? [gesture.startX, gesture.startY]
+          : [gesture.screenX, gesture.screenY];
+      const outcome = step
+        ? `recorded ${step.tool} fallback`
+        : "no swipe direction or missing coordinates — step skipped";
       logger.warn(
-        `[DualTrackRecorder] No element match for ${pending.gesture.type} ` +
-          `at (${pending.gesture.screenX}, ${pending.gesture.screenY}) — step skipped`,
+        `[DualTrackRecorder] No element match for ${gesture.type} at (${x}, ${y}) — ${outcome}`,
       );
     }
   }
@@ -357,8 +374,10 @@ export class DualTrackRecorder {
 
 function isCompatibleType(gestureType: string, eventType: string): boolean {
   return (
-    (gestureType === "tap" && eventType === "tap") ||
-    (gestureType === "doubleTap" && eventType === "tap") ||
+    // Compose Playground clicks emitted stateChange/scroll, never tap (#9142).
+    // Only tap/doubleTap may use this signal, and callers still require the hit-test.
+    ((gestureType === "tap" || gestureType === "doubleTap") &&
+      (eventType === "tap" || eventType === "stateChange")) ||
     (gestureType === "longPress" && eventType === "longPress") ||
     (gestureType === "swipe" && (eventType === "scroll" || eventType === "swipe"))
   );
@@ -430,27 +449,21 @@ export function resolveSwipeDirection(
   return dy > 0 ? "up" : "down";
 }
 
-function buildMergedStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
+function buildMergedStep(
+  gesture: GestureEvent,
+  event: ReceivedInteraction = { type: "", timestamp: 0 },
+): PlanStep | null {
   const selector = buildSelector(event.element);
 
   switch (gesture.type) {
     case "tap":
-      if (!selector) {
-        return null;
-      }
-      return { tool: "tapOn", params: { action: "tap", ...selector } };
-
     case "doubleTap":
-      if (!selector) {
-        return null;
+    case "longPress": {
+      if (selector) {
+        return { tool: "tapOn", params: { action: gesture.type, ...selector } };
       }
-      return { tool: "tapOn", params: { action: "doubleTap", ...selector } };
-
-    case "longPress":
-      if (!selector) {
-        return null;
-      }
-      return { tool: "tapOn", params: { action: "longPress", ...selector } };
+      return buildCoordinateTapStep(gesture);
+    }
 
     case "swipe": {
       const direction =
@@ -472,6 +485,27 @@ function buildMergedStep(gesture: GestureEvent, event: ReceivedInteraction): Pla
     default:
       return null;
   }
+}
+
+function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
+  if (gesture.screenX === undefined || gesture.screenY === undefined) {
+    return null;
+  }
+  // The scaler already supplies native Android display pixels (rotation applied).
+  // tapAt defaults to absolute native coordinates, so no coordinateSpace is needed.
+  const params: Record<string, unknown> = {
+    x: gesture.screenX,
+    y: gesture.screenY,
+    action: gesture.type,
+  };
+  if (gesture.type === "longPress" && gesture.durationMs !== undefined) {
+    // Classification starts at 400 ms; tapAt's existing contract starts at 500 ms.
+    params.durationMs = Math.min(
+      LONG_PRESS_MAX_MS,
+      Math.max(LONG_PRESS_MIN_MS, gesture.durationMs),
+    );
+  }
+  return { tool: "tapAt", params };
 }
 
 function buildPressButtonStep(gesture: GestureEvent): PlanStep {

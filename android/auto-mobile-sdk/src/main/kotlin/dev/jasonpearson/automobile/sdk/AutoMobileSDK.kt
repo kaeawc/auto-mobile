@@ -150,14 +150,14 @@ object AutoMobileSDK {
         }
 
         navigationOnlyMode = false
-        this.context = context.applicationContext
+        val appContext = context.applicationContext
+        this.context = appContext
         this.configuration = configuration
         capabilityRegistry.markInitialized()
         AutoMobileNetwork.setCapturePolicyProvider { capabilityRegistry.currentPolicy() }
         AutoMobileNetwork.setNetworkControlProvider {
           capabilityRegistry.isCapabilitySupported("network.control")
         }
-        val appContext = this.context!!
 
         // Create disk persistence for events
         val eventPersistence = FileEventPersistence(File(appContext.cacheDir, "automobile_events"))

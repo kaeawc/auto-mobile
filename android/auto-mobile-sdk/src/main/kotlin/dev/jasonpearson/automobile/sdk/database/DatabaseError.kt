@@ -12,7 +12,10 @@ sealed class DatabaseError(message: String) : Exception(message) {
   class SqlError(cause: String) : DatabaseError("SQL error: $cause")
 
   /** DatabaseInspector was not initialized with a context. */
-  class NotInitialized : DatabaseError("DatabaseInspector not initialized")
+  class NotInitialized :
+    DatabaseError(
+      "DatabaseInspector not initialized. Call AutoMobileSDK.initialize(context) first."
+    )
 
   /** A named application-provided driver was not registered. */
   class DriverNotFound(name: String) : DatabaseError("Database driver not found: $name")

@@ -10,7 +10,10 @@ sealed class SharedPreferencesError(message: String) : Exception(message) {
   class InvalidPath(path: String) : SharedPreferencesError("Invalid preferences path: $path")
 
   /** SharedPreferencesInspector was not initialized with a context. */
-  class NotInitialized : SharedPreferencesError("SharedPreferencesInspector not initialized")
+  class NotInitialized :
+    SharedPreferencesError(
+      "SharedPreferencesInspector not initialized. Call AutoMobileSDK.initialize(context) first."
+    )
 
   /** A named application-provided driver was not registered. */
   class DriverNotFound(name: String) : SharedPreferencesError("Storage driver not found: $name")

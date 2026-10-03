@@ -7,7 +7,10 @@ import {
   parsePackageVersionName,
   parseSelectedImeSubtype,
 } from "../../../src/features/action/AndroidImeCatalog";
-import { withAndroidImeLock } from "../../../src/features/action/androidImeLock";
+import {
+  quarantineAndroidIme,
+  withAndroidImeLock,
+} from "../../../src/features/action/androidImeLock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
@@ -15,7 +18,7 @@ const gboard =
   "com.google.android.inputmethod.latin/com.google.android.apps.inputmethod.latin.LatinIME";
 const samsung = "com.samsung.android.honeyboard/.service.HoneyBoardService";
 
-function fixture() {
+function fixture(deviceId = "test-device") {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponse("shell ime list -a -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
   adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n`, stderr: "" });
@@ -23,8 +26,146 @@ function fixture() {
     stdout: `${gboard}\n`,
     stderr: "",
   });
-  return { adb, catalog: new AndroidImeCatalog(adb, "test-device") };
+  return { adb, catalog: new AndroidImeCatalog(adb, deviceId) };
 }
+
+test("explicit selection recovers quarantine only after verified IME readback", async () => {
+  const deviceId = "quarantined-select-success";
+  const { adb, catalog } = fixture(deviceId);
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+    { stdout: gboard, stderr: "" },
+    { stdout: samsung, stderr: "" },
+  ]);
+  quarantineAndroidIme(deviceId);
+
+  expect((await catalog.select(samsung)).activeImeId).toBe(samsung);
+  expect(adb.getExecutedArgv()).toContainEqual(["shell", "ime", "set", samsung]);
+  expect(await withAndroidImeLock(deviceId, async () => "ordinary operation")).toBe(
+    "ordinary operation",
+  );
+});
+
+test("explicit selection of the already active IME recovers quarantine by readback", async () => {
+  const deviceId = "quarantined-select-active";
+  const { adb, catalog } = fixture(deviceId);
+  quarantineAndroidIme(deviceId);
+
+  expect((await catalog.select(gboard)).activeImeId).toBe(gboard);
+  expect(adb.getExecutedCommands()).toContain("shell settings get secure default_input_method");
+  expect(await withAndroidImeLock(deviceId, async () => true)).toBe(true);
+});
+
+test("mismatched selection readback leaves the device quarantined", async () => {
+  const deviceId = "quarantined-select-mismatch";
+  const { adb, catalog } = fixture(deviceId);
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  quarantineAndroidIme(deviceId);
+
+  await expect(catalog.select(samsung)).rejects.toThrow("did not take effect");
+  expect(adb.getExecutedArgv()).toContainEqual(["shell", "ime", "set", samsung]);
+  await expect(withAndroidImeLock(deviceId, async () => true)).rejects.toThrow(
+    "IME state is unknown",
+  );
+});
+
+test("failed ime set leaves the device quarantined and surfaces its error", async () => {
+  const deviceId = "quarantined-select-failure";
+  const { adb, catalog } = fixture(deviceId);
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  adb.setCommandResponse(`shell ime set ${samsung}`, { stdout: "", stderr: "permission denied" });
+  quarantineAndroidIme(deviceId);
+
+  await expect(catalog.select(samsung)).rejects.toThrow(
+    `Failed to select IME ${samsung}: permission denied`,
+  );
+  await expect(withAndroidImeLock(deviceId, async () => true)).rejects.toThrow(
+    "IME state is unknown",
+  );
+});
+
+test("failed selection readback leaves the device quarantined", async () => {
+  const deviceId = "quarantined-select-readback-failure";
+  const { adb, catalog } = fixture(deviceId);
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+    { stdout: gboard, stderr: "" },
+    { stdout: "", stderr: "permission denied" },
+  ]);
+  quarantineAndroidIme(deviceId);
+
+  await expect(catalog.select(samsung)).rejects.toThrow(
+    "Failed to read active IME: permission denied",
+  );
+  await expect(withAndroidImeLock(deviceId, async () => true)).rejects.toThrow(
+    "IME state is unknown",
+  );
+});
+
+test("scoped selection does not clear quarantine", async () => {
+  const deviceId = "quarantined-select-scoped";
+  const { catalog } = fixture(deviceId);
+  quarantineAndroidIme(deviceId);
+
+  expect((await catalog.selectWithinLock(gboard)).activeImeId).toBe(gboard);
+  await expect(withAndroidImeLock(deviceId, async () => true)).rejects.toThrow(
+    "IME state is unknown",
+  );
+});
+
+test("quarantined explicit selection holds the lock until readback before an ordinary operation", async () => {
+  const deviceId = "quarantined-select-serialization";
+  const { adb } = fixture(deviceId);
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+    { stdout: gboard, stderr: "" },
+    { stdout: samsung, stderr: "" },
+  ]);
+  let enteredSet: () => void = () => {};
+  const setStarted = new Promise<void>((resolve) => {
+    enteredSet = resolve;
+  });
+  let releaseSet: () => void = () => {};
+  const setHeld = new Promise<void>((resolve) => {
+    releaseSet = resolve;
+  });
+  const catalog = new AndroidImeCatalog(
+    {
+      execute: async (args: string[], options?: AdbExecuteOptions) => {
+        if (args.join(" ") === `shell ime set ${samsung}`) {
+          enteredSet();
+          await setHeld;
+        }
+        return adb.execute(args, options);
+      },
+    },
+    deviceId,
+  );
+  quarantineAndroidIme(deviceId);
+  const selection = catalog.select(samsung);
+  await Promise.race([setStarted, selection]);
+  let ran = false;
+  const ordinary = withAndroidImeLock(deviceId, async () => {
+    ran = true;
+  });
+  for (let i = 0; i < 8; i++) {
+    await Promise.resolve();
+  }
+  const ranBeforeReadback = ran;
+  const readsBeforeRelease = adb
+    .getExecutedCommands()
+    .filter((command) => command === "shell settings get secure default_input_method").length;
+  releaseSet();
+  await Promise.all([selection, ordinary]);
+  expect(ranBeforeReadback).toBe(false);
+  expect(readsBeforeRelease).toBe(1);
+  expect(ran).toBe(true);
+  expect(
+    adb
+      .getExecutedCommands()
+      .filter((command) => command === "shell settings get secure default_input_method").length,
+  ).toBe(2);
+});
 
 test("lists actual installed IMEs separately from enabled and active state", async () => {
   const { catalog } = fixture();

@@ -1080,12 +1080,17 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             try catchingObjCException {
-                let factory = try GestureCoordinateFactory(
+                let factory = try DisplayGestureFactory(
                     provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
                 )
-                let resolved = try factory.resolve(x: x, y: y)
-                logRelativeCoordinate(resolved.selection, gesture: "doubleTap")
-                try factory.provider.doubleTap(resolved.coordinate)
+                let delivery = try factory.deliverDoubleTap(
+                    start: GesturePoint(x: x, y: y), pause: { Thread.sleep(forTimeInterval: $0) }
+                )
+                if factory.mismatch {
+                    var sample = TapDiagnostics(requested: .init(x: x, y: y, durationMs: 0))
+                    factory.annotate(&sample, delivery: delivery)
+                    logger.warning("\(sample.logLine(gesture: "doubleTap"), privacy: .public)")
+                }
             }
         }
 
@@ -1095,12 +1100,17 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             try catchingObjCException {
-                let factory = try GestureCoordinateFactory(
+                let factory = try DisplayGestureFactory(
                     provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
                 )
-                let resolved = try factory.resolve(x: x, y: y)
-                logRelativeCoordinate(resolved.selection, gesture: "longPress")
-                try factory.provider.press(resolved.coordinate, duration: duration)
+                let delivery = try factory.deliver(start: GesturePoint(x: x, y: y), press: duration)
+                if factory.mismatch {
+                    let durationMs = duration
+                        .isFinite && abs(duration * 1000) < Double(Int.max) ? Int(duration * 1000) : 0
+                    var sample = TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))
+                    factory.annotate(&sample, delivery: delivery)
+                    logger.warning("\(sample.logLine(gesture: "longPress"), privacy: .public)")
+                }
             }
         }
 

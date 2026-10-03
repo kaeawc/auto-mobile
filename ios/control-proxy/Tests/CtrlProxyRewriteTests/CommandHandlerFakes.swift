@@ -267,6 +267,9 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
     var actions: [String] = []
     var symbolsAvailable = true
     var synthesisError: Error?
+    var failSynthesisOnCall: Int?
+    var synthesisResults: [Bool] = []
+    var tapDurations: [TimeInterval] = []
 
     init(geometry: GestureCoordinateGeometry?) { cachedGeometry = geometry }
 
@@ -282,7 +285,10 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
 
     func synthesize(_ touch: DisplayTouch) throws -> Bool {
         touches.append(touch)
-        if let synthesisError { throw synthesisError }
+        if let synthesisError, failSynthesisOnCall == nil || failSynthesisOnCall == touches.count {
+            throw synthesisError
+        }
+        if !synthesisResults.isEmpty { return synthesisResults.removeFirst() }
         return symbolsAvailable
     }
 
@@ -292,6 +298,7 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
     }
 
     func tap(_: GestureCoordinateSelection, duration: TimeInterval) throws {
+        tapDurations.append(duration)
         actions.append(duration > 0 ? "tapPress" : "tap")
     }
 

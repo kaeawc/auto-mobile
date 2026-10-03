@@ -51,8 +51,11 @@ struct DisplayGestureDelivery<Coordinate> {
     }
 }
 
-/// Only taps and single-finger swipes opt into this route. The existing factory remains
-/// the unchanged path for doubleTap, longPress, drag, pinch and multi-finger gestures.
+/// A short gap between display-targeted taps; coordinate double taps retain XCUITest's timing.
+let doubleTapInterTapGap: TimeInterval = 0.05
+
+/// Taps, long presses, double taps and single-finger swipes opt into this route. The existing
+/// factory remains the unchanged path for drag, pinch and multi-finger gestures.
 @MainActor
 struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     let provider: Provider
@@ -111,6 +114,26 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         }
     }
 
+    private func displayTouch(
+        start: GesturePoint, end: GesturePoint, press: TimeInterval, move: TimeInterval,
+        selection: GestureCoordinateSelection, endSelection: GestureCoordinateSelection
+    )
+        -> (touch: DisplayTouch?, fallbackFrom: TapCoordinateStrategy?)
+    {
+        guard selection.strategy.targetsDisplay,
+              let displayId = inventory?.target.displayId,
+              let startPoint = point(start, selection: selection),
+              let endPoint = point(end, selection: endSelection)
+        else { return (nil, nil) }
+        let orientation = selection.strategy == .displayTargeted ? 1 :
+            DeviceRotation.gestureInterfaceOrientationRawValue(rotation: geometry?.rotation)
+        guard let orientation else { return (nil, selection.strategy) }
+        return (DisplayTouch(
+            start: startPoint, end: endPoint, pressDuration: press, moveDuration: move,
+            displayId: displayId, interfaceOrientation: orientation
+        ), selection.strategy)
+    }
+
     func deliver(
         start: GesturePoint, end: GesturePoint? = nil, press: TimeInterval, move: TimeInterval = 0,
         velocity: Double? = nil, forced: TapCoordinateStrategy? = nil,
@@ -120,26 +143,17 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     {
         var selected = selection(point: start, forced: forced)
         let endSelection = selection(point: end ?? start, forced: forced)
-        var fallback: TapCoordinateStrategy?
-        if selected.strategy.targetsDisplay,
-           let displayId = inventory?.target.displayId,
-           let startPoint = point(start, selection: selected),
-           let endPoint = point(end ?? start, selection: endSelection)
-        {
-            let orientation = selected.strategy == .displayTargeted ? 1 :
-                DeviceRotation.gestureInterfaceOrientationRawValue(rotation: geometry?.rotation)
-            if let orientation {
-                let candidate = DisplayGestureDelivery<Provider.Coordinate>(
-                    selection: selected, coordinate: nil, synthesizedPoint: startPoint,
-                    synthesizedInterfaceOrientation: orientation, fallbackFrom: nil
-                )
-                beforeAction(candidate)
-                if try provider.synthesize(DisplayTouch(
-                    start: startPoint, end: endPoint, pressDuration: press, moveDuration: move,
-                    displayId: displayId, interfaceOrientation: orientation
-                )) { return candidate }
-            }
-            fallback = selected.strategy
+        let display = displayTouch(
+            start: start, end: end ?? start, press: press, move: move,
+            selection: selected, endSelection: endSelection
+        )
+        if let touch = display.touch {
+            let candidate = DisplayGestureDelivery<Provider.Coordinate>(
+                selection: selected, coordinate: nil, synthesizedPoint: touch.start,
+                synthesizedInterfaceOrientation: touch.interfaceOrientation, fallbackFrom: nil
+            )
+            beforeAction(candidate)
+            if try provider.synthesize(touch) { return candidate }
         }
         if selected.strategy.targetsDisplay {
             selected = GestureCoordinateSelection.choose(point: start, geometry: geometry)
@@ -147,7 +161,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         let coordinate = try provider.coordinate(selection: selected)
         let delivery = DisplayGestureDelivery(
             selection: selected, coordinate: coordinate, synthesizedPoint: nil,
-            synthesizedInterfaceOrientation: nil, fallbackFrom: fallback
+            synthesizedInterfaceOrientation: nil, fallbackFrom: display.fallbackFrom
         )
         if let end {
             let selectedEnd = GestureCoordinateSelection.choose(point: end, geometry: geometry)
@@ -158,6 +172,45 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
             beforeAction(delivery)
             try provider.tap(coordinate, duration: press)
         }
+        return delivery
+    }
+
+    func deliverDoubleTap(
+        start: GesturePoint, gap: TimeInterval = doubleTapInterTapGap,
+        pause: (TimeInterval) throws -> Void, forced: TapCoordinateStrategy? = nil,
+        beforeAction: (DisplayGestureDelivery<Provider.Coordinate>) -> Void = { _ in }
+    )
+        throws -> DisplayGestureDelivery<Provider.Coordinate>
+    {
+        var selected = selection(point: start, forced: forced)
+        let display = displayTouch(
+            start: start, end: start, press: 0, move: 0, selection: selected, endSelection: selected
+        )
+        if let touch = display.touch {
+            let candidate = DisplayGestureDelivery<Provider.Coordinate>(
+                selection: selected, coordinate: nil, synthesizedPoint: touch.start,
+                synthesizedInterfaceOrientation: touch.interfaceOrientation, fallbackFrom: nil
+            )
+            beforeAction(candidate)
+            if try provider.synthesize(touch) {
+                try pause(gap)
+                // Once the first tap succeeds, any failure must stop without delivering extra taps.
+                guard try provider.synthesize(touch) else {
+                    throw GesturePerformer.GestureError.gestureFailed("second double-tap synthesis unavailable")
+                }
+                return candidate
+            }
+        }
+        if selected.strategy.targetsDisplay {
+            selected = GestureCoordinateSelection.choose(point: start, geometry: geometry)
+        }
+        let coordinate = try provider.coordinate(selection: selected)
+        let delivery = DisplayGestureDelivery(
+            selection: selected, coordinate: coordinate, synthesizedPoint: nil,
+            synthesizedInterfaceOrientation: nil, fallbackFrom: display.fallbackFrom
+        )
+        beforeAction(delivery)
+        try provider.doubleTap(coordinate)
         return delivery
     }
 

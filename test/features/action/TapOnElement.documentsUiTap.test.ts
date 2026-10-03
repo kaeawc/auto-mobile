@@ -6,6 +6,8 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { logger } from "../../../src/utils/logger";
 
 function createTap(
   options: {
@@ -19,24 +21,20 @@ function createTap(
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const gestures: unknown[] = [];
-  const actions: unknown[] = [];
-  const service = {
-    supportsNodeActionSelectors: async () => options.supported ?? true,
-    requestNodeAction: async (action: string, selector: unknown) => {
-      actions.push({ action, selector });
-      if (options.throws) {
-        throw new Error("Runner disconnected");
-      }
-      return { success: options.success ?? true };
-    },
-    requestTapCoordinates: async (...args: unknown[]) => {
-      gestures.push(args);
-      if (options.dispatchedTapFails) {
-        (args[6] as (() => void) | undefined)?.();
-        return { success: false, error: "Tap timed out after 5000ms" };
-      }
-      return { success: true };
-    },
+  const service = new FakeCtrlProxy(timer);
+  service.setSupportsNodeActionSelectors(options.supported ?? true);
+  service.setActionResult({ success: options.success ?? true, action: "click", totalTimeMs: 1 });
+  if (options.throws) {
+    service.setFailureMode("requestNodeAction", new Error("Runner disconnected"));
+  }
+  const requestTap = service.requestTapCoordinates.bind(service);
+  service.requestTapCoordinates = async (...args) => {
+    gestures.push(args);
+    if (options.dispatchedTapFails) {
+      args[6]?.();
+      return { success: false, totalTimeMs: 1, error: "Tap timed out after 5000ms" };
+    }
+    return requestTap(...args);
   };
   const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
     service as unknown as AndroidCtrlProxyClient,
@@ -51,7 +49,12 @@ function createTap(
   } finally {
     clientSpy.mockRestore();
   }
-  return { tap, adb, gestures, actions };
+  return {
+    tap,
+    adb,
+    gestures,
+    service,
+  };
 }
 
 const row: Element = {
@@ -70,9 +73,9 @@ async function execute(tap: TapOnElement, element = row, action = "tap") {
 describe("DocumentsUI row activation (#6335)", () => {
   for (const pkg of ["com.android.documentsui", "com.google.android.documentsui"]) {
     test(`activates the exact ${pkg} collection item through CtrlProxy`, async () => {
-      const { tap, adb, actions, gestures } = createTap();
+      const { tap, adb, service, gestures } = createTap();
       await execute(tap, { ...row, "resource-id": `${pkg}:id/item_root` });
-      expect(actions).toEqual([
+      expect(service.getNodeActionHistory()).toMatchObject([
         {
           action: "click",
           selector: {
@@ -89,35 +92,46 @@ describe("DocumentsUI row activation (#6335)", () => {
 
   for (const options of [{ supported: false }, { success: false }, { throws: true }]) {
     test(`falls back to input when semantic activation is unavailable: ${JSON.stringify(options)}`, async () => {
-      const { tap, adb, gestures } = createTap(options);
-      await execute(tap);
-      expect(gestures).toHaveLength(0);
-      expect(adb.getAllCommands()).toEqual(["shell input touchscreen tap 540 380"]);
+      const { tap, adb, gestures, service } = createTap(options);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await execute(tap);
+        expect(service.getNodeActionHistory()).toHaveLength(options.success === false ? 1 : 0);
+        if (options.throws) {
+          expect(warning).toHaveBeenCalledWith(
+            "[TapOnElement] DocumentsUI row activation failed: Error: Runner disconnected",
+          );
+        }
+        expect(gestures).toHaveLength(0);
+        expect(adb.getAllCommands()).toEqual(["shell input touchscreen tap 540 380"]);
+      } finally {
+        warning.mockRestore();
+      }
     });
   }
 
   test("never activates the first resource-id match when collection identity is missing", async () => {
-    const { tap, adb, actions } = createTap();
+    const { tap, adb, service } = createTap();
     await execute(tap, {
       ...row,
       "collection-row-index": undefined,
       "collection-column-index": undefined,
     });
-    expect(actions).toHaveLength(0);
+    expect(service.getNodeActionHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toEqual(["shell input touchscreen tap 540 380"]);
   });
 
   test("does not use an incomplete collection identity", async () => {
-    const { tap, adb, actions } = createTap();
+    const { tap, adb, service } = createTap();
     await execute(tap, { ...row, "collection-column-index": undefined });
-    expect(actions).toHaveLength(0);
+    expect(service.getNodeActionHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toEqual(["shell input touchscreen tap 540 380"]);
   });
 
   test("does not attempt an unadvertised click action", async () => {
-    const { tap, adb, actions } = createTap();
+    const { tap, adb, service } = createTap();
     await execute(tap, { ...row, actions: ["long_click"] });
-    expect(actions).toHaveLength(0);
+    expect(service.getNodeActionHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toEqual(["shell input touchscreen tap 540 380"]);
   });
 
@@ -126,9 +140,9 @@ describe("DocumentsUI row activation (#6335)", () => {
     "com.google.android.documentsui:id/sub_menu_grid",
   ]) {
     test(`preserves coordinate gestures for ${id}`, async () => {
-      const { tap, adb, actions, gestures } = createTap();
+      const { tap, adb, service, gestures } = createTap();
       await execute(tap, { ...row, "resource-id": id });
-      expect(actions).toHaveLength(0);
+      expect(service.getNodeActionHistory()).toHaveLength(0);
       expect(gestures).toEqual([
         [540, 380, 10, undefined, undefined, undefined, expect.any(Function)],
       ]);
@@ -146,9 +160,9 @@ describe("DocumentsUI row activation (#6335)", () => {
   });
 
   test("preserves two input taps for an explicit double tap", async () => {
-    const { tap, adb, actions } = createTap();
+    const { tap, adb, service } = createTap();
     await execute(tap, row, "doubleTap");
-    expect(actions).toHaveLength(0);
+    expect(service.getNodeActionHistory()).toHaveLength(0);
     expect(adb.getAllCommands()).toEqual([
       "shell input touchscreen tap 540 380",
       "shell input touchscreen tap 540 380",
@@ -170,7 +184,7 @@ for (const action of ["tap", "doubleTap"]) {
 }
 
 test("does not activate or fall back after cancellation during runner capability lookup", async () => {
-  const { tap, adb, actions } = createTap();
+  const { tap, adb, service } = createTap();
   const controller = new AbortController();
   (tap as any).accessibilityService.supportsNodeActionSelectors = async () => {
     controller.abort();
@@ -179,7 +193,7 @@ test("does not activate or fall back after cancellation during runner capability
   await expect(
     (tap as any).executeAndroidTapWithCoordinates("tap", 540, 380, 0, row, controller.signal),
   ).rejects.toThrow();
-  expect(actions).toHaveLength(0);
+  expect(service.getNodeActionHistory()).toHaveLength(0);
   expect(adb.getAllCommands()).toHaveLength(0);
 });
 

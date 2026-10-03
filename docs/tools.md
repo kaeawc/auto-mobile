@@ -365,6 +365,33 @@ behavior can all make the actual native event recipient differ from this
 estimate. Re-observe after navigation, scrolling, or animation before using the
 point with `tapAt`.
 
+### Stable automation IDs for Android Views
+
+For legacy Android Views, use the accessibility extra `test-tag` as the stable
+per-View automation ID. Set it in an `AccessibilityDelegateCompat` override of
+`onInitializeAccessibilityNodeInfo`, after calling `super`:
+
+```kotlin
+info.extras.putString("test-tag", "widget_<id>")
+```
+
+Keep `contentDescription` as the accessibility-owned label. `observe` exposes the
+ID as `testTag` in its searchable output; select it with
+`tapOn({ testTag: "widget_<id>" })`. The raw hierarchy field is `test-tag`.
+
+Semantic node actions using `testTag`, `uniqueId`, or collection row + column
+(with a stable ID) require a CtrlProxy runner that advertises node-action selector
+support. Without that support, taps use coordinate routing and long presses use
+coordinate input. Ordinary taps already use coordinates; semantic taps are used
+for TalkBack activation and eligible DocumentsUI rows. A failed result for an
+advertised semantic `long_click` is reported without silent coordinate fallback.
+The non-TalkBack long-press path logs a thrown runner error and currently permits
+coordinate fallback.
+
+`View.setTag(Object)` and `View.setTag(int, Object)` are not supported automation
+IDs: the AccessibilityService client receives `AccessibilityNodeInfo`, not live
+Views, so those View tags are never serialized into the observed hierarchy.
+
 ### Cropping an observe screenshot
 
 `observe({ crop: { element: { text: "Gmail" } } })` saves a PNG of one exposed

@@ -4,6 +4,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
+import dev.jasonpearson.automobile.desktop.core.logging.Logger
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -217,28 +219,32 @@ class FakeMcpResourceClient : McpResourceClient {
  * Real MCP client that wraps AutoMobileClient (daemon client) Uses the existing daemon protocol to
  * read MCP resources
  */
-class DaemonMcpResourceClient(private val client: AutoMobileClient) : McpResourceClient {
+class DaemonMcpResourceClient(
+  private val client: AutoMobileClient,
+  private val logger: Logger = LoggerFactory.getLogger("DaemonMcpResourceClient"),
+) : McpResourceClient {
 
   override suspend fun readResource(uri: String): ResourceReadResult {
     return try {
-      println("[DaemonMcpResourceClient] Reading resource: $uri using ${client.transportName}")
-      println("[DaemonMcpResourceClient] Connection: ${client.connectionDescription}")
+      logger.debug("[DaemonMcpResourceClient] Reading resource: $uri using ${client.transportName}")
+      logger.debug("[DaemonMcpResourceClient] Connection: ${client.connectionDescription}")
 
       val contents = client.readResource(uri)
-      println("[DaemonMcpResourceClient] Received ${contents.size} content entries")
+      logger.debug("[DaemonMcpResourceClient] Received ${contents.size} content entries")
 
       val content = contents.firstOrNull()
       if (content?.text != null) {
-        println("[DaemonMcpResourceClient] Success: ${content.text.take(100)}...")
+        logger.debug(
+          "[DaemonMcpResourceClient] Success: length=${content.text.length}, mimeType=${content.mimeType}"
+        )
         ResourceReadResult.Success(content.text, content.mimeType ?: "application/json")
       } else {
-        println("[DaemonMcpResourceClient] Error: Resource response missing content")
+        logger.warn("[DaemonMcpResourceClient] Error: Resource response missing content")
         ResourceReadResult.Error("Resource response missing content")
       }
     } catch (e: Exception) {
       val errorMsg = "${e.javaClass.simpleName}: ${e.message}"
-      println("[DaemonMcpResourceClient] Exception: $errorMsg")
-      e.printStackTrace()
+      logger.warn("[DaemonMcpResourceClient] Exception: $errorMsg", e)
       ResourceReadResult.Error(
         "Connection error: $errorMsg\n\nCause: ${e.cause?.message ?: "none"}\n\nStack: ${e.stackTrace.take(3).joinToString("\n") { "  at $it" }}"
       )
@@ -247,9 +253,9 @@ class DaemonMcpResourceClient(private val client: AutoMobileClient) : McpResourc
 
   override suspend fun listResources(): List<ResourceInfo> {
     return try {
-      println("[DaemonMcpResourceClient] Listing resources using ${client.transportName}")
+      logger.debug("[DaemonMcpResourceClient] Listing resources using ${client.transportName}")
       val resources = client.listResources()
-      println("[DaemonMcpResourceClient] Found ${resources.size} resources")
+      logger.debug("[DaemonMcpResourceClient] Found ${resources.size} resources")
       resources.map { resource ->
         ResourceInfo(
           uri = resource.uri,
@@ -259,8 +265,7 @@ class DaemonMcpResourceClient(private val client: AutoMobileClient) : McpResourc
         )
       }
     } catch (e: Exception) {
-      println("[DaemonMcpResourceClient] Exception listing resources: ${e.message}")
-      e.printStackTrace()
+      logger.warn("[DaemonMcpResourceClient] Exception listing resources: ${e.message}", e)
       emptyList()
     }
   }
@@ -282,6 +287,8 @@ private data class PidFileData(
 
 /** Factory for creating MCP resource clients */
 object McpResourceClientFactory {
+  private val logger = LoggerFactory.getLogger("McpResourceClientFactory")
+
   private val json = Json {
     ignoreUnknownKeys = true
     isLenient = true
@@ -294,22 +301,22 @@ object McpResourceClientFactory {
    * Streamable HTTP processes, we read the PID file to get the port and use McpHttpClient.
    */
   fun create(process: McpProcess): McpResourceClient {
-    println("[McpResourceClientFactory] Creating client for process: ${process.name}")
-    println("[McpResourceClientFactory]   Type: ${process.connectionType}")
-    println("[McpResourceClientFactory]   Socket: ${process.socketPath}")
-    println("[McpResourceClientFactory]   Port: ${process.port}")
+    logger.debug("[McpResourceClientFactory] Creating client for process: ${process.name}")
+    logger.debug("[McpResourceClientFactory]   Type: ${process.connectionType}")
+    logger.debug("[McpResourceClientFactory]   Socket: ${process.socketPath}")
+    logger.debug("[McpResourceClientFactory]   Port: ${process.port}")
 
     return when (process.connectionType) {
       McpConnectionType.UnixSocket -> {
         val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
-        println("[McpResourceClientFactory] Creating McpDaemonClient with socket: $socketPath")
+        logger.debug("[McpResourceClientFactory] Creating McpDaemonClient with socket: $socketPath")
 
         // Check if socket file exists
         val socketFile = File(socketPath)
         if (!socketFile.exists()) {
           throw IllegalStateException("Socket file does not exist: $socketPath")
         }
-        println("[McpResourceClientFactory] Socket file exists: ${socketFile.absolutePath}")
+        logger.debug("[McpResourceClientFactory] Socket file exists: ${socketFile.absolutePath}")
 
         DaemonMcpResourceClient(McpDaemonClient(socketPath))
       }
@@ -317,7 +324,7 @@ object McpResourceClientFactory {
         // Read PID file to get the daemon's HTTP port
         val port = process.port ?: readDaemonPort() ?: 3000
         val endpoint = "http://localhost:$port/auto-mobile/streamable"
-        println("[McpResourceClientFactory] Creating McpHttpClient with endpoint: $endpoint")
+        logger.debug("[McpResourceClientFactory] Creating McpHttpClient with endpoint: $endpoint")
         DaemonMcpResourceClient(McpHttpClient(endpoint))
       }
       McpConnectionType.Stdio -> {
@@ -335,22 +342,21 @@ object McpResourceClientFactory {
     return try {
       val userId = getUserId()
       val pidFile = File("/tmp/auto-mobile-daemon-$userId.pid")
-      println("[McpResourceClientFactory] Looking for PID file at: ${pidFile.absolutePath}")
+      logger.debug("[McpResourceClientFactory] Looking for PID file at: ${pidFile.absolutePath}")
 
       if (!pidFile.exists()) {
-        println("[McpResourceClientFactory] PID file does not exist")
+        logger.debug("[McpResourceClientFactory] PID file does not exist")
         return null
       }
 
       val content = pidFile.readText()
-      println("[McpResourceClientFactory] PID file content: $content")
+      logger.debug("[McpResourceClientFactory] PID file content: $content")
 
       val pidData = json.decodeFromString<PidFileData>(content)
-      println("[McpResourceClientFactory] Daemon port from PID file: ${pidData.port}")
+      logger.debug("[McpResourceClientFactory] Daemon port from PID file: ${pidData.port}")
       pidData.port
     } catch (e: Exception) {
-      println("[McpResourceClientFactory] Error reading PID file: ${e.message}")
-      e.printStackTrace()
+      logger.warn("[McpResourceClientFactory] Error reading PID file: ${e.message}", e)
       null
     }
   }
@@ -372,6 +378,10 @@ object McpResourceClientFactory {
       val uid = process.inputStream.bufferedReader().readText().trim()
       if (uid.isNotEmpty()) uid else userName
     } catch (e: Exception) {
+      // Safe to swallow because the user name is the fallback identifier.
+      logger.debug(
+        "[McpResourceClientFactory] Could not read user ID; using user name: ${e.message}"
+      )
       userName
     }
   }

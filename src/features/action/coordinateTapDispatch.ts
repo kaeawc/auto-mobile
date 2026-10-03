@@ -27,6 +27,12 @@ export function isStaleFrameContextRejection(error: string | undefined): boolean
   return typeof error === "string" && error.toLowerCase().includes("stale frame context");
 }
 
+function indeterminateTapError(error: string | undefined): ActionableError {
+  return new ActionableError(
+    `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${error ?? "unknown error"}). Do not retry automatically.`,
+  );
+}
+
 /**
  * Dispatch one Android coordinate tap, preserving TapOnElement's CtrlProxy-first
  * then ADB-fallback behavior for non-element-specific taps.
@@ -90,9 +96,7 @@ export async function dispatchAndroidCoordinateTap(
     );
   }
   if (dispatched) {
-    throw new ActionableError(
-      `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). Do not retry automatically.`,
-    );
+    throw indeterminateTapError(result.error);
   }
   logger.warn(
     `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
@@ -127,7 +131,9 @@ export async function dispatchIosCoordinateTap(
 
 /** Shared tapOn/tapAny routing; non-default panels require an advertised CtrlProxy capability. */
 export async function androidDisplayTapDispatch(
-  client: CoordinateTapClient & { supportsCommand?: (name: string) => Promise<boolean> },
+  client: CoordinateTapClient<() => void> & {
+    supportsCommand?: (name: string) => Promise<boolean>;
+  },
   adb: AdbExecutor,
   options: Pick<TapAnyElementOptions, "action" | "duration">,
   context: {
@@ -143,6 +149,10 @@ export async function androidDisplayTapDispatch(
     target.assertCurrent();
     const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
     if (useCtrlProxy) {
+      let dispatched = false;
+      const onDispatch = () => {
+        dispatched = true;
+      };
       const result = await client.requestTapCoordinates(
         x,
         y,
@@ -150,13 +160,16 @@ export async function androidDisplayTapDispatch(
         resolveCoordinateTapCtrlProxyTimeoutMs(duration),
         undefined,
         undefined,
-        undefined,
+        onDispatch,
         signal,
         target.displayId === 0 ? undefined : target.displayId,
         target.assertCurrent,
       );
       throwIfAborted(signal);
       if (!result.success) {
+        if (dispatched) {
+          throw indeterminateTapError(result.error);
+        }
         throw new ActionableError(result.error ?? "Android tap failed");
       }
     } else {

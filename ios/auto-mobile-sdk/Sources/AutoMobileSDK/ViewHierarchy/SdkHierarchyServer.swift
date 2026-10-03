@@ -445,7 +445,18 @@
                         server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
                         return
                     }
-                    guard SdkHighlightOverlayManager.shared.show(id: payload.id, shape: payload.shape) else {
+                    let rendered: Bool
+                    if Thread.isMainThread {
+                        // Avoid a sync self-deadlock; the branch proves main-thread execution.
+                        rendered = MainActor.assumeIsolated {
+                            SdkHighlightOverlayManager.shared.show(id: payload.id, shape: payload.shape)
+                        }
+                    } else {
+                        rendered = DispatchQueue.main.sync {
+                            SdkHighlightOverlayManager.shared.show(id: payload.id, shape: payload.shape)
+                        }
+                    }
+                    guard rendered else {
                         server.sendResponse(
                             connection,
                             statusCode: 400,

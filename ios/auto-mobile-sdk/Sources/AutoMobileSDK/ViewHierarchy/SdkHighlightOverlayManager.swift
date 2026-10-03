@@ -13,6 +13,7 @@
     }
 
     #if canImport(UIKit)
+        @MainActor
         final class SdkHighlightOverlayManager {
             static let shared = SdkHighlightOverlayManager()
             private var window: UIWindow?
@@ -29,35 +30,31 @@
                 self.now = now
             }
 
-            deinit { timer?.invalidate() }
-
             @discardableResult
             func show(id: String, shape: SdkHighlightShape) -> Bool {
                 guard !id.isEmpty else { return false }
-                var rendered = false
-                let draw = {
-                    let window = self.ensureWindow()
-                    guard let bounds = shape.bounds.scaled(to: window.bounds.size) else { return }
-                    self.layers[id]?.layer.removeFromSuperlayer()
-                    let layer = HandDrawnCircleLayer()
-                    layer.frame = window.bounds
-                    layer.configure(rect: bounds, strokeScale: bounds.width / CGFloat(shape.bounds.width))
-                    layer.update(elapsed: 0)
-                    window.layer.addSublayer(layer)
-                    self.layers[id] = Entry(layer: layer, bounds: bounds, started: self.now())
-                    if self.timer == nil {
-                        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
-                        RunLoop.main.add(timer, forMode: .common)
-                        self.timer = timer
+                let window = ensureWindow()
+                guard let bounds = shape.bounds.scaled(to: window.bounds.size) else { return false }
+                layers[id]?.layer.removeFromSuperlayer()
+                let layer = HandDrawnCircleLayer()
+                layer.frame = window.bounds
+                layer.configure(rect: bounds, strokeScale: bounds.width / CGFloat(shape.bounds.width))
+                layer.update(elapsed: 0)
+                window.layer.addSublayer(layer)
+                layers[id] = Entry(layer: layer, bounds: bounds, started: now())
+                if timer == nil {
+                    let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+                        guard let self else {
+                            timer.invalidate()
+                            return
+                        }
+                        // This timer is registered only on RunLoop.main below.
+                        MainActor.assumeIsolated { self.tick() }
                     }
-                    rendered = true
+                    RunLoop.main.add(timer, forMode: .common)
+                    self.timer = timer
                 }
-                if Thread.isMainThread {
-                    draw()
-                } else {
-                    DispatchQueue.main.sync(execute: draw)
-                }
-                return rendered
+                return true
             }
 
             private func tick() {
@@ -83,19 +80,12 @@
             }
 
             func remove(id: String) {
-                let removeLayer = {
-                    self.layers.removeValue(forKey: id)?.layer.removeFromSuperlayer()
-                    if self.layers.isEmpty {
-                        self.timer?.invalidate()
-                        self.timer = nil
-                        self.window?.isHidden = true
-                        self.window = nil
-                    }
-                }
-                if Thread.isMainThread {
-                    removeLayer()
-                } else {
-                    DispatchQueue.main.async(execute: removeLayer)
+                layers.removeValue(forKey: id)?.layer.removeFromSuperlayer()
+                if layers.isEmpty {
+                    timer?.invalidate()
+                    timer = nil
+                    window?.isHidden = true
+                    window = nil
                 }
             }
 

@@ -31,5 +31,54 @@ import XCTest
                 ))
             }
         }
+
+        #if canImport(UIKit)
+            @MainActor
+            func testEmptyIdDoesNotCreateWindow() {
+                let manager = SdkHighlightOverlayManager(now: { 0 })
+                let shape = SdkHighlightShape(bounds: SdkHighlightBounds(
+                    x: 0, y: 0, width: 10, height: 10, sourceWidth: 100, sourceHeight: 100
+                ))
+
+                XCTAssertFalse(manager.show(id: "", shape: shape))
+                XCTAssertNil(manager.renderTargetSize())
+                XCTAssertNil(manager.renderedPathBounds(id: ""))
+            }
+
+            @MainActor
+            func testMissingSourceDimensionsReturnsFalse() {
+                let manager = SdkHighlightOverlayManager(now: { 0 })
+                defer { manager.remove(id: "invalid") }
+                let shape = SdkHighlightShape(bounds: SdkHighlightBounds(
+                    x: 0, y: 0, width: 10, height: 10, sourceWidth: nil, sourceHeight: nil
+                ))
+
+                XCTAssertFalse(manager.show(id: "invalid", shape: shape))
+                XCTAssertNil(manager.renderedPathBounds(id: "invalid"))
+            }
+
+            @MainActor
+            func testShowReplacesHighlightAndRemoveReleasesWindow() throws {
+                let manager = SdkHighlightOverlayManager(now: { 0 })
+                defer { manager.remove(id: "circle") }
+                let bounds = SdkHighlightBounds(
+                    x: 10, y: 20, width: 30, height: 40, sourceWidth: 100, sourceHeight: 200
+                )
+
+                XCTAssertTrue(manager.show(id: "circle", shape: SdkHighlightShape(bounds: bounds)))
+                let size = try XCTUnwrap(manager.renderTargetSize())
+                XCTAssertEqual(manager.renderedPathBounds(id: "circle"), bounds.scaled(to: size))
+
+                let replacement = SdkHighlightBounds(
+                    x: 20, y: 40, width: 50, height: 60, sourceWidth: 100, sourceHeight: 200
+                )
+                XCTAssertTrue(manager.show(id: "circle", shape: SdkHighlightShape(bounds: replacement)))
+                XCTAssertEqual(manager.renderedPathBounds(id: "circle"), replacement.scaled(to: size))
+
+                manager.remove(id: "circle")
+                XCTAssertNil(manager.renderedPathBounds(id: "circle"))
+                XCTAssertNil(manager.renderTargetSize())
+            }
+        #endif
     }
 #endif

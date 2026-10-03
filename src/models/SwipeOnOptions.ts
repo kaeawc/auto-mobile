@@ -1,3 +1,6 @@
+import type { ElementContainerSelector } from "./PinchOnOptions";
+import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
+
 /**
  * Options for swiping on screen or element
  */
@@ -16,10 +19,7 @@ export interface SwipeOnOptions {
   includeSystemInsets?: boolean; // Include status/navigation bars (default false)
 
   // Container to swipe within (optional, defaults to screen/window if not specified)
-  container?: {
-    elementId?: string; // Resource ID of container
-    text?: string; // Text within container
-  };
+  container?: ElementContainerSelector;
 
   // Auto-target a scrollable container when no container is specified (default true)
   autoTarget?: boolean;
@@ -34,6 +34,8 @@ export interface SwipeOnOptions {
   lookFor?: {
     elementId?: string;
     text?: string;
+    container?: ElementContainerSelector;
+    selectionStrategy?: ElementSelectionStrategy;
     maxTime?: number; // Max time to search (default 15000ms) - internal only
   };
 

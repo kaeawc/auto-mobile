@@ -1,3 +1,9 @@
+import {
+  scopedSearchDescription,
+  usesScopedSwipeContainer,
+  usesScopedSwipeLookFor,
+  resolveSwipeLookFor,
+} from "./swipeSelectorScopes";
 import type { FencedGestureOptions } from "../ExecuteGesture";
 import { unsupportedPlatformError } from "../../../models/ActionableError";
 import {
@@ -154,6 +160,27 @@ export class ScrollUntilVisible {
       : (result.chosen?.element ?? null);
   }
 
+  resolveSwipeContainer(
+    hierarchy: ViewHierarchyResult,
+    container: NonNullable<SwipeOnOptions["container"]>,
+  ): Element {
+    const result = this.resolver.resolve(
+      { id: String(hierarchy.updatedAt ?? "swipe"), nodes: this.searchable.project(hierarchy) },
+      { container },
+      { action: "inspect" },
+    );
+    if (result.error) {
+      throw new ActionableError(result.error);
+    }
+    const element = result.scope?.element;
+    if (!element) {
+      throw new ActionableError(
+        `Container level 1 not found: ${container.elementId ?? container.text}`,
+      );
+    }
+    return element;
+  }
+
   async execute(
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
@@ -250,6 +277,7 @@ export class ScrollUntilVisible {
     let unchangedScrollCount = 0;
     const maxUnchangedScrolls = 1;
 
+    const scopeDescription = scopedSearchDescription(options);
     const target = options.lookFor!.text
       ? `text "${options.lookFor!.text}"`
       : `element with id "${options.lookFor!.elementId}"`;
@@ -279,6 +307,7 @@ export class ScrollUntilVisible {
         options.lookFor!,
         lastObservation.viewHierarchy!,
         options.container,
+        containerElement,
       ),
     );
 
@@ -532,7 +561,7 @@ export class ScrollUntilVisible {
             const elapsed = this.deps.timer.now() - startTime;
             throw new ActionableError(
               `Scroll reached end of container (no change after ${maxUnchangedScrolls} scrolls). ` +
-                `${target} not found after ${scrollIteration} iterations (${elapsed}ms).`,
+                `${target} not found${scopeDescription} after ${scrollIteration} iterations (${elapsed}ms).`,
             );
           }
           // Switch to reverse half-screen recovery
@@ -554,6 +583,7 @@ export class ScrollUntilVisible {
         options.lookFor!,
         lastObservation.viewHierarchy!,
         options.container,
+        containerElement,
       );
 
       if (foundElement && !this.isElementWithinContainer(foundElement, containerElement.bounds)) {
@@ -578,7 +608,7 @@ export class ScrollUntilVisible {
       perf.end();
       const elapsed = this.deps.timer.now() - startTime;
       throw new ActionableError(
-        `${target} not found after scrolling for ${elapsed}ms (${scrollIteration} iterations, timeout=${maxTime}ms).`,
+        `${target} not found${scopeDescription} after scrolling for ${elapsed}ms (${scrollIteration} iterations, timeout=${maxTime}ms).`,
       );
     }
 
@@ -623,6 +653,9 @@ export class ScrollUntilVisible {
 
     if (!options.container.text && !options.container.elementId) {
       throw new ActionableError("Container must specify either text or elementId");
+    }
+    if (usesScopedSwipeContainer(options.container)) {
+      return this.resolveSwipeContainer(viewHierarchy, options.container);
     }
     element = this.resolveElement(
       viewHierarchy,
@@ -702,8 +735,13 @@ export class ScrollUntilVisible {
     let element: Element | null = null;
     const viewHierarchy = observeResult.viewHierarchy!;
 
-    if (options.container?.elementId || options.container?.text) {
-      element = this.resolveElement(viewHierarchy, options.container);
+    if (options.container) {
+      if (usesScopedSwipeContainer(options.container)) {
+        return this.resolveSwipeContainer(viewHierarchy, options.container);
+      }
+      if (options.container.elementId || options.container.text) {
+        element = this.resolveElement(viewHierarchy, options.container);
+      }
     }
     if (!element) {
       // Automatic scrolling keeps traversal priority: the outer scrollable
@@ -752,14 +790,32 @@ export class ScrollUntilVisible {
   }
 
   async findElementInHierarchy(
-    lookFor: { text?: string; elementId?: string },
+    lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
+    container?: SwipeOnOptions["container"],
+    containerElement?: Element,
   ): Promise<Element | null> {
     if (!lookFor.text && !lookFor.elementId) {
       return null;
     }
-    return this.resolveElement(viewHierarchy, { ...lookFor, container }, "inspect", true);
+    if (!usesScopedSwipeContainer(container) && !usesScopedSwipeLookFor(lookFor)) {
+      return this.resolveElement(viewHierarchy, { ...lookFor, container }, "inspect", true);
+    }
+    // A legacy container keeps its fallback semantics. Only its actual match,
+    // never the automatically selected scrollable, constrains a scoped lookFor.
+    const explicitContainer = usesScopedSwipeContainer(container)
+      ? containerElement
+      : container
+        ? this.resolveElement(viewHierarchy, container)
+        : undefined;
+    return resolveSwipeLookFor({
+      lookFor,
+      container: usesScopedSwipeContainer(container) || explicitContainer ? container : undefined,
+      containerElement: explicitContainer ?? undefined,
+      resolver: this.resolver,
+      nodes: this.searchable.project(viewHierarchy),
+      id: String(viewHierarchy.updatedAt ?? "swipe"),
+    });
   }
 
   computeHierarchyFingerprint(viewHierarchy: ViewHierarchyResult): string {

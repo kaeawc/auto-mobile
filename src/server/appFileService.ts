@@ -1,7 +1,17 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, posix, relative } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from "node:path";
 import { TextDecoder } from "node:util";
 import {
   AppFileContainer,
@@ -19,10 +29,12 @@ import {
   PutAppFileTarget,
   PutAppFileWriteResult,
   StorageDomain,
+  UserFilesTarget,
   buildAppFileResourceUri,
   hasSupportedMediaLibraryExtension,
   hasSupportedSimulatorMediaExtension,
   normalizeAppFileRelativePath,
+  normalizeUserFilesNamespace,
   normalizePutAppFileTarget,
 } from "./appFileContract";
 import {
@@ -183,6 +195,8 @@ export interface AppFileServiceDependencies {
   idGenerator?: IdGenerator;
   sharedStorageService?: SharedStorageService;
   iosSimulatorMediaClient?: IosSimulatorMediaClient;
+  iosFilesFixtureContainer?: IosFilesFixtureContainer;
+  documentPickerVisibilityVerifier?: DocumentPickerVisibilityVerifier;
 }
 
 export const nodeAppFileFileSystem: AppFileFileSystem = {
@@ -252,14 +266,10 @@ export function createAppFileServiceForTesting(
   };
   return new DefaultAppFileService(
     deps.providers ??
-      createDefaultProviders(
-        resolvedDeps,
-        deps.idGenerator ?? defaultIdGenerator,
-        deps.sharedStorageService ?? getSharedStorageService(),
-        deps.iosSimulatorMediaClient ??
-          new SimctlIosSimulatorMediaClient(resolvedDeps.simctlFactory),
-        deps.foregroundAppLookup,
-      ),
+      createDefaultProviders(resolvedDeps, {
+        ...deps,
+        sharedStorageService: deps.sharedStorageService ?? getSharedStorageService(),
+      }),
     resolvedDeps.deviceResolver,
     resolvedDeps.fileSystem,
   );
@@ -268,23 +278,34 @@ export function createAppFileServiceForTesting(
 function createDefaultProviders(
   deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">> &
     Pick<AppFileServiceDependencies, "timer">,
-  idGenerator: IdGenerator = defaultIdGenerator,
-  sharedStorageService: SharedStorageService | undefined = undefined,
-  iosSimulatorMediaClient: IosSimulatorMediaClient = new SimctlIosSimulatorMediaClient(
-    deps.simctlFactory,
-  ),
-  foregroundAppLookup?: ForegroundAppLookup,
+  options: Pick<
+    AppFileServiceDependencies,
+    | "idGenerator"
+    | "sharedStorageService"
+    | "iosSimulatorMediaClient"
+    | "foregroundAppLookup"
+    | "iosFilesFixtureContainer"
+    | "documentPickerVisibilityVerifier"
+  > = {},
 ): AppFileProvider[] {
   return [
     new AndroidAppFileProvider(deps.adbFactory, {
-      idGenerator,
-      foregroundAppLookup,
+      idGenerator: options.idGenerator ?? defaultIdGenerator,
+      foregroundAppLookup: options.foregroundAppLookup,
       timer: deps.timer,
     }),
-    new AndroidUserFilesProvider(sharedStorageService),
-    new AndroidMediaLibraryProvider(sharedStorageService),
+    new AndroidUserFilesProvider(options.sharedStorageService),
+    new AndroidMediaLibraryProvider(options.sharedStorageService),
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
-    new IosSimulatorMediaLibraryProvider(iosSimulatorMediaClient, deps.fileSystem),
+    new IosSimulatorUserFilesProvider(
+      options.iosFilesFixtureContainer ??
+        new SimctlIosFilesFixtureContainer(deps.simctlFactory, deps.fileSystem),
+      options.documentPickerVisibilityVerifier,
+    ),
+    new IosSimulatorMediaLibraryProvider(
+      options.iosSimulatorMediaClient ?? new SimctlIosSimulatorMediaClient(deps.simctlFactory),
+      deps.fileSystem,
+    ),
   ];
 }
 
@@ -476,6 +497,8 @@ class DefaultAppFileService implements AppFileService {
     const legacy = !canonicalInput || request.legacySingleFile === true;
     const canonical = canonicalInput ? request : legacyRequestToCanonical(request);
     const target = normalizeTarget(canonical.target);
+    // Reject before even preparing a host source for an unsupported device.
+    validateIosFilesDeviceTarget(request.device, target);
     const files = canonical.files.map((file) => ({
       ...file,
       destinationPath: normalizeAppFileRelativePath(file.destinationPath),
@@ -1305,6 +1328,254 @@ class IosSimulatorMediaLibraryProvider implements AppFileWriteProvider {
   }
 }
 
+/** The managed fixture app is a follow-up; no provider auto-install occurs here. */
+export const IOS_FILES_FIXTURE_BUNDLE_ID = "dev.jasonpearson.automobile.FilesFixture";
+
+/** Host staging only; completion makes no assertion about document-picker visibility. */
+export interface IosFilesFixtureContainer {
+  stageFiles(requests: readonly PutAppFileProviderRequest[]): Promise<void>;
+}
+
+export interface DocumentPickerVisibilityVerifier {
+  verify(request: {
+    device: BootedDevice;
+    namespace: string;
+    destinationPath: string;
+    signal?: AbortSignal;
+  }): Promise<{ status: "completed" | "unavailable"; reason?: string }>;
+}
+
+const unverifiedDocumentPicker: DocumentPickerVisibilityVerifier = {
+  verify: async () => ({
+    status: "unavailable",
+    reason:
+      "Picker visibility is unavailable: no document-picker verifier observed the destination.",
+  }),
+};
+
+function validateIosFilesDeviceTarget(device: BootedDevice, target: PutAppFileTarget): void {
+  if (device.platform === "ios" && target.domain === "user_files") {
+    requireIosFilesSimulator(device);
+  }
+}
+
+function requireIosFilesSimulator(device: BootedDevice): void {
+  if (!isIosSimulatorUdid(device.deviceId)) {
+    throw new ActionableError(
+      `iOS user_files staging is only supported on iOS Simulators. Device ${device.deviceId} looks like a physical iOS device. ` +
+        "Physical iOS is unsupported without an on-device fixture-app integration.",
+    );
+  }
+}
+
+function normalizeIosFilesRequest(
+  request: PutAppFileProviderRequest,
+): PutAppFileProviderRequest & { target: UserFilesTarget } {
+  requireIosFilesSimulator(request.device);
+  if (request.target.domain !== "user_files") {
+    throw new ActionableError("iOS Files fixture provider requires target.domain user_files.");
+  }
+  if (win32.isAbsolute(request.destinationPath) || /^[A-Za-z]:/.test(request.destinationPath)) {
+    throw new ActionableError(
+      "iOS Files destinationPath must be relative, without an absolute path or drive-letter prefix.",
+    );
+  }
+  return {
+    ...request,
+    target: { ...request.target, namespace: normalizeUserFilesNamespace(request.target.namespace) },
+    destinationPath: normalizeAppFileRelativePath(request.destinationPath),
+  };
+}
+
+export class IosSimulatorUserFilesProvider implements AppFileWriteProvider {
+  readonly platform = "ios" as const;
+  readonly domain = "user_files" as const;
+  readonly features = { namespaceReset: true } as const;
+
+  constructor(
+    private readonly container: IosFilesFixtureContainer,
+    private readonly verifier: DocumentPickerVisibilityVerifier = unverifiedDocumentPicker,
+  ) {}
+
+  async putFile(request: PutAppFileProviderRequest): Promise<AppFileProviderWriteResult> {
+    return (await this.putFiles([request]))[0]!;
+  }
+
+  async putFiles(requests: PutAppFileProviderRequest[]): Promise<AppFileProviderWriteResult[]> {
+    const normalized = requests.map(normalizeIosFilesRequest);
+    await this.container.stageFiles(normalized);
+    const results: AppFileProviderWriteResult[] = [];
+    for (const request of normalized) {
+      let visibility: Awaited<ReturnType<DocumentPickerVisibilityVerifier["verify"]>>;
+      try {
+        visibility = await this.verifier.verify({
+          device: request.device,
+          namespace: request.target.namespace,
+          destinationPath: request.destinationPath,
+          signal: request.signal,
+        });
+      } catch (error) {
+        logger.warn(
+          `Failed to verify iOS document picker visibility: ${errorMessage(error)}`,
+          error,
+        );
+        visibility = {
+          status: "unavailable",
+          reason: `Document-picker verification failed: ${errorMessage(error)}`,
+        };
+      }
+      results.push({
+        effects: [
+          { type: "host_stage", status: "completed" },
+          { type: "document_picker", ...visibility },
+        ],
+      });
+    }
+    return results;
+  }
+}
+
+/** Resolves runtime metadata only; writes and reset never target an undocumented Files path. */
+export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer {
+  private tempIndex = 0;
+
+  constructor(
+    private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
+    private readonly fileSystem: AppFileFileSystem,
+  ) {}
+
+  async stageFiles(requests: readonly PutAppFileProviderRequest[]): Promise<void> {
+    const normalized = requests.map(normalizeIosFilesRequest);
+    const roots = new Map<string, string>();
+    const destinations: Array<{
+      request: PutAppFileProviderRequest & { target: UserFilesTarget };
+      namespace: string;
+      target: string;
+    }> = [];
+    for (const request of normalized) {
+      let container = roots.get(request.device.deviceId);
+      if (container === undefined) {
+        container = await this.resolveContainer(request);
+        roots.set(request.device.deviceId, container);
+      }
+      const root = resolve(container, "Documents", "automobile");
+      const namespace = resolve(root, request.target.namespace);
+      const target = resolve(namespace, request.destinationPath);
+      this.assertBelow(root, namespace);
+      this.assertBelow(namespace, target);
+      this.assertBelow(root, target);
+      await this.assertNoSymlinks(container, target);
+      destinations.push({ request, namespace, target });
+    }
+    // Validate every destination before any reset or copy. buildProviderRequests
+    // marks only the first file reset=true; also bound direct batches to one reset per namespace.
+    const resetNamespaces = new Set<string>();
+    for (const { request, namespace, target } of destinations) {
+      if (request.target.reset && !resetNamespaces.has(namespace)) {
+        await this.fileSystem.rm(namespace);
+        resetNamespaces.add(namespace);
+      }
+      const index = ++this.tempIndex;
+      const temporary = iosAtomicTemporaryPath(target, index);
+      await this.assertNoSymlinks(roots.get(request.device.deviceId)!, temporary);
+      await writeIosFileAtomically(this.fileSystem, request.sourcePath, target, index);
+    }
+  }
+
+  private assertBelow(root: string, target: string): void {
+    const path = relative(root, target);
+    if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+      throw new ActionableError(
+        "iOS Files fixture destination must remain strictly below its managed namespace root.",
+      );
+    }
+  }
+
+  private async assertNoSymlinks(container: string, target: string): Promise<void> {
+    const parts = relative(container, target).split(sep);
+    let current = container;
+    for (const part of parts) {
+      current = join(current, part);
+      let stats: AppFileStats;
+      try {
+        stats = await this.fileSystem.lstat(current);
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+          throw toActionableError(
+            error,
+            `Failed to check iOS Files fixture containment at ${current}`,
+          );
+        }
+        // Missing descendants will be created by the bounded atomic write.
+        logger.debug(`iOS Files fixture path does not exist yet: ${current}`);
+        continue;
+      }
+      if (
+        (!stats.isDirectory() && !stats.isFile()) ||
+        (current !== target && !stats.isDirectory())
+      ) {
+        throw new ActionableError(
+          `Refusing iOS Files fixture symlink or non-directory containment path: ${current}`,
+        );
+      }
+    }
+  }
+
+  private async resolveContainer(request: PutAppFileProviderRequest): Promise<string> {
+    const guidance = `Install the managed iOS Files fixture app (${IOS_FILES_FIXTURE_BUNDLE_ID}) on the booted simulator and retry; no alternate storage path is used.`;
+    let output: ExecResult;
+    try {
+      output = await this.simctlFactory(request.device).executeCommandArgs(
+        ["get_app_container", request.device.deviceId, IOS_FILES_FIXTURE_BUNDLE_ID, "data"],
+        5_000,
+        request.signal,
+      );
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Unable to resolve the managed iOS Files fixture container. ${guidance}`,
+      );
+    }
+    const container = output.stdout.trim();
+    if (!container || !isAbsolute(container)) {
+      throw new ActionableError(
+        `Unable to resolve the managed iOS Files fixture container. ${guidance}`,
+      );
+    }
+    return container;
+  }
+}
+
+function iosAtomicTemporaryPath(target: string, index: number): string {
+  return join(dirname(target), `.${basename(target)}.${index}.tmp`);
+}
+
+/** Shared atomic copy; callers retain their own ordering and temporary-file sequence. */
+async function writeIosFileAtomically(
+  fileSystem: AppFileFileSystem,
+  sourcePath: string,
+  target: string,
+  index: number,
+): Promise<void> {
+  const temporary = iosAtomicTemporaryPath(target, index);
+  try {
+    await fileSystem.mkdir(dirname(target));
+    await fileSystem.copyFile(sourcePath, temporary);
+    await fileSystem.rename(temporary, target);
+  } catch (error) {
+    try {
+      await fileSystem.rm(temporary);
+    } catch (cleanupError) {
+      logger.warn(
+        `Failed to remove partial iOS app file at ${temporary}: ${errorMessage(cleanupError)}`,
+        cleanupError,
+      );
+    }
+    // Preserve the original write error for callers and existing provider contracts.
+    throw error;
+  }
+}
+
 class IosSimulatorAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
@@ -1386,10 +1657,12 @@ class IosSimulatorAppFileProvider
     const previous = this.pendingWrites.get(target);
     const write = previous
       ? previous.then(
-          () => this.writeAtomically(request.sourcePath, target),
-          () => this.writeAtomically(request.sourcePath, target),
+          () =>
+            writeIosFileAtomically(this.fileSystem, request.sourcePath, target, ++this.tempIndex),
+          () =>
+            writeIosFileAtomically(this.fileSystem, request.sourcePath, target, ++this.tempIndex),
         )
-      : this.writeAtomically(request.sourcePath, target);
+      : writeIosFileAtomically(this.fileSystem, request.sourcePath, target, ++this.tempIndex);
     this.pendingWrites.set(target, write);
     const clear = () => {
       if (this.pendingWrites.get(target) === write) {
@@ -1398,25 +1671,6 @@ class IosSimulatorAppFileProvider
     };
     void write.then(clear, clear);
     await write;
-  }
-
-  private async writeAtomically(sourcePath: string, target: string): Promise<void> {
-    const temporary = join(dirname(target), `.${basename(target)}.${++this.tempIndex}.tmp`);
-    try {
-      await this.fileSystem.mkdir(dirname(target));
-      await this.fileSystem.copyFile(sourcePath, temporary);
-      await this.fileSystem.rename(temporary, target);
-    } catch (error) {
-      try {
-        await this.fileSystem.rm(temporary);
-      } catch (cleanupError) {
-        logger.warn(
-          `Failed to remove partial iOS app file at ${temporary}: ${errorMessage(cleanupError)}`,
-          cleanupError,
-        );
-      }
-      throw error;
-    }
   }
 
   async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {

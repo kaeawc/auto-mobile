@@ -33,6 +33,17 @@ in the written user profile): it may not see the change until it re-reads the fi
 or is relaunched. The warning is omitted when running state is unknown or the
 app is not running, and for `user_files` and `media_library` writes.
 
+`user_files` also supports bounded iOS Simulator staging through the managed
+Files fixture app `dev.jasonpearson.automobile.FilesFixture` (not yet shipped in
+this repo). It resolves the installed app's data container at runtime and writes
+only `Documents/automobile/<namespace>`; reset deletes only that namespace.
+Missing fixture installation returns actionable guidance. Host staging and
+picker visibility are separate effects; visibility is unavailable unless a
+verifier observes the exact destination. Physical iOS and iOS user-files
+list/read remain unsupported or unexposed. Validation here uses fakes; the
+historical iOS 17.5 picker experiment is documented in the
+[accepted design](../decisions/ios-user-files-provider.md).
+
 On Android, `putAppFile` accepts optional `userId` (a non-negative safe integer).
 An explicit ID selects that profile without discovery. Omission checks package
 installation for every user: use the sole installed user; with several candidates,

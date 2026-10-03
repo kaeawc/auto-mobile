@@ -225,6 +225,46 @@ describe("storageCapabilityResources", () => {
     }
   });
 
+  test("iOS Simulator user_files reports pending installation without claiming picker visibility", async () => {
+    const simulator = { ...iosPhysical, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+    setDevices([simulator]);
+    const body = JSON.parse(
+      (await readResource(`automobile:devices/${simulator.deviceId}/storage/capabilities`)).text ??
+        "{}",
+    );
+    const userFiles = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "user_files",
+    );
+    expect(userFiles.operations.map((op: { state: string }) => op.state)).toEqual([
+      "unavailable",
+      "unavailable",
+      "partial",
+      "partial",
+      "unsupported",
+    ]);
+    expect(userFiles.note).toContain("picker visibility");
+    expect(body.context.iosFilesFixtureInstalled).toBeUndefined();
+  });
+
+  test("iOS Simulator user_files is unavailable with no registered write provider", async () => {
+    const simulator = { ...iosPhysical, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+    setDevices([simulator], { appFileCoverage: { describeProviderCoverage: () => [] } });
+    const body = JSON.parse(
+      (await readResource(`automobile:devices/${simulator.deviceId}/storage/capabilities`)).text ??
+        "{}",
+    );
+    const userFiles = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "user_files",
+    );
+    expect(userFiles.operations.map((op: { state: string }) => op.state)).toEqual([
+      "unavailable",
+      "unavailable",
+      "unavailable",
+      "unavailable",
+      "unsupported",
+    ]);
+  });
+
   test("resolveDeviceType classifies device identities", () => {
     expect(resolveDeviceType(androidEmulator)).toBe("emulator");
     expect(resolveDeviceType({ name: "d", platform: "android", deviceId: "1A2B3C4D" })).toBe(

@@ -90,6 +90,8 @@ export interface StorageCapabilityContext {
    * Without it, iOS physical file behavior is unsupported.
    */
   iosFileIntegration?: boolean;
+  /** Verified managed fixture container availability; omission is pending verification. */
+  iosFilesFixtureInstalled?: boolean;
   /** Optional app scope the report was computed for. */
   appId?: string;
 }
@@ -109,7 +111,7 @@ export interface DomainCapability {
   domain: StorageDomain;
   /**
    * Whether the domain behaves portably across platforms. `false` marks a
-   * platform-specific extension point (e.g. Android-only user files); it must not
+   * platform-specific extension point (e.g. managed user-files fixtures); it must not
    * be treated as portable behavior (#5602: document extension points).
    */
   portable: boolean;
@@ -141,6 +143,7 @@ export interface StorageCapabilitiesReport {
     authorized?: boolean;
     activeUserProfile?: boolean;
     iosFileIntegration?: boolean;
+    iosFilesFixtureInstalled?: boolean;
   };
   domains: DomainCapability[];
   extensionPoints: StorageExtensionPoint[];
@@ -206,6 +209,7 @@ const PREREQ_SDK = "AutoMobile SDK embedded with storage inspection";
 const PREREQ_SESSION = "active CtrlProxy runner session";
 const PREREQ_DEBUGGABLE = "debuggable app build";
 const PREREQ_ACTIVE_PROFILE = "active Android user/profile";
+const PREREQ_IOS_FILES_FIXTURE = "managed iOS Files fixture app installed";
 const PREREQ_IOS_FILE_INTEGRATION = "opt-in iOS app file-access integration";
 
 function keyValueDomain(ctx: StorageCapabilityContext): DomainCapability {
@@ -279,22 +283,47 @@ function appContainersDomain(ctx: StorageCapabilityContext): DomainCapability {
 
 function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
   if (ctx.platform === "ios") {
-    const reason =
-      "User-visible shared storage is an Android-only concept; iOS apps are sandboxed to per-app containers.";
+    const physicalReason =
+      ctx.deviceType === "simulator"
+        ? undefined
+        : "Physical iOS user_files is unsupported without an on-device fixture-app integration; generic iosFileIntegration does not provide it.";
+    const requirements = [req(PREREQ_IOS_FILES_FIXTURE, ctx.iosFilesFixtureInstalled)];
     return {
       domain: "user_files",
       portable: false,
-      platformScope: "android",
-      note: reason,
-      operations: (
-        ["list", "read", "write", "namespace_reset", "media_indexing"] as StorageOperation[]
-      ).map((operation) => deriveOperation(operation, reason, [])),
+      platformScope: "cross-platform",
+      note: "iOS Simulator only: managed fixture-app Documents/automobile namespaces. The fixture app is not shipped in this repo. Writes require its installed container; picker visibility is reported separately and unavailable unless verified. Physical iOS is unsupported. No user_files list/read resources are exposed.",
+      operations: [
+        physicalReason
+          ? deriveOperation("list", physicalReason, [])
+          : unavailableOperation("list", "No iOS user_files listing surface is exposed."),
+        physicalReason
+          ? deriveOperation("read", physicalReason, [])
+          : unavailableOperation("read", "No iOS user_files read surface is exposed."),
+        deriveOperation(
+          "write",
+          physicalReason,
+          requirements,
+          "Stages files in the managed iOS Files fixture app; picker visibility requires separate verification.",
+        ),
+        deriveOperation(
+          "namespace_reset",
+          physicalReason,
+          requirements,
+          "Resets only Documents/automobile/<namespace> in the managed fixture app.",
+        ),
+        deriveOperation(
+          "media_indexing",
+          physicalReason ?? "iOS user_files has no Android media indexing equivalent.",
+          [],
+        ),
+      ],
     };
   }
   return {
     domain: "user_files",
     portable: false,
-    platformScope: "android",
+    platformScope: "cross-platform",
     note: 'Android user-visible shared storage. putAppFile target.domain user_files writes, resets one namespace, and optionally indexes media in bounded Downloads namespaces; canonical resources: automobile:devices/{deviceId}/storage-domains/user_files/{namespace}[/{path}]; compatibility aliases: the "Downloads Namespace Files" and "Downloads Namespace File" MCP resources expose listing and reading at automobile:devices/{deviceId}/downloads/{namespace}[/{path}].',
     operations: [
       deriveOperation(
@@ -439,7 +468,13 @@ function extensionPoints(): StorageExtensionPoint[] {
       domain: "user_files",
       platform: "android",
       description:
-        "User-visible shared storage is Android-only and must not be advertised as portable behavior.",
+        "Android bounded Downloads namespaces are platform-specific; the separate iOS Simulator fixture-app provider does not make user_files portable.",
+    },
+    {
+      domain: "user_files",
+      platform: "ios",
+      description:
+        "iOS Simulator staging requires an installed managed Files fixture app; picker visibility requires separate verification. Physical iOS is unsupported; this is not portable storage.",
     },
     {
       domain: "app_containers",
@@ -523,6 +558,7 @@ export function computeStorageCapabilities(
       authorized: ctx.authorized,
       activeUserProfile: ctx.activeUserProfile,
       iosFileIntegration: ctx.iosFileIntegration,
+      iosFilesFixtureInstalled: ctx.iosFilesFixtureInstalled,
     },
     domains: [
       applyProviderCoverage(ctx, appContainersDomain(ctx)),

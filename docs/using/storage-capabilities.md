@@ -18,9 +18,25 @@ no host MediaScanner indexing equivalent. Neither platform exposes media-library
 list/read. Capability support describes the registered contract, not proof that
 a device workflow has been verified.
 
+iOS `user_files` writes and `namespace_reset` are Simulator-only and require the
+managed Files fixture app (`dev.jasonpearson.automobile.FilesFixture`), not yet
+shipped in this repo. `iosFilesFixtureInstalled: true` means its container was
+verified and supports those operations; false means unavailable; an omitted
+signal yields partial, pending verification. A missing registered provider
+still yields unavailable. The capability resource currently leaves installation
+unverified. `portable` remains false even though `platformScope` is cross-platform.
+Physical iOS stays unsupported regardless of `iosFileIntegration`. iOS user-files
+list/read are unavailable, and media indexing is unsupported. Picker visibility
+is a separate write effect, unavailable unless an exact-destination verifier
+observes it; host staging alone does not prove visibility. Only the historical
+iOS 17.5 / iPhone 15 Pro Simulator experiment is device-tested (see the
+[accepted design](../decisions/ios-user-files-provider.md)); this provider's tests
+use fakes and do not establish physical-device support.
+
 Canonical file resources use exact storage-domain names:
 `automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}[/{path}]{?userId}`
-and `automobile:devices/{deviceId}/storage-domains/user_files/{namespace}[/{path}]`.
+and `automobile:devices/{deviceId}/storage-domains/user_files/{namespace}[/{path}]`
+(the user-files resource is bounded Android Downloads only).
 The app `.../apps/{appId}/files/{container}[/{path}]{?userId}` and bounded Downloads
 `.../downloads/{namespace}[/{path}]` aliases remain supported until device
 verification permits retirement; emitted write/list links remain aliases.

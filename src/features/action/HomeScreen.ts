@@ -99,8 +99,9 @@ export class HomeScreen extends BaseVisualChange {
       if (!globalActionSucceeded) {
         logger.debug(`[HOME] Global action failed (${result.error}), falling back to ADB keyevent`);
       }
-    } catch {
-      // Fall through to ADB
+    } catch (error) {
+      // CtrlProxy is optional; the ADB keyevent fallback still navigates home.
+      logger.debug(`[HOME] Global action unavailable: ${errorMessage(error)}`);
     }
 
     if (globalActionSucceeded) {

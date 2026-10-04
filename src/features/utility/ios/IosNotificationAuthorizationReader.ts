@@ -310,8 +310,10 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
     } finally {
       try {
         await this.deps.rmTemp(tmp);
-      } catch {
-        // best-effort temp cleanup
+      } catch (error) {
+        logger.warn(
+          `[iOS] Failed to remove notification settings temp file: ${errorMessage(error)}`,
+        );
       }
     }
   }

@@ -12,6 +12,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 
 const SIMULATOR_UDID = "ABCDEF01-1234-1234-1234-1234567890AB";
 const PHYSICAL_UDID = "00008110-000A4D8E1234567E";
@@ -284,6 +285,8 @@ describe("OpenURL iOS routing", () => {
   });
 
   test("(e) devicectl launch failure returns { success:false, error }", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    restores.push(() => warnSpy.mockRestore());
     const simctl = new FakeSimCtlClient();
     const devicectl = new FakeDeviceUrlLauncher();
     devicectl.setLaunchError(new Error("device locked"));
@@ -297,9 +300,13 @@ describe("OpenURL iOS routing", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("device locked");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith("[OpenURL] devicectl open URL failed: device locked");
   });
 
   test("(a-neg) simulator simctl failure returns { success:false, error }", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    restores.push(() => warnSpy.mockRestore());
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(
       `openurl ${SIMULATOR_UDID} https://example.com`,
@@ -316,6 +323,8 @@ describe("OpenURL iOS routing", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Invalid device");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith("[OpenURL] simctl openurl failed: Invalid device");
   });
 });
 
@@ -325,6 +334,32 @@ describe("OpenURL package: delegation is unchanged", () => {
     while (restores.length) {
       restores.pop()!();
     }
+  });
+
+  test("logs the package name, underlying message and original launch error once", async () => {
+    const error = new Error("launch dispatch failed");
+    const launchSpy = spyOn(LaunchApp.prototype, "execute").mockRejectedValue(error);
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    restores.push(
+      () => launchSpy.mockRestore(),
+      () => warnSpy.mockRestore(),
+    );
+    const openURL = new OpenURL(
+      iosDevice(PHYSICAL_UDID),
+      new FakeAdbExecutor(),
+      new FakeSimCtlClient(),
+      new FakeDeviceUrlLauncher(),
+    );
+
+    const result = await openURL.execute("package:com.example.MyApp");
+
+    expect(result.success).toBe(false);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[OpenURL] Exception while launching app com.example.MyApp: launch dispatch failed",
+      error,
+    );
+    expect(warnSpy.mock.calls[0][1]).toBe(error);
   });
 
   test("(f) package: URL delegates to LaunchApp on iOS without touching simctl/devicectl", async () => {

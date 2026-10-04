@@ -285,6 +285,7 @@ export class BiometricAuth extends BaseVisualChange {
         message: `Posted ${targets.join(", ")} to simulator ${udid} (${options.action})`,
       };
     } catch (error) {
+      logger.warn(`Failed to simulate iOS biometric authentication: ${errorMessage(error)}`);
       return {
         success: false,
         action: options.action,
@@ -447,7 +448,7 @@ export class BiometricAuth extends BaseVisualChange {
 
       return this.buildSuccessResult(options, modality, fingerprintId);
     } catch (error) {
-      logger.error(`Failed to execute biometric action: ${error}`);
+      logger.warn(`Failed to execute biometric action: ${errorMessage(error)}`);
       return {
         success: false,
         action: options.action,

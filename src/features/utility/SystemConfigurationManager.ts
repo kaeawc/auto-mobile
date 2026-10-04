@@ -7,6 +7,7 @@ import {
   type HostCommandExecutor,
 } from "../../utils/HostCommandExecutor";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
@@ -157,8 +158,11 @@ export class SystemConfigurationManager {
         if (result.stdout && result.stdout.includes("SpringBoard")) {
           return true;
         }
-      } catch {
-        // SpringBoard not yet restarted, continue polling
+      } catch (error) {
+        // SpringBoard may be absent during restart; keep polling until the deadline.
+        logger.debug(
+          `[SystemConfigurationManager] SpringBoard restart probe: ${errorMessage(error)}`,
+        );
       }
     }
 

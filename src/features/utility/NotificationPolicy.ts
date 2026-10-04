@@ -1,4 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -165,6 +166,7 @@ export class NotificationPolicy {
       };
     } catch (error) {
       const message = errorMessage(error);
+      logger.warn(`[NotificationPolicy] Failed to read Android notification policy: ${message}`);
       return {
         success: false,
         appId,

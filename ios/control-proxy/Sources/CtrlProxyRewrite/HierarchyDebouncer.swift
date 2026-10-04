@@ -76,6 +76,10 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     private var skippedPollCount = 0
     private var lastBroadcastTime: Int64 = 0
     private var lastHierarchy: ViewHierarchy?
+    /// Capture-start ordering shared by polls and commands, never encoded on the wire.
+    /// Keep it across stop/start so an outstanding capture cannot regain precedence.
+    private var captureSequence: UInt64 = 0
+    private var lastHierarchySequence: UInt64 = 0
 
     private var isRunning = false
     private var pollScheduled = false
@@ -148,15 +152,21 @@ final class HierarchyDebouncer: HierarchyDebouncing {
         lastHierarchy
     }
 
-    func recordCommandCapture(_ hierarchy: ViewHierarchy) {
-        recordLatestHierarchy(hierarchy)
+    func beginCapture() -> UInt64 {
+        captureSequence += 1
+        return captureSequence
+    }
+
+    func recordCommandCapture(_ hierarchy: ViewHierarchy, captureSequence: UInt64) {
+        recordLatestHierarchy(hierarchy, captureSequence: captureSequence)
     }
 
     // MARK: - Private
 
     /// Keep SDK refreshes on the newest capture, independently of poll change detection.
-    private func recordLatestHierarchy(_ hierarchy: ViewHierarchy) {
-        if let lastHierarchy, hierarchy.updatedAt < lastHierarchy.updatedAt { return }
+    private func recordLatestHierarchy(_ hierarchy: ViewHierarchy, captureSequence: UInt64) {
+        guard captureSequence > lastHierarchySequence else { return }
+        lastHierarchySequence = captureSequence
         lastHierarchy = hierarchy
     }
 
@@ -183,6 +193,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     private func captureInitialState() {
         do {
             let startTime = timer.now()
+            let captureSequence = beginCapture()
             // Bind a fresh perf scope so the instrumented extraction's completed root lands in
             // the shared pool; the reference relied on this pooled flush of background hierarchy
             // timings into the next response's perfTiming (without a scope the perf calls no-op).
@@ -194,7 +205,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
 
             lastStructuralHash = hash
             lastObservedStructuralHash = hash
-            recordLatestHierarchy(hierarchy)
+            recordLatestHierarchy(hierarchy, captureSequence: captureSequence)
             lastBroadcastTime = timer.now()
 
             // Broadcast initial state so the IDE receives hierarchy immediately.
@@ -233,6 +244,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
         let startTime = timer.now()
 
         do {
+            let captureSequence = beginCapture()
             // Bind a fresh perf scope so the instrumented extraction's completed root is pooled
             // for the next response's perfTiming (see captureInitialState) instead of no-oping
             // outside any scope.
@@ -254,7 +266,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
                 // Structure unchanged - likely animation.
                 inAnimationMode = true
                 animationModeEndTime = timer.now() + Self.animationSkipWindowMs
-                recordLatestHierarchy(hierarchy)
+                recordLatestHierarchy(hierarchy, captureSequence: captureSequence)
                 // Idle: nothing changed since the last broadcast, so back off the poll
                 // interval toward the cap to eliminate steady-state load.
                 effectivePollIntervalMs = min(
@@ -267,7 +279,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
                 // Structure changed - this is a real content change.
                 let now = timer.now()
                 inAnimationMode = false
-                recordLatestHierarchy(hierarchy)
+                recordLatestHierarchy(hierarchy, captureSequence: captureSequence)
                 skippedPollCount = 0
                 // A real change resets the cadence to the fast base interval so we stay
                 // responsive immediately after any content change.

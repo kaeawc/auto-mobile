@@ -3589,8 +3589,9 @@ export class DevicePool {
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string> {
-    const { requestWaitDeadline, requestController, assignmentSignal } =
-      this.recoveryAssignmentRequest(recoveryTarget);
+    const { requestWaitDeadline, requestController, assignmentSignal } = recoveryTarget
+      ? this.recoveryAssignmentRequest(recoveryTarget)
+      : {};
     const recoveryDeadline =
       requestWaitDeadline === undefined
         ? recoveryTarget?.restartRecoveryDeadlineMs
@@ -3608,104 +3609,115 @@ export class DevicePool {
     let firstAttemptLogged = false;
     let lossIncident: EmulatorLossIncident | undefined;
 
-    const assign = () =>
-      this.retryExecutor.execute(
-        async (attempt) => {
-          if (requestWaitDeadline !== undefined && this.timer.now() >= requestWaitDeadline) {
-            throw new DevicePoolError("Recovery request budget exhausted", false);
-          }
-          lossIncident = await this.checkRecoveryAssignmentLoss(sessionId, recoveryTarget);
-          // Try to assign device (mutex ensures atomic assignment)
-          const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
-
-          if (assignResult.success) {
-            if (attempt > 1) {
-              logger.info(
-                `Device ${assignResult.deviceId} assigned to session ${sessionId} ` +
-                  `after ${attempt} attempts`,
-              );
-            }
-            return assignResult.deviceId!;
-          }
-
-          if (recoveryTarget) {
-            const recoveryFailure = this.recoveryFailure(
-              sessionId,
-              recoveryTarget,
-              assignResult.refreshCompleteness,
-            );
-            if (recoveryFailure) {
-              throw recoveryFailure;
-            }
-          }
-
-          // No device available - check if we should wait or fail
-          if (assignResult.livenessUnknown) {
-            throw new DevicePoolError(
-              `Unable to verify iOS simulator liveness for session ${sessionId}; iOS discovery failed.`,
-              false,
-            );
-          }
-          if (assignResult.shouldWait) {
-            // Devices exist but are busy - throw retryable error
-            if (!firstAttemptLogged) {
-              firstAttemptLogged = true;
-              logger.info(
-                `All ${assignResult.totalDevices} devices busy, ` +
-                  `session ${sessionId} waiting for availability (timeout: ${timeoutMs / 1000}s)...`,
-              );
-            }
-            throw new DevicePoolError("All devices busy", true);
-          } else {
-            // No devices at all - fail immediately with non-retryable error
-            const stats = this.getStatsForPlatform(platform);
-            throw new DevicePoolError(
-              `No devices in pool to assign to session ${sessionId}.\n` +
-                `Device pool status:\n` +
-                `  Total devices: ${stats.total}\n` +
-                `  Idle: ${stats.idle}\n` +
-                `  Assigned: ${stats.assigned}\n` +
-                `  Error: ${stats.error}\n\n` +
-                `Suggestions:\n` +
-                `  - Start an emulator or connect a physical device\n` +
-                `  - Check device pool status: auto-mobile --cli listDevices\n` +
-                `  - Verify device tooling is working for the selected platform`,
-              false,
-            );
-          }
-        },
-        {
-          maxAttempts,
-          signal: assignmentSignal,
-          delays: () =>
-            Math.min(
-              this.DEVICE_WAIT_INTERVAL_MS,
-              recoveryDeadline === undefined
-                ? this.DEVICE_WAIT_INTERVAL_MS
-                : Math.max(0, recoveryDeadline - this.timer.now()),
-            ),
-          shouldRetry: (error) =>
-            error instanceof DevicePoolError &&
-            error.isRetryable &&
-            (recoveryDeadline === undefined || this.timer.now() < recoveryDeadline),
-        },
-      );
-    const result =
+    // Select synchronously: the ordinary path calls the original executor directly,
+    // with no deadline wrapper or additional promise hop before candidate capture.
+    const executeAssignment: RetryExecutor["execute"] =
       requestWaitDeadline === undefined
-        ? await assign()
-        : await raceWithDeadline(() => runWithAbortSignal(assignmentSignal, assign), {
-            timer: this.timer,
-            timeoutMs: this.remainingStartDeadline(requestWaitDeadline),
-            label: "Session restart recovery",
-            timeoutError: () =>
-              recoveryTarget
-                ? this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident)
-                : new ActionableError("Device assignment request budget exhausted"),
-            onTimeout: () =>
-              requestController?.abort(
-                new DevicePoolError("Recovery request budget exhausted", false),
-              ),
-          });
+        ? this.retryExecutor.execute.bind(this.retryExecutor)
+        : (operation, options) =>
+            raceWithDeadline(
+              () =>
+                runWithAbortSignal(assignmentSignal, () =>
+                  this.retryExecutor.execute(operation, options),
+                ),
+              {
+                timer: this.timer,
+                timeoutMs: this.remainingStartDeadline(requestWaitDeadline),
+                label: "Session restart recovery",
+                timeoutError: () =>
+                  recoveryTarget
+                    ? this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident)
+                    : new ActionableError("Device assignment request budget exhausted"),
+                onTimeout: () =>
+                  requestController?.abort(
+                    new DevicePoolError("Recovery request budget exhausted", false),
+                  ),
+              },
+            );
+    const result = await executeAssignment(
+      async (attempt) => {
+        if (requestWaitDeadline !== undefined && this.timer.now() >= requestWaitDeadline) {
+          throw new DevicePoolError("Recovery request budget exhausted", false);
+        }
+        // Ordinary allocation must capture candidates before yielding to release/readiness.
+        if (recoveryTarget) {
+          lossIncident = await this.checkRecoveryAssignmentLoss(sessionId, recoveryTarget);
+        }
+        // Try to assign device (mutex ensures atomic assignment)
+        const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
+
+        if (assignResult.success) {
+          if (attempt > 1) {
+            logger.info(
+              `Device ${assignResult.deviceId} assigned to session ${sessionId} ` +
+                `after ${attempt} attempts`,
+            );
+          }
+          return assignResult.deviceId!;
+        }
+
+        if (recoveryTarget) {
+          const recoveryFailure = this.recoveryFailure(
+            sessionId,
+            recoveryTarget,
+            assignResult.refreshCompleteness,
+          );
+          if (recoveryFailure) {
+            throw recoveryFailure;
+          }
+        }
+
+        // No device available - check if we should wait or fail
+        if (assignResult.livenessUnknown) {
+          throw new DevicePoolError(
+            `Unable to verify iOS simulator liveness for session ${sessionId}; iOS discovery failed.`,
+            false,
+          );
+        }
+        if (assignResult.shouldWait) {
+          // Devices exist but are busy - throw retryable error
+          if (!firstAttemptLogged) {
+            firstAttemptLogged = true;
+            logger.info(
+              `All ${assignResult.totalDevices} devices busy, ` +
+                `session ${sessionId} waiting for availability (timeout: ${timeoutMs / 1000}s)...`,
+            );
+          }
+          throw new DevicePoolError("All devices busy", true);
+        } else {
+          // No devices at all - fail immediately with non-retryable error
+          const stats = this.getStatsForPlatform(platform);
+          throw new DevicePoolError(
+            `No devices in pool to assign to session ${sessionId}.\n` +
+              `Device pool status:\n` +
+              `  Total devices: ${stats.total}\n` +
+              `  Idle: ${stats.idle}\n` +
+              `  Assigned: ${stats.assigned}\n` +
+              `  Error: ${stats.error}\n\n` +
+              `Suggestions:\n` +
+              `  - Start an emulator or connect a physical device\n` +
+              `  - Check device pool status: auto-mobile --cli listDevices\n` +
+              `  - Verify device tooling is working for the selected platform`,
+            false,
+          );
+        }
+      },
+      {
+        maxAttempts,
+        signal: assignmentSignal,
+        delays: () =>
+          Math.min(
+            this.DEVICE_WAIT_INTERVAL_MS,
+            recoveryDeadline === undefined
+              ? this.DEVICE_WAIT_INTERVAL_MS
+              : Math.max(0, recoveryDeadline - this.timer.now()),
+          ),
+        shouldRetry: (error) =>
+          error instanceof DevicePoolError &&
+          error.isRetryable &&
+          (recoveryDeadline === undefined || this.timer.now() < recoveryDeadline),
+      },
+    );
 
     if (!result.success) {
       this.throwSessionAssignmentFailure({
@@ -3788,11 +3800,8 @@ export class DevicePool {
 
   private async checkRecoveryAssignmentLoss(
     sessionId: string,
-    target?: SessionRecoveryTarget,
+    target: SessionRecoveryTarget,
   ): Promise<EmulatorLossIncident | undefined> {
-    if (!target) {
-      return undefined;
-    }
     const incident = await this.settledRecoveryLossIncident(sessionId, target);
     if (incident && this.getDevicesMatchingRecoveryTarget(target).length === 0) {
       throw this.recoveryAssignmentError(sessionId, target, incident);
@@ -3979,7 +3988,6 @@ export class DevicePool {
         }
 
         if (device) {
-          throwIfRequestAborted();
           const totalDevices = selectCandidates().length;
           // No await between the final validation above and claim's field writes.
           const assignment = await this.claimSelectedDeviceForSession(
@@ -4135,6 +4143,10 @@ export class DevicePool {
     device: PooledDevice,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<{ deviceId: string; session?: Session }> {
+    // Recovery deadline cancellation must fence the claim's synchronous field writes.
+    if (recoveryTarget) {
+      throwIfRequestAborted();
+    }
     if (this.getDeviceHealthMarker(device.id)) {
       throw this.unhealthyDevicesError([device]);
     }

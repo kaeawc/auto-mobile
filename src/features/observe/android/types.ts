@@ -62,6 +62,15 @@ export interface AccessibilityNode {
   "collection-column-index"?: number;
   "visible-to-user"?: boolean;
   "container-title"?: string;
+  "hint-text"?: string | null;
+  "state-description"?: string | null;
+  "error-message"?: string | null;
+  "tooltip-text"?: string | null;
+  "pane-title"?: string | null;
+  "live-region"?: string | null;
+  "collection-info"?: string | null;
+  "collection-item-info"?: string | null;
+  "range-info"?: string | null;
   className?: string;
   packageName?: string;
   bounds?: {

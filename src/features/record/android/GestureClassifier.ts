@@ -10,6 +10,7 @@ interface ContactInfo {
   /** Last known raw sensor position (updated on each active frame) */
   lastX: number;
   lastY: number;
+  unknownAxes?: GestureEvent["unknownAxes"];
 }
 
 interface LastTap {
@@ -22,6 +23,7 @@ interface PinchState {
   initialDist: number;
   /** Updated each frame while both fingers are active */
   finalDist: number;
+  unknownAxes?: GestureEvent["unknownAxes"];
 }
 
 /**
@@ -63,6 +65,7 @@ export class GestureClassifier {
       if (existing) {
         existing.lastX = slot.x;
         existing.lastY = slot.y;
+        existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
       } else {
         this.contacts.set(slot.slotId, {
           startX: slot.x,
@@ -70,6 +73,7 @@ export class GestureClassifier {
           arrivedAt: frame.arrivedAt,
           lastX: slot.x,
           lastY: slot.y,
+          unknownAxes: slot.unknownAxes,
         });
       }
     }
@@ -79,11 +83,16 @@ export class GestureClassifier {
     if (activeCount === 2) {
       this.inTwoFingerMode = true;
       const [a, b] = frame.activeSlots;
-      const dist = this.screenDist(a.x, a.y, b.x, b.y);
+      const unknownAxes = mergeUnknownAxes(
+        this.contacts.get(a.slotId)?.unknownAxes,
+        this.contacts.get(b.slotId)?.unknownAxes,
+      );
+      const dist = unknownAxes?.length ? NaN : this.screenDist(a.x, a.y, b.x, b.y);
       if (!this.pinchState) {
-        this.pinchState = { initialDist: dist, finalDist: dist };
+        this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
       } else {
         this.pinchState.finalDist = dist;
+        this.pinchState.unknownAxes = mergeUnknownAxes(this.pinchState.unknownAxes, unknownAxes);
       }
     }
 
@@ -118,6 +127,19 @@ export class GestureClassifier {
         return null;
       }
 
+      if (contact.unknownAxes?.length) {
+        // No starting point means no displacement or double-tap proximity proof.
+        // Offer only a duration-based contact for accessibility to resolve.
+        this.lastTap = null;
+        const durationMs = frame.arrivedAt - contact.arrivedAt;
+        return {
+          type: durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS ? "longPress" : "tap",
+          arrivedAt: frame.arrivedAt,
+          durationMs,
+          unknownAxes: contact.unknownAxes,
+        };
+      }
+
       const { x: downX, y: downY } = this.scaler.toScreenPoint(contact.startX, contact.startY);
       const { x: upX, y: upY } = this.scaler.toScreenPoint(contact.lastX, contact.lastY);
       const durationMs = frame.arrivedAt - contact.arrivedAt;
@@ -149,6 +171,10 @@ export class GestureClassifier {
 
   private maybeEmitPinch(arrivedAt: number): GestureEvent | null {
     const pinch = this.pinchState;
+    if (pinch?.unknownAxes?.length) {
+      this.lastTap = null;
+      return { type: "pinch", arrivedAt, unknownAxes: pinch.unknownAxes };
+    }
     if (!pinch || pinch.initialDist === 0) {
       return null;
     }
@@ -227,4 +253,14 @@ export class GestureClassifier {
 
 function dist(x1: number, y1: number, x2: number, y2: number): number {
   return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+}
+
+function mergeUnknownAxes(
+  first: GestureEvent["unknownAxes"],
+  second: GestureEvent["unknownAxes"],
+): GestureEvent["unknownAxes"] {
+  if (!first?.length && !second?.length) {
+    return undefined;
+  }
+  return [...new Set([...(first ?? []), ...(second ?? [])])];
 }

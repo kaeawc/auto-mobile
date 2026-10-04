@@ -117,6 +117,141 @@ describe("DualTrackRecorder", () => {
     recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
   });
 
+  test.each(["tap", "doubleTap", "longPress"] as const)(
+    "unknown-axis %s uses a paired accessibility element",
+    async (type) => {
+      await recorder.start();
+      fakeGestures.emit({ type, arrivedAt: 0, unknownAxes: ["x", "y"] });
+      fakeTimer.advanceTime(360);
+      fakeA11y.emit({
+        type: type === "longPress" ? "longPress" : "tap",
+        timestamp: 0,
+        element: TAP_ELEMENT,
+      });
+      expect((await recorder.stop()).steps).toEqual([
+        { tool: "tapOn", params: { action: type, elementId: TAP_ELEMENT["resource-id"] } },
+      ]);
+    },
+  );
+
+  test.each(["x", "y", "both"] as const)(
+    "unpaired unknown-axis tap warns naming %s and skips",
+    async (axis) => {
+      await recorder.start();
+      const warning = spyOn(logger, "warn");
+      try {
+        fakeGestures.emit({
+          type: "tap",
+          arrivedAt: 0,
+          screenX: 0,
+          screenY: 0,
+          unknownAxes: axis === "both" ? ["x", "y"] : [axis],
+        });
+        fakeTimer.advanceTime(MERGE_WINDOW_MS);
+        expect((await recorder.stop()).steps).toEqual([]);
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining(`unknown axes: ${axis === "both" ? "x, y" : axis}`),
+        );
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test("buffered accessibility element resolves unknown axes within the merge window", async () => {
+    await recorder.start();
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["y"] });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } },
+    ]);
+  });
+
+  test("stale buffered element cannot resolve unknown axes", async () => {
+    await recorder.start();
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS + 1);
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), unknownAxes: ["x"] });
+    expect((await recorder.stop()).steps).toEqual([]);
+  });
+
+  test("bounds without a selector cannot resolve an unknown-axis tap", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 0, unknownAxes: ["y"] });
+    fakeA11y.emit({ type: "tap", timestamp: 0, element: { bounds: TAP_ELEMENT.bounds } });
+    expect((await recorder.stop()).steps).toEqual([]);
+  });
+
+  test.each(["longPress", "doubleTap", "swipe", "pinch"] as const)(
+    "unpaired unknown-axis %s is dropped",
+    async (type) => {
+      await recorder.start();
+      fakeGestures.emit({
+        type,
+        arrivedAt: 0,
+        screenX: 0,
+        screenY: 0,
+        direction: "up",
+        scale: 0.5,
+        unknownAxes: ["x"],
+      });
+      expect((await recorder.stop()).steps).toEqual([]);
+    },
+  );
+
+  test("unknown-axis swipe uses only the paired accessibility scroll direction", async () => {
+    await recorder.start();
+    fakeGestures.emit({
+      type: "swipe",
+      arrivedAt: 0,
+      direction: "right",
+      speed: "fast",
+      unknownAxes: ["x"],
+    });
+    fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: 100 });
+    expect((await recorder.stop()).steps).toEqual([
+      {
+        tool: "swipeOn",
+        params: { direction: "up", container: { elementId: TAP_ELEMENT["resource-id"] } },
+      },
+    ]);
+  });
+
+  test("unknown-axis swipe without accessibility direction is dropped", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "swipe", arrivedAt: 0, direction: "right", unknownAxes: ["y"] });
+    fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT });
+    expect((await recorder.stop()).steps).toEqual([]);
+  });
+
+  test("unknown-axis double tap cannot upgrade a known coordinate fallback", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, screenX: 342, screenY: 891 });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    fakeGestures.emit({
+      type: "doubleTap",
+      arrivedAt: 150,
+      firstTapArrivedAt: 0,
+      screenX: 342,
+      screenY: 0,
+      unknownAxes: ["y"],
+    });
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "tapAt", params: { x: 342, y: 891, action: "tap" } },
+    ]);
+  });
+
+  test("dropping an unknown-axis gesture releases later ordered steps", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["x", "y"] });
+    fakeGestures.emit({ type: "pressButton", arrivedAt: 10, button: "back" });
+    expect(recorder.stepCount).toBe(0);
+    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    expect((await recorder.stop()).steps).toEqual([
+      { tool: "pressButton", params: { button: "back" } },
+    ]);
+  });
+
   // Issue #9142 supplies measured host delays, not a captured getevent +
   // interaction trace fixture. These deterministic cases exercise those timings.
   test.each([220, 360])("tap merges an accessibility tap delayed by %d ms", async (delay) => {

@@ -11,3 +11,11 @@ issue #9143, filed 2026-10-03.
 - Raw coordinates: (27852, 16165) = (0x6ccc, 0x3f25).
 - The second contact deliberately has no ABS_MT_POSITION lines: Protocol B
   retains the slot's coordinates when they do not change.
+
+`repeated-axes-no-position-api36.txt` is a byte-identical raw capture from issue
+#9311, manual-test batch 16, main `9c8acdd13`.
+
+- Device: `am-api36-ga-arm64` emulator, API 36.
+- Input node: `/dev/input/event1` (`virtio_input_multi_touch_1`).
+- Both taps repeated the slot's pre-recording raw (9300, 22560), so no
+  ABS_MT_POSITION lines were sent. Trailing spaces are preserved from the capture.

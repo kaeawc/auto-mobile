@@ -1,0 +1,8 @@
+[    5983.435911] EV_ABS       ABS_MT_TRACKING_ID   00000006            
+[    5983.435911] EV_SYN       SYN_REPORT           00000000            
+[    5983.551377] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[    5983.551377] EV_SYN       SYN_REPORT           00000000            
+[    5985.767307] EV_ABS       ABS_MT_TRACKING_ID   00000007            
+[    5985.767307] EV_SYN       SYN_REPORT           00000000            
+[    5985.887756] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[    5985.887756] EV_SYN       SYN_REPORT           00000000            

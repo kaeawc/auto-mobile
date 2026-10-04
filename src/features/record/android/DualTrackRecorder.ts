@@ -144,7 +144,7 @@ export class DualTrackRecorder {
     }
 
     if (gesture.type === "pinch") {
-      this.enqueueStep({ resolved: true, step: buildPinchStep(gesture) });
+      this.enqueueStep({ resolved: true, step: buildPinchStep(gesture) ?? undefined });
       return;
     }
 
@@ -156,48 +156,8 @@ export class DualTrackRecorder {
           gesture.arrivedAt - pending.gesture.arrivedAt <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS),
     );
 
-    if (gesture.type === "doubleTap") {
-      const priorTap = [...this.pendingGestures].reverse().find((pending) => {
-        const prior = pending.gesture;
-        if (prior.type !== "tap" || prior.screenX === undefined || prior.screenY === undefined) {
-          return false;
-        }
-        const elapsed = gesture.arrivedAt - prior.arrivedAt;
-        if (gesture.firstTapArrivedAt !== undefined) {
-          return (
-            prior.arrivedAt === gesture.firstTapArrivedAt &&
-            elapsed >= 0 &&
-            elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS
-          );
-        }
-        // Direct emitter events lack the classifier's correlation time.
-        const dx = (gesture.screenX ?? Infinity) - prior.screenX;
-        const dy = (gesture.screenY ?? Infinity) - prior.screenY;
-        return (
-          elapsed >= 0 &&
-          elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
-          Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
-        );
-      });
-      const step = priorTap?.step;
-      if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
-        step.params.action = "doubleTap";
-        return;
-      }
-      if (priorTap && !priorTap.resolved) {
-        // Keep the first tap's position, but allow the pair's delayed click a
-        // fresh merge window, as when recording an uncorrelated double tap.
-        if (priorTap.timeout) {
-          this.timer.clearTimeout(priorTap.timeout);
-        }
-        priorTap.gesture = gesture;
-        priorTap.arrivedAt = this.timer.now();
-        priorTap.timeout = this.timer.setTimeout(
-          () => this.resolveGesture(priorTap),
-          MERGE_WINDOW_MS,
-        );
-        return;
-      }
+    if (this.upgradeDoubleTap(gesture)) {
+      return;
     }
 
     // tap / doubleTap / longPress / swipe → hold for merge window
@@ -210,6 +170,59 @@ export class DualTrackRecorder {
     this.enqueueStep(pending);
 
     pending.timeout = this.timer.setTimeout(() => this.resolveGesture(pending), MERGE_WINDOW_MS);
+  }
+
+  private upgradeDoubleTap(gesture: GestureEvent): boolean {
+    if (gesture.type !== "doubleTap" || hasUnknownAxes(gesture)) {
+      return false;
+    }
+    const priorTap = [...this.pendingGestures].reverse().find((pending) => {
+      const prior = pending.gesture;
+      if (
+        prior.type !== "tap" ||
+        hasUnknownAxes(prior) ||
+        prior.screenX === undefined ||
+        prior.screenY === undefined
+      ) {
+        return false;
+      }
+      const elapsed = gesture.arrivedAt - prior.arrivedAt;
+      if (gesture.firstTapArrivedAt !== undefined) {
+        return (
+          prior.arrivedAt === gesture.firstTapArrivedAt &&
+          elapsed >= 0 &&
+          elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS
+        );
+      }
+      // Direct emitter events lack the classifier's correlation time.
+      const dx = (gesture.screenX ?? Infinity) - prior.screenX;
+      const dy = (gesture.screenY ?? Infinity) - prior.screenY;
+      return (
+        elapsed >= 0 &&
+        elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
+        Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
+      );
+    });
+    const step = priorTap?.step;
+    if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
+      step.params.action = "doubleTap";
+      return true;
+    }
+    if (priorTap && !priorTap.resolved) {
+      // Keep the first tap's position, but allow the pair's delayed click a
+      // fresh merge window, as when recording an uncorrelated double tap.
+      if (priorTap.timeout) {
+        this.timer.clearTimeout(priorTap.timeout);
+      }
+      priorTap.gesture = gesture;
+      priorTap.arrivedAt = this.timer.now();
+      priorTap.timeout = this.timer.setTimeout(
+        () => this.resolveGesture(priorTap),
+        MERGE_WINDOW_MS,
+      );
+      return true;
+    }
+    return false;
   }
 
   private enqueueStep(entry: OrderedStep): void {
@@ -282,6 +295,10 @@ export class DualTrackRecorder {
     const step = buildMergedStep(pending.gesture, event);
     pending.step = step ?? undefined;
     this.flushResolvedSteps();
+    if (!step && hasUnknownAxes(pending.gesture)) {
+      warnUnknownGesture(pending.gesture);
+      return;
+    }
     if (!event || !buildSelector(event.element) || !step) {
       const gesture = pending.gesture;
       const [x, y] =
@@ -437,10 +454,16 @@ function gestureHitsElement(gesture: GestureEvent, element?: Partial<Element>): 
   if (!bounds) {
     return false;
   }
+  // Unknown raw axes cannot be mapped to screen axes (rotation may swap them).
+  // Pair by compatible type, bounded receipt time and oldest pending contact;
+  // require a replayable element rather than accepting coordinate placeholders.
+  if (hasUnknownAxes(gesture)) {
+    return buildSelector(element) !== null;
+  }
   // Swipes use startX/startY; taps/longPress/doubleTap use screenX/screenY
   const x = gesture.screenX ?? gesture.startX;
   const y = gesture.screenY ?? gesture.startY;
-  if (x === null || x === undefined || y === null || y === undefined) {
+  if (typeof x !== "number" || typeof y !== "number") {
     return false;
   }
   const PAD = 20;
@@ -514,30 +537,39 @@ function buildMergedStep(
       return buildCoordinateTapStep(gesture);
     }
 
-    case "swipe": {
-      const direction =
-        gesture.direction ?? resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY);
-      if (!direction) {
-        return null;
-      }
-      const params: Record<string, unknown> = { direction };
-      if (selector) {
-        params.container =
-          "elementId" in selector ? { elementId: selector.elementId } : { text: selector.text };
-      }
-      if (gesture.speed === "fast") {
-        params.speed = "fast";
-      }
-      return { tool: "swipeOn", params };
-    }
+    case "swipe":
+      return buildSwipeStep(gesture, event);
 
     default:
       return null;
   }
 }
 
+function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
+  const selector = buildSelector(event.element);
+  const direction = hasUnknownAxes(gesture)
+    ? selector && resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY)
+    : (gesture.direction ?? resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY));
+  if (!direction) {
+    return null;
+  }
+  const params: Record<string, unknown> = { direction };
+  if (selector) {
+    params.container =
+      "elementId" in selector ? { elementId: selector.elementId } : { text: selector.text };
+  }
+  if (!hasUnknownAxes(gesture) && gesture.speed === "fast") {
+    params.speed = "fast";
+  }
+  return { tool: "swipeOn", params };
+}
+
+function hasUnknownAxes(gesture: GestureEvent): boolean {
+  return Boolean(gesture.unknownAxes?.length);
+}
+
 function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
-  if (gesture.screenX === undefined || gesture.screenY === undefined) {
+  if (hasUnknownAxes(gesture) || gesture.screenX === undefined || gesture.screenY === undefined) {
     return null;
   }
   // The scaler already supplies native Android display pixels (rotation applied).
@@ -557,11 +589,21 @@ function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
   return { tool: "tapAt", params };
 }
 
+function warnUnknownGesture(gesture: GestureEvent): void {
+  logger.warn(
+    `[DualTrackRecorder] ${gesture.type} has unknown axes: ${gesture.unknownAxes?.join(", ")} — no resolved element gesture; step skipped`,
+  );
+}
+
 function buildPressButtonStep(gesture: GestureEvent): PlanStep {
   return { tool: "pressButton", params: { button: gesture.button } };
 }
 
-function buildPinchStep(gesture: GestureEvent): PlanStep {
+function buildPinchStep(gesture: GestureEvent): PlanStep | null {
+  if (hasUnknownAxes(gesture)) {
+    warnUnknownGesture(gesture);
+    return null;
+  }
   return {
     tool: "pinchOn",
     params: {

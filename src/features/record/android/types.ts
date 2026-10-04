@@ -17,11 +17,14 @@ export interface TouchSlot {
   /** raw sensor y coordinate */
   y: number;
   pressure: number;
+  /** Raw axes not yet observed in this stream; their numeric values are NaN. */
+  unknownAxes?: ("x" | "y")[];
 }
 
 export interface RawTouchFrame {
   /** Date.now() on host when the SYN_REPORT line was read */
   arrivedAt: number;
+
   /** Only slots with trackingId >= 0 */
   activeSlots: ReadonlyArray<TouchSlot>;
   /** slotIds whose trackingId became -1 in this frame */
@@ -38,6 +41,9 @@ export interface GestureEvent {
   type: GestureEventType;
   /** Host time of the UP/key event that completed the gesture */
   arrivedAt: number;
+
+  /** Raw axes unknown during this contact; screen coordinates must not be inferred. */
+  unknownAxes?: ("x" | "y")[];
 
   // tap / doubleTap / longPress
   screenX?: number;

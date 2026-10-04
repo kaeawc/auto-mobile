@@ -66,6 +66,67 @@ describe("TouchFrameReconstructor", () => {
     r = new TouchFrameReconstructor();
   });
 
+  test("captured pre-recording axes are unknown on both contacts until observed", () => {
+    const unknownCapture = readFileSync(
+      `${import.meta.dir}/../../../fixtures/android-getevent/repeated-axes-no-position-api36.txt`,
+      "utf8",
+    );
+    const knownCapture = readFileSync(
+      `${import.meta.dir}/../../../fixtures/android-getevent/same-coordinate-taps-api36.txt`,
+      "utf8",
+    );
+    const frames = feedLines(r, (unknownCapture + knownCapture).split("\n")).filter(isFrame);
+    expect(frames).toHaveLength(8);
+    for (const index of [0, 2]) {
+      const slot = frames[index].activeSlots[0];
+      expect(slot.unknownAxes).toEqual(["x", "y"]);
+      expect(slot.x).toBeNaN();
+      expect(slot.y).toBeNaN();
+    }
+    for (const index of [4, 6]) {
+      expect(frames[index].activeSlots[0]).toEqual({
+        slotId: 0,
+        trackingId: index === 4 ? 0x321 : 0x322,
+        x: 27852,
+        y: 16165,
+        pressure: 0,
+      });
+    }
+  });
+
+  test("only Y observed flags X and later updates do not mutate earlier snapshots", () => {
+    const frames = feedLines(r, [
+      "[  1.0] EV_ABS ABS_MT_POSITION_Y 000000c8",
+      "[  1.0] EV_ABS ABS_MT_TRACKING_ID 00000001",
+      "[  1.0] EV_SYN SYN_REPORT 00000000",
+      ...SINGLE_FINGER_UP,
+      ...SINGLE_FINGER_DOWN,
+    ]).filter(isFrame);
+    expect(frames[0].activeSlots[0].unknownAxes).toEqual(["x"]);
+    expect(frames[0].activeSlots[0].x).toBeNaN();
+    expect(frames[0].activeSlots[0].y).toBe(200);
+    expect(frames[2].activeSlots[0].unknownAxes).toBeUndefined();
+  });
+
+  test("observed zero is known and knowledge stays local to each slot across release", () => {
+    const frames = feedLines(r, [
+      "[  1.0] EV_ABS ABS_MT_TRACKING_ID 00000001",
+      "[  1.0] EV_ABS ABS_MT_POSITION_X 00000000",
+      "[  1.0] EV_SYN SYN_REPORT 00000000",
+      ...SINGLE_FINGER_UP,
+      "[  2.0] EV_ABS ABS_MT_TRACKING_ID 00000002",
+      "[  2.0] EV_ABS ABS_MT_SLOT 00000001",
+      "[  2.0] EV_ABS ABS_MT_TRACKING_ID 00000003",
+      "[  2.0] EV_SYN SYN_REPORT 00000000",
+    ]).filter(isFrame);
+    expect(frames[0].activeSlots[0].x).toBe(0);
+    expect(frames[0].activeSlots[0].unknownAxes).toEqual(["y"]);
+    expect(frames[2].activeSlots[0].x).toBe(0);
+    expect(frames[2].activeSlots[0].unknownAxes).toEqual(["y"]);
+    expect(frames[2].activeSlots[1].unknownAxes).toEqual(["x", "y"]);
+    expect(frames[2].activeSlots[1].x).toBeNaN();
+  });
+
   test("captured API 36 repeated taps retain coordinates without position updates", () => {
     const capture = readFileSync(
       `${import.meta.dir}/../../../fixtures/android-getevent/same-coordinate-taps-api36.txt`,

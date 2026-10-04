@@ -31,6 +31,62 @@ describe("GestureClassifier", () => {
     c = new GestureClassifier(identityScaler, DENSITY);
   });
 
+  test.each([50, 500])("unknown axes propagate without screen coordinates (%d ms)", (duration) => {
+    c.feedFrame({
+      arrivedAt: 0,
+      activeSlots: [{ slotId: 0, trackingId: 1, x: NaN, y: 800, pressure: 0, unknownAxes: ["x"] }],
+      releasedSlots: [],
+    });
+    const gesture = c.feedFrame(makeFrame(duration, [], [0]));
+    expect(gesture?.type).toBe(duration < 400 ? "tap" : "longPress");
+    expect(gesture?.unknownAxes).toEqual(["x"]);
+    expect(gesture?.screenX).toBeUndefined();
+    expect(gesture?.screenY).toBeUndefined();
+    expect(gesture?.startX).toBeUndefined();
+  });
+
+  test("axes first observed mid-contact cannot recover its unknown starting point", () => {
+    c.feedFrame({
+      arrivedAt: 0,
+      activeSlots: [
+        { slotId: 0, trackingId: 1, x: NaN, y: NaN, pressure: 0, unknownAxes: ["x", "y"] },
+      ],
+      releasedSlots: [],
+    });
+    c.feedFrame(makeFrame(20, [{ slotId: 0, trackingId: 1, x: 500, y: 800 }]));
+    const gesture = c.feedFrame(makeFrame(50, [], [0]));
+    expect(gesture?.unknownAxes).toEqual(["x", "y"]);
+    expect(gesture?.screenX).toBeUndefined();
+    c.feedFrame(makeFrame(100, [{ slotId: 0, trackingId: 2, x: 500, y: 800 }]));
+    const known = c.feedFrame(makeFrame(150, [], [0]));
+    expect(known?.type).toBe("tap");
+    expect(known?.unknownAxes).toBeUndefined();
+    expect(known?.screenX).toBe(500);
+  });
+
+  test("unknown pinch axes propagate without deriving scale or single-finger gestures", () => {
+    const frame = makeFrame(0, [
+      { slotId: 0, trackingId: 1, x: 100, y: 200 },
+      { slotId: 1, trackingId: 2, x: 300, y: 200 },
+    ]);
+    c.feedFrame(frame);
+    c.feedFrame({
+      ...frame,
+      arrivedAt: 20,
+      activeSlots: frame.activeSlots.map((slot) => ({ ...slot, unknownAxes: ["y"] })),
+    });
+    expect(
+      c.feedFrame(makeFrame(30, [{ slotId: 0, trackingId: 1, x: 100, y: 200 }], [1])),
+    ).toBeNull();
+    expect(c.feedFrame(makeFrame(50, [], [0]))).toEqual({
+      type: "pinch",
+      arrivedAt: 50,
+      unknownAxes: ["y"],
+    });
+    c.feedFrame(makeFrame(100, [{ slotId: 0, trackingId: 3, x: 100, y: 200 }]));
+    expect(c.feedFrame(makeFrame(150, [], [0]))?.type).toBe("tap");
+  });
+
   // -------------------------------------------------------------------------
   // tap
   // -------------------------------------------------------------------------

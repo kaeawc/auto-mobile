@@ -5,11 +5,8 @@ import XCTest
     import UIKit
 #endif
 
-// The register-vs-shutdown races these managers had are now closed by construction:
-// observers/path-monitor are registered WHILE the lock is held (see `initialize`), so a
-// `shutdown()` (which also locks) can never interleave between building a resource and
-// storing it. There is therefore no injectable mid-registration seam to drive a race
-// deterministically; these tests pin the observable init/shutdown lifecycle instead.
+// Resource registration is atomic under the manager lock. MainThreadLifecycleTests
+// also exercise deferred registration and shutdown invalidation through a fake executor.
 
 final class OsEventsTests: XCTestCase {
     #if canImport(UIKit) && !os(watchOS)

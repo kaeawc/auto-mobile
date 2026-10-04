@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "anchor",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "anchor": {
+        "type": "element",
+        "selector": {
+          "testTag": "target",
+          "container": "card"
+        },
+        "alignment": "bottom",
+        "offset": {
+          "x": 0,
+          "y": 4
+        }
+      }
+    }
+  },
+  "expectedPath": "root.anchor.selector.container"
+}

@@ -3,6 +3,8 @@ import {
   parsePlist,
   buildPlist,
   injectUITestEnvironment,
+  PlistReal,
+  type PlistValue,
 } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 
 /**
@@ -97,6 +99,82 @@ function expectDict(value: unknown): Map<string, unknown> {
 
 describe("XctestrunPlist", function () {
   describe("parsePlist / buildPlist round-trip (EC2)", function () {
+    test("preserves absent values and malformed dictionary pair tolerance in the existing capture", async () => {
+      const missingValue = SAMPLE_XCTESTRUN.replace("<integer>1</integer>", "");
+      const root = expectDict(await parsePlist(missingValue));
+      expect(expectDict(root.get("__xctestrun_metadata__")).get("FormatVersion")).toBe("");
+
+      const nonKey = SAMPLE_XCTESTRUN.replace(
+        "<key>FormatVersion</key>",
+        "<string>FormatVersion</string>",
+      );
+      const skipped = expectDict(await parsePlist(nonKey));
+      expect([...expectDict(skipped.get("__xctestrun_metadata__")).entries()]).toEqual([]);
+
+      const unknownValue = SAMPLE_XCTESTRUN.replace("<integer>1</integer>", "<unknown>1</unknown>");
+      const fallback = expectDict(await parsePlist(unknownValue));
+      expect(expectDict(fallback.get("__xctestrun_metadata__")).get("FormatVersion")).toBe("1");
+    });
+
+    test("preserves empty scalar defaults using the existing capture", async () => {
+      for (const [tag, expected] of [
+        ["string", ""],
+        ["integer", 0],
+        ["real", new PlistReal(0)],
+        ["data", Buffer.alloc(0)],
+        ["date", new Date(0)],
+        ["true", true],
+        ["false", false],
+        ["unknown", ""],
+      ] as const) {
+        const root = expectDict(
+          await parsePlist(SAMPLE_XCTESTRUN.replace("<integer>1</integer>", `<${tag}/>`)),
+        );
+        expect(expectDict(root.get("__xctestrun_metadata__")).get("FormatVersion")).toEqual(
+          expected,
+        );
+      }
+    });
+
+    test("preserves exact collection and scalar serialization", () => {
+      const value: PlistValue = new Map<string, PlistValue>([
+        ["emptyDict", new Map()],
+        ["emptyArray", []],
+        [
+          "values",
+          [
+            true,
+            false,
+            new PlistReal(30),
+            1,
+            1.5,
+            new Date("2026-01-01T00:00:00.123Z"),
+            Buffer.from("binary xctestrun payload"),
+            "a & b < c > d",
+          ],
+        ],
+      ]);
+      expect(buildPlist(value).split("\n").slice(3, -2)).toEqual([
+        "<dict>",
+        "\t<key>emptyDict</key>",
+        "\t<dict/>",
+        "\t<key>emptyArray</key>",
+        "\t<array/>",
+        "\t<key>values</key>",
+        "\t<array>",
+        "\t\t<true/>",
+        "\t\t<false/>",
+        "\t\t<real>30</real>",
+        "\t\t<integer>1</integer>",
+        "\t\t<real>1.5</real>",
+        "\t\t<date>2026-01-01T00:00:00Z</date>",
+        "\t\t<data>YmluYXJ5IHhjdGVzdHJ1biBwYXlsb2Fk</data>",
+        "\t\t<string>a &amp; b &lt; c &gt; d</string>",
+        "\t</array>",
+        "</dict>",
+      ]);
+    });
+
     test("parses dicts as ordered Maps and preserves scalar types", async function () {
       const root = expectDict(await parsePlist(SAMPLE_XCTESTRUN));
 

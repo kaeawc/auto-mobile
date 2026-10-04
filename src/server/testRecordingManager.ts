@@ -7,6 +7,7 @@ import { PlanValidator } from "../utils/plan/PlanValidator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import type { TouchTrackFailure } from "../features/record/android/types";
 import { DualTrackRecorder } from "../features/record/android";
 
 interface TestRecordingStartResult {
@@ -17,6 +18,8 @@ interface TestRecordingStartResult {
 }
 
 interface TestRecordingStopResult {
+  /** Partial-plan warning, carried through the existing tool/socket error field. */
+  error?: string;
   recordingId: string;
   startedAt: string;
   stoppedAt: string;
@@ -251,8 +254,9 @@ async function stopAndBuildResult(
   timer: Timer,
 ): Promise<TestRecordingStopResult> {
   let steps: PlanStep[];
+  let touchTrackFailure: TouchTrackFailure | undefined;
   try {
-    ({ steps } = await raceWithDeadline(() => session.recorder.stop(), {
+    ({ steps, touchTrackFailure } = await raceWithDeadline(() => session.recorder.stop(), {
       timer,
       timeoutMs: STOP_RECORDING_TIMEOUT_MS,
       label: "Stopping test recording",
@@ -262,6 +266,21 @@ async function stopAndBuildResult(
   } catch (error) {
     logger.warn(`[TestRecording] Failed to stop recording ${session.recordingId}`, error);
     throw toActionableError(error, "Failed to stop test recording");
+  }
+
+  const touchTrackMessage = touchTrackFailure
+    ? `Touch track (getevent) stopped ${touchTrackFailure.failedAt - session.startedAt} ms after recording start: ${touchTrackFailure.error.message}. Later taps may be missing.`
+    : undefined;
+  if (touchTrackMessage && steps.length === 0) {
+    throw toActionableError(
+      new Error(touchTrackMessage, { cause: touchTrackFailure?.error }),
+      "Failed to stop test recording",
+    );
+  }
+  // Preserve useful partial plans, including accessibility-only inputText steps.
+  // The export schema has no warnings field, so success carries its warning in error.
+  if (touchTrackMessage) {
+    logger.warn(`[TestRecording] ${touchTrackMessage}`);
   }
 
   const stoppedAt = timer.now();
@@ -285,6 +304,7 @@ async function stopAndBuildResult(
     planName: resolvedPlanName,
     planContent,
     stepCount,
+    ...(touchTrackMessage ? { error: `Warning: ${touchTrackMessage}` } : {}),
     deviceId: session.deviceId,
     platform: session.platform,
   };

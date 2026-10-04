@@ -12,7 +12,6 @@ src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphM
 src/features/navigation/NavigateTo.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
 src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 src/features/observe/Idle.ts: error TS2741: Property 'updatedPrevTotalFrames' is missing in type '{ isStable: false; shouldUpdateLastNonIdleTime: true; updatedPrevMissedVsync: null; updatedPrevSlowUiThread: null; updatedPrevFrameDeadlineMissed: null; updatedFirstGfxInfoLog: false; }' but required in type 'UiStabilityResult'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
@@ -33,8 +32,7 @@ src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<
 # swap-fp: 11 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.
 # swap-fp: 11 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'string | undefined' is not assignable to type 'null | string'.
 # swap-fp: 11,11,13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
-# swap-fp: 13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
-# swap-fp: 17 :: src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
+# swap-fp: 19 :: src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
 # swap-fp: 27,45 :: src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 3 :: src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphManager"' declares 'ToolCallInteraction' locally, but it is not exported.
 # swap-fp: 3 :: src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
@@ -47,7 +45,7 @@ src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<
 # swap-fp: 7 :: src/features/action/swipeon/SwipeOn.ts: error TS2322: Type 'AndroidCtrlProxyClient' is not assignable to type 'ScrollAccessibilityService'.
 # swap-fp: 7 :: src/features/observe/Idle.ts: error TS2741: Property 'updatedPrevTotalFrames' is missing in type '{ isStable: false; shouldUpdateLastNonIdleTime: true; updatedPrevMissedVsync: null; updatedPrevSlowUiThread: null; updatedPrevFrameDeadlineMissed: null; updatedFirstGfxInfoLog: false; }' but required in type 'UiStabilityResult'.
 # swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
-# swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
+# swap-fp: 74 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 # swap-fp: 9 :: src/features/navigation/NavigateTo.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
 # swap-fp: 9 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.

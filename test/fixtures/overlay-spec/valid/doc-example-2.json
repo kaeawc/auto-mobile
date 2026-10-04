@@ -1,0 +1,77 @@
+{
+  "id": "choices",
+  "window": {
+    "placement": {
+      "type": "sheet",
+      "edge": "bottom",
+      "height": 240
+    }
+  },
+  "state": {
+    "selected": 0
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "scroll",
+        "axis": "horizontal",
+        "child": {
+          "type": "row",
+          "children": [
+            {
+              "type": "text",
+              "text": "Save",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "save",
+                  "payload": {
+                    "variant": "A"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "spacer",
+              "style": {
+                "width": {
+                  "dp": 16
+                }
+              }
+            },
+            {
+              "type": "icon",
+              "name": "favorite",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "selected",
+                  "value": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "type": "bottomNav",
+        "stateKey": "selected",
+        "safeAreaPadding": {
+          "edges": ["bottom"],
+          "types": ["systemBars"]
+        },
+        "items": [
+          {
+            "label": "Home",
+            "icon": "home"
+          },
+          {
+            "label": "Favorites",
+            "icon": "favorite"
+          }
+        ]
+      }
+    ]
+  }
+}

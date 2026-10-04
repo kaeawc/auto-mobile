@@ -11,6 +11,10 @@ import {
 
 export type PlanExecutionLockScope = "session" | "global";
 
+export interface PlanExecutionLease {
+  release(): void;
+}
+
 /**
  * Global server configuration state
  * Set once during server initialization
@@ -38,7 +42,8 @@ class ServerConfig {
   private _a11yReportViewIds: boolean = true;
   private _a11yRetrieveInteractiveWindows: boolean = true;
   private _occlusionEnabled: boolean = true;
-  private _planExecutionActive: boolean = false;
+  private _planExecutionLeaseCount = 0;
+  private _compatPlanExecutionLease?: PlanExecutionLease;
   private _observeResultIncludeElements: boolean = false;
   private _toolResultsNoStructuredContent: boolean = false;
   private _actionsDiffObserve: boolean = false;
@@ -254,12 +259,32 @@ class ServerConfig {
     };
   }
 
+  acquirePlanExecutionLease(): PlanExecutionLease {
+    this._planExecutionLeaseCount++;
+    let released = false;
+    return {
+      release: () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        this._planExecutionLeaseCount--;
+      },
+    };
+  }
+
+  // Compatibility/test seam; production code must use acquirePlanExecutionLease().
   setPlanExecutionActive(active: boolean): void {
-    this._planExecutionActive = active;
+    if (active) {
+      this._compatPlanExecutionLease ??= this.acquirePlanExecutionLease();
+    } else {
+      this._compatPlanExecutionLease?.release();
+      this._compatPlanExecutionLease = undefined;
+    }
   }
 
   isPlanExecutionActive(): boolean {
-    return this._planExecutionActive;
+    return this._planExecutionLeaseCount > 0;
   }
 
   // --- Output-size reduction flags (issue #2756) ---

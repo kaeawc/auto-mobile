@@ -1,32 +1,9 @@
+import type { InstalledAppsStore } from "../models/InstalledAppsStore";
 import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, InstalledApp as DbInstalledApp, NewInstalledApp } from "./types";
 
-export interface InstalledAppsStore {
-  getCacheVerifiedAt(deviceId: string): Promise<number | null>;
-  getProfileCacheVerifiedAt(deviceId: string, userId: number): Promise<number | null>;
-  listInstalledApps(deviceId: string): Promise<DbInstalledApp[]>;
-  replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void>;
-  upsertInstalledApp(
-    deviceId: string,
-    userId: number,
-    packageName: string,
-    isSystem: boolean,
-    timestampMs: number,
-  ): Promise<void>;
-  removeInstalledApp(deviceId: string, userId: number, packageName: string): Promise<void>;
-  removeInstalledAppForDevice(deviceId: string, packageName: string): Promise<void>;
-  markDeviceStale(deviceId: string): Promise<void>;
-  markProfileStale(deviceId: string, userId: number): Promise<void>;
-  touchDevice(deviceId: string, timestampMs: number): Promise<void>;
-  clearDeviceSession(deviceId: string): Promise<void>;
-  clearOldDaemonSessions(currentDaemonSessionId: string): Promise<void>;
-  setSessionTracking(
-    daemonSessionId: string,
-    deviceId: string,
-    deviceSessionStart: number,
-  ): Promise<void>;
-}
+export type { InstalledAppsStore } from "../models/InstalledAppsStore";
 
 export class InstalledAppsRepository implements InstalledAppsStore {
   private db: Kysely<Database> | null;

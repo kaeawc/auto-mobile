@@ -59,7 +59,11 @@ import { isPackageInstalledForUser } from "../utils/android-cmdline-tools/isPack
 import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { logger } from "../utils/logger";
 import { prepareFileSource } from "./fileSourcePreparation";
-import { getSharedStorageService, type SharedStorageService } from "./sharedStorageService";
+import {
+  getSharedStorageService,
+  rollbackWrittenFiles,
+  type SharedStorageService,
+} from "./sharedStorageService";
 import {
   SimctlIosSimulatorMediaClient,
   type IosSimulatorMediaClient,
@@ -818,10 +822,44 @@ class AndroidAppFileProvider
       request.signal,
     );
     const results: AppFileProviderWriteResult[] = [];
-    for (const file of requests) {
-      await this.writeFile(file, adb, userId);
-      results.push({ resourceUserId: pinInResourceUri ? userId : undefined });
+    const writtenPaths: string[] = [];
+    const cleanupFailures: string[] = [];
+    let failedPath = request.destinationPath;
+    try {
+      for (const file of requests) {
+        failedPath = file.destinationPath;
+        await this.writeFile(
+          file,
+          adb,
+          userId,
+          () => writtenPaths.push(file.destinationPath),
+          cleanupFailures,
+        );
+        if (cleanupFailures.length > 0) {
+          throw new ActionableError("Android app-file staging cleanup failed.");
+        }
+        results.push({ resourceUserId: pinInResourceUri ? userId : undefined });
+      }
+    } catch (error) {
+      const rollback = await this.rollbackFiles(adb, appTarget, userId, writtenPaths);
+      throw new ActionableError(
+        `Android app-container batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
+          `Rolled back: ${rollback.rolledBack.length > 0 ? rollback.rolledBack.join(", ") : "none"}. ` +
+          `Rollback failures: ${[...rollback.failures, ...cleanupFailures].join("; ") || "none"}.`,
+        { cause: error },
+      );
     }
+    await this.confirmRunningState(adb, request, appTarget, userId, results);
+    return results;
+  }
+
+  private async confirmRunningState(
+    adb: AdbExecutor,
+    request: PutAppFileProviderRequest,
+    appTarget: AppContainersTarget,
+    userId: number,
+    results: AppFileProviderWriteResult[],
+  ): Promise<void> {
     try {
       const state = await readAndroidPackageProcesses(adb, appTarget.appId, {
         userId,
@@ -847,13 +885,45 @@ class AndroidAppFileProvider
         error,
       );
     }
-    return results;
+  }
+
+  private rollbackFiles(
+    adb: AdbExecutor,
+    appTarget: AppContainersTarget,
+    userId: number,
+    writtenPaths: string[],
+  ) {
+    return rollbackWrittenFiles(writtenPaths, this.timer, (paths, signal, timeoutMs) => {
+      const targets = paths.map((path) => {
+        const resolved = resolveAndroidTarget(appTarget.appId, appTarget.container, path, userId);
+        if (resolved.kind === "unsupported") {
+          throw new ActionableError(resolved.message);
+        }
+        return shellQuote(
+          resolved.kind === "external" ? resolved.absolutePath : resolved.relativePath,
+        );
+      });
+      const prefix =
+        appTarget.container === "externalFiles"
+          ? "shell"
+          : androidRunAsPrefix(appTarget.appId, userId);
+      return adb.executeCommand(
+        `${prefix} rm -f ${targets.join(" ")}`,
+        timeoutMs,
+        undefined,
+        true,
+        signal,
+        true,
+      );
+    });
   }
 
   private async writeFile(
     request: PutAppFileProviderRequest,
     adb: AdbExecutor,
     userId: number,
+    onWritten: () => void,
+    cleanupFailures: string[],
   ): Promise<void> {
     const appTarget = requireAppContainersTarget(request.target);
     const target = resolveAndroidTarget(
@@ -871,83 +941,79 @@ class AndroidAppFileProvider
         target.message,
       );
     }
-
-    if (target.kind === "external") {
-      await executeAndroidAppFileCommand(
-        adb,
-        `shell mkdir -p ${shellQuote(posix.dirname(target.absolutePath))}`,
-        {
-          device: request.device,
-          appId: appTarget.appId,
-          container: appTarget.container,
-          operation: "write",
-          userId,
-          access: "externalFiles",
-        },
-        { noRetry: true, signal: request.signal },
-      );
-      await executeAndroidAppFileCommand(
-        adb,
-        `push ${shellQuote(request.sourcePath)} ${shellQuote(target.absolutePath)}`,
-        {
-          device: request.device,
-          appId: appTarget.appId,
-          container: appTarget.container,
-          operation: "write",
-          userId,
-          access: "externalFiles",
-        },
-        { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
-      );
-      return;
-    }
-
-    const runAs = androidRunAsPrefix(appTarget.appId, userId);
-    const tempDevicePath = `/data/local/tmp/automobile-${this.idGenerator.next()}-${posix.basename(request.destinationPath)}`;
+    const prefix =
+      target.kind === "external" ? "shell" : androidRunAsPrefix(appTarget.appId, userId);
+    const destination = target.kind === "external" ? target.absolutePath : target.relativePath;
+    const token = this.idGenerator.next();
+    const temporary = posix.join(posix.dirname(destination), `.automobile-${token}.tmp`);
+    const staging =
+      target.kind === "external"
+        ? temporary
+        : `/data/local/tmp/automobile-${token}-${posix.basename(request.destinationPath)}`;
+    const context = {
+      device: request.device,
+      appId: appTarget.appId,
+      container: appTarget.container,
+      operation: "write" as const,
+      userId,
+      access: target.kind === "external" ? ("externalFiles" as const) : ("run-as" as const),
+    };
+    const cleanupCommands = [
+      ...(target.kind === "external" ? [] : [`shell rm -f ${shellQuote(staging)}`]),
+      `${prefix} rm -f ${shellQuote(temporary)}`,
+    ];
     try {
+      if (target.kind === "external") {
+        await executeAndroidAppFileCommand(
+          adb,
+          `shell mkdir -p ${shellQuote(posix.dirname(destination))}`,
+          context,
+          { noRetry: true, signal: request.signal },
+        );
+      }
       await executeAndroidAppFileCommand(
         adb,
-        `push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`,
-        {
-          device: request.device,
-          appId: appTarget.appId,
-          container: appTarget.container,
-          operation: "write",
-          userId,
-          access: "run-as",
-        },
+        `push ${shellQuote(request.sourcePath)} ${shellQuote(staging)}`,
+        context,
         { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
       );
       const command =
-        `mkdir -p ${shellQuote(posix.dirname(target.relativePath))} && ` +
-        `cp ${shellQuote(tempDevicePath)} ${shellQuote(target.relativePath)} && ` +
-        `chmod 600 ${shellQuote(target.relativePath)}`;
-      await executeAndroidAppFileCommand(
-        adb,
-        `${runAs} sh -c ${shellQuote(command)}`,
-        {
-          device: request.device,
-          appId: appTarget.appId,
-          container: appTarget.container,
-          operation: "write",
-          userId,
-          access: "run-as",
-        },
-        { noRetry: true, signal: request.signal },
-      );
+        target.kind === "external"
+          ? `mv -f ${shellQuote(temporary)} ${shellQuote(destination)}`
+          : `mkdir -p ${shellQuote(posix.dirname(destination))} && ` +
+            `cp ${shellQuote(staging)} ${shellQuote(temporary)} && ` +
+            `chmod 600 ${shellQuote(temporary)} && ` +
+            `mv -f ${shellQuote(temporary)} ${shellQuote(destination)}`;
+      await executeAndroidAppFileCommand(adb, `${prefix} sh -c ${shellQuote(command)}`, context, {
+        noRetry: true,
+        signal: request.signal,
+      });
+      onWritten();
     } finally {
+      await this.cleanupStaging(adb, cleanupCommands, request.destinationPath, cleanupFailures);
+    }
+  }
+
+  private async cleanupStaging(
+    adb: AdbExecutor,
+    commands: string[],
+    destinationPath: string,
+    failures: string[],
+  ): Promise<void> {
+    // Cleanup must outlive both explicit and ambient request cancellation.
+    for (const command of commands) {
       const cleanup = new AbortController();
       try {
-        // Staging cleanup must outlive both explicit and ambient request cancellation.
         await runWithAbortSignal(undefined, () =>
           raceWithDeadline(
             () =>
               adb.executeCommand(
-                `shell rm -f ${shellQuote(tempDevicePath)}`,
+                command,
                 APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS,
                 undefined,
                 true,
                 cleanup.signal,
+                true,
               ),
             {
               timer: this.timer,
@@ -958,7 +1024,7 @@ class AndroidAppFileProvider
           ),
         );
       } catch (error) {
-        // Preserve the completed write or its original error even if staging cleanup fails.
+        failures.push(`${destinationPath} staging cleanup (${command}): ${errorMessage(error)}`);
         logger.warn("Android app-file staging cleanup failed", error);
       }
     }
@@ -1190,6 +1256,7 @@ class AndroidUserFilesProvider implements AppFileWriteProvider {
         destinationPath: file.destinationPath,
       })),
       signal: request.signal,
+      rollbackOnFailure: true,
     });
     return result.files.map((staged) => ({
       effects: [

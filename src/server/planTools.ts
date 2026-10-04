@@ -243,6 +243,7 @@ const exportPlanTool = async (params: {
       planContent: result.planContent,
       stepCount: result.stepCount,
       durationMs: result.durationMs,
+      ...(result.error ? { error: result.error } : {}),
     });
   } catch (error) {
     logger.error(`[exportPlan] Failed to export plan: ${error}`);

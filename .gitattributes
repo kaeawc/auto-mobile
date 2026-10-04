@@ -7,6 +7,7 @@ test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/release/*.md text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf
+test/fixtures/android-adb/*.txt text eol=lf
 test/fixtures/android-getevent/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
@@ -79,3 +80,7 @@ test/fixtures/android-display/hinge-angle0-get*.txt -text
 test/fixtures/android-display/fold-pixel10pf-api36/*.txt text eol=lf
 # Preserve the captured emulator console CRLF bytes in both postures.
 test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
+
+# Shared overlay specs: preserve byte limits and path parity on Windows.
+test/fixtures/overlay-spec/**/*.json text eol=lf
+schemas/overlay-spec-contract.json text eol=lf

@@ -8,6 +8,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.junit.After
 import org.junit.Before
@@ -175,6 +176,202 @@ class SQLiteDatabaseDriverTest {
         )
       }
   }
+
+  @Test
+  fun `multiple mutations are rejected before either table changes`() {
+    val dbFile = createNotesDatabase("multiple-mutations.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      driver.executeSQL(dbFile.absolutePath, "CREATE TABLE backup AS SELECT * FROM notes")
+
+      val error =
+        assertFailsWith<DatabaseError.SqlError> {
+          driver.executeSQL(dbFile.absolutePath, "DELETE FROM notes; DELETE FROM backup")
+        }
+
+      assertEquals("SQL error: Multiple SQL statements are not supported", error.message)
+      assertEquals(3, driver.getTableData(dbFile.absolutePath, "notes", 10, 0).total)
+      assertEquals(3, driver.getTableData(dbFile.absolutePath, "backup", 10, 0).total)
+    } finally {
+      driver.closeAll()
+    }
+  }
+
+  @Test
+  fun `select followed by mutation is rejected on both execution paths`() {
+    val dbFile = createNotesDatabase("multiple-read-statements.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      val query = "SELECT 1; DELETE FROM notes"
+      val writableError =
+        assertFailsWith<DatabaseError.SqlError> {
+          driver.executeSQL(dbFile.absolutePath, query)
+        }
+      val readOnlyError =
+        assertFailsWith<DatabaseError.SqlError> {
+          driver.executeReadOnlySQL(dbFile.absolutePath, query)
+        }
+      val mutationError =
+        assertFailsWith<DatabaseError.SqlError> {
+          driver.executeReadOnlySQL(dbFile.absolutePath, "DELETE FROM notes; DELETE FROM notes")
+        }
+
+      listOf(writableError, readOnlyError, mutationError).forEach { error ->
+        assertEquals("SQL error: Multiple SQL statements are not supported", error.message)
+      }
+      assertEquals(3, driver.getTableData(dbFile.absolutePath, "notes", 10, 0).total)
+    } finally {
+      driver.closeAll()
+    }
+  }
+
+  @Test
+  fun `trailing terminators and comments preserve single statement execution`() {
+    val dbFile = createNotesDatabase("trailing-sql-trivia.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      listOf(";", ";  ", "; -- trailing ; comment", "; /* trailing ; comment */ ").forEach { suffix
+        ->
+        val query = "SELECT body FROM notes WHERE id = 1$suffix"
+        assertEquals(
+          listOf(listOf("alpha")),
+          (driver.executeSQL(dbFile.absolutePath, query) as SQLExecutionResult.Query).rows,
+        )
+        assertEquals(
+          listOf(listOf("alpha")),
+          driver.executeReadOnlySQL(dbFile.absolutePath, query).rows,
+        )
+        assertEquals(
+          SQLExecutionResult.Mutation(rowsAffected = 1),
+          driver.executeSQL(
+            dbFile.absolutePath,
+            "UPDATE notes SET body = body WHERE id = 1$suffix",
+          ),
+        )
+      }
+    } finally {
+      driver.closeAll()
+    }
+  }
+
+  @Test
+  fun `quoted and commented semicolons are not statement boundaries`() {
+    val dbFile = createNotesDatabase("quoted-sql-semicolons.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      listOf(
+          "SELECT 'a;b' AS value",
+          "SELECT 'a'';b' AS value",
+          "SELECT 1 AS \"a;b\"",
+          "SELECT 1 AS \"a\"\";b\"",
+          "SELECT 1 AS `a;b`",
+          "SELECT 1 AS `a``;b`",
+          "SELECT 1 AS [a;b]",
+          "SELECT -- ; DELETE FROM notes\n 1 AS value",
+          "SELECT -- comment\r; DELETE FROM notes\n 1 AS value",
+          "SELECT /* ; DELETE FROM notes */ 1 AS value",
+          "SELECT \$value(a;b)",
+          "SELECT \$namespace::value(a(b)",
+        )
+        .forEach { query ->
+          val result = driver.executeSQL(dbFile.absolutePath, query) as SQLExecutionResult.Query
+          assertEquals(1, result.rows.size, query)
+          assertEquals(
+            result.rows,
+            driver.executeReadOnlySQL(dbFile.absolutePath, query).rows,
+            query,
+          )
+        }
+      assertEquals(
+        SQLExecutionResult.Mutation(rowsAffected = 1),
+        driver.executeSQL(dbFile.absolutePath, "UPDATE notes SET body = 'a;b' WHERE id = 1"),
+      )
+      assertEquals("a;b", driver.getTableData(dbFile.absolutePath, "notes", 10, 0).rows[0][1])
+    } finally {
+      driver.closeAll()
+    }
+  }
+
+  @Test
+  fun `trigger body semicolons and nested case ends stay within one statement`() {
+    val dbFile = createNotesDatabase("trigger-statements.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      driver.executeSQL(dbFile.absolutePath, "CREATE TABLE audit (body TEXT NOT NULL)")
+      listOf("", "TEMP ", "TEMPORARY ").forEachIndexed { index, modifier ->
+        driver.executeSQL(dbFile.absolutePath, auditTrigger("audit_$index", modifier))
+      }
+      driver.executeSQL(dbFile.absolutePath, "INSERT INTO notes (body) VALUES ('delta')")
+
+      val audit = driver.getTableData(dbFile.absolutePath, "audit", 20, 0)
+      assertEquals(6, audit.total)
+      assertEquals(3, audit.rows.count { it == listOf("first;body") })
+      assertEquals(3, audit.rows.count { it == listOf("delta") })
+    } finally {
+      driver.closeAll()
+    }
+  }
+
+  @Test
+  fun `trigger followed by another statement is rejected without creating the trigger`() {
+    val dbFile = createNotesDatabase("trigger-with-tail.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      driver.executeSQL(dbFile.absolutePath, "CREATE TABLE audit (body TEXT NOT NULL)")
+      val error =
+        assertFailsWith<DatabaseError.SqlError> {
+          driver.executeSQL(
+            dbFile.absolutePath,
+            auditTrigger("blocked_trigger") + " /* tail */ DELETE FROM notes",
+          )
+        }
+      assertEquals("SQL error: Multiple SQL statements are not supported", error.message)
+      driver.executeSQL(dbFile.absolutePath, "INSERT INTO notes (body) VALUES ('delta')")
+      assertEquals(0, driver.getTableData(dbFile.absolutePath, "audit", 10, 0).total)
+      assertEquals(4, driver.getTableData(dbFile.absolutePath, "notes", 10, 0).total)
+    } finally {
+      driver.closeAll()
+    }
+  }
+
+  @Test
+  fun `standalone transaction control does not hide later statements`() {
+    val dbFile = createNotesDatabase("transaction-with-tail.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      listOf(
+          "BEGIN; DELETE FROM notes; COMMIT",
+          "COMMIT; DELETE FROM notes",
+          "END; DELETE FROM notes",
+          "DELETE FROM notes; 'unterminated",
+          "SELECT \$namespace::value(a(b); DELETE FROM notes",
+          "DELETE FROM notes; (unterminated",
+        )
+        .forEach { query ->
+          val error =
+            assertFailsWith<DatabaseError.SqlError> {
+              driver.executeSQL(dbFile.absolutePath, query)
+            }
+          assertEquals("SQL error: Multiple SQL statements are not supported", error.message)
+        }
+      assertEquals(3, driver.getTableData(dbFile.absolutePath, "notes", 10, 0).total)
+    } finally {
+      driver.closeAll()
+    }
+  }
+
+  private fun auditTrigger(name: String, modifier: String = ""): String =
+    """
+    CREATE ${modifier}TRIGGER $name AFTER INSERT ON notes BEGIN
+      INSERT INTO audit (body) VALUES ('first;body');
+      INSERT INTO audit (body) VALUES (
+        CASE WHEN NEW.body = 'delta' THEN
+          CASE WHEN NEW.id > 0 THEN NEW.body ELSE 'inner fallback' END
+        ELSE 'outer fallback' END
+      );
+    END;
+    """
+      .trimIndent()
 
   private fun createDatabase(name: String): File {
     val dbFile = context.getDatabasePath(name)

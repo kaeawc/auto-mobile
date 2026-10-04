@@ -12,6 +12,8 @@ import {
 } from "../../src/doctor/checks/android";
 import type { DoctorProbeOptions } from "../../src/doctor/types";
 import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -19,6 +21,11 @@ import type { BootedDevice } from "../../src/models";
 import { createDoctorDeadline } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { runDoctor } from "../../src/doctor";
+
+const adbVersionOutput = readFileSync(
+  join(import.meta.dir, "../fixtures/android-adb/adb-version.txt"),
+  "utf8",
+);
 
 const baseDependencies: AndroidDoctorDependencies = {
   detectAndroidCommandLineTools: async () => [],
@@ -133,7 +140,7 @@ describe("post-repair Android doctor checks", () => {
       create: () => ({
         getAdbPathOnly: async () => "/test/android-sdk/platform-tools/adb",
         executeCommand: async () => ({
-          stdout: "Android Debug Bridge version 35.0.0",
+          stdout: adbVersionOutput,
           stderr: "",
           exitCode: 0,
         }),
@@ -366,36 +373,61 @@ describe("checkAdbVersion", () => {
     fakeFactory = new FakeAdbClientFactory(fakeExecutor as any);
   });
 
-  test("passes and parses version from standard ADB output", async () => {
+  test("reports the platform-tools version from captured ADB output", async () => {
     fakeExecutor.setCommandResponse("--version", {
-      stdout: "Android Debug Bridge version 35.0.0\nInstalled as /usr/local/bin/adb",
+      stdout: adbVersionOutput,
       stderr: "",
-      toString: () => "Android Debug Bridge version 35.0.0",
-      trim: () => "Android Debug Bridge version 35.0.0",
-      includes: (s: string) => "Android Debug Bridge version 35.0.0".includes(s),
+      toString: () => adbVersionOutput,
+      trim: () => adbVersionOutput.trim(),
+      includes: (s: string) => adbVersionOutput.includes(s),
     });
 
     const result = await checkAdbVersion(fakeFactory);
-    expect(result.name).toBe("ADB Version");
-    expect(result.status).toBe("pass");
-    expect(result.message).toBe("Version 35.0.0");
-    expect(result.value).toBe("35.0.0");
+    expect(result).toEqual({
+      name: "ADB Version",
+      status: "pass",
+      message: "Version 37.0.1 (protocol 1.0.41)",
+      value: "37.0.1",
+    });
   });
 
-  test("passes with unknown version when output does not match pattern", async () => {
-    fakeExecutor.setCommandResponse("--version", {
-      stdout: "some unexpected output",
+  test.each([
+    {
+      stdout: adbVersionOutput.split("\n")[0],
       stderr: "",
-      toString: () => "some unexpected output",
-      trim: () => "some unexpected output",
-      includes: (s: string) => "some unexpected output".includes(s),
+      excerpt: adbVersionOutput.split("\n")[0],
+    },
+    {
+      stdout: "  some unexpected\n output  ",
+      stderr: "adb: usage: unknown command --version",
+      excerpt: "some unexpected output",
+    },
+    {
+      stdout: " \n ",
+      stderr: "  adb: usage:\n unknown command --version  ",
+      excerpt: "adb: usage: unknown command --version",
+    },
+    {
+      stdout: "x".repeat(120),
+      stderr: "",
+      excerpt: "x".repeat(80),
+    },
+    { stdout: "", stderr: "", excerpt: "empty output" },
+  ])("warns for undetermined platform-tools version: %j", async ({ stdout, stderr, excerpt }) => {
+    fakeExecutor.setCommandResponse("--version", {
+      stdout,
+      stderr,
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (s: string) => stdout.includes(s),
     });
 
     const result = await checkAdbVersion(fakeFactory);
-    expect(result.name).toBe("ADB Version");
-    expect(result.status).toBe("pass");
-    expect(result.message).toBe("Version unknown");
-    expect(result.value).toBe("unknown");
+    expect(result).toEqual({
+      name: "ADB Version",
+      status: "warn",
+      message: `Could not determine ADB version (platform-tools): ${excerpt}`,
+    });
   });
 
   test("warns when executeCommand throws an error", async () => {
@@ -404,8 +436,11 @@ describe("checkAdbVersion", () => {
     const result = await checkAdbVersion(fakeFactory);
     expect(result.name).toBe("ADB Version");
     expect(result.status).toBe("warn");
-    expect(result.message).toContain("Could not determine ADB version");
-    expect(result.message).toContain("ADB command failed");
+    expect(result).toEqual({
+      name: "ADB Version",
+      status: "warn",
+      message: "Could not determine ADB version: ADB command failed",
+    });
   });
 
   test("warns with non-Error thrown values", async () => {
@@ -543,7 +578,7 @@ describe("doctor probe cancellation seam (#7008)", () => {
     const controller = new AbortController();
     const fakeExecutor = new FakeAdbExecutor();
     fakeExecutor.setCommandResponse("--version", {
-      stdout: "Android Debug Bridge version 35.0.0",
+      stdout: adbVersionOutput,
       stderr: "",
       toString: () => "",
       trim: () => "",

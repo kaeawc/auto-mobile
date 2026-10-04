@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": 1,
+      "style": {
+        "colour": "red"
+      },
+      "aaa": 1
+    }
+  },
+  "expectedPath": "root.aaa"
+}

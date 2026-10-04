@@ -82,8 +82,9 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     for (const socket of this.connections.keys()) {
       try {
         socket.end();
-      } catch {
-        // Ignore errors when closing
+      } catch (error) {
+        // Peers may disconnect before shutdown; subscriber state is cleared below.
+        logger.debug(`Push socket shutdown close failed: ${errorMessage(error)}`);
       }
     }
     this.subscribers.clear();
@@ -135,8 +136,9 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         deadSockets.add(socket);
         try {
           socket.destroy();
-        } catch {
-          // Ignore errors when destroying
+        } catch (error) {
+          // A timed-out peer may already be gone; its subscriptions are removed below.
+          logger.debug(`Push socket timeout cleanup failed: ${errorMessage(error)}`);
         }
         continue;
       }
@@ -156,8 +158,9 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         deadSockets.add(socket);
         try {
           socket.destroy();
-        } catch {
-          // Ignore
+        } catch (error) {
+          // The failed peer is retired below even if its socket has already closed.
+          logger.debug(`Push socket failed-peer cleanup failed: ${errorMessage(error)}`);
         }
       }
     }
@@ -362,8 +365,9 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         deadSockets.add(subscriber.socket);
         try {
           subscriber.socket.destroy();
-        } catch {
-          // Ignore
+        } catch (error) {
+          // The failed peer is retired below even if its socket has already closed.
+          logger.debug(`Push socket failed-peer cleanup failed: ${errorMessage(error)}`);
         }
       }
     }

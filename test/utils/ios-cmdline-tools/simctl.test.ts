@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
@@ -6,6 +6,7 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimulatorDeviceTypeProfiles } from "../../fakes/FakeSimulatorDeviceTypeProfiles";
+import { logger } from "../../../src/utils/logger";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 
 function resetSimctlCaches(): void {
@@ -1114,6 +1115,85 @@ describe("Simctl", function () {
       expect(secondDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
     });
 
+    test("settled shutdown never reads with an exhausted timeout budget", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      mockExecAsync = async (): Promise<ExecResult> =>
+        createExecResult(
+          simulatorListPayload([
+            {
+              udid: mockDevice.deviceId,
+              name: mockDevice.name,
+              state: "Shutdown",
+              isAvailable: true,
+            },
+          ]),
+          "",
+        );
+      simctl = new Simctl(null, mockExecAsync, timer);
+      const reads = spyOn(simctl, "listSimulatorImages");
+      try {
+        await expect(simctl.killSimulator(mockDevice)).resolves.toBeUndefined();
+        expect(reads.mock.calls.map(([timeoutMs]) => timeoutMs)).toEqual([
+          10_000, 9_000, 8_000, 7_000, 6_000, 5_000, 4_000, 3_000, 2_000, 1_000,
+        ]);
+        expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
+      } finally {
+        reads.mockRestore();
+      }
+    });
+
+    test.each([0, 1_000])(
+      "late shutdown read failure retains confirmed Shutdown with %i ms left",
+      async function (remainingMs) {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        mockExecAsync = async (): Promise<ExecResult> => createExecResult("", "");
+        simctl = new Simctl(null, mockExecAsync, timer);
+        const failure = new Error("state probe unavailable");
+        const reads = spyOn(simctl, "listSimulatorImages").mockImplementation(async () => {
+          if (timer.now() >= 9_000) {
+            timer.advanceTime(1_000 - remainingMs);
+            throw failure;
+          }
+          return [{ ...mockDevice, state: "Shutdown", isRunning: false }];
+        });
+        const debug = spyOn(logger, "debug");
+        try {
+          await expect(simctl.killSimulator(mockDevice)).resolves.toBeUndefined();
+          expect(reads.mock.calls).toHaveLength(10);
+          expect(timer.now()).toBe(10_000);
+          expect(debug).toHaveBeenCalledWith(expect.stringContaining("state probe unavailable"));
+        } finally {
+          reads.mockRestore();
+          debug.mockRestore();
+        }
+      },
+    );
+
+    test.each([
+      { description: "without a successful observation", failAtMs: 0, advanceMs: 10_000 },
+      { description: "before the final polling interval", failAtMs: 1_000, advanceMs: 0 },
+    ])("shutdown read failure propagates $description", async function ({ failAtMs, advanceMs }) {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      mockExecAsync = async (): Promise<ExecResult> => createExecResult("", "");
+      simctl = new Simctl(null, mockExecAsync, timer);
+      const failure = new Error("state probe unavailable");
+      const reads = spyOn(simctl, "listSimulatorImages").mockImplementation(async () => {
+        if (timer.now() >= failAtMs) {
+          timer.advanceTime(advanceMs);
+          throw failure;
+        }
+        return [{ ...mockDevice, state: "Shutdown", isRunning: false }];
+      });
+      try {
+        await expect(simctl.killSimulator(mockDevice)).rejects.toBe(failure);
+      } finally {
+        reads.mockRestore();
+      }
+    });
+
     test("successful shutdown invalidates the cached boot state", async function () {
       const timer = new FakeTimer();
       let running = true;
@@ -1147,7 +1227,7 @@ describe("Simctl", function () {
         name: "iPhone 17",
       });
       expect(await simctl.getBootedSimulatorsChecked()).toEqual([]);
-      expect(reads).toBe(12);
+      expect(reads).toBe(11);
       expect(timer.now()).toBe(10_000);
     });
 

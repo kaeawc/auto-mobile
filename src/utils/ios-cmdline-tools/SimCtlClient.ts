@@ -1386,13 +1386,10 @@ export class SimCtlClient implements SimCtl {
 
   private async verifyShutdownSettled(device: BootedDevice, signal?: AbortSignal): Promise<void> {
     const deadlineMs = this.timer.now() + SHUTDOWN_SETTLE_MS;
+    let state: string | undefined;
     for (let attempt = 1; ; attempt++) {
       signal?.throwIfAborted();
       const remainingMs = deadlineMs - this.timer.now();
-      const state = await this.readSimulatorState(device.deviceId, Math.max(1, remainingMs));
-      if (state === "Booted") {
-        throw await this.revivedSimulatorError(device, signal);
-      }
       if (remainingMs <= 0) {
         if (state !== "Shutdown") {
           throw new ActionableError(
@@ -1401,8 +1398,29 @@ export class SimCtlClient implements SimCtl {
         }
         return;
       }
+      try {
+        state = await this.readSimulatorState(device.deviceId, remainingMs);
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (
+          state !== "Shutdown" ||
+          deadlineMs - this.timer.now() > SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt)
+        ) {
+          throw error;
+        }
+        // The final probe may exhaust its budget; the last successful read already confirmed Shutdown.
+        logger.debug(
+          `[iOS] Keeping confirmed Shutdown for ${device.deviceId} after late state read failed: ${errorMessage(error)}`,
+        );
+      }
+      if (state === "Booted") {
+        throw await this.revivedSimulatorError(device, signal);
+      }
       await this.timer.sleep(
-        Math.min(SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt), remainingMs),
+        Math.min(
+          SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt),
+          Math.max(0, deadlineMs - this.timer.now()),
+        ),
       );
     }
   }

@@ -2734,6 +2734,129 @@ describe("killDevice handler", () => {
     expect(pool.getDevice(device.deviceId)).toBeNull();
   });
 
+  test("iOS fallback confirmation retains its shutdown reservation without an intentional marker", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const device: BootedDevice = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "ios-monitor-kill",
+    };
+    successfulManager.setDeviceImages("ios", [{ ...device, isRunning: false, source: "local" }]);
+    const { pool, registry } = createRegistryWiredDevicePool(
+      sessionManager,
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+    const mark = spyOn(pool, "markIntentionalShutdown");
+    const pooledDevice = pool.getDevice(device.deviceId);
+    const discover = successfulManager.getBootedDevicesDetailed.bind(successfulManager);
+    const discovery = spyOn(successfulManager, "getBootedDevicesDetailed");
+    const kill = spyOn(successfulManager, "killDevice").mockImplementation(async () => {
+      successfulManager.setBootedDevices("ios", []);
+      throw new Error("Command timed out after 1ms");
+    });
+    let fallbackChecked = false;
+    discovery.mockImplementation(async (platform, options) => {
+      if (platform === "ios" && kill.mock.calls.length > 0 && !fallbackChecked) {
+        fallbackChecked = true;
+        expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+        expect(mark).not.toHaveBeenCalled();
+        // Exercise the monitor's pool cleanup while fallback discovery is awaiting.
+        for (let tick = 0; tick < 3; tick++) {
+          await pool.removeDisconnectedDevice(device.deviceId, false);
+        }
+        expect(pool.getDevice(device.deviceId)).toBe(pooledDevice);
+        expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+      }
+      return await discover(platform, options);
+    });
+    try {
+      const result = await ToolRegistry.getTool("killDevice")!.handler({ device });
+      expect(mark).not.toHaveBeenCalled();
+      expect(fallbackChecked).toBe(true);
+      expect(result).toMatchObject({
+        content: [{ type: "text", text: expect.stringContaining("shutdown successfully") }],
+      });
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+    } finally {
+      kill.mockRestore();
+      mark.mockRestore();
+      discovery.mockRestore();
+    }
+  });
+
+  test("iOS confirmation discovery failure leaves no shutdown marker or fence", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const device: BootedDevice = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "ios-discovery-failure",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    successfulManager.setDeviceImages("ios", [{ ...device, isRunning: false, source: "local" }]);
+    const { pool, registry } = createRegistryWiredDevicePool(
+      sessionManager,
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+    const discover = successfulManager.getBootedDevicesDetailed.bind(successfulManager);
+    const discovery = spyOn(successfulManager, "getBootedDevicesDetailed").mockImplementation(
+      async (platform, options) => {
+        if (successfulManager.killedDeviceIds.length > 0) {
+          throw new Error("simulator discovery unavailable");
+        }
+        return await discover(platform, options);
+      },
+    );
+    const mark = spyOn(pool, "markIntentionalShutdown");
+    const resume = spyOn(IOSCtrlProxyClient, "resumeAfterDeviceStart");
+    try {
+      await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
+        "simulator discovery unavailable",
+      );
+      expect(successfulManager.killedDeviceIds).toEqual([device.deviceId]);
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+      expect(mark).not.toHaveBeenCalled();
+      expect(pool.getDevice(device.deviceId)).not.toBeNull();
+      expect(resume).toHaveBeenCalledWith(device.deviceId);
+    } finally {
+      discovery.mockRestore();
+      mark.mockRestore();
+      resume.mockRestore();
+    }
+  });
+
   test("awaits iOS pool removal before retiring its device-session epoch", async () => {
     const timer = new FakeTimer();
     const successfulManager = new SuccessfulKillDeviceManager();

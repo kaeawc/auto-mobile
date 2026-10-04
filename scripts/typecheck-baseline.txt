@@ -5,8 +5,6 @@ src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
-src/features/navigation/Explore.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
-src/features/navigation/Explore.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
 src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphManager"' declares 'ToolCallInteraction' locally, but it is not exported.
 src/features/navigation/NavigateTo.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
 src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
@@ -36,4 +34,3 @@ src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol
 # swap-fp: 74 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 9 :: src/features/navigation/NavigateTo.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
 # swap-fp: 9 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
-# swap-fp: 9,63 :: src/features/navigation/Explore.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.

@@ -23,6 +23,7 @@ import { registerUtilityTools, setActiveDeviceSchema } from "../../src/server/ut
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePoolRefresh } from "../../src/daemon/devicePoolRefresh";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
@@ -110,6 +111,44 @@ async function select(display?: unknown) {
     ...(display === undefined ? {} : { display }),
   });
 }
+
+test.each(["missing-device", device.deviceId])(
+  "setActiveDevice reports a failed refresh for %s even after partial pool updates",
+  async (deviceId) => {
+    const utils = new FakeDeviceUtils();
+    utils.setBootedDevices("android", [device]);
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "failed-refresh", {
+        timer,
+        deviceManager: utils,
+        devicePoolRefreshFactory: (port) =>
+          new DevicePoolRefresh({
+            ...port,
+            setDeviceSessionTracking: async () => {
+              throw new Error("tracking persistence unavailable");
+            },
+          }),
+      }),
+    );
+    DaemonState.getInstance().initialize(sessions, pool);
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    await expect(handler({ deviceId, sessionUuid: "one" })).rejects.toThrow(
+      "Could not refresh device list: tracking persistence unavailable",
+    );
+  },
+);
+
+test("setActiveDevice reports device not found after a successful empty refresh", async () => {
+  const utils = new FakeDeviceUtils();
+  pool = new DevicePool(
+    createDevicePoolDependencies(sessions, "empty-refresh", { timer, deviceManager: utils }),
+  );
+  DaemonState.getInstance().initialize(sessions, pool);
+  const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+  await expect(handler({ deviceId: "missing-device", sessionUuid: "one" })).rejects.toThrow(
+    "Device 'missing-device' not found in device pool",
+  );
+});
 
 for (const inventoryKind of ["single", "empty", "one panel"] as const) {
   for (const selector of ["0", "active"] as const) {

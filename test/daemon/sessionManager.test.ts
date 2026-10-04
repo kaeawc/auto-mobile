@@ -6173,3 +6173,114 @@ describe("released-session restart recovery window read-only probe", () => {
     );
   });
 });
+
+describe("terminal release of persisted restart recovery", () => {
+  test.each([
+    "explicit-release",
+    "superseded",
+    "heartbeat-timeout",
+    "device-killed",
+    "missing-first-heartbeat",
+    "cli-idle-timeout",
+    "rehydration-owner-timeout",
+    "session-creation-cancelled",
+    "identity-recovery-unavailable",
+    "device-disconnected:Pixel",
+  ])("%s revokes recovery across manager restart", async (reason) => {
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(persistedRecoverySession({ release_reason: "device-restart:Pixel" }));
+    const manager = new SessionManager(timer, persistence);
+    const restarted = new SessionManager(timer, persistence);
+    manager.stopCleanupTimer();
+    restarted.stopCleanupTimer();
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow("persisted-session")).toBe(true);
+    const releaseReason = reason === "superseded" ? "identity-recovery-superseded" : reason;
+    expect(await manager.releaseSession("persisted-session", reason)).toBe("emulator-5554");
+    expect(await persistence.getSession?.("persisted-session")).toMatchObject({
+      release_reason: releaseReason,
+    });
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow("persisted-session")).toBe(false);
+    expect(await restarted.isReleasedSessionInRestartRecoveryWindow("persisted-session")).toBe(
+      false,
+    );
+    for (const owner of [manager, restarted]) {
+      await expect(owner.admitIssuedSessionForAutomation("persisted-session")).rejects.toThrow(
+        TerminalSessionError,
+      );
+      await expect(
+        owner.getOrCreateSession("persisted-session", undefined, undefined, undefined, true),
+      ).rejects.toThrow(TerminalSessionError);
+    }
+  });
+
+  test.each(["missing", "daemon-restart", "expired-window"])(
+    "terminal release leaves %s outside restart recovery unchanged",
+    async (state) => {
+      const timer = new FakeTimer();
+      const persistence = new FakeDeviceSessionPersistence();
+      if (state !== "missing") {
+        persistence.seed(
+          persistedRecoverySession({
+            release_reason: state === "daemon-restart" ? "daemon-restart" : "device-restart:Pixel",
+          }),
+        );
+      }
+      const manager = new SessionManager(timer, persistence);
+      manager.stopCleanupTimer();
+      if (state === "expired-window") {
+        timer.advanceTime(180_000);
+      }
+      const before = { ...(await persistence.getSession?.("persisted-session")) };
+      expect(await manager.releaseSession("persisted-session", "explicit-release")).toBeNull();
+      expect({ ...(await persistence.getSession?.("persisted-session")) }).toEqual(before);
+      expect(manager.getTerminalReleaseSnapshot("persisted-session")).toBeUndefined();
+    },
+  );
+
+  test("failed terminal persistence fences recovery until its retry commits", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(persistedRecoverySession({ release_reason: "device-restart:Pixel" }));
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+    persistence.failure = "release";
+    await expect(manager.releaseSession("persisted-session", "explicit-release")).rejects.toThrow(
+      "Failed to persist terminal release",
+    );
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow("persisted-session")).toBe(false);
+    await expect(manager.admitIssuedSessionForAutomation("persisted-session")).rejects.toThrow(
+      TerminalSessionError,
+    );
+    persistence.failure = null;
+    await manager.releaseSession("persisted-session", "explicit-release");
+    expect(await persistence.getSession?.("persisted-session")).toMatchObject({
+      release_reason: "explicit-release",
+    });
+  });
+});
+
+test.each(["explicit-release", "heartbeat-timeout", "device-killed"])(
+  "owned finalized restart release already supports terminal %s",
+  async (reason) => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+    const session = await manager.createSession(
+      "owned",
+      "emulator-5554",
+      "android",
+      undefined,
+      undefined,
+      "Pixel",
+    );
+    await manager.releaseSession("owned", "device-restart:Pixel");
+    expect(await manager.releaseSessionIfOwned("owned", session, "emulator-5554", reason)).toBe(
+      "emulator-5554",
+    );
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow("owned")).toBe(false);
+    expect(await persistence.getSession?.("owned")).toMatchObject({ release_reason: reason });
+    await expect(manager.admitIssuedSessionForAutomation("owned")).rejects.toThrow(
+      TerminalSessionError,
+    );
+  },
+);

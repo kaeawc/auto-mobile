@@ -12,6 +12,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
@@ -116,6 +117,7 @@ async function boundRecoveryHarness() {
   const socketId = [...server["sessions"].keys()][0]!;
   const forwarded: Record<string, unknown>[] = [];
   const recoveryErrors: unknown[] = [];
+  const discoverySeeds: { method: string; sessionUuid: string | undefined }[] = [];
   server.mcpClientFactory = async (seed) => {
     const binding = new SessionToolBinding(seed);
     return {
@@ -131,16 +133,33 @@ async function boundRecoveryHarness() {
           return shapeToolCallError(error, { toolName: "observe", source: "MCP" });
         }
       },
-      listTools: async () => ({ tools: [] }),
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      listTools: async () => {
+        discoverySeeds.push({ method: "tools/list", sessionUuid: seed });
+        return { tools: [] };
+      },
+      listResources: async () => {
+        discoverySeeds.push({ method: "resources/list", sessionUuid: seed });
+        return { resources: [] };
+      },
+      readResource: async () => {
+        discoverySeeds.push({ method: "resources/read", sessionUuid: seed });
+        return { contents: [] };
+      },
+      listResourceTemplates: async () => {
+        discoverySeeds.push({ method: "resources/list-templates", sessionUuid: seed });
+        return { resourceTemplates: [] };
+      },
       close: async () => {},
     };
   };
   await manager.createSession("bound", "emulator-5554", "android", undefined, undefined, "Pixel");
-  const call = (bound = true, sessionUuid = "bound") =>
-    server["handleRequest"](socketId, socket, {
+  const call = (
+    bound = true,
+    sessionUuid = "bound",
+    connectionId = socketId,
+    connectionSocket = socket,
+  ) =>
+    server["handleRequest"](connectionId, connectionSocket, {
       id: "recovery",
       type: "mcp_request",
       method: "tools/call",
@@ -161,7 +180,25 @@ async function boundRecoveryHarness() {
     socketId,
     forwarded,
     recoveryErrors,
+    discoverySeeds,
     call,
+    request: (method: string) =>
+      server["handleRequest"](socketId, socket, {
+        id: method,
+        type: "mcp_request",
+        method,
+        params: {
+          sessionUuid: "bound",
+          [DAEMON_BOUND_SESSION_PARAM]: "bound",
+          uri: "automobile:devices",
+        },
+      }),
+    connect: () => {
+      const other = new FakeSocket();
+      server["handleConnection"](other);
+      const id = [...server["sessions"].keys()].at(-1)!;
+      return { id, socket: other };
+    },
     close: () => {
       socket.destroy();
       manager.stopCleanupTimer();
@@ -191,9 +228,17 @@ test("bound call inside restart window reaches session_recovery_pending and keep
       "bound",
     );
     expect(h.forwarded.at(-1)?.sessionUuid).toBeUndefined();
+    const bindingBeforeExplicit = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
     const explicit = await h.call(false);
     expect(explicit?.result).toEqual(response?.result);
+    const explicitBinding = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
+    expect(explicitBinding).toEqual({
+      ...bindingBeforeExplicit,
+      executionKey: "session:bound",
+      requiresLiveDaemonSession: false,
+    });
     expect((await h.call())?.result).toEqual(response?.result);
+    expect(h.server["boundMcpClientKeysBySocketSession"].get(h.socketId)).toEqual(explicitBinding);
   } finally {
     h.close();
   }
@@ -278,15 +323,25 @@ test("healthy bound route is synchronous and does not read persistence", async (
       h.socketId,
     );
     expect(route).not.toBeInstanceOf(Promise);
-    let forwardedSynchronously = false;
-    const forward = h.server["forwardAdmittedBoundToolCall"](
-      { sessionUuid: "bound", [DAEMON_BOUND_SESSION_PARAM]: "bound" },
-      async () => {
-        forwardedSynchronously = true;
-        return null;
+    const client = await h.server["getMcpClient"](route.clientKey, "bound");
+    const before = h.forwarded.length;
+    const forward = h.server["handleIdeRequest"](
+      client,
+      {
+        id: "healthy",
+        type: "mcp_request",
+        method: "tools/call",
+        params: {
+          name: "observe",
+          arguments: { sessionUuid: "bound", [DAEMON_BOUND_SESSION_PARAM]: "bound" },
+        },
       },
+      1_000,
+      h.socketId,
+      new ProgressExtendableDeadline(h.timer.now(), 1_000),
+      1_000,
     );
-    expect(forwardedSynchronously).toBe(true);
+    expect(h.forwarded).toHaveLength(before + 1);
     await forward;
     expect(lookup).not.toHaveBeenCalled();
     expect(await h.call()).toMatchObject({ success: true });
@@ -338,3 +393,152 @@ test("never-issued bound identity retains ReleasedBoundSessionError and loss fen
     h.close();
   }
 });
+
+test.each(["tools/list", "resources/list", "resources/list-templates", "resources/read"])(
+  "%s serves the recovering session without dropping its binding and fences after expiry",
+  async (method) => {
+    const h = await boundRecoveryHarness();
+    try {
+      const binding = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
+      await h.manager.releaseSession("bound", "device-restart:Pixel");
+      expect(await h.request(method)).toMatchObject({ success: true });
+      expect(h.discoverySeeds.at(-1)).toEqual({ method, sessionUuid: "bound" });
+      expect(h.server["boundMcpClientKeysBySocketSession"].get(h.socketId)).toEqual(binding);
+      expect((await h.call())?.boundSessionLoss).toBeUndefined();
+      h.timer.advanceTime(180_000);
+      expect(await h.request(method)).toMatchObject({
+        success: false,
+        boundSessionLoss: {
+          sessionUuid: "bound",
+          reason: "session-not-found",
+        },
+      });
+      expect(h.discoverySeeds).toHaveLength(1);
+    } finally {
+      h.close();
+    }
+  },
+);
+
+test.each(["explicit-release", "heartbeat-timeout", "superseded", "device-killed"])(
+  "terminal %s revokes restart recovery for bound and explicit calls",
+  async (reason) => {
+    const h = await boundRecoveryHarness();
+    try {
+      await h.manager.releaseSession("bound", "device-restart:Pixel");
+      await h.manager.releaseSession("bound", reason);
+      expect(await h.manager.isReleasedSessionInRestartRecoveryWindow("bound")).toBe(false);
+      expect(await h.call()).toMatchObject({
+        success: false,
+        boundSessionLoss: { sessionUuid: "bound" },
+      });
+      const explicit = await h.call(false);
+      expect(explicit).toMatchObject({ success: true, result: { isError: true } });
+      expect(h.recoveryErrors.at(-1)).not.toBeInstanceOf(SessionRecoveryAssignmentError);
+      expect(h.manager.getSession("bound")).toBeNull();
+      expect(await h.call()).toMatchObject({
+        success: false,
+        boundSessionLoss: { sessionUuid: "bound" },
+      });
+    } finally {
+      h.close();
+    }
+  },
+);
+
+test("a second connection's recovery marker grants only explicit-path results and no binding", async () => {
+  const h = await boundRecoveryHarness();
+  const other = h.connect();
+  try {
+    await h.manager.releaseSession("bound", "device-restart:Pixel");
+    const marked = await h.call(true, "bound", other.id, other.socket);
+    expect(h.server["boundMcpClientKeysBySocketSession"].get(other.id)).toBeUndefined();
+    const explicit = await h.call(false, "bound", other.id, other.socket);
+    expect(marked?.result).toEqual(explicit?.result);
+    expect(h.manager.getSession("bound")).toBeNull();
+    expect(h.server["boundMcpClientKeysBySocketSession"].get(h.socketId)?.sessionUuid).toBe(
+      "bound",
+    );
+  } finally {
+    other.socket.destroy();
+    h.close();
+  }
+});
+
+test.each(["active", "recovering"])("session lookup throws fail closed while %s", async (state) => {
+  const h = await boundRecoveryHarness();
+  const warn = spyOn(logger, "warn");
+  try {
+    if (state === "recovering") {
+      await h.manager.releaseSession("bound", "device-restart:Pixel");
+    }
+    const lookup = spyOn(h.manager, "getSession").mockImplementation(() => {
+      throw new Error("state read failed");
+    });
+    try {
+      expect(await h.call()).toMatchObject({
+        success: false,
+        boundSessionLoss: { sessionUuid: "bound" },
+      });
+      expect(h.forwarded).toHaveLength(1);
+      expect(
+        warn.mock.calls.some(([message]) => String(message).includes("state read failed")),
+      ).toBe(true);
+    } finally {
+      lookup.mockRestore();
+    }
+  } finally {
+    warn.mockRestore();
+    h.close();
+  }
+});
+
+test.each(["expiry", "stale-true", "probe-throw"])(
+  "%s between recovery probes is fenced before forwarding",
+  async (race) => {
+    const h = await boundRecoveryHarness();
+    const warn = spyOn(logger, "warn");
+    try {
+      await h.manager.releaseSession("bound", "device-restart:Pixel");
+      const original = h.manager.isReleasedSessionInRestartRecoveryWindow.bind(h.manager);
+      let probes = 0;
+      const probe = spyOn(h.manager, "isReleasedSessionInRestartRecoveryWindow").mockImplementation(
+        async (uuid) => {
+          probes++;
+          if (probes === 1) {
+            const result = await original(uuid);
+            if (race === "expiry") {
+              h.timer.advanceTime(180_000);
+            }
+            if (race === "stale-true") {
+              h.persistence.getSession = async () => undefined;
+            }
+            return result;
+          }
+          if (race === "probe-throw") {
+            throw new Error("probe read failed");
+          }
+          return original(uuid);
+        },
+      );
+      try {
+        expect(await h.call()).toMatchObject({
+          success: false,
+          boundSessionLoss: { sessionUuid: "bound", reason: "session-not-found" },
+        });
+        expect(probes).toBeGreaterThanOrEqual(2);
+        expect(h.forwarded).toHaveLength(1);
+        if (race === "probe-throw") {
+          expect(
+            warn.mock.calls.some(([message]) => String(message).includes("probe read failed")),
+          ).toBe(true);
+        }
+      } finally {
+        probe.mockRestore();
+      }
+    } finally {
+      warn.mockRestore();
+      h.close();
+    }
+  },
+);

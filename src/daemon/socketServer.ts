@@ -2244,7 +2244,19 @@ export class UnixSocketServer {
       );
     }
 
-    const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
+    return this.withAdmittedBoundSession(
+      this.boundSessionAdmissionArgs(request),
+      (recoverableSessionUuid) =>
+        this.getAdmittedMcpForwardRoute(request, socketSessionId, recoverableSessionUuid),
+    );
+  }
+
+  private getAdmittedMcpForwardRoute(
+    request: DaemonRequest,
+    socketSessionId: string,
+    recoverableSessionUuid?: string,
+  ): McpForwardRoute {
+    const boundRoute = this.getBoundMcpClientRoute(socketSessionId, recoverableSessionUuid);
     if (
       request.method === "tools/list" ||
       request.method === "resources/list" ||
@@ -2278,7 +2290,6 @@ export class UnixSocketServer {
       // the proxy-side reconnect seeding (issue #4610).
       const listSessionUuid = this.getSessionUuid(request.params);
       const toolSelectionProfileUuid = this.getToolSelectionProfileUuid(request.params);
-      this.throwIfReleasedBoundSession(request.params);
       if (listSessionUuid) {
         return this.sessionScopedForwardRoute(
           socketSessionId,
@@ -2299,7 +2310,6 @@ export class UnixSocketServer {
 
     const sessionUuid = this.getSessionUuid(request.params);
     const toolSelectionProfileUuid = this.getToolSelectionProfileUuid(request.params);
-    this.throwIfReleasedBoundSession(request.params);
     if (sessionUuid) {
       return this.sessionScopedForwardRoute(
         socketSessionId,
@@ -2350,12 +2360,6 @@ export class UnixSocketServer {
     if (sessionUuid) {
       const releasedSessionUuid =
         request.params?.[DAEMON_RELEASED_SESSION_PARAM] === sessionUuid ? sessionUuid : undefined;
-      const isReleasedScreenshot =
-        releasedSessionUuid !== undefined &&
-        request.params?.uri === `automobile:device-session/${sessionUuid}/screenshot`;
-      if (!isReleasedScreenshot) {
-        this.throwIfReleasedBoundSession(request.params);
-      }
       return this.sessionScopedForwardRoute(
         socketSessionId,
         sessionUuid,
@@ -2421,17 +2425,14 @@ export class UnixSocketServer {
     socketSessionId: string,
     toolName?: unknown,
   ): McpForwardRoute | Promise<McpForwardRoute> {
-    if (this.isReleasedBoundSession(args)) {
-      return this.throwIfUnrecoverableBoundSession(args).then(() =>
-        this.getAdmittedToolsCallForwardRoute(
-          args,
-          socketSessionId,
-          toolName,
-          this.getSessionUuid(args),
-        ),
-      );
-    }
-    return this.getAdmittedToolsCallForwardRoute(args, socketSessionId, toolName);
+    return this.withAdmittedBoundSession(args, (recoverableSessionUuid) =>
+      this.getAdmittedToolsCallForwardRoute(
+        args,
+        socketSessionId,
+        toolName,
+        recoverableSessionUuid,
+      ),
+    );
   }
 
   private getAdmittedToolsCallForwardRoute(
@@ -2704,7 +2705,7 @@ export class UnixSocketServer {
       return;
     }
     if (
-      !this.hasActiveDaemonSession(sessionUuid) &&
+      this.isReleasedBoundSession(request.params?.arguments) &&
       this.isRetryableSessionRecoveryResult(response, sessionUuid)
     ) {
       // Recovery is still using the admitted identity; keep its transport binding.
@@ -3712,8 +3713,12 @@ export class UnixSocketServer {
     try {
       return this.daemonState.getSessionManager().getSession(sessionUuid) !== null;
     } catch (error) {
-      logger.debug(`Unable to resolve bound session ${sessionUuid}: ${error}`);
-      return false;
+      logger.warn(`Unable to resolve bound session ${sessionUuid}: ${errorMessage(error)}`, error);
+      throw new ReleasedBoundSessionError({
+        code: BOUND_SESSION_LOSS_CODE,
+        sessionUuid,
+        reason: "session-not-found",
+      });
     }
   }
 
@@ -3743,34 +3748,42 @@ export class UnixSocketServer {
     );
   }
 
-  private async throwIfUnrecoverableBoundSession(args: unknown): Promise<void> {
-    const sessionUuid = this.getSessionUuid(args);
-    if (sessionUuid) {
-      try {
-        if (
-          await this.daemonState
-            .getSessionManager()
-            .isReleasedSessionInRestartRecoveryWindow?.(sessionUuid)
-        ) {
-          return;
-        }
-      } catch (error) {
-        logger.warn(
-          `Unable to read restart recovery window for bound session ${sessionUuid}: ${errorMessage(error)}`,
-          error,
-        );
-      }
-    }
-    this.throwIfReleasedBoundSession(args);
+  private boundSessionAdmissionArgs(request: DaemonRequest): unknown {
+    const sessionUuid = this.getSessionUuid(request.params);
+    return request.method === "resources/read" &&
+      sessionUuid !== undefined &&
+      request.params?.[DAEMON_RELEASED_SESSION_PARAM] === sessionUuid &&
+      request.params?.uri === `automobile:device-session/${sessionUuid}/screenshot`
+      ? undefined
+      : request.params;
   }
 
-  private throwIfReleasedBoundSession(args: unknown): void {
+  private withAdmittedBoundSession<T>(
+    args: unknown,
+    forward: (recoverableSessionUuid?: string) => T,
+  ): T | Promise<T> {
     if (!this.isReleasedBoundSession(args)) {
-      return;
+      // Keep healthy routing and forwarding synchronous up to the existing I/O.
+      return forward();
     }
-    const sessionUuid = this.getSessionUuid(args);
-    if (!sessionUuid) {
-      throw new Error("Released bound session is missing its session UUID.");
+    const sessionUuid = this.getSessionUuid(args)!;
+    return this.admitReleasedBoundSession(sessionUuid).then(() => forward(sessionUuid));
+  }
+
+  private async admitReleasedBoundSession(sessionUuid: string): Promise<void> {
+    try {
+      if (
+        await this.daemonState
+          .getSessionManager()
+          .isReleasedSessionInRestartRecoveryWindow?.(sessionUuid)
+      ) {
+        return;
+      }
+    } catch (error) {
+      logger.warn(
+        `Unable to read restart recovery window for bound session ${sessionUuid}: ${errorMessage(error)}`,
+        error,
+      );
     }
     const release = this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid);
     throw new ReleasedBoundSessionError({
@@ -6315,7 +6328,9 @@ export class UnixSocketServer {
 
     switch (request.method) {
       case "tools/list": {
-        return await mcpClient.listTools(undefined, requestOptions);
+        return await this.withAdmittedBoundSession(request.params, () =>
+          mcpClient.listTools(undefined, requestOptions),
+        );
       }
       case "tools/call": {
         const progressToken = request.progressToken;
@@ -6405,7 +6420,7 @@ export class UnixSocketServer {
         }
 
         try {
-          return await this.forwardAdmittedBoundToolCall(request.params.arguments, () => {
+          return await this.withAdmittedBoundSession(request.params.arguments, () => {
             const forwardedArguments = this.withSocketSessionAutolockKey(
               request.params.arguments,
               socketSessionId,
@@ -6427,16 +6442,22 @@ export class UnixSocketServer {
         }
       }
       case "resources/list": {
-        return await mcpClient.listResources(undefined, requestOptions);
+        return await this.withAdmittedBoundSession(request.params, () =>
+          mcpClient.listResources(undefined, requestOptions),
+        );
       }
       case "resources/read": {
         if (!request.params?.uri) {
           throw new Error("resources/read requires params.uri");
         }
-        return await mcpClient.readResource({ uri: request.params.uri }, undefined, requestOptions);
+        return await this.withAdmittedBoundSession(this.boundSessionAdmissionArgs(request), () =>
+          mcpClient.readResource({ uri: request.params.uri }, undefined, requestOptions),
+        );
       }
       case "resources/list-templates": {
-        return await mcpClient.listResourceTemplates(undefined, requestOptions);
+        return await this.withAdmittedBoundSession(request.params, () =>
+          mcpClient.listResourceTemplates(undefined, requestOptions),
+        );
       }
       case "ide/getNavigationGraph": {
         const args = {
@@ -6481,17 +6502,6 @@ export class UnixSocketServer {
       ...(args as Record<string, unknown>),
       [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveDeadlineKey,
     };
-  }
-
-  private async forwardAdmittedBoundToolCall(
-    args: unknown,
-    callTool: () => Promise<unknown>,
-  ): Promise<unknown> {
-    if (this.isReleasedBoundSession(args)) {
-      await this.throwIfUnrecoverableBoundSession(args);
-    }
-    // Healthy bindings invoke the existing forward without an intervening await.
-    return await callTool();
   }
 
   private withSocketSessionAutolockKey(

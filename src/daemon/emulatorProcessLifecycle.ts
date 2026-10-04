@@ -129,10 +129,25 @@ export class EmulatorProcessLifecycle {
     deviceId: string,
     retainLeaseUntil?: (settlement: Promise<unknown>) => void,
   ): Promise<void> {
-    const childProcess = this.pool.getStartedDeviceProcesses().get(deviceId);
-    await this.stopEmulatorProcess(childProcess, retainLeaseUntil);
-    this.pool.getStartedDeviceProcesses().delete(deviceId);
-    this.pool.getStartedDeviceProcessOutput().delete(deviceId);
+    const processes = this.pool.getStartedDeviceProcesses();
+    const childProcess = processes.get(deviceId);
+    // The exit listener must see this intentional stop before either signal.
+    // Keep the output tail until success so a surviving process retains diagnostics.
+    processes.delete(deviceId);
+    let stopped = false;
+    try {
+      await this.stopEmulatorProcess(childProcess, retainLeaseUntil);
+      stopped = true;
+    } finally {
+      // A replacement tracked during the await owns its own process and output.
+      if (!processes.has(deviceId)) {
+        if (!stopped && childProcess) {
+          processes.set(deviceId, childProcess);
+        } else if (stopped) {
+          this.pool.getStartedDeviceProcessOutput().delete(deviceId);
+        }
+      }
+    }
   }
 
   async stopEmulatorProcess(

@@ -14,6 +14,21 @@ import XCTest
 /// (that fake arrives with the Phase 6 CommandHandler port). The `ForegroundTracker` tests use
 /// `var` because the reference's lock-guarded class became a `mutating`-method struct.
 final class ElementLocatorTests: XCTestCase {
+    func testDepthCap_belowCapDoesNotReportTruncation() {
+        XCTAssertNil(ElementLocator.depthCapTruncationReason(depth: 29, maxDepth: 30, hasChildren: true))
+    }
+
+    func testDepthCap_childrenAtCapReportMaxDepth() {
+        XCTAssertEqual(
+            ElementLocator.depthCapTruncationReason(depth: 30, maxDepth: 30, hasChildren: true),
+            "max_depth"
+        )
+    }
+
+    func testDepthCap_leafAtCapDoesNotReportTruncation() {
+        XCTAssertNil(ElementLocator.depthCapTruncationReason(depth: 30, maxDepth: 30, hasChildren: false))
+    }
+
     func testForegroundBundleId_switcherOwnsForegroundOverAppCards() {
         XCTAssertEqual(
             ElementLocator.foregroundBundleId(

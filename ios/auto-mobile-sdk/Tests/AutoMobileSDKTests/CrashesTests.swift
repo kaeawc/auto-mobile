@@ -18,9 +18,14 @@ private let foreignHandler: @convention(c) (NSException) -> Void = { exception i
     handlers.crashes.handleException(exception)
 }
 
-/// All callbacks are invoked synchronously by these tests; no timers are started.
+private let replacementHandler: @convention(c) (NSException) -> Void = { exception in
+    (exception.userInfo?["handlers"] as? FakeUncaughtHandlers)?.foreignCalls += 1
+}
+
+/// Handler accessors run serially under the lifecycle lock; tests join any worker
+/// before reading the counters. Exception deliveries are synchronous; no timers start.
 private final class FakeUncaughtHandlers: @unchecked Sendable {
-    let crashes = AutoMobileCrashes.makeTestInstance()
+    let crashes: AutoMobileCrashes
     var current: (@convention(c) (NSException) -> Void)? = knownPreviousHandler
     var captureCalls = 0
     var installCalls = 0
@@ -30,7 +35,8 @@ private final class FakeUncaughtHandlers: @unchecked Sendable {
     var flushCalls = 0
     var flushedEvents = 0
 
-    init() {
+    init(crashes: AutoMobileCrashes = AutoMobileCrashes.makeTestInstance()) {
+        self.crashes = crashes
         crashes.captureUncaughtHandler = { [weak self] in
             guard let self else { return nil }
             self.captureCalls += 1
@@ -44,6 +50,35 @@ private final class FakeUncaughtHandlers: @unchecked Sendable {
 
     func makeException() -> NSException {
         NSException(name: NSExceptionName("TestException"), reason: "test", userInfo: ["handlers": self])
+    }
+}
+
+/// Observe actual contention, rather than assuming a queued worker has reached
+/// initialize/reset. Foundation's NSLocking keeps this seam internal to tests.
+private final class TrackingLifecycleLock: NSLocking, @unchecked Sendable {
+    private let underlyingLock = NSLock()
+    private let stateLock = NSLock()
+    private var isLocked = false
+    let didAttemptLockWhileHeld = DispatchSemaphore(value: 0)
+
+    func lock() {
+        stateLock.lock()
+        let wasLocked = isLocked
+        stateLock.unlock()
+        if wasLocked {
+            didAttemptLockWhileHeld.signal()
+        }
+        underlyingLock.lock()
+        stateLock.lock()
+        isLocked = true
+        stateLock.unlock()
+    }
+
+    func unlock() {
+        stateLock.lock()
+        isLocked = false
+        stateLock.unlock()
+        underlyingLock.unlock()
     }
 }
 
@@ -135,7 +170,7 @@ final class CrashesTests: XCTestCase {
 
         handlers.crashes.initialize(bundleId: "com.reinitialized", buffer: buffer)
         XCTAssertTrue(handlers.crashes.isInitialized)
-        XCTAssertEqual(handlers.captureCalls, 2) // Initialize + reset; no recapture of H1.
+        XCTAssertEqual(handlers.captureCalls, 3) // Re-read H1 without saving it as our predecessor.
         XCTAssertEqual(handlers.installCalls, 1)
         XCTAssertEqual(rawPointer(handlers.current), rawPointer(foreignHandler))
         XCTAssertTrue(AutoMobileSDK.shared.isEnabled)
@@ -174,6 +209,221 @@ final class CrashesTests: XCTestCase {
         XCTAssertEqual(handlers.previousCalls, 1)
         handlers.crashes.reset()
         XCTAssertEqual(handlers.installCalls, 4)
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(knownPreviousHandler))
+    }
+
+    func testResetWithNilHandlerThenReinitializeDiscardsPreviousHandler() {
+        let handlers = FakeUncaughtHandlers()
+        handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        let ourHandler = handlers.current
+        handlers.current = nil
+
+        handlers.crashes.reset()
+
+        XCTAssertFalse(handlers.crashes.isInitialized)
+        XCTAssertNil(handlers.current) // Do not undo the host's intentional clear.
+        XCTAssertEqual(handlers.installCalls, 1)
+        handlers.crashes.handleException(handlers.makeException())
+        XCTAssertEqual(handlers.previousCalls, 0) // Reset discarded the old pre-SDK reporter.
+
+        handlers.crashes.initialize(bundleId: "com.reinitialized", buffer: makeBuffer())
+
+        XCTAssertTrue(handlers.crashes.isInitialized)
+        XCTAssertEqual(handlers.captureCalls, 3)
+        XCTAssertEqual(handlers.installCalls, 2)
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(ourHandler))
+        handlers.crashes.handleException(handlers.makeException())
+        XCTAssertEqual(handlers.previousCalls, 0) // No predecessor was current at re-initialize.
+        handlers.crashes.reset()
+        XCTAssertNil(handlers.current)
+    }
+
+    func testDormantHandlerReplacedByNilThenReinitializeInstallsAgain() {
+        let handlers = FakeUncaughtHandlers()
+        handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        let ourHandler = handlers.current
+        handlers.current = foreignHandler
+        handlers.crashes.reset()
+        handlers.current = nil
+
+        handlers.crashes.initialize(bundleId: "com.reinitialized", buffer: makeBuffer())
+
+        XCTAssertTrue(handlers.crashes.isInitialized)
+        XCTAssertEqual(handlers.captureCalls, 3)
+        XCTAssertEqual(handlers.installCalls, 2)
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(ourHandler))
+        handlers.crashes.handleException(handlers.makeException())
+        XCTAssertEqual(handlers.previousCalls, 0)
+        XCTAssertEqual(handlers.foreignCalls, 0)
+        handlers.crashes.reset()
+        XCTAssertNil(handlers.current)
+    }
+
+    func testDormantHandlerReplacedByDifferentReporterReactivatesInPlace() {
+        let handlers = FakeUncaughtHandlers()
+        handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        handlers.current = foreignHandler
+        handlers.crashes.reset()
+        handlers.current = replacementHandler
+
+        handlers.crashes.initialize(bundleId: "com.reinitialized", buffer: makeBuffer())
+
+        XCTAssertTrue(handlers.crashes.isInitialized)
+        XCTAssertEqual(handlers.captureCalls, 3)
+        XCTAssertEqual(handlers.installCalls, 1)
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(replacementHandler))
+        // Even a replaced reporter is not captured as our predecessor. Deliver
+        // directly to the isolated instance, without assuming this reporter chains.
+        handlers.crashes.handleException(handlers.makeException())
+        XCTAssertEqual(handlers.previousCalls, 1)
+        XCTAssertEqual(handlers.foreignCalls, 0)
+        handlers.crashes.reset()
+        XCTAssertEqual(handlers.installCalls, 1)
+    }
+
+    func testDormantOwnHandlerReinitializeKeepsOriginalPredecessor() {
+        let handlers = FakeUncaughtHandlers()
+        handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        let ourHandler = handlers.current
+        handlers.current = foreignHandler
+        handlers.crashes.reset()
+        handlers.current = ourHandler
+
+        handlers.crashes.initialize(bundleId: "com.reinitialized", buffer: makeBuffer())
+
+        XCTAssertTrue(handlers.crashes.isInitialized)
+        XCTAssertEqual(handlers.captureCalls, 3)
+        XCTAssertEqual(handlers.installCalls, 2)
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(ourHandler))
+        // The foreign reporter bounds any erroneous cycle through it, and this
+        // delivery must instead reach the original predecessor exactly once.
+        handlers.crashes.handleException(handlers.makeException())
+        XCTAssertEqual(handlers.previousCalls, 1)
+        XCTAssertEqual(handlers.foreignCalls, 0)
+        handlers.crashes.reset()
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(knownPreviousHandler))
+    }
+
+    func testInitializeWithOwnHandlerDoesNotCaptureItAsPredecessor() {
+        let seed = FakeUncaughtHandlers()
+        seed.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        let ourHandler = seed.current
+        seed.crashes.reset()
+        let handlers = FakeUncaughtHandlers()
+        handlers.current = ourHandler
+
+        handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        handlers.crashes.reset()
+
+        // Restoring nil proves that the normal (non-dormant) path did not save
+        // our process-global routing handler as a predecessor. Guard delivery on
+        // this assertion so a regression never invokes the real shared instance.
+        XCTAssertNil(handlers.current)
+        if handlers.current == nil {
+            handlers.crashes.handleException(handlers.makeException())
+            XCTAssertEqual(handlers.previousCalls, 0)
+        }
+    }
+
+    func testInitializeWaitsForResetHandlerTransaction() {
+        let lifecycleLock = TrackingLifecycleLock()
+        let handlers = FakeUncaughtHandlers(crashes: .makeTestInstance(lifecycleLock: lifecycleLock))
+        let buffer = makeBuffer()
+        handlers.crashes.initialize(bundleId: "com.example", buffer: buffer)
+        let worker = DispatchQueue(label: "CrashesTests.reinitialize")
+        let finished = DispatchGroup()
+        handlers.crashes.captureUncaughtHandler = { [weak handlers] in
+            guard let handlers else { return nil }
+            handlers.captureCalls += 1
+            let current = handlers.current
+            if handlers.captureCalls == 2 {
+                finished.enter()
+                worker.async {
+                    handlers.crashes.initialize(bundleId: "com.reinitialized", buffer: buffer)
+                    finished.leave()
+                }
+                // Reset has already published uninitialized state but has not
+                // restored H0 yet. Wait for the worker's actual lock attempt;
+                // it cannot capture A until reset finishes restoring H0.
+                lifecycleLock.didAttemptLockWhileHeld.wait()
+            }
+            return current
+        }
+
+        handlers.crashes.reset()
+        finished.wait() // Join only AFTER reset releases the lifecycle lock.
+
+        XCTAssertTrue(handlers.crashes.isInitialized)
+        XCTAssertEqual(handlers.captureCalls, 3)
+        XCTAssertEqual(handlers.installCalls, 3) // Install A, restore H0, install A.
+        handlers.crashes.handleException(handlers.makeException())
+        XCTAssertEqual(handlers.previousCalls, 1)
+        XCTAssertEqual(handlers.foreignCalls, 0)
+        handlers.crashes.reset()
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(knownPreviousHandler))
+    }
+
+    func testResetWaitsForInitializeHandlerInstallation() {
+        let lifecycleLock = TrackingLifecycleLock()
+        let handlers = FakeUncaughtHandlers(crashes: .makeTestInstance(lifecycleLock: lifecycleLock))
+        let worker = DispatchQueue(label: "CrashesTests.reset")
+        let finished = DispatchGroup()
+        handlers.crashes.installUncaughtHandler = { [weak handlers] handler in
+            guard let handlers else { return }
+            handlers.installCalls += 1
+            if handlers.installCalls == 1 {
+                finished.enter()
+                worker.async {
+                    handlers.crashes.reset()
+                    finished.leave()
+                }
+                // Initialization has published active state but has not installed
+                // A yet. Reset must wait until the entire transaction completes.
+                lifecycleLock.didAttemptLockWhileHeld.wait()
+            }
+            handlers.current = handler
+        }
+
+        handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        finished.wait() // The worker can finish once initialize releases its lock.
+
+        XCTAssertFalse(handlers.crashes.isInitialized)
+        XCTAssertEqual(handlers.captureCalls, 2)
+        XCTAssertEqual(handlers.installCalls, 2)
+        XCTAssertEqual(rawPointer(handlers.current), rawPointer(knownPreviousHandler))
+        handlers.crashes.handleException(handlers.makeException())
+        XCTAssertEqual(handlers.previousCalls, 0) // Reset removed the saved predecessor.
+    }
+
+    func testHandlerAccessorsCanDeliverExceptionsOnSameAndOtherThread() {
+        let handlers = FakeUncaughtHandlers()
+        let worker = DispatchQueue(label: "CrashesTests.exception")
+        handlers.crashes.captureUncaughtHandler = { [weak handlers] in
+            guard let handlers else { return nil }
+            handlers.captureCalls += 1
+            _ = handlers.crashes.isInitialized
+            handlers.crashes.handleException(handlers.makeException())
+            worker.sync {
+                _ = handlers.crashes.currentScreenProvider
+                handlers.crashes.handleException(handlers.makeException())
+            }
+            return handlers.current
+        }
+        handlers.crashes.installUncaughtHandler = { [weak handlers] handler in
+            guard let handlers else { return }
+            handlers.installCalls += 1
+            handlers.current = handler
+            handlers.crashes.handleException(handlers.makeException())
+            worker.sync {
+                handlers.crashes.handleException(handlers.makeException())
+            }
+        }
+
+        handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
+        XCTAssertEqual(handlers.previousCalls, 2) // Both install-seam deliveries forward to H0.
+        handlers.crashes.reset()
+        XCTAssertEqual(handlers.previousCalls, 4) // Both reset-capture deliveries still forward.
+        XCTAssertFalse(handlers.crashes.isInitialized)
         XCTAssertEqual(rawPointer(handlers.current), rawPointer(knownPreviousHandler))
     }
 

@@ -128,8 +128,8 @@ describe("root SPM toolchain floor workflow", () => {
     expect(selectJdk?.run).toContain("/usr/libexec/java_home -v 21");
     expect(selectJdk?.run).toContain('[[ -z "$jdk_home" ]]');
     expect(selectJdk?.run).toContain("::error::");
-    expect(selectJdk?.run).toContain('"$jdk_home/bin/javac" -version 2>&1');
-    expect(selectJdk?.run).toContain("grep -Eq '^javac 21([.]|$)'");
+    expect(selectJdk?.run).toContain('javac_version=$("$jdk_home/bin/javac" -version 2>&1)');
+    expect(selectJdk?.run).toContain("grep -Eq '^javac 21([.]|$)' <<<\"$javac_version\"");
     expect(selectJdk?.run).toContain('echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"');
     expect(selectJdk?.run).toContain('echo "$jdk_home/bin" >> "$GITHUB_PATH"');
     expect(stepNamed(desktop, "Isolate self-hosted desktop build")?.run).toContain(

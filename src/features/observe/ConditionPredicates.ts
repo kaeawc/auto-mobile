@@ -164,12 +164,15 @@ function idWaitCandidates(
 function textWaitCandidates(
   resolver: ConditionResolver,
   observation: ObserveResult,
-  expected: string,
-  container: ConditionSelector["container"],
-  result: ElementResolution,
-  matched: boolean,
-  hasElementId: boolean,
+  options: {
+    expected: string;
+    container: ConditionSelector["container"];
+    result: ElementResolution;
+    matched: boolean;
+    hasElementId: boolean;
+  },
 ): Element[] {
+  const { expected, container, result, matched, hasElementId } = options;
   const fallback = elements(result);
   if (matched || hasElementId) {
     return fallback;
@@ -348,15 +351,13 @@ export function textEquals(
     return {
       matched,
       matchedElement: matched ? located?.element : undefined,
-      candidates: textWaitCandidates(
-        resolver,
-        observation,
+      candidates: textWaitCandidates(resolver, observation, {
         expected,
         container,
         result,
         matched,
-        selector.elementId !== undefined,
-      ),
+        hasElementId: selector.elementId !== undefined,
+      }),
     };
   };
 }

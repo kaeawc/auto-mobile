@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
@@ -11,11 +14,17 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.android.controller.ServiceController
+import org.robolectric.annotation.Config
+import org.robolectric.util.ReflectionHelpers
 
 class SdkEventBatchBroadcastHandlerTest {
   @Test
@@ -343,5 +352,83 @@ class SdkEventBatchBroadcastHandlerExtraTest {
     }
     assertEquals(List(2) { batch }, batches)
     assertEquals(List(2) { SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED }, codes)
+  }
+}
+
+/** Exercise the service's real receiver and handler without starting accessibility IO. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
+class CtrlProxyEventBatchReceiverTest {
+  private lateinit var controller: ServiceController<CtrlProxy>
+  private lateinit var service: CtrlProxy
+  private lateinit var receiver: BroadcastReceiver
+  private val batches = mutableListOf<SdkEventBatch>()
+
+  @Before
+  fun setUp() {
+    controller = Robolectric.buildService(CtrlProxy::class.java)
+    service = controller.get()
+    service.gestureThreadFactory = {
+      object : GestureThread {
+        override val handler = Handler(Looper.getMainLooper())
+
+        override fun post(work: () -> Unit): Boolean {
+          work()
+          return true
+        }
+
+        override fun quitSafely() {}
+      }
+    }
+    controller.create()
+    receiver = ReflectionHelpers.getField(service, "eventBatchReceiver")
+    val handler =
+      ReflectionHelpers.getField<SdkEventBatchBroadcastHandler>(
+        service,
+        "eventBatchBroadcastHandler",
+      )
+    // Keep the production handler (including its dedup window); replace only its queue handoff.
+    val enqueue: (SdkEventBatch) -> Boolean = {
+      batches.add(it)
+      true
+    }
+    ReflectionHelpers.setField(handler, "enqueue", enqueue)
+  }
+
+  @After
+  fun tearDown() {
+    controller.destroy()
+  }
+
+  @Test
+  fun `real receiver forwards batch id so repeats dedupe and different or absent ids enqueue`() {
+    val batch =
+      SdkEventBatch(
+        timestamp = 0L,
+        events =
+          listOf(
+            SdkNavigationEvent(
+              timestamp = 0L,
+              destination = "home",
+              source = NavigationSourceType.CUSTOM,
+            )
+          ),
+      )
+    val intent =
+      Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH).apply {
+        putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(batch))
+        putExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID, "first-id")
+      }
+
+    repeat(2) { receiver.onReceive(service, intent) }
+    assertEquals(listOf(batch), batches)
+
+    intent.putExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID, "second-id")
+    receiver.onReceive(service, intent)
+    assertEquals(List(2) { batch }, batches)
+
+    intent.removeExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID)
+    repeat(2) { receiver.onReceive(service, intent) }
+    assertEquals(List(4) { batch }, batches)
   }
 }

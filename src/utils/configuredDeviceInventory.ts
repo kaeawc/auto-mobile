@@ -5,7 +5,7 @@ import {
   describeDevice,
   projectConfiguredImage,
   type ConfiguredImage,
-} from "../server/deviceDescription";
+} from "../models/deviceDescription";
 
 export const CONFIGURED_DEVICE_INVENTORY_SCHEMA_VERSION = 1 as const;
 

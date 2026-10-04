@@ -4,6 +4,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { FakePlanExecutionLock } from "../fakes/FakePlanExecutionLock";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import type { ToolSelectionSessionManager } from "../../src/features/toolSelection/selectionSessionResolver";
 import {
   ExecutionTrackerPlanExecutionLock,
   type PlanExecutionLockScopeProvider,
@@ -136,6 +140,159 @@ describe("Plan execution lock", () => {
       });
       expect(globalDecision.blocked).toBe(true);
       expect(globalDecision.scope).toBe("global");
+    } finally {
+      tracker.endExecution(execution.id);
+    }
+  });
+});
+
+describe("Plan execution lock through session routing", () => {
+  const toolName = "planLockRoutingProbe";
+  const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+  const lock = new ExecutionTrackerPlanExecutionLock(
+    tracker,
+    new FakePlanExecutionLockScopeProvider("session"),
+  );
+  const sessions: ToolSelectionSessionManager = {
+    getDeviceLabels: (sessionUuid) =>
+      sessionUuid === "plan-base" || sessionUuid === "other-base"
+        ? { phone: `${sessionUuid}:phone`, tablet: `${sessionUuid}:tablet` }
+        : undefined,
+  };
+  let explicitFixture: McpTestFixture;
+  let routingFixture: McpTestFixture;
+  let restorePipeline: () => void;
+  let originalRepository: Parameters<typeof ToolRegistry.setToolCallRepositoryForTesting>[0];
+
+  beforeAll(async () => {
+    originalRepository = ToolRegistry["toolCallRepository"];
+    ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
+    // Reuse the pipeline seam: resolve no device and bypass DB-backed finalization.
+    restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async ({ args }) => ({
+          args,
+          baseSessionUuid: args.sessionUuid,
+          sessionUuid: args.sessionUuid,
+          device: undefined,
+          internalCall: false,
+          shouldResolveDevice: false,
+        }),
+      },
+      afterToolCall: {
+        handle: async ({ response }) => ({ durationMs: 0, finalizedResponse: response }),
+      },
+    });
+    const response = () => ({ content: [{ type: "text" as const, text: "probe executed" }] });
+    ToolRegistry.registerDeviceAware(
+      toolName,
+      "Plan lock routing probe",
+      z.object({ device: z.string().optional(), sessionUuid: z.string().optional() }),
+      async () => response(),
+      { nonDeviceHandler: async () => response() },
+    );
+    explicitFixture = new McpTestFixture({
+      planExecutionLock: lock,
+      toolSelectionSessionManager: sessions,
+    });
+    routingFixture = new McpTestFixture({
+      planExecutionLock: lock,
+      toolSelectionSessionManager: sessions,
+      sessionContext: { initialSessionToolBinding: "plan-base" },
+    });
+    await explicitFixture.setup();
+    await routingFixture.setup();
+  });
+
+  afterAll(async () => {
+    await explicitFixture.teardown();
+    await routingFixture.teardown();
+    ToolRegistry.unregister(toolName);
+    restorePipeline();
+    ToolRegistry.setToolCallRepositoryForTesting(originalRepository);
+  });
+
+  test.each([
+    {
+      name: "gates the derived device label with an explicit base UUID",
+      route: "explicit",
+      args: { sessionUuid: "plan-base", device: "phone" },
+      activeUuid: "plan-base:phone",
+      blocked: true,
+    },
+    {
+      name: "gates the derived device label with only a routing base UUID",
+      route: "routing",
+      args: { device: "phone" },
+      activeUuid: "plan-base:phone",
+      blocked: true,
+    },
+    {
+      name: "allows a sibling device label",
+      route: "routing",
+      args: { device: "tablet" },
+      activeUuid: "plan-base:phone",
+      blocked: false,
+    },
+    {
+      name: "allows the same device label in a different session",
+      route: "explicit",
+      args: { sessionUuid: "other-base", device: "phone" },
+      activeUuid: "plan-base:phone",
+      blocked: false,
+    },
+    {
+      name: "does not gate a derived label against an active base UUID",
+      route: "routing",
+      args: { device: "phone" },
+      activeUuid: "plan-base",
+      blocked: false,
+    },
+    {
+      name: "gates a matching explicit UUID without a device label",
+      route: "explicit",
+      args: { sessionUuid: "provided-session" },
+      activeUuid: "provided-session",
+      blocked: true,
+    },
+    {
+      name: "allows a different explicit UUID without a device label",
+      route: "explicit",
+      args: { sessionUuid: "provided-session" },
+      activeUuid: "other-session",
+      blocked: false,
+    },
+    {
+      name: "gates a matching routing UUID without a device label",
+      route: "routing",
+      args: {},
+      activeUuid: "plan-base",
+      blocked: true,
+    },
+    {
+      name: "allows a different routing UUID without a device label",
+      route: "routing",
+      args: {},
+      activeUuid: "other-session",
+      blocked: false,
+    },
+  ])("$name", async ({ route, args, activeUuid, blocked }) => {
+    const execution = tracker.startExecution("executePlan", undefined, activeUuid);
+    try {
+      const fixture = route === "explicit" ? explicitFixture : routingFixture;
+      const request = fixture
+        .getContext()
+        .client.request(
+          { method: "tools/call", params: { name: toolName, arguments: args } },
+          z.any(),
+        );
+      if (blocked) {
+        await expect(request).rejects.toThrow("plan execution in progress");
+      } else {
+        expect(await request).toMatchObject({
+          content: [{ type: "text", text: "probe executed" }],
+        });
+      }
     } finally {
       tracker.endExecution(execution.id);
     }

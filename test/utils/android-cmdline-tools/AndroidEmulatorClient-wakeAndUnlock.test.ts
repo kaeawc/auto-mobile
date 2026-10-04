@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { AndroidWakeAndUnlock } from "../../../src/utils/android-cmdline-tools/AndroidWakeAndUnlock";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -7,6 +7,7 @@ import { ExecResult, BootedDevice, DeviceLockState } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { DeviceLockStore } from "../../../src/devices/DeviceLockStore";
 
 /**
  * A factory that returns a single FakeAdbExecutor instance for all create() calls.
@@ -20,6 +21,7 @@ class TestAdbClientFactory implements AdbClientFactory {
 }
 
 const LOCKED_SWIPE: DeviceLockState = { locked: true, keyguardShowing: true, secure: false };
+const LOCKED_SECURE: DeviceLockState = { locked: true, keyguardShowing: true, secure: true };
 const UNLOCKED: DeviceLockState = { locked: false, keyguardShowing: false, secure: false };
 const DEVICE: BootedDevice = { name: "test-avd", platform: "android", deviceId: "emulator-5554" };
 
@@ -34,6 +36,7 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeTimer: FakeTimer;
   let fakeFactory: TestAdbClientFactory;
+  let credentialSpies: Array<{ mockRestore(): void }>;
 
   const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
     stdout,
@@ -53,11 +56,22 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
   }
 
   beforeEach(() => {
+    // Keep every boot-time lock lookup/write off the real file-backed database.
+    credentialSpies = [
+      spyOn(DeviceLockStore.prototype, "getRecordedCredential").mockResolvedValue(null),
+      spyOn(DeviceLockStore.prototype, "rememberLock").mockResolvedValue(undefined),
+    ];
     fakeAdb = new FakeAdbExecutor();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     fakeFactory = new TestAdbClientFactory(fakeAdb);
     emulatorClient = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+  });
+
+  afterEach(() => {
+    for (const spy of credentialSpies) {
+      spy.mockRestore();
+    }
   });
 
   test("an already-aborted boot request rejects without waking or unlocking the device", async () => {
@@ -138,6 +152,61 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
     // Waking is enough; there is no keyguard to dismiss.
     expect(fakeAdb.wasCommandExecuted("KEYCODE_WAKEUP")).toBe(true);
     expect(fakeAdb.wasCommandExecuted("wm dismiss-keyguard")).toBe(false);
+  });
+
+  test.each([{ locked: false, keyguardShowing: false, secure: true }, null])(
+    "boot never replays a remembered PIN after dismissal or an unknown lock read (%j)",
+    async (lock) => {
+      fakeAdb.setScreenState(true, "Awake");
+      fakeAdb.setAndroidApiLevel(35);
+      fakeAdb.setDeviceLockSequence([LOCKED_SECURE, lock]);
+      const recorded = spyOn(DeviceLockStore.prototype, "getRecordedCredential").mockResolvedValue(
+        "1234",
+      );
+      const remember = spyOn(DeviceLockStore.prototype, "rememberLock").mockResolvedValue(
+        undefined,
+      );
+      try {
+        await runWakeAndUnlock();
+
+        expect(recorded).toHaveBeenCalledWith(DEVICE.deviceId);
+        expect(fakeAdb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+        expect(remember).not.toHaveBeenCalled();
+      } finally {
+        recorded.mockRestore();
+        remember.mockRestore();
+      }
+    },
+  );
+
+  test("boot still submits a remembered PIN when the pre-entry read remains secure-locked", async () => {
+    fakeAdb.setScreenState(true, "Awake");
+    fakeAdb.setAndroidApiLevel(35);
+    fakeAdb.setDeviceLockSequence([
+      LOCKED_SECURE,
+      LOCKED_SECURE,
+      { locked: false, keyguardShowing: false, secure: true },
+    ]);
+    const recorded = spyOn(DeviceLockStore.prototype, "getRecordedCredential").mockResolvedValue(
+      "1234",
+    );
+    const remember = spyOn(DeviceLockStore.prototype, "rememberLock").mockResolvedValue(undefined);
+    try {
+      await runWakeAndUnlock();
+
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        "shell wm dismiss-keyguard",
+        "shell input keyevent KEYCODE_1",
+        "shell input keyevent KEYCODE_2",
+        "shell input keyevent KEYCODE_3",
+        "shell input keyevent KEYCODE_4",
+        "shell input keyevent KEYCODE_ENTER",
+      ]);
+      expect(remember).not.toHaveBeenCalled();
+    } finally {
+      recorded.mockRestore();
+      remember.mockRestore();
+    }
   });
 
   test("waits for direct boot to finish unlocking the primary user", async () => {

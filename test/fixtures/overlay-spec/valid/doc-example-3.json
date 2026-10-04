@@ -1,0 +1,39 @@
+{
+  "id": "button-preview",
+  "window": {
+    "placement": {
+      "type": "floating",
+      "gravity": "topStart",
+      "offset": {
+        "x": 24,
+        "y": 120
+      }
+    },
+    "opacity": 50
+  },
+  "root": {
+    "type": "box",
+    "anchor": {
+      "type": "element",
+      "selector": {
+        "testTag": "buy"
+      },
+      "alignment": "cover"
+    },
+    "style": {
+      "background": "#2255CC",
+      "cornerRadius": 12
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Buy now",
+        "onTap": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    ]
+  }
+}

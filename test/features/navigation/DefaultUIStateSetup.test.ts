@@ -713,3 +713,106 @@ describe("DefaultUIStateSetup", () => {
     });
   });
 });
+
+describe("DefaultUIStateSetup cancellation", () => {
+  afterEach(() => ToolRegistry.clearTools());
+
+  test("an already aborted setup dispatches neither observation nor scrolling", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let observations = 0;
+    let swipes = 0;
+    const setup = makeSetup(() => ({
+      execute: async () => {
+        observations++;
+        return emptyModalHierarchy();
+      },
+    }));
+    ToolRegistry.register("swipeOn", "Fake swipe", {}, async () => {
+      swipes++;
+      return createStructuredToolResponse({ success: true });
+    });
+    await expect(
+      setup.setupUIState(
+        { uiState: { selectedElements: [{ text: "Tab" }] } } as NavigationEdge,
+        "android",
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    await expect(
+      setup.setupScrollPosition(
+        { targetElement: { text: "Target" }, direction: "down" },
+        "android",
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(observations).toBe(0);
+    expect(swipes).toBe(0);
+  });
+
+  test("cancellation during a selection tap prevents the next setup tap", async () => {
+    const controller = new AbortController();
+    const taps: unknown[] = [];
+    ToolRegistry.register("tapOn", "Fake tap", {}, async (args, _progress, signal) => {
+      expect(signal).toBe(controller.signal);
+      taps.push(args.selector);
+      controller.abort();
+      return createStructuredToolResponse({ success: true });
+    });
+    const setup = makeSetup(emptyModalObserve);
+    await expect(
+      setup.setupUIState(
+        {
+          uiState: { selectedElements: [{ text: "First" }, { text: "Second" }] },
+        } as NavigationEdge,
+        "android",
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(taps).toEqual([{ text: "First" }]);
+  });
+
+  test("cancellation during scroll propagates instead of returning null", async () => {
+    const controller = new AbortController();
+    ToolRegistry.register("swipeOn", "Fake swipe", {}, async (_args, _progress, signal) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+      return createStructuredToolResponse({ success: true });
+    });
+    await expect(
+      makeSetup(emptyModalObserve).setupScrollPosition(
+        { targetElement: { text: "Target" }, direction: "down" },
+        "android",
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+  });
+
+  test("cancellation in a modal dismissal never tries its fallback actions", async () => {
+    const controller = new AbortController();
+    const actions: string[] = [];
+    ToolRegistry.register("swipeOn", "Fake swipe", {}, async (_args, _progress, signal) => {
+      expect(signal).toBe(controller.signal);
+      actions.push("swipe");
+      controller.abort();
+      return createStructuredToolResponse({ success: true });
+    });
+    ToolRegistry.register("pressButton", "Fake back", {}, async () => {
+      actions.push("back");
+      return createStructuredToolResponse({ success: true });
+    });
+    const setup = makeSetup(emptyModalObserve);
+    await expect(
+      (
+        setup as unknown as {
+          dismissTopModal: (
+            modal: ModalState,
+            platform: string,
+            signal?: AbortSignal,
+          ) => Promise<boolean>;
+        }
+      ).dismissTopModal({ type: "bottomsheet", layer: 1, windowId: 42 }, "ios", controller.signal),
+    ).rejects.toThrow("Operation cancelled");
+    expect(actions).toEqual(["swipe"]);
+  });
+});

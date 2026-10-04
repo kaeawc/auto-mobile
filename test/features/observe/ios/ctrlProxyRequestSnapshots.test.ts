@@ -55,6 +55,7 @@ import type { HierarchyDelegateContext } from "../../../../src/features/observe/
 import { buildNetworkMockRules } from "../../../../src/server/networkMockRules";
 import { NetworkState } from "../../../../src/server/NetworkState";
 import { RequestManager } from "../../../../src/utils/RequestManager";
+import { serializeIosRequest } from "../../../../src/features/observe/ios/serializeIosRequest";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const FIXTURE_PATH = resolve(
@@ -87,6 +88,7 @@ function createHarness(): Harness {
   const sent: string[] = [];
   const requestManager = new RequestManager(timer);
   const context: HierarchyDelegateContext = {
+    serializeRequest: serializeIosRequest,
     getWebSocket: () =>
       ({
         send: (data: string) => {
@@ -584,5 +586,104 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
       "get_table_structure",
     ];
     expect(required.filter((t) => !covered.has(t))).toEqual([]);
+  });
+});
+
+describe("iOS integer millisecond request boundary", () => {
+  const timingFields: Readonly<Record<string, readonly string[]>> = {
+    request_tap_coordinates: ["duration"],
+    request_action: ["duration"],
+    request_drag: ["pressDurationMs", "dragDurationMs", "holdDurationMs", "holdTime"],
+    request_swipe: ["duration", "timeoutMs"],
+    request_pinch: ["duration"],
+    request_two_finger_swipe: ["duration"],
+    request_multi_finger_swipe: ["duration"],
+    set_hierarchy_poll_interval: ["intervalMs"],
+  };
+  for (const [type, fields] of Object.entries(timingFields)) {
+    for (const field of fields) {
+      test(`${type}.${field} rounds fractions, preserves integers and omits undefined`, () => {
+        for (const [input, expected] of [
+          [250.5, 251],
+          [0.4, 1],
+          [600.5, 601],
+          [1500.4, 1500],
+        ]) {
+          const message = { type, [field]: input, x: 1.5 };
+          expect(serializeIosRequest(message)).toBe(
+            JSON.stringify({ ...message, [field]: expected }),
+          );
+        }
+        for (const input of [0, 1, 250, 1500, undefined]) {
+          const message = { type, [field]: input, x: 1.5 };
+          expect(serializeIosRequest(message)).toBe(JSON.stringify(message));
+        }
+      });
+    }
+  }
+
+  test("live gesture and VoiceOver builders share the serializer", async () => {
+    const specs: SnapshotSpec[] = [
+      {
+        name: "tap",
+        builder: "tap",
+        invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(1.5, 2.5, 250.5),
+      },
+      {
+        name: "action",
+        builder: "action",
+        invoke: (h) =>
+          new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
+            "Row",
+            "longPress",
+            5000,
+            undefined,
+            { duration: 250.5 },
+          ),
+      },
+      {
+        name: "drag",
+        builder: "drag",
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestDrag(1, 2, 3, 4, 600.5, 1500.4, 0.4, 5000),
+      },
+      {
+        name: "swipe",
+        builder: "swipe",
+        invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(1, 2, 3, 4, 250.5, 1500.4),
+      },
+      {
+        name: "pinch",
+        builder: "pinch",
+        invoke: (h) => new CtrlProxyGestures(h.context).requestPinch(1, 2, 3, 4, 0.5, 250.5),
+      },
+      {
+        name: "multi",
+        builder: "multi",
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestMultiFingerSwipe(1, 2, 3, 4, 3, 250.5),
+      },
+    ];
+    for (const spec of specs) {
+      const wire = await captureWire(spec);
+      if (spec.name === "drag") {
+        expect(wire.pressDurationMs).toBe(601);
+        expect(wire.dragDurationMs).toBe(1500);
+        expect(wire.holdDurationMs).toBe(1);
+      } else {
+        expect(wire.duration).toBe(251);
+      }
+      if (spec.name === "swipe") {
+        expect(wire.timeoutMs).toBe(1500);
+      }
+      if (spec.name === "pinch") {
+        expect(wire.rotationDegrees).toBe(0.5);
+      }
+    }
+  });
+
+  test("opaque payloads and unrelated numeric fields are unchanged", () => {
+    const message = { type: "set_preference", duration: 0.4, value: { intervalMs: 250.5 } };
+    expect(serializeIosRequest(message)).toBe(JSON.stringify(message));
   });
 });

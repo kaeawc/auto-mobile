@@ -28,31 +28,8 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     return schema;
   }
 
-  // Null-prototype map: a `{}` here inherits `Object.prototype`, so the
-  // `!mergedProperties[key]` guard below would read the inherited member for a
-  // property named `constructor`/`toString`/`__proto__`/... and merge the real
-  // branch schema into it, silently corrupting the emitted schema (issue #4187).
-  const mergedProperties: Record<string, unknown> = Object.create(null);
-  const seenAdditionalProperties = new Set<boolean | undefined>();
-  const requiredSets: Set<string>[] = [];
-
-  for (const branch of branches) {
-    const props = branch.properties as Record<string, unknown> | undefined;
-    if (props) {
-      for (const [key, value] of Object.entries(props)) {
-        if (!mergedProperties[key]) {
-          mergedProperties[key] = value;
-        } else {
-          mergedProperties[key] = mergeUnionProperty(mergedProperties[key], value);
-        }
-      }
-    }
-    if (typeof branch.additionalProperties === "boolean") {
-      seenAdditionalProperties.add(branch.additionalProperties);
-    }
-    const req = branch.required as string[] | undefined;
-    requiredSets.push(new Set(req ?? []));
-  }
+  const { mergedProperties, seenAdditionalProperties, requiredSets } =
+    collectUnionBranches(branches);
 
   const commonRequired =
     requiredSets.length > 0
@@ -82,6 +59,44 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
   }
 
   return result;
+}
+
+function collectUnionBranches(branches: Record<string, unknown>[]) {
+  // Null-prototype map: a `{}` here inherits `Object.prototype`, so the
+  // `!mergedProperties[key]` guard below would read the inherited member for a
+  // property named `constructor`/`toString`/`__proto__`/... and merge the real
+  // branch schema into it, silently corrupting the emitted schema (issue #4187).
+  const mergedProperties: Record<string, unknown> = Object.create(null);
+  const seenAdditionalProperties = new Set<boolean | undefined>();
+  const requiredSets: Set<string>[] = [];
+
+  for (const branch of branches) {
+    const props = branch.properties as Record<string, unknown> | undefined;
+    mergeBranchProperties(mergedProperties, props);
+    if (typeof branch.additionalProperties === "boolean") {
+      seenAdditionalProperties.add(branch.additionalProperties);
+    }
+    const req = branch.required as string[] | undefined;
+    requiredSets.push(new Set(req ?? []));
+  }
+
+  return { mergedProperties, seenAdditionalProperties, requiredSets };
+}
+
+function mergeBranchProperties(
+  mergedProperties: Record<string, unknown>,
+  props: Record<string, unknown> | undefined,
+): void {
+  if (!props) {
+    return;
+  }
+  for (const [key, value] of Object.entries(props)) {
+    if (!mergedProperties[key]) {
+      mergedProperties[key] = value;
+    } else {
+      mergedProperties[key] = mergeUnionProperty(mergedProperties[key], value);
+    }
+  }
 }
 
 interface ConditionalRequirement {

@@ -40,6 +40,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
+import type { ForcedRestartSnapshot } from "../ctrlProxy/ForcedRestartBudget";
 import {
   NotifyutilIosLockStateProbe,
   type IosLockStateProbe,
@@ -1589,6 +1590,167 @@ function iosRunnerCommandsComplete(
   );
 }
 
+interface IosServiceStatusProbe {
+  manager: IOSCtrlProxyManager;
+  installed: boolean;
+  health: CtrlProxyHealthCheckResult;
+  version: CtrlProxyVersionInfo | undefined;
+}
+
+function resolveCtrlProxyVersionLookup(
+  androidLookup: AndroidServiceStatusLookup,
+  versionLookup: CtrlProxyVersionLookup | undefined,
+): CtrlProxyVersionLookup {
+  return (
+    versionLookup ??
+    (androidLookup === defaultAndroidServiceStatusLookup
+      ? defaultCtrlProxyVersionLookup
+      : noOpCtrlProxyVersionLookup)
+  );
+}
+
+async function queryAndroidDeviceServiceStatus(
+  device: BootedDeviceProbeTarget,
+  bootedDevice: BootedDevice,
+  androidLookup: AndroidServiceStatusLookup,
+  resolvedVersionLookup: CtrlProxyVersionLookup,
+  timer: Timer,
+): Promise<DeviceServiceStatus> {
+  const manager = androidLookup.getManager(bootedDevice);
+  const [installed, enabled, installedSha256, version] = await Promise.all([
+    manager.isInstalled(),
+    manager.isEnabled(),
+    manager.getInstalledApkSha256(),
+    getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
+  ]);
+  const expectedSha256 = resolveApkChecksum();
+  // An explicit pin absent from the registry yields an empty expected checksum,
+  // which must NOT read as "compatible" — the installed APK is unverifiable (#2746).
+  const isCompatible =
+    !AndroidCtrlProxyManager.isPinnedVersionUnverifiable() &&
+    (expectedSha256.length === 0 ||
+      (installedSha256 !== null && installedSha256.toLowerCase() === expectedSha256.toLowerCase()));
+  return {
+    installed,
+    enabled,
+    running: androidLookup.isConnected(device.deviceId),
+    installedSha256,
+    expectedSha256,
+    isCompatible,
+    ...(installed && version
+      ? {
+          versionInfo: version,
+          ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
+        }
+      : {}),
+  };
+}
+
+function readIosRunnerIdentity(
+  device: BootedDeviceProbeTarget,
+  bootedDevice: BootedDevice,
+  running: boolean,
+  options: { runnerCommandRequirements?: IosRunnerCommandRequirements },
+) {
+  // The iOS runner exposes no hash/version, so identity comes from the cached
+  // `supportedCommands` handshake. Read it connection-free (this hot path must
+  // not open a WebSocket); null means identity is unknown this fetch.
+  let supportedCommandsComplete: boolean | null = null;
+  let supportedFeaturesComplete: boolean | null = null;
+  if (running) {
+    const client = IOSCtrlProxyClient.getExistingInstance(bootedDevice.deviceId);
+    const cached = client?.getCachedSupportedCommands() ?? null;
+    if (cached !== null) {
+      const advertised = new Set(cached);
+      supportedCommandsComplete = iosRunnerCommandsComplete(device, advertised, options);
+    }
+    const requiredFeatures = getRequiredIosRunnerFeatureFlags();
+    const cachedFeatures = client?.getCachedSupportedFeatures() ?? null;
+    if (requiredFeatures.length === 0) {
+      supportedFeaturesComplete = true;
+    } else if (cachedFeatures !== null) {
+      const advertisedFeatures = new Set(cachedFeatures);
+      supportedFeaturesComplete = requiredFeatures.every((feature) =>
+        advertisedFeatures.has(feature),
+      );
+    }
+  }
+
+  return { supportedCommandsComplete, supportedFeaturesComplete };
+}
+
+function describeIosRecovery(
+  restartBudget: ForcedRestartSnapshot,
+): Pick<DeviceServiceStatus, "recovery"> {
+  return restartBudget.state === "idle"
+    ? {}
+    : {
+        recovery: {
+          state: restartBudget.state,
+          attempts: restartBudget.attempts,
+          ...(restartBudget.lastFailureReason
+            ? {
+                reason:
+                  restartBudget.state === "suspended"
+                    ? "device removed or cleanup failed"
+                    : "CtrlProxy restart failed",
+              }
+            : {}),
+          ...(restartBudget.nextAttemptAtMs === undefined
+            ? {}
+            : { nextAttemptAt: new Date(restartBudget.nextAttemptAtMs).toISOString() }),
+        },
+      };
+}
+
+function buildIosDeviceServiceStatus(
+  device: BootedDeviceProbeTarget,
+  bootedDevice: BootedDevice,
+  iosProbe: IosServiceStatusProbe,
+  options: { runnerCommandRequirements?: IosRunnerCommandRequirements },
+): DeviceServiceStatus {
+  const { manager, installed, health, version } = iosProbe;
+  const running = health.ok;
+  const expectedSha256 = resolveIpaChecksum();
+
+  const { supportedCommandsComplete, supportedFeaturesComplete } = readIosRunnerIdentity(
+    device,
+    bootedDevice,
+    running,
+    options,
+  );
+
+  // Only claim compatibility we can actually verify. isCompatible is true
+  // *only* when the runner's advertised command set is known complete; a stale
+  // runner (incomplete) or an unknown one (no cached handshake yet) is reported
+  // not-compatible rather than the previous always-true reassurance. An
+  // unverifiable explicit pin is never compatible (#2746).
+  const isCompatible =
+    supportedCommandsComplete === true &&
+    supportedFeaturesComplete === true &&
+    !IosCtrlProxyBuilder.isPinnedVersionUnverifiable();
+  const restartBudget = manager.getForcedRestartBudget().snapshot();
+
+  return {
+    installed,
+    enabled: running,
+    running,
+    installedSha256: null,
+    expectedSha256,
+    isCompatible,
+    // isInstalled() is host-wide/unconditional for simulators; running is the per-device signal.
+    ...(installed && running && version
+      ? {
+          versionInfo: version,
+          ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
+        }
+      : {}),
+    supportedCommandsComplete,
+    supportedFeaturesComplete,
+    ...describeIosRecovery(restartBudget),
+  };
+}
+
 // Query service status for a single booted device
 export async function queryDeviceServiceStatus(
   device: BootedDeviceProbeTarget,
@@ -1603,20 +1765,9 @@ export async function queryDeviceServiceStatus(
     deviceId: device.deviceId,
     source: device.source,
   };
-  const resolvedVersionLookup =
-    versionLookup ??
-    (androidLookup === defaultAndroidServiceStatusLookup
-      ? defaultCtrlProxyVersionLookup
-      : noOpCtrlProxyVersionLookup);
+  const resolvedVersionLookup = resolveCtrlProxyVersionLookup(androidLookup, versionLookup);
 
-  let iosProbe:
-    | {
-        manager: IOSCtrlProxyManager;
-        installed: boolean;
-        health: CtrlProxyHealthCheckResult;
-        version: CtrlProxyVersionInfo | undefined;
-      }
-    | undefined;
+  let iosProbe: IosServiceStatusProbe | undefined;
   if (device.platform === "ios") {
     try {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
@@ -1643,111 +1794,15 @@ export async function queryDeviceServiceStatus(
 
   try {
     if (device.platform === "android") {
-      const manager = androidLookup.getManager(bootedDevice);
-      const [installed, enabled, installedSha256, version] = await Promise.all([
-        manager.isInstalled(),
-        manager.isEnabled(),
-        manager.getInstalledApkSha256(),
-        getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
-      ]);
-      const expectedSha256 = resolveApkChecksum();
-      // An explicit pin absent from the registry yields an empty expected checksum,
-      // which must NOT read as "compatible" — the installed APK is unverifiable (#2746).
-      const isCompatible =
-        !AndroidCtrlProxyManager.isPinnedVersionUnverifiable() &&
-        (expectedSha256.length === 0 ||
-          (installedSha256 !== null &&
-            installedSha256.toLowerCase() === expectedSha256.toLowerCase()));
-      return {
-        installed,
-        enabled,
-        running: androidLookup.isConnected(device.deviceId),
-        installedSha256,
-        expectedSha256,
-        isCompatible,
-        ...(installed && version
-          ? {
-              versionInfo: version,
-              ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
-            }
-          : {}),
-      };
+      return await queryAndroidDeviceServiceStatus(
+        device,
+        bootedDevice,
+        androidLookup,
+        resolvedVersionLookup,
+        timer,
+      );
     } else if (device.platform === "ios" && iosProbe) {
-      const { manager, installed, health, version } = iosProbe;
-      const running = health.ok;
-      const expectedSha256 = resolveIpaChecksum();
-
-      // The iOS runner exposes no hash/version, so identity comes from the cached
-      // `supportedCommands` handshake. Read it connection-free (this hot path must
-      // not open a WebSocket); null means identity is unknown this fetch.
-      let supportedCommandsComplete: boolean | null = null;
-      let supportedFeaturesComplete: boolean | null = null;
-      if (running) {
-        const client = IOSCtrlProxyClient.getExistingInstance(bootedDevice.deviceId);
-        const cached = client?.getCachedSupportedCommands() ?? null;
-        if (cached !== null) {
-          const advertised = new Set(cached);
-          supportedCommandsComplete = iosRunnerCommandsComplete(device, advertised, options);
-        }
-        const requiredFeatures = getRequiredIosRunnerFeatureFlags();
-        const cachedFeatures = client?.getCachedSupportedFeatures() ?? null;
-        if (requiredFeatures.length === 0) {
-          supportedFeaturesComplete = true;
-        } else if (cachedFeatures !== null) {
-          const advertisedFeatures = new Set(cachedFeatures);
-          supportedFeaturesComplete = requiredFeatures.every((feature) =>
-            advertisedFeatures.has(feature),
-          );
-        }
-      }
-
-      // Only claim compatibility we can actually verify. isCompatible is true
-      // *only* when the runner's advertised command set is known complete; a stale
-      // runner (incomplete) or an unknown one (no cached handshake yet) is reported
-      // not-compatible rather than the previous always-true reassurance. An
-      // unverifiable explicit pin is never compatible (#2746).
-      const isCompatible =
-        supportedCommandsComplete === true &&
-        supportedFeaturesComplete === true &&
-        !IosCtrlProxyBuilder.isPinnedVersionUnverifiable();
-      const restartBudget = manager.getForcedRestartBudget().snapshot();
-
-      return {
-        installed,
-        enabled: running,
-        running,
-        installedSha256: null,
-        expectedSha256,
-        isCompatible,
-        // isInstalled() is host-wide/unconditional for simulators; running is the per-device signal.
-        ...(installed && running && version
-          ? {
-              versionInfo: version,
-              ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
-            }
-          : {}),
-        supportedCommandsComplete,
-        supportedFeaturesComplete,
-        ...(restartBudget.state === "idle"
-          ? {}
-          : {
-              recovery: {
-                state: restartBudget.state,
-                attempts: restartBudget.attempts,
-                ...(restartBudget.lastFailureReason
-                  ? {
-                      reason:
-                        restartBudget.state === "suspended"
-                          ? "device removed or cleanup failed"
-                          : "CtrlProxy restart failed",
-                    }
-                  : {}),
-                ...(restartBudget.nextAttemptAtMs === undefined
-                  ? {}
-                  : { nextAttemptAt: new Date(restartBudget.nextAttemptAtMs).toISOString() }),
-              },
-            }),
-      };
+      return buildIosDeviceServiceStatus(device, bootedDevice, iosProbe, options);
     }
   } catch (error) {
     logger.warn(

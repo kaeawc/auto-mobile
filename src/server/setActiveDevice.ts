@@ -55,12 +55,12 @@ async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<
   let device = pool.getDevice(deviceId);
   if (!device) {
     const outcome = await pool.refreshDevicesWithOutcome();
-    if (outcome.failure !== undefined) {
+    device = pool.getDevice(deviceId);
+    if (!device && outcome.failure !== undefined) {
       throw new ActionableError(
         `Could not refresh device list: ${outcome.failure}. Resolve the cause and retry.`,
       );
     }
-    device = pool.getDevice(deviceId);
   }
   if (!device) {
     throw new ActionableError(`Device '${deviceId}' not found in device pool`);

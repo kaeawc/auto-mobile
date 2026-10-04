@@ -19,6 +19,7 @@ export class FakeTalkBackNavigationDriver
   nodeActionSelectorsSupported = true;
 
   tapHistory: Array<{ x: number; y: number; durationMs: number }> = [];
+  doubleTapHistory: Array<{ x: number; y: number }> = [];
   actionHistory: Array<{
     action: string;
     resourceId?: string;
@@ -66,6 +67,19 @@ export class FakeTalkBackNavigationDriver
   ): Promise<A11yTapCoordinatesResult> {
     this.tapHistory.push({ x, y, durationMs });
 
+    const result = this.tapOverrides.shift() ?? this.tapResult;
+    if (result.success || this.tapDispatched) {
+      onDispatch?.();
+    }
+    return result;
+  }
+
+  async requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    onDispatch?: () => void,
+  ): Promise<A11yTapCoordinatesResult> {
+    this.doubleTapHistory.push({ x, y });
     const result = this.tapOverrides.shift() ?? this.tapResult;
     if (result.success || this.tapDispatched) {
       onDispatch?.();

@@ -2137,7 +2137,9 @@ export async function tapOnHandler(
   // non-empty fallback (#4183 P4). The failure keeps the search summary so the
   // user still sees how long the selector was looked for before it missed.
   const message = result.success
-    ? buildTapOnSuccessMessage(result, searchSummary, args.ensureChecked)
+    ? `${buildTapOnSuccessMessage(result, searchSummary, args.ensureChecked)}${
+        result.warnings?.length ? `. Warning: ${result.warnings.join("; ")}` : ""
+      }`
     : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
   const payload = { message, observation: result.observation, ...result };
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =

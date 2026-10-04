@@ -112,6 +112,19 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches atomic double tap with frame and display routing`() = runTest {
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_tap_coordinates","requestId":"d1","x":100,"y":200,"doubleTap":true,"frameContext":"frame","displayId":2}"""
+      )
+    CtrlProxyMessageHandler(actions, sdkInt = { 30 }).handleMessage(request)
+    assertEquals(
+      "requestDoubleTapCoordinates" to listOf<Any?>("d1", 100.0, 200.0, "frame", 2),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches request_two_finger_swipe`() = runTest {
     dispatch(
       """{"type":"request_two_finger_swipe","requestId":"tf1","x1":0,"y1":0,"x2":10,"y2":20,"duration":300,"offset":50}"""

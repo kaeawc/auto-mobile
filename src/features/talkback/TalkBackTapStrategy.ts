@@ -24,6 +24,8 @@ export interface TalkBackTapResult {
    */
   method: "focus-navigation" | "accessibility-action" | "coordinate-fallback";
   error?: string;
+  /** Acknowledged coordinate gestures do not confirm semantic activation. */
+  warnings?: string[];
   /** A stable selector and advertised action rejected the semantic request. */
   semanticActionFailure?: boolean;
   /** Whether a precise coordinate focus tap completed before activation. */
@@ -45,6 +47,8 @@ export interface ScreenReaderNavigationResult {
 
 export type TalkBackFallbackAction = "tap" | "doubleTap" | "longPress";
 export const TALKBACK_PRECISE_FOCUS_SETTLE_MS = 500;
+export const TALKBACK_ACTIVATION_WARNING =
+  "TalkBack activation is unconfirmed: the coordinate gesture completed, but the element may only have received accessibility focus. Observe the result before retrying.";
 
 interface TalkBackTapStrategyDependencies {
   matcher?: FocusElementMatcher;
@@ -393,36 +397,23 @@ export class TalkBackTapStrategy {
     const tapDuration = action === "longPress" ? durationMs : 50;
 
     if (action === "doubleTap") {
-      // First tap
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      const firstResult = await this.requestTapCoordinates(driver, x, y, tapDuration);
-      if (!firstResult.success) {
+      const result = await this.requestTapCoordinates(driver, x, y, tapDuration, true);
+      if (!result.success) {
         return {
           success: false,
           method: "coordinate-fallback",
-          error: `First tap failed: ${firstResult.error}`,
+          error: `Double tap failed: ${result.error}`,
           completedTaps: 0,
         };
       }
 
-      // Wait between taps (standard double-tap interval)
-      await this.timer.sleep(200);
-
-      // Second tap
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      const secondResult = await this.requestTapCoordinates(driver, x, y, tapDuration);
-      if (!secondResult.success) {
-        return {
-          success: false,
-          method: "coordinate-fallback",
-          error: `Second tap failed: ${secondResult.error}`,
-          completedTaps: 1,
-        };
-      }
-
-      return { success: true, method: "coordinate-fallback", completedTaps: 2 };
+      return {
+        success: true,
+        method: "coordinate-fallback",
+        completedTaps: 2,
+        warnings: [TALKBACK_ACTIVATION_WARNING],
+      };
     }
 
     // A single touch only moves TalkBack's accessibility focus; it does not
@@ -661,13 +652,17 @@ export class TalkBackTapStrategy {
     x: number,
     y: number,
     durationMs: number,
+    doubleTap = false,
   ): Promise<A11yTapCoordinatesResult> {
     let dispatched = false;
     let result: A11yTapCoordinatesResult;
     try {
-      result = await driver.requestTapCoordinates(x, y, durationMs, () => {
+      const onDispatch = () => {
         dispatched = true;
-      });
+      };
+      result = doubleTap
+        ? await driver.requestDoubleTapCoordinates(x, y, onDispatch)
+        : await driver.requestTapCoordinates(x, y, durationMs, onDispatch);
     } catch (error) {
       if (dispatched) {
         throw indeterminateTapError(errorMessage(error));

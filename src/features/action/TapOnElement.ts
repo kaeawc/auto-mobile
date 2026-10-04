@@ -103,7 +103,9 @@ import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
   TalkBackTapStrategy,
+  TALKBACK_ACTIVATION_WARNING,
   type ScreenReaderNavigationResult,
+  type TalkBackTapResult,
 } from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -4060,6 +4062,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
+          const activationWarnings: string[] = [];
 
           // Platform-specific tap execution
           await perf.track("executeTap", async () => {
@@ -4072,7 +4075,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   longPressDuration,
                   tapElement,
                   signal,
-                  { ...options, displayFence: fence },
+                  {
+                    ...options,
+                    displayFence: fence,
+                    onActivationWarning: (warning) => activationWarnings.push(warning),
+                  },
                   isAccessibilityServiceEnabled,
                 );
                 break;
@@ -4118,6 +4125,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             selectedElement: selectedElementMetadata,
             searchUntil: searchOutcome.stats,
             ...(screenReaderNavigation ? { screenReaderNavigation } : {}),
+            ...(activationWarnings.length ? { warnings: activationWarnings } : {}),
           };
         },
         {
@@ -4262,7 +4270,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element: Element,
     signal?: AbortSignal,
-    options?: TapOnElementOptions & DisplayFenceOption,
+    options?: TapOnElementOptions &
+      DisplayFenceOption & { onActivationWarning?: (warning: string) => void },
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const fence = options?.displayFence;
@@ -4292,6 +4301,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         signal,
         talkBackEnabled,
         fence,
+        onActivationWarning: options?.onActivationWarning,
       });
       return undefined;
     }
@@ -4325,6 +4335,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal;
     talkBackEnabled: boolean;
     fence?: DisplayFence;
+    onActivationWarning?: (warning: string) => void;
   }): Promise<void> {
     const { action, x, y, durationMs, element, signal, talkBackEnabled, fence } = context;
     // Native resource-ID activation is global. Bind new scoped/unique calls to
@@ -4342,6 +4353,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               driver,
               { displayFence: fence },
             );
+      this.reportTalkBackActivationWarning(result, context, action);
       if (result.success) {
         return;
       }
@@ -4667,13 +4679,28 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
   }
 
+  /** Gesture acknowledgement cannot distinguish activation from a TalkBack focus move. */
+  private reportTalkBackActivationWarning(
+    result: TalkBackTapResult,
+    context?: { onActivationWarning?: (warning: string) => void },
+    action = "tap",
+  ): void {
+    if (action === "longPress") {
+      return;
+    }
+    for (const warning of result.warnings ?? [TALKBACK_ACTIVATION_WARNING]) {
+      context?.onActivationWarning?.(warning);
+    }
+  }
+
   private async executeAndroidTapWithAccessibility(
     action: string,
     x: number,
     y: number,
     element: Element,
     durationMs: number,
-    options?: TapOnElementOptions & DisplayFenceOption,
+    options?: TapOnElementOptions &
+      DisplayFenceOption & { onActivationWarning?: (warning: string) => void },
     signal?: AbortSignal,
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const fence = this.readOptionalDisplayFence(options);
@@ -4781,6 +4808,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             { displayFence: fence },
           );
 
+    this.reportTalkBackActivationWarning(fallbackResult, options);
     if (!fallbackResult.success) {
       logger.warn(
         `[TapOnElement] Accessibility coordinate tap failed (${fallbackResult.error}), ` +

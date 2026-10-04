@@ -81,6 +81,7 @@ export interface RequestScreenshotMessage {
 
 /** `@SerialName("request_tap_coordinates")` → `RequestTapCoordinates` */
 export interface RequestTapCoordinatesMessage {
+  doubleTap?: boolean;
   type: "request_tap_coordinates";
   requestId: string;
   x: number;
@@ -744,6 +745,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
   "ime_key_events_v1",
   "gesture_display_id_v1",
+  "tap_double_v1",
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */

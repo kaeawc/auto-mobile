@@ -234,6 +234,7 @@ class WebSocketServer(
     }
     add("node_selector_actions")
     add("ime_key_events_v1")
+    add("tap_double_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for

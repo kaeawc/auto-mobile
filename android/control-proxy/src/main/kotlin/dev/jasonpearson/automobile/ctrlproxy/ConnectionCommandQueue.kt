@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ThreadContextElement
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -38,8 +39,22 @@ internal interface QueuedCommandOrigin {
 }
 
 internal class CommandOriginContext(val origin: QueuedCommandOrigin) :
-  AbstractCoroutineContextElement(Key) {
-  companion object Key : CoroutineContext.Key<CommandOriginContext>
+  AbstractCoroutineContextElement(Key), ThreadContextElement<QueuedCommandOrigin?> {
+  override fun updateThreadContext(context: CoroutineContext): QueuedCommandOrigin? {
+    val previous = currentOrigin.get()
+    currentOrigin.set(origin)
+    return previous
+  }
+
+  override fun restoreThreadContext(context: CoroutineContext, oldState: QueuedCommandOrigin?) {
+    currentOrigin.set(oldState)
+  }
+
+  companion object Key : CoroutineContext.Key<CommandOriginContext> {
+    private val currentOrigin = ThreadLocal<QueuedCommandOrigin?>()
+
+    fun currentClient(): WebSocketServer.ConnectedClient? = currentOrigin.get()?.client
+  }
 }
 
 /**
@@ -152,19 +167,19 @@ internal class ConnectionCommandQueue(
   private suspend fun runCommand(connection: Connection, command: QueuedCommand) = supervisorScope {
     // Keep cooperative delegate cancellation isolated from the sequential worker. Check inside
     // the child, immediately before dispatch, even if lifetime completion has not run its hook.
-    launch {
-      currentCoroutineContext().ensureActive()
-      if (!command.origin.client.isConnected || !connection.lifetime.isActive) {
-        logDebug("Skipping command for inactive connection: ${command.request.requestId}")
-        return@launch
+    launch(CommandOriginContext(command.origin)) {
+        currentCoroutineContext().ensureActive()
+        if (!command.origin.client.isConnected || !connection.lifetime.isActive) {
+          logDebug("Skipping command for inactive connection: ${command.request.requestId}")
+          return@launch
+        }
+        val requestId = command.request.requestId
+        if (command.origin.ownerRecorded && requestId != null && !hasRequestOwner(requestId)) {
+          logDebug("Skipping command for disconnected owner: $requestId")
+          return@launch
+        }
+        dispatch(command)
       }
-      val requestId = command.request.requestId
-      if (command.origin.ownerRecorded && requestId != null && !hasRequestOwner(requestId)) {
-        logDebug("Skipping command for disconnected owner: $requestId")
-        return@launch
-      }
-      dispatch(command)
-    }
       .join()
   }
 

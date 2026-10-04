@@ -1,3 +1,4 @@
+import type { InstalledAppsTable } from "../models/InstalledAppsStore";
 import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 
 /**
@@ -14,19 +15,6 @@ export interface DeviceConfigTable {
   config_json: string; // JSON blob for flexible config storage
   created_at: Generated<string>;
   updated_at: Generated<string>;
-}
-
-// Installed apps cache table
-interface InstalledAppsTable {
-  device_id: string;
-  user_id: number;
-  package_name: string;
-  is_system: number; // SQLite boolean (0/1)
-  installed_at: number;
-  last_verified_at: number;
-  profile_type: Generated<"primary" | "managed" | "secondary" | "unknown" | null>;
-  daemon_session_id: string | null;
-  device_session_start: number | null;
 }
 
 // Performance thresholds table
@@ -857,8 +845,7 @@ export interface Database {
 }
 
 // Convenience types for each table
-export type InstalledApp = Selectable<InstalledAppsTable>;
-export type NewInstalledApp = Insertable<InstalledAppsTable>;
+export type { InstalledApp, NewInstalledApp } from "../models/InstalledAppsStore";
 
 export type DeviceSession = Selectable<DeviceSessionsTable>;
 export type NewDeviceSession = Insertable<DeviceSessionsTable>;

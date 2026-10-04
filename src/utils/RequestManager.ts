@@ -2,6 +2,7 @@ import type { TimingEntry } from "./PerformanceTracker";
 import { logger } from "./logger";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
 import { Timer, defaultTimer } from "./SystemTimer";
+import { errorMessage } from "./describeUnknownError";
 
 /**
  * Represents a pending request with timeout handling.
@@ -115,7 +116,10 @@ export class RequestManager {
     // to a WebSocket. Keep that abandoned promise observed until the caller's
     // error path cancels it or its timeout resolves; otherwise close() turns a
     // send failure into an unhandled rejection.
-    void promise.catch(() => {});
+    void promise.catch((error) => {
+      // Close/send-failure cleanup may reject an abandoned request; the caller still observes the original promise.
+      logger.debug(`[RequestManager] Observed request rejection: ${errorMessage(error)}`);
+    });
     return promise;
   }
 

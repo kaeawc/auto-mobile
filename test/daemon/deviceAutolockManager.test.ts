@@ -209,6 +209,54 @@ describe("DeviceAutolockManager", () => {
     sessions.stopCleanupTimer();
   });
 
+  test("clears only the captured entry's rebind lock and preserves MCP routes", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const { manager, sessions, device } = harness();
+    const id = await manager.autolockDevice(device.id, "android", "mcp-1");
+    await manager.attachAutolockSessionToMcpSession(id!, "mcp-2");
+
+    manager.clearRebindAutolockLock(id!, device.id, device);
+
+    expect(device.autolockSessionId).toBeUndefined();
+    expect(device.sessionId).toBe(id);
+    expect(device.status).toBe("busy");
+    expect(manager.captureAutolockSessionForMcpSession("mcp-1")).toBe(id);
+    expect(manager.captureAutolockSessionForMcpSession("mcp-2")).toBe(id);
+    sessions.stopCleanupTimer();
+  });
+
+  test("does not clear a same-serial replacement entry or its MCP route", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const { manager, sessions, device, devices } = harness();
+    const id = await manager.autolockDevice(device.id, "android", "mcp-1");
+    const replacement = { ...device, incarnation: device.incarnation + 1 };
+    devices.set(device.id, replacement);
+
+    manager.clearRebindAutolockLock(id!, device.id, device);
+
+    expect(device.autolockSessionId).toBe(id);
+    expect(replacement.autolockSessionId).toBe(id);
+    expect(manager.captureAutolockSessionForMcpSession("mcp-1")).toBe(id);
+    expect(
+      manager.resolveAutolockSessionForMcpSession("mcp-1", "android", undefined, device.id),
+    ).toBe(id);
+    sessions.stopCleanupTimer();
+  });
+
+  test("does not clear another session's lock on the captured entry", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const { manager, sessions, device } = harness();
+    const id = await manager.autolockDevice(device.id, "android", "mcp-1");
+    device.autolockSessionId = "another-owner";
+    const snapshot = { ...device };
+
+    manager.clearRebindAutolockLock(id!, device.id, device);
+
+    expect(device).toEqual(snapshot);
+    expect(manager.captureAutolockSessionForMcpSession("mcp-1")).toBe(id);
+    sessions.stopCleanupTimer();
+  });
+
   test("reuses the caller's owned autolock session", async () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, events } = harness();

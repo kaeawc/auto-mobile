@@ -134,7 +134,7 @@ mask_noncode() {
 check_logical_line() {
   local file="$1" srcline="$2" raw="$3"
   [[ "$raw" =~ ^[[:space:]]*# ]] && return
-  printf '%s' "$raw" | grep -q 'md-bash-lint-ok' && return
+  [[ "${raw}" == *"md-bash-lint-ok"* ]] && return
 
   # Name-based checks run on the masked line so GNUism words in strings/comments
   # do not false-positive. sed is special: masking `sed -i 's/a/b/'` collapses it
@@ -146,19 +146,19 @@ check_logical_line() {
   local label="" hint=""
   # grep PCRE: short `-P`/`-oP` and the long `--perl-regexp` (with optional
   # `=value`). This is the exact class behind #4117.
-  if printf '%s' "$line" | grep -qE '\bgrep\b[^|]*(-[A-Za-z]*P|--perl-regexp)'; then
+  if grep -qE '\bgrep\b[^|]*(-[A-Za-z]*P|--perl-regexp)' <<<"${line}"; then
     label="gnu-grep-P"; hint="grep -P/-oP/--perl-regexp is GNU-only PCRE; /usr/bin/grep on macOS rejects it (#4117)."
-  elif printf '%s' "$line" | grep -qE '\bsed\b[^|]*[[:space:]](-i([[:space:]]|$)|--in-place([[:space:]]|$))' \
-    && ! printf '%s' "$raw" | grep -qE "\bsed\b[^|]*[[:space:]]-i[[:space:]]+(''|\"\")"; then
+  elif grep -qE '\bsed\b[^|]*[[:space:]](-i([[:space:]]|$)|--in-place([[:space:]]|$))' <<<"${line}" \
+    && ! grep -qE "\bsed\b[^|]*[[:space:]]-i[[:space:]]+(''|\"\")" <<<"${raw}"; then
     # `sed -i ''`/`sed -i ""` is the portable BSD empty-suffix form the hint
     # recommends — flag only the suffixless `sed -i`/`sed --in-place <script>`
     # spelling; an explicit `--in-place=SUFFIX` carries its suffix and is skipped.
     label="gnu-sed-inplace"; hint="sed -i/--in-place without a suffix is GNU-only; BSD/macOS needs sed -i '' or a temp file."
-  elif printf '%s' "$line" | grep -qE '\breadlink\b[^|]*(-[A-Za-z]*f|--canonicalize)'; then
+  elif grep -qE '\breadlink\b[^|]*(-[A-Za-z]*f|--canonicalize)' <<<"${line}"; then
     label="gnu-readlink-f"; hint="readlink -f/--canonicalize is GNU-only; use a portable path resolver (cd/pwd -P)."
-  elif printf '%s' "$line" | grep -qE '\b(mapfile|readarray)\b'; then
+  elif grep -qE '\b(mapfile|readarray)\b' <<<"${line}"; then
     label="bash4-mapfile"; hint="mapfile/readarray is bash 4+; /bin/bash on macOS is 3.2. Use a read loop."
-  elif printf '%s' "$line" | grep -qE '\bdate\b[^|]*([[:space:]]-d([[:space:]]|$|[^-[:space:]])|[[:space:]]--date([[:space:]=]|$))'; then
+  elif grep -qE '\bdate\b[^|]*([[:space:]]-d([[:space:]]|$|[^-[:space:]])|[[:space:]]--date([[:space:]=]|$))' <<<"${line}"; then
     # -d / -dSTRING (attached) / --date / --date=STRING are all GNU-only.
     label="gnu-date-d"; hint="date -d/--date is GNU-only; BSD/macOS date uses -v/-j -f."
   fi

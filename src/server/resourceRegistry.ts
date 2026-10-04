@@ -9,7 +9,7 @@ import {
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
-import { ListChangedBroadcaster } from "./listChangedBroadcast";
+import { ListChangedBroadcaster, ResourceUpdatedBroadcaster } from "./listChangedBroadcast";
 
 export interface ResourceReadContext {
   sessionUuid?: string;
@@ -502,6 +502,10 @@ class ResourceRegistryClass {
     if (!resource && !templateMatch) {
       return;
     }
+
+    ResourceUpdatedBroadcaster.emit((subscriptions) =>
+      this.resolveNotificationTargets(uri, resource, templateMatch, subscriptions),
+    );
 
     // Retain every live session (issue #3223), but resolve its own subscriptions.
     for (const server of this.servers) {

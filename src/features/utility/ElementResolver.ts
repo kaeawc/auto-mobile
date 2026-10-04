@@ -1,3 +1,4 @@
+import type { ResolutionAction } from "../../models/ResolutionAction";
 import {
   STABLE_VIEW_ID_PREFIX,
   STABLE_VIEW_ID_HASH_LENGTH,
@@ -26,17 +27,7 @@ const syntheticNodeKey = new RegExp(
 const FOCUS_LABEL_ANCESTOR_HOP_LIMIT = 2;
 
 export type MatchMode = "exact" | "contains" | "regex";
-export type ResolutionAction =
-  | "inspect"
-  | "tap"
-  | "long-press"
-  | "scroll"
-  | "input"
-  | "focus-input"
-  | "accessibility-focus"
-  | "focus"
-  | "highlight"
-  | "drag";
+export type { ResolutionAction } from "../../models/ResolutionAction";
 
 function usesClickablePromotion(action: ResolutionAction): boolean {
   return action === "tap" || action === "long-press" || action === "highlight";

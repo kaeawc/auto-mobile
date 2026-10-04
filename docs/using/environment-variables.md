@@ -160,6 +160,33 @@ The proxy's default heartbeat cadence derives from this timeout.
 export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
 ```
 
+Liveness ownership has a single token per session. The latest claim with a new
+token wins, even if the previous owner is still heartbeating. A stdio/HTTP proxy
+bound with `--initial-session-uuid` claims on its first heartbeat and restores
+the strict heartbeat policy. An external keeper can claim with
+`--daemon heartbeat S --liveness-owner-token T --claim-liveness-ownership`;
+that CLI claim adopts the CLI idle policy described below. Ordinary ticks from
+the current owner refresh deadlines without changing the policy.
+
+A displaced token's non-claiming `daemon/heartbeat` returns
+`{ success: false, code: "liveness_owner_superseded", error: "..." }` and changes
+no activity, heartbeat, expiry or policy. The heartbeat CLI exits non-zero with
+guidance to re-claim or stop, instead of printing `heartbeat recorded`. Claims
+are idempotent per token: repeating a displaced token's claim is still a
+successful no-op. To take ownership back, use a fresh token with
+`--claim-liveness-ownership`, then use that token on subsequent ticks. This
+displaces the other keeper; there is no co-ownership.
+
+The proxy treats supersession as informational, logs it once at debug level,
+and continues without fencing, reconnecting or releasing the session. Only the
+current owner's ticks protect liveness: a proxy stall past the heartbeat timeout
+can therefore reap the session even while a displaced external keeper ticks.
+Legacy tokenless heartbeats after a token has claimed ownership remain
+successful no-ops. Missing or releasing sessions still return
+`daemon_session_not_found`. A keeper cannot currently claim through the
+heartbeat CLI without adopting its CLI policy; policy-independent claims and
+co-ownership require a separate ownership-policy decision.
+
 ## CLI session lifetime
 
 <div class="environment-variable-table" markdown>

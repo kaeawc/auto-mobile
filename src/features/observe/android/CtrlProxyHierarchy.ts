@@ -1569,6 +1569,21 @@ export class CtrlProxyHierarchy {
     if (node["container-title"]) {
       converted["container-title"] = node["container-title"];
     }
+    for (const key of [
+      "hint-text",
+      "state-description",
+      "error-message",
+      "tooltip-text",
+      "pane-title",
+      "live-region",
+      "collection-info",
+      "collection-item-info",
+      "range-info",
+    ] as const) {
+      if (node[key]) {
+        converted[key] = node[key];
+      }
+    }
     if (node["view-id"]) {
       converted["view-id"] = node["view-id"];
     }

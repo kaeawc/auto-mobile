@@ -14,7 +14,6 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { SwipeOnOptions } from "../../../src/models/SwipeOnOptions";
 
 export const android: BootedDevice = {
   deviceId: "emulator-5554",
@@ -156,11 +155,9 @@ export function createSendKeysFocusHarness(device: BootedDevice = android) {
     display?: string;
     options?: SendKeysFocusOptions;
   }> = [];
-  const swipes: SwipeOnOptions[] = [];
   const signals: Array<AbortSignal | undefined> = [];
   const replies: Array<Awaited<ReturnType<SendKeysTargetFocuser["focus"]>> | Error> = [];
   const recovery = {
-    swipe: async () => ({ success: true }),
     close: async () => ({ success: true }),
   };
   const transitions = new FakeDisplayTransitionReader();
@@ -178,7 +175,14 @@ export function createSendKeysFocusHarness(device: BootedDevice = android) {
   const dependencies: SendKeysDependencies = {
     timer: new FakeTimer(),
     executor: h.executor,
-    observer: { execute: async () => observation },
+    observer: {
+      execute: async (options) => {
+        if (options?.freshness === "fresh" && options.minTimestamp === 0) {
+          calls.push("refresh");
+        }
+        return observation;
+      },
+    },
     displayTransitions: transitions,
     lastRenderedObservation: () => observation,
     timestampProvider: { now: async () => 1 },
@@ -191,19 +195,11 @@ export function createSendKeysFocusHarness(device: BootedDevice = android) {
       ) => {
         calls.push("focus");
         focusCalls.push({ selector, signal, display, options });
-        const reply = replies.shift() ?? { success: true };
+        const reply = replies.shift() ?? { success: true, focusVerified: true };
         if (reply instanceof Error) {
           throw reply;
         }
         return reply;
-      },
-    },
-    swipeOn: {
-      execute: async (options: SwipeOnOptions, _progress?: unknown, signal?: AbortSignal) => {
-        calls.push("swipe");
-        swipes.push(options);
-        signals.push(signal);
-        return recovery.swipe();
       },
     },
     keyboard: {
@@ -220,7 +216,6 @@ export function createSendKeysFocusHarness(device: BootedDevice = android) {
     action,
     calls,
     focusCalls,
-    swipes,
     signals,
     replies,
     recovery,

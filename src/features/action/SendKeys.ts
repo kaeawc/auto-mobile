@@ -1,6 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import type { SwipeOnOptions } from "../../models/SwipeOnOptions";
 import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
@@ -36,9 +35,8 @@ import {
 } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
-import { TapOnElement } from "./TapOnElement";
+import { TapOnElement, tapFocusFailure, type TapOnFocusResult } from "./TapOnElement";
 import { Keyboard } from "./Keyboard";
-import { SwipeOn } from "./swipeon/SwipeOn";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -239,15 +237,9 @@ export interface SendKeysTargetFocuser {
     signal?: AbortSignal,
     display?: string,
     options?: SendKeysFocusOptions,
-  ): Promise<{ success: boolean; error?: string }>;
-}
-
-export interface SendKeysScrollSearcher {
-  execute(
-    options: SwipeOnOptions,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<
+    Pick<TapOnFocusResult, "success" | "error" | "focusVerified" | typeof tapFocusFailure>
+  >;
 }
 
 export interface SendKeysKeyboard {
@@ -272,7 +264,6 @@ export interface SendKeysDependencies {
   lastRenderedObservation?: RenderedObservationReader;
   executor?: SendKeysCommandExecutor;
   focuser?: SendKeysTargetFocuser;
-  swipeOn?: SendKeysScrollSearcher;
   keyboard?: SendKeysKeyboard;
   observer?: SendKeysObserver;
   timestampProvider?: SendKeysTimestampProvider;
@@ -1880,7 +1871,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 export class SendKeys {
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
-  private readonly swipeOn?: SendKeysScrollSearcher;
   private readonly keyboard?: SendKeysKeyboard;
   private readonly observer: SendKeysObserver;
   private readonly timestampProvider: SendKeysTimestampProvider;
@@ -1894,7 +1884,6 @@ export class SendKeys {
     dependencies: SendKeysDependencies = {},
   ) {
     this.timer = dependencies.timer ?? defaultTimer;
-    this.swipeOn = dependencies.swipeOn;
     this.keyboard = dependencies.keyboard;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.displayTransitionReader = dependencies.displayTransitions ?? displayTransitions;
@@ -1911,19 +1900,22 @@ export class SendKeys {
       dependencies.focuser ??
       ({
         focus: async (selector, signal, display, options) => {
-          const tap = display
-            ? new TapOnElement(device, adbFactory.create(device), {
-                timer: this.timer,
-                lastRenderedObservation: this.lastRenderedObservation,
-              })
-            : new TapOnElement(device);
+          const tap = new TapOnElement(device, adbFactory.create(device), {
+            timer: this.timer,
+            lastRenderedObservation: this.lastRenderedObservation,
+          });
           const result = await tap.execute(
             { ...selector, ...options, action: "focus", display },
             undefined,
             signal,
             { throwOnKeyboardOcclusion: true },
           );
-          return { success: result.success, error: result.error };
+          return {
+            success: result.success,
+            error: result.error,
+            focusVerified: result.focusVerified,
+            [tapFocusFailure]: result[tapFocusFailure],
+          };
         },
       } satisfies SendKeysTargetFocuser);
   }
@@ -2267,72 +2259,15 @@ export class SendKeys {
     display?: string,
     options: SendKeysFocusOptions = {},
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
-    const original = await this.focusWithKeyboardRecovery(selector, signal, display, options);
+    const result = await this.focusWithKeyboardRecovery(selector, signal, display, options);
     signal?.throwIfAborted();
-    const lookFor = this.scrollTargetForFailure(selector, original);
-    if (!lookFor) {
-      return original;
+    if (!result.success && result[tapFocusFailure]) {
+      return {
+        ...result,
+        error: `${result.error} The field may be scrolled out of view; use swipeOn with lookFor to bring it into view, then retry.`,
+      };
     }
-    try {
-      const search = await this.scrollToTarget(lookFor, signal, display, options);
-      signal?.throwIfAborted();
-      if (search.success) {
-        const retry = await this.focusWithKeyboardRecovery(selector, signal, display, options);
-        signal?.throwIfAborted();
-        if (retry.success || retry.occlusionError) {
-          return retry;
-        }
-      }
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(`[SendKeys] Selector scroll recovery failed: ${errorMessage(error)}`, error);
-    }
-    return {
-      ...original,
-      error: `${original.error}. The field may be scrolled out of view; use swipeOn with lookFor to bring it into view.`,
-    };
-  }
-
-  private scrollTargetForFailure(
-    selector: SendKeysSelector,
-    result: Awaited<ReturnType<SendKeysTargetFocuser["focus"]>>,
-  ): SwipeOnOptions["lookFor"] {
-    // TapOnElement has no typed not-found result; keep this match restricted to
-    // its target-missing wording, excluding container/ambiguity/validation errors.
-    if (result.success || !result.error?.includes("Element not found with provided ")) {
-      return undefined;
-    }
-    if (selector.text) {
-      return { text: selector.text };
-    }
-    if (selector.elementId) {
-      return { elementId: selector.elementId };
-    }
-    return undefined;
-  }
-
-  private scrollToTarget(
-    lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
-    signal?: AbortSignal,
-    display?: string,
-    options: SendKeysFocusOptions = {},
-  ): ReturnType<SendKeysScrollSearcher["execute"]> {
-    const swipe =
-      this.swipeOn ??
-      new SwipeOn(this.device, null, {
-        timer: this.timer,
-        lastRenderedObservation: this.lastRenderedObservation,
-      });
-    return swipe.execute(
-      {
-        direction: "up",
-        display,
-        container: options.container,
-        lookFor: { ...lookFor, ...options },
-      },
-      undefined,
-      signal,
-    );
+    return result;
   }
 
   private async focusWithKeyboardRecovery(
@@ -2340,11 +2275,7 @@ export class SendKeys {
     signal?: AbortSignal,
     display?: string,
     options?: SendKeysFocusOptions,
-  ): Promise<
-    Awaited<ReturnType<SendKeysTargetFocuser["focus"]>> & {
-      occlusionError?: KeyboardOcclusionError;
-    }
-  > {
+  ): ReturnType<SendKeysTargetFocuser["focus"]> {
     signal?.throwIfAborted();
     try {
       return await this.focuser.focus(selector, signal, display, options);
@@ -2353,40 +2284,59 @@ export class SendKeys {
       if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
         throw error;
       }
+      // Keyboard.close cannot target a display. Never dismiss on an ambient display
+      // when this action is explicitly routed (including display "0").
+      if (display !== undefined) {
+        logger.warn("[SendKeys] Display-routed target is covered by the IME", error);
+        return { success: false, error: error.message };
+      }
       logger.warn("[SendKeys] Target is covered by the IME; closing the keyboard", error);
       try {
-        const retry = await this.retryFocusAfterKeyboardClose(selector, signal, display, options);
-        signal?.throwIfAborted();
-        if (retry.success) {
-          return retry;
-        }
+        return await this.retryFocusAfterKeyboardClose(selector, error, signal, options);
       } catch (recoveryError) {
         signal?.throwIfAborted();
         logger.warn(
           `[SendKeys] IME focus recovery failed: ${errorMessage(recoveryError)}`,
           recoveryError,
         );
+        return { success: false, error: errorMessage(recoveryError) };
       }
-      // A failed IME retry terminates this call, so a later scroll attempt cannot
-      // dismiss again. Preserve the original refusal, as SetUIState does.
-      return { success: false, error: error.message, occlusionError: error };
     }
   }
 
   private async retryFocusAfterKeyboardClose(
     selector: SendKeysSelector,
+    occlusion: KeyboardOcclusionError,
     signal?: AbortSignal,
-    display?: string,
     options?: SendKeysFocusOptions,
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
     const keyboard =
       this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer);
-    const dismissal = await keyboard.execute("close", signal);
+    let dismissal: Awaited<ReturnType<SendKeysKeyboard["execute"]>>;
+    try {
+      dismissal = await keyboard.execute("close", signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`[SendKeys] Keyboard close failed: ${errorMessage(error)}`, error);
+      return { success: false, error: occlusion.message };
+    }
     signal?.throwIfAborted();
     if (!dismissal.success) {
-      return dismissal;
+      return { success: false, error: occlusion.message };
     }
-    return this.focuser.focus(selector, signal, display, options);
+    // Mirror SetUIState's fresh observation and verified-focus requirement. Each
+    // focus execution re-resolves the selector against the refreshed hierarchy.
+    await this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 });
+    signal?.throwIfAborted();
+    const retry = await this.focuser.focus(selector, signal, undefined, options);
+    signal?.throwIfAborted();
+    if (retry.success && retry.focusVerified !== true) {
+      return {
+        success: false,
+        error: "Failed to confirm focus on target field after closing the keyboard",
+      };
+    }
+    return retry;
   }
 
   private async executeCommands(

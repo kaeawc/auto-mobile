@@ -103,6 +103,27 @@ async function harness() {
 afterEach(() => mock.restore());
 
 describe("SessionPreservingRecoveryRunner", () => {
+  test.each(["new-owner", "same-owner-new-assignment"])(
+    "failed recovery preserves a %s device",
+    async (scenario) => {
+      const h = await harness();
+      h.device.androidImage = undefined;
+      h.port.releaseDisconnectedRecoverySessionWithRetry = async () => {
+        h.device.sessionId = scenario === "new-owner" ? "other-session" : "session";
+        h.device.assignmentCount++;
+        h.device.status = "busy";
+      };
+      expect(await h.run()).toBe("released");
+      expect(h.device).toMatchObject({
+        sessionId: scenario === "new-owner" ? "other-session" : "session",
+        status: "busy",
+        assignmentCount: 2,
+      });
+      expect(h.events).not.toContain("remove");
+      expect(h.events).not.toContain("suppress");
+    },
+  );
+
   const traces = {
     recovered: "reboot,refresh,check-release,finalize,settle",
     "ios-passive":

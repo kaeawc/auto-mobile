@@ -179,7 +179,7 @@ describe("CtrlProxyManager", function () {
   });
 
   describe("status cache TTLs", () => {
-    const installedCommand = `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`;
+    const installedCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
 
     function createManager(timer: FakeTimer, adb: FakeAdbExecutor): AndroidCtrlProxyManager {
       return AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
@@ -380,7 +380,7 @@ describe("CtrlProxyManager", function () {
     for (const { method, command, service, readyOutput } of [
       {
         method: "isInstalled" as const,
-        command: `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        command: `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
         service: "package",
         readyOutput: `package:${AndroidCtrlProxyManager.PACKAGE}`,
       },
@@ -465,50 +465,158 @@ describe("CtrlProxyManager", function () {
     });
   });
 
+  describe("legacy package probe", () => {
+    const legacy = AndroidCtrlProxyManager.LEGACY_PACKAGE;
+    const probe = `shell pm list packages ${legacy}`;
+    const uninstall = `shell pm uninstall ${legacy}`;
+
+    test("legacy absent is quiet and uses no grep", async () => {
+      // Model the real executor rejecting grep's exit 1 on the old command.
+      fakeAdb.setCommandError(
+        `shell pm list packages | grep ${legacy}`,
+        new Error("Command failed: grep exited 1"),
+      );
+      fakeAdb.setCommandResponse(probe, { stdout: "", stderr: "" });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const error = spyOn(logger, "error").mockImplementation(() => {});
+      try {
+        await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+        expect(warn).not.toHaveBeenCalled();
+        expect(error).not.toHaveBeenCalled();
+        expect(fakeAdb.getExecutedCommands()).toEqual([probe]);
+        expect(fakeAdb.wasCommandExecuted("grep")).toBe(false);
+        expect(fakeAdb.wasCommandExecuted(uninstall)).toBe(false);
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    });
+
+    test.each(["\n", "\r\n"])(
+      "legacy present clears cache after uninstall: %j",
+      async (newline) => {
+        fakeAdb.setCommandResponse(probe, { stdout: `package:${legacy}${newline}`, stderr: "" });
+        const clear = spyOn(accessibilityServiceClient, "clearAvailabilityCache");
+        try {
+          await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+          expect(fakeAdb.getExecutedCommands()).toEqual([probe, uninstall]);
+          expect(clear).toHaveBeenCalledTimes(1);
+        } finally {
+          clear.mockRestore();
+        }
+      },
+    );
+
+    test("similar legacy names are not uninstalled", async () => {
+      fakeAdb.setCommandResponse(probe, {
+        stdout: `package:${legacy}.debug\npackage:x.${legacy}\n`,
+        stderr: "",
+      });
+      await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+      expect(fakeAdb.getExecutedCommands()).toEqual([probe]);
+    });
+
+    test("setup continues after a legacy probe failure", async () => {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
+      fakeAdb.setCommandError(probe, new Error("adb unavailable"));
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
+      const enabled = spyOn(accessibilityServiceClient, "isEnabled").mockResolvedValue(true);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect((await accessibilityServiceClient.setup()).success).toBe(true);
+        expect(fakeAdb.getExecutedCommands()).toContain(probe);
+        expect(warn).toHaveBeenCalledWith(
+          "[CTRL_PROXY] Failed to check/uninstall legacy package: adb unavailable",
+          expect.any(Error),
+        );
+      } finally {
+        enabled.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test.each(["probe", "uninstall"])("legacy %s failure warns and continues", async (stage) => {
+      fakeAdb.setCommandResponse(probe, { stdout: `package:${legacy}\n`, stderr: "" });
+      fakeAdb.setCommandError(stage === "probe" ? probe : uninstall, new Error("adb unavailable"));
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const clear = spyOn(accessibilityServiceClient, "clearAvailabilityCache");
+      try {
+        await expect(
+          accessibilityServiceClient["uninstallLegacyPackageIfPresent"](),
+        ).resolves.toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(
+          "[CTRL_PROXY] Failed to check/uninstall legacy package: adb unavailable",
+          expect.any(Error),
+        );
+        expect(clear).toHaveBeenCalledTimes(stage === "uninstall" ? 1 : 0);
+      } finally {
+        warn.mockRestore();
+        clear.mockRestore();
+      }
+    });
+  });
+
   describe("isInstalled", function () {
     test("should return true when accessibility service package is installed", async function () {
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
 
       const result = await accessibilityServiceClient.isInstalled();
       expect(result).toBe(true);
     });
 
     test("accepts installed output alongside a benign ADB startup notice", async function () {
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
+      });
 
       expect(await accessibilityServiceClient.isInstalled()).toBe(true);
     });
 
     test("should return false when accessibility service package is not installed", async function () {
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: "",
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "",
+        stderr: "",
+      });
 
       const result = await accessibilityServiceClient.isInstalled();
       expect(result).toBe(false);
+    });
+
+    test.each([
+      { stdout: "", installed: false },
+      {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}.debug\npackage:x.${AndroidCtrlProxyManager.PACKAGE}\n`,
+        installed: false,
+      },
+      { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\r\n`, installed: true },
+    ])("filtered installation probe matches exact names: %j", async ({ stdout, installed }) => {
+      const probe = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
+      fakeAdb.setCommandResponse(probe, { stdout, stderr: "" });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const error = spyOn(logger, "error").mockImplementation(() => {});
+      try {
+        expect(await accessibilityServiceClient.isInstalled()).toBe(installed);
+        expect(fakeAdb.getExecutedCommands()).toEqual([probe]);
+        expect(warn).not.toHaveBeenCalled();
+        expect(error).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
     });
 
     test.each(["adb: device offline", "error: device is offline"])(
       "preserves an offline-device failure instead of reporting not installed: %s",
       async (message) => {
         fakeAdb.setCommandError(
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
           new Error(message),
         );
 
@@ -559,13 +667,10 @@ describe("CtrlProxyManager", function () {
     });
 
     test("preserves missing-device failure when installation is positively cached", async function () {
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       expect(await accessibilityServiceClient.isInstalled()).toBe(true);
       fakeAdb.setCommandError(
         "settings get secure",
@@ -1241,13 +1346,10 @@ describe("CtrlProxyManager", function () {
 
   describe("isAvailable", function () {
     test("should return true when service is both installed and enabled", async function () {
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
         stderr: "",
@@ -1260,20 +1362,17 @@ describe("CtrlProxyManager", function () {
       // must be issued; a count check could not catch a wrong probe command.
       expect(fakeAdb.getExecutedCommands().sort()).toEqual(
         [
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
           "shell settings get secure enabled_accessibility_services",
         ].sort(),
       );
     });
 
     test("should return false when service is installed but not enabled", async function () {
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: "other.service/SomeService",
         stderr: "",
@@ -1285,13 +1384,10 @@ describe("CtrlProxyManager", function () {
     });
 
     test("should return false when service is not installed", async function () {
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: "",
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "",
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
         stderr: "",
@@ -1385,7 +1481,7 @@ describe("CtrlProxyManager", function () {
         // would otherwise accept it (status "skipped") without ever downloading.
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
           {
             stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
             stderr: "",
@@ -1416,7 +1512,7 @@ describe("CtrlProxyManager", function () {
       try {
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
           {
             stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
             stderr: "",
@@ -1442,13 +1538,10 @@ describe("CtrlProxyManager", function () {
     test("should report compatible when installed SHA matches expected", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -1470,13 +1563,10 @@ describe("CtrlProxyManager", function () {
 
     test("preserves device loss while inspecting an installed APK checksum", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       fakeAdb.setCommandError(
         `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
         new Error("error: device 'test-device' not found"),
@@ -1492,13 +1582,10 @@ describe("CtrlProxyManager", function () {
     test("should accept preinstalled APK when installed SHA mismatches expected by default", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -1536,7 +1623,7 @@ describe("CtrlProxyManager", function () {
       try {
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
           {
             stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
             stderr: "",
@@ -1587,7 +1674,7 @@ describe("CtrlProxyManager", function () {
       try {
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponse(
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
           {
             stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
             stderr: "",
@@ -1636,13 +1723,10 @@ describe("CtrlProxyManager", function () {
     test("should upgrade when installed SHA mismatches expected and installed download is explicitly allowed", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -1684,13 +1768,10 @@ describe("CtrlProxyManager", function () {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
 
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -1721,13 +1802,10 @@ describe("CtrlProxyManager", function () {
       (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
 
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -1766,7 +1844,7 @@ describe("CtrlProxyManager", function () {
       await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
       (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
 
-      const packageCheckCommand = `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`;
+      const packageCheckCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
       const localFakeAdb = new FakeAdbExecutor();
       localFakeAdb.setCommandResponseSequence(packageCheckCommand, [
         createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
@@ -1830,7 +1908,7 @@ describe("CtrlProxyManager", function () {
         await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
         (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
 
-        const packageCheckCommand = `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`;
+        const packageCheckCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
         const localFakeAdb = new FakeAdbExecutor();
         localFakeAdb.setCommandResponseSequence(packageCheckCommand, [
           createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
@@ -2032,13 +2110,10 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const fakeTimer = new FakeTimer();
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: "",
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "",
+        stderr: "",
+      });
 
       let downloadCalls = 0;
       AndroidCtrlProxyManager.resetInstances();
@@ -2069,13 +2144,10 @@ describe("CtrlProxyManager", function () {
     test("should reinstall when upgrade install fails", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -2142,10 +2214,10 @@ describe("CtrlProxyManager", function () {
         delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
         delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
 
-        fakeAdb.setCommandResponse(
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-          { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`, stderr: "" },
-        );
+        fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "",
+        });
         fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
           stdout: "package:/data/app/base.apk\n",
           stderr: "",
@@ -2182,10 +2254,10 @@ describe("CtrlProxyManager", function () {
         delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
         delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
 
-        fakeAdb.setCommandResponse(
-          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-          { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`, stderr: "" },
-        );
+        fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "",
+        });
         fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
           stdout: "package:/data/app/base.apk\n",
           stderr: "",
@@ -2365,13 +2437,10 @@ describe("CtrlProxyManager", function () {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
 
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
 
       AndroidCtrlProxyManager.resetInstances();
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
@@ -2451,13 +2520,10 @@ describe("CtrlProxyManager", function () {
     test("should mark download unavailable when offline", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -2488,13 +2554,10 @@ describe("CtrlProxyManager", function () {
     test("should not let forced update failures poison nonblocking readiness cache", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
-      localFakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      localFakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -2788,13 +2851,10 @@ describe("CtrlProxyManager", function () {
   describe("setup", function () {
     test("should allow repeated setup when service is already available", async function () {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
         stderr: "",

@@ -1,3 +1,5 @@
+import { getReturnDuration, validateSwipeTimingOptions } from "./swipeTiming";
+import { ActionableError } from "../../../models/ActionableError";
 import type { FencedGestureOptions } from "../ExecuteGesture";
 import { BootedDevice, Element, SwipeDirection } from "../../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -143,7 +145,21 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
-    const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
+    const timingError = validateSwipeTimingOptions(
+      {
+        boomerang: true,
+        apexPause: boomerang.apexPauseMs,
+        returnSpeed: boomerang.returnSpeed,
+      },
+      forwardDuration,
+    );
+    if (timingError) {
+      throw new ActionableError(timingError);
+    }
+    const returnDuration = getReturnDuration({
+      forwardDuration,
+      returnSpeed: boomerang.returnSpeed,
+    });
     const totalDuration = forwardDuration + boomerang.apexPauseMs + returnDuration;
 
     const forwardOptions = this.buildGestureOptions(gestureOptions, forwardDuration);
@@ -217,10 +233,6 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       fallbackReason:
         "XCTest-synthesized touches do not reach VoiceOver; no gesture fallback is available",
     };
-  }
-
-  private getReturnDuration(forwardDuration: number, returnSpeed: number): number {
-    return Math.max(1, Math.round(forwardDuration / returnSpeed));
   }
 
   private buildGestureOptions(

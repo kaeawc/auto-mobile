@@ -1,4 +1,8 @@
 import {
+  discoveryRefreshOutcome,
+  deviceListRefreshFailureMessage,
+} from "../daemon/devicePoolRefresh";
+import {
   DEVICE_SHUTDOWN_POLL_INTERVAL_MS,
   DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
   isShutdownTimeoutError,
@@ -4507,6 +4511,20 @@ export function getVerifiedWarmAndroidAvdIdentity(
   return undefined;
 }
 
+// This checked discovery is the pre-allocation refresh for a serial selector.
+// Use the same outcome as pool refresh before lifecycle resolution can mask its cause.
+function assertAndroidLifecycleDiscovery(
+  discovery: BootedDeviceDiscovery,
+  matchCount: number,
+): void {
+  if (matchCount === 0) {
+    const outcome = discoveryRefreshOutcome(discovery, 0);
+    if (outcome.failure !== undefined) {
+      throw new ActionableError(deviceListRefreshFailureMessage(outcome.failure));
+    }
+  }
+}
+
 export async function resolveAndroidStartStableDeviceLifecycleTarget(
   deviceId: string,
   deadlineMs: number,
@@ -4540,6 +4558,7 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
       `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
     );
   }
+  assertAndroidLifecycleDiscovery(bootedDiscovery, bootedMatches.length);
   const bootedMatch = bootedMatches[0];
   if (bootedMatch && !isVirtualAndroidDevice(bootedMatch)) {
     // Physical devices have no AVD representation; coordinate by the request selector.

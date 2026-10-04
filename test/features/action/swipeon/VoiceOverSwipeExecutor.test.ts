@@ -62,6 +62,32 @@ describe("VoiceOverSwipeExecutor", () => {
     perf = new NoOpPerformanceTracker();
   });
 
+  test("unsafe return duration rejects before either gesture", async () => {
+    const { executor: gesture, calls } = makeFakeGestureExecutor();
+    const executor = new VoiceOverSwipeExecutor(
+      { platform: "android", deviceId: "fake", name: "fake" },
+      gesture,
+      fakeIosClient,
+      fakeVoiceOverDetector,
+      fakeTimer,
+    );
+    for (const returnSpeed of [1e-320, 0.02, Infinity, NaN]) {
+      await expect(
+        executor.executeBoomerangGesture(
+          100,
+          500,
+          100,
+          200,
+          { duration: 300 },
+          { apexPauseMs: 100, returnSpeed },
+          perf,
+        ),
+      ).rejects.toThrow(/returnSpeed/);
+      expect(calls).toEqual([]);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+    }
+  });
+
   describe("non-iOS platforms", () => {
     test("uses standard swipe on Android regardless of VoiceOver state", async () => {
       const { executor, calls } = makeFakeGestureExecutor();

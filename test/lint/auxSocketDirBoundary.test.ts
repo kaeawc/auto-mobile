@@ -71,9 +71,22 @@ function isHomeSocket(node: Expression): boolean {
 }
 
 function violations(source: string): string[] {
-  const { program, errors } = parseSync("boundary.test.ts", source);
+  const parsed = parseSync("boundary.test.ts", source);
+  const { errors } = parsed;
   if (errors.length > 0) {
     return errors.map((error) => `parse error: ${error.message}`);
+  }
+  // Every recognized constructor ends in SocketServer; home paths require
+  // homedir, and listeners require both listen and a defaultPath/getSocketPath
+  // origin (even through local aliases). Escaped identifiers or
+  // computed string keys contain a backslash, so they always reach the visitor.
+  // Keep parsing all files above: a syntax error must still fail the inventory.
+  // Access program only for candidates (Oxc materializes its AST lazily).
+  if (
+    !/SocketServer|homedir|\\/.test(source) &&
+    !(source.includes("listen") && /defaultPath|getSocketPath/.test(source))
+  ) {
+    return [];
   }
   const found: string[] = [];
   const scopes: Map<string, boolean>[] = [new Map()];
@@ -125,7 +138,7 @@ function violations(source: string): string[] {
         report(node.start, "explicit production socket path");
       }
     },
-  }).visit(program);
+  }).visit(parsed.program);
   return found;
 }
 
@@ -139,6 +152,19 @@ describe("auxiliary socket test boundary (issue #7616)", () => {
     'const socket = DEVICE_DATA_STREAM_SOCKET_CONFIG["defaultPath"]; peer.listen(socket)',
   ])("rejects production socket spelling: %s", (source) => {
     expect(violations(source)).toHaveLength(1);
+  });
+
+  test("keeps escaped names and aliased listener paths in the candidate set", () => {
+    for (const source of [
+      String.raw`new DeviceDataStreamSocketServer()`,
+      String.raw`peer["listen"](CONFIG.defaultPath)`,
+      "const first = getSocketPath(); const second = first; peer.listen(second)",
+      String.raw`path.join(os["homedir"](), ".auto-mobile", "stream.sock")`,
+    ]) {
+      expect(violations(source)).toHaveLength(1);
+    }
+    expect(violations("const =")[0]).toStartWith("parse error:");
+    expect(violations("peer.listen(temporaryPath)")).toEqual([]);
   });
 
   test("normalizes Windows relative paths to POSIX form", () => {
@@ -161,8 +187,8 @@ describe("auxiliary socket test boundary (issue #7616)", () => {
   });
 
   let offenders: string[];
-  // Parse every test AST once during setup; individual assertions stay below
-  // the 100ms budget without a text prefilter that could miss new spellings.
+  // Check syntax in every file, then visit only conservative candidates during
+  // setup; individual assertions stay below the 100ms budget.
   beforeAll(() => {
     const files = testFiles(TEST_DIR);
     expect(files.length).toBeGreaterThan(0);

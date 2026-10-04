@@ -205,3 +205,17 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" != *missing* ]]
 }
+
+@test "npm missing check recognizes E404 before a large error log" {
+  cat > "$STUB_DIR/npm" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' 'npm error E404'
+awk 'BEGIN { for (i=0; i<20000; i++) print "npm error log filler" }'
+exit 1
+STUB
+  chmod +x "$STUB_DIR/npm"
+  awk '/^check_npm\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$SCRIPT" > "$BATS_TEST_TMPDIR/npm-helper.sh"
+  run bash -euo pipefail -c 'source "$1"; NPM_PACKAGE=@kaeawc/auto-mobile; check_npm 0.0.45' _ "$BATS_TEST_TMPDIR/npm-helper.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = missing ]
+}

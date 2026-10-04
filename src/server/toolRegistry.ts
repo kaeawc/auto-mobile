@@ -94,6 +94,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  stripNavigationToolParams,
 } from "../daemon/constants";
 
 /**
@@ -448,12 +449,7 @@ interface NavigationToolCallRecorder {
 export function stripNavigationInternalParams(
   args: Record<string, unknown>,
 ): Record<string, unknown> {
-  const clean = { ...args };
-  delete clean.__mcpSessionId;
-  delete clean.__executionId;
-  delete clean.__executionStartTime;
-  delete clean[INTERNAL_NO_DIFF_PARAM];
-  return clean;
+  return stripNavigationToolParams(args);
 }
 
 function withAmbientDeviceContext(

@@ -1,3 +1,4 @@
+import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
   Plan,
@@ -26,8 +27,8 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
-import { isDeviceLostError } from "../../server/deviceLossOutcome";
-import { formatToolParamError } from "../../server/toolParamError";
+import { isDeviceLostError } from "../../models/DeviceLostError";
+import { formatToolParamError } from "../toolParamError";
 import { stripUndeclaredSessionUuid } from "../toolParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
@@ -396,6 +397,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
     sessionUuid: string | undefined,
   ): Record<string, unknown> {
     const enhancedParams: Record<string, unknown> = { ...step.params };
+    for (const key of Object.keys(enhancedParams)) {
+      if (isInternalStepParam(key)) {
+        delete enhancedParams[key];
+      }
+    }
 
     if (!tool.requiresDevice) {
       return enhancedParams;

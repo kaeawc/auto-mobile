@@ -84,6 +84,7 @@ import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
+import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
@@ -850,7 +851,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   // A hierarchy has object identity for its short trip from extraction to broadcast. Retaining the
   // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
-  private val extractedHierarchyFrameContexts =
+  private val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
     Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
 
   @Volatile private var isRecording: Boolean = false
@@ -1383,6 +1384,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 setBroadcastResult(code)
               }
             },
+            batchId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
           )
         } catch (e: Exception) {
           Log.e(TAG, "Error handling event batch broadcast", e)

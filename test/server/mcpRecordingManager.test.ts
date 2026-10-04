@@ -198,6 +198,21 @@ describe("mcpRecordingManager", () => {
   });
 
   describe("stopMcpRecording", () => {
+    test("exports launchApp without transport metadata", () => {
+      const timer = new FakeTimer();
+      startMcpRecording({ timer });
+      getMcpRecorder()!.record("launchApp", {
+        appId: "com.android.settings",
+        sessionUuid: "session",
+        __mcpRequestTimeoutMs: 120000,
+        __mcpRequestDeadlineMs: 1790948577851,
+        __foo: "reserved",
+      });
+      const result = stopMcpRecording({ planName: "clean-launch", timer });
+      expect(result.planContent).toContain("appId: com.android.settings");
+      expect(result.planContent).not.toContain("__");
+    });
+
     test("throws when no recording active", () => {
       expect(() => stopMcpRecording()).toThrow("No active MCP recording");
     });

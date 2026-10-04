@@ -19,7 +19,7 @@ fi
 git fetch --tags --force >/dev/null 2>&1 || true
 
 if [ -z "$SINCE_TAG" ]; then
-  if git tag --list "$CURRENT_TAG" | grep -q .; then
+  if git tag --list "$CURRENT_TAG" | grep . >/dev/null; then
     SINCE_TAG=$(git tag --sort=-creatordate | awk -v current="$CURRENT_TAG" '$0 != current {print; exit}')
   else
     SINCE_TAG=$(git tag --sort=-creatordate | head -n1)

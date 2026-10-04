@@ -770,10 +770,12 @@ export class TakeScreenshot implements ScreenshotService {
       : `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
     // Use larger maxBuffer (50MB) to handle high-resolution screenshots
     const maxBuffer = 50 * 1024 * 1024; // 50MB
+    let captureDispatched = false;
     let captureCompleted = false;
     const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, async () => {
       try {
         throwIfAborted(signal);
+        captureDispatched = true;
         const captured = await this.adb.executeCommand(
           command,
           undefined,
@@ -785,7 +787,7 @@ export class TakeScreenshot implements ScreenshotService {
         return captured;
       } finally {
         // Successful captures already remove the file in the unchanged chained command.
-        if (!readOnly && (!captureCompleted || signal?.aborted)) {
+        if (captureDispatched && !readOnly && (!captureCompleted || signal?.aborted)) {
           this.removeBase64TempScreenshot(tempFile);
         }
       }

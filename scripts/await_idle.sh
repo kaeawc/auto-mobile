@@ -273,9 +273,9 @@ wait_for_process_idle() {
         local dumpsys_output
         dumpsys_output=$($ADB_CMD shell dumpsys activity)
 
-        if echo "$dumpsys_output" | grep -q "mSleeping=false" &&
-            echo "$dumpsys_output" | grep -q "mBooted=true" &&
-            echo "$dumpsys_output" | grep -q "mBooting=false"; then
+        if echo "$dumpsys_output" | grep "mSleeping=false" >/dev/null &&
+            echo "$dumpsys_output" | grep "mBooted=true" >/dev/null &&
+            echo "$dumpsys_output" | grep "mBooting=false" >/dev/null; then
             echo "Device is process idle"
             return 0
         fi

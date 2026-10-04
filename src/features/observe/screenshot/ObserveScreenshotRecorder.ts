@@ -161,8 +161,9 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       .finally(() => {
         perf.endOperation("screenshot");
       })
-      .catch(() => {
-        /* error already recorded in onComplete */
+      .catch((error) => {
+        // onComplete already records capture failures; this prevents a duplicate unhandled rejection.
+        logger.debug(`[OBSERVE] Screenshot completion rejected: ${errorMessage(error)}`);
       });
   }
 

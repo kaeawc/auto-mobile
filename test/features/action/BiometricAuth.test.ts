@@ -1,4 +1,5 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { BiometricAuth } from "../../../src/features/action/BiometricAuth";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { ObserveResult, BootedDevice } from "../../../src/models";
@@ -72,6 +73,24 @@ describe("BiometricAuth", () => {
   });
 
   describe("execute - match action", () => {
+    test("logs the underlying emulator biometric exception once", async () => {
+      fakeAdb.setCommandError("emu finger touch 1", new Error("console disconnected"));
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await biometricAuth.execute({ action: "match" });
+        expect(result.success).toBe(false);
+        expect(
+          warnSpy.mock.calls.filter(([message]) =>
+            String(message).startsWith("Failed to execute biometric action:"),
+          ),
+        ).toHaveLength(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          "Failed to execute biometric action: console disconnected",
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
     test("should execute fingerprint match with default ID", async () => {
       fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });

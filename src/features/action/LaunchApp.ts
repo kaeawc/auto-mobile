@@ -481,8 +481,11 @@ export class LaunchApp extends BaseVisualChange {
               await perf.track("terminateApp", async () => {
                 try {
                   await terminator.terminateApp(bundleId);
-                } catch {
-                  // App might not be running
+                } catch (error) {
+                  // Cold-start cleanup may find no running app; launching still proceeds.
+                  logger.debug(
+                    `[LaunchApp] Pre-launch termination unavailable: ${errorMessage(error)}`,
+                  );
                 } finally {
                   this.cacheInvalidator.invalidate(this.device);
                 }
@@ -722,8 +725,8 @@ export class LaunchApp extends BaseVisualChange {
         await xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs);
         logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms`);
         return;
-      } catch {
-        // Fall through to warn
+      } catch (error) {
+        logger.warn(`[LaunchApp] iOS hierarchy sync failed: ${errorMessage(error)}`);
       }
     }
 
@@ -1849,7 +1852,9 @@ export class LaunchApp extends BaseVisualChange {
           return { success: false };
         } catch (error) {
           this.assertLaunchNotAborted(signal);
-          logger.info(`[LaunchApp] Intent launch failed: ${error}, falling back to monkey`);
+          logger.warn(
+            `[LaunchApp] Intent launch failed: ${errorMessage(error)}, falling back to monkey`,
+          );
           return { success: false };
         }
       });
@@ -1892,8 +1897,8 @@ export class LaunchApp extends BaseVisualChange {
             return { success: true };
           } catch (error) {
             this.assertLaunchNotAborted(signal);
-            logger.info(
-              `[LaunchApp] Monkey launch failed: ${error}, falling back to activity discovery`,
+            logger.warn(
+              `[LaunchApp] Monkey launch failed: ${errorMessage(error)}, falling back to activity discovery`,
             );
             return { success: false };
           }

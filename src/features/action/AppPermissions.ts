@@ -1,4 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -474,8 +475,11 @@ export class AppPermissions {
           permissions: mapAndroidPermissionStates(permissionNames, granted),
         };
       }
-    } catch {
-      // fall through to ADB
+    } catch (error) {
+      // CtrlProxy is optional; ADB can read permissions when it is unavailable.
+      logger.debug(
+        `[AppPermissions] CtrlProxy permission read unavailable: ${errorMessage(error)}`,
+      );
     }
 
     try {

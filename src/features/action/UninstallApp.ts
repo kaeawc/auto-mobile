@@ -223,6 +223,7 @@ export class UninstallApp {
         keepData: false, // iOS doesn't support keeping data during uninstall
       };
     } catch (error) {
+      logger.warn(`[UninstallApp] iOS uninstall failed: ${errorMessage(error)}`);
       return {
         success: false,
         packageName: bundleId,
@@ -320,6 +321,7 @@ export class UninstallApp {
       return this.successfulAndroidUninstall(packageName, keepData, targetUserId);
     } catch (error) {
       throwIfAborted(signal);
+      logger.warn(`[UninstallApp] Android uninstall failed: ${errorMessage(error)}`);
       return {
         success: false,
         packageName,

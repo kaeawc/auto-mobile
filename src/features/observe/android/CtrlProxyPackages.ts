@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
 
 export interface PackageInfoOptions {
   includePermissions?: boolean;
@@ -89,6 +90,7 @@ export class CtrlProxyPackages {
 
       return await resultPromise;
     } catch (error) {
+      logger.warn(`[CtrlProxyPackages] installed_packages request failed: ${errorMessage(error)}`);
       return {
         success: false,
         userId: userId ?? -1,
@@ -173,6 +175,7 @@ export class CtrlProxyPackages {
 
       return await resultPromise;
     } catch (error) {
+      logger.warn(`[CtrlProxyPackages] package_info request failed: ${errorMessage(error)}`);
       return {
         success: false,
         packageName,
@@ -246,6 +249,7 @@ export class CtrlProxyPackages {
 
       return await resultPromise;
     } catch (error) {
+      logger.warn(`[CtrlProxyPackages] launch_intent request failed: ${errorMessage(error)}`);
       return {
         success: false,
         packageName,

@@ -1392,6 +1392,35 @@ describe("LaunchApp", () => {
     }
   });
 
+  test("warns with the underlying iOS hierarchy sync error and continues", async () => {
+    const client = {
+      async getLatestHierarchy() {
+        return null;
+      },
+      async requestHierarchySync() {
+        throw new Error("hierarchy socket closed");
+      },
+    };
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    const iosLaunchApp = new LaunchApp({ ...device, platform: "ios" }, fakeAdb, null, fakeTimer);
+    try {
+      await (
+        iosLaunchApp as unknown as {
+          waitForIosHierarchyReady(timeoutMs: number): Promise<void>;
+        }
+      ).waitForIosHierarchyReady(5000);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[LaunchApp] iOS hierarchy sync failed: hierarchy socket closed",
+      );
+    } finally {
+      warnSpy.mockRestore();
+      getInstanceSpy.mockRestore();
+    }
+  });
+
   test("resolves iOS hierarchy readiness via sync and unsubscribes the losing push", async () => {
     const iosDevice: BootedDevice = {
       name: "test-ios-device",
@@ -1590,6 +1619,41 @@ describe("LaunchApp", () => {
         ): Promise<{ success: boolean; activityName?: string }>;
       }
     ).performLaunch(launchPackage, undefined, userId, new DefaultPerformanceTracker(fakeTimer));
+
+  test("warns with the intent launch exception before continuing to monkey", async () => {
+    fakeAdb.setCommandError(
+      "shell am start --user 0 -a android.intent.action.MAIN",
+      new Error("intent dispatch failed"),
+    );
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await performFallbackLaunch();
+      expect(result).toMatchObject({ success: true, activityName: "monkey_launch" });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[LaunchApp] Intent launch failed: intent dispatch failed, falling back to monkey",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("warns with the monkey launch exception before continuing to activity discovery", async () => {
+    fakeAdb.setCommandResponse("shell am start --user 0 -a android.intent.action.MAIN", {
+      stdout: "Error: no launcher activity",
+      stderr: "",
+    });
+    fakeAdb.setCommandError("shell monkey", new Error("monkey dispatch failed"));
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await performFallbackLaunch();
+      expect(result.success).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[LaunchApp] Monkey launch failed: monkey dispatch failed, falling back to activity discovery",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 
   describe("ADB launcher fallback contract", () => {
     let ctrlProxySpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;

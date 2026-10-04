@@ -362,6 +362,30 @@ describe("resolveDeviceDataRoot", () => {
 });
 
 describe("BulletinBoardAuthorizationReader", () => {
+  test("warns with the temp cleanup error while preserving decoded authorization", async () => {
+    const b64 = Buffer.from("bplist00-placeholder").toString("base64");
+    const { deps } = fakeDeps({
+      outer: outerXml({ "com.apple.MobileSMS": b64 }),
+      nested: nestedXml({ authorizationStatus: 2 }),
+    });
+    deps.rmTemp = async () => {
+      throw new Error("temp removal denied");
+    };
+    const reader = new BulletinBoardAuthorizationReader(deps);
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await reader.read(SIM_UDID, "com.apple.MobileSMS");
+      expect(result.allowed).toBe(true);
+      expect(result.authorizationStatus).toBe("authorized");
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[iOS] Failed to remove notification settings temp file: temp removal denied",
+      );
+      expect(warnSpy.mock.calls[0][0]).not.toContain(b64);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test.each([5, 99, -1, 1.5])(
     "unrecognized authorizationStatus %s returns unknown, not denied",
     async (authorizationStatus) => {

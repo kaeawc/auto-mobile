@@ -222,6 +222,8 @@ final class FramingParityTests: XCTestCase {
             "complete request with body"
         )
         XCTAssertNil(RewriteFraming.completeHTTPRequestLength(in: partialBody), "incomplete body → nil")
+        XCTAssertEqual(RewriteFraming.classifyHTTPRequest(in: withBody), .complete(length: withBody.count))
+        XCTAssertEqual(RewriteFraming.classifyHTTPRequest(in: partialBody), .incomplete)
     }
 
     // MARK: - Handshake digest (known SHA-1 vectors)

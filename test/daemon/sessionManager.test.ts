@@ -30,6 +30,7 @@ import { DEVICE_SESSION_RETENTION_MAX_AGE_MS } from "../../src/db/deviceSessionR
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
+import { logger } from "../../src/utils/logger";
 
 class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
   private deferredWrite: Promise<void> | null = null;
@@ -2048,6 +2049,160 @@ describe("SessionManager", () => {
   });
 
   describe("rebindSession", () => {
+    test("bounds a rebind whose keep-awake restoration never settles", async () => {
+      const restorationStarted = Promise.withResolvers<void>();
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({
+          restore: () => {
+            restorationStarted.resolve();
+            return new Promise<void>(() => {});
+          },
+        }),
+      );
+      try {
+        await manager.createSession("s1", "device-1", "android");
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+        let rebound = false;
+        const rebind = manager.rebindSession("s1", "device-2", "android").then((session) => {
+          rebound = true;
+          return session;
+        });
+        await restorationStarted.promise;
+
+        await fakeTimer.advanceTimeAsync(999);
+        expect(rebound).toBe(false);
+        expect(manager.getDeviceForSession("s1")).toBe("device-1");
+        await fakeTimer.advanceTimeAsync(1);
+        expect(rebound).toBe(true);
+        await expect(rebind).resolves.toMatchObject({ assignedDevice: "device-2" });
+        expect(manager.getDeviceForSession("s1")).toBe("device-2");
+        expect(manager.getPendingDeviceCleanup("device-1")).not.toBeNull();
+        expect(manager.getPendingDeviceCleanup("device-2")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test.each(["resolve", "reject"] as const)(
+      "quarantines the old device until timed-out rebind keep-awake restoration settles (%s)",
+      async (outcome) => {
+        const restoration = Promise.withResolvers<void>();
+        const restorationStarted = Promise.withResolvers<void>();
+        const restored: Array<{ deviceId: string; state: KeepScreenAwakeState }> = [];
+        const warning = spyOn(logger, "warn").mockImplementation(() => {});
+        const manager = new SessionManager(
+          fakeTimer,
+          new FakeDeviceSessionPersistence(),
+          () => new FakeDbWriteBarrier(),
+          (device) => ({
+            restore: async (state) => {
+              restorationStarted.resolve();
+              await restoration.promise;
+              restored.push({ deviceId: device.deviceId, state });
+            },
+          }),
+        );
+        const state: KeepScreenAwakeState = { applied: true, method: "svc", svcWasEnabled: false };
+        try {
+          const session = await manager.createSession("s1", "device-1", "android");
+          manager.setKeepScreenAwake("s1", state);
+          let rebound = false;
+          const rebind = manager
+            .rebindSession("s1", "device-2", "android")
+            .then((reboundSession) => {
+              rebound = true;
+              return reboundSession;
+            });
+          await restorationStarted.promise;
+          await fakeTimer.advanceTimeAsync(1_000);
+          expect(rebound).toBe(true);
+          await expect(rebind).resolves.toBe(session);
+          expect(manager.getDeviceForSession("s1")).toBe("device-2");
+          expect(session.cacheData.keepScreenAwake).toBeUndefined();
+          expect(warning).toHaveBeenCalledWith(
+            "Timed out after 1000ms restoring keep-awake state for session s1",
+          );
+          const cleanup = manager.getPendingDeviceCleanup("device-1");
+          expect(cleanup).not.toBeNull();
+          expect(manager.getPendingDeviceCleanup("device-2")).toBeNull();
+
+          if (outcome === "reject") {
+            restoration.reject(new Error("late keep-awake restore failure"));
+          } else {
+            restoration.resolve();
+          }
+          await expect(cleanup).resolves.toBeUndefined();
+          expect(manager.getPendingDeviceCleanup("device-1")).toBeNull();
+          expect(manager.getDeviceForSession("s1")).toBe("device-2");
+          expect(restored).toEqual(outcome === "resolve" ? [{ deviceId: "device-1", state }] : []);
+        } finally {
+          restoration.resolve();
+          manager.stopCleanupTimer();
+          warning.mockRestore();
+        }
+      },
+    );
+
+    test("rebinds without advancing time when keep-awake restoration completes immediately", async () => {
+      const restoredDevices: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        (device) => ({
+          restore: async () => {
+            restoredDevices.push(device.deviceId);
+          },
+        }),
+      );
+      try {
+        await manager.createSession("s1", "device-1", "android");
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+
+        await expect(manager.rebindSession("s1", "device-2", "android")).resolves.toMatchObject({
+          assignedDevice: "device-2",
+        });
+        expect(fakeTimer.now()).toBe(0);
+        expect(restoredDevices).toEqual(["device-1"]);
+        expect(manager.getPendingDeviceCleanup("device-1")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("warns and rebinds when keep-awake restoration rejects immediately", async () => {
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({
+          restore: async () => {
+            throw new Error("immediate keep-awake restore failure");
+          },
+        }),
+      );
+      try {
+        await manager.createSession("s1", "device-1", "android");
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+
+        await expect(manager.rebindSession("s1", "device-2", "android")).resolves.toMatchObject({
+          assignedDevice: "device-2",
+        });
+        expect(fakeTimer.now()).toBe(0);
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining("immediate keep-awake restore failure"),
+        );
+        expect(manager.getPendingDeviceCleanup("device-1")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+        warning.mockRestore();
+      }
+    });
+
     test("times out a stalled setup without persisting or publishing the rebind", async () => {
       const timer = new FakeTimer();
       const repository = new DeferredDeviceSessionPersistence();

@@ -1,6 +1,7 @@
 import type { PerformanceAuditHistoryEntry } from "../db/performanceAuditRepository";
+import type { SocketRequest } from "./socketServer/SocketServerTypes";
 
-export interface PerformanceStreamSocketRequest {
+export interface PerformanceStreamSocketRequest extends SocketRequest {
   command: "poll";
   sinceTimestamp?: string;
   sinceId?: number;

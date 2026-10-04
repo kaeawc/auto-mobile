@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
+import { readFileSync } from "node:fs";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
 import type { RawTouchFrame, GestureEvent } from "../../../../src/features/record/android/types";
 
@@ -63,6 +64,75 @@ describe("TouchFrameReconstructor", () => {
 
   beforeEach(() => {
     r = new TouchFrameReconstructor();
+  });
+
+  test("captured API 36 repeated taps retain coordinates without position updates", () => {
+    const capture = readFileSync(
+      `${import.meta.dir}/../../../fixtures/android-getevent/same-coordinate-taps-api36.txt`,
+      "utf8",
+    );
+    const frames = feedLines(r, capture.split("\n")).filter(isFrame);
+    expect(frames).toHaveLength(4);
+    expect(frames[0].activeSlots).toEqual([
+      { slotId: 0, trackingId: 0x321, x: 27852, y: 16165, pressure: 0 },
+    ]);
+    expect(frames[0].releasedSlots).toEqual([]);
+    expect(frames[1].activeSlots).toEqual([]);
+    expect(frames[1].releasedSlots).toEqual([0]);
+    expect(frames[2].activeSlots).toEqual([
+      { slotId: 0, trackingId: 0x322, x: 27852, y: 16165, pressure: 0 },
+    ]);
+    expect(frames[2].releasedSlots).toEqual([]);
+    expect(frames[3].activeSlots).toEqual([]);
+    expect(frames[3].releasedSlots).toEqual([0]);
+  });
+
+  test("two slots retain independent coordinates across contacts and partial updates", () => {
+    const frames = feedLines(r, [
+      ...TWO_FINGER_DOWN,
+      "[  3.0] EV_ABS ABS_MT_TRACKING_ID ffffffff",
+      "[  3.0] EV_ABS ABS_MT_SLOT 00000000",
+      "[  3.0] EV_ABS ABS_MT_TRACKING_ID ffffffff",
+      "[  3.0] EV_SYN SYN_REPORT 00000000",
+      "[  4.0] EV_ABS ABS_MT_TRACKING_ID 00000003",
+      "[  4.0] EV_ABS ABS_MT_POSITION_X 00000101",
+      "[  4.0] EV_ABS ABS_MT_SLOT 00000001",
+      "[  4.0] EV_ABS ABS_MT_TRACKING_ID 00000004",
+      "[  4.0] EV_ABS ABS_MT_POSITION_Y 00000401",
+      "[  4.0] EV_SYN SYN_REPORT 00000000",
+    ]).filter(isFrame);
+    expect(frames[1].releasedSlots).toEqual([0, 1]);
+    expect(frames[2].activeSlots).toEqual([
+      { slotId: 0, trackingId: 3, x: 0x101, y: 0x200, pressure: 0 },
+      { slotId: 1, trackingId: 4, x: 0x300, y: 0x401, pressure: 0 },
+    ]);
+    expect(frames[2].releasedSlots).toEqual([]);
+  });
+
+  test("pressure is retained after release when the next contact omits it", () => {
+    const frames = feedLines(r, [
+      ...SINGLE_FINGER_DOWN,
+      "[  1.0] EV_ABS ABS_MT_PRESSURE 00000064",
+      ...SINGLE_FINGER_UP,
+      "[  2.0] EV_ABS ABS_MT_TRACKING_ID 00000002",
+      "[  2.0] EV_SYN SYN_REPORT 00000000",
+    ]).filter(isFrame);
+    expect(frames[2].activeSlots[0].pressure).toBe(100);
+  });
+
+  test("releases are reported once and never for slots that were inactive", () => {
+    const frames = feedLines(r, [
+      ...SINGLE_FINGER_DOWN,
+      ...SINGLE_FINGER_UP,
+      "[  2.0] EV_SYN SYN_REPORT 00000000",
+      "[  2.0] EV_ABS ABS_MT_TRACKING_ID ffffffff",
+      "[  2.0] EV_ABS ABS_MT_SLOT 00000001",
+      "[  2.0] EV_ABS ABS_MT_POSITION_X 00000064",
+      "[  2.0] EV_ABS ABS_MT_TRACKING_ID ffffffff",
+      "[  2.0] EV_SYN SYN_REPORT 00000000",
+    ]).filter(isFrame);
+    expect(frames.map((frame) => frame.releasedSlots)).toEqual([[], [0], [], []]);
+    expect(frames[3].activeSlots).toEqual([]);
   });
 
   test("single finger tap produces two frames (DOWN then UP)", () => {

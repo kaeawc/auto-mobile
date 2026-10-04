@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "\ud800": "unknown"
+    }
+  },
+  "expectedPath": "root[\"\\ud800\"]"
+}

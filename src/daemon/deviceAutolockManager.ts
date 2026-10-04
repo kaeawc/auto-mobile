@@ -672,6 +672,16 @@ export class DeviceAutolockManager {
     this.clearMcpAutolockMappings(sessionId);
   }
 
+  /** Unlock only the captured old device while the session remains alive after rebind. */
+  clearRebindAutolockLock(sessionId: string, deviceId: string, expectedDevice: PooledDevice): void {
+    const device = this.pool.getDevice(deviceId);
+    if (!device || device !== expectedDevice || device.autolockSessionId !== sessionId) {
+      return;
+    }
+
+    device.autolockSessionId = undefined;
+  }
+
   /** Clear autolock-only state for an explicit release without freeing early. */
   clearReleasedAutolockState(sessionId: string, deviceId: string): void {
     const device = this.pool.getDevice(deviceId);

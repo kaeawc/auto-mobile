@@ -184,6 +184,16 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
       expect(rules(source)).not.toContain("unfunneled-mkdtemp");
     });
 
+    test("accepts binder wiring and still rejects raw mkdtemp in a binder suite", () => {
+      const source = [
+        'import { bindFileBackedDbHarness } from "./withFileBackedDb";',
+        "const getHarness = bindFileBackedDbHarness();",
+        'const dir = await getHarness().makeTempDbDir("am-");',
+      ].join("\n");
+      expect(rules(source)).toEqual([]);
+      expect(rules(source + '\nconst raw = mkdtemp("am-");')).toContain("unfunneled-mkdtemp");
+    });
+
     test("does NOT match a camelCase identifier like `makeFakeMkdtemp`", () => {
       const source = [
         'import { createFileBackedDbHarness } from "./withFileBackedDb";',

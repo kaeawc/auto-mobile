@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import { createFileBackedDbHarness } from "./withFileBackedDb";
+import { bindFileBackedDbHarness } from "./withFileBackedDb";
 
 /**
  * Verifies the cached-error migration contract that issue #2784 depends on and
@@ -19,19 +19,11 @@ import { createFileBackedDbHarness } from "./withFileBackedDb";
 describe("database startup migration failure contract", () => {
   // Shared harness: fresh module import, tracked temp dirs cleaned with the
   // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   test("ensureMigrations rethrows the cached startup error without floating a rejection", async () => {
     // Point the DB path at a directory so opening the sqlite file fails.
-    const tempDir = await harness.makeTempDbDir("am-db-fail-");
+    const tempDir = await getHarness().makeTempDbDir("am-db-fail-");
     process.env.AUTOMOBILE_DB_PATH = tempDir; // a directory, not a file
 
     const unhandled: unknown[] = [];
@@ -41,7 +33,7 @@ describe("database startup migration failure contract", () => {
     process.on("unhandledRejection", onUnhandled);
 
     try {
-      const db = await harness.importFreshDatabaseModule();
+      const db = await getHarness().importFreshDatabaseModule();
 
       await expect(db.ensureMigrations()).rejects.toThrow(
         /refusing to run queries until the daemon restarts/i,

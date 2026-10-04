@@ -292,7 +292,9 @@ const waitForElementBaseSchema = z
     if (value.textMatch === "regex" && value.text !== undefined) {
       try {
         new RegExp(value.text);
-      } catch {
+      } catch (error) {
+        // Invalid caller regexes are expected validation failures reported by the schema.
+        logger.debug(`waitFor regex validation failed: ${errorMessage(error)}`);
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "text must be a valid regular expression when textMatch is regex",

@@ -838,7 +838,12 @@ async function enforceInProgressSizeCap(
     return;
   }
   const { statFileSize } = await getVideoRecordingDependencies();
-  const sizeBytes = await statFileSize(filePath);
+  // Host output can be absent during capture (Android pulls it only at stop).
+  // Keep injected size probes intact; only the default probe's expected missing
+  // file diagnostic should be quiet on recurring monitor ticks.
+  const sizeBytes = await (statFileSize === getFileSize
+    ? getFileSize(filePath, true)
+    : statFileSize(filePath));
   if (sizeBytes < capBytes) {
     return;
   }
@@ -1015,12 +1020,20 @@ async function resolveConfigInput(
   return mergeConfigInput(baseInput, overrides);
 }
 
-async function getFileSize(filePath: string): Promise<number> {
+async function getFileSize(filePath: string, inProgress = false): Promise<number> {
   try {
     const stats = await fsPromises.stat(filePath);
     return stats.size;
-  } catch {
-    logger.warn(`[VideoRecording] Missing recording file at ${redactHomeDir(filePath)}`);
+  } catch (error) {
+    if (inProgress && error instanceof Error && "code" in error && error.code === "ENOENT") {
+      // A live capture may not create its host file until finalization/adb pull.
+      logger.debug(
+        `[VideoRecording] Missing recording file at ${redactHomeDir(filePath)} during capture; ` +
+          "the host file may be unavailable until finalization (Android adb pull).",
+      );
+    } else {
+      logger.warn(`[VideoRecording] Missing recording file at ${redactHomeDir(filePath)}`, error);
+    }
     return 0;
   }
 }
@@ -1380,7 +1393,14 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
     transitions: metadata.transitions,
   });
 
-  const eviction = await enforceArchiveLimit(metadata.config.maxArchiveSizeMb);
+  const eviction = await enforceArchiveLimit(metadata.config.maxArchiveSizeMb, resolvedId);
+  if (eviction.maxSizeBytes > 0 && eviction.currentSizeBytes > eviction.maxSizeBytes) {
+    metadata.warnings = [
+      ...(metadata.warnings ?? []),
+      `Archive size ${eviction.currentSizeBytes} bytes exceeds limit ${eviction.maxSizeBytes} bytes ` +
+        `after eviction; just-finished recording ${resolvedId} was kept.`,
+    ];
+  }
 
   await notifyVideoRecordingResources([metadata.recordingId]);
 
@@ -1502,7 +1522,7 @@ export async function getLatestVideoRecordingMetadata(
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({
     status: ["completed", "interrupted"],
-    orderByLastAccessed: "desc",
+    orderByStartedAt: "desc",
     limit: 1,
     ownerSessionUuid: scope.ownerSessionUuid,
   });
@@ -1545,7 +1565,10 @@ async function removeVideoRecordingArtifacts(filePath: string): Promise<void> {
   await fsPromises.rm(recordingDir, { recursive: true, force: true });
 }
 
-async function enforceArchiveLimit(maxArchiveSizeMb: number): Promise<VideoArchiveEvictionResult> {
+async function enforceArchiveLimit(
+  maxArchiveSizeMb: number,
+  protectedRecordingId?: string,
+): Promise<VideoArchiveEvictionResult> {
   const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({
@@ -1566,6 +1589,10 @@ async function enforceArchiveLimit(maxArchiveSizeMb: number): Promise<VideoArchi
   const evictedRecordingIds: string[] = [];
 
   for (const recording of recordings) {
+    // The stop result promises this file, even when it alone exceeds the cap.
+    if (recording.recordingId === protectedRecordingId) {
+      continue;
+    }
     if (currentSizeBytes <= maxSizeBytes) {
       break;
     }

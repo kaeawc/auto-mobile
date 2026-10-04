@@ -17,21 +17,12 @@ extension ElementLocator {
         /// locally with no further IPC. Zero-area nodes are skipped to mirror the
         /// old `!frame.isEmpty` visibility filter.
         static func collectTextInputSnapshots(from snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
-            var snapshots: [XCUIElementSnapshot] = []
-            collectTextInputSnapshots(from: snapshot, into: &snapshots)
-            return snapshots
-        }
-
-        private static func collectTextInputSnapshots(
-            from snapshot: XCUIElementSnapshot,
-            into snapshots: inout [XCUIElementSnapshot]
-        ) {
-            if textInputElementTypes.contains(snapshot.elementType), !snapshot.frame.isEmpty {
-                snapshots.append(snapshot)
-            }
-            for child in snapshot.children {
-                collectTextInputSnapshots(from: child, into: &snapshots)
-            }
+            return collectTextInputNodes(
+                snapshot,
+                isTextInput: { textInputElementTypes.contains($0.elementType) },
+                frame: { $0.frame },
+                children: { $0.children }
+            )
         }
 
         /// Get system alerts from the app snapshot and springboard.

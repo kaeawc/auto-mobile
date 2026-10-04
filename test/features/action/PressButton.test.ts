@@ -292,7 +292,7 @@ describe("PressButton", () => {
     }
   });
 
-  test("android fails fast when the global action exhausts the deadline before the ADB fallback", async () => {
+  test("android reports an indeterminate press when a dispatched global action exhausts the deadline", async () => {
     const androidDevice: BootedDevice = {
       deviceId: "android-device",
       platform: "android",
@@ -303,10 +303,20 @@ describe("PressButton", () => {
     let adbCalled = false;
 
     const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestGlobalAction: async (action: string, timeoutMs: number) => {
-        // Consume the entire budget.
+      requestGlobalAction: async (
+        ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
+      ) => {
+        const [action, timeoutMs = 5000] = args;
+        args[5]?.();
+        // Consume the entire budget after the request was sent.
         fakeTimer.advanceTime(timeoutMs);
-        return { success: false, action, totalTimeMs: timeoutMs, error: "timeout" };
+        return {
+          success: false,
+          action,
+          totalTimeMs: timeoutMs,
+          error: "timeout",
+          acknowledged: false,
+        };
       },
     } as any);
 
@@ -329,10 +339,10 @@ describe("PressButton", () => {
 
       const result = await pressButton.press("back", 500);
 
-      // Deadline exhausted -> structured failure, and the unbounded ADB keyevent
-      // is never dispatched.
+      // A lost reply after dispatch is indeterminate even when the deadline is exhausted.
       expect(result.success).toBe(false);
-      expect(result.error).toContain("deadline exhausted");
+      expect(result.error).toContain("may have been applied");
+      expect(result.error).toContain("timeout");
       expect(adbCalled).toBe(false);
     } finally {
       getInstanceSpy.mockRestore();

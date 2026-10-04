@@ -1071,6 +1071,7 @@ export class DevicePool {
       getTimer: () => this.timer,
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       hasReusableSerial: (device) => this.hasReusableSerial(device),
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
       cancelDeviceExecutions: (deviceId, reason, options) =>
         this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(deviceId, reason, options) ??
         Promise.resolve(0),

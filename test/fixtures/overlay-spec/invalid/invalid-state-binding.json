@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "absent"
+    }
+  },
+  "expectedPath": "root.stateKey"
+}

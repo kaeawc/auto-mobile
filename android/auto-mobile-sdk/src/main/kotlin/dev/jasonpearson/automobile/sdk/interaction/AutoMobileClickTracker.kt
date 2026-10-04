@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.interaction
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
@@ -13,7 +14,10 @@ import android.view.View
 import android.view.Window
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.MainThread
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import java.lang.ref.WeakReference
 
 /**
  * Automatic click tracking for all Activities via Window.Callback chaining.
@@ -50,8 +54,15 @@ internal object AutoMobileClickTracker {
   @Volatile private var lastTapProcessedAt = 0L
   private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
 
+  /**
+   * Catches up the Activity supplied by [context], including through ContextWrapper chains.
+   * Application-only initialization cannot discover an already-resumed Activity until a later
+   * pause/resume callback (or post-resume on API 29+) supplies it. A fully resumed Activity that
+   * remains idle cannot be reached from an Application context alone.
+   */
   @MainThread
-  internal fun initialize(application: Application, appId: String?) {
+  internal fun initialize(context: Context, appId: String?) {
+    val application = context.applicationContext as? Application ?: return
     this.isInitialized = true
     this.applicationId = appId
 
@@ -64,24 +75,57 @@ internal object AutoMobileClickTracker {
         override fun onActivityResumed(activity: Activity) {
           // Wrap on resumed, not created — ensures window is fully set up
           // and that we wrap AFTER frameworks like AppCompat set their callback
-          if (wrappedActivities[activity] != true) {
-            wrapWindowCallback(activity)
-            wrappedActivities[activity] = true
-          }
+          wrapWindowCallback(activity)
         }
 
-        override fun onActivityPaused(activity: Activity) {}
+        override fun onActivityPostResumed(activity: Activity) {
+          // API 29+ delivers this after onPostResume, covering registration during onResume.
+          wrapWindowCallback(activity)
+        }
+
+        override fun onActivityPaused(activity: Activity) {
+          // A late Application-only init may first see this Activity pause. Its window is already
+          // set up, so catch up now rather than waiting for another resume.
+          wrapWindowCallback(activity)
+        }
 
         override fun onActivityStopped(activity: Activity) {}
 
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
 
         override fun onActivityDestroyed(activity: Activity) {
+          restoreWindowCallback(activity)
           wrappedActivities.remove(activity)
         }
       }
     lifecycleCallbacks = callbacks
     application.registerActivityLifecycleCallbacks(callbacks)
+
+    val activity = findActivity(context) ?: return
+    if (
+      activity is LifecycleOwner &&
+        !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    ) {
+      // Initialization from onCreate must allow AppCompat to finish setting up its callback.
+      val reference = WeakReference(activity)
+      handler.post {
+        if (isInitialized && lifecycleCallbacks === callbacks) {
+          reference.get()?.let { wrapWindowCallback(it) }
+        }
+      }
+    } else {
+      wrapWindowCallback(activity)
+    }
+  }
+
+  internal fun findActivity(context: Context): Activity? {
+    var current = context
+    val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Context, Boolean>())
+    while (visited.add(current)) {
+      if (current is Activity) return current
+      current = (current as? ContextWrapper)?.baseContext ?: return null
+    }
+    return null
   }
 
   /**
@@ -95,15 +139,7 @@ internal object AutoMobileClickTracker {
     // Restore original Window.Callback on all wrapped activities so
     // tap dispatch no longer goes through SDK wrapper logic.
     for (activity in wrappedActivities.keys.toList()) {
-      try {
-        val window = activity.window ?: continue
-        val current = window.callback
-        if (current is ClickTrackingCallback) {
-          window.callback = current.delegate
-        }
-      } catch (_: Exception) {
-        // Activity may be finishing — ignore
-      }
+      restoreWindowCallback(activity)
     }
     wrappedActivities.clear()
     isInitialized = false
@@ -111,14 +147,26 @@ internal object AutoMobileClickTracker {
     lastTapProcessedAt = 0L
   }
 
+  private fun restoreWindowCallback(activity: Activity) {
+    try {
+      val window = activity.window ?: return
+      val current = window.callback
+      if (current is ClickTrackingCallback) window.callback = current.delegate
+    } catch (error: Exception) {
+      AutoMobileSDK.logger.w(TAG, error) { "Could not restore Activity window callback" }
+    }
+  }
+
   private fun wrapWindowCallback(activity: Activity) {
+    if (activity.isDestroyed || wrappedActivities[activity] == true) return
     val window = activity.window ?: return
     val current = window.callback ?: return
 
     // Don't double-wrap
-    if (current is ClickTrackingCallback) return
-
-    window.callback = ClickTrackingCallback(current, window)
+    if (current !is ClickTrackingCallback) {
+      window.callback = ClickTrackingCallback(current, window)
+    }
+    wrappedActivities[activity] = true
   }
 
   /**

@@ -1994,38 +1994,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Enable Accessibility Service via adb settings commands
    */
-  private throwEnableSettingsError(error: unknown): never {
-    const deviceError = this.statusInspectionDeviceError(error);
-    if (deviceError) {
-      throw deviceError;
-    }
-    const errorMsg = errorMessage(error);
-    const errorLower = errorMsg.toLowerCase();
-
-    // Categorize error types for clearer feedback
-    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-      throw new Error(
-        `Permission denied while enabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
-      );
-    } else if (
-      errorLower.includes("device not found") ||
-      errorLower.includes("no devices") ||
-      errorLower.includes("offline")
-    ) {
-      throw new Error(
-        `Device connection lost while enabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
-      );
-    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-      throw new Error(
-        `Timeout while enabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
-      );
-    } else {
-      throw new Error(
-        `Failed to enable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
-      );
-    }
-  }
-
   async enableViaSettings(): Promise<void> {
     // Check if settings toggle is supported
     const capabilities = await this.getToggleCapabilities();
@@ -2087,10 +2055,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
-  /**
-   * Disable Accessibility Service via adb settings commands
-   */
-  private throwDisableSettingsError(error: unknown): never {
+  private throwEnableSettingsError(error: unknown): never {
     const deviceError = this.statusInspectionDeviceError(error);
     if (deviceError) {
       throw deviceError;
@@ -2101,7 +2066,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     // Categorize error types for clearer feedback
     if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
       throw new Error(
-        `Permission denied while disabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+        `Permission denied while enabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
       );
     } else if (
       errorLower.includes("device not found") ||
@@ -2109,19 +2074,22 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       errorLower.includes("offline")
     ) {
       throw new Error(
-        `Device connection lost while disabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+        `Device connection lost while enabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
       );
     } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
       throw new Error(
-        `Timeout while disabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
+        `Timeout while enabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
       );
     } else {
       throw new Error(
-        `Failed to disable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+        `Failed to enable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
       );
     }
   }
 
+  /**
+   * Disable Accessibility Service via adb settings commands
+   */
   async disableViaSettings(): Promise<void> {
     // Check if settings toggle is supported
     const capabilities = await this.getToggleCapabilities();
@@ -2189,6 +2157,38 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
+  private throwDisableSettingsError(error: unknown): never {
+    const deviceError = this.statusInspectionDeviceError(error);
+    if (deviceError) {
+      throw deviceError;
+    }
+    const errorMsg = errorMessage(error);
+    const errorLower = errorMsg.toLowerCase();
+
+    // Categorize error types for clearer feedback
+    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
+      throw new Error(
+        `Permission denied while disabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+      );
+    } else if (
+      errorLower.includes("device not found") ||
+      errorLower.includes("no devices") ||
+      errorLower.includes("offline")
+    ) {
+      throw new Error(
+        `Device connection lost while disabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+      );
+    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
+      throw new Error(
+        `Timeout while disabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
+      );
+    } else {
+      throw new Error(
+        `Failed to disable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+      );
+    }
+  }
+
   /**
    * Enable Accessibility Service
    */
@@ -2200,38 +2200,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Enable Accessibility Service for a specific user profile via adb settings commands
    * @param userId - The Android user ID to enable for (e.g., 10 for work profile)
    */
-  private throwEnableUserError(error: unknown, userId: number): never {
-    const deviceError = this.statusInspectionDeviceError(error);
-    if (deviceError) {
-      throw deviceError;
-    }
-    const errorMsg = errorMessage(error);
-    const errorLower = errorMsg.toLowerCase();
-
-    // Categorize error types for clearer feedback
-    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-      throw new Error(
-        `Permission denied while enabling Accessibility Service for user ${userId}. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
-      );
-    } else if (
-      errorLower.includes("device not found") ||
-      errorLower.includes("no devices") ||
-      errorLower.includes("offline")
-    ) {
-      throw new Error(
-        `Device connection lost while enabling Accessibility Service for user ${userId}. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
-      );
-    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-      throw new Error(
-        `Timeout while enabling Accessibility Service for user ${userId}. The device may be unresponsive. Original error: ${errorMsg}`,
-      );
-    } else {
-      throw new Error(
-        `Failed to enable Accessibility Service via settings for user ${userId}. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
-      );
-    }
-  }
-
   async enableForUser(userId: number): Promise<void> {
     // Check if settings toggle is supported
     const capabilities = await this.getToggleCapabilities();
@@ -2291,6 +2259,38 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Issue #4192: main-user cache only (per-user caching not implemented);
       // `finally` also covers the partial-failure path.
       this.clearAvailabilityCache();
+    }
+  }
+
+  private throwEnableUserError(error: unknown, userId: number): never {
+    const deviceError = this.statusInspectionDeviceError(error);
+    if (deviceError) {
+      throw deviceError;
+    }
+    const errorMsg = errorMessage(error);
+    const errorLower = errorMsg.toLowerCase();
+
+    // Categorize error types for clearer feedback
+    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
+      throw new Error(
+        `Permission denied while enabling Accessibility Service for user ${userId}. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+      );
+    } else if (
+      errorLower.includes("device not found") ||
+      errorLower.includes("no devices") ||
+      errorLower.includes("offline")
+    ) {
+      throw new Error(
+        `Device connection lost while enabling Accessibility Service for user ${userId}. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+      );
+    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
+      throw new Error(
+        `Timeout while enabling Accessibility Service for user ${userId}. The device may be unresponsive. Original error: ${errorMsg}`,
+      );
+    } else {
+      throw new Error(
+        `Failed to enable Accessibility Service via settings for user ${userId}. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+      );
     }
   }
 

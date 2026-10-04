@@ -141,6 +141,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private multiFingerSwipeResult: CtrlProxySwipeResult | null = null;
   private actionResult: CtrlProxyActionResult | null = null;
   private clipboardResult: CtrlProxyClipboardResult | null = null;
+  private clipboardResults: CtrlProxyClipboardResult[] = [];
 
   // Clipboard call history
   private clipboardHistory: Array<{
@@ -320,6 +321,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   setClipboardResult(result: CtrlProxyClipboardResult | null): void {
     this.clipboardResult = result;
+  }
+
+  setClipboardResults(results: CtrlProxyClipboardResult[]): void {
+    this.clipboardResults = [...results];
   }
 
   getClipboardHistory(): Array<{ action: "copy" | "paste" | "clear" | "get"; text?: string }> {
@@ -540,6 +545,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.actionHistory = [];
     this.multiFingerSwipeHistory = [];
     this.clipboardHistory = [];
+    this.clipboardResults = [];
     this.connectWithoutSetupHistory = [];
   }
 
@@ -1293,6 +1299,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.checkFailure("clipboard");
 
     this.clipboardHistory.push({ action, text });
+
+    const queuedResult = this.clipboardResults.shift();
+    if (queuedResult) {
+      return queuedResult;
+    }
 
     if (this.clipboardResult) {
       return this.clipboardResult;

@@ -22,6 +22,8 @@ interface PendingGesture extends OrderedStep {
   timeout?: NodeJS.Timeout;
 }
 
+type BufferedInteraction = ReceivedInteraction & { receivedAt: number };
+
 /**
  * How long to wait for a CtrlProxy event to pair with a getevent gesture.
  * Issue #9142 measured 222–361 ms from touch-up to host receipt, including the
@@ -47,7 +49,7 @@ export class DualTrackRecorder {
   private orderedSteps: OrderedStep[] = [];
   private latestEntry: OrderedStep | null = null;
   private pendingGestures: PendingGesture[] = [];
-  private bufferedInteractions: (ReceivedInteraction & { receivedAt: number })[] = [];
+  private bufferedInteractions: BufferedInteraction[] = [];
   private lastInputText: { elementKey: string; entry: OrderedStep } | null = null;
   private activeEmitter: GestureEmitter | null = null;
   private unsubscribeA11y: (() => void) | null = null;
@@ -152,6 +154,9 @@ export class DualTrackRecorder {
       (pending) =>
         !pending.resolved ||
         (pending.step !== undefined && pending.stepIndex === undefined) ||
+        // Retain unknown contacts as ambiguity witnesses across serial timeouts.
+        (hasUnknownAxes(pending.gesture) &&
+          this.timer.now() - pending.arrivedAt <= MERGE_WINDOW_MS * 2) ||
         (pending.gesture.type === "tap" &&
           gesture.arrivedAt - pending.gesture.arrivedAt <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS),
     );
@@ -259,11 +264,9 @@ export class DualTrackRecorder {
     }
 
     // tap / longPress / swipe — try to match a pending gesture
+    const received = { ...event, receivedAt: this.timer.now() };
     const matched = this.pendingGestures.find(
-      (p) =>
-        !p.resolved &&
-        isCompatibleType(p.gesture.type, event.type) &&
-        gestureHitsElement(p.gesture, event.element),
+      (p) => !p.resolved && !hasUnknownAxes(p.gesture) && this.isPairCandidate(p, received),
     );
 
     if (matched) {
@@ -273,12 +276,14 @@ export class DualTrackRecorder {
       !this.pendingGestures.some(
         (p) =>
           p.resolved &&
+          !hasUnknownAxes(p.gesture) &&
           isCompatibleType(p.gesture.type, event.type) &&
           gestureHitsElement(p.gesture, event.element),
       )
     ) {
       // A late event for an already resolved touch must not seed the next touch.
-      this.bufferedInteractions.push({ ...event, receivedAt: this.timer.now() });
+      // Unknown contacts wait for the full window so later competitors count.
+      this.bufferedInteractions.push(received);
     }
   }
 
@@ -330,29 +335,64 @@ export class DualTrackRecorder {
     if (interaction) {
       candidates.push({ event: { ...interaction, receivedAt: now }, index: -1 });
     }
-    const selected = candidates
-      .filter(
-        ({ event }) =>
-          Math.abs(event.receivedAt - pending.arrivedAt) <= MERGE_WINDOW_MS &&
-          isCompatibleType(pending.gesture.type, event.type) &&
-          gestureHitsElement(pending.gesture, event.element),
+    const matching = candidates.filter(({ event }) => this.isPairCandidate(pending, event));
+    if (
+      hasUnknownAxes(pending.gesture) &&
+      !this.isUnambiguousUnknownPair(
+        pending,
+        matching.map(({ event }) => event),
       )
-      .sort((a, b) => {
-        // Genuine clicks beat stateChange. Within that priority, prefer events
-        // following the touch, then proximity. Stable ties retain buffer order
-        // (the incoming event is appended after buffered candidates).
-        const aDelta = a.event.receivedAt - pending.arrivedAt;
-        const bDelta = b.event.receivedAt - pending.arrivedAt;
-        return (
-          Number(b.event.type === "tap") - Number(a.event.type === "tap") ||
-          Number(aDelta < 0) - Number(bDelta < 0) ||
-          Math.abs(aDelta) - Math.abs(bDelta)
-        );
-      })[0];
+    ) {
+      return undefined;
+    }
+    const selected = matching.sort((a, b) => {
+      // Genuine clicks beat stateChange. Within that priority, prefer events
+      // following the touch, then proximity. Stable ties retain buffer order
+      // (the incoming event is appended after buffered candidates).
+      const aDelta = a.event.receivedAt - pending.arrivedAt;
+      const bDelta = b.event.receivedAt - pending.arrivedAt;
+      return (
+        Number(b.event.type === "tap") - Number(a.event.type === "tap") ||
+        Number(aDelta < 0) - Number(bDelta < 0) ||
+        Math.abs(aDelta) - Math.abs(bDelta)
+      );
+    })[0];
     if (selected && selected.index >= 0) {
       this.bufferedInteractions.splice(selected.index, 1);
     }
     return selected?.event;
+  }
+
+  private isPairCandidate(pending: PendingGesture, event: BufferedInteraction): boolean {
+    const gesture = pending.gesture;
+    if (
+      Math.abs(event.receivedAt - pending.arrivedAt) > MERGE_WINDOW_MS ||
+      !isCompatibleType(gesture.type, event.type, !hasUnknownAxes(gesture))
+    ) {
+      return false;
+    }
+    if (hasUnknownAxes(gesture)) {
+      return Boolean(event.element?.bounds && buildSelector(event.element));
+    }
+    return gestureHitsElement(gesture, event.element);
+  }
+
+  private isUnambiguousUnknownPair(
+    pending: PendingGesture,
+    candidates: BufferedInteraction[],
+  ): boolean {
+    if (candidates.length !== 1) {
+      return false;
+    }
+    const event = candidates[0];
+    // Known points claim their targets first. Resolved unknown contacts remain
+    // witnesses so flushing an earlier ambiguous contact cannot free its event.
+    return !this.pendingGestures.some(
+      (other) =>
+        other !== pending &&
+        (hasUnknownAxes(other.gesture) || !other.resolved) &&
+        this.isPairCandidate(other, event),
+    );
   }
 
   private handleInputText(event: ReceivedInteraction): void {
@@ -438,12 +478,16 @@ export class DualTrackRecorder {
 // Pure helper functions
 // -------------------------------------------------------------------------
 
-function isCompatibleType(gestureType: string, eventType: string): boolean {
+function isCompatibleType(
+  gestureType: string,
+  eventType: string,
+  allowStateChange = true,
+): boolean {
   return (
     // Compose Playground clicks emitted stateChange/scroll, never tap (#9142).
     // Only tap/doubleTap may use this signal, and callers still require the hit-test.
     ((gestureType === "tap" || gestureType === "doubleTap") &&
-      (eventType === "tap" || eventType === "stateChange")) ||
+      (eventType === "tap" || (allowStateChange && eventType === "stateChange"))) ||
     (gestureType === "longPress" && eventType === "longPress") ||
     (gestureType === "swipe" && (eventType === "scroll" || eventType === "swipe"))
   );
@@ -454,16 +498,19 @@ function gestureHitsElement(gesture: GestureEvent, element?: Partial<Element>): 
   if (!bounds) {
     return false;
   }
-  // Unknown raw axes cannot be mapped to screen axes (rotation may swap them).
-  // Pair by compatible type, bounded receipt time and oldest pending contact;
-  // require a replayable element rather than accepting coordinate placeholders.
+  // Unknown raw axes cannot prove a spatial hit (rotation may swap them).
   if (hasUnknownAxes(gesture)) {
-    return buildSelector(element) !== null;
+    return false;
   }
   // Swipes use startX/startY; taps/longPress/doubleTap use screenX/screenY
   const x = gesture.screenX ?? gesture.startX;
   const y = gesture.screenY ?? gesture.startY;
-  if (typeof x !== "number" || typeof y !== "number") {
+  if (
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y)
+  ) {
     return false;
   }
   const PAD = 20;

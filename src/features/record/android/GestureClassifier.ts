@@ -3,7 +3,7 @@ import { GESTURE_THRESHOLDS } from "./types";
 import type { CoordScaler } from "./AxisRanges";
 
 interface ContactInfo {
-  /** Raw sensor position when the finger first touched */
+  /** First observed raw position per axis; unknownAxes retains missing START axes. */
   startX: number;
   startY: number;
   arrivedAt: number;
@@ -20,9 +20,9 @@ interface LastTap {
 }
 
 interface PinchState {
-  initialDist: number;
+  initialDist?: number;
   /** Updated each frame while both fingers are active */
-  finalDist: number;
+  finalDist?: number;
   unknownAxes?: GestureEvent["unknownAxes"];
 }
 
@@ -63,6 +63,14 @@ export class GestureClassifier {
     for (const slot of frame.activeSlots) {
       const existing = this.contacts.get(slot.slotId);
       if (existing) {
+        // A later axis report proves movement only from its first seen value.
+        // It cannot recover the missing contact-start coordinate.
+        if (!Number.isFinite(existing.startX)) {
+          existing.startX = slot.x;
+        }
+        if (!Number.isFinite(existing.startY)) {
+          existing.startY = slot.y;
+        }
         existing.lastX = slot.x;
         existing.lastY = slot.y;
         existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
@@ -87,7 +95,7 @@ export class GestureClassifier {
         this.contacts.get(a.slotId)?.unknownAxes,
         this.contacts.get(b.slotId)?.unknownAxes,
       );
-      const dist = unknownAxes?.length ? NaN : this.screenDist(a.x, a.y, b.x, b.y);
+      const dist = unknownAxes?.length ? undefined : this.screenDist(a.x, a.y, b.x, b.y);
       if (!this.pinchState) {
         this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
       } else {
@@ -128,16 +136,7 @@ export class GestureClassifier {
       }
 
       if (contact.unknownAxes?.length) {
-        // No starting point means no displacement or double-tap proximity proof.
-        // Offer only a duration-based contact for accessibility to resolve.
-        this.lastTap = null;
-        const durationMs = frame.arrivedAt - contact.arrivedAt;
-        return {
-          type: durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS ? "longPress" : "tap",
-          arrivedAt: frame.arrivedAt,
-          durationMs,
-          unknownAxes: contact.unknownAxes,
-        };
+        return this.evaluateUnknownContact(contact, frame.arrivedAt);
       }
 
       const { x: downX, y: downY } = this.scaler.toScreenPoint(contact.startX, contact.startY);
@@ -163,6 +162,26 @@ export class GestureClassifier {
   // Private helpers
   // -------------------------------------------------------------------------
 
+  private evaluateUnknownContact(contact: ContactInfo, arrivedAt: number): GestureEvent {
+    this.lastTap = null;
+    const durationMs = arrivedAt - contact.arrivedAt;
+    // An axis never observed contributes no displacement. Use the same finite
+    // anchor at both ends solely for distance scaling (including rotation),
+    // never as an exported coordinate or a reconstructed starting point.
+    const firstX = Number.isFinite(contact.startX) ? contact.startX : 0;
+    const firstY = Number.isFinite(contact.startY) ? contact.startY : 0;
+    const lastX = Number.isFinite(contact.lastX) ? contact.lastX : firstX;
+    const lastY = Number.isFinite(contact.lastY) ? contact.lastY : firstY;
+    const displacement = this.screenDist(firstX, firstY, lastX, lastY);
+    const type =
+      displacement >= GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp
+        ? "swipe"
+        : durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS
+          ? "longPress"
+          : "tap";
+    return { type, arrivedAt, durationMs, unknownAxes: contact.unknownAxes };
+  }
+
   private screenDist(rawX1: number, rawY1: number, rawX2: number, rawY2: number): number {
     const first = this.scaler.toScreenPoint(rawX1, rawY1);
     const second = this.scaler.toScreenPoint(rawX2, rawY2);
@@ -173,9 +192,14 @@ export class GestureClassifier {
     const pinch = this.pinchState;
     if (pinch?.unknownAxes?.length) {
       this.lastTap = null;
-      return { type: "pinch", arrivedAt, unknownAxes: pinch.unknownAxes };
+      return null;
     }
-    if (!pinch || pinch.initialDist === 0) {
+    if (
+      !pinch ||
+      pinch.initialDist === undefined ||
+      pinch.finalDist === undefined ||
+      pinch.initialDist === 0
+    ) {
       return null;
     }
 

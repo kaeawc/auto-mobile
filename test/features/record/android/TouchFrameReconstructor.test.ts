@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
+import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { RawTouchFrame, GestureEvent } from "../../../../src/features/record/android/types";
 
 // Helper: feed multiple lines and collect all non-null results
@@ -64,6 +66,55 @@ describe("TouchFrameReconstructor", () => {
 
   beforeEach(() => {
     r = new TouchFrameReconstructor();
+  });
+
+  test("in-repo fully observed captures preserve origin/main gestures exactly", () => {
+    const directory = `${import.meta.dir}/../../../fixtures/android-getevent`;
+    expect(
+      readdirSync(directory)
+        .filter((name) => name.endsWith(".txt"))
+        .sort(),
+    ).toEqual(["repeated-axes-no-position-api36.txt", "same-coordinate-taps-api36.txt"]);
+    // origin/main reconstructor + classifier, identity scaler and captured timing.
+    // The other capture deliberately reports neither axis, so has no known-coordinate baseline.
+    const expected: Record<string, GestureEvent[]> = {
+      "same-coordinate-taps-api36.txt": [
+        { type: "tap", arrivedAt: 125, screenX: 27852, screenY: 16165 },
+        { type: "tap", arrivedAt: 2813, screenX: 27852, screenY: 16165 },
+      ],
+    };
+    for (const [name, baseline] of Object.entries(expected)) {
+      const reconstructor = new TouchFrameReconstructor();
+      const classifier = new GestureClassifier(
+        {
+          toScreenPoint: (x, y) => {
+            expect(Number.isFinite(x) && Number.isFinite(y)).toBe(true);
+            return { x, y };
+          },
+        },
+        1,
+      );
+      const timer = new FakeTimer();
+      const lines = readFileSync(`${directory}/${name}`, "utf8").trim().split("\n");
+      const firstTimestamp = Number(lines[0].split("]")[0].slice(1));
+      const gestures: GestureEvent[] = [];
+      for (const line of lines) {
+        const timestamp = Number(line.split("]")[0].slice(1));
+        const arrivedAt = Math.round((timestamp - firstTimestamp) * 1000);
+        timer.advanceTime(arrivedAt - timer.now());
+        const result = reconstructor.feedLine(line, timer.now());
+        if (result && isFrame(result)) {
+          const gesture = classifier.feedFrame(result);
+          if (gesture) {
+            gestures.push(gesture);
+          }
+        }
+      }
+      expect(gestures).toEqual(baseline);
+      for (const gesture of gestures) {
+        expect(gesture.unknownAxes).toBeUndefined();
+      }
+    }
   });
 
   test("captured pre-recording axes are unknown on both contacts until observed", () => {

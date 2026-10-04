@@ -301,6 +301,7 @@ describe("TapAtCoordinate", () => {
       },
     };
     const tapAt = new TapAtCoordinate(androidDevice, adb, { timer, androidClient: client });
+    setFakeTapAtWindow(tapAt);
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation(100, 200));
     tapAt.observeScreen = observe;
@@ -403,6 +404,7 @@ describe("TapAtCoordinate", () => {
           invalidations++;
         },
       });
+      setFakeTapAtWindow(tapAt);
       tapAt.observeScreen = observe;
 
       const result = await tapAt.execute(
@@ -456,6 +458,7 @@ describe("TapAtCoordinate", () => {
         displayRevision: 41,
       }),
     });
+    setFakeTapAtWindow(tapAt);
     tapAt.observeScreen = observe;
     const sleep = spyOn(timer, "sleep").mockImplementation(async (ms) => {
       expect(ms).toBe(DOUBLE_TAP_GAP_MS);

@@ -1,4 +1,5 @@
 @testable import AutoMobileSDK
+import os
 import XCTest
 
 final class AutoMobileFailuresTests: XCTestCase {
@@ -71,5 +72,42 @@ final class AutoMobileFailuresTests: XCTestCase {
         XCTAssertEqual(deviceInfo?.model, expected.model)
         XCTAssertEqual(deviceInfo?.osVersion, expected.osVersion)
         XCTAssertEqual(deviceInfo?.systemName, expected.systemName)
+    }
+
+    @MainActor
+    func testCacheMissRecordsFallbackWithoutExecutingMainWork() {
+        let failures = AutoMobileFailures.shared
+        failures.reset()
+        let executor = FakeMainThreadExecutor()
+        let reads = OSAllocatedUnfairLock(initialState: 0)
+        failures.cacheDeviceInfo(executor: executor) {
+            reads.withLock { $0 += 1 }
+            return SdkDeviceInfo(model: "UIKit fixture", osVersion: "17", systemName: "iOS")
+        }
+        failures.recordHandledException(NSError(domain: "cache-miss", code: 1))
+        let fallback = AutoMobileFailures.fallbackDeviceInfo()
+        XCTAssertEqual(failures.getRecentEvents().first?.deviceInfo.model, fallback.model)
+        XCTAssertEqual(executor.pendingCount, 1)
+        XCTAssertEqual(reads.withLock { $0 }, 0)
+        executor.runAll()
+        failures.recordHandledException(NSError(domain: "cache-hit", code: 2))
+        XCTAssertEqual(failures.getRecentEvents().last?.deviceInfo.model, "UIKit fixture")
+        XCTAssertEqual(reads.withLock { $0 }, 1)
+        XCTAssertEqual(executor.pendingCount, 0)
+    }
+
+    @MainActor
+    func testResetDropsDeferredDeviceInfoRead() {
+        let failures = AutoMobileFailures.shared
+        let executor = FakeMainThreadExecutor()
+        let reads = OSAllocatedUnfairLock(initialState: 0)
+        failures.cacheDeviceInfo(executor: executor) {
+            reads.withLock { $0 += 1 }
+            return SdkDeviceInfo(model: "stale", osVersion: "17", systemName: "iOS")
+        }
+        failures.reset()
+        executor.runAll()
+        XCTAssertEqual(reads.withLock { $0 }, 0)
+        XCTAssertEqual(AutoMobileFailures.currentDeviceInfo().model, AutoMobileFailures.fallbackDeviceInfo().model)
     }
 }

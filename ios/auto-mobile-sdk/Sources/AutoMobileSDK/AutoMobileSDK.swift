@@ -28,7 +28,31 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var sessionObservers: [NSObjectProtocol] = []
     private var _breadcrumbTrail: BreadcrumbTrail?
 
-    private init() {}
+    private let mainLifecycle: MainThreadLifecycle
+    private let persistenceOverride: (any EventPersisting)?
+    private let timerFactory: @Sendable () -> any TimerScheduling
+
+    private init(
+        executor: any MainThreadExecuting = MainThreadExecutor(),
+        persistence: (any EventPersisting)? = nil,
+        timerFactory: @escaping @Sendable () -> any TimerScheduling = { GCDTimer() }
+    ) {
+        mainLifecycle = MainThreadLifecycle(executor: executor)
+        persistenceOverride = persistence
+        self.timerFactory = timerFactory
+    }
+
+    static func makeTestInstance(
+        executor: any MainThreadExecuting,
+        persistence: any EventPersisting,
+        timerFactory: @escaping @Sendable () -> any TimerScheduling
+    )
+        -> AutoMobileSDK
+    {
+        AutoMobileSDK(executor: executor, persistence: persistence, timerFactory: timerFactory)
+    }
+
+    var isMainThreadSetupInstalled: Bool { mainLifecycle.isInstalled }
 
     // MARK: - Initialization
 
@@ -40,6 +64,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
     /// Initialize the SDK with all subsystems using a custom configuration.
     /// Call this early in your app lifecycle (e.g., in your App init or AppDelegate).
+    /// Background callers defer UIKit setup to main without waiting for it.
     public func initialize(bundleId: String? = nil, configuration: AutoMobileConfiguration) {
         lock.lock()
         guard !_isInitialized else {
@@ -47,6 +72,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
             return
         }
         _isInitialized = true
+        let mainGeneration = mainLifecycle.prepare()
 
         let context = SdkContext()
         context.appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
@@ -68,7 +94,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         // Set up disk-first event persistence
         let persistence: any EventPersisting
-        if let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+        if let persistenceOverride {
+            persistence = persistenceOverride
+        } else if let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             let eventsDir = cachesDir.appendingPathComponent("automobile_events")
             persistence = FileEventPersistence(directory: eventsDir, dateProvider: dateProvider)
         } else {
@@ -83,6 +111,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
             flushIntervalMs: configuration.flushIntervalMs,
             maxPendingEvents: configuration.maxPendingEvents,
             processors: configuration.eventProcessors,
+            timerFactory: timerFactory,
             dropCounter: counter
         ) { [weak self] events in
             let bundleId = self?.bundleId
@@ -90,9 +119,6 @@ public final class AutoMobileSDK: @unchecked Sendable {
         }
         eventBuffer = buffer
         lock.unlock()
-
-        // Device info may synchronously hop to main; the SDK lock must be released first.
-        AutoMobileFailures.shared.cacheDeviceInfo()
 
         buffer.start()
         SdkEventBroadcaster.shared.broadcastBatch(
@@ -131,13 +157,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
             AutoMobileHangs.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
             AutoMobileHangs.shared.startMonitoring()
         }
-        AutoMobileOsEvents.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileNotificationObserver.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileInteractionTracker.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         ViewBodyTracker.shared.initialize(buffer: buffer, dateProvider: dateProvider)
-        #if canImport(UIKit) && !os(watchOS)
-            ViewHierarchyTracker.shared.initialize(buffer: buffer)
-        #endif
         UserDefaultsInspector.shared.initialize(buffer: buffer)
         DatabaseInspector.shared.initialize()
 
@@ -150,25 +172,45 @@ public final class AutoMobileSDK: @unchecked Sendable {
         sessionTracker = tracker
         lock.unlock()
 
-        #if canImport(UIKit) && !os(watchOS)
-            let fgObserver = NotificationCenter.default.addObserver(
-                forName: UIApplication.didBecomeActiveNotification,
-                object: nil,
-                queue: .main
-            ) { [weak tracker] _ in
-                tracker?.onForeground()
+        guard let mainGeneration else { return }
+        mainLifecycle.schedule(generation: mainGeneration, setup: {
+            AutoMobileFailures.shared.cacheDeviceInfo()
+            AutoMobileOsEvents.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+            #if canImport(UIKit) && !os(watchOS)
+                ViewHierarchyTracker.shared.initialize(buffer: buffer)
+            #endif
+            #if canImport(UIKit) && !os(watchOS)
+                let fgObserver = NotificationCenter.default.addObserver(
+                    forName: UIApplication.didBecomeActiveNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak tracker] _ in
+                    tracker?.onForeground()
+                }
+                let bgObserver = NotificationCenter.default.addObserver(
+                    forName: UIApplication.didEnterBackgroundNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak tracker] _ in
+                    tracker?.onBackground()
+                }
+                self.lock.lock()
+                self.sessionObservers.append(contentsOf: [fgObserver, bgObserver])
+                self.lock.unlock()
+            #endif
+        }, teardown: {
+            AutoMobileOsEvents.shared.reset()
+            #if canImport(UIKit) && !os(watchOS)
+                ViewHierarchyTracker.shared.reset()
+            #endif
+            self.lock.lock()
+            let observers = self.sessionObservers
+            self.sessionObservers.removeAll()
+            self.lock.unlock()
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
             }
-            let bgObserver = NotificationCenter.default.addObserver(
-                forName: UIApplication.didEnterBackgroundNotification,
-                object: nil,
-                queue: .main
-            ) { [weak tracker] _ in
-                tracker?.onBackground()
-            }
-            lock.lock()
-            sessionObservers.append(contentsOf: [fgObserver, bgObserver])
-            lock.unlock()
-        #endif
+        })
     }
 
     // MARK: - Navigation Listeners
@@ -289,8 +331,15 @@ public final class AutoMobileSDK: @unchecked Sendable {
     // MARK: - Shutdown
 
     /// Shuts down the SDK, releasing all resources.
+    /// Background callers invalidate pending UIKit setup immediately and defer teardown to main.
     /// After calling this method, `initialize` may be called again to restart the SDK.
     public func shutdown() {
+        mainLifecycle.stop()
+        // Invalidate child callbacks now; their resource teardown also defers to main.
+        AutoMobileOsEvents.shared.reset()
+        #if canImport(UIKit) && !os(watchOS)
+            ViewHierarchyTracker.shared.reset()
+        #endif
         lock.lock()
         let config = _configuration
         lock.unlock()
@@ -305,13 +354,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
         if config?.enableHangDetection ?? true {
             AutoMobileHangs.shared.reset()
         }
-        AutoMobileOsEvents.shared.reset()
         AutoMobileNotificationObserver.shared.reset()
         AutoMobileInteractionTracker.shared.reset()
         ViewBodyTracker.shared.reset()
-        #if canImport(UIKit) && !os(watchOS)
-            ViewHierarchyTracker.shared.reset()
-        #endif
         UserDefaultsInspector.shared.reset()
         DatabaseInspector.shared.reset()
         if config?.enableNetworkCapture ?? true {
@@ -321,18 +366,13 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileBiometrics.shared.reset()
         AutoMobileLog.shared.reset()
 
-        // Shut down session tracker and remove observers
+        // Shut down session tracker; mainLifecycle owns observer removal.
         lock.lock()
         let trackerToShutdown = sessionTracker
         sessionTracker = nil
-        let observersToRemove = sessionObservers
-        sessionObservers.removeAll()
         lock.unlock()
 
         trackerToShutdown?.shutdown()
-        for observer in observersToRemove {
-            NotificationCenter.default.removeObserver(observer)
-        }
 
         // Extract buffer under lock, then shut it down OUTSIDE the lock
         // to prevent deadlock: shutdown() -> onFlush -> bundleId -> lock

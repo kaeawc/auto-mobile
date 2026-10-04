@@ -58,6 +58,19 @@ private final class NetworkRecordCollector: @unchecked Sendable {
 }
 
 final class AutoMobileNetworkTests: XCTestCase {
+    func testStopBeforeTaskStorageRejectsSuspendedTask() throws {
+        let request = try URLRequest(url: XCTUnwrap(URL(string: "https://example.invalid/stopped")))
+        let client = RecordingURLProtocolClient()
+        let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+        proto.stopLoading()
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.dataTask(with: request)
+        XCTAssertFalse(proto.storeTaskIfRunning(task, session: session))
+        XCTAssertEqual(task.state, .suspended, "rejected tasks are never resumed")
+        XCTAssertTrue(client.calls.isEmpty)
+    }
+
     override func tearDown() {
         AutoMobileNetwork.shared.reset()
         #if DEBUG

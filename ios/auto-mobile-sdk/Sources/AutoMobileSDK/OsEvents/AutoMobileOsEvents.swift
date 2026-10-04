@@ -26,7 +26,17 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     private var observers: [NSObjectProtocol] = []
     private var _isEnabled = true
 
-    private init() {}
+    private let mainLifecycle: MainThreadLifecycle
+
+    private init(executor: any MainThreadExecuting = MainThreadExecutor()) {
+        mainLifecycle = MainThreadLifecycle(executor: executor)
+    }
+
+    static func makeTestInstance(executor: any MainThreadExecuting) -> AutoMobileOsEvents {
+        AutoMobileOsEvents(executor: executor)
+    }
+
+    var isTracking: Bool { mainLifecycle.isInstalled }
 
     // MARK: - Enable/Disable
 
@@ -48,18 +58,11 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     // MARK: - Initialization
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
-        #if canImport(UIKit) && !os(watchOS)
-            // Hop before acquiring `lock`, preserving synchronous setup and teardown.
-            if Thread.isMainThread {
-                MainActor.assumeIsolated { initializeOnCurrentThread(bundleId: bundleId, buffer: buffer) }
-            } else {
-                DispatchQueue.main.sync {
-                    MainActor.assumeIsolated { self.initializeOnCurrentThread(bundleId: bundleId, buffer: buffer) }
-                }
-            }
-        #else
-            initializeOnCurrentThread(bundleId: bundleId, buffer: buffer)
-        #endif
+        mainLifecycle.start(setup: {
+            self.initializeOnCurrentThread(bundleId: bundleId, buffer: buffer)
+        }, teardown: {
+            self.shutdownOnCurrentThread()
+        })
     }
 
     #if canImport(UIKit) && !os(watchOS)
@@ -91,19 +94,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     }
 
     func shutdown() {
-        #if canImport(UIKit) && !os(watchOS)
-            // Serializing the whole lifecycle on main keeps the battery side effect
-            // in the same critical section as observer registration/removal.
-            if Thread.isMainThread {
-                MainActor.assumeIsolated { shutdownOnCurrentThread() }
-            } else {
-                DispatchQueue.main.sync {
-                    MainActor.assumeIsolated { self.shutdownOnCurrentThread() }
-                }
-            }
-        #else
-            shutdownOnCurrentThread()
-        #endif
+        mainLifecycle.stop()
     }
 
     #if canImport(UIKit) && !os(watchOS)
@@ -294,7 +285,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     // MARK: - Event Posting
 
     private func postEvent(state: String, details: [String: String] = [:]) {
-        guard AutoMobileSDK.shared.isEnabled else { return }
+        guard AutoMobileSDK.shared.isEnabled, mainLifecycle.isActive else { return }
 
         lock.lock()
         guard _isEnabled else {

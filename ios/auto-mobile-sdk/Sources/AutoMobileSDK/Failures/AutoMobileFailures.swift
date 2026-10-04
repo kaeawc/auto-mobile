@@ -14,6 +14,7 @@ public final class AutoMobileFailures: Sendable {
         var buffer: SdkEventBuffer?
         var events: [HandledExceptionEvent] = []
         var cachedDeviceInfo: SdkDeviceInfo?
+        var cacheGeneration: UInt64 = 0
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -28,15 +29,23 @@ public final class AutoMobileFailures: Sendable {
         }
     }
 
-    /// Cache device info from the main thread during SDK initialization.
-    /// This avoids accessing UIDevice.current from background threads.
+    /// Populate UIKit metadata without waiting for a host application's main thread.
     func cacheDeviceInfo(
-        deviceInfoProvider: @Sendable ()
-            -> SdkDeviceInfo = { AutoMobileFailures.currentDeviceInfo() }
+        executor: any MainThreadExecuting = MainThreadExecutor(),
+        deviceInfoProvider: @escaping @MainActor @Sendable () -> SdkDeviceInfo = {
+            AutoMobileFailures.readDeviceInfo()
+        }
     ) {
-        // UIKit reads may hop to main. Never hold the state lock across that hop.
-        let deviceInfo = deviceInfoProvider()
-        state.withLock { $0.cachedDeviceInfo = deviceInfo }
+        let generation = state.withLock { $0.cacheGeneration }
+        executor.execute {
+            guard self.state.withLock({ $0.cacheGeneration == generation }) else { return }
+            // Provider can re-enter failures; never call it while holding the lock.
+            let deviceInfo = deviceInfoProvider()
+            self.state.withLock {
+                guard $0.cacheGeneration == generation else { return }
+                $0.cachedDeviceInfo = deviceInfo
+            }
+        }
     }
 
     /// Record a handled exception/error.
@@ -54,7 +63,7 @@ public final class AutoMobileFailures: Sendable {
                 state.bundleId ?? Bundle.main.bundleIdentifier ?? ""
             )
         }
-        let deviceInfo = cachedDeviceInfo ?? Self.currentDeviceInfo()
+        let deviceInfo = cachedDeviceInfo ?? Self.fallbackDeviceInfo()
 
         let event = HandledExceptionEvent(
             timestamp: Int64(Date().timeIntervalSince1970 * 1000),
@@ -111,42 +120,60 @@ public final class AutoMobileFailures: Sendable {
 
     // MARK: - Device Info
 
+    /// Event and crash reporting never wait for UIKit. If the cache lock is busy,
+    /// crash reporting can still obtain platform metadata without waiting for it.
     static func currentDeviceInfo() -> SdkDeviceInfo {
-        #if canImport(UIKit) && !os(watchOS)
-            if Thread.isMainThread {
-                // Assertion only after confirming main-thread execution, as in ViewHierarchyWalker.
-                return MainActor.assumeIsolated { readDeviceInfo() }
+        let cached = shared.state.withLockIfAvailable { $0.cachedDeviceInfo }
+        return cached.flatMap { $0 } ?? fallbackDeviceInfo()
+    }
+
+    static func fallbackDeviceInfo() -> SdkDeviceInfo {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machine = withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingUTF8: $0) ?? "Unknown"
             }
-            return DispatchQueue.main.sync {
-                MainActor.assumeIsolated { readDeviceInfo() }
+        }
+        let systemName = withUnsafePointer(to: &systemInfo.sysname) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingUTF8: $0) ?? "Unknown"
             }
+        }
+        return SdkDeviceInfo(
+            model: machine,
+            osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            systemName: systemName == "Darwin" ? platformSystemName : systemName
+        )
+    }
+
+    private static var platformSystemName: String {
+        #if os(iOS)
+            "iOS"
+        #elseif os(tvOS)
+            "tvOS"
+        #elseif os(watchOS)
+            "watchOS"
+        #elseif os(visionOS)
+            "visionOS"
         #else
-            var systemInfo = utsname()
-            uname(&systemInfo)
-            let machine = withUnsafePointer(to: &systemInfo.machine) {
-                $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                    String(validatingUTF8: $0) ?? "Unknown"
-                }
-            }
-            return SdkDeviceInfo(
-                model: machine,
-                osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
-                systemName: "macOS"
-            )
+            "macOS"
         #endif
     }
 
-    #if canImport(UIKit) && !os(watchOS)
-        @MainActor
-        private static func readDeviceInfo() -> SdkDeviceInfo {
+    @MainActor
+    private static func readDeviceInfo() -> SdkDeviceInfo {
+        #if canImport(UIKit) && !os(watchOS)
             let device = UIDevice.current
             return SdkDeviceInfo(
                 model: device.model,
                 osVersion: device.systemVersion,
                 systemName: device.systemName
             )
-        }
-    #endif
+        #else
+            return fallbackDeviceInfo()
+        #endif
+    }
 
     // MARK: - Testing Support
 
@@ -156,6 +183,7 @@ public final class AutoMobileFailures: Sendable {
             state.buffer = nil
             state.events.removeAll()
             state.cachedDeviceInfo = nil
+            state.cacheGeneration &+= 1
         }
     }
 }

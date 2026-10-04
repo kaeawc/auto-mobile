@@ -635,14 +635,28 @@ public class AutoMobileURLProtocol: URLProtocol {
         config.protocolClasses = config.protocolClasses?.filter { $0 != AutoMobileURLProtocol.self }
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         let task = session.dataTask(with: mutableRequest as URLRequest)
-        let previous = state.withLock { state in
+        if storeTaskIfRunning(task, session: session), state.withLock({ !$0.stopped }) {
+            // Recheck cancellation after storage. Cancellation racing resume is
+            // handled by URLSession, without holding our lock across a task callout.
+            task.resume()
+        } else {
+            task.cancel()
+            session.invalidateAndCancel()
+        }
+    }
+
+    /// Accept a suspended task only while loading is active. Internal so the
+    /// stop-before-store interleaving can be tested without making a request.
+    func storeTaskIfRunning(_ task: URLSessionDataTask, session: URLSession) -> Bool {
+        let result = state.withLock { state in
+            guard !state.stopped else { return (false, state.urlSession, state.dataTask) }
             let previous = (state.urlSession, state.dataTask)
             state.urlSession = session
             state.dataTask = task
-            return previous
+            return (true, previous.0, previous.1)
         }
-        withExtendedLifetime(previous) {}
-        state.withLock { $0.dataTask }?.resume()
+        withExtendedLifetime(result) {}
+        return result.0
     }
 
     override public func stopLoading() {

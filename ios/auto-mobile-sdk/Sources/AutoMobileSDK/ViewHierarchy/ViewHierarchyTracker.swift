@@ -21,11 +21,28 @@
             private var hierarchyServer: SdkHierarchyServer?
         #endif
 
+        private let mainLifecycle = MainThreadLifecycle()
+
         private init() {}
 
         // MARK: - Lifecycle
 
-        func initialize(buffer: any EventBuffering, timerFactory: (() -> any TimerScheduling)? = nil) {
+        func initialize(
+            buffer: any EventBuffering,
+            timerFactory: (@Sendable () -> any TimerScheduling)? = nil
+        ) {
+            mainLifecycle.start(setup: {
+                self.initializeOnMain(buffer: buffer, timerFactory: timerFactory)
+            }, teardown: {
+                self.resetOnMain()
+            })
+        }
+
+        @MainActor
+        private func initializeOnMain(
+            buffer: any EventBuffering,
+            timerFactory: (@Sendable () -> any TimerScheduling)?
+        ) {
             lock.lock()
             self.buffer = buffer
             let timer = timerFactory?() ?? GCDTimer()
@@ -47,6 +64,11 @@
         }
 
         func reset() {
+            mainLifecycle.stop()
+        }
+
+        @MainActor
+        private func resetOnMain() {
             lock.lock()
             pollTimer?.cancel()
             pollTimer = nil
@@ -111,14 +133,16 @@
         // MARK: - Polling
 
         private func poll() {
-            guard AutoMobileSDK.shared.isEnabled else { return }
+            guard AutoMobileSDK.shared.isEnabled, mainLifecycle.isActive else { return }
 
             DispatchQueue.main.async { [weak self] in
-                self?.refreshApplicationActiveState()
-                self?.walkAndBroadcastIfChanged()
+                guard let self, self.mainLifecycle.isActive else { return }
+                self.refreshApplicationActiveState()
+                self.walkAndBroadcastIfChanged()
             }
         }
 
+        @MainActor
         private func observeApplicationLifecycle() {
             // `refreshApplicationActiveState` takes `lock`, so seed the state before
             // acquiring it (NSLock is not recursive).
@@ -151,17 +175,9 @@
             lock.unlock()
         }
 
+        @MainActor
         private func refreshApplicationActiveState() {
-            // Both callers enter without holding `lock`; acquire it only after the UIKit read.
-            let isActive: Bool
-            if Thread.isMainThread {
-                isActive = MainActor.assumeIsolated { UIApplication.shared.applicationState == .active }
-            } else {
-                isActive = DispatchQueue.main.sync {
-                    MainActor.assumeIsolated { UIApplication.shared.applicationState == .active }
-                }
-            }
-            setApplicationActive(isActive)
+            setApplicationActive(UIApplication.shared.applicationState == .active)
         }
 
         private func setApplicationActive(_ isActive: Bool) {

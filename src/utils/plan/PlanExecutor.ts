@@ -27,7 +27,11 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
-import { isDeviceLostError } from "../../models/DeviceLostError";
+import {
+  type DeviceLostError,
+  isDeviceLostError,
+  rememberDeviceLossAbort,
+} from "../../models/DeviceLostError";
 import { formatToolParamError } from "../toolParamError";
 import { stripUndeclaredSessionUuid } from "../toolParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
@@ -949,6 +953,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     const combinedSignal = signal
       ? AbortSignal.any([signal, internalAbortController.signal])
       : internalAbortController.signal;
+    let firstDeviceLoss: DeviceLostError | undefined;
 
     // Track per-device results
     const perDeviceResults = new Map<string, DeviceExecutionResult>();
@@ -1030,6 +1035,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
         return result;
       } catch (error) {
         if (isDeviceLostError(error)) {
+          // Device loss overrides ordinary-failure abort strategies. Remember the
+          // originating error before abort listeners can reject sibling tracks.
+          firstDeviceLoss ??= error;
+          rememberDeviceLossAbort(internalAbortController.signal, firstDeviceLoss);
+          rememberDeviceLossAbort(combinedSignal, firstDeviceLoss);
+          internalAbortController.abort(firstDeviceLoss);
           throw error;
         }
         const errorMsg = errorMessage(error);
@@ -1080,8 +1091,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
     });
 
-    // Wait for all devices to complete
-    const results = await Promise.all(devicePromises);
+    // Keep plan ownership until every track, including in-flight tools, settles.
+    const results = await this.settleDeviceTracks(devicePromises, () => firstDeviceLoss);
 
     // Calculate total executed steps across all devices
     const totalExecutedSteps = results.reduce((sum, r) => sum + r.executedSteps, 0);
@@ -1131,6 +1142,23 @@ export class DefaultPlanExecutor implements PlanExecutor {
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
     };
+  }
+
+  private async settleDeviceTracks<T>(
+    devicePromises: Promise<T>[],
+    getDeviceLoss: () => DeviceLostError | undefined,
+  ): Promise<T[]> {
+    const settled = await Promise.allSettled(devicePromises);
+    const deviceLoss = getDeviceLoss();
+    if (deviceLoss) {
+      throw deviceLoss;
+    }
+    return settled.map((result) => {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+      return result.value;
+    });
   }
 
   /**

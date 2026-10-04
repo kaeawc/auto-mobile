@@ -1,10 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
 const ROOT = join(import.meta.dir, "..", "..");
+const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 
 interface BoundaryOffender {
   readonly file: string;
@@ -210,6 +211,18 @@ function findOffenders(source: string, file = "fixture.ts"): BoundaryOffender[] 
   if (!/(?:devicectl|terminateApp|\\|\+|\$\{)/i.test(source)) {
     return [];
   }
+  // All launcher/seam seeds contain exec or spawn; aliases still need a seed
+  // in this file (the analyzer does not resolve imports across files). The owner
+  // API contains terminateApp. A backslash keeps escaped identifiers/keys in.
+  // Comments and strings can only create extra candidates, never hide a seed.
+  if (!/exec|spawn|terminateApp|\\/i.test(source)) {
+    return [];
+  }
+  // Simulator scope must appear in the path, a callee, an argument, or an
+  // enclosing identifier/string. Keep escapes for decoded AST evidence too.
+  if (!/(?:Simulator|SimCtl)/i.test(file) && !/simulator|simctl|\\/i.test(source)) {
+    return [];
+  }
   const ast = executionBoundaryAst(source);
   return ast.calls.flatMap((call) => {
     const values = commandValues(ast, call);
@@ -221,10 +234,13 @@ function findOffenders(source: string, file = "fixture.ts"): BoundaryOffender[] 
   });
 }
 
-const sourceOffenders = sourceFiles(join(ROOT, "src")).flatMap((file) => {
-  const repoPath = relative(ROOT, file).replace(/\\/g, "/");
-  return findOffenders(readFileSync(file, "utf8"), repoPath);
-});
+let sourceOffenders: BoundaryOffender[];
+beforeAll(() => {
+  sourceOffenders = sourceFiles(join(ROOT, "src")).flatMap((file) => {
+    const repoPath = relative(ROOT, file).replace(/\\/g, "/");
+    return findOffenders(readFileSync(file, "utf8"), repoPath);
+  });
+}, TREE_SCAN_HOOK_TIMEOUT_MS);
 
 describe("simctl/devicectl simulator boundary (issue #8353)", () => {
   test("the source scan has no simulator routes to devicectl for simctl-owned concerns", () => {
@@ -237,6 +253,23 @@ describe("simctl/devicectl simulator boundary (issue #8353)", () => {
         'if (isSimulator) { await executeCommand("xcrun", ["devicectl", "device", "pasteboard", "copy", text]); }',
       ),
     ).toEqual([{ file: "fixture.ts", concern: "pasteboard" }]);
+  });
+
+  test("keeps aliases, computed keys, escapes, and constructed commands in the candidate set", () => {
+    for (const source of [
+      `import { spawn as launch } from "node:child_process";
+       const command = "devi" + "cectl";
+       if (isSimulator) { launch("xcrun", [command, "boot"]); }`,
+      'if (isSimulator) { executor["execFile"]("xcrun", [`devi${"cectl"}`, "boot"]); }',
+      String.raw`if (isSimulator) { runner["exec"]("xcrun", ["devicectl", "boot"]); }`,
+    ]) {
+      expect(findOffenders(source)).toEqual([{ file: "fixture.ts", concern: "lifecycle" }]);
+    }
+    expect(
+      findOffenders('executeCommand("xcrun", ["devicectl", "boot"]);', "src/Simulator.ts"),
+    ).toEqual([{ file: "src/Simulator.ts", concern: "lifecycle" }]);
+    expect(findOffenders('const command = "devicectl"; const text = "simulator";')).toEqual([]);
+    expect(findOffenders('// exec devicectl simulator boot\nconst text = "example";')).toEqual([]);
   });
 
   test("allows physical-device devicectl concerns and simulator simctl calls", () => {

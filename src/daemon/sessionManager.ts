@@ -449,6 +449,12 @@ export interface SessionDeviceAssigner {
 
 type SessionAccess = "acquire" | "read-only";
 
+interface SessionAcquisitionOptions {
+  access?: SessionAccess;
+  /** Request-local only; not part of Session or the persistence contract. */
+  requestDeadlineMs?: number;
+}
+
 /** Persisted identity required before recovering a session after daemon restart. */
 export interface SessionRecoveryTarget {
   platform: Platform;
@@ -459,6 +465,8 @@ export interface SessionRecoveryTarget {
   androidEmulator?: boolean;
   /** Only device-restart releases may wait, bounded by session expiry and restart grace. */
   restartRecoveryDeadlineMs?: number;
+  /** Current assignment call's deadline only; never persisted or reused for another call. */
+  requestDeadlineMs?: number;
   /** Liveness contract recorded before the daemon restart. */
   liveness?: SessionRecoveryLiveness;
   /** A startup rehydration reserves the device until its prior owner reconnects. */
@@ -1526,8 +1534,9 @@ export class SessionManager {
     // device just because a device pool is in scope. Internal fresh mints
     // (device-label derived sessions) leave it false and keep minting.
     requireIssuedSession = false,
-    access: SessionAccess = "acquire",
+    accessOptions: SessionAccess | SessionAcquisitionOptions = "acquire",
   ): Promise<Session> {
+    const { access, requestDeadlineMs } = this.resolveSessionAcquisitionOptions(accessOptions);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
@@ -1537,7 +1546,7 @@ export class SessionManager {
         platform,
         execution,
         requireIssuedSession,
-        access,
+        accessOptions,
       );
     }
 
@@ -1552,7 +1561,7 @@ export class SessionManager {
           platform,
           undefined,
           requireIssuedSession,
-          access,
+          accessOptions,
         );
       }
       logger.info(
@@ -1582,7 +1591,7 @@ export class SessionManager {
         platform,
         undefined,
         requireIssuedSession,
-        access,
+        accessOptions,
       );
     }
 
@@ -1592,7 +1601,18 @@ export class SessionManager {
       platform,
       requireIssuedSession,
       access,
+      requestDeadlineMs,
     );
+  }
+
+  /** Preserve the existing access-string API while admitting request-local options. */
+  private resolveSessionAcquisitionOptions(options: SessionAccess | SessionAcquisitionOptions): {
+    access: SessionAccess;
+    requestDeadlineMs?: number;
+  } {
+    return typeof options === "string"
+      ? { access: options }
+      : { access: options.access ?? "acquire", requestDeadlineMs: options.requestDeadlineMs };
   }
 
   /**
@@ -1606,6 +1626,7 @@ export class SessionManager {
     platform: Platform | undefined,
     requireIssuedSession: boolean,
     access: SessionAccess,
+    requestDeadlineMs?: number,
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
@@ -1628,6 +1649,7 @@ export class SessionManager {
       devicePool,
       platform,
       requireIssuedSession,
+      requestDeadlineMs,
     ).finally(() => {
       if (this.pendingSessionAssignments.get(sessionId) === assignment) {
         this.pendingSessionAssignments.delete(sessionId);
@@ -1691,6 +1713,7 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
     requireIssuedSession = false,
+    requestDeadlineMs?: number,
   ): Promise<Session> {
     const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
     const persistedTerminalRelease = persisted
@@ -1726,7 +1749,14 @@ export class SessionManager {
       );
     }
 
-    return await this.recoverPersistedSession(sessionId, devicePool, platform, persisted);
+    return await this.recoverPersistedSession(
+      sessionId,
+      devicePool,
+      platform,
+      persisted,
+      "owned",
+      requestDeadlineMs,
+    );
   }
 
   /** Reuse the on-demand recovery path for startup rehydration. */
@@ -1736,6 +1766,7 @@ export class SessionManager {
     platform: Platform | undefined,
     persisted: DeviceSession | undefined,
     initialOwnership: "owned" | "awaiting-owner" = "owned",
+    requestDeadlineMs?: number,
   ): Promise<Session> {
     const recoveryTarget = await this.recoveryTargetFromPersisted(sessionId, persisted, platform);
     if (recoveryTarget && initialOwnership === "awaiting-owner") {
@@ -1752,7 +1783,7 @@ export class SessionManager {
         sessionId,
         devicePool,
         platform,
-        recoveryTarget,
+        recoveryTarget ? { ...recoveryTarget, requestDeadlineMs } : undefined,
         persisted,
       );
     } finally {

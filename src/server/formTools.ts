@@ -124,7 +124,7 @@ export function resetSetUIStateFactory(): void {
  * is no transport deadline to bound against and `SetUIState` falls back to
  * its own conservative internal budget.
  */
-function resolveTransportDeadlineMs(args: unknown): number | undefined {
+export function resolveTransportDeadlineMs(args: unknown): number | undefined {
   if (!args || typeof args !== "object") {
     return undefined;
   }

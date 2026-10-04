@@ -5706,13 +5706,12 @@ describe("DevicePool", () => {
         release_reason: deviceRestartReleaseReason("Pixel 8"),
         stable_device_id: "Pixel 8",
       });
+      fakeTimer.clearHistory();
       const resume = sessionManager.getOrCreateSession("session-1", devicePool, "android");
-      await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
-        description: "restart recovery retry sleep",
-      });
-      expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
-      fakeTimer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
-      await expect(resume).rejects.toThrow("recovery reason: target-absent");
+      await expect(resume).rejects.toThrow(
+        "watched-process-exit (code=1, signal=null); recovery outcome: exhausted",
+      );
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
     test("does not recover an emulator intentionally shut down by the client", async () => {

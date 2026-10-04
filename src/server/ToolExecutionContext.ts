@@ -83,6 +83,8 @@ interface ToolExecutionContext {
 export interface SessionOptions {
   keepScreenAwake?: boolean;
   platform?: Platform;
+  /** Current call's transport budget; never part of the session's persisted state. */
+  requestDeadlineMs?: number;
   /**
    * `booted` skips automation-only setup (accessibility-service / CtrlProxy
    * preparation) for a tool that only needs the device connected and booted.
@@ -135,6 +137,7 @@ export async function createToolExecutionContext(
       sessionOptions.platform,
       execution,
       requireIssuedSession,
+      { requestDeadlineMs: sessionOptions.requestDeadlineMs },
     ));
 
   if (!sessionManager.isAdmittedForAutomation(session)) {

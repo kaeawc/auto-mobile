@@ -1228,7 +1228,6 @@ export async function checkBootedSimulators(
       name: "Booted Simulators",
       status: "skip",
       message: `Could not check simulators: ${errorMessage(error)}`,
-      value: 0,
     };
   }
 }

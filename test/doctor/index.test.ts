@@ -135,6 +135,7 @@ describe("formatConsoleOutput", () => {
     const output = formatConsoleOutput(report, false);
 
     expect(output).toContain("Skipped: 1");
+    expect(output).toContain("[SKIP] iOS Check: not applicable\n");
   });
 
   test("skipped count is omitted when zero", () => {
@@ -208,6 +209,33 @@ describe("formatConsoleOutput", () => {
     expect(output).toContain("[PASS] OS: the message");
   });
 
+  test("skipped check displays its reason even when it carries a value", () => {
+    const check: CheckResult = {
+      name: "Booted Simulators",
+      status: "skip",
+      message: "Could not check simulators: boom",
+      value: 0,
+    };
+    const output = formatConsoleOutput(makeReport({ ios: { checks: [check] } }), false);
+
+    expect(output).toContain("[SKIP] Booted Simulators: Could not check simulators: boom\n");
+    expect(output).not.toContain("Booted Simulators: 0");
+  });
+
+  test("skipped AVD listing displays its existing failure reason instead of zero", () => {
+    const check = makeCheck({
+      name: "Available AVDs",
+      status: "skip",
+      message: "Could not list AVDs (emulator may not be installed)",
+      value: 0,
+    });
+    const output = formatConsoleOutput(makeReport({ android: { checks: [check] } }), false);
+
+    expect(output).toContain(
+      "[SKIP] Available AVDs: Could not list AVDs (emulator may not be installed)\n",
+    );
+  });
+
   test.each(["pass", "warn", "fail", "skip"] as const)(
     "prints detail under %s checks in every section, before any tip",
     (status) => {
@@ -223,9 +251,12 @@ describe("formatConsoleOutput", () => {
       });
       for (const section of ["system", "android", "ios", "autoMobile"] as const) {
         const output = formatConsoleOutput(makeReport({ [section]: { checks: [check] } }), false);
-        expect(output).toContain(`CoreDevice: 651.13.4\n       ${detail}\n`);
+        const displayed = status === "skip" ? "version message" : "651.13.4";
+        expect(output).toContain(`CoreDevice: ${displayed}\n       ${detail}\n`);
         expect(output.split(`       ${detail}`)).toHaveLength(2);
-        expect(output).not.toContain("version message");
+        if (status !== "skip") {
+          expect(output).not.toContain("version message");
+        }
         if (section !== "system" && (status === "warn" || status === "fail")) {
           expect(output).toContain(`       ${detail}\n       Tip: Check toolchain`);
         }

@@ -323,6 +323,8 @@ describe("PinchOn", () => {
   test("requests fresh capture and pinches changed bounds instead of cached coordinates", async () => {
     const capture = new FakeHierarchyCapture(() => ({
       hierarchy: {
+        // Keep screen geometry distinct from the freshly moved content control.
+        bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
         node: {
           "resource-id": "container-id",
           bounds: { left: 400, top: 400, right: 600, bottom: 600 },

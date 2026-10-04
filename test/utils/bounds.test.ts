@@ -4,11 +4,43 @@ import {
   boundsEqual,
   boundsNearlyEqual,
   horizontalExtentNearlyEqual,
+  intersectBounds,
   clamp,
   isElementBounds,
   parseBounds,
   parseBoundsString,
 } from "../../src/utils/bounds";
+
+describe("intersectBounds", () => {
+  const screen = { left: 0, top: 0, right: 402, bottom: 874 };
+
+  it("returns the overlap without mutating either rectangle", () => {
+    const target = Object.freeze({ left: -30, top: 100, right: 200, bottom: 1000 });
+    expect(intersectBounds(target, Object.freeze(screen))).toEqual({
+      left: 0,
+      top: 100,
+      right: 200,
+      bottom: 874,
+    });
+  });
+
+  it("returns null for touching horizontal or vertical edges", () => {
+    expect(intersectBounds(screen, { left: 402, top: 0, right: 500, bottom: 100 })).toBeNull();
+    expect(intersectBounds(screen, { left: 0, top: 874, right: 100, bottom: 900 })).toBeNull();
+  });
+
+  it("returns null for disjoint rectangles", () => {
+    expect(intersectBounds(screen, { left: -100, top: 0, right: -1, bottom: 100 })).toBeNull();
+    expect(intersectBounds(screen, { left: 0, top: -100, right: 100, bottom: -1 })).toBeNull();
+  });
+
+  it("returns the contained rectangle in either argument order", () => {
+    const inner = { left: 10, top: 20, right: 100, bottom: 200 };
+    expect(intersectBounds(screen, inner)).toEqual(inner);
+    expect(intersectBounds(inner, screen)).toEqual(inner);
+    expect(intersectBounds(screen, screen)).toEqual(screen);
+  });
+});
 
 describe("boundsNearlyEqual", () => {
   it("returns true for identical bounds at epsilon 0", () => {

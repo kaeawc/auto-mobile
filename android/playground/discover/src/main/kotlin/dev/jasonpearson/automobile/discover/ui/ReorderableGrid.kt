@@ -5,9 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
@@ -28,12 +31,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -51,58 +56,81 @@ data class GridImage(val id: String, val imageUrl: String, val description: Stri
 fun ReorderableGrid(images: List<GridImage>, onReorder: (Int, Int) -> Unit) {
   var draggedItemId by remember { mutableStateOf<String?>(null) }
   var draggedOverIndex by remember { mutableIntStateOf(-1) }
+  val gridState = rememberLazyGridState()
   val density = LocalDensity.current
+  val columns = 3
 
-  LazyVerticalGrid(
-    columns = GridCells.Fixed(3),
-    contentPadding = PaddingValues(8.dp),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-    modifier = Modifier.height(280.dp),
-  ) {
-    itemsIndexed(images, key = { _, image -> image.id }) { index, image ->
-      val isBeingDragged = draggedItemId == image.id
-      val isDropTarget = draggedOverIndex == index && !isBeingDragged
+  BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+    val rows = (images.size + columns - 1) / columns
+    // Round up to the widest measured column so pixel rounding cannot clip the last row.
+    val contentHeight =
+      with(density) {
+        val spacingPx = 8.dp.roundToPx()
+        val availableWidth = (constraints.maxWidth - spacingPx * (columns + 1)).coerceAtLeast(0)
+        val cellSizePx = (availableWidth + columns - 1) / columns
+        (cellSizePx * rows + spacingPx * (rows - 1).coerceAtLeast(0) + spacingPx * 2).toDp()
+      }
 
-      GridImageItem(
-        image = image,
-        isDragged = isBeingDragged,
-        isDropTarget = isDropTarget,
-        onDragStart = { draggedItemId = image.id },
-        onDragEnd = {
-          if (draggedItemId != null && draggedOverIndex != -1) {
+    LazyVerticalGrid(
+      columns = GridCells.Fixed(columns),
+      state = gridState,
+      userScrollEnabled = false,
+      contentPadding = PaddingValues(8.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.fillMaxWidth().height(contentHeight),
+    ) {
+      itemsIndexed(images, key = { _, image -> image.id }) { index, image ->
+        val isBeingDragged = draggedItemId == image.id
+        val isDropTarget = draggedOverIndex == index && !isBeingDragged
+
+        GridImageItem(
+          image = image,
+          isDragged = isBeingDragged,
+          isDropTarget = isDropTarget,
+          onDragStart = {
+            draggedItemId = image.id
+            draggedOverIndex = -1
+          },
+          onDragEnd = {
             val draggedIndex = images.indexOfFirst { it.id == draggedItemId }
-            if (draggedIndex != -1 && draggedIndex != draggedOverIndex) {
+            if (
+              draggedIndex != -1 &&
+                draggedOverIndex in images.indices &&
+                draggedIndex != draggedOverIndex
+            ) {
               onReorder(draggedIndex, draggedOverIndex)
             }
-          }
-          draggedItemId = null
-          draggedOverIndex = -1
-        },
-        onDragMove = { offset ->
-          if (draggedItemId != null) {
-            // Calculate which grid cell we're hovering over
-            val itemSize = with(density) { 96.dp.toPx() } // Item size + spacing
-            val cols = 3
-            val currentRow = index / cols
-            val currentCol = index % cols
-
-            val newCol =
-              ((currentCol * itemSize + offset.x) / itemSize).roundToInt().coerceIn(0, cols - 1)
-            val newRow =
-              ((currentRow * itemSize + offset.y) / itemSize)
-                .roundToInt()
-                .coerceIn(0, 1) // 2 rows max in our 280dp height
-            val newIndex = (newRow * cols + newCol).coerceIn(0, images.size - 1)
-
-            val draggedIndex = images.indexOfFirst { it.id == draggedItemId }
-            if (newIndex != draggedOverIndex && newIndex != draggedIndex) {
-              draggedOverIndex = newIndex
+            draggedItemId = null
+            draggedOverIndex = -1
+          },
+          onDragMove = { offset ->
+            val activeId = draggedItemId
+            if (activeId != null) {
+              val cells =
+                gridState.layoutInfo.visibleItemsInfo.map { item ->
+                  GridDropCell(
+                    item.index,
+                    Rect(
+                      item.offset.x.toFloat(),
+                      item.offset.y.toFloat(),
+                      (item.offset.x + item.size.width).toFloat(),
+                      (item.offset.y + item.size.height).toFloat(),
+                    ),
+                  )
+                }
+              // Include the source cell: returning to it must clear a previous drop target.
+              draggedOverIndex =
+                calculateGridDropTarget(images.map { it.id }, activeId, cells, offset)
             }
-          }
-        },
-        modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null),
-      )
+          },
+          onDragCancel = {
+            draggedItemId = null
+            draggedOverIndex = -1
+          },
+          modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null),
+        )
+      }
     }
   }
 }
@@ -116,9 +144,14 @@ fun GridImageItem(
   onDragEnd: () -> Unit,
   onDragMove: (Offset) -> Unit,
   modifier: Modifier = Modifier,
+  onDragCancel: () -> Unit = {},
 ) {
   var dragOffset by remember { mutableStateOf(Offset.Zero) }
   val scale = remember { Animatable(1f) }
+  val currentOnDragStart by rememberUpdatedState(onDragStart)
+  val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+  val currentOnDragMove by rememberUpdatedState(onDragMove)
+  val currentOnDragCancel by rememberUpdatedState(onDragCancel)
 
   LaunchedEffect(isDragged) { scale.animateTo(if (isDragged) 1.15f else 1f) }
 
@@ -139,20 +172,24 @@ fun GridImageItem(
         .scale(scale.value)
         .zIndex(if (isDragged) 1f else 0f)
         .shadow(if (isDragged) 16.dp else 4.dp, RoundedCornerShape(8.dp))
-        .pointerInput(Unit) {
+        .pointerInput(image.id) {
           detectDragGestures(
-            onDragStart = { offset ->
+            onDragStart = { _ ->
               // Start drag immediately on touch
-              onDragStart()
+              currentOnDragStart()
               dragOffset = Offset.Zero
             },
             onDragEnd = {
-              onDragEnd()
+              currentOnDragEnd()
               dragOffset = Offset.Zero
             },
-          ) { change, dragAmount ->
+            onDragCancel = {
+              currentOnDragCancel()
+              dragOffset = Offset.Zero
+            },
+          ) { _, dragAmount ->
             dragOffset += dragAmount
-            onDragMove(dragOffset)
+            currentOnDragMove(dragOffset)
           }
         },
     elevation = CardDefaults.cardElevation(defaultElevation = if (isDragged) 16.dp else 4.dp),

@@ -5,7 +5,7 @@ import { join } from "path";
 import { createHash, X509Certificate } from "crypto";
 import { logger } from "../logger";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
-import { parsePlist, PlistReal, type PlistValue } from "./XctestrunPlist";
+import { escapeXml, parsePlist, PlistReal, type PlistValue } from "./XctestrunPlist";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
 import { defaultTimer, Timer } from "../SystemTimer";
@@ -198,7 +198,7 @@ const serializePlist = (value: unknown, indent: string = ""): string => {
     return `${indent}<string></string>`;
   }
   if (typeof value === "string") {
-    return `${indent}<string>${value}</string>`;
+    return `${indent}<string>${escapeXml(value)}</string>`;
   }
   if (typeof value === "number") {
     return Number.isInteger(value)
@@ -218,13 +218,13 @@ const serializePlist = (value: unknown, indent: string = ""): string => {
   if (typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     const lines = entries.map(([key, val]) => {
-      const keyLine = `${nextIndent}<key>${key}</key>`;
+      const keyLine = `${nextIndent}<key>${escapeXml(key)}</key>`;
       const valueLine = serializePlist(val, nextIndent);
       return `${keyLine}\n${valueLine}`;
     });
     return `${indent}<dict>\n${lines.join("\n")}\n${indent}</dict>`;
   }
-  return `${indent}<string>${String(value)}</string>`;
+  return `${indent}<string>${escapeXml(String(value))}</string>`;
 };
 
 const entitlementsPlist = (entitlements: Record<string, unknown>): string => {

@@ -784,6 +784,98 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         XCTAssertLessThanOrEqual(response.body.count, 2048)
     }
 
+    func testExecuteSqlMarksTruncatedWhenMaxRowsCutsRows() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        fakeDriver.sqlResult = SQLExecutionResult(
+            columns: ["value"],
+            rows: [["first"], ["second"], ["third"]],
+            rowsAffected: 0
+        )
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"],
+            maxRows: 2,
+            maxBytes: 2048
+        ))
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT value FROM notes"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+        XCTAssertEqual(response.statusCode, 200)
+        let payload = try JSONDecoder().decode(SdkExecuteSqlPayload.self, from: response.body)
+
+        XCTAssertEqual(payload.rows?.count, 2)
+        XCTAssertEqual(payload.rows, [["first"], ["second"]])
+        XCTAssertTrue(payload.truncated)
+    }
+
+    func testExecuteSqlMarksTruncatedWhenByteLimitCutsRows() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        // Cell byte sums are 5 and 600: the second row exceeds the 512-byte budget.
+        // The first row plus the JSON envelope fits without any further trimming.
+        let rows: [[String?]] = [["first"], [String(repeating: "x", count: 600)]]
+        fakeDriver.sqlResult = SQLExecutionResult(columns: ["value"], rows: rows, rowsAffected: 0)
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"],
+            maxRows: 10,
+            maxBytes: 512
+        ))
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT value FROM notes"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+        XCTAssertEqual(response.statusCode, 200)
+        let payload = try JSONDecoder().decode(SdkExecuteSqlPayload.self, from: response.body)
+
+        XCTAssertEqual(payload.rows, [["first"]])
+        XCTAssertLessThan(payload.rows?.count ?? rows.count, rows.count)
+        XCTAssertTrue(payload.truncated)
+        XCTAssertLessThanOrEqual(response.body.count, 512)
+    }
+
+    func testExecuteSqlDoesNotMarkTruncatedWhenAllRowsFit() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        let rows: [[String?]] = [["first"], ["second"], ["third"]]
+        fakeDriver.sqlResult = SQLExecutionResult(columns: ["value"], rows: rows, rowsAffected: 0)
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"],
+            maxRows: 10,
+            maxBytes: 2048
+        ))
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT value FROM notes"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+        XCTAssertEqual(response.statusCode, 200)
+        let payload = try JSONDecoder().decode(SdkExecuteSqlPayload.self, from: response.body)
+
+        XCTAssertEqual(payload.rows, rows)
+        XCTAssertFalse(payload.truncated)
+    }
+
     func testConfiguredDatabaseAllowlistBlocksUnregisteredPath() throws {
         let fakeDriver = RouteFakeDatabaseDriver()
         fakeDriver.databases = [

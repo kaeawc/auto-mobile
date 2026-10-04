@@ -79,7 +79,6 @@ export interface TalkBackSwipeRunner {
 export interface OverlayAnalyzer {
   collectOverlayCandidates(
     viewHierarchy: ViewHierarchyResult,
-    container: SwipeOnOptions["container"] | undefined,
     containerElement: Element,
   ): OverlayCandidate[];
 

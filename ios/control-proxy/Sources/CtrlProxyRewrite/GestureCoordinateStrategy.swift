@@ -1,6 +1,6 @@
 import Foundation
 
-struct GestureSize: Equatable, Sendable {
+struct GestureSize: Equatable, Hashable, Sendable {
     let width: Double
     let height: Double
 
@@ -44,6 +44,18 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
     let observation: GestureSize
     let rotation: Int?
 
+    nonisolated func replacingScreen(_ screen: GestureSize) -> Self {
+        Self(app: app, screen: screen, observation: observation, rotation: rotation)
+    }
+
+    /// Correct only a runner-screen mismatch that disappears against the trusted screen.
+    nonisolated func resolvingSinglePanel(reference: GestureSize?) -> Self? {
+        guard hasMultiPanelMismatch(app: app, screen: screen),
+              let reference, reference.isValid,
+              !hasMultiPanelMismatch(app: app, screen: reference) else { return nil }
+        return replacingScreen(reference)
+    }
+
     /// Mirrors resolveIosObserveRotation: unknown cardinal orientation falls back to size.
     nonisolated static func observationRotation(_ rotation: Int?, size: GestureSize) -> Int? {
         guard size.isValid else { return nil }
@@ -53,6 +65,56 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
             return rotation
         }
         return size.width < size.height ? 0 : 1
+    }
+}
+
+/// Memoizes successful reads and rate-limits retries after unavailable or invalid references.
+@MainActor
+final class ReferenceScreenCache {
+    static let failedReadRetryIntervalMs: Int64 = 5000
+
+    private struct Key: Hashable {
+        let app: GestureSize
+        let screen: GestureSize
+
+        init(_ geometry: GestureCoordinateGeometry) {
+            app = geometry.app
+            screen = geometry.screen
+        }
+    }
+
+    private let timer: any ProxyTimer
+    private let retryAfterMs: Int64
+    private let reader: @MainActor () -> GestureSize?
+    private var entries: [Key: GestureSize] = [:]
+    private var failedReads: [Key: Int64] = [:]
+
+    init(
+        timer: any ProxyTimer = SystemTimer(),
+        retryAfterMs: Int64 = ReferenceScreenCache.failedReadRetryIntervalMs,
+        reader: @escaping @MainActor () -> GestureSize?
+    ) {
+        self.timer = timer
+        self.retryAfterMs = retryAfterMs
+        self.reader = reader
+    }
+
+    func screen(for geometry: GestureCoordinateGeometry) -> GestureSize? {
+        let key = Key(geometry)
+        if let screen = entries[key] { return screen }
+        if let failedAt = failedReads[key], timer.now() - failedAt < retryAfterMs { return nil }
+        if let screen = reader(), screen.isValid {
+            entries[key] = screen
+            failedReads.removeValue(forKey: key)
+            return screen
+        }
+        failedReads[key] = timer.now()
+        return nil
+    }
+
+    /// Forced legacy can consume a warm entry, but must never trigger a platform read.
+    func cachedScreen(for geometry: GestureCoordinateGeometry) -> GestureSize? {
+        entries[Key(geometry)]
     }
 }
 

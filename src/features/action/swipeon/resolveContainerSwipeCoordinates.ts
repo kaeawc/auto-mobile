@@ -43,7 +43,6 @@ export function resolveContainerSwipeCoordinates({
 
   const overlayCandidates = overlayDetector.collectOverlayCandidates(
     viewHierarchy,
-    options.container,
     containerElement,
   );
   if (overlayCandidates.length === 0) {

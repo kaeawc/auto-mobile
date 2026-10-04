@@ -235,21 +235,21 @@ object VideoServer {
         return evenDimensions(displayWidth, displayHeight)
       }
       val scale = quality.maxHeight.toFloat() / displayHeight.toFloat()
-      val scaledWidth = (displayWidth * scale).toInt() and 0xFFFE // Round to even
-      return scaledWidth to quality.maxHeight
+      val scaledWidth = (displayWidth * scale).toInt()
+      return evenDimensions(scaledWidth, quality.maxHeight)
     } else {
       // Scale based on width (landscape)
       if (displayWidth <= quality.maxHeight) {
         return evenDimensions(displayWidth, displayHeight)
       }
       val scale = quality.maxHeight.toFloat() / displayWidth.toFloat()
-      val scaledHeight = (displayHeight * scale).toInt() and 0xFFFE // Round to even
-      return quality.maxHeight to scaledHeight
+      val scaledHeight = (displayHeight * scale).toInt()
+      return evenDimensions(quality.maxHeight, scaledHeight)
     }
   }
 
   private fun evenDimensions(width: Int, height: Int): Pair<Int, Int> =
-    (width and 0xFFFE) to (height and 0xFFFE)
+    maxOf(2, width and 0xFFFE) to maxOf(2, height and 0xFFFE)
 
   private fun run(
     width: Int,

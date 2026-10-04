@@ -1,12 +1,16 @@
+test/fixtures/android-display/**/*.txt text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
+test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/release/*.md text eol=lf
+test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 # Pin byte-exact captured plutil output to LF across Windows checkouts.
 test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
+test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
@@ -65,3 +69,7 @@ android/playground/design/assets/src/main/res/font/*.ttf -filter -diff -merge -t
 ios/Playground/Sources/Resources/Fonts/*.ttf -filter -diff -merge -text
 # Emulator console captures whose CRLF line endings are part of the asserted bytes (#9018).
 test/fixtures/android-display/hinge-angle0-get*.txt -text
+# Pin the consistent display capture pair to LF, except console bytes below.
+test/fixtures/android-display/fold-pixel10pf-api36/*.txt text eol=lf
+# Preserve the captured emulator console CRLF bytes in both postures.
+test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text

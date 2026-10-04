@@ -34,7 +34,8 @@ export async function recordLogEvent(
 ): Promise<void> {
   await getDb(db).insertInto("log_events").values(toLogRow(input)).execute();
 
-  cleanupIfNeeded(db);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db);
 }
 
 /**
@@ -51,7 +52,8 @@ export async function recordLogEvents(
   }
   await getDb(db).insertInto("log_events").values(inputs.map(toLogRow)).execute();
 
-  cleanupIfNeeded(db, undefined, undefined, inputs.length);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getLogEvents(

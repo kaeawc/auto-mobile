@@ -982,68 +982,91 @@ describe("startDevice handler", () => {
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
   });
 
-  it("restarts the pooled AVD and preserves its session after a System UI ANR", async () => {
-    const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
-        timer: timer,
-        deviceManager: fakeDeviceUtils,
-      }),
-    );
-    const recoveryImage = {
-      ...androidImage,
-      deviceId: "emulator-5556",
-    };
-    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
-    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
-    // assignment (#6863 review) — a different scenario, covered by "does not guess
-    // an AVD when an unknown Android runtime needs System UI recovery".
-    const pooledAnrDevice = { ...androidDevice };
-    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
-    await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
-    DaemonState.getInstance().initialize(daemonSessionManager, pool);
-    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeMatcher.setBootedResult(pooledAnrDevice);
-    fakeMatcher.setImageResult(recoveryImage);
-    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
-      fakeDeviceUtils.setBootedDevices("android", []);
-    };
-    let readinessAttempts = 0;
-    setDeviceToolsDependencies({
-      timer,
-      ensureCtrlProxyReady: async () => {
-        readinessAttempts++;
-        timer.advanceTime(17);
-        if (readinessAttempts === 1) {
-          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+  it.each([false, true])(
+    "restarts the pooled AVD and preserves its session after a System UI ANR (release rejects=%s)",
+    async (releaseRejects) => {
+      const timer = new FakeTimer();
+      daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+          timer: timer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
+      const recoveryImage = {
+        ...androidImage,
+        deviceId: "emulator-5556",
+      };
+      // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+      // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+      // assignment (#6863 review) — a different scenario, covered by "does not guess
+      // an AVD when an unknown Android runtime needs System UI recovery".
+      const pooledAnrDevice = { ...androidDevice };
+      fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+      await pool.initializeWithDevices([pooledAnrDevice]);
+      await pool.bindOrReuseDeviceSession(
+        "owner-session",
+        pooledAnrDevice.deviceId,
+        "android",
+        recoveryImage,
+      );
+      const reserve = pool.reserveDeviceForShutdown.bind(pool);
+      pool.reserveDeviceForShutdown = async (...args) => {
+        const reservation = await reserve(...args);
+        if (!reservation) {
+          return undefined;
         }
-      },
-    });
-    registerDeviceTools();
+        return {
+          ...reservation,
+          release: async () => {
+            await reservation.release();
+            if (releaseRejects) {
+              throw new Error("ANR shutdown reservation release failed");
+            }
+          },
+        };
+      };
+      DaemonState.getInstance().initialize(daemonSessionManager, pool);
+      fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+      fakeMatcher.setBootedResult(pooledAnrDevice);
+      fakeMatcher.setImageResult(recoveryImage);
+      const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+      fakeDeviceUtils.killDevice = async (device, options) => {
+        await originalKillDevice(device, options);
+        fakeDeviceUtils.setBootedDevices("android", []);
+      };
+      let readinessAttempts = 0;
+      setDeviceToolsDependencies({
+        timer,
+        ensureCtrlProxyReady: async () => {
+          readinessAttempts++;
+          timer.advanceTime(17);
+          if (readinessAttempts === 1) {
+            throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+          }
+        },
+      });
+      registerDeviceTools();
 
-    const result = await callStartDeviceWithEvidence({ platform: "android" }, 34, true);
+      const result = await callStartDeviceWithEvidence({ platform: "android" }, 34, true);
 
-    expect(result.runtime.deviceId).toBe("emulator-5556");
-    expect(result.runtime.session.sessionUuid).toBe("owner-session");
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:359983");
-    expect(pool.getDevice("emulator-5556")).toMatchObject({
-      sessionId: "owner-session",
-      status: "busy",
-      avdName: "Pixel_7_API_34",
-    });
-    expect(pool.getIdleDevices()).toEqual([]);
-    expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe("emulator-5556");
-  });
+      expect(result.runtime.deviceId).toBe("emulator-5556");
+      expect(result.runtime.session.sessionUuid).toBe("owner-session");
+      expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
+      expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+        "startDevice:Pixel_7_API_34:359983",
+      );
+      expect(pool.getDevice("emulator-5556")).toMatchObject({
+        sessionId: "owner-session",
+        status: "busy",
+        avdName: "Pixel_7_API_34",
+      });
+      expect(pool.getIdleDevices()).toEqual([]);
+      expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
+        "emulator-5556",
+      );
+    },
+  );
 
   // Recovery already resolved the ANR'd AVD's image by exact name, so the
   // replacement boot must reuse that resolution. `DeviceMatcher.matchesName` is

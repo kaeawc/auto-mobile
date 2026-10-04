@@ -4,7 +4,7 @@ import type { Writable } from "node:stream";
 import { describe, expect, spyOn, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { BootedDevice } from "../../../src/models";
+import { ActionableError, type BootedDevice } from "../../../src/models";
 import {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
   IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
@@ -267,7 +267,7 @@ function createHarnessWithOverrides(
     forceRawPipeline: true,
     ...options,
   });
-  return { source, helper, encoderSpawns };
+  return { source, helper, encoder, encoderSpawns };
 }
 
 // A harness that hands out a *fresh* encoder per spawn, so an encoder restart
@@ -401,6 +401,69 @@ async function successfulCommandRunner(_command: string, args: string[]) {
 }
 
 describe("IosH264Source", () => {
+  test.each([
+    [0, 2],
+    [-1, 2],
+    [NaN, 2],
+    [Infinity, 2],
+    [2, 0],
+    [2, -1],
+    [2, NaN],
+    [2, Infinity],
+  ])(
+    "rejects invalid source frame size %sx%s before spawning an encoder",
+    async (width, height) => {
+      const timer = new FakeTimer();
+      const errors: Error[] = [];
+      const { source, helper, encoder, encoderSpawns } = createHarnessWithOverrides({
+        timer,
+        runningReconnectMaxAttempts: 0,
+        onError: (error) => errors.push(error),
+      });
+      const invalidFrame = frame(2, 2, 0x11);
+      invalidFrame.header = { ...invalidFrame.header, width, height };
+
+      try {
+        await startWithFrame(source, helper, invalidFrame);
+
+        expect(encoderSpawns).toHaveLength(0);
+        expect(encoder.getStdinData()).toHaveLength(0);
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toBeInstanceOf(ActionableError);
+        expect(errors[0].message).toContain(`${width}x${height}`);
+        expect(errors[0].message).toContain("cannot configure the H.264 encoder");
+      } finally {
+        await source.stop();
+      }
+    },
+  );
+
+  test("rejects a mid-stream invalid source frame size without reconfiguring or writing it", async () => {
+    const timer = new FakeTimer();
+    const errors: Error[] = [];
+    const { source, helper, encoder, encoderSpawns } = createHarnessWithOverrides({
+      timer,
+      runningReconnectMaxAttempts: 0,
+      onError: (error) => errors.push(error),
+    });
+    try {
+      await startWithFrame(source, helper, frame(2, 2, 0x11));
+      const written = encoder.getStdinData();
+      const invalidFrame = frame(2, 2, 0x22);
+      invalidFrame.header = { ...invalidFrame.header, width: NaN };
+
+      helper.emitFrame(invalidFrame);
+
+      expect(encoderSpawns).toHaveLength(1);
+      expect(encoder.getStdinData()).toEqual(written);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toBeInstanceOf(ActionableError);
+      expect(errors[0].message).toContain("NaNx2");
+    } finally {
+      await source.stop();
+    }
+  });
+
   test("captures a physical device, encodes BGRA frames, and forwards Annex-B output", async () => {
     let freshFrames = 0;
     const { source, helper, encoder, helperTargets, encoderSpawns, chunks } = createHarness(

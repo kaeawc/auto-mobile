@@ -67,7 +67,8 @@ export async function recordNetworkEvent(
     .returning("id")
     .executeTakeFirstOrThrow();
 
-  cleanupIfNeeded(db);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db);
 
   return result.id;
 }

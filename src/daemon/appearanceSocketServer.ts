@@ -18,6 +18,7 @@ import {
   triggerAppearanceSync,
 } from "./AppearanceSyncScheduler";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
 import { DaemonState } from "./daemonState";
 import type {
   AppearanceConfig,
@@ -32,6 +33,8 @@ import {
 } from "./streamSocketAuth";
 
 const VALID_MODES = new Set(["light", "dark", "auto"]);
+const AUTOMATIC_SYNC_DISABLED_WARNING =
+  "Automatic appearance sync is disabled by AUTOMOBILE_APPEARANCE_SYNC.";
 
 export interface AppearanceDeviceSource {
   getPooledDevices(): BootedDevice[];
@@ -70,6 +73,7 @@ export interface AppearanceSocketServerDependencies {
   resolveMode: (config: AppearanceConfig) => Promise<AppearanceMode>;
   applyToDevice: (device: BootedDevice, mode: AppearanceMode) => Promise<void>;
   triggerSync: () => Promise<void>;
+  isSyncEnabled?: () => boolean;
   applyDeadlineMs?: number;
 }
 
@@ -79,6 +83,7 @@ const defaultDependencies: AppearanceSocketServerDependencies = {
   resolveMode: resolveAppearanceMode,
   applyToDevice: applyAppearanceToDevice,
   triggerSync: triggerAppearanceSync,
+  isSyncEnabled: isAppearanceSyncEnabledFromEnvironment,
 };
 
 /**
@@ -139,6 +144,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
           result: {
             config,
             appliedMode: appliedMode ?? undefined,
+            ...this.automaticSyncWarning(enabled),
           },
         };
       }
@@ -162,6 +168,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
           result: {
             config,
             appliedMode: appliedMode ?? undefined,
+            ...this.automaticSyncWarning(normalizedMode === "auto"),
           },
         };
       }
@@ -177,6 +184,15 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       success: false,
       error,
     };
+  }
+
+  private automaticSyncWarning(
+    automaticSyncRequested: boolean,
+  ): { warning: string } | Record<string, never> {
+    return automaticSyncRequested &&
+      !(this.dependencies.isSyncEnabled ?? isAppearanceSyncEnabledFromEnvironment)()
+      ? { warning: AUTOMATIC_SYNC_DISABLED_WARNING }
+      : {};
   }
 
   private async applyToTargets(

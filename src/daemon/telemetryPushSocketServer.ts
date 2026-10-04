@@ -14,8 +14,6 @@ import { getNavigationEvents } from "../db/navigationEventRepository";
 import { getStorageEvents } from "../db/storageEventRepository";
 import { getLayoutEvents } from "../db/layoutEventRepository";
 import { getDatabase } from "../db/database";
-import type { Database } from "../db/types";
-import type { Kysely } from "kysely";
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
@@ -289,7 +287,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       const screenshotUris: Map<string, string> = new Map();
       if (rows.length > 0) {
         try {
-          const db = getDatabase() as unknown as Kysely<Database>;
+          const db = getDatabase();
           const destinations = [...new Set(rows.map((r) => r.destination))];
           const nodes = await db
             .selectFrom("navigation_nodes")
@@ -326,7 +324,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
         return;
       }
       try {
-        const db = getDatabase() as unknown as Kysely<Database>;
+        const db = getDatabase();
         let q = db
           .selectFrom("failure_occurrences")
           .innerJoin("failure_groups", "failure_groups.id", "failure_occurrences.group_id")

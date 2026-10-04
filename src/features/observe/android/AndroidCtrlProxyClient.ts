@@ -101,8 +101,11 @@ import {
 import {
   normalizeAnr,
   normalizeCrash,
+  withResolvedTimestamp,
   type SdkAnrPayload,
+  type SdkAnrWirePayload,
   type SdkCrashPayload,
+  type SdkCrashWirePayload,
 } from "../crash/sdkCrashIngestion";
 import { AndroidSdkEventIngestor, DefaultAndroidSdkEventIngestor } from "./AndroidSdkEventIngestor";
 import { FailureEventRepository } from "../../../db/failureEventRepository";
@@ -700,12 +703,12 @@ interface WsHandledExceptionEventMessage extends WsMessageBase {
 
 interface WsCrashEventMessage extends WsMessageBase {
   type: "crash_event";
-  event?: SdkCrashPayload;
+  event?: SdkCrashWirePayload;
 }
 
 interface WsAnrEventMessage extends WsMessageBase {
   type: "anr_event";
-  event?: SdkAnrPayload;
+  event?: SdkAnrWirePayload;
 }
 
 /** Real per-frame metrics from the in-app SDK FrameMetricsCollector (issue #5076). */
@@ -2068,7 +2071,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public static resetInstances(): void {
     for (const instance of AndroidCtrlProxyClient.instances.values()) {
-      instance.close().catch(() => {});
+      instance.close().catch((error) => {
+        const logger = instance.loggerInstance;
+        // The local alias keeps the injected logger visible to the catch-convention lint rule.
+        logger.warn(`[CTRL_PROXY] Instance reset cleanup failed: ${errorMessage(error)}`, error);
+      });
     }
     AndroidCtrlProxyClient.instances.clear();
     AndroidCtrlProxyClient.activeObservers.clear();
@@ -3994,6 +4001,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
+      const logger = this.loggerInstance;
+      // The local alias keeps the injected logger visible to the catch-convention lint rule.
+      logger.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
@@ -4004,7 +4014,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         success: false,
         action,
         totalTimeMs: this.timer.now() - startTime,
-        error: `${error}`,
+        error: error instanceof Error ? error.toString() : errorMessage(error),
       };
     }
   }
@@ -4062,13 +4072,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
+      const logger = this.loggerInstance;
+      logger.warn(`[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
           error instanceof Error ? error : new Error(String(error)),
         );
       }
-      return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
+      return {
+        success: false,
+        totalTimeMs: this.timer.now() - startTime,
+        error: error instanceof Error ? error.toString() : errorMessage(error),
+      };
     }
   }
 
@@ -4160,13 +4176,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await promise;
     } catch (error) {
+      const logger = this.loggerInstance;
+      logger.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);
       if (requestId) {
         this.requestManager.reject(
           requestId,
           error instanceof Error ? error : new Error(String(error)),
         );
       }
-      return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
+      return {
+        success: false,
+        totalTimeMs: this.timer.now() - startTime,
+        error: error instanceof Error ? error.toString() : errorMessage(error),
+      };
     }
   }
 
@@ -5564,14 +5586,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     crash_event: async (message) => {
       const event = message.event;
       if (event) {
-        await this.handleCrashEvent(event);
+        await this.handleCrashEvent(
+          withResolvedTimestamp(event, message.timestamp, this.timer.now()),
+        );
       }
     },
 
     anr_event: async (message) => {
       const event = message.event;
       if (event) {
-        await this.handleAnrEvent(event);
+        await this.handleAnrEvent(
+          withResolvedTimestamp(event, message.timestamp, this.timer.now()),
+        );
       }
     },
 
@@ -5821,23 +5847,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // The full hierarchy (~10-50KB with bounds/states/extras) is available via
       // the observation stream and would cause excessive traffic at 500ms intervals.
       const compactHierarchy = data.hierarchy ? { node: compactifyNode(data.hierarchy) } : null;
-      recorder.recordLayoutEvent({
-        timestamp: now,
-        applicationId: data.packageName ?? null,
-        subType: "hierarchy_change",
-        composableName: null,
-        composableId: null,
-        recompositionCount: null,
-        durationMs: null,
-        likelyCause: null,
-        detailsJson: JSON.stringify({
+      recorder
+        .recordLayoutEvent({
+          timestamp: now,
+          applicationId: data.packageName ?? null,
+          subType: "hierarchy_change",
+          composableName: null,
+          composableId: null,
+          recompositionCount: null,
+          durationMs: null,
+          likelyCause: null,
+          detailsJson: JSON.stringify({
+            screenName,
+            windowCount,
+            foregroundActivity: data.foregroundActivity ?? null,
+            hierarchy: compactHierarchy,
+          }),
           screenName,
-          windowCount,
-          foregroundActivity: data.foregroundActivity ?? null,
-          hierarchy: compactHierarchy,
-        }),
-        screenName,
-      });
+        })
+        .catch((error) => {
+          logger.warn(`[CTRL_PROXY] Layout telemetry failed: ${errorMessage(error)}`, error);
+        });
     }
 
     // Notify hierarchy navigation detector
@@ -6207,8 +6237,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         screenshotFallbackReason: fallbackReason,
       };
     } catch (error) {
+      const logger = this.loggerInstance;
       const message = errorMessage(error);
-      this.loggerInstance.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
+      logger.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
       return { success: false, error: `ADB screencap failed: ${message}` };
     }
   }

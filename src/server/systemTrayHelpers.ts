@@ -115,7 +115,10 @@ export interface SystemTrayIosClient {
 }
 
 export interface SystemTrayDependencies {
-  appInventoryFactory: (device: BootedDevice) => Pick<ListInstalledApps, "executeDetailedResult">;
+  appInventoryFactory: (
+    device: BootedDevice,
+  ) => Pick<ListInstalledApps, "executeDetailedResult"> &
+    Partial<Pick<ListInstalledApps, "executeIosDetailedResult">>;
   appLabelResolver: (
     device: BootedDevice,
     appId: string,

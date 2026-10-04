@@ -1137,8 +1137,10 @@
           "type": "boolean"
         },
         "vmSnapshotTimeoutMs": {
-          "description": "VM snapshot timeout ms",
-          "type": "number"
+          "description": "VM snapshot timeout in milliseconds (positive integer; maximum 1800000 ms / 30 minutes)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 1800000
         },
         "appBundleIds": {
           "description": "iOS bundle IDs for app data snapshot",

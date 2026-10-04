@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash, X509Certificate } from "crypto";
 import { join, resolve } from "path";
 import { XcodeSigningManager } from "../../../src/utils/ios-cmdline-tools/XcodeSigning";
+import { parsePlist, type PlistValue } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -63,6 +64,7 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
   const fakeTimer = new FakeTimer();
   fakeTimer.enableAutoAdvance();
   const writtenFiles: string[] = [];
+  const writtenData: string[] = [];
   const xcodebuildArgs: string[][] = [];
   return {
     deps: {
@@ -113,8 +115,9 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
       readDir: async () => options?.profiles ?? ["test.mobileprovision"],
       readFile: async () => "",
       stat: async () => ({ isFile: () => true }),
-      writeFile: async (path: string) => {
+      writeFile: async (path: string, data: string) => {
         writtenFiles.push(path);
+        writtenData.push(data);
       },
       mkdir: async () => {},
       homedir: () => "/Users/test",
@@ -122,6 +125,7 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
       timer: fakeTimer,
     },
     writtenFiles,
+    writtenData,
     xcodebuildArgs,
     fakeTimer,
   };
@@ -414,6 +418,57 @@ describe("XcodeSigningManager", () => {
       `PROVISIONING_PROFILE_SPECIFIER=\"${profileName}\"`,
     );
     expect(writtenFiles.length).toBe(1);
+  });
+
+  test("escapes entitlement keys and values and round-trips their original strings", async () => {
+    const fingerprint = buildFingerprint(CERT_BASE64);
+    const { deps, writtenFiles, writtenData } = createFakeDependencies({
+      identities: `  1) ${fingerprint} "Apple Development: Test (${teamId})"`,
+    });
+    deps.securityClient.decodeCms = async () =>
+      profileXml.replace(
+        "<key>get-task-allow</key>",
+        `<key>key&amp;&lt;&gt;</key><string>a&amp;b&lt;c</string>
+      <key>nested</key><dict><key>inner&amp;</key><array><string>&gt;&amp;&lt;</string></array></dict>
+      <key>get-task-allow</key>`,
+      );
+
+    await new XcodeSigningManager(deps).resolveSigningForDevice(deviceUdid);
+
+    expect(writtenFiles).toHaveLength(1);
+    expect(writtenData[0]).toContain("<key>key&amp;&lt;&gt;</key>");
+    expect(writtenData[0]).toContain("<string>a&amp;b&lt;c</string>");
+    expect(writtenData[0]).toContain("<string>&gt;&amp;&lt;</string>");
+    expect(await parsePlist(writtenData[0])).toEqual(
+      new Map<string, PlistValue>([
+        ["key&<>", "a&b<c"],
+        ["nested", new Map([["inner&", [">&<"]]])],
+        ["get-task-allow", true],
+        ["application-identifier", `${teamId}.dev.jasonpearson.automobile.ctrlproxy`],
+      ]),
+    );
+  });
+
+  test("writes plain entitlements byte-identically", async () => {
+    const fingerprint = buildFingerprint(CERT_BASE64);
+    const { deps, writtenData } = createFakeDependencies({
+      identities: `  1) ${fingerprint} "Apple Development: Test (${teamId})"`,
+    });
+
+    await new XcodeSigningManager(deps).resolveSigningForDevice(deviceUdid);
+
+    expect(writtenData).toEqual([
+      `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>get-task-allow</key>
+    <true/>
+    <key>application-identifier</key>
+    <string>${teamId}.dev.jasonpearson.automobile.ctrlproxy</string>
+  </dict>
+</plist>`,
+    ]);
   });
 
   test("falls back to automatic signing when identity is missing", async () => {

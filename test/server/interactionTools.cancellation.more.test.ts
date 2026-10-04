@@ -185,10 +185,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     const { started, sleep } = pausedSleep(timer);
-    adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
-      createExecResult("mRotation=0", ""),
-    );
+    adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
     const settingsGet = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsGet",
@@ -278,10 +275,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     const controller = new AbortController();
-    adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
-      createExecResult("mRotation=0", ""),
-    );
+    adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
     adb.abortAfterCommand("shell settings put system accelerometer_rotation 0", controller);
     const settingsGet = spyOn(
       AndroidCtrlProxyClient.prototype,
@@ -298,7 +292,7 @@ describe("registered interaction handlers honor cancellation", () => {
         handler("rotate")(device, { orientation: "landscape" }, undefined, controller.signal),
       ).rejects.toThrow("device may still complete the change");
       expect(adb.getExecutedCommands()).toEqual([
-        'shell dumpsys window | grep -i "mRotation="',
+        "shell dumpsys window displays",
         "shell settings put system accelerometer_rotation 0",
         "shell settings put system accelerometer_rotation 1",
       ]);
@@ -355,10 +349,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const adb = new FakeAdbExecutor();
       const timer = new FakeTimer();
       const controller = new AbortController();
-      adb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=0", ""),
-      );
+      adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
       adb.abortAfterCommand("shell settings put system accelerometer_rotation 0", controller);
       const settingsGet = spyOn(
         AndroidCtrlProxyClient.prototype,
@@ -486,10 +477,7 @@ describe("registered interaction handlers honor cancellation", () => {
         restored.resolve();
       });
       const started = Promise.withResolvers<void>();
-      adb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=0", ""),
-      );
+      adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
       const settingsGet = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsGet",
@@ -564,10 +552,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const restoreStarted = Promise.withResolvers<void>();
       const restore = Promise.withResolvers<ReturnType<typeof createExecResult>>();
       adb.abortAfterCommand("shell settings put system accelerometer_rotation 0", controller);
-      adb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=0", ""),
-      );
+      adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
       const originalExecute = adb.executeCommand.bind(adb);
       const execute = spyOn(adb, "executeCommand").mockImplementation(async (command) => {
         if (command === "shell settings put system accelerometer_rotation 1") {
@@ -621,10 +606,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     const controller = new AbortController();
-    adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
-      createExecResult("mRotation=0", ""),
-    );
+    adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
     const settingsGet = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsGet",

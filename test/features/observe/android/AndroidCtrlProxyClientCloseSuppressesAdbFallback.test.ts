@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { logger } from "../../../../src/utils/logger";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { BootedDevice } from "../../../../src/models";
@@ -66,6 +67,25 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
       new FakeIdGenerator(["ctrlproxy-fallback"]),
     );
   }
+
+  test("ADB screencap failure retains its typed failure and warns", async () => {
+    const client = createClient();
+    client["a11yScreenshotSupported"] = false;
+    fakeAdb.setCommandError("screencap", new Error("capture denied"));
+    const log = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await client.captureScreenshotForObservationStream();
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("ADB screencap failed: capture denied");
+      expect(log).toHaveBeenCalledWith(
+        "[CTRL_PROXY] ADB screencap failed: capture denied",
+        expect.any(Error),
+      );
+    } finally {
+      log.mockRestore();
+      await client.close();
+    }
+  });
 
   test("issues no ADB screencap once the client is closed", async function () {
     const client = createClient();

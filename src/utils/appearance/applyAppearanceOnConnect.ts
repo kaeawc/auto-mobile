@@ -2,21 +2,47 @@ import type { AppearanceMode, BootedDevice } from "../../models";
 import { getAppearanceConfig, resolveAppearanceMode } from "../../server/appearanceManager";
 import { applyAppearanceToDevice } from "../deviceAppearance";
 import { logger } from "../logger";
+import { isAppearanceSyncEnabledFromEnvironment } from "./appearanceSyncPolicy";
+
+export interface AppearanceOnConnectDependencies {
+  isSyncEnabled: () => boolean;
+  getConfig: typeof getAppearanceConfig;
+  resolveMode: typeof resolveAppearanceMode;
+  apply: typeof applyAppearanceToDevice;
+}
+
+const defaultDependencies: AppearanceOnConnectDependencies = {
+  isSyncEnabled: isAppearanceSyncEnabledFromEnvironment,
+  getConfig: getAppearanceConfig,
+  resolveMode: resolveAppearanceMode,
+  apply: applyAppearanceToDevice,
+};
 
 export async function applyAppearanceOnConnect(
   device: BootedDevice,
+  dependencies: Partial<AppearanceOnConnectDependencies> = {},
 ): Promise<AppearanceMode | null> {
+  const { isSyncEnabled, getConfig, resolveMode, apply } = {
+    ...defaultDependencies,
+    ...dependencies,
+  };
+  if (!isSyncEnabled()) {
+    return null;
+  }
   try {
-    const config = await getAppearanceConfig();
+    const config = await getConfig();
     if (!config.applyOnConnect) {
       return null;
     }
 
-    const mode = await resolveAppearanceMode(config);
-    await applyAppearanceToDevice(device, mode);
+    const mode = await resolveMode(config);
+    if (!isSyncEnabled()) {
+      return null;
+    }
+    await apply(device, mode);
     return mode;
   } catch (error) {
-    logger.warn(`[Appearance] Failed to apply appearance on connect: ${error}`);
+    logger.warn("[Appearance] Failed to apply appearance on connect", error);
     return null;
   }
 }

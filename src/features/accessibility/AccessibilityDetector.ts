@@ -50,6 +50,7 @@ function isTalkBackService(component: string): boolean {
 interface AccessibilityCacheValue {
   enabled: boolean;
   service: AccessibilityService;
+  ctrlProxyEnabled: boolean | null;
 }
 
 /**
@@ -114,7 +115,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     // Detect current state
     logger.debug(`[AccessibilityDetector] Detecting accessibility state for device ${deviceId}`);
     const startTime = this.timer.now();
-    const { enabled, service } = await this.detectAccessibilityState(deviceId, adb);
+    const state = await this.detectAccessibilityState(deviceId, adb);
     const detectionTime = this.timer.now() - startTime;
 
     if (detectionTime > 50) {
@@ -128,9 +129,9 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     }
 
     // Update cache
-    this.cache.set(deviceId, { enabled, service });
+    this.cache.set(deviceId, state);
 
-    return enabled;
+    return state.enabled;
   }
 
   /**
@@ -166,10 +167,31 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     }
 
     // Detect current state
-    const { enabled, service } = await this.detectAccessibilityState(deviceId, adb);
+    const state = await this.detectAccessibilityState(deviceId, adb);
     // Update cache
-    this.cache.set(deviceId, { enabled, service });
-    return service;
+    this.cache.set(deviceId, state);
+    return state.service;
+  }
+
+  async isCtrlProxyServiceEnabled(
+    deviceId: string,
+    adb?: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<boolean | null> {
+    // User-facing force mode is not evidence of CtrlProxy health.
+    if (featureFlags && !featureFlags.isEnabled("accessibility-auto-detect")) {
+      return null;
+    }
+    const cached = this.cache.get(deviceId);
+    if (cached) {
+      return cached.ctrlProxyEnabled;
+    }
+    if (!adb) {
+      return null;
+    }
+    const state = await this.detectAccessibilityState(deviceId, adb);
+    this.cache.set(deviceId, state);
+    return state.ctrlProxyEnabled;
   }
 
   /**
@@ -202,12 +224,15 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   private async detectAccessibilityState(
     deviceId: string,
     adb: AdbExecutor,
-  ): Promise<{ enabled: boolean; service: AccessibilityService }> {
+  ): Promise<AccessibilityCacheValue> {
     try {
       // Query enabled accessibility services
       const result = await adb.executeCommand(
         "shell settings get secure enabled_accessibility_services",
       );
+      if (result.error) {
+        throw new Error(result.error);
+      }
 
       const output = result.stdout.trim();
 
@@ -219,10 +244,11 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
               .map((service) => service.trim())
               .filter(Boolean);
       const nonCtrlProxyServices = services.filter((service) => !isCtrlProxyService(service));
+      const ctrlProxyEnabled = services.some(isCtrlProxyService);
 
       if (nonCtrlProxyServices.some(isTalkBackService)) {
         logger.debug(`[AccessibilityDetector] TalkBack detected as enabled on device ${deviceId}`);
-        return { enabled: true, service: "talkback" };
+        return { enabled: true, service: "talkback", ctrlProxyEnabled };
       }
 
       // Check if any accessibility service is enabled (but not TalkBack specifically).
@@ -237,20 +263,20 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
         logger.debug(
           `[AccessibilityDetector] Unknown accessibility service detected on device ${deviceId}: ${nonCtrlProxyServices.join(":")}`,
         );
-        return { enabled: true, service: "unknown" };
+        return { enabled: true, service: "unknown", ctrlProxyEnabled };
       }
 
       logger.debug(
         `[AccessibilityDetector] No accessibility services enabled on device ${deviceId}`,
       );
-      return { enabled: false, service: "unknown" };
+      return { enabled: false, service: "unknown", ctrlProxyEnabled };
     } catch (error) {
       logger.warn(
         `[AccessibilityDetector] Failed to detect accessibility state for device ${deviceId}: ${errorMessage(error)}`,
         error,
       );
-      // Graceful fallback: assume disabled on error
-      return { enabled: false, service: "unknown" };
+      // Preserve the user-facing fallback without treating read failure as CtrlProxy loss.
+      return { enabled: false, service: "unknown", ctrlProxyEnabled: null };
     }
   }
 }

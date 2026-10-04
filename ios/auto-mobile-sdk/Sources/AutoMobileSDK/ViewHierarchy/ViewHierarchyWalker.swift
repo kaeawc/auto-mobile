@@ -822,11 +822,9 @@
             guard let color = color else { return nil }
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             color.getRed(&r, green: &g, blue: &b, alpha: &a)
+            // Failed extraction or non-finite components omit the colour.
             guard a > 0 else { return nil }
-            return String(
-                format: "#%02X%02X%02X%02X",
-                Int(r * 255), Int(g * 255), Int(b * 255), Int(a * 255)
-            )
+            return ColorHex.rgbaHex(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
         }
     }
 #endif

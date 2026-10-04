@@ -217,6 +217,94 @@ describe("CachingDisplayInventoryProvider", () => {
     expect((await provider.hydrate(device, "1")).displays).toBe(displays);
   });
 
+  test("synchronous read failures retry after each failure window", async () => {
+    const timer = new FakeTimer();
+    const failureRetryMs = 1000;
+    let reads = 0;
+    const source = {
+      read: () => {
+        reads++;
+        throw new Error("boom");
+      },
+    };
+    const provider = new CachingDisplayInventoryProvider(
+      source,
+      source,
+      timer,
+      5000,
+      failureRetryMs,
+    );
+    expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]).toEqual({
+      kind: "unreadable",
+      reason: "boom",
+    });
+    expect(reads).toBe(1);
+    timer.advanceTime(failureRetryMs);
+    await provider.hydrate(device, "1");
+    expect(reads).toBe(2);
+    await Promise.resolve();
+    timer.advanceTime(failureRetryMs);
+    await provider.hydrate(device, "1");
+    expect(reads).toBe(3);
+  });
+
+  test("concurrent callers share synchronous failures through the retry deadline", async () => {
+    const timer = new FakeTimer();
+    const failureRetryMs = 1000;
+    let reads = 0;
+    const source = {
+      read: () => {
+        reads++;
+        throw new Error("boom");
+      },
+    };
+    const provider = new CachingDisplayInventoryProvider(
+      source,
+      source,
+      timer,
+      5000,
+      failureRetryMs,
+    );
+    const initial = await Promise.all(
+      Array.from({ length: 50 }, () => provider.hydrate(device, "1")),
+    );
+    expect(initial.every((result) => result[displayInventoryOutcome]?.kind === "unreadable")).toBe(
+      true,
+    );
+    expect(reads).toBe(1);
+    timer.advanceTime(failureRetryMs - 1);
+    await Promise.all(Array.from({ length: 50 }, () => provider.hydrate(device, "1")));
+    expect(reads).toBe(1);
+    timer.advanceTime(1);
+    await Promise.all(Array.from({ length: 50 }, () => provider.hydrate(device, "1")));
+    expect(reads).toBe(2);
+  });
+
+  test("a synchronous failure can recover to a cached multi-panel inventory", async () => {
+    const timer = new FakeTimer();
+    let reads = 0;
+    const source = {
+      read: () => {
+        reads++;
+        if (reads === 1) {
+          throw new Error("boom");
+        }
+        return Promise.resolve({ displays, degraded: false });
+      },
+    };
+    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]?.kind).toBe("unreadable");
+    timer.advanceTime(30_000);
+    expect((await provider.hydrate(device, "1")).displays).toBeUndefined();
+    expect(reads).toBe(2);
+    await Promise.resolve();
+    await Promise.resolve();
+    const recovered = await provider.hydrate(device, "1");
+    expect(recovered.displays).toBe(displays);
+    expect(recovered[displayInventoryOutcome]).toEqual({ kind: "multi" });
+    expect(reads).toBe(2);
+  });
+
   test("an aborted waiter does not cancel another waiter or poison the cache", async () => {
     let finishRead: ((value: { displays: typeof displays; degraded: boolean }) => void) | undefined;
     let reads = 0;

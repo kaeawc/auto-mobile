@@ -135,12 +135,19 @@ export class AppLifecycle {
     appId: string,
     userId: number,
     signal?: AbortSignal,
-  ): Promise<boolean> {
-    const foreground = await this.adb.getForegroundApp(signal, COMMAND_TIMEOUT_MS);
+  ): Promise<{ state: "foreground" | "not-foreground" } | { state: "unreadable"; error: string }> {
+    const result = await this.adb.getForegroundAppChecked(signal, COMMAND_TIMEOUT_MS);
     signal?.throwIfAborted();
-    // getForegroundApp returns null on read failure as well as no foreground;
-    // the existing API cannot distinguish them, so null means not foreground here.
-    return foreground?.packageName === appId && foreground.userId === userId;
+    if (result.state === "unreadable") {
+      return result;
+    }
+    const foreground = result.app;
+    return {
+      state:
+        foreground?.packageName === appId && foreground.userId === userId
+          ? "foreground"
+          : "not-foreground",
+    };
   }
 
   private async background(
@@ -149,7 +156,10 @@ export class AppLifecycle {
   ): Promise<AppLifecycleResult> {
     const { base, userId, pidBefore } = target;
     const { signal } = options;
-    if (await this.isForeground(base.appId, userId, signal)) {
+    const before = await this.isForeground(base.appId, userId, signal);
+    // An unreadable pre-Home state may still be foreground, so Home may be needed.
+    const pressedHome = before.state !== "not-foreground";
+    if (pressedHome) {
       signal?.throwIfAborted();
       options.onMutation?.();
       try {
@@ -158,7 +168,16 @@ export class AppLifecycle {
         this.cacheInvalidator.invalidate(this.device);
       }
     }
-    if (await this.isForeground(base.appId, userId, signal)) {
+    const after = await this.isForeground(base.appId, userId, signal);
+    if (after.state === "unreadable") {
+      return {
+        ...base,
+        pidBefore,
+        errorCode: "background_not_verified",
+        error: `Background outcome is indeterminate: ${pressedHome ? `Home was pressed for ${base.appId} but its` : `${base.appId}'s`} foreground state could not be read (${after.error}); background could not be verified. Do not retry automatically.`,
+      };
+    }
+    if (after.state === "foreground") {
       return {
         ...base,
         pidBefore,
@@ -176,7 +195,15 @@ export class AppLifecycle {
     const { base, userId, pidBefore } = target;
     const { signal } = options;
     const attempt = { ...base, pidBefore };
-    if (await this.isForeground(base.appId, userId, signal)) {
+    const foreground = await this.isForeground(base.appId, userId, signal);
+    if (foreground.state === "unreadable") {
+      return {
+        ...attempt,
+        errorCode: "background_not_verified",
+        error: `Cannot kill ${base.appId}: its foreground state could not be read (${foreground.error}); call appLifecycle with action background first or retry once the device responds`,
+      };
+    }
+    if (foreground.state === "foreground") {
       return {
         ...attempt,
         errorCode: "app_in_foreground",

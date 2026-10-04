@@ -265,11 +265,12 @@ export class PerformanceAuditRepository {
       builder = builder.where("timestamp", "<=", query.endTime);
     }
     if (query.sinceTimestamp) {
+      const sinceTimestamp = query.sinceTimestamp;
       const sinceId = query.sinceId ?? 0;
       builder = builder.where((eb) =>
         eb.or([
-          eb("timestamp", ">", query.sinceTimestamp),
-          eb.and([eb("timestamp", "=", query.sinceTimestamp), eb("id", ">", sinceId)]),
+          eb("timestamp", ">", sinceTimestamp),
+          eb.and([eb("timestamp", "=", sinceTimestamp), eb("id", ">", sinceId)]),
         ]),
       );
     }

@@ -132,6 +132,32 @@ const getNetworkGraphSchema = addDeviceTargetingToSchema(
 
 type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;
 
+const NETWORK_GRAPH_MAX_EVENTS = 10_000;
+
+type DeviceSyncResult = { synced: true } | { synced: false; warning: string };
+
+function deviceSyncFields(result: DeviceSyncResult): { deviceSynced?: false; warning?: string } {
+  return result.synced ? {} : { deviceSynced: false, warning: result.warning };
+}
+
+function syncAndroidNetworkMessage(
+  device: BootedDevice,
+  message: Record<string, unknown>,
+): DeviceSyncResult {
+  const warning =
+    "Network state is stored but was not synced to the device; it will be applied when the " +
+    "device connection is restored (error simulation keeps its original expiry).";
+  try {
+    if (AndroidCtrlProxyClient.getInstance(device).sendMessage(JSON.stringify(message))) {
+      return { synced: true };
+    }
+    logger.warn(`[networkTools] ${warning}`);
+  } catch (error) {
+    logger.warn(`[networkTools] Failed to sync network state: ${errorMessage(error)}`, error);
+  }
+  return { synced: false, warning };
+}
+
 function compareDottedVersion(a: string, b: string): number {
   const aParts = a.split(".").map((part) => Number(part));
   const bParts = b.split(".").map((part) => Number(part));
@@ -189,66 +215,59 @@ function assertIosNetworkErrorSimulationAvailable(): void {
   );
 }
 
-async function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): Promise<void> {
-  if (device.platform !== "android" && device.platform !== "ios") {
-    return;
+async function syncMockRulesToDevice(
+  device: BootedDevice,
+  state: NetworkState,
+): Promise<DeviceSyncResult> {
+  if (device.platform === "android") {
+    // Use limit (not remaining): device-side stores track consumption and
+    // reconnect restores all retained rules from NetworkState.
+    return syncAndroidNetworkMessage(device, {
+      type: "set_network_mock_rules",
+      rules: buildNetworkMockRules(state),
+    });
   }
   try {
     if (device.platform === "ios") {
       await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
-      return;
     }
-    const client = AndroidCtrlProxyClient.getInstance(device);
-    // Use limit (not remaining) since the server never tracks consumption —
-    // the device-side NetworkMockRuleStore manages its own remaining count
-    const rules = buildNetworkMockRules(state);
-    const msg = JSON.stringify({ type: "set_network_mock_rules", rules });
-    const sent = client.sendMessage(msg);
-    logger.info(
-      `[networkTools] syncMockRules(${device.platform}): ${rules.length} rules, sent=${sent}`,
+  } catch (error) {
+    logger.warn(
+      `[networkTools] Failed to sync mock rules to device: ${errorMessage(error)}`,
+      error,
     );
-  } catch (e) {
-    logger.info(`[networkTools] Failed to sync mock rules to device: ${e}`);
   }
+  return { synced: true };
 }
 
 async function syncErrorSimulationToDevice(
   device: BootedDevice,
   state: NetworkState,
-): Promise<void> {
+): Promise<DeviceSyncResult> {
   if (device.platform !== "android" && device.platform !== "ios") {
-    return;
+    return { synced: true };
   }
-  try {
-    const sim = state.simulation;
-    if (device.platform === "ios") {
-      const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
-        enabled: sim !== null,
-        errorType: sim?.errorType ?? null,
-        limit: sim?.limit ?? null,
-        expiresAtEpochMs: sim?.expiresAt ?? null,
-      });
-      if (!result.success) {
-        throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
-      }
-      return;
+  const sim = state.simulation;
+  if (device.platform === "ios") {
+    const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
+      enabled: sim !== null,
+      errorType: sim?.errorType ?? null,
+      limit: sim?.limit ?? null,
+      expiresAtEpochMs: sim?.expiresAt ?? null,
+    });
+    if (!result.success) {
+      throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
     }
+    return { synced: true };
+  }
 
-    AndroidCtrlProxyClient.getInstance(device).sendMessage(
-      JSON.stringify({
-        type: "set_network_error_simulation",
-        enabled: sim !== null,
-        errorType: sim?.errorType ?? null,
-        limit: sim?.limit ?? null,
-        expiresAtEpochMs: sim?.expiresAt ?? null,
-      }),
-    );
-  } catch (e) {
-    if (device.platform === "ios") {
-      throw e;
-    }
-    logger.debug(`[networkTools] Failed to sync error simulation to device: ${e}`);
-  }
+  return syncAndroidNetworkMessage(device, {
+    type: "set_network_error_simulation",
+    enabled: sim !== null,
+    errorType: sim?.errorType ?? null,
+    limit: sim?.limit ?? null,
+    expiresAtEpochMs: sim?.expiresAt ?? null,
+  });
 }
 
 async function setIosErrorSimulation(
@@ -288,6 +307,7 @@ export function registerNetworkTools(): void {
     "Control network capture and error simulation.",
     networkSchema,
     async (device, args: NetworkArgs) => {
+      let syncResult: DeviceSyncResult = { synced: true };
       if (args.capture !== undefined) {
         state.setCapture(args.capture);
       }
@@ -325,7 +345,7 @@ export function registerNetworkTools(): void {
               args.simulateErrors.limit ?? null,
             );
           }
-          await syncErrorSimulationToDevice(device, state);
+          syncResult = await syncErrorSimulationToDevice(device, state);
         }
       }
 
@@ -339,7 +359,7 @@ export function registerNetworkTools(): void {
         state.setSlowThresholdMs(args.slowThresholdMs);
       }
 
-      return createJSONToolResponse(state.getSnapshot());
+      return createJSONToolResponse({ ...state.getSnapshot(), ...deviceSyncFields(syncResult) });
     },
     { defaultEnabled: false, embeddedSdkOnly: true },
   );
@@ -384,11 +404,12 @@ export function registerNetworkTools(): void {
         contentType: args.contentType ?? "application/json",
       });
 
-      await syncMockRulesToDevice(device, state);
+      const syncResult = await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         mockId: mock.mockId,
         mocked: state.getMockSummary(),
+        ...deviceSyncFields(syncResult),
       });
     },
     { defaultEnabled: false, embeddedSdkOnly: true },
@@ -419,11 +440,12 @@ export function registerNetworkTools(): void {
         cleared = state.clearAllMocks();
       }
 
-      await syncMockRulesToDevice(device, state);
+      const syncResult = await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         cleared,
         remaining: state.getMockSummary(),
+        ...deviceSyncFields(syncResult),
       });
     },
     { defaultEnabled: false, embeddedSdkOnly: true },
@@ -443,14 +465,19 @@ export function registerNetworkTools(): void {
         deviceId: device.deviceId,
         sinceTimestamp,
         method: args.method,
-        limit: 10_000,
+        limit: NETWORK_GRAPH_MAX_EVENTS + 1,
       });
 
-      const graph = buildNetworkGraph(events, {
+      const truncated = events.length > NETWORK_GRAPH_MAX_EVENTS;
+      // The repository orders newest first; exclude the extra oldest event.
+      const graph = buildNetworkGraph(events.slice(0, NETWORK_GRAPH_MAX_EVENTS), {
         minRequests: args.minRequests,
       });
 
-      return createJSONToolResponse(graph);
+      return createJSONToolResponse({
+        ...graph,
+        ...(truncated ? { truncated: true, maxEvents: NETWORK_GRAPH_MAX_EVENTS } : {}),
+      });
     },
     { defaultEnabled: false, embeddedSdkOnly: true },
   );

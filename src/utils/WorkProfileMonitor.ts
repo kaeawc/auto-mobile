@@ -4,7 +4,7 @@ import { errorMessage } from "./describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import type { InstalledAppsStore } from "../db/installedAppsRepository";
+import type { InstalledAppsStore } from "../models/InstalledAppsStore";
 
 /**
  * Environment variable to configure polling interval (default: 5000ms)

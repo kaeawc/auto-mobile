@@ -255,7 +255,17 @@ export class XcodeSigningManager {
     let entries: string[];
     try {
       entries = await this.dependencies.readDir(this.profileDirectory());
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+        // Automatic signing can work without a local provisioning-profile directory.
+        logger.debug(
+          `[XcodeSigning] No local provisioning-profile directory: ${errorMessage(error)}`,
+        );
+      } else {
+        logger.warn(
+          `[XcodeSigning] Failed to read provisioning-profile directory: ${errorMessage(error)}`,
+        );
+      }
       return [];
     }
 

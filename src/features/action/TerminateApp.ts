@@ -302,6 +302,9 @@ export class TerminateApp extends BaseVisualChange {
       const terminateLogic = async (): Promise<TerminateAppResult> => {
         const result = await terminateTransport();
         if (result.success) {
+          if (result.wasInstalled !== false) {
+            this.cacheInvalidator.invalidate(this.device);
+          }
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
             bundleId,
           );

@@ -201,7 +201,7 @@ describe("proxy server lazy tools/list", () => {
 
       const capabilities = client.getServerCapabilities();
       expect(capabilities?.tools).toEqual({ listChanged: true });
-      expect(capabilities?.resources).toEqual({ listChanged: true });
+      expect(capabilities?.resources).toEqual({ subscribe: true, listChanged: true });
     } finally {
       await client.close();
       await proxy.close();

@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "tabBar",
+      "pager": "p",
+      "stateKey": "x",
+      "items": [
+        {
+          "label": "x"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.pager"
+}

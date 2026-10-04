@@ -1,8 +1,18 @@
 import { warmedTests } from "../helpers/warmedTests";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test as bunTest,
+} from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
@@ -12,6 +22,8 @@ import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/f
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import {
+  getLatestVideoRecordingMetadata,
+  getVideoRecordingMetadata,
   listVideoRecordings,
   interruptVideoRecording,
   recordVideoRecordingHighlightAdded,
@@ -39,7 +51,18 @@ import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
 import type { DeviceSnapshotRepository } from "../../src/db/deviceSnapshotRepository";
 import type { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import type { DeviceSnapshotManifest } from "../../src/models";
-import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
+import {
+  VideoRecordingRepository,
+  type VideoRecordingRecord,
+} from "../../src/db/videoRecordingRepository";
+import { createTestDatabase } from "../db/testDbHelper";
+import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
+import { logger } from "../../src/utils/logger";
+import {
+  getLatestVideoRecording,
+  getVideoArchiveItem,
+  type VideoRecordingResourceStore,
+} from "../../src/server/videoRecordingResources";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
@@ -77,6 +100,7 @@ describe("videoRecordingManager", () => {
 
     service = new VideoRecorderService({
       backend: fakeBackend,
+      idGenerator: new FakeIdGenerator(),
       archiveRoot,
       now: () => new Date(fakeTimer.now()),
     });
@@ -292,6 +316,161 @@ describe("videoRecordingManager", () => {
 
     fakeTimer.advanceTime(3000);
     expect(fakeBackend.stopCalls.length).toBe(1);
+  });
+
+  describe("archive stop protection and latest recording", () => {
+    const capBytes = DEFAULT_VIDEO_RECORDING_CONFIG.maxArchiveSizeMb * 1024 * 1024;
+
+    const finish = async (outputName: string, sizeBytes = 10) => {
+      const active = await startVideoRecording({ device: iosDevice, outputName });
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+      fakeBackend.setStopResultOverrides({ sizeBytes });
+      return stopVideoRecording(active.recordingId);
+    };
+
+    test.each([false, true])(
+      "oversized stop survives eviction (older recording=%s)",
+      async (withOlder) => {
+        const older = withOlder ? await finish("older", 1024) : undefined;
+        fakeTimer.advanceTime(1000);
+        const stopped = await finish("oversized", capBytes + 1024);
+
+        expect(await fsPromises.readFile(stopped.metadata.filePath, "utf8")).toBe("video-bytes");
+        expect((await listVideoRecordings()).map((row) => row.recordingId)).toEqual([
+          stopped.metadata.recordingId,
+        ]);
+        expect(
+          await getVideoRecordingMetadata(stopped.metadata.recordingId, { touch: false }),
+        ).not.toBeNull();
+        expect(stopped.evictedRecordingIds).toEqual(older ? [older.metadata.recordingId] : []);
+        expect(stopped.metadata.warnings?.join(" ")).toContain("exceeds limit");
+        expect(stopped.metadata.warnings?.join(" ")).toContain("kept");
+        if (older) {
+          expect(await fakeRepository.getRecording(older.metadata.recordingId)).toBeNull();
+          await expect(fsPromises.stat(older.metadata.filePath)).rejects.toMatchObject({
+            code: "ENOENT",
+          });
+        }
+      },
+    );
+
+    test("normal stop under the archive cap is unchanged", async () => {
+      const stopped = await finish("normal");
+      expect(stopped.evictedRecordingIds).toEqual([]);
+      expect(stopped.metadata.warnings).toBeUndefined();
+      expect(stopped.metadata.sizeBytes).toBe(10);
+      expect(await fsPromises.readFile(stopped.metadata.filePath, "utf8")).toBe("video-bytes");
+      expect((await listVideoRecordings()).map((row) => row.recordingId)).toEqual([
+        stopped.metadata.recordingId,
+      ]);
+    });
+
+    test("archive eviction still removes the least recently accessed recording", async () => {
+      const older = await finish("older", capBytes * 0.4);
+      fakeTimer.advanceTime(1000);
+      const newer = await finish("newer", capBytes * 0.4);
+      fakeTimer.advanceTime(1000);
+      await getVideoRecordingMetadata(older.metadata.recordingId);
+      fakeTimer.advanceTime(1000);
+      const stopped = await finish("last", capBytes * 0.4);
+      expect(stopped.evictedRecordingIds).toEqual([newer.metadata.recordingId]);
+      expect((await listVideoRecordings()).map((row) => row.recordingId)).toEqual([
+        stopped.metadata.recordingId,
+        older.metadata.recordingId,
+      ]);
+      expect(await fsPromises.readFile(older.metadata.filePath, "utf8")).toBe("video-bytes");
+    });
+
+    test("latest stays newest after archive reads and repeated latest reads", async () => {
+      const older = await finish("older");
+      fakeTimer.advanceTime(60_000);
+      const newer = await finish("newer");
+      const store: VideoRecordingResourceStore = {
+        getLatest: getLatestVideoRecordingMetadata,
+        getById: getVideoRecordingMetadata,
+        list: listVideoRecordings,
+        readFile: fsPromises.readFile,
+        archiveRoot,
+      };
+      const first = await getLatestVideoRecording(store);
+      expect(JSON.parse(first.text!).metadata.recordingId).toBe(newer.metadata.recordingId);
+      fakeTimer.advanceTime(1000);
+      const archived = await getVideoArchiveItem(
+        { recordingId: older.metadata.recordingId },
+        store,
+      );
+      expect(JSON.parse(archived.text!).metadata.recordingId).toBe(older.metadata.recordingId);
+      expect((await listVideoRecordings())[0].recordingId).toBe(older.metadata.recordingId);
+      const second = await getLatestVideoRecording(store);
+      expect(JSON.parse(second.text!).metadata.recordingId).toBe(newer.metadata.recordingId);
+      expect(second.blob).toBe(first.blob);
+      expect((await fakeRepository.getRecording(newer.metadata.recordingId))?.lastAccessedAt).toBe(
+        new Date(fakeTimer.now()).toISOString(),
+      );
+    });
+
+    test("size-cap safety stop preserves an oversized capture", async () => {
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        statFileSize: async () => capBytes * 2,
+      });
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+      fakeBackend.setStopResultOverrides({ sizeBytes: capBytes * 2 });
+      const stopping = fakeBackend.waitForStopCall();
+      fakeTimer.advanceTime(15_000);
+      await stopping;
+      // Join the monitor's in-flight stop to await finalization without sleeping.
+      const stopped = await stopVideoRecording(active.recordingId);
+      expect(stopped.evictedRecordingIds).toEqual([]);
+      expect(stopped.metadata.warnings?.join(" ")).toContain("exceeds limit");
+      expect(await fsPromises.readFile(stopped.metadata.filePath, "utf8")).toBe("video-bytes");
+      expect((await listVideoRecordings()).map((row) => row.recordingId)).toEqual([
+        active.recordingId,
+      ]);
+      expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test.each([
+      ["ENOENT", 0],
+      ["EACCES", 3],
+    ] as const)(
+      "Android host-file monitor suppresses only expected missing-file warnings (%s)",
+      async (code, expectedWarnings) => {
+        const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const debug = spyOn(logger, "debug").mockImplementation(() => {});
+        const stat = spyOn(fsPromises, "stat").mockRejectedValue(
+          Object.assign(new Error("host file stat failed"), { code }),
+        );
+        try {
+          for (let tick = 0; tick < 3; tick++) {
+            fakeTimer.advanceTime(15_000);
+            // The rejected fake stat settles entirely through microtasks.
+            for (let turn = 0; turn < 10; turn++) {
+              await Promise.resolve();
+            }
+          }
+          expect(stat).toHaveBeenCalledTimes(3);
+          expect(
+            warn.mock.calls.filter(([message]) =>
+              String(message).includes("Missing recording file"),
+            ),
+          ).toHaveLength(expectedWarnings);
+          expect(
+            debug.mock.calls.filter(([message]) =>
+              String(message).includes("unavailable until finalization"),
+            ),
+          ).toHaveLength(code === "ENOENT" ? 3 : 0);
+          expect(fakeBackend.stopCalls).toHaveLength(0);
+          expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+        } finally {
+          stat.mockRestore();
+          warn.mockRestore();
+          debug.mockRestore();
+        }
+      },
+    );
   });
 
   test("stop metadata retains the recorded panel and a timestamped pushed transition", async () => {
@@ -1345,4 +1524,73 @@ describe("videoRecordingManager", () => {
       expect(fakeBackend.startCalls.length).toBe(0);
     });
   });
+});
+
+// Repository ordering is exercised here because the existing DB suite is an
+// integration lane; these regressions use only the shared in-memory DB helper.
+describe("VideoRecordingRepository latest ordering", () => {
+  let db: Awaited<ReturnType<typeof createTestDatabase>>;
+  beforeAll(async () => {
+    const warmup = await createTestDatabase();
+    await warmup.destroy();
+  });
+  beforeEach(async () => {
+    db = await createTestDatabase();
+  });
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  bunTest.each(["database", "fake"])(
+    "latest uses startedAt and recordingId, independently of LRU (%s)",
+    async (kind) => {
+      const repo =
+        kind === "database" ? new VideoRecordingRepository(db) : new FakeVideoRecordingRepository();
+      const base: VideoRecordingRecord = {
+        recordingId: "older",
+        deviceId: "device",
+        platform: "ios",
+        status: "completed",
+        fileName: "video.mp4",
+        filePath: "/tmp/video.mp4",
+        format: "mp4",
+        sizeBytes: 10,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        lastAccessedAt: "2026-03-01T00:00:00.000Z",
+        config: DEFAULT_VIDEO_RECORDING_CONFIG,
+      };
+      await repo.insertRecording(base);
+      await repo.insertRecording({
+        ...base,
+        recordingId: "newer-a",
+        status: "interrupted",
+        startedAt: "2026-02-01T00:00:00.000Z",
+        lastAccessedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await repo.insertRecording({
+        ...base,
+        recordingId: "newer-z",
+        startedAt: "2026-02-01T00:00:00.000Z",
+        lastAccessedAt: "2026-01-02T00:00:00.000Z",
+      });
+      await repo.insertRecording({
+        ...base,
+        recordingId: "active",
+        status: "recording",
+        startedAt: "2026-04-01T00:00:00.000Z",
+      });
+      expect((await repo.getLatestRecording())?.recordingId).toBe("newer-z");
+      await repo.touchRecording("older", "2026-05-01T00:00:00.000Z");
+      expect((await repo.getLatestRecording())?.recordingId).toBe("newer-z");
+      expect(
+        (
+          await repo.listRecordings({
+            status: ["completed", "interrupted"],
+            orderByLastAccessed: "asc",
+          })
+        ).map((row) => row.recordingId),
+      ).toEqual(["newer-a", "newer-z", "older"]);
+    },
+  );
 });

@@ -128,53 +128,63 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
           result: { config },
         };
       }
-      case "set_appearance_sync": {
-        this.authenticator.authorize({ sessionUuid: request.sessionUuid });
-        const enabled = request.params?.enabled ?? request.enabled;
-        if (typeof enabled !== "boolean") {
-          throw new Error("set_appearance_sync requires enabled boolean");
-        }
-        const config = await this.dependencies.updateConfig({ syncWithHost: enabled });
-        const appliedMode = await this.applyToTargets(config, request.sessionUuid);
-        await this.dependencies.triggerSync();
-        return {
-          id: request.id,
-          type: "appearance_response",
-          success: true,
-          result: {
-            config,
-            appliedMode: appliedMode ?? undefined,
-            ...this.automaticSyncWarning(enabled),
-          },
-        };
-      }
-      case "set_appearance": {
-        this.authenticator.authorize({ sessionUuid: request.sessionUuid });
-        const mode = request.params?.mode ?? request.mode;
-        if (!mode || !VALID_MODES.has(String(mode).toLowerCase())) {
-          throw new Error("set_appearance requires mode: light | dark | auto");
-        }
-        const normalizedMode = String(mode).toLowerCase();
-        const config = await this.dependencies.updateConfig({
-          defaultMode: normalizedMode,
-          syncWithHost: normalizedMode === "auto",
-        });
-        const appliedMode = await this.applyToTargets(config, request.sessionUuid, normalizedMode);
-        await this.dependencies.triggerSync();
-        return {
-          id: request.id,
-          type: "appearance_response",
-          success: true,
-          result: {
-            config,
-            appliedMode: appliedMode ?? undefined,
-            ...this.automaticSyncWarning(normalizedMode === "auto"),
-          },
-        };
-      }
+      case "set_appearance_sync":
+        return this.handleSetAppearanceSync(request);
+      case "set_appearance":
+        return this.handleSetAppearance(request);
       default:
         throw new Error(`Unsupported appearance command: ${command}`);
     }
+  }
+
+  private async handleSetAppearanceSync(
+    request: AppearanceSocketRequest,
+  ): Promise<AppearanceSocketResponse> {
+    this.authenticator.authorize({ sessionUuid: request.sessionUuid });
+    const enabled = request.params?.enabled ?? request.enabled;
+    if (typeof enabled !== "boolean") {
+      throw new Error("set_appearance_sync requires enabled boolean");
+    }
+    const config = await this.dependencies.updateConfig({ syncWithHost: enabled });
+    const appliedMode = await this.applyToTargets(config, request.sessionUuid);
+    await this.dependencies.triggerSync();
+    return {
+      id: request.id,
+      type: "appearance_response",
+      success: true,
+      result: {
+        config,
+        appliedMode: appliedMode ?? undefined,
+        ...this.automaticSyncWarning(enabled),
+      },
+    };
+  }
+
+  private async handleSetAppearance(
+    request: AppearanceSocketRequest,
+  ): Promise<AppearanceSocketResponse> {
+    this.authenticator.authorize({ sessionUuid: request.sessionUuid });
+    const mode = request.params?.mode ?? request.mode;
+    if (!mode || !VALID_MODES.has(String(mode).toLowerCase())) {
+      throw new Error("set_appearance requires mode: light | dark | auto");
+    }
+    const normalizedMode = String(mode).toLowerCase();
+    const config = await this.dependencies.updateConfig({
+      defaultMode: normalizedMode,
+      syncWithHost: normalizedMode === "auto",
+    });
+    const appliedMode = await this.applyToTargets(config, request.sessionUuid, normalizedMode);
+    await this.dependencies.triggerSync();
+    return {
+      id: request.id,
+      type: "appearance_response",
+      success: true,
+      result: {
+        config,
+        appliedMode: appliedMode ?? undefined,
+        ...this.automaticSyncWarning(normalizedMode === "auto"),
+      },
+    };
   }
 
   protected createErrorResponse(id: string | undefined, error: string): AppearanceSocketResponse {

@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 101
+    },
+    "root": {
+      "type": "text",
+      "text": "hello"
+    }
+  },
+  "expectedPath": "window.opacity"
+}

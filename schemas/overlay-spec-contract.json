@@ -1,0 +1,1893 @@
+{
+  "limits": {
+    "MAX_OVERLAY_NODES": 500,
+    "MAX_OVERLAY_DEPTH": 24,
+    "MAX_OVERLAY_IMAGES": 32,
+    "MAX_OVERLAY_SPEC_BYTES": 262144,
+    "MAX_OVERLAY_EMIT_PAYLOAD_BYTES": 4096,
+    "MAX_OVERLAY_EMIT_PAYLOAD_DEPTH": 24,
+    "MAX_OVERLAY_SELECTOR_DEPTH": 8
+  },
+  "definitions": {
+    "offset": {
+      "kind": "object",
+      "fields": {
+        "x": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": false
+        },
+        "y": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": false
+        }
+      }
+    },
+    "bounds": {
+      "kind": "object",
+      "fields": {
+        "x": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": false
+        },
+        "y": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": false
+        },
+        "width": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": false
+        },
+        "height": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": false
+        }
+      }
+    },
+    "selector": {
+      "kind": "object",
+      "fields": {
+        "elementId": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "text": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "testTag": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "container": {
+          "rule": {
+            "kind": "ref",
+            "name": "container"
+          },
+          "optional": true
+        }
+      },
+      "atLeastOne": true
+    },
+    "condition": {
+      "kind": "object",
+      "fields": {
+        "key": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        },
+        "equals": {
+          "rule": {
+            "kind": "scalar"
+          },
+          "optional": false
+        }
+      }
+    },
+    "sheetCondition": {
+      "kind": "object",
+      "fields": {
+        "key": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        },
+        "equals": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": false
+        }
+      }
+    },
+    "safeAreaPadding": {
+      "kind": "object",
+      "fields": {
+        "edges": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "enum",
+              "values": ["top", "bottom", "start", "end"]
+            },
+            "min": 1,
+            "unique": true,
+            "max": 4
+          },
+          "optional": false
+        },
+        "types": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "enum",
+              "values": ["systemBars", "cutout", "ime"]
+            },
+            "min": 1,
+            "unique": true,
+            "max": 3
+          },
+          "optional": false
+        }
+      }
+    },
+    "dimension": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "enum",
+          "values": ["fill", "wrap"]
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "dp": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
+    "detent": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "enum",
+          "values": ["half", "full"]
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "dp": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 1e-6
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
+    "padding": {
+      "kind": "object",
+      "fields": {
+        "top": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "bottom": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "start": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "end": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        }
+      }
+    },
+    "border": {
+      "kind": "object",
+      "fields": {
+        "width": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": false
+        },
+        "color": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": false
+        }
+      }
+    },
+    "style": {
+      "kind": "object",
+      "fields": {
+        "width": {
+          "rule": {
+            "kind": "ref",
+            "name": "dimension"
+          },
+          "optional": true
+        },
+        "height": {
+          "rule": {
+            "kind": "ref",
+            "name": "dimension"
+          },
+          "optional": true
+        },
+        "padding": {
+          "rule": {
+            "kind": "ref",
+            "name": "padding"
+          },
+          "optional": true
+        },
+        "background": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "cornerRadius": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "border": {
+          "rule": {
+            "kind": "ref",
+            "name": "border"
+          },
+          "optional": true
+        },
+        "alpha": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1
+          },
+          "optional": true
+        },
+        "alignment": {
+          "rule": {
+            "kind": "enum",
+            "values": [
+              "topStart",
+              "topCenter",
+              "topEnd",
+              "centerStart",
+              "center",
+              "centerEnd",
+              "bottomStart",
+              "bottomCenter",
+              "bottomEnd"
+            ]
+          },
+          "optional": true
+        },
+        "arrangement": {
+          "rule": {
+            "kind": "enum",
+            "values": ["start", "center", "end", "spaceBetween", "spaceAround", "spaceEvenly"]
+          },
+          "optional": true
+        },
+        "spacing": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "textSize": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1e-6
+          },
+          "optional": true
+        },
+        "fontWeight": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 100,
+            "max": 900
+          },
+          "optional": true
+        },
+        "color": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "textAlign": {
+          "rule": {
+            "kind": "enum",
+            "values": ["start", "center", "end", "justify"]
+          },
+          "optional": true
+        },
+        "maxLines": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 1,
+            "max": 2147483647
+          },
+          "optional": true
+        },
+        "fontFamily": {
+          "rule": {
+            "kind": "enum",
+            "values": ["default", "sansSerif", "serif", "monospace"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "item": {
+      "kind": "object",
+      "fields": {
+        "label": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "icon": {
+          "rule": {
+            "kind": "enum",
+            "values": [
+              "home",
+              "search",
+              "settings",
+              "person",
+              "favorite",
+              "add",
+              "close",
+              "check",
+              "arrow_back",
+              "arrow_forward",
+              "chevron_left",
+              "chevron_right",
+              "menu",
+              "more_vert",
+              "share",
+              "edit",
+              "delete",
+              "info",
+              "warning",
+              "notifications",
+              "star",
+              "shopping_cart",
+              "help",
+              "refresh",
+              "done",
+              "cancel",
+              "play_arrow",
+              "pause",
+              "stop",
+              "mail",
+              "phone",
+              "location_on",
+              "calendar_today",
+              "visibility",
+              "lock",
+              "logout"
+            ]
+          },
+          "optional": true
+        },
+        "image": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      }
+    },
+    "anchor": {
+      "kind": "tagged",
+      "variants": {
+        "bounds": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["bounds"]
+              },
+              "optional": false
+            },
+            "bounds": {
+              "rule": {
+                "kind": "ref",
+                "name": "bounds"
+              },
+              "optional": false
+            }
+          }
+        },
+        "element": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["element"]
+              },
+              "optional": false
+            },
+            "selector": {
+              "rule": {
+                "kind": "ref",
+                "name": "selector"
+              },
+              "optional": false
+            },
+            "alignment": {
+              "rule": {
+                "kind": "enum",
+                "values": ["cover", "top", "bottom", "start", "end"]
+              },
+              "optional": false
+            },
+            "offset": {
+              "rule": {
+                "kind": "ref",
+                "name": "offset"
+              },
+              "optional": true
+            }
+          }
+        }
+      }
+    },
+    "placement": {
+      "kind": "tagged",
+      "variants": {
+        "fullscreen": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["fullscreen"]
+              },
+              "optional": false
+            },
+            "scrim": {
+              "rule": {
+                "kind": "color"
+              },
+              "optional": true
+            }
+          }
+        },
+        "sheet": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["sheet"]
+              },
+              "optional": false
+            },
+            "edge": {
+              "rule": {
+                "kind": "enum",
+                "values": ["top", "bottom"]
+              },
+              "optional": false
+            },
+            "height": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 1e-6
+              },
+              "optional": false
+            }
+          }
+        },
+        "floating": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["floating"]
+              },
+              "optional": false
+            },
+            "gravity": {
+              "rule": {
+                "kind": "enum",
+                "values": [
+                  "topStart",
+                  "topCenter",
+                  "topEnd",
+                  "centerStart",
+                  "center",
+                  "centerEnd",
+                  "bottomStart",
+                  "bottomCenter",
+                  "bottomEnd"
+                ]
+              },
+              "optional": false
+            },
+            "offset": {
+              "rule": {
+                "kind": "ref",
+                "name": "offset"
+              },
+              "optional": false
+            }
+          }
+        }
+      }
+    },
+    "action": {
+      "kind": "tagged",
+      "variants": {
+        "emit": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["emit"]
+              },
+              "optional": false
+            },
+            "name": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "payload": {
+              "rule": {
+                "kind": "json",
+                "maxBytes": 4096,
+                "maxDepth": 24
+              },
+              "optional": true
+            }
+          }
+        },
+        "setPage": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["setPage"]
+              },
+              "optional": false
+            },
+            "pager": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "page": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": ["next", "prev"]
+                  },
+                  {
+                    "kind": "number",
+                    "integer": true,
+                    "min": 0,
+                    "max": 2147483647
+                  }
+                ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "setState": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["setState"]
+              },
+              "optional": false
+            },
+            "key": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "value": {
+              "rule": {
+                "kind": "scalar"
+              },
+              "optional": false
+            }
+          }
+        },
+        "dismiss": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["dismiss"]
+              },
+              "optional": false
+            }
+          }
+        }
+      }
+    },
+    "node": {
+      "kind": "tagged",
+      "variants": {
+        "box": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["box"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 0,
+                "unique": false
+              },
+              "optional": false
+            }
+          }
+        },
+        "row": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["row"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 0,
+                "unique": false
+              },
+              "optional": false
+            }
+          }
+        },
+        "column": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["column"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 0,
+                "unique": false
+              },
+              "optional": false
+            }
+          }
+        },
+        "text": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["text"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "text": {
+              "rule": {
+                "kind": "string",
+                "empty": true
+              },
+              "optional": false
+            }
+          }
+        },
+        "image": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["image"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "asset": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "contentScale": {
+              "rule": {
+                "kind": "enum",
+                "values": ["fit", "crop", "fill"]
+              },
+              "optional": true
+            }
+          }
+        },
+        "icon": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["icon"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "name": {
+              "rule": {
+                "kind": "enum",
+                "values": [
+                  "home",
+                  "search",
+                  "settings",
+                  "person",
+                  "favorite",
+                  "add",
+                  "close",
+                  "check",
+                  "arrow_back",
+                  "arrow_forward",
+                  "chevron_left",
+                  "chevron_right",
+                  "menu",
+                  "more_vert",
+                  "share",
+                  "edit",
+                  "delete",
+                  "info",
+                  "warning",
+                  "notifications",
+                  "star",
+                  "shopping_cart",
+                  "help",
+                  "refresh",
+                  "done",
+                  "cancel",
+                  "play_arrow",
+                  "pause",
+                  "stop",
+                  "mail",
+                  "phone",
+                  "location_on",
+                  "calendar_today",
+                  "visibility",
+                  "lock",
+                  "logout"
+                ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "spacer": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["spacer"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            }
+          }
+        },
+        "textField": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["textField"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "placeholder": {
+              "rule": {
+                "kind": "string",
+                "empty": true
+              },
+              "optional": true
+            }
+          }
+        },
+        "scroll": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["scroll"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "axis": {
+              "rule": {
+                "kind": "enum",
+                "values": ["vertical", "horizontal"]
+              },
+              "optional": true
+            },
+            "child": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": false
+            }
+          }
+        },
+        "pager": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pager"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 1,
+                "unique": false
+              },
+              "optional": false
+            }
+          }
+        },
+        "tabBar": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["tabBar"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "items": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "item"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": false
+            },
+            "pager": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "scrollable": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            }
+          },
+          "binding": true
+        },
+        "bottomNav": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["bottomNav"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "items": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "item"
+                },
+                "min": 2,
+                "unique": false,
+                "max": 5
+              },
+              "optional": false
+            },
+            "pager": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            }
+          },
+          "binding": true
+        },
+        "bottomSheet": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["bottomSheet"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "child": {
+              "rule": {
+                "kind": "ref",
+                "name": "node"
+              },
+              "optional": false
+            },
+            "openWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "sheetCondition"
+              },
+              "optional": false
+            },
+            "detents": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "detent"
+                },
+                "min": 1,
+                "unique": true,
+                "max": 8
+              },
+              "optional": false
+            },
+            "scrim": {
+              "rule": {
+                "kind": "color"
+              },
+              "optional": true
+            },
+            "dragHandle": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "dismissOnSwipe": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            }
+          }
+        }
+      }
+    },
+    "window": {
+      "kind": "object",
+      "fields": {
+        "placement": {
+          "rule": {
+            "kind": "ref",
+            "name": "placement"
+          },
+          "optional": false
+        },
+        "opacity": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
+          },
+          "optional": true
+        }
+      }
+    },
+    "spec": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "window": {
+          "rule": {
+            "kind": "ref",
+            "name": "window"
+          },
+          "optional": false
+        },
+        "state": {
+          "rule": {
+            "kind": "map",
+            "item": {
+              "kind": "scalar"
+            }
+          },
+          "optional": true
+        },
+        "root": {
+          "rule": {
+            "kind": "ref",
+            "name": "node"
+          },
+          "optional": false
+        }
+      }
+    },
+    "container": {
+      "kind": "object",
+      "fields": {
+        "elementId": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        "text": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true
+          },
+          "optional": true
+        },
+        "index": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 2147483647
+          },
+          "optional": true
+        },
+        "selectionStrategy": {
+          "rule": {
+            "kind": "enum",
+            "values": ["unique"]
+          },
+          "optional": true
+        },
+        "container": {
+          "rule": {
+            "kind": "ref",
+            "name": "container"
+          },
+          "optional": true
+        }
+      },
+      "exclusive": ["elementId", "text"]
+    }
+  }
+}

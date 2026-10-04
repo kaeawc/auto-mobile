@@ -161,6 +161,13 @@ export function partitionToolSelectionNames(
       `Tools ${unknown.map((toolName) => `'${toolName}'`).join(", ")} are not user-configurable.`,
     );
   }
+  for (const toolName of uniqueNames) {
+    const tool = ToolRegistry.getRegisteredTool(toolName)!;
+    const reasons = ToolRegistry.getToolAvailabilityGateReasons(tool);
+    if (reasons.length > 0) {
+      throw new ActionableError(`Tool '${toolName}' is unavailable: ${reasons.join("; ")}.`);
+    }
+  }
   return {
     requested: uniqueNames.filter((toolName) => ToolRegistry.isUserConfigurableTool(toolName)),
     skipped: uniqueNames

@@ -1646,13 +1646,14 @@ export class ToolRegistryClass {
     this.toolCallRepository = repository;
   }
 
-  private getToolAvailabilityGateReasons(tool: RegisteredTool): string[] {
+  /** Shared availability evidence for discovery, call rejection, and selection validation. */
+  getToolAvailabilityGateReasons(tool: RegisteredTool): string[] {
     const reasons: string[] = [];
     if (tool.debugOnly && !isDebugModeEnabled()) {
-      reasons.push("--debug is disabled");
+      reasons.push("--debug is disabled; start the daemon with --debug");
     }
     if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
-      reasons.push("embedded SDK mode is disabled");
+      reasons.push("embedded SDK mode is disabled; start the daemon with --embedded-sdk");
     }
     if (tool.planOnly) {
       reasons.push(PLAN_ONLY_GATE_REASON);

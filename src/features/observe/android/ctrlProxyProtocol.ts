@@ -916,21 +916,28 @@ export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = Object.keys(
 // Serialization
 // =============================================================================
 
-const MILLISECOND_FIELDS = new Map<string, readonly string[]>([
+const STROKE_DURATION_FIELDS = new Map<string, readonly string[]>([
   ["request_tap_coordinates", ["duration"]],
   ["request_swipe", ["duration"]],
   ["request_two_finger_swipe", ["duration"]],
-  ["request_drag", ["pressDurationMs", "dragDurationMs", "holdDurationMs", "holdTime", "duration"]],
   ["request_pinch", ["duration"]],
+]);
+
+const MILLISECOND_FIELDS = new Map<string, readonly string[]>([
+  ["request_drag", ["pressDurationMs", "dragDurationMs", "holdDurationMs", "holdTime", "duration"]],
   ["set_hierarchy_interval", ["intervalMs"]],
 ]);
 
-/** Android's Long duration fields reject decimal JSON tokens. Leave other numbers untouched. */
+/**
+ * Android's Long fields reject decimal JSON tokens; StrokeDescription also requires duration > 0.
+ * Drag phases and hierarchy intervals retain meaningful zeros. Leave other numbers untouched.
+ */
 export function normalizeCtrlProxyMilliseconds(
   type: string,
   params: Record<string, unknown>,
 ): Record<string, unknown> {
-  const fields = MILLISECOND_FIELDS.get(type);
+  const strokeFields = STROKE_DURATION_FIELDS.get(type);
+  const fields = strokeFields ?? MILLISECOND_FIELDS.get(type);
   if (!fields) {
     return params;
   }
@@ -938,7 +945,7 @@ export function normalizeCtrlProxyMilliseconds(
     Object.entries(params).map(([field, value]) => [
       field,
       fields.includes(field) && typeof value === "number"
-        ? value > 0
+        ? strokeFields !== undefined || value > 0
           ? Math.max(1, Math.round(value))
           : Math.round(value)
         : value,

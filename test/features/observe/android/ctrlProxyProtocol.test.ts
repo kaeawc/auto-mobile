@@ -59,33 +59,42 @@ describe("Android millisecond serialization", () => {
     },
   ];
   test.each([
-    [250.5, 251],
-    [250.49, 250],
-    [250, 250],
-    [0.1, 1],
-    [0, 0],
-  ] as const)("%s milliseconds serializes as %s across gesture types", (value, expected) => {
-    for (const request of gestures(value)) {
-      const normalized = { ...request };
-      for (const field of [
-        "duration",
-        "pressDurationMs",
-        "dragDurationMs",
-        "holdDurationMs",
-      ] as const) {
-        if (field in normalized) {
-          Object.assign(normalized, { [field]: expected });
+    [250.5, 251, 251],
+    [250.49, 250, 250],
+    [250, 250, 250],
+    [0.1, 1, 1],
+    [0, 1, 0],
+  ] as const)(
+    "%s milliseconds serializes as %s for strokes and %s for drag",
+    (value, strokeExpected, dragExpected) => {
+      for (const request of gestures(value)) {
+        const normalized = { ...request };
+        for (const field of [
+          "duration",
+          "pressDurationMs",
+          "dragDurationMs",
+          "holdDurationMs",
+        ] as const) {
+          if (field in normalized) {
+            Object.assign(normalized, {
+              [field]: request.type === "request_drag" ? dragExpected : strokeExpected,
+            });
+          }
         }
+        expect(serializeCtrlProxyRequest(request)).toBe(JSON.stringify(normalized));
       }
-      expect(serializeCtrlProxyRequest(request)).toBe(JSON.stringify(normalized));
-    }
-  });
+    },
+  );
   test("preserves absent fields, drops undefined on serialization and rounds legacy drag durations", () => {
     const params = { x1: 1.5, holdTime: 250.5, duration: 0.1, holdDurationMs: undefined };
     expect(JSON.stringify(normalizeCtrlProxyMilliseconds("request_drag", params))).toBe(
       '{"x1":1.5,"holdTime":251,"duration":1}',
     );
     expect(normalizeCtrlProxyMilliseconds("request_drag", {})).toEqual({});
+    expect(normalizeCtrlProxyMilliseconds("request_drag", { holdTime: 0, duration: 0 })).toEqual({
+      holdTime: 0,
+      duration: 0,
+    });
     expect(params.holdTime).toBe(250.5);
     expect(
       normalizeCtrlProxyMilliseconds("request_set_text", { text: "250.5", duration: 250.5 }),
@@ -97,6 +106,9 @@ describe("Android millisecond serialization", () => {
     );
     expect(serializeCtrlProxyRequest({ type: "set_hierarchy_interval", intervalMs: null })).toBe(
       '{"type":"set_hierarchy_interval","intervalMs":null}',
+    );
+    expect(serializeCtrlProxyRequest({ type: "set_hierarchy_interval", intervalMs: 0 })).toBe(
+      '{"type":"set_hierarchy_interval","intervalMs":0}',
     );
     const timestamp: CtrlProxyRequest = {
       type: "request_hierarchy_if_stale",

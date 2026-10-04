@@ -525,32 +525,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         func testFaultRulesMatchHeaderNamesCaseInsensitively() {
             let store = NetworkMockRuleStore()
             store.setFaultRules([
-                NetworkFaultRuleDTO(
-                    faultId: "header-1",
-                    transport: .urlSession,
-                    host: ".*",
-                    port: nil,
-                    scheme: nil,
-                    path: ".*",
-                    method: "*",
-                    headers: ["x-test": "1"],
-                    origin: nil,
-                    connectionId: nil,
-                    sessionId: nil,
-                    action: .error,
-                    statusCode: nil,
-                    responseHeaders: nil,
-                    responseBody: nil,
-                    contentType: nil,
-                    errorType: "timeout",
-                    delayMs: nil,
-                    bandwidthBytesPerSecond: nil,
-                    dropBytes: nil,
-                    limit: nil,
-                    expiresAtEpochMs: nil,
-                    scope: nil,
-                    dryRun: false
-                ),
+                makeHeaderFaultRule(faultId: "header-1", headers: ["x-test": "1"]),
             ])
             let request = { (headers: [String: String]) in
                 NetworkMockRuleStore.FaultRequest(
@@ -563,6 +538,81 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertEqual(store.evaluate(request(["X-Test": "1"]))?.faultId, "header-1")
             XCTAssertNil(store.evaluate(request(["X-Test": "2"])))
             XCTAssertNil(store.evaluate(request([:])))
+        }
+
+        func testFaultRulesMatchAnyHeaderWithCaseInsensitiveName() {
+            let firstValueStore = NetworkMockRuleStore()
+            firstValueStore.setFaultRules([
+                makeHeaderFaultRule(faultId: "header-1", headers: ["X-TEST": "1"]),
+            ])
+            let secondValueStore = NetworkMockRuleStore()
+            secondValueStore.setFaultRules([
+                makeHeaderFaultRule(faultId: "header-2", headers: ["x-test": "2"]),
+            ])
+            let missingValueStore = NetworkMockRuleStore()
+            missingValueStore.setFaultRules([
+                makeHeaderFaultRule(faultId: "header-3", headers: ["x-test": "3"]),
+            ])
+            let request = { (headers: [String: String]) in
+                NetworkMockRuleStore.FaultRequest(
+                    transport: .urlSession, host: "api.example.com", port: 443, scheme: "https",
+                    path: "/v1", method: "GET", headers: headers, origin: nil,
+                    connectionId: nil, sessionId: nil
+                )
+            }
+
+            for _ in 0 ..< 64 {
+                for reverseOrder in [false, true] {
+                    var headers: [String: String] = [:]
+                    if reverseOrder {
+                        headers["x-test"] = "2"
+                        headers["X-Test"] = "1"
+                    } else {
+                        headers["X-Test"] = "1"
+                        headers["x-test"] = "2"
+                    }
+                    let faultRequest = request(headers)
+                    XCTAssertEqual(firstValueStore.evaluate(faultRequest)?.faultId, "header-1")
+                    XCTAssertEqual(secondValueStore.evaluate(faultRequest)?.faultId, "header-2")
+                    XCTAssertNil(missingValueStore.evaluate(faultRequest))
+                }
+            }
+
+            let singleHeaderStore = NetworkMockRuleStore()
+            singleHeaderStore.setFaultRules([
+                makeHeaderFaultRule(faultId: "single-header", headers: ["x-test": "1"]),
+            ])
+            XCTAssertEqual(singleHeaderStore.evaluate(request(["X-Test": "1"]))?.faultId, "single-header")
+            XCTAssertNil(singleHeaderStore.evaluate(request([:])))
+        }
+
+        private func makeHeaderFaultRule(faultId: String, headers: [String: String]) -> NetworkFaultRuleDTO {
+            NetworkFaultRuleDTO(
+                faultId: faultId,
+                transport: .urlSession,
+                host: ".*",
+                port: nil,
+                scheme: nil,
+                path: ".*",
+                method: "*",
+                headers: headers,
+                origin: nil,
+                connectionId: nil,
+                sessionId: nil,
+                action: .error,
+                statusCode: nil,
+                responseHeaders: nil,
+                responseBody: nil,
+                contentType: nil,
+                errorType: "timeout",
+                delayMs: nil,
+                bandwidthBytesPerSecond: nil,
+                dropBytes: nil,
+                limit: nil,
+                expiresAtEpochMs: nil,
+                scope: nil,
+                dryRun: false
+            )
         }
 
         func testFaultRulesHonorExpiryAndDryRunWithoutConsuming() {

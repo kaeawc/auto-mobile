@@ -1173,6 +1173,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
     };
   }
 
+  private resolveTrackDeviceId(deviceLabel: string, sessionUuid?: string): string | undefined {
+    const daemonState = DaemonState.getInstance();
+    if (!sessionUuid || !daemonState.isInitialized()) {
+      return undefined;
+    }
+    const sessionManager = daemonState.getSessionManager();
+    const trackSessionUuid = sessionManager.getDeviceLabels(sessionUuid)?.[deviceLabel];
+    // A plan label is not a device ID. Unallocated tracks must never cancel
+    // another track's jobs by falling back to the orchestrator's base device.
+    return trackSessionUuid
+      ? (sessionManager.getDeviceForSession(trackSessionUuid) ?? undefined)
+      : undefined;
+  }
+
   private async settleDeviceTracks<T>(
     devicePromises: Promise<T>[],
     getDeviceLoss: () => DeviceLostError | undefined,
@@ -1243,7 +1257,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         const stepStartTime = this.timer.now();
         const stepResult = await this.executeStep(step, {
           platform,
-          deviceId,
+          deviceId: this.resolveTrackDeviceId(device, sessionUuid),
           sessionUuid,
           signal,
           logPrefix: `[PARALLEL_EXEC][${device}]`,

@@ -396,6 +396,41 @@ internal fun crashEventResponse(
       ),
   )
 
+internal fun handledExceptionEventResponse(
+  timestamp: Long,
+  exceptionClass: String,
+  exceptionMessage: String?,
+  stackTrace: String,
+  customMessage: String?,
+  currentScreen: String?,
+  packageName: String,
+  appVersion: String?,
+  deviceModel: String,
+  deviceManufacturer: String,
+  osVersion: String,
+  sdkInt: Int,
+): HandledExceptionEvent =
+  HandledExceptionEvent(
+    timestamp = timestamp,
+    event =
+      HandledExceptionData(
+        exceptionClass = exceptionClass,
+        message = exceptionMessage,
+        stackTrace = stackTrace,
+        customMessage = customMessage,
+        currentScreen = currentScreen,
+        packageName = packageName,
+        appVersion = appVersion,
+        deviceInfo =
+          DeviceInfo(
+            model = deviceModel,
+            manufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
+          ),
+      ),
+  )
+
 /**
  * Owns the "serialize once → write file → broadcast → always release the frame-context entry"
  * sequence for a single hierarchy delivery (issue #5469 follow-up).
@@ -7446,26 +7481,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
+      // Fall back to now because the legacy intent timestamp extra defaults to 0.
       val response =
-        HandledExceptionEvent(
-          timestamp = System.currentTimeMillis(),
-          event =
-            HandledExceptionData(
-              exceptionClass = exceptionClass,
-              message = exceptionMessage,
-              stackTrace = stackTrace,
-              customMessage = customMessage,
-              currentScreen = currentScreen,
-              packageName = packageName,
-              appVersion = appVersion,
-              deviceInfo =
-                DeviceInfo(
-                  model = deviceModel,
-                  manufacturer = deviceManufacturer,
-                  osVersion = osVersion,
-                  sdkInt = sdkInt,
-                ),
-            ),
+        handledExceptionEventResponse(
+          timestamp = crashEventTimestamp(timestamp, System.currentTimeMillis()),
+          exceptionClass = exceptionClass,
+          exceptionMessage = exceptionMessage,
+          stackTrace = stackTrace,
+          customMessage = customMessage,
+          currentScreen = currentScreen,
+          packageName = packageName,
+          appVersion = appVersion,
+          deviceModel = deviceModel,
+          deviceManufacturer = deviceManufacturer,
+          osVersion = osVersion,
+          sdkInt = sdkInt,
         )
 
       webSocketServer.broadcast(response)

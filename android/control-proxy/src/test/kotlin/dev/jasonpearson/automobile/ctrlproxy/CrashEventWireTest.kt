@@ -46,6 +46,42 @@ class CrashEventWireTest {
   }
 
   @Test
+  fun `handled exception response retains the SDK timestamp and wire fields`() {
+    val response =
+      handledExceptionEventResponse(
+        timestamp = 1234L,
+        exceptionClass = "java.lang.IllegalStateException",
+        exceptionMessage = "Unexpected state",
+        stackTrace = "IllegalStateException: Unexpected state\n  at App.run(App.kt:42)",
+        customMessage = "Handled by app",
+        currentScreen = "profile",
+        packageName = "com.example.app",
+        appVersion = "1.2.3",
+        deviceModel = "Pixel 8",
+        deviceManufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
+
+    assertEquals(1234L, response.timestamp)
+    assertEquals("java.lang.IllegalStateException", response.event.exceptionClass)
+    assertEquals("Unexpected state", response.event.message)
+    assertEquals(
+      "IllegalStateException: Unexpected state\n  at App.run(App.kt:42)",
+      response.event.stackTrace,
+    )
+    assertEquals("Handled by app", response.event.customMessage)
+    assertEquals("profile", response.event.currentScreen)
+    assertEquals("com.example.app", response.event.packageName)
+    assertEquals("1.2.3", response.event.appVersion)
+    val deviceInfo = requireNotNull(response.event.deviceInfo)
+    assertEquals("Pixel 8", deviceInfo.model)
+    assertEquals("Google", deviceInfo.manufacturer)
+    assertEquals("14", deviceInfo.osVersion)
+    assertEquals(34, deviceInfo.sdkInt)
+  }
+
+  @Test
   fun `crashEventTimestamp keeps a positive reported time`() {
     assertEquals(1234L, crashEventTimestamp(reportedMs = 1234L, nowMs = 9999L))
   }
@@ -58,14 +94,7 @@ class CrashEventWireTest {
 
   @Test
   fun `broadcastCrashEvent preserves the reported timestamp through the response helper`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
-    val declaration = Regex("""\bfun\s+broadcastCrashEvent\s*\(""").find(source)
-    assertTrue("broadcastCrashEvent declaration not found in CtrlProxy.kt", declaration != null)
-    val parenOpen = requireNotNull(declaration).range.last
-    val parametersEnd = KotlinSourceScan.matchParen(source, parenOpen)
-    val bodyOpen = source.indexOf('{', parametersEnd)
-    assertTrue("broadcastCrashEvent body not found after its parameter list", bodyOpen >= 0)
-    val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+    val body = broadcastBody("broadcastCrashEvent")
 
     assertTrue(
       "broadcastCrashEvent must call crashEventResponse with timestamp = crashEventTimestamp(timestamp, ...)",
@@ -86,6 +115,42 @@ class CrashEventWireTest {
         bareClockTimestamp.containsMatchIn(arguments),
       )
     }
+  }
+
+  @Test
+  fun `broadcastHandledExceptionEvent preserves the reported timestamp through the response helper`() {
+    val body = broadcastBody("broadcastHandledExceptionEvent")
+
+    assertTrue(
+      "broadcastHandledExceptionEvent must call handledExceptionEventResponse with timestamp = crashEventTimestamp(timestamp, ...)",
+      Regex(
+          """\bhandledExceptionEventResponse\s*\(\s*timestamp\s*=\s*crashEventTimestamp\s*\(\s*timestamp\s*,"""
+        )
+        .containsMatchIn(body),
+    )
+
+    val bareClockTimestamp =
+      Regex("""\btimestamp\s*=\s*System\s*\.\s*currentTimeMillis\s*\(\s*\)""")
+    for (construction in Regex("""\bHandledExceptionEvent\s*\(""").findAll(body)) {
+      val argumentsOpen = construction.range.last
+      val arguments =
+        body.substring(argumentsOpen, KotlinSourceScan.matchParen(body, argumentsOpen))
+      assertFalse(
+        "broadcastHandledExceptionEvent must not construct HandledExceptionEvent with timestamp = System.currentTimeMillis(); preserve the reported handled exception time",
+        bareClockTimestamp.containsMatchIn(arguments),
+      )
+    }
+  }
+
+  private fun broadcastBody(functionName: String): String {
+    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+    val declaration = Regex("""\bfun\s+${Regex.escape(functionName)}\s*\(""").find(source)
+    assertTrue("$functionName declaration not found in CtrlProxy.kt", declaration != null)
+    val parenOpen = requireNotNull(declaration).range.last
+    val parametersEnd = KotlinSourceScan.matchParen(source, parenOpen)
+    val bodyOpen = source.indexOf('{', parametersEnd)
+    assertTrue("$functionName body not found after its parameter list", bodyOpen >= 0)
+    return source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
   }
 
   private fun locateCtrlProxySource(): File {

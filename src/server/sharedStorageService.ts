@@ -275,7 +275,7 @@ class DefaultSharedStorageService implements SharedStorageService {
         this.timer,
       );
       throw new ActionableError(
-        `Android media-library batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
+        `Android ${request.requireMediaIndexing ? "media-library" : "shared-storage"} batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
           `Rolled back: ${rollback.rolledBack.length > 0 ? rollback.rolledBack.join(", ") : "none"}. ` +
           `Rollback failures: ${rollback.failures.length > 0 ? rollback.failures.join("; ") : "none"}.`,
         { cause: error },
@@ -329,6 +329,18 @@ async function rollbackStagedFiles(
   writtenPaths: string[],
   timer: Timer,
 ): Promise<{ rolledBack: string[]; failures: string[] }> {
+  return rollbackWrittenFiles(writtenPaths, timer, (chunk, signal, timeoutMs) => {
+    const paths = chunk.map((path) => shellQuote(posix.join(destinationDirectory, path)));
+    return execute(adb, `shell rm -f ${paths.join(" ")}`, signal, timeoutMs);
+  });
+}
+
+/** Shared bounded, cancellation-detached rollback contract for Android file batches. */
+export async function rollbackWrittenFiles(
+  writtenPaths: string[],
+  timer: Timer,
+  removePaths: (paths: string[], signal: AbortSignal, timeoutMs: number) => Promise<unknown>,
+): Promise<{ rolledBack: string[]; failures: string[] }> {
   return runWithAbortSignal(undefined, async () => {
     const rolledBack: string[] = [];
     const failures: string[] = [];
@@ -352,17 +364,13 @@ async function rollbackStagedFiles(
             `Shared-storage batch rollback exceeded total timeout of ${SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS}ms`,
           );
         }
-        const paths = chunk.map((path) => shellQuote(posix.join(destinationDirectory, path)));
-        await raceWithDeadline(
-          () => execute(adb, `shell rm -f ${paths.join(" ")}`, cleanup.signal, timeoutMs),
-          {
-            timer,
-            timeoutMs,
-            signal: cleanup.signal,
-            label: "Shared-storage batch rollback",
-            onTimeout: () => cleanup.abort(),
-          },
-        );
+        await raceWithDeadline(() => removePaths(chunk, cleanup.signal, timeoutMs), {
+          timer,
+          timeoutMs,
+          signal: cleanup.signal,
+          label: "Shared-storage batch rollback",
+          onTimeout: () => cleanup.abort(),
+        });
         rolledBack.push(...chunk);
       } catch (error) {
         // A failed command may have removed some paths; none have confirmed success.

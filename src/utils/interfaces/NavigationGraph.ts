@@ -461,8 +461,8 @@ export interface NavigationGraph {
   /** Record back stack information for the current screen */
   recordBackStack(backStack: BackStackInfo): void | Promise<void>;
 
-  /** Record a tool call for correlation */
-  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): void;
+  /** Record an eligible tool call; returns an idempotent withdrawal handle. */
+  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): () => void;
 
   /** Get the current screen name */
   getCurrentScreen(): string | null;

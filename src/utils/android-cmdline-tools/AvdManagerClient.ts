@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { errorMessage } from "../describeUnknownError";
 import { appendBounded } from "./appendBounded";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
@@ -198,10 +197,7 @@ export class AvdManagerClient {
         throw error;
       }
       const message = `Failed to create AVD ${params.name}: ${(error as Error).message}`;
-      this.dependencies.logger.warn(
-        `Failed to create AVD ${params.name}: ${errorMessage(error)}`,
-        error,
-      );
+      this.dependencies.logger.warn(message, error);
       return { success: false, message };
     }
   }
@@ -232,7 +228,7 @@ export class AvdManagerClient {
         throw error;
       }
       const message = `Failed to delete AVD ${name}: ${(error as Error).message}`;
-      this.dependencies.logger.warn(`Failed to delete AVD ${name}: ${errorMessage(error)}`, error);
+      this.dependencies.logger.warn(message, error);
       return { success: false, message };
     }
   }

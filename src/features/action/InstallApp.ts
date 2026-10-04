@@ -1,4 +1,7 @@
-import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import {
+  outputLooksLikeShellFailure,
+  packageListingContains,
+} from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import path from "path";
 import AdmZip from "adm-zip";
@@ -24,6 +27,7 @@ import {
   DefaultAndroidBuildToolsLocator,
   type AndroidBuildToolsLocator,
 } from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
@@ -53,6 +57,24 @@ import {
 const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
 const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
 const IOS_PHYSICAL_VERIFY_RETRY_DELAY_MS = 200;
+
+interface AndroidInstallAttempt {
+  success: boolean;
+  output: string;
+  threw: boolean;
+  error?: unknown;
+}
+
+interface AndroidPackageUsers {
+  installedUserIds: number[];
+  warnings: string[];
+}
+
+interface AndroidRestoreProgress {
+  restoredUserIds: number[];
+  unconfirmedUserIds: number[];
+  warnings: string[];
+}
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -192,104 +214,30 @@ export class InstallApp {
       );
     }
 
-    const warnings: string[] = [];
+    return this.executeAndroid(artifactPath, userId, perf, signal);
+  }
 
-    // Extract package name from APK
-    const packageNameResult = await perf.track("extractPackageName", async () => {
-      return this.extractPackageName(artifactPath, signal);
-    });
-    if (packageNameResult.warning) {
-      warnings.push(packageNameResult.warning);
-    }
-    let packageName = packageNameResult.packageName?.trim();
+  private async executeAndroid(
+    artifactPath: string,
+    userId: number | undefined,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<InstallAppResult> {
+    const preparation = await this.prepareAndroidInstall(artifactPath, userId, perf, signal);
+    let { packageName, isInstalled } = preparation;
+    const { targetUserId, beforePackages, warnings } = preparation;
 
-    // Auto-detect target user if not specified
-    const targetUserId = await perf.track("detectTargetUser", async () => {
-      return (
-        await new AndroidUserTargetResolver(this.adb).resolve({
-          packageName,
-          explicitUserId: userId,
-          signal,
-        })
-      ).userId;
-    });
-
-    let isInstalled = false;
-    if (packageName) {
-      const packageNameToCheck = packageName;
-      // Check if app is already installed for this user.
-      isInstalled = await perf.track("checkInstalled", async () => {
-        try {
-          const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-          const result = await a11y.requestInstalledPackages(true, undefined, 3000);
-          if (result.success && result.userId === targetUserId) {
-            return result.packages.some((p) => p.packageName === packageName);
-          }
-        } catch {
-          // fall through to ADB
-        }
-        try {
-          const isInstalledCmd = `shell pm list packages --user ${targetUserId}`;
-          const isInstalledOutput = await this.adb.executeCommand(
-            isInstalledCmd,
-            undefined,
-            undefined,
-            true,
-            signal,
-          );
-          return packageListingContains(isInstalledOutput.toString(), packageNameToCheck);
-        } catch (error) {
-          // Both the a11y check and this pm/grep fallback failed; treat the package as
-          // not installed rather than blocking the install flow on a query error.
-          logger.debug(`src/features/action/InstallApp.ts fallback failed: ${error}`, error);
-          return false;
-        }
-      });
-    }
-
-    const beforePackages = await perf.track("listPackagesBefore", async () => {
-      return this.listPackagesForUser(targetUserId, signal);
-    });
-
-    const installArgs = `install --user ${targetUserId} -r "${artifactPath}"`;
-    let installAttempt = await perf.track("adbInstall", () =>
-      this.runAndroidInstall(installArgs, signal),
+    const installation = await this.installAndroidWithRecovery(
+      packageName,
+      targetUserId,
+      `install --user ${targetUserId} -r "${artifactPath}"`,
+      perf,
+      signal,
     );
-
-    if (installAttempt.success) {
-      this.cacheInvalidator.invalidate(this.device);
-      await this.markInstalledAppsCacheStale(true);
-    }
-
-    if (!installAttempt.success && this.isAndroidDowngradeError(installAttempt.output)) {
-      // The installed version is newer than the artifact. `adb install -r` cannot
-      // downgrade a package, so the default behavior is to uninstall the existing
-      // app and reinstall the provided version.
-      if (!packageName) {
-        throw new Error(
-          "Install failed because the installed version is newer (INSTALL_FAILED_VERSION_DOWNGRADE), " +
-            "but the package name could not be determined in order to uninstall it first.",
-        );
-      }
-      logger.warn(
-        `[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`,
-      );
-      await perf.track("downgradeUninstall", () =>
-        this.uninstallAndroidForDowngrade(packageName!, targetUserId, signal),
-      );
-      this.cacheInvalidator.invalidate(this.device);
-      await this.markInstalledAppsCacheStale(true);
-      installAttempt = await perf.track("adbReinstall", () =>
-        this.runAndroidInstall(installArgs, signal),
-      );
-      if (installAttempt.success) {
-        this.cacheInvalidator.invalidate(this.device);
-        await this.markInstalledAppsCacheStale(true);
-        warnings.push(
-          `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`,
-        );
-        isInstalled = false; // The app was removed, so this is effectively a fresh install.
-      }
+    const installAttempt = installation.installAttempt;
+    if (installation.warning) {
+      warnings.push(installation.warning);
+      isInstalled = false; // The app was removed, so this is effectively a fresh install.
     }
 
     // Preserve prior behavior: a hard install failure (non-zero exit) surfaces as a thrown error.
@@ -300,35 +248,18 @@ export class InstallApp {
     const success = installAttempt.success;
 
     if (success) {
-      const afterPackages = await perf.track("listPackagesAfter", async () => {
-        return this.listPackagesForUser(targetUserId, signal);
-      });
-
-      if (packageName && !afterPackages.has(packageName)) {
-        const observedPackages = this.diffSets(beforePackages, afterPackages);
-        const devicePackageName =
-          observedPackages.length > 0 ? observedPackages.join(", ") : "no installed package";
-        throw new ActionableError(
-          `APK package name mismatch: aapt reported "${packageName}", but the device reported "${devicePackageName}" after installation. Verify the APK manifest application ID and install the matching APK.`,
-        );
+      const verification = await this.verifyAndroidInstall(
+        packageName,
+        beforePackages,
+        targetUserId,
+        perf,
+        signal,
+      );
+      packageName = verification.packageName;
+      if (verification.warning) {
+        warnings.push(verification.warning);
       }
-
-      if (!packageName) {
-        const newPackages = this.diffSets(beforePackages, afterPackages);
-
-        if (newPackages.length === 1) {
-          packageName = newPackages[0];
-        } else if (newPackages.length > 1) {
-          warnings.push(
-            "Installed APK but multiple new packages were detected; unable to determine the package name reliably.",
-          );
-        } else if (success) {
-          warnings.push(
-            "Installed APK but package name could not be determined from the device package list.",
-          );
-          isInstalled = true;
-        }
-      }
+      isInstalled = verification.upgrade ?? isInstalled;
     }
 
     perf.end();
@@ -341,6 +272,404 @@ export class InstallApp {
       packageName: packageName,
       warning: warning,
     };
+  }
+
+  private async prepareAndroidInstall(
+    artifactPath: string,
+    userId: number | undefined,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<{
+    packageName?: string;
+    isInstalled: boolean;
+    targetUserId: number;
+    beforePackages: Set<string>;
+    warnings: string[];
+  }> {
+    const warnings: string[] = [];
+
+    // Extract package name from APK
+    const packageNameResult = await perf.track("extractPackageName", async () => {
+      return this.extractPackageName(artifactPath, signal);
+    });
+    if (packageNameResult.warning) {
+      warnings.push(packageNameResult.warning);
+    }
+    const packageName = packageNameResult.packageName?.trim();
+
+    // Auto-detect target user if not specified
+    const targetUserId = await perf.track("detectTargetUser", async () => {
+      return (
+        await new AndroidUserTargetResolver(this.adb).resolve({
+          packageName,
+          explicitUserId: userId,
+          signal,
+        })
+      ).userId;
+    });
+
+    const isInstalled = packageName
+      ? await perf.track("checkInstalled", () =>
+          this.isAndroidPackageInstalled(packageName!, targetUserId, signal),
+        )
+      : false;
+
+    const beforePackages = await perf.track("listPackagesBefore", async () => {
+      return this.listPackagesForUser(targetUserId, signal);
+    });
+
+    return { packageName, isInstalled, targetUserId, beforePackages, warnings };
+  }
+
+  private async installAndroidWithRecovery(
+    packageName: string | undefined,
+    targetUserId: number,
+    installArgs: string,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<{ installAttempt: AndroidInstallAttempt; warning?: string }> {
+    const installAttempt = await perf.track("adbInstall", () =>
+      this.runAndroidInstall(installArgs, signal),
+    );
+    if (installAttempt.success) {
+      this.cacheInvalidator.invalidate(this.device);
+      await this.markInstalledAppsCacheStale(true);
+    }
+    if (installAttempt.success || !this.isAndroidDowngradeError(installAttempt.output)) {
+      return { installAttempt };
+    }
+    // APK versions are package-wide, so a per-user uninstall cannot enable a downgrade.
+    if (!packageName) {
+      throw new Error(
+        "Install failed because the installed version is newer (INSTALL_FAILED_VERSION_DOWNGRADE), " +
+          "but the package name could not be determined in order to uninstall it first.",
+      );
+    }
+    return this.recoverAndroidDowngrade(packageName, targetUserId, installArgs, perf, signal);
+  }
+
+  private async isAndroidPackageInstalled(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestInstalledPackages(true, undefined, 3000);
+      if (result.success && result.userId === userId) {
+        return result.packages.some((p) => p.packageName === packageName);
+      }
+    } catch (error) {
+      // The optional accessibility lookup can be unavailable; ADB supplies the fallback.
+      logger.debug(
+        `[InstallApp] Accessibility package lookup unavailable: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    try {
+      const output = await this.adb.executeCommand(
+        `shell pm list packages --user ${userId}`,
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
+      return packageListingContains(output.toString(), packageName);
+    } catch (error) {
+      logger.warn(`[InstallApp] Package presence query failed: ${errorMessage(error)}`, error);
+      return false;
+    }
+  }
+
+  private async verifyAndroidInstall(
+    packageName: string | undefined,
+    beforePackages: Set<string>,
+    userId: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<{ packageName?: string; warning?: string; upgrade?: boolean }> {
+    let afterPackages: Set<string>;
+    try {
+      afterPackages = await perf.track("listPackagesAfter", () =>
+        this.listPackagesForUser(userId, signal),
+      );
+      throwIfAborted(signal);
+    } catch (error) {
+      if (this.isAndroidCancellation(error, signal)) {
+        throw error;
+      }
+      const warning = `Install completed but could not verify installed package on the device: ${errorMessage(error)}`;
+      logger.warn(`[InstallApp] ${warning}`, error);
+      // A failed listing is unknown, not an empty package set. Keep only the APK's known ID.
+      return { packageName, warning };
+    }
+
+    const newPackages = this.diffSets(beforePackages, afterPackages);
+    if (packageName && !afterPackages.has(packageName)) {
+      const devicePackageName =
+        newPackages.length > 0 ? newPackages.join(", ") : "no installed package";
+      throw new ActionableError(
+        `APK package name mismatch: aapt reported "${packageName}", but the device reported "${devicePackageName}" after installation. Verify the APK manifest application ID and install the matching APK.`,
+      );
+    }
+    if (packageName) {
+      return { packageName };
+    }
+    if (newPackages.length === 1) {
+      return { packageName: newPackages[0] };
+    }
+    if (newPackages.length > 1) {
+      return {
+        warning:
+          "Installed APK but multiple new packages were detected; unable to determine the package name reliably.",
+      };
+    }
+    return {
+      warning:
+        "Installed APK but package name could not be determined from the device package list.",
+      upgrade: true,
+    };
+  }
+
+  private async listAndroidPackageUsers(
+    packageName: string,
+    targetUserId: number,
+    signal?: AbortSignal,
+  ): Promise<AndroidPackageUsers> {
+    const users = await this.adb.listUsers(signal);
+    throwIfAborted(signal);
+    if (users.length === 0) {
+      const warning =
+        "Other users could not be checked and may have lost the app during downgrade recovery.";
+      logger.warn(`[InstallApp] ${warning}`);
+      return { installedUserIds: [targetUserId], warnings: [warning] };
+    }
+    const inventory: AndroidPackageUsers = { installedUserIds: [], warnings: [] };
+    // Include stopped users: a package-wide uninstall removes their app and data too.
+    for (const { userId } of users) {
+      await this.checkAndroidPackageUser(packageName, userId, inventory, signal);
+    }
+    inventory.installedUserIds.sort((a, b) => a - b);
+    return inventory;
+  }
+
+  private async checkAndroidPackageUser(
+    packageName: string,
+    userId: number,
+    inventory: AndroidPackageUsers,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      const packages = await this.listPackagesForUser(userId, signal);
+      throwIfAborted(signal);
+      if (packages.has(packageName)) {
+        inventory.installedUserIds.push(userId);
+      }
+    } catch (error) {
+      if (this.isAndroidCancellation(error, signal)) {
+        throw error;
+      }
+      const warning = `User ${userId} could not be checked and may have lost the app during downgrade recovery: ${errorMessage(error)}`;
+      logger.warn(`[InstallApp] ${warning}`, error);
+      inventory.warnings.push(warning);
+    }
+  }
+
+  private async recoverAndroidDowngrade(
+    packageName: string,
+    targetUserId: number,
+    installArgs: string,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<{ installAttempt: AndroidInstallAttempt; warning?: string }> {
+    const inventory = await this.listAndroidPackageUsers(packageName, targetUserId, signal);
+    const { installedUserIds } = inventory;
+    logger.warn(
+      `[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`,
+    );
+    await perf.track("downgradeUninstall", () =>
+      this.uninstallAndroidForDowngrade(packageName, targetUserId, signal),
+    );
+    this.cacheInvalidator.invalidate(this.device);
+    await this.markInstalledAppsCacheStale(true);
+    const removedUsers =
+      installedUserIds.length > 0 ? ` (removed for users: ${installedUserIds.join(", ")})` : "";
+    const failureContext = [
+      `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE); the device now has no copy of the app${removedUsers}.`,
+      ...inventory.warnings,
+    ].join(" ");
+    let installAttempt: AndroidInstallAttempt;
+    try {
+      installAttempt = await perf.track("adbReinstall", () =>
+        this.runAndroidInstall(installArgs, signal),
+      );
+    } catch (error) {
+      // Cancellation still rejects, but must disclose the already completed uninstall.
+      throw new ActionableError(`${failureContext} ${this.extractErrorText(error)}`, {
+        cause: error,
+      });
+    }
+    if (!installAttempt.success) {
+      const output = `${failureContext} ${installAttempt.output}`;
+      if (installAttempt.threw) {
+        throw new ActionableError(output, { cause: installAttempt.error });
+      }
+      return { installAttempt: { ...installAttempt, output } };
+    }
+    this.cacheInvalidator.invalidate(this.device);
+    await this.markInstalledAppsCacheStale(true);
+    const warning = await this.restoreAndroidPackageUsers(
+      packageName,
+      targetUserId,
+      inventory,
+      signal,
+    );
+    return { installAttempt, warning };
+  }
+
+  private async restoreAndroidPackageUsers(
+    packageName: string,
+    targetUserId: number,
+    inventory: AndroidPackageUsers,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const { installedUserIds } = inventory;
+    const progress: AndroidRestoreProgress = {
+      restoredUserIds: [],
+      unconfirmedUserIds: [],
+      warnings: [],
+    };
+    try {
+      for (const userId of installedUserIds.filter((id) => id !== targetUserId)) {
+        signal?.throwIfAborted();
+        const restoration = await this.restoreAndroidPackageUser(packageName, userId, signal);
+        if (restoration.warning) {
+          progress.warnings.push(restoration.warning);
+        } else {
+          progress.restoredUserIds.push(userId);
+        }
+      }
+      signal?.throwIfAborted();
+      await this.confirmAndroidPackageUsers(packageName, progress, signal);
+      signal?.throwIfAborted();
+    } catch (error) {
+      throw this.androidRestoreStoppedError(packageName, targetUserId, inventory, progress, error);
+    }
+    const originalWarning = `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`;
+    if (installedUserIds.every((id) => id === targetUserId)) {
+      return [originalWarning, ...inventory.warnings].join(" ");
+    }
+    const restored = [targetUserId, ...progress.restoredUserIds].sort((a, b) => a - b);
+    return [
+      originalWarning,
+      `App data was lost for users: ${installedUserIds.join(", ")}.`,
+      `Package restored for users: ${restored.join(", ")} (app data was not restored).`,
+      ...inventory.warnings,
+      ...progress.warnings,
+    ].join(" ");
+  }
+
+  private androidRestoreStoppedError(
+    packageName: string,
+    targetUserId: number,
+    inventory: AndroidPackageUsers,
+    progress: AndroidRestoreProgress,
+    error: unknown,
+  ): ActionableError {
+    const notRestored = inventory.installedUserIds.filter(
+      (id) =>
+        id !== targetUserId &&
+        !progress.restoredUserIds.includes(id) &&
+        !progress.unconfirmedUserIds.includes(id),
+    );
+    return new ActionableError(
+      [
+        `The previous version of ${packageName} was uninstalled during downgrade recovery; the package was reinstalled for target user ${targetUserId}.`,
+        progress.restoredUserIds.length > 0
+          ? `Package restored for users: ${progress.restoredUserIds.join(", ")} (app data was not restored; restore confirmation may be incomplete).`
+          : "No other-user restoration was completed.",
+        notRestored.length > 0 ? `Package NOT restored for users: ${notRestored.join(", ")}.` : "",
+        ...inventory.warnings,
+        ...progress.warnings,
+        this.extractErrorText(error),
+      ].join(" "),
+      { cause: error },
+    );
+  }
+
+  private async confirmAndroidPackageUsers(
+    packageName: string,
+    progress: AndroidRestoreProgress,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    // Confirm only other-user restores; the normal target verification remains unchanged.
+    for (const userId of [...progress.restoredUserIds]) {
+      signal?.throwIfAborted();
+      const confirmation = await this.confirmAndroidPackageUser(packageName, userId, signal);
+      if (confirmation.warning) {
+        progress.warnings.push(confirmation.warning);
+        if (confirmation.unknown) {
+          progress.unconfirmedUserIds.push(userId);
+        }
+        progress.restoredUserIds = progress.restoredUserIds.filter((id) => id !== userId);
+      }
+    }
+  }
+
+  private async confirmAndroidPackageUser(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<{ warning?: string; unknown?: boolean }> {
+    try {
+      const packages = await this.listPackagesForUser(userId, signal);
+      signal?.throwIfAborted();
+      if (packages.has(packageName)) {
+        return {};
+      }
+      const warning = `Package NOT restored for users: ${userId}; the package was absent from the post-restore listing.`;
+      logger.warn(`[InstallApp] ${warning}`);
+      return { warning };
+    } catch (error) {
+      if (this.isAndroidCancellation(error, signal)) {
+        throw error;
+      }
+      const warning = `Install completed but could not confirm package restoration for user ${userId}: ${errorMessage(error)}`;
+      logger.warn(`[InstallApp] ${warning}`, error);
+      return { warning, unknown: true };
+    }
+  }
+
+  private async restoreAndroidPackageUser(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<{ warning?: string }> {
+    try {
+      const result = await this.adb.executeCommand(
+        `shell pm install-existing --user ${userId} ${shellQuote(packageName)}`,
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
+      const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      if (
+        outputLooksLikeShellFailure(result.stdout, result.stderr) ||
+        output.includes("Failure [")
+      ) {
+        throw new ActionableError(output);
+      }
+      return {};
+    } catch (error) {
+      if (this.isAndroidCancellation(error, signal)) {
+        throw error;
+      }
+      // A non-cancellation failure affects only this user; continue restoring the others.
+      const warning = `Could not restore package for user ${userId}: ${errorMessage(error)}`;
+      logger.warn(`[InstallApp] ${warning}`, error);
+      return { warning };
+    }
   }
 
   private static readonly ANDROID_DOWNGRADE_MARKER = "INSTALL_FAILED_VERSION_DOWNGRADE";
@@ -374,7 +703,7 @@ export class InstallApp {
   private async runAndroidInstall(
     installArgs: string,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; output: string; threw: boolean; error?: unknown }> {
+  ): Promise<AndroidInstallAttempt> {
     try {
       const result = await this.adb.executeCommand(
         installArgs,
@@ -386,11 +715,20 @@ export class InstallApp {
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
       return { success: output.includes("Success"), output, threw: false };
     } catch (error) {
-      if (signal?.aborted) {
+      if (this.isAndroidCancellation(error, signal)) {
         throw error;
       }
+      logger.warn(`[InstallApp] ADB install failed: ${errorMessage(error)}`, error);
       return { success: false, output: this.extractErrorText(error), threw: true, error };
     }
+  }
+
+  private isAndroidCancellation(error: unknown, signal?: AbortSignal): boolean {
+    return (
+      Boolean(signal?.aborted) ||
+      (error instanceof Error &&
+        (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE))
+    );
   }
 
   private isAndroidDowngradeError(output: string): boolean {
@@ -415,8 +753,12 @@ export class InstallApp {
         true,
         signal,
       );
-    } catch {
-      // Best-effort stop; proceed with uninstall regardless.
+    } catch (error) {
+      // Force-stop is best-effort; uninstall can still remove a package that is not running.
+      logger.debug(
+        `[InstallApp] Could not stop package before downgrade: ${errorMessage(error)}`,
+        error,
+      );
     }
     await this.adb.executeCommand(
       `uninstall ${packageName}`,

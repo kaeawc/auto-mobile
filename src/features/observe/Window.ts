@@ -10,7 +10,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { BootedDevice } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
+import { resolveAutoMobileBaseDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { Window as WindowInterface } from "./interfaces/Window";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -49,7 +49,7 @@ export class Window implements WindowInterface {
   private cachedActiveWindow: ActiveWindowInfo | null = null;
   private readonly device: BootedDevice;
   private readonly timer: Timer;
-  private cacheDir: string = getTempDir(TEMP_SUBDIRS.WINDOW);
+  private readonly cacheDir: string | null;
 
   /**
    * Create a Window instance
@@ -58,12 +58,23 @@ export class Window implements WindowInterface {
    * @param timer - Injected clock; used to derive one absolute deadline shared
    *   across the getActive sub-reads (kept as a seam so FakeTimer can drive the
    *   budget deterministically in tests).
+   * @param env - Environment controlling disk-cache opt-in under unit tests
+   * @param homeDir - Optional home-directory seam for isolated path tests
    */
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    env: NodeJS.ProcessEnv = process.env,
+    homeDir?: string,
   ) {
+    // Match the resolver's precedence and trimming: an empty primary override
+    // must not opt into the default directory via the secondary alias (#9474).
+    const dataDirOverride = (env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR)?.trim();
+    this.cacheDir =
+      env.NODE_ENV === "test" && !dataDirOverride
+        ? null
+        : path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.WINDOW);
     this.adb = adbFactory.create(device);
     this.device = device;
     this.timer = timer;
@@ -72,7 +83,10 @@ export class Window implements WindowInterface {
   /**
    * Get the cache file path based on device ID
    */
-  private getCacheFilePath(): string {
+  private getCacheFilePath(): string | null {
+    if (this.cacheDir === null) {
+      return null;
+    }
     const deviceHash = NodeCryptoService.generateCacheKey(this.device.deviceId);
     return path.join(this.cacheDir, deviceHash);
   }
@@ -86,8 +100,8 @@ export class Window implements WindowInterface {
    */
   private async writeCacheToDisk(activeWindow: ActiveWindowInfo): Promise<void> {
     const filePath = this.getCacheFilePath();
-    if (!filePath) {
-      logger.info("[WINDOW] No device ID, skipping disk cache write");
+    if (!filePath || this.cacheDir === null) {
+      logger.info("[WINDOW] Disk cache disabled, skipping disk cache write");
       return;
     }
 
@@ -109,7 +123,7 @@ export class Window implements WindowInterface {
   private async readCacheFromDisk(): Promise<ActiveWindowInfo | null> {
     const filePath = this.getCacheFilePath();
     if (!filePath) {
-      logger.info("[WINDOW] No device ID, skipping disk cache read");
+      logger.info("[WINDOW] Disk cache disabled, skipping disk cache read");
       return null;
     }
 

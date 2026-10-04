@@ -1,9 +1,9 @@
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
-import { logger } from "../../../src/utils/logger";
 import { DefaultAndroidBuildToolsLocator } from "../../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { FakeSystemDetection } from "../../fakes/FakeSystemDetection";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { join } from "path";
+import { logger } from "../../../src/utils/logger";
 
 describe("DefaultAndroidBuildToolsLocator", () => {
   let systemDetection: FakeSystemDetection;
@@ -24,26 +24,21 @@ describe("DefaultAndroidBuildToolsLocator", () => {
     expect(tool).toEqual({ tool: "aapt2", path: "/usr/local/bin/aapt2" });
   });
 
-  test("warns on unreadable build-tools and still returns null", async () => {
-    const buildToolsDir = join("/sdk", "build-tools");
+  test("warns on an unreadable build-tools directory and keeps searching", async () => {
     systemDetection.setPlatform("darwin");
     systemDetection.setEnvVar("ANDROID_HOME", "/sdk");
     systemDetection.addExistingFile("/sdk");
-    fileSystem.setDirectory(buildToolsDir);
-    const failure = new Error("permission denied");
-    fileSystem.readdir = async () => {
-      throw failure;
-    };
+    fileSystem.setDirectory("/sdk/build-tools");
+    const read = spyOn(fileSystem, "readdir").mockRejectedValue(new Error("permission denied"));
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      expect(
-        await new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection).findAaptTool(),
-      ).toBeNull();
+      const locator = new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection);
+      expect(await locator.findAaptTool()).toBeNull();
       expect(warn).toHaveBeenCalledWith(
-        `Failed to read Android build-tools at ${buildToolsDir}: permission denied`,
-        failure,
+        "[AndroidBuildToolsLocator] Failed to read build-tools directory: permission denied",
       );
     } finally {
+      read.mockRestore();
       warn.mockRestore();
     }
   });

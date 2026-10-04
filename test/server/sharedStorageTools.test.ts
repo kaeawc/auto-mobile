@@ -2,8 +2,14 @@ import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerSharedStorageTools } from "../../src/server/sharedStorageTools";
-import type { StageSharedStorageResult } from "../../src/server/sharedStorageService";
-import type { BootedDevice } from "../../src/models";
+import {
+  createSharedStorageServiceForTesting,
+  type StageSharedStorageRequest,
+  type StageSharedStorageResult,
+} from "../../src/server/sharedStorageService";
+import { ActionableError, type BootedDevice } from "../../src/models";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -49,6 +55,7 @@ describe("shared-storage tools", () => {
 
   test("advertises defaulted fields as optional", () => {
     registerSharedStorageTools();
+
     for (const name of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
       const tool = ToolRegistry.getToolDefinitions().find((candidate) => candidate.name === name)!;
       const validate = new Ajv2020({ strict: false }).compile(tool.inputSchema);
@@ -63,13 +70,61 @@ describe("shared-storage tools", () => {
   });
 
   for (const name of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
+    test(`${name} preserves the shared rollback error for a three-file indexing failure`, async () => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const service = createSharedStorageServiceForTesting({
+        adbFactory: { create: () => adb },
+        timer,
+        fileSystem: {
+          stat: async () => ({ size: 7, isFile: () => true }),
+          mkdtemp: async () => "/fake/unused",
+          writeFileBuffer: async () => {},
+          rm: async () => {},
+        },
+        createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "primary" }) }),
+      });
+      const pendingCleanups: Promise<unknown>[] = [];
+      registerSharedStorageTools({
+        sharedStorage: () => service,
+        registerPendingDeviceCleanup: (_deviceId, cleanup) => {
+          pendingCleanups.push(cleanup);
+        },
+      });
+      const error = await ToolRegistry.getTool(name)!.deviceAwareHandler!(androidDevice, {
+        namespace: "fixtures",
+        files: ["a.txt", "b.png", "c.txt"].map((destinationPath) => ({
+          contentText: "fixture",
+          destinationPath,
+        })),
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toBe(
+        "Android shared-storage batch staging failed for b.png: Android media indexing did not complete for /storage/emulated/0/Download/fixtures/b.png within 5 seconds. Rolled back: b.png, a.txt. Rollback failures: none.",
+      );
+      expect(adb.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(2);
+      expect(adb.getExecutedCommands()).toContain(
+        "shell rm -f '/storage/emulated/0/Download/fixtures/b.png' '/storage/emulated/0/Download/fixtures/a.txt'",
+      );
+      expect(pendingCleanups).toHaveLength(1);
+      await expect(pendingCleanups[0]).rejects.toBe(error);
+    });
+  }
+
+  for (const name of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
     test(`${name} registers device cleanup before staging settles`, async () => {
       const staged = Promise.withResolvers<StageSharedStorageResult>();
       const registrations: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+      let stageRequest: StageSharedStorageRequest | undefined;
       let stagePromise: Promise<StageSharedStorageResult> | undefined;
       registerSharedStorageTools({
         sharedStorage: () => ({
-          stage: () => {
+          stage: (request) => {
+            stageRequest = request;
             stagePromise = staged.promise;
             return staged.promise;
           },
@@ -84,6 +139,7 @@ describe("shared-storage tools", () => {
         files: [{ contentText: "fixture", destinationPath: "fixture.txt" }],
       });
       try {
+        expect(stageRequest?.rollbackOnFailure).toBe(true);
         expect(stagePromise).toBe(staged.promise);
         expect(registrations).toEqual([
           { deviceId: androidDevice.deviceId, cleanup: staged.promise },

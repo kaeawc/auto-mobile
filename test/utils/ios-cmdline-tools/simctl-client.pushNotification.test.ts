@@ -1,11 +1,12 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import { logger } from "../../../src/utils/logger";
 import {
   SimCtlClient,
   type SimCtlFileSystem,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
+import { logger } from "../../../src/utils/logger";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 // In-memory fake for SimCtlFileSystem so these tests never touch the real
 // host tmp dir (repo fake-injection rule). Tracks calls so a test could
@@ -50,71 +51,6 @@ describe("SimCtlClient pushNotification", () => {
     platform: "ios",
     source: "local",
   };
-
-  test("warns on payload-write and cleanup failures while retaining the write failure", async () => {
-    const fileSystem = createFakeSimCtlFileSystem();
-    const failure = new Error("payload write failed");
-    const cleanupFailure = new Error("cleanup denied");
-    fileSystem.writeFile = async () => {
-      throw failure;
-    };
-    fileSystem.rm = async () => {
-      throw cleanupFailure;
-    };
-    const simctl = new SimCtlClient(
-      device,
-      async () => createExecResult("", ""),
-      undefined,
-      undefined,
-      undefined,
-      fileSystem,
-    );
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      expect(await simctl.pushNotification(device.deviceId, "com.example.app", "{}")).toEqual({
-        success: false,
-        error: "payload write failed",
-      });
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to push notification"),
-        failure,
-      );
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to remove push notification directory"),
-        cleanupFailure,
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  test("warns on cleanup failure without changing successful delivery", async () => {
-    const fileSystem = createFakeSimCtlFileSystem();
-    const failure = new Error("cleanup denied");
-    fileSystem.rm = async () => {
-      throw failure;
-    };
-    const simctl = new SimCtlClient(
-      device,
-      async () => createExecResult("simctl version 1.0.0", ""),
-      undefined,
-      undefined,
-      undefined,
-      fileSystem,
-    );
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      expect(await simctl.pushNotification(device.deviceId, "com.example.app", "{}")).toEqual({
-        success: true,
-      });
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to remove push notification directory"),
-        failure,
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
 
   // Issue #6517: `simctl push` can exit 0 (delivered) while still writing
   // advisory/diagnostic text to stderr. Success must be driven by the exit
@@ -178,16 +114,57 @@ describe("SimCtlClient pushNotification", () => {
     };
 
     const fileSystem = createFakeSimCtlFileSystem();
-    const simctl = new SimCtlClient(device, execAsync, undefined, undefined, undefined, fileSystem);
-    const result = await simctl.pushNotification(
-      "ios-device-push",
-      "com.example.app",
-      JSON.stringify({ aps: { alert: "hi" } }),
+    const simctl = new SimCtlClient(
+      device,
+      execAsync,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      fileSystem,
     );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await simctl.pushNotification(
+        "ios-device-push",
+        "com.example.app",
+        JSON.stringify({ aps: { alert: "hi" } }),
+      );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Invalid device state");
-    // Confirms the write went through the fake, not the real host tmp dir.
-    expect(fileSystem.writes.size).toBe(0);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Invalid device state");
+      expect(warn).toHaveBeenCalledWith(
+        `[iOS] Failed to push simulator notification: ${result.error}`,
+      );
+      // Confirms the write went through the fake, not the real host tmp dir.
+      expect(fileSystem.writes.size).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("warns on temp-file cleanup failure and preserves successful delivery", async () => {
+    const fileSystem = createFakeSimCtlFileSystem();
+    fileSystem.rm = async () => {
+      throw new Error("permission denied");
+    };
+    const simctl = new SimCtlClient(
+      device,
+      async () => createExecResult("", ""),
+      new FakeTimer(),
+      undefined,
+      undefined,
+      fileSystem,
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await simctl.pushNotification("ios-device-push", "com.example.app", "{}")).toEqual({
+        success: true,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "[iOS] Failed to clean up simulator notification file: permission denied",
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -131,6 +131,22 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
   };
 };
 
+test("warns on unreadable provisioning profiles and returns an empty list", async () => {
+  const { deps } = createFakeDependencies();
+  deps.readDir = async () => {
+    throw new Error("permission denied");
+  };
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(await new XcodeSigningManager(deps).listProvisioningProfiles()).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      "[XcodeSigning] Failed to read provisioning-profile directory: permission denied",
+    );
+  } finally {
+    warn.mockRestore();
+  }
+});
+
 // ADD-4 (#4177 item 5): profile-eligibility table. `resolveSigningForDevice`
 // reads the PREFERRED profile from the env var AUTOMOBILE_IOS_PROFILE_UUID (it
 // takes exactly one param, the device udid — there is no options arg). Fixed
@@ -404,8 +420,8 @@ describe("XcodeSigningManager", () => {
         expect(await new XcodeSigningManager(deps).listProvisioningProfiles()).toEqual([]);
         expect(code === "ENOENT" ? debug : warn).toHaveBeenCalledWith(
           expect.stringContaining("profile"),
-          failure,
         );
+        expect(code === "ENOENT" ? debug : warn).toHaveBeenCalledTimes(1);
         expect(code === "ENOENT" ? warn : debug).not.toHaveBeenCalled();
       } finally {
         debug.mockRestore();

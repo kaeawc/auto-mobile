@@ -143,9 +143,8 @@ describe("AvdManagerClient", () => {
   for (const operation of ["createAvd", "deleteAvd"] as const) {
     test(`${operation} propagates mid-run cancellation without logging a failure`, async () => {
       const errorLog = mock(() => {});
-      const warnLog = mock(() => {});
       const { client, child } = createClient({
-        logger: { info() {}, warn: warnLog, error: errorLog },
+        logger: { info() {}, warn() {}, error: errorLog },
       });
       const controller = new AbortController();
       const options = { signal: controller.signal };
@@ -162,7 +161,6 @@ describe("AvdManagerClient", () => {
       await expect(pending).rejects.not.toBe(controller.signal.reason);
       expect(child.kills).toEqual(["SIGTERM"]);
       expect(errorLog).not.toHaveBeenCalled();
-      expect(warnLog).not.toHaveBeenCalled();
     });
 
     test(`${operation} preserves a timeout that precedes request cancellation`, async () => {
@@ -183,10 +181,11 @@ describe("AvdManagerClient", () => {
       expect(child.kills).toEqual(["SIGTERM"]);
     });
 
-    test(`${operation} logs a non-abort spawn failure and returns a typed failure`, async () => {
-      const warnLog = mock(() => {});
+    test(`${operation} logs at warn level for a non-abort spawn failure and returns a typed failure`, async () => {
+      const warnLog = mock((message: string, error?: unknown) => {});
+      const errorLog = mock(() => {});
       const { client, child } = createClient({
-        logger: { info() {}, warn: warnLog, error() {} },
+        logger: { info() {}, warn: warnLog, error: errorLog },
       });
       const options = { signal: new AbortController().signal };
       const pending =
@@ -198,7 +197,13 @@ describe("AvdManagerClient", () => {
 
       const message = `Failed to ${operation === "createAvd" ? "create" : "delete"} AVD pixel: Failed to spawn avdmanager: spawn unavailable`;
       await expect(pending).resolves.toEqual({ success: false, message });
+      expect(warnLog).toHaveBeenCalledTimes(1);
       expect(warnLog).toHaveBeenCalledWith(message, expect.any(Error));
+      expect(warnLog.mock.calls[0][1]).toHaveProperty(
+        "message",
+        "Failed to spawn avdmanager: spawn unavailable",
+      );
+      expect(errorLog).not.toHaveBeenCalled();
       expect(child.kills).toEqual([]);
     });
   }

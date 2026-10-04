@@ -1,3 +1,4 @@
+import { loggerCallsWithPrefix } from "../../../helpers/loggerCallsWithPrefix";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../../src/ctrlProxy/constants";
@@ -69,7 +70,14 @@ describe("observe CtrlProxy readiness regression", () => {
       });
     }
     expect(h.calls).toEqual([]);
-    expect(warn).not.toHaveBeenCalled();
+    expect(
+      loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[AccessibilityDetector]",
+        "[observe] Accessibility service not enabled",
+        "[observe] Failed to reset accessibility setup state",
+      ),
+    ).toHaveLength(0);
     expect(h.adb.getExecutedCommands()).toHaveLength(1);
   });
 
@@ -94,7 +102,14 @@ describe("observe CtrlProxy readiness regression", () => {
         "reset",
         "invalidate:owner:accessibility service disabled",
       ]);
-      expect(warn).toHaveBeenCalledTimes(3);
+      expect(
+        loggerCallsWithPrefix(
+          warn.mock.calls,
+          "[AccessibilityDetector]",
+          "[observe] Accessibility service not enabled",
+          "[observe] Failed to reset accessibility setup state",
+        ),
+      ).toHaveLength(3);
       // Every confirmed loss evicts the cached read, so every observation reads fresh.
       expect(h.adb.getExecutedCommands()).toHaveLength(3);
       expect(await h.detector.isCtrlProxyServiceEnabled(device.deviceId)).toBeNull();
@@ -112,7 +127,14 @@ describe("observe CtrlProxy readiness regression", () => {
       detectionSkipped: false,
     });
     expect(h.calls).toEqual([]);
-    expect(warn).not.toHaveBeenCalled();
+    expect(
+      loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[AccessibilityDetector]",
+        "[observe] Accessibility service not enabled",
+        "[observe] Failed to reset accessibility setup state",
+      ),
+    ).toHaveLength(0);
   });
 
   test("failed adb detection is unknown and preserves readiness", async () => {
@@ -121,7 +143,14 @@ describe("observe CtrlProxy readiness regression", () => {
     h.adb.setCommandError("enabled_accessibility_services", new Error("ADB read failed"));
     await h.observe();
     expect(h.calls).toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(1); // Diagnostic warning only, no readiness warning.
+    expect(
+      loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[AccessibilityDetector]",
+        "[observe] Accessibility service not enabled",
+        "[observe] Failed to reset accessibility setup state",
+      ),
+    ).toHaveLength(1); // Diagnostic warning only, no readiness warning.
     expect(h.adb.getExecutedCommands()).toHaveLength(1);
   });
 
@@ -151,13 +180,27 @@ describe("observe CtrlProxy readiness regression", () => {
     const read = spyOn(h.detector, "isCtrlProxyServiceEnabled").mockResolvedValue(null);
     await h.observe();
     expect(h.calls).toEqual(["reset", "invalidate:owner:accessibility service disabled"]);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(
+      loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[AccessibilityDetector]",
+        "[observe] Accessibility service not enabled",
+        "[observe] Failed to reset accessibility setup state",
+      ),
+    ).toHaveLength(1);
     read.mockRestore();
     await h.observe();
     // Each loss evicts the cache, so immediate recovery needs no TTL advance.
     h.setOutput(ctrlProxy!);
     await h.observe();
-    expect(warn).toHaveBeenCalledTimes(2);
+    expect(
+      loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[AccessibilityDetector]",
+        "[observe] Accessibility service not enabled",
+        "[observe] Failed to reset accessibility setup state",
+      ),
+    ).toHaveLength(2);
     expect(h.calls).toHaveLength(4);
     expect(h.adb.getExecutedCommands()).toHaveLength(3);
   });

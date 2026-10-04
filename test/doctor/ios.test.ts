@@ -3,7 +3,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyC
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeWebSocket, createInstantFailureWebSocketFactory } from "../fakes/FakeWebSocket";
 import { ObserveElementsBuilder } from "../../src/features/observe/ObserveElementsBuilder";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IosDoctorDependencies } from "../../src/doctor/checks/ios";
@@ -39,6 +39,7 @@ import type { ExecResult } from "../../src/models";
 import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { createDoctorDeadline, DoctorDeadlineError } from "../../src/doctor/deadline";
+import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
@@ -105,10 +106,12 @@ const baseDependencies: IosDoctorDependencies = {
     waitForSimulatorReady: async () => ({ name: "sim", platform: "ios", deviceId: "123" }),
     listSimulatorImages: async () => [],
     getBootedSimulators: async () => [],
+    getBootedSimulatorsChecked: async () => [],
     getDeviceInfo: async () => null,
     bootSimulator: async () => ({ name: "sim", platform: "ios", deviceId: "123" }),
     getDeviceTypes: async () => [],
     getRuntimes: async () => [],
+    getRuntimesChecked: async () => [],
     createSimulator: async () => "123",
     deleteSimulator: async () => {},
     listApps: async () => [],
@@ -631,7 +634,7 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          getRuntimes: async () => [],
+          getRuntimesChecked: async () => [],
         }),
       });
 
@@ -639,27 +642,35 @@ describe("iOS doctor checks", () => {
       expect(result.message).toContain("No iOS simulator runtimes");
     });
 
-    test("passes when iOS runtimes are available", async () => {
+    test.each([true, false])("filters iOS runtimes by availability (%s)", async (isAvailable) => {
       const result = await checkSimulatorRuntimes({
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          getRuntimes: async () => [
+          getRuntimesChecked: async () => [
             {
               bundlePath: "/path",
               buildversion: "21A328",
               runtimeRoot: "/path",
               identifier: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
               version: "17.0",
-              isAvailable: true,
+              isAvailable,
               name: "iOS 17.0",
             },
           ],
         }),
       });
 
-      expect(result.status).toBe("pass");
-      expect(result.message).toContain("iOS 17.0");
+      expect(result.status).toBe(isAvailable ? "pass" : "fail");
+      if (isAvailable) {
+        expect(result.message).toContain("iOS 17.0");
+        expect(result.value).toBe(1);
+      } else {
+        expect(result.message).toBe("No iOS simulator runtimes available");
+        expect(result.recommendation).toBe(
+          "Install an iOS Simulator runtime in Xcode Settings > Platforms.",
+        );
+      }
     });
   });
 
@@ -819,7 +830,7 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          getBootedSimulators: async () => [
+          getBootedSimulatorsChecked: async () => [
             { name: "iPhone 15", platform: "ios", deviceId: "ABC-123" },
             { name: "iPad Air", platform: "ios", deviceId: "DEF-456" },
           ],
@@ -838,7 +849,7 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          getBootedSimulators: async () => [],
+          getBootedSimulatorsChecked: async () => [],
         }),
       });
 
@@ -934,7 +945,7 @@ describe("iOS doctor checks", () => {
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
           isAvailable: async () => true,
-          getRuntimes: async () => {
+          getRuntimesChecked: async () => {
             throw new Error("runtimes exploded");
           },
         }),
@@ -1002,6 +1013,125 @@ describe("iOS doctor checks", () => {
       expect(result.status).toBe("skip");
       expect(logger.at("warn").length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe("iOS doctor checked simctl listings", () => {
+  beforeEach(() => SimCtlClient.invalidateDeviceListCache());
+  afterEach(() => SimCtlClient.invalidateDeviceListCache());
+
+  test("reports a failed device listing instead of no booted simulators", async () => {
+    const message = "Unable to locate device set: CoreSimulatorService connection became invalid";
+    const logger = new FakeLogger();
+    const simctl = new SimCtlClient(
+      null,
+      async (file, args) => {
+        const command = `${file} ${args.join(" ")}`;
+        if (command === "xcrun --find simctl") {
+          return createExecResult("/usr/bin/simctl");
+        }
+        expect(command).toBe("xcrun simctl list devices --json");
+        throw new Error(message);
+      },
+      new FakeTimer(),
+      "darwin",
+    );
+
+    const result = await checkBootedSimulators({
+      ...baseDependencies,
+      logger,
+      createSimctlClient: () => simctl,
+    });
+    expect(result.status).toBe("skip");
+    expect(result.message).toStartWith("Could not check simulators:");
+    expect(result.message).toContain(message);
+    expect(logger.at("warn").length).toBeGreaterThan(0);
+  });
+
+  test.each([
+    ["non-JSON", "xcrun: error: unable to find utility"],
+    ["missing runtimes array", "{}"],
+  ])("reports malformed runtime listing (%s) instead of no runtimes", async (_kind, stdout) => {
+    const logger = new FakeLogger();
+    const simctl = new SimCtlClient(
+      null,
+      async (file, args) => {
+        const command = `${file} ${args.join(" ")}`;
+        if (command === "xcrun --find simctl") {
+          return createExecResult("/usr/bin/simctl");
+        }
+        expect(command).toBe("xcrun simctl list runtimes --json");
+        return createExecResult(stdout);
+      },
+      new FakeTimer(),
+      "darwin",
+    );
+
+    const result = await checkSimulatorRuntimes({
+      ...baseDependencies,
+      logger,
+      createSimctlClient: () => simctl,
+    });
+    expect(result.status).toBe("fail");
+    expect(result.message).toStartWith("Failed to list runtimes:");
+    expect(result.message).not.toContain("No iOS simulator runtimes available");
+    expect(logger.at("warn").length).toBeGreaterThan(0);
+  });
+
+  test.each([
+    ["booted simulators", checkBootedSimulators, "devices"],
+    ["runtimes", checkSimulatorRuntimes, "runtimes"],
+  ] as const)("propagates the doctor deadline during %s listing", async (_name, check, listing) => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const logger = new FakeLogger();
+    let listingStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      listingStarted = resolve;
+    });
+    let rejectListing: (error: unknown) => void = () => {};
+    const pendingListing = new Promise<ExecResult>((_resolve, reject) => {
+      rejectListing = reject;
+    });
+    const simctl = new SimCtlClient(
+      null,
+      async (file, args, _maxBuffer, signal) => {
+        const command = `${file} ${args.join(" ")}`;
+        if (command === "xcrun --find simctl") {
+          return createExecResult("/usr/bin/simctl");
+        }
+        expect(command).toBe(`xcrun simctl list ${listing} --json`);
+        expect(signal).toBeDefined();
+        listingStarted();
+        return await pendingListing;
+      },
+      timer,
+      "darwin",
+    );
+
+    try {
+      const checking = check(
+        {
+          ...baseDependencies,
+          logger,
+          createSimctlClient: () => simctl,
+        },
+        deadline.probe,
+      );
+      const rejected = checking.then(
+        () => {
+          throw new Error("Expected the doctor deadline to propagate");
+        },
+        (error: unknown) => error,
+      );
+      await started;
+      timer.advanceTime(50);
+      rejectListing(deadline.probe.signal?.reason);
+      expect(await rejected).toBeInstanceOf(DoctorDeadlineError);
+      expect(logger.at("warn")).toEqual([]);
+    } finally {
+      deadline.dispose();
+    }
   });
 });
 

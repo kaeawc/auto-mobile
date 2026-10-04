@@ -323,6 +323,16 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
         ? { path, size: stat.size, mtimeMs: stat.mtimeMs }
         : undefined;
     } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        // A file that vanished after readdir consumes no retention capacity.
+        logger.debug(`Screenshot vanished before cleanup stat: ${path}`, error);
+        return undefined;
+      }
       state.inventoryFailed = true;
       logger.warn(`Failed to stat screenshot during cleanup: ${path}`, error);
       return undefined;

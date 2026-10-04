@@ -29,7 +29,14 @@ type ClipboardCtrlProxy = {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; text?: string; totalTimeMs: number }>;
+    onDispatch?: () => void,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    text?: string;
+    totalTimeMs: number;
+    acknowledged?: boolean;
+  }>;
 };
 type ClipboardCtrlProxyFactory = (
   device: BootedDevice,
@@ -263,9 +270,19 @@ export class Clipboard {
     throwIfAborted(signal);
     const a11yClient = this.getAndroidCtrlProxy();
 
+    let dispatched = false;
+    const indeterminateResult = (reason: string | undefined): ClipboardResult => ({
+      success: false,
+      action,
+      method: "a11y",
+      error: `Paste outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The paste may have been applied. Do not retry automatically. Observe before retrying.`,
+    });
     try {
       const a11yResult = await awaitWhileRequestIsLive(
-        a11yClient.requestClipboard(action, text, undefined, undefined, signal),
+        a11yClient.requestClipboard(action, text, undefined, undefined, signal, () => {
+          // Only paste can duplicate an input action when replayed.
+          dispatched = action === "paste";
+        }),
         signal,
       );
 
@@ -282,6 +299,9 @@ export class Clipboard {
       }
 
       logger.warn(`[Clipboard] Accessibility service ${action} failed: ${a11yResult.error}`);
+      if (dispatched && !a11yResult.acknowledged) {
+        return indeterminateResult(a11yResult.error);
+      }
       if (action === "get") {
         // On Android 10+, a background service cannot directly read a target app's clipboard.
         // Working read strategies require foreground target-app code, the default IME role, or
@@ -297,6 +317,9 @@ export class Clipboard {
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`[Clipboard] Accessibility service error: ${error}`, error);
+      if (dispatched) {
+        return indeterminateResult(errorMessage(error));
+      }
       if (action === "get") {
         return {
           success: false,

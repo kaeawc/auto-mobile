@@ -509,12 +509,20 @@ class SQLiteDatabaseDriverTest {
   private fun cachedHandle(driver: SQLiteDatabaseDriver, path: String): SQLiteDatabase {
     val cacheField = SQLiteDatabaseDriver::class.java.getDeclaredField("openDatabases")
     cacheField.isAccessible = true
-    val entry = (cacheField.get(driver) as Map<*, *>)[path]!!
+    val cache = cacheField.get(driver)
+    check(cache is Map<*, *>) {
+      "openDatabases must be a Map, got ${cache?.javaClass?.name ?: "null"}"
+    }
+    val entry = checkNotNull(cache[path]) { "No cached database for $path" }
     // Also supports the original bare-handle cache when running the pre-fix regression tests.
     if (entry is SQLiteDatabase) return entry
     val databaseField = entry.javaClass.getDeclaredField("database")
     databaseField.isAccessible = true
-    return databaseField.get(entry) as SQLiteDatabase
+    val database = databaseField.get(entry)
+    check(database is SQLiteDatabase) {
+      "Cached database for $path must be a SQLiteDatabase, got ${database?.javaClass?.name ?: "null"}"
+    }
+    return database
   }
 
   private fun createNotesDatabase(name: String): File {
@@ -536,11 +544,19 @@ class SQLiteDatabaseDriverTest {
       SQLiteDatabaseDriver::class.java.getDeclaredMethod("classifySQL", String::class.java).apply {
         isAccessible = true
       }
-    val result = classify.invoke(driver, query) as Pair<*, *>
-    return Classification(
-      returnsRows = result.first as Boolean,
-      readOnly = result.second as Boolean,
-    )
+    val result = classify.invoke(driver, query)
+    check(result is Pair<*, *>) {
+      "classifySQL must return a Pair, got ${result?.javaClass?.name ?: "null"}"
+    }
+    val returnsRows = result.first
+    val readOnly = result.second
+    check(returnsRows is Boolean) {
+      "classifySQL returnsRows must be a Boolean, got ${returnsRows?.javaClass?.name ?: "null"}"
+    }
+    check(readOnly is Boolean) {
+      "classifySQL readOnly must be a Boolean, got ${readOnly?.javaClass?.name ?: "null"}"
+    }
+    return Classification(returnsRows = returnsRows, readOnly = readOnly)
   }
 
   private data class Classification(val returnsRows: Boolean, val readOnly: Boolean)
@@ -550,31 +566,44 @@ class SQLiteDatabaseDriverTest {
 // Supply real host identities only in the replacement tests; production uses API-21 Os.stat.
 @Implements(className = "libcore.io.Linux", minSdk = 26, isInAndroidSdk = false)
 class DatabaseFileStatShadow : ShadowLinux() {
-  @Implementation
-  override fun stat(path: String?): StructStat {
-    // ShadowLinux.fstat delegates with a null path; retain its default behavior for that case.
-    if (path == null) return super.stat(null)
-    val attributes =
-      try {
-        Files.readAttributes(File(path).toPath(), "unix:dev,ino")
-      } catch (error: IOException) {
-        throw ErrnoException("stat", OsConstants.ENOENT, error)
+  companion object {
+    // Robolectric supports static implementations of instance methods. Avoid a receiver cast to
+    // this test shadow if a Linux instance already carries a base ShadowLinux in the sandbox.
+    @JvmStatic
+    @Implementation(methodName = "stat")
+    fun statWithFileIdentity(path: String?): StructStat {
+      // ShadowLinux.fstat delegates with a null path; retain its default behavior for that case.
+      if (path == null) return ShadowLinux().stat(null)
+      val attributes =
+        try {
+          Files.readAttributes(File(path).toPath(), "unix:dev,ino")
+        } catch (error: IOException) {
+          throw ErrnoException("stat", OsConstants.ENOENT, error)
+        }
+      val original = ShadowLinux().stat(path)
+      return StructStat(
+        numericAttribute(attributes, "dev", path),
+        numericAttribute(attributes, "ino", path),
+        original.st_mode,
+        original.st_nlink,
+        original.st_uid,
+        original.st_gid,
+        original.st_rdev,
+        original.st_size,
+        original.st_atime,
+        original.st_mtime,
+        original.st_ctime,
+        original.st_blksize,
+        original.st_blocks,
+      )
+    }
+
+    private fun numericAttribute(attributes: Map<String, *>, name: String, path: String): Long {
+      val value = attributes[name]
+      check(value is Number) {
+        "unix:$name for $path must be a Number, got ${value?.javaClass?.name ?: "null (missing or null attribute)"}"
       }
-    val original = super.stat(path)
-    return StructStat(
-      attributes.getValue("dev") as Long,
-      attributes.getValue("ino") as Long,
-      original.st_mode,
-      original.st_nlink,
-      original.st_uid,
-      original.st_gid,
-      original.st_rdev,
-      original.st_size,
-      original.st_atime,
-      original.st_mtime,
-      original.st_ctime,
-      original.st_blksize,
-      original.st_blocks,
-    )
+      return value.toLong()
+    }
   }
 }

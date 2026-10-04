@@ -18,7 +18,94 @@ import {
   KNOWN_REQUEST_TYPES,
   ANDROID_CAPABILITY_GATED_COMMANDS,
   ANDROID_CAPABILITY_REQUEST_TYPES,
+  type CtrlProxyRequest,
+  normalizeCtrlProxyMilliseconds,
 } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+
+describe("Android millisecond serialization", () => {
+  const gestures = (value: number): CtrlProxyRequest[] => [
+    { type: "request_tap_coordinates", requestId: "ms", x: 1.5, y: 2.5, duration: value },
+    { type: "request_swipe", requestId: "ms", x1: 1.5, y1: 2.5, x2: 3.5, y2: 4.5, duration: value },
+    {
+      type: "request_two_finger_swipe",
+      requestId: "ms",
+      x1: 1.5,
+      y1: 2.5,
+      x2: 3.5,
+      y2: 4.5,
+      duration: value,
+      offset: 80,
+    },
+    {
+      type: "request_drag",
+      requestId: "ms",
+      x1: 1.5,
+      y1: 2.5,
+      x2: 3.5,
+      y2: 4.5,
+      pressDurationMs: value,
+      dragDurationMs: value,
+      holdDurationMs: value,
+    },
+    {
+      type: "request_pinch",
+      requestId: "ms",
+      centerX: 1.5,
+      centerY: 2.5,
+      distanceStart: 3.5,
+      distanceEnd: 4.5,
+      rotationDegrees: 15.5,
+      duration: value,
+    },
+  ];
+  test.each([
+    [250.5, 251],
+    [250.49, 250],
+    [250, 250],
+    [0.1, 1],
+    [0, 0],
+  ] as const)("%s milliseconds serializes as %s across gesture types", (value, expected) => {
+    for (const request of gestures(value)) {
+      const normalized = { ...request };
+      for (const field of [
+        "duration",
+        "pressDurationMs",
+        "dragDurationMs",
+        "holdDurationMs",
+      ] as const) {
+        if (field in normalized) {
+          Object.assign(normalized, { [field]: expected });
+        }
+      }
+      expect(serializeCtrlProxyRequest(request)).toBe(JSON.stringify(normalized));
+    }
+  });
+  test("preserves absent fields, drops undefined on serialization and rounds legacy drag durations", () => {
+    const params = { x1: 1.5, holdTime: 250.5, duration: 0.1, holdDurationMs: undefined };
+    expect(JSON.stringify(normalizeCtrlProxyMilliseconds("request_drag", params))).toBe(
+      '{"x1":1.5,"holdTime":251,"duration":1}',
+    );
+    expect(normalizeCtrlProxyMilliseconds("request_drag", {})).toEqual({});
+    expect(params.holdTime).toBe(250.5);
+    expect(
+      normalizeCtrlProxyMilliseconds("request_set_text", { text: "250.5", duration: 250.5 }),
+    ).toEqual({ text: "250.5", duration: 250.5 });
+  });
+  test("rounds hierarchy intervals while preserving timestamps and explicit null", () => {
+    expect(serializeCtrlProxyRequest({ type: "set_hierarchy_interval", intervalMs: 250.5 })).toBe(
+      '{"type":"set_hierarchy_interval","intervalMs":251}',
+    );
+    expect(serializeCtrlProxyRequest({ type: "set_hierarchy_interval", intervalMs: null })).toBe(
+      '{"type":"set_hierarchy_interval","intervalMs":null}',
+    );
+    const timestamp: CtrlProxyRequest = {
+      type: "request_hierarchy_if_stale",
+      requestId: "ms",
+      sinceTimestamp: 250.5,
+    };
+    expect(serializeCtrlProxyRequest(timestamp)).toBe(JSON.stringify(timestamp));
+  });
+});
 
 test("Keystore discovery is an optional advertised Android capability", () => {
   expect(ANDROID_CAPABILITY_REQUEST_TYPES).toContain("discover_keystore");

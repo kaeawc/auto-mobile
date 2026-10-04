@@ -1,3 +1,4 @@
+import { inputDurationArgument } from "./touchscreenInput";
 import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
   resolveGestureCtrlProxyTimeoutMs,
@@ -107,7 +108,9 @@ export async function dispatchAndroidCoordinateTap(
   );
   await executeTouchscreenInput(
     adb,
-    durationMs >= LONG_PRESS_MIN_MS ? `swipe ${x} ${y} ${x} ${y} ${durationMs}` : `tap ${x} ${y}`,
+    durationMs >= LONG_PRESS_MIN_MS
+      ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`
+      : `tap ${x} ${y}`,
     undefined,
     signal,
     assertCurrent,
@@ -183,7 +186,9 @@ export async function androidDisplayTapDispatch(
     } else {
       await executeTouchscreenInput(
         adb,
-        options.action === "longPress" ? `swipe ${x} ${y} ${x} ${y} ${duration}` : `tap ${x} ${y}`,
+        options.action === "longPress"
+          ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
+          : `tap ${x} ${y}`,
         target.displayId,
         signal,
         target.assertCurrent,

@@ -60,6 +60,11 @@ export class SharedGestureDelegate {
     return {};
   }
 
+  /** Platform-owned wire normalization before the shared transport serializes the request. */
+  protected gestureParams(_type: string, params: Record<string, unknown>): Record<string, unknown> {
+    return params;
+  }
+
   /** iOS overrides this opt-in seam; Android keeps its existing wire. */
   protected tapDiagnosticParams(): TapDiagnosticParameters {
     return {};
@@ -82,14 +87,14 @@ export class SharedGestureDelegate {
       idPrefix: "tap",
       responseType: "tap_coordinates",
       messageType: "request_tap_coordinates",
-      params: {
+      params: this.gestureParams("request_tap_coordinates", {
         x: this.coord(x),
         y: this.coord(y),
         duration,
         frameContext,
         ...displayParams,
         ...this.tapDiagnosticParams(),
-      },
+      }),
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",
       timeoutMs,
@@ -140,7 +145,7 @@ export class SharedGestureDelegate {
       idPrefix: "swipe",
       responseType: "swipe",
       messageType: "request_swipe",
-      params: {
+      params: this.gestureParams("request_swipe", {
         x1: this.coord(x1),
         y1: this.coord(y1),
         x2: this.coord(x2),
@@ -149,7 +154,7 @@ export class SharedGestureDelegate {
         ...this.swipeContextParams(contextOptions),
         ...(this.config.includeSwipeTimeoutMs ? { timeoutMs } : {}),
         ...displayParams,
-      },
+      }),
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",
       timeoutMs,
@@ -185,7 +190,7 @@ export class SharedGestureDelegate {
       idPrefix: "drag",
       responseType: "drag",
       messageType: "request_drag",
-      params: {
+      params: this.gestureParams("request_drag", {
         x1: this.coord(x1),
         y1: this.coord(y1),
         x2: this.coord(x2),
@@ -195,7 +200,7 @@ export class SharedGestureDelegate {
         holdDurationMs,
         frameContext,
         ...displayParams,
-      },
+      }),
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",
       timeoutMs,
@@ -229,7 +234,7 @@ export class SharedGestureDelegate {
       idPrefix: "pinch",
       responseType: "pinch",
       messageType: "request_pinch",
-      params: {
+      params: this.gestureParams("request_pinch", {
         centerX: this.coord(centerX),
         centerY: this.coord(centerY),
         distanceStart: this.coord(distanceStart),
@@ -237,7 +242,7 @@ export class SharedGestureDelegate {
         rotationDegrees,
         duration,
         ...displayParams,
-      },
+      }),
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",
       timeoutMs,

@@ -54,6 +54,46 @@ async function flush(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+describe("Android gesture duration wire", () => {
+  it.each([
+    [250.5, 251],
+    [250, 250],
+    [0.1, 1],
+    [0, 0],
+  ] as const)(
+    "normalizes %s to %s through the actual shared send path",
+    async (duration, expected) => {
+      const { context, sent, requestManager } = createFakeContext();
+      const gestures = new CtrlProxyGestures(context);
+      const requests = [
+        () => gestures.requestTapCoordinates(10, 20, duration),
+        () => gestures.requestSwipe(10, 20, 30, 40, duration),
+        () => gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration),
+        () => gestures.requestDrag(10, 20, 30, 40, duration, duration, duration, 5000),
+        () => gestures.requestPinch(10, 20, 30, 40, 15.5, duration),
+      ];
+      for (const send of requests) {
+        const promise = send();
+        await flush();
+        const message = JSON.parse(sent[sent.length - 1]!);
+        const fields =
+          message.type === "request_drag"
+            ? ["pressDurationMs", "dragDurationMs", "holdDurationMs"]
+            : ["duration"];
+        requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
+        await promise;
+        for (const field of fields) {
+          expect(message[field]).toBe(expected);
+        }
+        if (message.type === "request_pinch") {
+          expect(message.rotationDegrees).toBe(15.5);
+        }
+        expect(message).not.toHaveProperty("timeoutMs");
+      }
+    },
+  );
+});
+
 describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
   it("resolves from a swipe_result frame before the timeout fires (success)", async () => {
     const { context, sent, timer, requestManager } = createFakeContext();

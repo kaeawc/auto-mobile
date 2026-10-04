@@ -1,3 +1,4 @@
+import { inputDurationArgument } from "./touchscreenInput";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { DragAndDropTarget } from "../../models/DragAndDropOptions";
 import type { DisplayFenceDependencies } from "./BaseVisualChange";
@@ -169,7 +170,7 @@ export class DragAndDrop extends BaseVisualChange {
       }
       await executeTouchscreenInput(
         this.adb,
-        `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
+        `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${inputDurationArgument(duration)}`,
         target.displayId,
         signal,
         target.assertCurrent,

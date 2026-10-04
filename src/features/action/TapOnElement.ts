@@ -1,3 +1,4 @@
+import { inputDurationArgument } from "./touchscreenInput";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { resolveVoiceOverActivateCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
@@ -4954,7 +4955,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
       await this.adb.executeCommand(
-        `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+        `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
         longPressTimeoutMs,
         undefined,
         undefined,
@@ -4968,7 +4969,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
       await this.adb.executeCommand(
-        `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+        `shell input swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
         longPressTimeoutMs,
         undefined,
         undefined,

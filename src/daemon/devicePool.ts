@@ -4779,8 +4779,15 @@ export class DevicePool {
    * A device that has been explicitly stopped must not become assignable in the
    * interval between its session release and pool removal.
    */
-  async retireDeviceForShutdown(expectedDevice: PooledDevice): Promise<boolean> {
+  async retireDeviceForShutdown(
+    expectedDevice: PooledDevice,
+    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
+  ): Promise<boolean> {
     return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return false;
+      }
+      await this.runtimeIdentity.cancelRetiredDeviceExecutions(expectedDevice, options);
       if (this.devices.get(expectedDevice.id) !== expectedDevice) {
         return false;
       }
@@ -4830,8 +4837,15 @@ export class DevicePool {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     beforeReplacementPublishes?: () => void,
+    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
   ): Promise<PooledDevice | undefined> {
     return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return undefined;
+      }
+      // A kill's same-serial successor must not inherit the old device's work.
+      // System UI recovery uses its separate session-preserving handoff.
+      await this.runtimeIdentity.cancelRetiredDeviceExecutions(expectedDevice, options);
       if (this.devices.get(expectedDevice.id) !== expectedDevice) {
         return undefined;
       }

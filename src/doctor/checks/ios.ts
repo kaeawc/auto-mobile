@@ -896,8 +896,10 @@ export async function checkSimulatorRuntimes(
   }
 
   try {
-    const runtimes = await simctl.getRuntimes(currentProbe.timeoutMs, currentProbe.signal);
-    const iosRuntimes = runtimes.filter((runtime) => runtime.name.startsWith("iOS"));
+    const runtimes = await simctl.getRuntimesChecked(currentProbe.timeoutMs, currentProbe.signal);
+    const iosRuntimes = runtimes
+      .filter((runtime) => runtime.isAvailable)
+      .filter((runtime) => runtime.name.startsWith("iOS"));
 
     if (iosRuntimes.length === 0) {
       return {
@@ -916,6 +918,7 @@ export async function checkSimulatorRuntimes(
       value: iosRuntimes.length,
     };
   } catch (error) {
+    remainingDoctorProbe(probe);
     dependencies.logger.warn(`Simulator runtimes check failed: ${errorMessage(error)}`, error);
     return {
       name,
@@ -1149,7 +1152,7 @@ export async function checkBootedSimulators(
       };
     }
 
-    const simulators = await simctl.getBootedSimulators(
+    const simulators = await simctl.getBootedSimulatorsChecked(
       currentProbe.timeoutMs,
       currentProbe.signal,
     );
@@ -1171,6 +1174,7 @@ export async function checkBootedSimulators(
       value: simulators.length,
     };
   } catch (error) {
+    remainingDoctorProbe(probe);
     dependencies.logger.warn(`Booted simulators check failed: ${errorMessage(error)}`, error);
     return {
       name: "Booted Simulators",

@@ -1,7 +1,6 @@
 src/utils/ContentHashProvider.ts -> src/features/observe/GetAppMetadata
 src/utils/KeepScreenAwakeManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
 src/utils/WorkProfileMonitor.ts -> src/db/installedAppsRepository
-src/utils/android-cmdline-tools/AvdConfigReader.ts -> src/features/device-control/virtualDeviceCapabilities
 src/utils/androidSystemUiAnr.ts -> src/features/utility/ElementParser
 src/utils/appearance/applyAppearanceOnConnect.ts -> src/server/appearanceManager
 src/utils/configuredDeviceInventory.ts -> src/server/deviceDescription

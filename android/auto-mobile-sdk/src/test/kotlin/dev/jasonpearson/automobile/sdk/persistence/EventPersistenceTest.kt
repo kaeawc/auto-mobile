@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.sdk.persistence
 
+import android.content.Context
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -16,8 +17,14 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.events.AckPackageInfoReader
+import dev.jasonpearson.automobile.sdk.events.BatchBroadcastSender
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
 import dev.jasonpearson.automobile.sdk.events.DefaultDropCounter
 import dev.jasonpearson.automobile.sdk.events.DropReason
+import dev.jasonpearson.automobile.sdk.events.SdkEventAckCapability
+import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -29,6 +36,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class EventPersistenceTest {
@@ -62,6 +70,106 @@ class EventPersistenceTest {
       arguments = mapOf("id" to "42"),
       metadata = mapOf("screen" to "home"),
     )
+
+  private class IdentityDeliveryFixture : BatchBroadcastSender, BatchDeliveryScheduler {
+    val ids = mutableListOf<String?>()
+    var timeout: Runnable? = null
+    var lateResult: ((Int) -> Unit)? = null
+    var accepted = false
+    val context: Context = RuntimeEnvironment.getApplication()
+
+    init {
+      SdkEventBroadcaster.reset()
+      SdkEventBroadcaster.batchIdProvider = { "stable-id" }
+      SdkEventBroadcaster.broadcastSender = this
+      SdkEventBroadcaster.deliveryScheduler = this
+      SdkEventBroadcaster.capabilityGate =
+        SdkEventAckCapability(AckPackageInfoReader { true }, { 0 })
+    }
+
+    override fun send(
+      context: Context,
+      batchJson: String,
+      batchId: String?,
+      ordered: Boolean,
+      onResult: (Int) -> Unit,
+    ) {
+      assertTrue(ordered)
+      ids.add(batchId)
+      if (accepted) onResult(1000) else lateResult = onResult
+    }
+
+    override fun execute(task: Runnable) = task.run()
+
+    override fun schedule(task: Runnable, delayMs: Long): () -> Unit {
+      assertEquals(SdkEventBroadcaster.ACK_TIMEOUT_MS, delayMs)
+      timeout = task
+      return { timeout = null }
+    }
+
+    fun replay(persistence: EventPersistence) {
+      EventBatchReplay().replay(persistence, { it.run() }) { events, id, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          events,
+          onUndelivered = { _, _ -> },
+          onFinished = complete,
+          splitBatches = false,
+          batchId = id,
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `timed out batch retains id through persistence reload replay and failed deletion`() {
+    val delivery = IdentityDeliveryFixture()
+    try {
+      val persistence = createPersistence()
+      SdkEventBroadcaster.broadcastBatch(
+        delivery.context,
+        listOf(makeLifecycleEvent("pending")),
+        onUndelivered = { events, id -> persistence.persist(events, id) },
+      )
+      delivery.timeout!!.run()
+      delivery.lateResult!!(1000)
+      assertEquals(listOf<String?>("stable-id"), delivery.ids)
+      val reloaded = FileEventPersistence(tempFolder.root, clock = { 1000L }, fileOps = { false })
+      assertEquals("stable-id", reloaded.loadPending().single().deliveryId)
+      delivery.accepted = true
+      repeat(2) { delivery.replay(reloaded) }
+      assertEquals(List<String?>(3) { "stable-id" }, delivery.ids)
+      assertEquals(1, reloaded.loadPending().size)
+    } finally {
+      SdkEventBroadcaster.reset()
+    }
+  }
+
+  @Test
+  fun `old array file loads and replays without an id`() {
+    val delivery = IdentityDeliveryFixture()
+    try {
+      val persistence = createPersistence()
+      writeLegacy("1000_old", listOf(makeLifecycleEvent("legacy")))
+      assertEquals(null, persistence.loadPending().single().deliveryId)
+      delivery.accepted = true
+      delivery.replay(persistence)
+      assertEquals(listOf<String?>(null), delivery.ids)
+      assertTrue(persistence.loadPending().isEmpty())
+    } finally {
+      SdkEventBroadcaster.reset()
+    }
+  }
+
+  @Test
+  fun `retry rename preserves persisted delivery id`() {
+    val persistence = createPersistence()
+    val storageId = persistence.persist(listOf(makeLifecycleEvent("retry")), "delivery-id")!!
+    assertTrue(persistence.recordReplayFailure(storageId))
+    val loaded = createPersistence().loadPending().single()
+    assertTrue(loaded.storageId.contains("_a1_"))
+    assertEquals("delivery-id", loaded.deliveryId)
+  }
 
   @Test
   fun `persist returns batch ID on success`() {
@@ -102,7 +210,7 @@ class EventPersistenceTest {
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
-    val restored = loaded[0].second[0] as SdkNavigationEvent
+    val restored = loaded[0].events[0] as SdkNavigationEvent
     assertEquals("settings", restored.destination)
     assertEquals(NavigationSourceType.COMPOSE_NAVIGATION, restored.source)
     assertEquals(99L, restored.timestamp)
@@ -127,9 +235,9 @@ class EventPersistenceTest {
 
     val loaded = persistence.loadPending()
     assertEquals(3, loaded.size)
-    assertEquals("first", (loaded[0].second[0] as SdkLifecycleEvent).kind)
-    assertEquals("second", (loaded[1].second[0] as SdkLifecycleEvent).kind)
-    assertEquals("third", (loaded[2].second[0] as SdkLifecycleEvent).kind)
+    assertEquals("first", (loaded[0].events[0] as SdkLifecycleEvent).kind)
+    assertEquals("second", (loaded[1].events[0] as SdkLifecycleEvent).kind)
+    assertEquals("third", (loaded[2].events[0] as SdkLifecycleEvent).kind)
   }
 
   @Test
@@ -179,7 +287,7 @@ class EventPersistenceTest {
 
     val remaining = newPersistence.loadPending()
     assertEquals(1, remaining.size)
-    assertEquals("new", (remaining[0].second[0] as SdkLifecycleEvent).kind)
+    assertEquals("new", (remaining[0].events[0] as SdkLifecycleEvent).kind)
   }
 
   @Test
@@ -204,7 +312,7 @@ class EventPersistenceTest {
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
-    assertEquals("valid", (loaded[0].second[0] as SdkLifecycleEvent).kind)
+    assertEquals("valid", (loaded[0].events[0] as SdkLifecycleEvent).kind)
 
     // Corrupt file should have been deleted
     val remaining = tempFolder.root.listFiles { f -> f.name.contains("corrupt") }
@@ -231,7 +339,7 @@ class EventPersistenceTest {
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
     // Lifecycle + Nav + Lifecycle = 3 events (all deserializable types)
-    assertEquals(3, loaded[0].second.size)
+    assertEquals(3, loaded[0].events.size)
   }
 
   @Test
@@ -258,7 +366,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkLogEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkLogEvent
     assertEquals(300L, restored.timestamp)
     assertEquals(5, restored.level)
     assertEquals("MyTag", restored.tag)
@@ -279,7 +387,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkLifecycleEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkLifecycleEvent
     assertEquals("foreground", restored.kind)
     assertEquals(mapOf("activity" to "MainActivity"), restored.details)
   }
@@ -300,7 +408,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkNetworkRequestEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkNetworkRequestEvent
     assertEquals("https://api.example.com/data", restored.url)
     assertEquals("GET", restored.method)
     assertEquals(200, restored.statusCode)
@@ -331,7 +439,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkCrashEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkCrashEvent
     assertEquals("java.lang.NullPointerException", restored.exceptionClass)
     assertEquals("Attempt to invoke virtual method", restored.exceptionMessage)
     assertEquals("main", restored.threadName)
@@ -354,7 +462,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkBroadcastEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkBroadcastEvent
     assertEquals("android.intent.action.BATTERY_LOW", restored.action)
     assertEquals(listOf("android.intent.category.DEFAULT"), restored.categories)
     assertEquals(mapOf("level" to "Int"), restored.extraKeys)
@@ -374,7 +482,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkHandledExceptionEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkHandledExceptionEvent
     assertEquals("java.io.IOException", restored.exceptionClass)
     assertEquals("Connection reset", restored.exceptionMessage)
     assertEquals("Retry succeeded", restored.customMessage)
@@ -395,7 +503,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkWebSocketFrameEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkWebSocketFrameEvent
     assertEquals("ws-1", restored.connectionId)
     assertEquals(WebSocketFrameDirection.SENT, restored.direction)
     assertEquals(WebSocketFrameType.TEXT, restored.frameType)
@@ -417,7 +525,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkAnrEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkAnrEvent
     assertEquals(12345, restored.pid)
     assertEquals("FOREGROUND", restored.importance)
     assertEquals("main thread trace", restored.trace)
@@ -437,7 +545,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkNotificationActionEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkNotificationActionEvent
     assertEquals("notif-1", restored.notificationId)
     assertEquals("reply", restored.actionId)
     assertEquals("Reply", restored.actionLabel)
@@ -454,7 +562,7 @@ class EventPersistenceTest {
       )
     persistence.persist(listOf(original))
 
-    val restored = persistence.loadPending()[0].second[0] as SdkRecompositionSnapshotEvent
+    val restored = persistence.loadPending()[0].events[0] as SdkRecompositionSnapshotEvent
     assertEquals("""{"counts":[1,2,3]}""", restored.snapshotJson)
   }
 
@@ -509,7 +617,7 @@ class EventPersistenceTest {
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
-    assertEquals(12, loaded[0].second.size, "All event types should round-trip")
+    assertEquals(12, loaded[0].events.size, "All event types should round-trip")
   }
 
   @Test
@@ -521,7 +629,7 @@ class EventPersistenceTest {
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
-    assertEquals(0, loaded[0].second.size, "Unknown type should be skipped, not throw")
+    assertEquals(0, loaded[0].events.size, "Unknown type should be skipped, not throw")
   }
 
   @Test
@@ -555,7 +663,7 @@ class EventPersistenceTest {
     assertEquals(
       listOf("third", "fourth"),
       persistence.loadPending().map {
-        (it.second.single() as SdkLifecycleEvent).kind
+        (it.events.single() as SdkLifecycleEvent).kind
       },
     )
     assertEquals(2, tempFolder.root.listFiles()!!.size)
@@ -566,12 +674,14 @@ class EventPersistenceTest {
     val removed = mutableListOf<String>()
     var persistCalls = 0
 
-    override fun persist(events: List<SdkEvent>): String? {
+    override fun persist(events: List<SdkEvent>, deliveryId: String?): String? {
       persistCalls++
       return "duplicate"
     }
 
-    override fun loadPending(): List<Pair<String, List<SdkEvent>>> = pending
+    override fun loadPending(): List<PendingEventBatch> = pending.map { (id, events) ->
+      PendingEventBatch(id, events)
+    }
 
     override fun removeBatch(batchId: String) {
       removed.add(batchId)
@@ -587,7 +697,7 @@ class EventPersistenceTest {
     val persistence = ReplayPersistence(listOf("oldest" to first, "newest" to second))
     val submitted = mutableListOf<List<SdkEvent>>()
     val completions = mutableListOf<(Boolean) -> Unit>()
-    replayEventBatches(persistence, { it.run() }) { events, complete ->
+    replayEventBatches(persistence, { it.run() }) { events, _, complete ->
       submitted.add(events)
       completions.add(complete)
     }
@@ -603,7 +713,9 @@ class EventPersistenceTest {
   @Test
   fun `replay submission failure keeps original without repersisting`() {
     val persistence = ReplayPersistence(listOf("id" to listOf(makeLifecycleEvent("one"))))
-    replayEventBatches(persistence, { it.run() }) { _, _ -> throw IllegalStateException("failure") }
+    replayEventBatches(persistence, { it.run() }) { _, _, _ ->
+      throw IllegalStateException("failure")
+    }
     assertTrue(persistence.removed.isEmpty())
     assertEquals(0, persistence.persistCalls)
   }
@@ -612,9 +724,9 @@ class EventPersistenceTest {
   fun `replay contains load and remove persistence failures`() {
     val unreadable =
       object : EventPersistence {
-        override fun persist(events: List<SdkEvent>): String? = null
+        override fun persist(events: List<SdkEvent>, deliveryId: String?): String? = null
 
-        override fun loadPending(): List<Pair<String, List<SdkEvent>>> =
+        override fun loadPending(): List<PendingEventBatch> =
           throw IllegalStateException("read failure")
 
         override fun removeBatch(batchId: String) {
@@ -624,14 +736,14 @@ class EventPersistenceTest {
         override fun cleanup(maxAgeDays: Int) {}
       }
     var submitted = false
-    replayEventBatches(unreadable, { it.run() }) { _, _ -> submitted = true }
+    replayEventBatches(unreadable, { it.run() }) { _, _, _ -> submitted = true }
     assertTrue(!submitted)
     val unremovable =
       object : EventPersistence {
-        override fun persist(events: List<SdkEvent>): String? = null
+        override fun persist(events: List<SdkEvent>, deliveryId: String?): String? = null
 
-        override fun loadPending(): List<Pair<String, List<SdkEvent>>> =
-          listOf("id" to listOf<SdkEvent>(makeLifecycleEvent("one")))
+        override fun loadPending(): List<PendingEventBatch> =
+          listOf(PendingEventBatch("id", listOf<SdkEvent>(makeLifecycleEvent("one"))))
 
         override fun removeBatch(batchId: String) {
           throw IllegalStateException("remove failure")
@@ -640,7 +752,7 @@ class EventPersistenceTest {
         override fun cleanup(maxAgeDays: Int) {}
       }
     var complete: ((Boolean) -> Unit)? = null
-    replayEventBatches(unremovable, { it.run() }) { _, callback -> complete = callback }
+    replayEventBatches(unremovable, { it.run() }) { _, _, callback -> complete = callback }
     complete!!(true)
   }
 
@@ -695,7 +807,7 @@ class EventPersistenceTest {
     now = 1000L
     val newest = persistence.persist(listOf(makeLifecycleEvent("new")))
     assertNotNull(newest)
-    assertEquals(listOf(newest), persistence.loadPending().map { it.first })
+    assertEquals(listOf(newest), persistence.loadPending().map { it.storageId })
     assertEquals(3L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
   }
 
@@ -706,7 +818,7 @@ class EventPersistenceTest {
     val first = persistence.persist(listOf(makeLifecycleEvent("first")))
     now = 1000L
     val second = persistence.persist(listOf(makeLifecycleEvent("second")))
-    assertEquals(listOf(first, second), persistence.loadPending().map { it.first })
+    assertEquals(listOf(first, second), persistence.loadPending().map { it.storageId })
   }
 
   @Test
@@ -717,7 +829,7 @@ class EventPersistenceTest {
     val first = persistence.persist(listOf(makeLifecycleEvent("first")))
     uuid = "a_uuid-with-dash"
     val second = persistence.persist(listOf(makeLifecycleEvent("second")))
-    assertEquals(listOf(first, second), persistence.loadPending().map { it.first })
+    assertEquals(listOf(first, second), persistence.loadPending().map { it.storageId })
   }
 
   @Test
@@ -728,7 +840,7 @@ class EventPersistenceTest {
     val second = oldInstance.persist(listOf(makeLifecycleEvent("second")))
     val third = newInstance.persist(listOf(makeLifecycleEvent("third")))
     assertTrue(third!!.startsWith("s00000000000000000003_"))
-    assertEquals(listOf(first, second, third), newInstance.loadPending().map { it.first })
+    assertEquals(listOf(first, second, third), newInstance.loadPending().map { it.storageId })
   }
 
   @Test
@@ -756,12 +868,12 @@ class EventPersistenceTest {
     writeLegacy("9_b_uuid", listOf(makeLifecycleEvent("b")))
     assertEquals(
       listOf("9_b_uuid", "20_a_uuid", "20_z_uuid", newest),
-      persistence.loadPending().map { it.first },
+      persistence.loadPending().map { it.storageId },
     )
     persistence.removeBatch("20_a_uuid")
     assertEquals(
       listOf("9_b_uuid", "20_z_uuid", newest),
-      persistence.loadPending().map { it.first },
+      persistence.loadPending().map { it.storageId },
     )
   }
 
@@ -776,7 +888,7 @@ class EventPersistenceTest {
     val recent = persistence.persist(listOf(makeLifecycleEvent("recent")))
     persistence.cleanup()
     persistence.cleanup()
-    assertEquals(listOf(recent), persistence.loadPending().map { it.first })
+    assertEquals(listOf(recent), persistence.loadPending().map { it.storageId })
     assertEquals(5L, counter.snapshot()[DropReason.DELIVERY_FAILED])
   }
 
@@ -799,7 +911,7 @@ class EventPersistenceTest {
     val persistence =
       FileEventPersistence(tempFolder.root, maxPendingBatches = 1, dropCounter = counter)
     val retained = persistence.persist(listOf(makeLifecycleEvent("new")))
-    assertEquals(listOf(retained), persistence.loadPending().map { it.first })
+    assertEquals(listOf(retained), persistence.loadPending().map { it.storageId })
     assertEquals(3L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
   }
 
@@ -818,20 +930,20 @@ class EventPersistenceTest {
     val second = persistence.persist(listOf(makeLifecycleEvent("second")))!!
     assertTrue(persistence.recordReplayFailure(first))
     val reloaded = instance()
-    val failedOnce = reloaded.loadPending().first().first
+    val failedOnce = reloaded.loadPending().first().storageId
     assertTrue(failedOnce.contains("_a1_"))
     assertEquals(
       listOf("first", "second"),
       reloaded.loadPending().map {
-        (it.second.first() as SdkLifecycleEvent).kind
+        (it.events.first() as SdkLifecycleEvent).kind
       },
     )
     assertTrue(reloaded.recordReplayFailure(failedOnce))
     val thirdInstance = instance()
-    val failedTwice = thirdInstance.loadPending().first().first
+    val failedTwice = thirdInstance.loadPending().first().storageId
     assertTrue(failedTwice.contains("_a2_"))
     assertFalse(thirdInstance.recordReplayFailure(failedTwice))
-    assertEquals(listOf(second), thirdInstance.loadPending().map { it.first })
+    assertEquals(listOf(second), thirdInstance.loadPending().map { it.storageId })
     assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
     assertFalse(thirdInstance.recordReplayFailure(failedTwice))
     assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
@@ -845,7 +957,7 @@ class EventPersistenceTest {
     instance().persist(List(3) { makeLifecycleEvent("failed") })
     repeat(3) { launch ->
       val persistence = instance()
-      replayEventBatches(persistence, { it.run() }) { _, complete -> complete(false) }
+      replayEventBatches(persistence, { it.run() }) { _, _, complete -> complete(false) }
       assertEquals(if (launch == 2) 0 else 1, persistence.loadPending().size)
     }
     assertEquals(3L, counter.snapshot()[DropReason.DELIVERY_FAILED])
@@ -871,12 +983,12 @@ class EventPersistenceTest {
     val loaded = reloaded.loadPending()
     assertEquals(
       listOf("a", "z", "new"),
-      loaded.map { (it.second.first() as SdkLifecycleEvent).kind },
+      loaded.map { (it.events.first() as SdkLifecycleEvent).kind },
     )
-    assertFalse(reloaded.recordReplayFailure(loaded[1].first))
+    assertFalse(reloaded.recordReplayFailure(loaded[1].storageId))
     assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
-    reloaded.removeBatch(loaded[0].first)
-    assertEquals(listOf(newest), reloaded.loadPending().map { it.first })
+    reloaded.removeBatch(loaded[0].storageId)
+    assertEquals(listOf(newest), reloaded.loadPending().map { it.storageId })
   }
 
   @Test
@@ -914,7 +1026,7 @@ class EventPersistenceTest {
     refuseDelete = true
     val second = persistence.persist(listOf(makeLifecycleEvent("second")))!!
     val third = persistence.persist(listOf(makeLifecycleEvent("third")))!!
-    assertEquals(listOf(first, second, third), persistence.loadPending().map { it.first })
+    assertEquals(listOf(first, second, third), persistence.loadPending().map { it.storageId })
     assertEquals(listOf("events_$first.json", "events_$first.json"), attempted)
     assertTrue(counter.snapshot().isEmpty())
   }
@@ -934,7 +1046,7 @@ class EventPersistenceTest {
       )
     persistence.persist(List(3) { makeLifecycleEvent("old") })
     val newest = persistence.persist(listOf(makeLifecycleEvent("new")))
-    assertEquals(listOf(newest), persistence.loadPending().map { it.first })
+    assertEquals(listOf(newest), persistence.loadPending().map { it.storageId })
     assertTrue(counter.snapshot().isEmpty())
   }
 
@@ -971,7 +1083,7 @@ class EventPersistenceTest {
       )
     val id = persistence.persist(List(2) { makeLifecycleEvent("retained") })!!
     assertTrue(persistence.recordReplayFailure(id))
-    assertEquals(listOf(id), persistence.loadPending().map { it.first })
+    assertEquals(listOf(id), persistence.loadPending().map { it.storageId })
     assertTrue(counter.snapshot().isEmpty())
   }
 
@@ -986,6 +1098,77 @@ class EventPersistenceTest {
     val id = persistence.persist(listOf(makeLifecycleEvent("retained")))
     assertNotNull(id)
     assertTrue(id.startsWith("s00000000000000000002_"))
-    assertEquals(listOf(id), persistence.loadPending().map { it.first })
+    assertEquals(listOf(id), persistence.loadPending().map { it.storageId })
+  }
+
+  @Test
+  fun `byte cap evicts oldest and counts dropped events`() {
+    val events = List(2) { makeLifecycleEvent("same") }
+    val oneBatchBytes =
+      createPersistence()
+        .serializePendingBatch(events, null)
+        .toByteArray(Charsets.UTF_8)
+        .size
+        .toLong()
+    val counter = DefaultDropCounter()
+    val persistence =
+      FileEventPersistence(tempFolder.root, dropCounter = counter, maxPendingBytes = oneBatchBytes)
+    persistence.persist(events)
+    val newest = persistence.persist(events)
+    assertNotNull(newest)
+    assertEquals(listOf(newest), persistence.loadPending().map { it.storageId })
+    assertEquals(2L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
+    assertTrue(tempFolder.root.listFiles()!!.sumOf { it.length() } <= oneBatchBytes)
+  }
+
+  @Test
+  fun `oversized batch is refused for buffer to count without evicting retained batch`() {
+    val small = listOf(makeLifecycleEvent("small"))
+    val bytes =
+      createPersistence()
+        .serializePendingBatch(small, null)
+        .toByteArray(Charsets.UTF_8)
+        .size
+        .toLong()
+    val persistence = FileEventPersistence(tempFolder.root, maxPendingBytes = bytes)
+    val retained = persistence.persist(small)
+    assertNotNull(retained)
+    assertNull(persistence.persist(listOf(makeLifecycleEvent("x".repeat(1000)))))
+    assertEquals(listOf(retained), persistence.loadPending().map { it.storageId })
+  }
+
+  @Test
+  fun `unavailable replay across launches preserves file identity and attempt count`() {
+    val persistence = createPersistence()
+    val id = persistence.persist(listOf(makeLifecycleEvent("retained")))!!
+    repeat(4) {
+      EventBatchReplay().replay(persistence, { it.run() }) { _, _, complete ->
+        complete(BatchDeliveryOutcome.UNDELIVERED)
+      }
+    }
+    assertEquals(listOf(id), persistence.loadPending().map { it.storageId })
+  }
+
+  @Test
+  fun `failed invalid file removal does not starve later files or recount within pass`() {
+    val persistence =
+      FileEventPersistence(
+        directory = tempFolder.root,
+        clock = { 1000L },
+        fileOps = { false },
+      )
+    persistence.persist(listOf(makeLifecycleEvent("invalid")))
+    persistence.persist(listOf(makeLifecycleEvent("later")))
+    val delivered = mutableListOf<String>()
+    EventBatchReplay().replay(persistence, { it.run() }) { events, _, complete ->
+      val kind = (events.single() as SdkLifecycleEvent).kind
+      delivered.add(kind)
+      complete(
+        if (kind == "invalid") BatchDeliveryOutcome.INVALID_PAYLOAD
+        else BatchDeliveryOutcome.DELIVERED
+      )
+    }
+    assertEquals(listOf("invalid", "later"), delivered)
+    assertEquals(2, persistence.loadPending().size)
   }
 }

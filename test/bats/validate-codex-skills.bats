@@ -178,3 +178,31 @@ EOF
   [[ "$output" != *"unbound variable"* ]]
   [ "$status" -ne 0 ]
 }
+
+@test "duplicate predicates recognize names at the start of large inventories" {
+  cat > "$WORK_DIR/writer" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' demo
+awk 'BEGIN { for (i=0; i<20000; i++) print "skill-filler-" i }'
+STUB
+  chmod +x "$WORK_DIR/writer"
+  local condition
+  condition=$(grep 'if .*printf.*skill_names\[@\]' "$PROJECT_ROOT/$SCRIPT")
+  run bash -euo pipefail -c '
+    skill_names=()
+    while IFS= read -r name; do skill_names+=("$name"); done < <("$1")
+    skill_name=demo
+    eval "$2 echo duplicate; else exit 1; fi"
+  ' _ "$WORK_DIR/writer" "$condition"
+  [ "$status" -eq 0 ]
+  [ "$output" = duplicate ]
+  condition=$(grep 'if printf.*agents_names\[@\]' "$PROJECT_ROOT/$SCRIPT")
+  run bash -euo pipefail -c '
+    agents_names=()
+    while IFS= read -r name; do agents_names+=("$name"); done < <("$1")
+    listed_name=demo
+    eval "$2 echo duplicate; else exit 1; fi"
+  ' _ "$WORK_DIR/writer" "$condition"
+  [ "$status" -eq 0 ]
+  [ "$output" = duplicate ]
+}

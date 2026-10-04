@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
-import { createFileBackedDbHarness } from "./withFileBackedDb";
+import { bindFileBackedDbHarness } from "./withFileBackedDb";
 import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 
 /**
@@ -11,20 +11,12 @@ import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
  * ordering is inherited (issue #3046).
  */
 describe("navigation provenance migration — file-backed lifecycle", () => {
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   test(
     "full migration chain creates the provenance tables on a real file DB",
     async () => {
-      const lifecycle = await harness.openLifecycleTestDb("nav-provenance-");
+      const lifecycle = await getHarness().openLifecycleTestDb("nav-provenance-");
       try {
         const db = lifecycle.module.getDatabase() as Kysely<unknown>;
         const rows = await sql<{ name: string }>`

@@ -291,7 +291,8 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       failure = error;
     });
     await drainUntilQuiescent(timer);
-    expect(targets[0]?.requestDeadlineMs).toBe(3_500);
+    expect(targets[0]?.requestDeadlineMs).toBeUndefined();
+    expect(targets[0]?.onRecoveryWait).toBeFunction();
     expect(targets[0]?.restartRecoveryDeadlineMs).toBe(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     timer.advanceTime(2_499);
     await drainUntilQuiescent(timer);
@@ -350,9 +351,11 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       const second = call(secondDeadline).catch((error: unknown) => error);
       await drainUntilQuiescent(timer);
       expect(targets).toHaveLength(2);
-      expect(targets[1]?.requestDeadlineMs).toBe(secondDeadline);
+      expect(targets[1]?.requestDeadlineMs).toBeUndefined();
+      expect(targets[1]?.onRecoveryWait).toBeFunction();
       expect(targets[1]).not.toBe(targets[0]);
-      expect(targets[0]?.requestDeadlineMs).toBe(3_500);
+      expect(targets[0]?.requestDeadlineMs).toBeUndefined();
+      expect(targets[0]?.onRecoveryWait).toBeFunction();
       expect(await persistence.getSession?.(persisted.session_uuid)).not.toHaveProperty(
         "requestDeadlineMs",
       );

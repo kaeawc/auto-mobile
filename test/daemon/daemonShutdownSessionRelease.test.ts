@@ -1,7 +1,7 @@
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
-import type { SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import type { Session, SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
 import * as databaseModule from "../../src/db";
@@ -17,6 +17,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
+import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 
 interface DaemonSocketServerInternals {
   socketServer: {
@@ -24,6 +25,16 @@ interface DaemonSocketServerInternals {
     drainSessionReleaseNotifications(): Promise<void>;
     close(): Promise<void>;
   } | null;
+}
+
+interface DaemonReleaseInternals {
+  cancelAndReleaseSession(
+    sessionId: string,
+    reason: string,
+    allowExpired?: boolean,
+    expectedSession?: Session,
+    shouldCommit?: () => boolean,
+  ): Promise<boolean>;
 }
 
 /**
@@ -39,15 +50,442 @@ function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): voi
 }
 
 describe("Daemon shutdown session release (issue #5303)", () => {
+  let appearanceSync: ReturnType<typeof spyOn>;
   // Daemon shutdown drains the process-wide write barrier. These unit tests mock
   // closeDatabase(), so reset that global explicitly to retain test isolation.
-  beforeEach(() => resetDbWriteBarrier());
+  beforeEach(() => {
+    resetDbWriteBarrier();
+    appearanceSync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
+      undefined,
+    );
+  });
 
   afterEach(() => {
+    appearanceSync.mockRestore();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
     resetDbWriteBarrier();
+  });
+
+  test("retried release keeps the device busy and unclaimable during backoff", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const manager = daemon.getSessionManager();
+    const pool = daemon.getDevicePool();
+    // One allocation attempt proves another session cannot claim the busy device.
+    Object.assign(pool, { DEVICE_WAIT_TIMEOUT_MS: 1000 });
+    const device: BootedDevice = {
+      name: "Physical Android",
+      deviceId: "release-device",
+      platform: "android",
+    };
+    const originalPersist = repository.markReleased.bind(repository);
+    const persist = spyOn(repository, "markReleased")
+      .mockImplementationOnce(async () => {
+        throw new Error("first release persistence failed");
+      })
+      .mockImplementation(originalPersist);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const free = spyOn(pool, "releaseDevice");
+    let retry: Promise<void> | undefined;
+    try {
+      stubPoolDiscovery(pool, [device]);
+      await pool.initializeWithDevices([device]);
+      await pool.assignDeviceToSession("release-session", "android");
+      retry = (
+        pool as unknown as {
+          releaseDisconnectedRecoverySessionWithRetry(
+            id: string,
+            device: string,
+            reason: string,
+          ): Promise<void>;
+        }
+      ).releaseDisconnectedRecoverySessionWithRetry(
+        "release-session",
+        device.deviceId,
+        "device-restart:Physical Android",
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(timer.getPendingSleeps()).toEqual([1000]);
+      expect(manager.hasSession("release-session")).toBe(false);
+      expect(pool.getDevice(device.deviceId)).toMatchObject({
+        sessionId: "release-session",
+        status: "busy",
+      });
+      await expect(pool.assignDeviceToSession("other-session", "android")).rejects.toThrow();
+      expect(pool.getDevice(device.deviceId)?.sessionId).toBe("release-session");
+      await timer.resolvePromise(retry, 1000);
+      expect(persist).toHaveBeenCalledTimes(2);
+      expect(free).toHaveBeenCalledTimes(1);
+      expect(pool.getDevice(device.deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+    } finally {
+      if (retry) {
+        await timer.resolvePromise(retry, 1000);
+      }
+      free.mockRestore();
+      persist.mockRestore();
+      warn.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("exhausted release retries free the removed session's device exactly once", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const manager = daemon.getSessionManager();
+    const pool = daemon.getDevicePool();
+    const device: BootedDevice = {
+      name: "Physical Android",
+      deviceId: "release-device",
+      platform: "android",
+    };
+    const persist = spyOn(repository, "markReleased").mockRejectedValue(
+      new Error("persistence unavailable"),
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const free = spyOn(pool, "releaseDevice");
+    const originalRelease = manager.releaseSession.bind(manager);
+    let originalError: unknown;
+    const release = spyOn(manager, "releaseSession").mockImplementation(async (...args) => {
+      try {
+        return await originalRelease(...args);
+      } catch (error) {
+        originalError = error;
+        throw error;
+      }
+    });
+    try {
+      stubPoolDiscovery(pool, [device]);
+      await pool.initializeWithDevices([device]);
+      await pool.assignDeviceToSession("release-session", "android");
+      const retry = (
+        pool as unknown as {
+          releaseDisconnectedRecoverySessionWithRetry(
+            id: string,
+            device: string,
+            reason: string,
+          ): Promise<void>;
+        }
+      ).releaseDisconnectedRecoverySessionWithRetry(
+        "release-session",
+        device.deviceId,
+        "device-restart:Physical Android",
+      );
+      const outcome = retry.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      for (let attempt = 1; attempt < 3; attempt++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(persist).toHaveBeenCalledTimes(attempt);
+        expect(timer.getPendingSleeps()).toEqual([1000]);
+        expect(pool.getDevice(device.deviceId)).toMatchObject({
+          sessionId: "release-session",
+          status: "busy",
+        });
+        expect(free).not.toHaveBeenCalled();
+        timer.advanceTime(1000);
+      }
+      expect(await outcome).toBe(originalError);
+      expect(originalError).toBeDefined();
+      expect(persist).toHaveBeenCalledTimes(3);
+      expect(free).toHaveBeenCalledTimes(1);
+      expect(pool.getDevice(device.deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+    } finally {
+      release.mockRestore();
+      persist.mockRestore();
+      free.mockRestore();
+      warn.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test.each(["idle", "other-session"])(
+    "attempt two skips a device now %s without a warning or success log",
+    async (owner) => {
+      const timer = new FakeTimer();
+      const repository = new FakeDeviceSessionRepository();
+      const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+      const manager = daemon.getSessionManager();
+      const pool = daemon.getDevicePool();
+      const device: BootedDevice = {
+        name: "Physical Android",
+        deviceId: "release-device",
+        platform: "android",
+      };
+      const originalPersist = repository.markReleased.bind(repository);
+      const persist = spyOn(repository, "markReleased")
+        .mockImplementationOnce(async () => {
+          throw new Error("first release failed");
+        })
+        .mockImplementation(originalPersist);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      const free = spyOn(pool, "releaseDevice");
+      const cancel = spyOn(daemon as unknown as DaemonReleaseInternals, "cancelAndReleaseSession");
+      try {
+        stubPoolDiscovery(pool, [device]);
+        await pool.initializeWithDevices([device]);
+        await pool.assignDeviceToSession("release-session", "android");
+        const retry = (
+          pool as unknown as {
+            releaseDisconnectedRecoverySessionWithRetry(
+              id: string,
+              device: string,
+              reason: string,
+            ): Promise<void>;
+          }
+        ).releaseDisconnectedRecoverySessionWithRetry(
+          "release-session",
+          device.deviceId,
+          "device-restart:Physical Android",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(timer.getPendingSleeps()).toEqual([1000]);
+        const pooled = pool.getDevice(device.deviceId)!;
+        pooled.sessionId = owner === "idle" ? null : owner;
+        pooled.status = owner === "idle" ? "idle" : "busy";
+        pooled.assignmentCount++;
+        warn.mockClear();
+        info.mockClear();
+        await timer.resolvePromise(retry, 1000);
+        expect(persist).toHaveBeenCalledTimes(2);
+        expect(await cancel.mock.results[1].value).toBe(false);
+        expect(free).not.toHaveBeenCalled();
+        expect(warn).not.toHaveBeenCalled();
+        expect(
+          info.mock.calls.some(([message]) => String(message).includes("and released device")),
+        ).toBe(false);
+        expect(pooled).toMatchObject({
+          sessionId: owner === "idle" ? null : owner,
+          status: owner === "idle" ? "idle" : "busy",
+        });
+      } finally {
+        cancel.mockRestore();
+        persist.mockRestore();
+        free.mockRestore();
+        warn.mockRestore();
+        info.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    },
+  );
+
+  test("daemon fallback pool failure warns and preserves the original release error", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const manager = daemon.getSessionManager();
+    const pool = daemon.getDevicePool();
+    const device: BootedDevice = {
+      name: "Physical Android",
+      deviceId: "release-device",
+      platform: "android",
+    };
+    const persist = spyOn(repository, "markReleased").mockRejectedValue(
+      new Error("persistence failed"),
+    );
+    const poolError = new Error("fallback failed");
+    const free = spyOn(pool, "releaseDevice").mockRejectedValue(poolError);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const originalRelease = manager.releaseSession.bind(manager);
+    let originalError: unknown;
+    const release = spyOn(manager, "releaseSession").mockImplementation(async (...args) => {
+      try {
+        return await originalRelease(...args);
+      } catch (error) {
+        originalError = error;
+        throw error;
+      }
+    });
+    try {
+      stubPoolDiscovery(pool, [device]);
+      await pool.initializeWithDevices([device]);
+      await pool.assignDeviceToSession("release-session", "android");
+      const result = (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
+        "release-session",
+        "device-restart:Physical Android",
+      );
+      await expect(result).rejects.toThrow("Failed to persist non-terminal release");
+      await expect(result).rejects.toBe(originalError);
+      expect(manager.hasSession("release-session")).toBe(false);
+      expect(free).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Failed to free device release-device after session release-session release",
+        poolError,
+      );
+    } finally {
+      release.mockRestore();
+      persist.mockRestore();
+      free.mockRestore();
+      warn.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test.each(["ordinary", "owned", "conditional"] as const)(
+    "release persistence failure respects the real caller reason: %s",
+    async (branch) => {
+      const repository = new FakeDeviceSessionRepository();
+      const daemon = new Daemon({}, new FakeInstalledAppsRepository(), new FakeTimer(), repository);
+      const manager = daemon.getSessionManager();
+      const pool = daemon.getDevicePool();
+      const device: BootedDevice = {
+        name: "Physical Android",
+        deviceId: "release-device",
+        platform: "android",
+      };
+      const failure = new Error("release persistence failed after removal");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const persist = spyOn(repository, "markReleased").mockImplementation(async () => {
+        expect(manager.hasSession("release-session")).toBe(branch !== "ordinary");
+        throw failure;
+      });
+      const originalRelease = manager.releaseSession.bind(manager);
+      let reportedError: unknown;
+      const release = spyOn(manager, "releaseSession").mockImplementation(async (...args) => {
+        try {
+          return await originalRelease(...args);
+        } catch (error) {
+          reportedError = error;
+          throw error;
+        }
+      });
+      try {
+        stubPoolDiscovery(pool, [device]);
+        await pool.initializeWithDevices([device]);
+        await pool.assignDeviceToSession("release-session", "android");
+        const session = manager.getSession("release-session");
+        if (!session) {
+          throw new Error("expected session");
+        }
+        const result = (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
+          "release-session",
+          branch === "ordinary" ? "daemon-shutdown" : "device-disconnected:release-device",
+          false,
+          branch === "owned" ? session : undefined,
+          branch === "conditional" ? () => true : undefined,
+        );
+        if (branch === "ordinary") {
+          // Shutdown is non-terminal: the manager logs failed persistence and
+          // completes removal. Disconnect reasons retain a terminal fence.
+          expect(await result).toBe(true);
+          expect(pool.getDevice(device.deviceId)).toMatchObject({
+            sessionId: null,
+            status: "idle",
+          });
+        } else {
+          await expect(result).rejects.toThrow("Failed to persist terminal release");
+          await expect(result).rejects.toBe(reportedError);
+          expect(reportedError).toBeDefined();
+          expect(pool.getDevice(device.deviceId)).toMatchObject({
+            sessionId: "release-session",
+            status: "busy",
+          });
+        }
+        expect(manager.hasSession("release-session")).toBe(branch !== "ordinary");
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(failure.message));
+      } finally {
+        release.mockRestore();
+        persist.mockRestore();
+        warn.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    },
+  );
+
+  test.each(["ordinary", "owned", "conditional"] as const)(
+    "successful daemon release frees its device: %s",
+    async (branch) => {
+      const daemon = new Daemon(
+        {},
+        new FakeInstalledAppsRepository(),
+        new FakeTimer(),
+        new FakeDeviceSessionRepository(),
+      );
+      const manager = daemon.getSessionManager();
+      const pool = daemon.getDevicePool();
+      const device: BootedDevice = {
+        name: "Physical Android",
+        deviceId: "release-device",
+        platform: "android",
+      };
+      try {
+        stubPoolDiscovery(pool, [device]);
+        await pool.initializeWithDevices([device]);
+        await pool.assignDeviceToSession("release-session", "android");
+        const session = manager.getSession("release-session");
+        if (!session) {
+          throw new Error("expected session");
+        }
+        expect(
+          await (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
+            "release-session",
+            "explicit-release",
+            false,
+            branch === "owned" ? session : undefined,
+            branch === "conditional" ? () => true : undefined,
+          ),
+        ).toBe(true);
+        expect(manager.hasSession("release-session")).toBe(false);
+        expect(pool.getDevice(device.deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    },
+  );
+
+  test("persistence failure keeps device ownership for a newer same-UUID incarnation", async () => {
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), new FakeTimer(), repository);
+    const manager = daemon.getSessionManager();
+    const pool = daemon.getDevicePool();
+    const device: BootedDevice = {
+      name: "Physical Android",
+      deviceId: "release-device",
+      platform: "android",
+    };
+    let original: Session;
+    const persist = spyOn(repository, "markReleased").mockImplementation(async () => {
+      expect(manager.hasSession("release-session")).toBe(false);
+      // Model a replacement publishing after removal without waiting on the
+      // old incarnation's in-flight release promise from createSession().
+      (manager as unknown as { sessions: Map<string, Session> }).sessions.set("release-session", {
+        ...original,
+      });
+      throw new Error("old incarnation persistence failed");
+    });
+    const free = spyOn(pool, "releaseDevice");
+    try {
+      stubPoolDiscovery(pool, [device]);
+      await pool.initializeWithDevices([device]);
+      await pool.assignDeviceToSession("release-session", "android");
+      const session = manager.getSession("release-session");
+      if (!session) {
+        throw new Error("expected session");
+      }
+      original = session;
+      await expect(
+        (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
+          "release-session",
+          "device-restart:test",
+        ),
+      ).rejects.toThrow("old incarnation persistence failed");
+      expect(manager.hasSession("release-session")).toBe(true);
+      expect(manager.getSession("release-session")).not.toBe(original);
+      expect(free).not.toHaveBeenCalled();
+      expect(pool.getDevice(device.deviceId)).toMatchObject({
+        sessionId: "release-session",
+        status: "busy",
+      });
+    } finally {
+      free.mockRestore();
+      persist.mockRestore();
+      manager.stopCleanupTimer();
+    }
   });
 
   test("waits for pending device cleanup before closing the database", async () => {

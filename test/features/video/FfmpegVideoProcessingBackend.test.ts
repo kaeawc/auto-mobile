@@ -95,6 +95,8 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   });
 
   test("starts iOS recording through the injected SimCtl argv boundary", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const stderr = new PassThrough();
     const child = new EventEmitter() as ChildProcess;
     Object.assign(child, { stderr, stdout: null, stdin: null, killed: false, kill: () => true });
@@ -105,14 +107,21 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       startCommandArgs: async (args: string[], options?: SpawnOptions) => {
         receivedArgs = args;
         receivedOptions = options;
-        defaultTimer.setTimeout(() => {
+        timer.setTimeout(() => {
           child.emit("spawn");
           stderr.write("Recording started\n");
         }, 0);
         return child;
       },
     } as SimCtl;
-    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
     (backend as any).ensureFfmpegAvailable = async () => {};
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-recording-udid" };
 
@@ -158,6 +167,8 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   }
 
   test("reselects the Duo recording display after folding changes", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const commands: string[][] = [];
     let live = { width: 1398, height: 2034 };
     let enumerateFails = false;
@@ -172,7 +183,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
       startCommandArgs: async (args: string[]) => {
         commands.push(args);
-        return makeCaptureChild(true);
+        return makeCaptureChild(true, timer);
       },
     } as SimCtl;
     const ffmpeg = {
@@ -194,7 +205,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       ffmpeg,
       undefined,
       undefined,
-      undefined,
+      timer,
       undefined,
       async () => {
         if (probeFails) {

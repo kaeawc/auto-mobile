@@ -1,16 +1,24 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
-import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { TapOnElement, tapFocusFailure } from "../../../src/features/action/TapOnElement";
 import type { ElementBounds, ObserveResult } from "../../../src/models";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import {
   imeOcclusionHierarchy,
   sharedBoundsImeHierarchy,
 } from "../../fixtures/observe/imeOcclusion";
+import {
+  syntheticNavigationHierarchy,
+  navigationScreen,
+} from "../../fixtures/observe/iosNavigationOcclusion";
+import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { KeyboardOcclusionError } from "../../../src/models/KeyboardOcclusionError";
@@ -34,6 +42,12 @@ async function executeAt(
     elementId,
     action = "tap",
     throwOnKeyboardOcclusion = false,
+    display,
+    missing = false,
+    selectionError,
+    editable = true,
+    realSelector = false,
+    selectionStrategy,
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -45,9 +59,18 @@ async function executeAt(
     elementId?: string;
     action?: "tap" | "focus";
     throwOnKeyboardOcclusion?: boolean;
+    display?: string;
+    missing?: boolean;
+    selectionError?: ActionableError;
+    editable?: boolean;
+    realSelector?: boolean;
+    selectionStrategy?: "unique";
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
+  if (display !== undefined) {
+    hierarchy.displayId = Number(display);
+  }
   const keyboard = hierarchy.windows?.[0]?.hierarchy.node;
   if (keyboard && platform === "ios") {
     keyboard.$ = { class: "UIKeyboard" };
@@ -68,7 +91,7 @@ async function executeAt(
     throw new Error(`Missing fixture node ${label}`);
   }
   const element = source;
-  if (action === "focus") {
+  if (action === "focus" && editable) {
     element.class = "android.widget.EditText";
   }
   if (anonymous) {
@@ -83,16 +106,28 @@ async function executeAt(
       throw new Error("Unexpected ADB spawn");
     },
   }) as AdbExecutor;
-  const selector = new FakeElementSelector(element);
+  const selector = new FakeElementSelector(missing ? null : element);
+  if (selectionError) {
+    selector.selectByText = () => {
+      throw selectionError;
+    };
+  }
+  const observeScreen = new FakeObserveScreen();
+  const transitions = new FakeDisplayTransitionReader();
   if (matchedBounds) {
     selector.nextMatchedElement = { ...element, bounds: matchedBounds };
   }
   const tap = new TapOnElement({ name: "test-device", platform, deviceId: "emulator-5554" }, adb, {
     timer,
-    elementSelector: selector,
+    hierarchyCapture: new FakeHierarchyCapture(() => hierarchy, platform),
+    displayTransitions: transitions,
+    lastRenderedObservation: () => observation,
+    elementSelector: realSelector ? undefined : selector,
+    visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
     tapStrategy: new FakeTapStrategy(),
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
+  tap.observeScreen = observeScreen;
   const observation: ObserveResult = {
     observationId: "ime-test",
     updatedAt: 1,
@@ -103,7 +138,10 @@ async function executeAt(
         : { width: 400, height: 240 }),
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: hierarchy,
+    display: { key: "0", role: "unknown", posture: "unknown", generation: transitions.generation },
+    displayRevision: transitions.fullRevision,
   };
+  observeScreen.setObserveResult(observation);
   const points: Array<{ x: number; y: number }> = [];
   let actionError: unknown;
   tap.observedInteraction = async (action) => {
@@ -128,13 +166,150 @@ async function executeAt(
   tap.recordDeferredPredictionOutcome = async () => {};
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute(
-    { ...(elementId ? { elementId } : { text: label }), action },
+    {
+      ...(elementId ? { elementId } : { text: label }),
+      action,
+      display,
+      selectionStrategy,
+      searchUntil: { duration: 100 },
+    },
     undefined,
     undefined,
     throwOnKeyboardOcclusion ? { throwOnKeyboardOcclusion: true } : undefined,
   );
   return { result, points, actionError };
 }
+
+describe("internal typed focus failures", () => {
+  for (const display of [undefined, "0"]) {
+    test(`${display ?? "default"}: target not-found is marked without changing JSON output`, async () => {
+      const { result, points } = await executeAt("Above Keyboard", {
+        action: "focus",
+        withIme: false,
+        missing: true,
+        display,
+      });
+      const original = "Element not found with provided text 'Above Keyboard'";
+      expect(result.error).toBe(
+        display ? original : `Failed to perform tap on element: ${original}`,
+      );
+      expect(result[tapFocusFailure]).toBe("not-found");
+      expect(Object.getOwnPropertyDescriptor(result, tapFocusFailure)?.enumerable).toBe(false);
+      expect(JSON.stringify(result)).not.toContain("not-found");
+      expect(points).toEqual([]);
+    });
+
+    test(`${display ?? "default"}: stale s2 not-found receives the same marker`, async () => {
+      const { result, points } = await executeAt("Above Keyboard", {
+        action: "focus",
+        withIme: false,
+        missing: true,
+        elementId: "s2-stale",
+        display,
+      });
+      expect(result[tapFocusFailure]).toBe("not-found");
+      expect(result.error).toContain("Element not found with provided elementId 's2-stale'");
+      expect(points).toEqual([]);
+    });
+
+    test(`${display ?? "default"}: off-screen-but-present target is marked`, async () => {
+      const fixture = imeOcclusionHierarchy(false);
+      fixture.hierarchy.node!.node![2].$.bounds = { left: 100, top: 300, right: 300, bottom: 350 };
+      const { result, points } = await executeAt("Above Keyboard", {
+        action: "focus",
+        fixture,
+        display,
+      });
+      expect(result[tapFocusFailure]).toBe("no-visible-tap-area");
+      expect(result.error).toContain("no visible tap area");
+      expect(points).toEqual([]);
+    });
+  }
+
+  test("strict real-selector not-found retains its diagnostic and gets a typed marker", async () => {
+    const { result, points } = await executeAt("Above Keyboard", {
+      action: "focus",
+      realSelector: true,
+      elementId: "s2-stale",
+      selectionStrategy: "unique",
+      withIme: false,
+    });
+    expect(result.error).toBe("Failed to perform tap on element: Target not found");
+    expect(result[tapFocusFailure]).toBe("not-found");
+    expect(points).toEqual([]);
+  });
+
+  test("strict real-selector ambiguity gets no focus-failure marker", async () => {
+    const fixture = imeOcclusionHierarchy(false);
+    fixture.hierarchy.node!.node = [20, 80].map((top) => ({
+      $: {
+        text: "Phone",
+        class: "android.widget.EditText",
+        clickable: true,
+        bounds: { left: 100, top, right: 300, bottom: top + 30 },
+      },
+    }));
+    const { result, points } = await executeAt("Phone", {
+      action: "focus",
+      fixture,
+      realSelector: true,
+      selectionStrategy: "unique",
+    });
+    expect(result.error).toContain("Target ambiguous: 2 matches");
+    expect(result[tapFocusFailure]).toBeUndefined();
+    expect(points).toEqual([]);
+  });
+
+  test("display real-selector non-editable match gets no focus-failure marker", async () => {
+    const { result, points } = await executeAt("Above Keyboard", {
+      action: "focus",
+      editable: false,
+      realSelector: true,
+      withIme: false,
+      display: "0",
+    });
+    expect(result.error).toContain("not an editable input");
+    expect(result[tapFocusFailure]).toBeUndefined();
+    expect(points).toEqual([]);
+  });
+
+  test("navigation-bar focus failure is marked at the visibility source", async () => {
+    const { result, points } = await executeAt("Forms & Input", {
+      action: "focus",
+      platform: "ios",
+      fixture: syntheticNavigationHierarchy(),
+      screenSize: navigationScreen,
+    });
+    expect(result[tapFocusFailure]).toBe("navigation-bar");
+    expect(result.error).toBe(
+      'Failed to perform tap on element: Target "Forms & Input" is covered by the navigation bar; scroll it into view with swipeOn, then retry tapOn.',
+    );
+    expect(points).toEqual([]);
+  });
+
+  test("ambiguous focus error is unmarked", async () => {
+    const { result } = await executeAt("Above Keyboard", {
+      action: "focus",
+      selectionError: new ActionableError("Target ambiguous: 2 matches"),
+    });
+    expect(result[tapFocusFailure]).toBeUndefined();
+    expect(result.error).toBe("Failed to perform tap on element: Target ambiguous: 2 matches");
+  });
+
+  test("non-editable and keyboard-occluded focus failures are unmarked", async () => {
+    const notEditable = await executeAt("Above Keyboard", { action: "focus", editable: false });
+    expect(notEditable.result[tapFocusFailure]).toBeUndefined();
+    expect(notEditable.result.error).toContain("not an editable input");
+    const keyboard = await executeAt("Continue as Guest", { action: "focus" });
+    expect(keyboard.result[tapFocusFailure]).toBeUndefined();
+    expect(keyboard.result.error).toContain("covered by the soft keyboard");
+  });
+
+  test("ordinary tap not-found carries no focus marker", async () => {
+    const { result } = await executeAt("Above Keyboard", { missing: true, withIme: false });
+    expect(result[tapFocusFailure]).toBeUndefined();
+  });
+});
 
 describe("tapOn Android IME occlusion", () => {
   test("refuses text-selected app content behind an anonymous equal-bounds IME key", async () => {
@@ -186,6 +361,26 @@ describe("tapOn Android IME occlusion", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  test("Android display focus opt-in preserves the typed IME refusal", async () => {
+    await expect(
+      executeAt("Continue as Guest", {
+        action: "focus",
+        display: "0",
+        throwOnKeyboardOcclusion: true,
+      }),
+    ).rejects.toBeInstanceOf(KeyboardOcclusionError);
+  });
+
+  test("Android display focus without opt-in keeps its failure result", async () => {
+    const { result, points } = await executeAt("Continue as Guest", {
+      action: "focus",
+      display: "0",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("covered by the soft keyboard");
+    expect(points).toEqual([]);
   });
 
   test("uses the caller text selector when the matched element has no label", async () => {

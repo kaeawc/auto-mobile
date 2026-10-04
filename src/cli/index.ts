@@ -86,8 +86,10 @@ export function parseCliArgs(args: string[]): {
 
     const nextArg = args[i + 1];
 
-    // Check if this is a boolean flag (no value or next arg is also a flag)
-    if (nextArg === undefined || nextArg.startsWith("--")) {
+    // A YAML document marker is a value; other -- tokens remain flags.
+    // Only classify the argv prefix here; the plan parser validates the YAML.
+    const startsYamlDocument = nextArg !== undefined && /^---(?:\s|$)/.test(nextArg);
+    if (nextArg === undefined || (nextArg.startsWith("--") && !startsYamlDocument)) {
       // Boolean flag without value - treat as true
       params[paramName] = true;
     } else {

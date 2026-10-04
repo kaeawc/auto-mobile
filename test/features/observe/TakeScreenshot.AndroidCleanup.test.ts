@@ -7,6 +7,7 @@ import type { ScreenshotResult } from "../../../src/models/ScreenshotResult";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../../src/utils/logger";
 import { screenshotTempIdToken } from "../../../src/utils/screenshot/screenshotFormats";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
@@ -56,6 +57,31 @@ async function pendingSentinel(): Promise<"pending"> {
 }
 
 describe("Android base64 screenshot cleanup", () => {
+  test.each(["already aborted", "before dispatch"])(
+    "does not remove a temporary file when cancelled %s",
+    async (kind) => {
+      const adb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const failure = new DOMException("capture aborted", "AbortError");
+      if (kind === "already aborted") {
+        controller.abort(failure);
+      }
+
+      const capture = captureFor(adb).captureScreenshotBase64(
+        "/screenshots/result.png",
+        options,
+        controller.signal,
+      );
+      // The display argument await yields before entering the capture lock.
+      if (kind === "before dispatch") {
+        controller.abort(failure);
+      }
+
+      await expect(capture).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
   test.each(["abort", "maxBuffer"])(
     "detaches cleanup after %s without delaying rejection",
     async (kind) => {

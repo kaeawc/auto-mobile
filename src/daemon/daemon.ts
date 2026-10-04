@@ -1,6 +1,7 @@
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
+import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
@@ -603,7 +604,9 @@ export class Daemon {
       installedAppsRepository: this.installedAppsRepository,
       deviceSessionRepository: this.deviceSessionRepository,
       releaseSessionForDisconnectedDevice: (sessionId, _deviceId, releaseReason, shouldCommit) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit),
+        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
+          deferFailureFallback: true,
+        }),
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryConfiguration.policy,
       onDeviceFramesInvalidated: (deviceId) => {
@@ -2986,6 +2989,7 @@ export class Daemon {
     allowExpired: boolean = false,
     expectedSession?: Session,
     shouldCommit?: () => boolean,
+    options?: { deferFailureFallback?: boolean },
   ): Promise<boolean> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
     // Early identity fence: discovery can replace a same-serial runtime while
@@ -2995,39 +2999,79 @@ export class Daemon {
     if (shouldCommit?.() === false) {
       return false;
     }
-    let deviceId: string | null;
-    if (expectedSession) {
-      deviceId = await this.sessionManager.releaseSessionIfOwned(
-        sessionId,
-        expectedSession,
-        expectedSession.assignedDevice,
-        releaseReason,
-      );
-    } else if (shouldCommit) {
-      const release = await this.sessionManager.releaseSessionUnlessSuperseded(
-        sessionId,
-        releaseReason,
-        shouldCommit,
-        allowExpired,
-      );
-      if (release.superseded) {
-        logger.info(
-          `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
-        );
-        return false;
-      }
-      deviceId = release.deviceId;
-    } else {
-      deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    // Capture the owner before release can remove it or hide it behind a
+    // terminal fence. Pool lookup also covers expired sessions during shutdown.
+    const assignedDeviceId =
+      expectedSession?.assignedDevice ??
+      this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
+      null;
+    let deviceId: string | null = null;
+    let superseded = false;
+    await releaseSessionAndDevice(
+      this.sessionManager,
+      this.devicePool,
+      assignedDeviceId,
+      sessionId,
+      releaseReason,
+      {
+        ...options,
+        release: async () => {
+          if (expectedSession) {
+            deviceId = await this.sessionManager.releaseSessionIfOwned(
+              sessionId,
+              expectedSession,
+              expectedSession.assignedDevice,
+              releaseReason,
+            );
+          } else if (shouldCommit) {
+            const release = await this.sessionManager.releaseSessionUnlessSuperseded(
+              sessionId,
+              releaseReason,
+              shouldCommit,
+              allowExpired,
+            );
+            if (release.superseded) {
+              logger.info(
+                `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+              );
+              superseded = true;
+              return null;
+            }
+            deviceId = release.deviceId;
+          } else {
+            deviceId = await this.sessionManager.releaseSession(
+              sessionId,
+              releaseReason,
+              allowExpired,
+            );
+          }
+          // A completed persistence retry may return a device already idle or
+          // reassigned. Do not issue a stale pool release or report it as freed.
+          if (!this.isSessionDeviceAssigned(deviceId, sessionId)) {
+            deviceId = null;
+          }
+          return deviceId;
+        },
+      },
+    );
+    if (superseded) {
+      return false;
     }
-    if (deviceId) {
-      await this.devicePool.releaseDevice(deviceId, sessionId);
+    if (!deviceId || this.isSessionDeviceAssigned(deviceId, sessionId)) {
+      logger.info(
+        `Cancelled session ${sessionId} (${cancelled} executions); no device freed (reason=${releaseReason})`,
+      );
+      return false;
     }
     logger.info(
-      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
+      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId} ` +
         `(reason=${releaseReason})`,
     );
     return true;
+  }
+
+  private isSessionDeviceAssigned(deviceId: string | null, sessionId: string): boolean {
+    return deviceId !== null && this.devicePool.getDevice(deviceId)?.sessionId === sessionId;
   }
 
   private async cancelAndDrainDeviceExecutions(
@@ -3201,7 +3245,7 @@ export class Daemon {
       // startup timeout does not cancel discovery, so this may run after a
       // session has claimed a device; refresh preserves that owner and its
       // incarnation when rediscovering the same device.
-      await this.devicePool.refreshDevices();
+      const outcome = await this.devicePool.refreshDevicesWithOutcome();
       const bootedDevices = this.devicePool.getAllDevices();
 
       if (bootedDevices.length > 0) {
@@ -3220,7 +3264,8 @@ export class Daemon {
         logger.info(
           `Device pool initialized with ${bootedDevices.length} devices: ${bootedDevices.map((device) => device.id).join(", ")}`,
         );
-      } else {
+      } else if (outcome.failure === undefined) {
+        // Failed refreshes already log their reason at warn in DevicePoolRefresh.
         logger.warn("No devices detected during daemon startup. Device pool is empty.");
         logger.warn("Start an emulator or connect a physical device before creating sessions.");
       }

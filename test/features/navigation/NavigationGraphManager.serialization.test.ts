@@ -52,6 +52,24 @@ describe("NavigationGraphManager navigation write ordering", () => {
     await harness.dispose();
   });
 
+  test("sanitizes legacy edge arguments on graph reads and pathfinding without rewriting storage", async () => {
+    const args = {
+      text: "Continue",
+      sessionUuid: "old",
+      __mcpRequestDeadlineMs: 1,
+      __mcpRequestTimeoutMs: 2,
+      __futureInternal: true,
+      _foo: "keep",
+      sessionUuidX: "keep",
+      session: "keep",
+    };
+    await repository.createEdge(appId, "Other", "Home", "tapOn", args, 4000);
+    const expected = { text: "Continue", _foo: "keep", sessionUuidX: "keep", session: "keep" };
+    expect((await manager.getEdgesFrom("Other"))[0].interaction?.args).toEqual(expected);
+    expect((await manager.findPath("Home")).path[0].interaction?.args).toEqual(expected);
+    expect(JSON.parse((await repository.getEdgesFrom(appId, "Other"))[0].tool_args!)).toEqual(args);
+  });
+
   for (const releaseHierarchyFirst of [true, false]) {
     test(`preserves invocation order when ${releaseHierarchyFirst ? "hierarchy" : "event"} gate releases first`, async () => {
       const eventGate = deferred();

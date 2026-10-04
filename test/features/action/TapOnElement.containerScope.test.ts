@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
@@ -170,4 +170,51 @@ describe("tapOn captured container scope (#8986)", () => {
       expect(result.candidates).toHaveLength(0);
     },
   );
+});
+
+test.each(["tap", "focus"] as const)(
+  "tapOn %s explicitly opts its text field target into hint fallback",
+  (action) => {
+    const resolve = spyOn(resolver, "resolve");
+    const fieldCapture: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          class: "android.widget.EditText",
+          "resource-id": "phone",
+          text: "5551234",
+          "hint-text": "Phone",
+          clickable: true,
+          focusable: true,
+        },
+      },
+    };
+    try {
+      for (const selector of [{ text: "Phone" }, { textAny: ["Missing", "Phone"] }]) {
+        const selected = tap.findElementInHierarchy({ action, ...selector }, fieldCapture);
+        expect(selected.selection.element?.["resource-id"]).toBe("phone");
+      }
+      expect(
+        resolve.mock.calls
+          .filter(([, selector]) => selector.text === "Phone")
+          .every(([, , intent]) => intent.allowHintFallback === true),
+      ).toBe(true);
+    } finally {
+      resolve.mockRestore();
+    }
+  },
+);
+
+test("tapOn long press and sibling anchors do not opt into hint fallback", () => {
+  const resolve = spyOn(resolver, "resolve");
+  try {
+    tap.findElementInHierarchy({ action: "longPress", text: "Rev3" }, capture);
+    tap.findElementInHierarchy({ action: "tap", text: "Rev3", sibling: true }, capture);
+    expect(resolve.mock.calls.length).toBeGreaterThan(0);
+    expect(resolve.mock.calls.every(([, , intent]) => intent.allowHintFallback !== true)).toBe(
+      true,
+    );
+  } finally {
+    resolve.mockRestore();
+  }
 });

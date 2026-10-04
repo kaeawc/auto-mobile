@@ -91,7 +91,7 @@ const TAP_ELEMENT = {
 
 function touchFrame(
   arrivedAt: number,
-  activeSlots: Array<{ slotId: number; trackingId: number; x: number; y: number }>,
+  activeSlots: Array<Omit<RawTouchFrame["activeSlots"][number], "pressure">>,
   releasedSlots: number[] = [],
 ): RawTouchFrame {
   return {
@@ -262,6 +262,250 @@ describe("DualTrackRecorder", () => {
       }
     },
   );
+
+  // Logic tests: available captures do not contain an unreported-axis scroll.
+  test.each([
+    ["y", 50, true],
+    ["x", 50, true],
+    ["y", 500, true],
+    ["x", 500, true],
+    ["y", 50, false],
+    ["x", 50, false],
+    ["y", 500, false],
+    ["x", 500, false],
+  ] as const)(
+    "unreported %s axis with low displacement (%d ms, directional scroll: %s)",
+    async (axis, durationMs, scroll) => {
+      await recorder.start();
+      const classifier = new GestureClassifier({ toScreenPoint: (x, y) => ({ x, y }) }, 1);
+      const slot = {
+        slotId: 0,
+        trackingId: 1,
+        x: axis === "x" ? NaN : 342,
+        y: axis === "y" ? NaN : 891,
+        unknownAxes: [axis],
+      };
+      classifier.feedFrame(touchFrame(0, [slot]));
+      fakeTimer.advanceTime(20);
+      classifier.feedFrame(
+        touchFrame(fakeTimer.now(), [{ ...slot, x: slot.x + 2, y: slot.y + 2 }]),
+      );
+      fakeTimer.advanceTime(durationMs - 20);
+      const gesture = classifier.feedFrame(touchFrame(fakeTimer.now(), [], [0]));
+      const action = durationMs < 400 ? "tap" : "longPress";
+      expect(gesture).toEqual({
+        type: action,
+        arrivedAt: durationMs,
+        durationMs,
+        unknownAxes: [axis],
+      });
+      if (!gesture) {
+        throw new Error("Expected a completed contact");
+      }
+      fakeGestures.emit(gesture);
+      fakeTimer.advanceTime(360);
+      fakeA11y.emit({
+        type: scroll ? "scroll" : action,
+        timestamp: durationMs,
+        element: TAP_ELEMENT,
+        ...(scroll ? (axis === "y" ? { scrollDeltaY: 100 } : { scrollDeltaX: 100 }) : {}),
+      });
+      // Unknown contacts must wait for later ambiguity witnesses.
+      expect(recorder.stepCount).toBe(0);
+      fakeTimer.advanceTime(MERGE_WINDOW_MS - 360);
+      expect((await recorder.stop()).steps).toEqual([
+        scroll
+          ? {
+              tool: "swipeOn",
+              params: {
+                direction: axis === "y" ? "up" : "left",
+                container: { elementId: TAP_ELEMENT["resource-id"] },
+              },
+            }
+          : { tool: "tapOn", params: { action, elementId: TAP_ELEMENT["resource-id"] } },
+      ]);
+    },
+  );
+
+  test("buffered directional scroll resolves an unknown-axis tap", async () => {
+    await recorder.start();
+    fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: -100 });
+    fakeTimer.advanceTime(50);
+    fakeGestures.emit({ type: "tap", arrivedAt: 50, unknownAxes: ["y"] });
+    expect((await recorder.stop()).steps).toEqual([
+      {
+        tool: "swipeOn",
+        params: { direction: "down", container: { elementId: TAP_ELEMENT["resource-id"] } },
+      },
+    ]);
+  });
+
+  test.each(["scroll", "tap"])(
+    "unknown-axis tap drops ambiguous scroll and %s candidates",
+    async (otherType) => {
+      await recorder.start();
+      const warning = spyOn(logger, "warn");
+      try {
+        fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["y"] });
+        fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: 100 });
+        fakeTimer.advanceTime(100);
+        fakeA11y.emit({
+          type: otherType,
+          timestamp: 100,
+          element: TAP_ELEMENT,
+          scrollDeltaY: -100,
+        });
+        fakeTimer.advanceTime(MERGE_WINDOW_MS);
+        expect((await recorder.stop()).steps).toEqual([]);
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("tap has unknown axes: y"));
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "zero-delta scroll cannot promote unknown-axis tap (click: %s)",
+    async (click) => {
+      await recorder.start();
+      const warning = spyOn(logger, "warn");
+      try {
+        fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["y"] });
+        fakeA11y.emit({
+          type: "scroll",
+          timestamp: 0,
+          element: TAP_ELEMENT,
+          scrollDeltaX: 0,
+          scrollDeltaY: 0,
+        });
+        if (click) {
+          fakeA11y.emit({ type: "tap", timestamp: 0, element: TAP_ELEMENT });
+        }
+        expect((await recorder.stop()).steps).toEqual(
+          click
+            ? [{ tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } }]
+            : [],
+        );
+        if (!click) {
+          expect(warning).toHaveBeenCalledWith(expect.stringContaining("tap has unknown axes: y"));
+        }
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test.each([true, false])(
+    "known swipe claims scroll over unknown tap (scroll buffered: %s)",
+    async (buffered) => {
+      await recorder.start();
+      const warning = spyOn(logger, "warn");
+      try {
+        fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["y"] });
+        if (buffered) {
+          fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: 100 });
+        }
+        fakeTimer.advanceTime(100);
+        fakeGestures.emit({
+          type: "swipe",
+          arrivedAt: 100,
+          startX: 342,
+          startY: 891,
+          direction: "down",
+        });
+        if (!buffered) {
+          fakeA11y.emit({
+            type: "scroll",
+            timestamp: 100,
+            element: TAP_ELEMENT,
+            scrollDeltaY: 100,
+          });
+        }
+        fakeTimer.advanceTime(MERGE_WINDOW_MS);
+        expect((await recorder.stop()).steps).toEqual([
+          {
+            tool: "swipeOn",
+            params: { direction: "down", container: { elementId: TAP_ELEMENT["resource-id"] } },
+          },
+        ]);
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("tap has unknown axes: y"));
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test("two unknown contacts cannot share a directional scroll across serial timeouts", async () => {
+    await recorder.start();
+    const warning = spyOn(logger, "warn");
+    try {
+      fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["y"] });
+      fakeTimer.advanceTime(300);
+      fakeGestures.emit({ type: "longPress", arrivedAt: 300, unknownAxes: ["x"] });
+      fakeA11y.emit({ type: "scroll", timestamp: 300, element: TAP_ELEMENT, scrollDeltaY: 100 });
+      fakeTimer.advanceTime(MERGE_WINDOW_MS);
+      expect((await recorder.stop()).steps).toEqual([]);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("tap has unknown axes: y"));
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining("longPress has unknown axes: x"),
+      );
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test.each(["stateChange", "swipe"])(
+    "%s with directional deltas cannot promote an unknown-axis tap",
+    async (type) => {
+      await recorder.start();
+      const warning = spyOn(logger, "warn");
+      try {
+        fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["y"] });
+        fakeA11y.emit({ type, timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: 100 });
+        expect((await recorder.stop()).steps).toEqual([]);
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("tap has unknown axes: y"));
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test.each(["doubleTap", "tap"] as const)(
+    "scroll cannot promote %s with complete coordinates",
+    async (type) => {
+      await recorder.start();
+      fakeGestures.emit({ type, arrivedAt: 0, screenX: 342, screenY: 891 });
+      fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: 100 });
+      expect((await recorder.stop()).steps).toEqual([
+        { tool: "tapAt", params: { action: type, x: 342, y: 891 } },
+      ]);
+    },
+  );
+
+  test("scroll cannot promote an unknown-axis double tap", async () => {
+    await recorder.start();
+    fakeGestures.emit({ type: "doubleTap", arrivedAt: 0, unknownAxes: ["y"] });
+    fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: 100 });
+    expect((await recorder.stop()).steps).toEqual([]);
+  });
+
+  test.each([{ bounds: TAP_ELEMENT.bounds }, { "resource-id": TAP_ELEMENT["resource-id"] }])(
+    "scroll needs both bounds and a selector to promote an unknown tap (%p)",
+    async (element) => {
+      await recorder.start();
+      fakeGestures.emit({ type: "tap", arrivedAt: 0, unknownAxes: ["y"] });
+      fakeA11y.emit({ type: "scroll", timestamp: 0, element, scrollDeltaY: 100 });
+      expect((await recorder.stop()).steps).toEqual([]);
+    },
+  );
+
+  test("stale scroll cannot promote an unknown-axis tap", async () => {
+    await recorder.start();
+    fakeA11y.emit({ type: "scroll", timestamp: 0, element: TAP_ELEMENT, scrollDeltaY: 100 });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS + 1);
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), unknownAxes: ["y"] });
+    expect((await recorder.stop()).steps).toEqual([]);
+  });
 
   test.each(["tap", "doubleTap", "longPress"] as const)(
     "unknown-axis %s uses a paired accessibility element",

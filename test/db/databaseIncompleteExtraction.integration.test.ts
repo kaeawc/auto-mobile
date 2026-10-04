@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import path from "path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { isIncompleteExtractionError } from "../../src/db/migrationDependencyIntegrity";
-import { createFileBackedDbHarness } from "./withFileBackedDb";
+import { bindFileBackedDbHarness } from "./withFileBackedDb";
 
 /**
  * Issue #2833: the incomplete-extraction mapping is scoped to KNOWN migration
@@ -20,18 +20,10 @@ import { createFileBackedDbHarness } from "./withFileBackedDb";
 describe("startup migration failure does not mislabel a genuine bad import", () => {
   // Shared harness: fresh module import, tracked temp dirs cleaned with the
   // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   test("an unknown missing package surfaces the generic error, not incomplete-extraction", async () => {
-    const tempDir = await harness.makeTempDbDir("am-bad-import-");
+    const tempDir = await getHarness().makeTempDbDir("am-bad-import-");
     const migrationsDir = path.join(tempDir, "migrations");
     await mkdir(migrationsDir, { recursive: true });
 
@@ -53,9 +45,11 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
     };
     process.on("unhandledRejection", onUnhandled);
 
-    let db: Awaited<ReturnType<typeof harness.importFreshDatabaseModule>> | undefined;
+    let db:
+      | Awaited<ReturnType<ReturnType<typeof getHarness>["importFreshDatabaseModule"]>>
+      | undefined;
     try {
-      db = await harness.importFreshDatabaseModule();
+      db = await getHarness().importFreshDatabaseModule();
 
       let thrown: unknown;
       try {

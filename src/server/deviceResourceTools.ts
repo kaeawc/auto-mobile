@@ -1,7 +1,8 @@
 import type { z } from "zod/v4";
 import type { DeviceToolsDependencies } from "./deviceTools";
 import { setDeviceResourcesSchema } from "./deviceResourceSchemas";
-import { ToolRegistry, stripNavigationInternalParams } from "./toolRegistry";
+import { ToolRegistry } from "./toolRegistry";
+import { INTERNAL_NO_DIFF_PARAM } from "./internalToolCall";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { getAbortSignal } from "../utils/AbortContext";
 import {
@@ -23,9 +24,10 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
     async (device, args: z.infer<typeof setDeviceResourcesSchema>, _progress, signal) => {
       const callerSignal = signal ?? getAbortSignal();
       callerSignal?.throwIfAborted();
-      const external = stripNavigationInternalParams(args);
+      const external: Record<string, unknown> = { ...args };
       const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
       deleteInternalToolParams(external);
+      delete external[INTERNAL_NO_DIFF_PARAM];
       const parsed = setDeviceResourcesSchema.parse(external);
       const deps = dependencies();
       const requestedDeadline =

@@ -48,12 +48,12 @@ adb -s "$device_id" shell am start \
   --eu android.provider.extra.INITIAL_URI \
   content://com.android.externalstorage.documents/document/primary%3ADownload%2Fissue-5804-smoke%2Fdocuments >/dev/null
 adb -s "$device_id" shell uiautomator dump "$document_dump" >/dev/null
-adb -s "$device_id" shell cat "$document_dump" | grep -Fq "${document_name}"
+adb -s "$device_id" shell cat "$document_dump" | grep -F "${document_name}" >/dev/null
 
-adb -s "$device_id" shell "content query --uri content://media/external_primary/images/media --projection _id:_display_name:relative_path --where \"_display_name='${media_name}' AND relative_path='Download/automobile-media/'\"" | grep -Fq "$media_name"
+adb -s "$device_id" shell "content query --uri content://media/external_primary/images/media --projection _id:_display_name:relative_path --where \"_display_name='${media_name}' AND relative_path='Download/automobile-media/'\"" | grep -F "$media_name" >/dev/null
 adb -s "$device_id" shell am start -a android.provider.action.PICK_IMAGES >/dev/null
 adb -s "$device_id" shell uiautomator dump "$media_dump" >/dev/null
-adb -s "$device_id" shell cat "$media_dump" | grep -Fq "com.google.android.providers.media.module"
+adb -s "$device_id" shell cat "$media_dump" | grep -F "com.google.android.providers.media.module" >/dev/null
 adb -s "$device_id" shell am force-stop com.google.android.documentsui
 adb -s "$device_id" shell am start \
   -a android.intent.action.OPEN_DOCUMENT \
@@ -62,6 +62,6 @@ adb -s "$device_id" shell am start \
   --eu android.provider.extra.INITIAL_URI \
   content://com.android.externalstorage.documents/document/primary%3ADownload%2Fautomobile-media >/dev/null
 adb -s "$device_id" shell uiautomator dump "$media_dump" >/dev/null
-adb -s "$device_id" shell cat "$media_dump" | grep -Fq "${media_name}"
+adb -s "$device_id" shell cat "$media_dump" | grep -F "${media_name}" >/dev/null
 
 echo "putAppFile picker smoke passed for $device_id"

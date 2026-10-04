@@ -272,16 +272,43 @@ class AutoMobileAnrTest {
     val firstLaunch = BroadcastContext(context)
     AutoMobileAnr.initialize(firstLaunch)
     assertEquals(2, firstLaunch.attempts)
+    for ((pid, timestamp) in listOf(101 to 20L, 102 to 30L)) {
+      assertEquals(
+        1,
+        logger.entries.count {
+          it.level == "D" && it.message == "Detected NEW previous ANR: pid=$pid, time=$timestamp"
+        },
+      )
+      assertEquals(
+        0,
+        logger.entries.count {
+          it.level == "D" &&
+            it.message ==
+              "Skipping already reported ANR: time=$timestamp, identity=${identity(pid, context.packageName)}"
+        },
+      )
+    }
     logger.clear()
     AutoMobileAnr.reset()
     val secondLaunch = BroadcastContext(context)
     AutoMobileAnr.initialize(secondLaunch)
 
     assertEquals(0, secondLaunch.attempts)
-    for (pid in 101..102) {
-      val perAnrLogs = logger.entries.filter { it.message.contains("pid=$pid,") }
-      assertTrue(perAnrLogs.size <= 1)
-      assertTrue(perAnrLogs.all { it.message.startsWith("Skipping already reported ANR") })
+    for ((pid, timestamp) in listOf(101 to 20L, 102 to 30L)) {
+      assertEquals(
+        1,
+        logger.entries.count {
+          it.level == "D" &&
+            it.message ==
+              "Skipping already reported ANR: time=$timestamp, identity=${identity(pid, context.packageName)}"
+        },
+      )
+      assertEquals(
+        0,
+        logger.entries.count {
+          it.level == "D" && it.message == "Detected NEW previous ANR: pid=$pid, time=$timestamp"
+        },
+      )
     }
   }
 

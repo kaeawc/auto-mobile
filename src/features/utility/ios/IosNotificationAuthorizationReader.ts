@@ -242,7 +242,30 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
       };
     }
 
-    const settings = await this.decodeNestedBlob(Buffer.from(base64Blob, "base64"));
+    let settings: BulletinBoardSettings;
+    try {
+      settings = await this.decodeNestedBlob(Buffer.from(base64Blob, "base64"));
+    } catch (error) {
+      logger.warn(
+        `[iOS] Could not read notification authorization state for ${bundleId}: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        supported: true,
+        allowed: null,
+        method: "ios_bulletinboard_plist",
+        warning: `Could not read notification authorization state for ${bundleId} (notification section unreadable)`,
+      };
+    }
+
+    if (settings.authorizationStatus === undefined) {
+      return {
+        supported: true,
+        allowed: null,
+        method: "ios_bulletinboard_plist",
+        warning: `Notification section for ${bundleId} had no authorization status`,
+      };
+    }
 
     const status =
       settings.authorizationStatus !== undefined && settings.authorizationStatus < UN_AUTH.length

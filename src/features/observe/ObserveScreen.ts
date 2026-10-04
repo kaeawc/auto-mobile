@@ -115,7 +115,11 @@ import {
   WAIT_BUTTON_RESOURCE_ID,
 } from "../../utils/androidSystemUiAnr";
 import { DaemonState } from "../../daemon/daemonState";
-import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
+import {
+  AndroidDisplayReadError,
+  ObservedAndroidDisplayCache,
+  observedIosDisplay,
+} from "./ObservationDisplay";
 import { displayTransitions, type DisplayCaptureStart } from "./DisplayTransition";
 import {
   assertAllDisplayObserveSupported,
@@ -936,6 +940,7 @@ export class RealObserveScreen implements ObserveScreen {
       return false;
     }
     return (
+      error instanceof AndroidDisplayReadError ||
       error instanceof StaleDisplayError ||
       (context.signal?.aborted === true && error === context.signal.reason)
     );

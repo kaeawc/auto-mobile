@@ -42,8 +42,19 @@ describe("ToolRegistry.getToolDefinitions", () => {
       };
       const initialChoices = choices();
       expect(initialChoices).toEqual(["optionalTool"]);
+      expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toEqual([
+        "setToolEnabled",
+        "optionalTool",
+      ]);
+      for (const tool of ToolRegistry.getToolDefinitions()) {
+        expect(ToolRegistry.getTool(tool.name)).toBeDefined();
+      }
       setDebugModeEnabled(true);
       expect(choices()).toEqual(["debugTool", "optionalTool"]);
+      expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toContain("debugTool");
+      for (const tool of ToolRegistry.getToolDefinitions()) {
+        expect(ToolRegistry.getTool(tool.name)).toBeDefined();
+      }
       expect(initialChoices).toEqual(["optionalTool"]);
       setDebugModeEnabled(false);
       expect(choices()).toEqual(["optionalTool"]);

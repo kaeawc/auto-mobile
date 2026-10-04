@@ -1,5 +1,6 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  AndroidDisplayReadError,
   ObservedAndroidDisplayCache,
   observedAndroidDisplay,
   observedIosDisplay,
@@ -45,6 +46,96 @@ import {
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "simulator" };
 
+describe("Android observe disconnected fold panels", () => {
+  const inner = "4619827259835644672";
+  const cover = "4619827551948147201";
+  const device: BootedDevice = {
+    ...android,
+    deviceId: "observe-disconnected-fold",
+    displays: {
+      panels: [
+        { key: inner, role: "inner", sizePx: { width: 2076, height: 2152 } },
+        { key: cover, role: "cover", sizePx: { width: 1080, height: 2364 } },
+      ],
+      postures: ["closed", "opened"],
+    },
+  };
+  const captures = {
+    opened: readFileSync(
+      new URL("../../fixtures/android-fold-displays/fold-open-get-displays.txt", import.meta.url),
+      "utf8",
+    ),
+    closed: readFileSync(
+      new URL("../../fixtures/android-fold-displays/fold-closed-get-displays.txt", import.meta.url),
+      "utf8",
+    ),
+  };
+  const message = (
+    key: string,
+    role: string,
+    connectedKey: string,
+    connectedRole: string,
+    posture: string,
+  ) =>
+    `Display "${key}" (${role}) is not connected in the current posture. Connected panels: ${connectedKey} (${connectedRole}). Target a connected panel, omit display, or use display: "active"; to make this panel available, change the device posture with setPosture {posture: "${posture}"}.`;
+  async function observe(posture: keyof typeof captures, display: string) {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: captures[posture], stderr: "" });
+    const screen = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(adb),
+      { viewHierarchy: new FakeViewHierarchy(), cacheStore: new FakeObserveCacheStore(timer) },
+      timer,
+    );
+    try {
+      return await screen.execute({ display, skipScreenshot: true, skipBackStack: true });
+    } finally {
+      ObservedAndroidDisplayCache.release(device.deviceId);
+      displayTransitions.reset(device.deviceId);
+      resetObserveCacheStore();
+    }
+  }
+
+  test("opened observe cover uses the action message and only the connected inner", async () => {
+    await expect(observe("opened", "cover")).rejects.toThrow(
+      message(cover, "cover", inner, "inner", "closed"),
+    );
+  });
+
+  test("closed pinned inner carries the connected cover and posture and pin remedies", async () => {
+    const error = await runWithSelectedDisplayPin(
+      { pin: "inner", inventory: device.displays },
+      () => observe("closed", "inner"),
+    ).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(PinnedDisplayUnavailableError);
+    expect(error).toHaveProperty(
+      "message",
+      message(inner, "inner", cover, "cover", "opened") +
+        " Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly.",
+    );
+    expect(error).toHaveProperty("details", {
+      pin: "inner",
+      availablePanels: [{ key: cover, role: "cover" }],
+    });
+  });
+
+  test.each(["opened", "closed"] as const)(
+    "connected %s panel resolves to logical zero",
+    async (posture) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cmd display get-displays", { stdout: captures[posture], stderr: "" });
+      expect(
+        await new ObservedAndroidDisplayCache(new FakeTimer()).logicalIdForPanel(
+          device,
+          adb,
+          posture === "opened" ? inner : cover,
+        ),
+      ).toBe(0);
+    },
+  );
+});
+
 describe("Android display-list read failures", () => {
   const device: BootedDevice = {
     ...android,
@@ -59,6 +150,125 @@ describe("Android display-list read failures", () => {
   };
   const coverDisplay =
     'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}';
+  const innerDisplay =
+    'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}';
+
+  beforeEach(() => ObservedAndroidDisplayCache.release(device.deviceId));
+  afterEach(() => ObservedAndroidDisplayCache.release(device.deviceId));
+
+  test("a failed first read is retried immediately instead of caching the fallback", async () => {
+    const timer = new FakeTimer();
+    const cache = new ObservedAndroidDisplayCache(timer);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    const read = spyOn(adb, "executeCommand").mockImplementationOnce(() => {
+      throw new Error("first read failed synchronously");
+    });
+    try {
+      expect((await cache.resolve(device, adb)).display).toMatchObject({
+        key: "0",
+        role: "unknown",
+      });
+      expect((await cache.resolve(device, adb)).display).toMatchObject({
+        key: "cover",
+        role: "cover",
+      });
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("a failed first read does not become the last-known display", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("cmd display get-displays", new Error("timeout"));
+    expect((await cache.resolve(device, adb)).display.key).toBe("0");
+    // clear() preserves last-known state, so a changed inventory exposes a stored fallback.
+    ObservedAndroidDisplayCache.clear(device.deviceId);
+    const singlePanel = {
+      ...device,
+      displays: { ...device.displays!, panels: [device.displays!.panels[1]] },
+    };
+    expect((await cache.resolve(singlePanel, adb)).display.key).toBe("cover");
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+  });
+
+  test.each(["expired", "forced"] as const)(
+    "a failed %s read retains the previous value but the next call retries immediately",
+    async (mode) => {
+      const timer = new FakeTimer();
+      const cache = new ObservedAndroidDisplayCache(timer);
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+      const previous = await cache.resolve(device, adb);
+      timer.advanceTime(mode === "expired" ? 5_000 : 1_000);
+      const read = spyOn(adb, "executeCommand").mockRejectedValueOnce(new Error("timeout"));
+      try {
+        const failed = await cache.resolve(device, adb, undefined, mode === "forced");
+        expect(failed).toEqual(previous);
+        expect(failed).not.toBe(previous);
+        expect(failed.display).not.toBe(previous.display);
+        adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+        expect((await cache.resolve(device, adb)).display.key).toBe("inner");
+        expect(read).toHaveBeenCalledTimes(2);
+      } finally {
+        read.mockRestore();
+      }
+    },
+  );
+
+  test("a successful display read is cached until exactly five seconds", async () => {
+    const timer = new FakeTimer();
+    const cache = new ObservedAndroidDisplayCache(timer);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    expect((await cache.resolve(device, adb)).display.key).toBe("cover");
+    adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+    timer.advanceTime(4_999);
+    expect((await cache.resolve(device, adb)).display.key).toBe("cover");
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+    timer.advanceTime(1);
+    expect((await cache.resolve(device, adb)).display.key).toBe("inner");
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+  });
+
+  test("a read-only failed probe preserves the owner's cache and its expiry", async () => {
+    const timer = new FakeTimer();
+    const owner = new ObservedAndroidDisplayCache(timer);
+    const observer = new ObservedAndroidDisplayCache(timer, true);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    const previous = await owner.resolve(device, adb);
+    timer.advanceTime(1_000);
+    const read = spyOn(adb, "executeCommand").mockRejectedValueOnce(new Error("timeout"));
+    try {
+      expect(await observer.resolve(device, adb, undefined, true)).toEqual(previous);
+      adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+      expect(await owner.resolve(device, adb)).toEqual(previous);
+      expect(read).toHaveBeenCalledTimes(1);
+      timer.advanceTime(4_000);
+      expect((await owner.resolve(device, adb)).display.key).toBe("inner");
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("no-panel discovery keeps its default display without a shell read", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    const adb = new FakeAdbExecutor();
+    adb.setDefaultError(new Error("must not probe"));
+    const singleScreen = { ...device, displays: undefined };
+    const first = await cache.resolve(singleScreen, adb);
+    expect(first).toEqual({
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      logicalId: 0,
+    });
+    expect(await cache.resolve(singleScreen, adb)).toEqual(first);
+    expect(await cache.resolve(singleScreen, adb, undefined, true)).toEqual(first);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
 
   test("a failed read rejects panel selection with a retryable ActionableError", async () => {
     const adb = new FakeAdbExecutor();
@@ -70,6 +280,7 @@ describe("Android display-list read failures", () => {
         .logicalIdForPanel(device, adb, "inner")
         .catch((error: unknown) => error);
       expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toBeInstanceOf(AndroidDisplayReadError);
       expect(error).not.toBeInstanceOf(DisplaySelectionError);
       expect(error).toHaveProperty(
         "message",
@@ -95,7 +306,9 @@ describe("Android display-list read failures", () => {
       expect(error).toBeInstanceOf(DisplaySelectionError);
       expect(error).toHaveProperty(
         "message",
-        'Display panel "inner" is not currently connected. Choose an active panel and retry.',
+        expect.stringContaining(
+          'Display "inner" (inner) is not connected in the current posture. Connected panels:',
+        ),
       );
     },
   );

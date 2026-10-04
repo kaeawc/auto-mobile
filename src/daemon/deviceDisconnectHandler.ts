@@ -50,7 +50,7 @@ export interface DeviceDisconnectPoolPort {
   ): Promise<void>;
   refreshEmulatorLossRecoverySettlement(
     incidentId: string | undefined,
-    fallbackOutcome: "exhausted",
+    fallbackOutcome: "exhausted" | "not-attempted",
   ): Promise<void>;
   getRecoveryPolicy(): DeviceRecoveryPolicy;
   isAndroidEmulatorActiveRelaunchEligible(
@@ -75,6 +75,7 @@ export class DeviceDisconnectHandler {
     deviceId: string,
     device: PooledDevice | undefined,
     mayBeStaleSignal: boolean,
+    onRemovalAttempt: () => void,
   ): Promise<boolean> {
     const markerIncarnation = this.pool.getIntentionalShutdownMarker(deviceId);
     if (markerIncarnation === undefined) {
@@ -109,13 +110,14 @@ export class DeviceDisconnectHandler {
     if (device && current && current !== device) {
       return true;
     }
-    await this.consumeIntentionalShutdownAndRemove(deviceId, device);
+    await this.consumeIntentionalShutdownAndRemove(deviceId, device, onRemovalAttempt);
     return true;
   }
 
   private async consumeIntentionalShutdownAndRemove(
     deviceId: string,
     device: PooledDevice | undefined,
+    onRemovalAttempt: () => void,
   ): Promise<void> {
     if (device?.sessionId) {
       // removeDevice would refuse an assigned entry; keep the marker so it still
@@ -126,6 +128,7 @@ export class DeviceDisconnectHandler {
       return;
     }
     this.pool.deleteIntentionalShutdownMarker(deviceId);
+    onRemovalAttempt();
     await this.pool.removeDevice(deviceId, true, device);
   }
 
@@ -135,6 +138,7 @@ export class DeviceDisconnectHandler {
     mayBeStaleSignal: boolean,
     incidentId: string | undefined,
   ): Promise<boolean> {
+    let fallbackOutcome: "exhausted" | "not-attempted" = "exhausted";
     try {
       if (device && this.pool.isReservedForShutdown(device)) {
         // killDevice owns this captured incarnation until its bounded disappearance
@@ -142,9 +146,17 @@ export class DeviceDisconnectHandler {
         // monitor signal must not release its session or consume its marker.
         return true;
       }
-      return await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal);
+      return await this.applyIntentionalShutdownOnDisconnect(
+        deviceId,
+        device,
+        mayBeStaleSignal,
+        () => {
+          // Only intentional removal failures skip recovery; earlier pool checks may throw.
+          fallbackOutcome = "not-attempted";
+        },
+      );
     } catch (error) {
-      await this.refreshFailedDisconnectRecovery(deviceId, incidentId, error);
+      await this.refreshFailedDisconnectRecovery(deviceId, incidentId, error, fallbackOutcome);
       this.pool.settleEmulatorLossIncident(incidentId);
       throw error;
     }
@@ -221,7 +233,7 @@ export class DeviceDisconnectHandler {
       await this.completeRecoveryIfNotAttempted(incidentId, recoveryWasAttempted);
     } catch (error) {
       // Plain reboot has no deferred incident owner; preserve any coordinator outcome.
-      await this.refreshFailedDisconnectRecovery(device.id, incidentId, error);
+      await this.refreshFailedDisconnectRecovery(device.id, incidentId, error, "exhausted");
       throw error;
     } finally {
       this.pool.settleEmulatorLossIncident(incidentId);
@@ -232,9 +244,10 @@ export class DeviceDisconnectHandler {
     deviceId: string,
     incidentId: string | undefined,
     error: unknown,
+    fallbackOutcome: "exhausted" | "not-attempted",
   ): Promise<void> {
     try {
-      await this.pool.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
+      await this.pool.refreshEmulatorLossRecoverySettlement(incidentId, fallbackOutcome);
     } catch (settlementError) {
       // Diagnostics persistence must not replace the original cleanup failure.
       logger.warn(

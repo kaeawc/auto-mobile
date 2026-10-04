@@ -514,6 +514,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const result = await proxy.readResource(uri, { signal: extra.signal });
       return result;
     } catch (error) {
+      extra.signal.throwIfAborted();
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);
       }

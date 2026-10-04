@@ -384,6 +384,7 @@ export class DaemonToolUnavailableError extends Error {
     client: BuildIdentity;
     daemon: BuildIdentity;
     buildMismatch?: boolean;
+    daemonRejection?: string;
   }) {
     const matchingReason =
       params.client.buildId !== "unknown" &&
@@ -397,15 +398,17 @@ export class DaemonToolUnavailableError extends Error {
     super(
       params.buildMismatch === false
         ? `Tool "${params.toolName}" is advertised by this AutoMobile client but is unavailable in ` +
-            `the connected daemon's current configuration for this session (for example, a flag-gated ` +
-            `tool). client build=${describeBuildIdentity(params.client)}, ` +
+            `the connected daemon's current configuration for this session. ` +
+            `${params.daemonRejection ? `Daemon rejection: ${params.daemonRejection}. ` : ""}` +
+            `client build=${describeBuildIdentity(params.client)}, ` +
             `daemon build=${describeBuildIdentity(params.daemon)}. ${matchingReason}`
         : `Tool "${params.toolName}" is advertised by this AutoMobile client but the connected daemon ` +
             `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
             `wrong-build daemon is serving this frontend. ` +
             `client build=${describeBuildIdentity(params.client)}, ` +
             `daemon build=${describeBuildIdentity(params.daemon)}. ` +
-            `Restart the daemon from this checkout to resolve the skew.`,
+            `Restart the daemon from this checkout to resolve the skew.` +
+            `${params.daemonRejection ? ` Daemon rejection: ${params.daemonRejection}.` : ""}`,
     );
     this.name = "DaemonToolUnavailableError";
     this.toolName = params.toolName;
@@ -2706,7 +2709,7 @@ export class DaemonMcpProxy {
       // tool this frontend advertises — surface an actionable error naming both
       // builds instead of the opaque -32603.
       if (this.isUnknownToolError(error)) {
-        throw await this.toolUnavailableError(name);
+        throw await this.toolUnavailableError(name, errorMessage(error));
       }
       throw error;
     } finally {
@@ -3781,7 +3784,7 @@ export class DaemonMcpProxy {
     return this.toolAcceptsSessionUuid(name);
   }
 
-  private async toolUnavailableError(name: string): Promise<Error> {
+  private async toolUnavailableError(name: string, daemonRejection?: string): Promise<Error> {
     let daemonIdentity: BuildIdentity = { entryScript: "", buildId: "unknown" };
     try {
       const status = await this.daemonManager.status();
@@ -3800,6 +3803,7 @@ export class DaemonMcpProxy {
       client: this.buildIdentity,
       daemon: daemonIdentity,
       buildMismatch: !buildIdentitiesMatch(this.buildIdentity, daemonIdentity),
+      daemonRejection,
     });
   }
 

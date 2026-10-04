@@ -12,6 +12,8 @@ import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
   type OpenEmulatorLossIncidentInput,
+  type EmulatorLossRecoverySettlement,
+  type EmulatorRecoveryOutcome,
 } from "../../src/daemon/emulatorLossIncident";
 import {
   SessionManager,
@@ -291,6 +293,11 @@ interface DaemonDisconnectInternals {
 interface DaemonDeferredRecoverySweepInternals {
   deferredSessionRecoverySweeps: Set<Promise<void>>;
   trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
+}
+
+interface DevicePoolProcessExitInternals {
+  trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
+  emulatorLossRecoverySettlements: Map<string, Promise<void>>;
 }
 
 interface DevicePoolRecoveryInternals {
@@ -979,7 +986,7 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   await incidents.writeStarted.promise;
   let failure: unknown;
   try {
-    await pool.bindOrReuseDeviceSession(
+    const binding = pool.bindOrReuseDeviceSession(
       "new-session",
       original.deviceId,
       "android",
@@ -987,16 +994,177 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
       child,
       original,
     );
-  } catch (error) {
-    failure = error;
+    await drainUntil(() => timer.getPendingTimeouts().includes(1_000), {
+      description: "bind armed the shared incident deadline",
+    });
+    // Keep main's ordering: bind fails before the recorder's write is released.
+    timer.advanceTime(1_000);
+    try {
+      await binding;
+    } catch (error) {
+      failure = error;
+    }
+    expect(pool.getDevice(original.deviceId)).toBeNull();
   } finally {
     incidents.releaseWrite.resolve();
     await drainUntilQuiescent(timer);
   }
+  expect(await incidents.list()).toHaveLength(1);
   expect(failure).toBeInstanceOf(Error);
   expect(String(failure)).toContain("exited before process tracking completed");
   expect(pool.getDevice(original.deviceId)).toBeNull();
   expect(sessions.getSession("new-session")).toBeNull();
+});
+
+function exitedChild(): ChildProcess & { exitCode: number | null } {
+  return Object.assign(new EventEmitter(), {
+    exitCode: null as number | null,
+    signalCode: null,
+    stdout: null,
+    stderr: null,
+  }) as ChildProcess & { exitCode: number | null };
+}
+
+async function setupProcessExitPool(
+  onLoss: boolean,
+  continuity: boolean,
+  incidents?: EmulatorLossIncidentStore,
+  manager = new FakeDeviceManager(),
+) {
+  const timer = new FakeTimer();
+  const store = incidents ?? new InMemoryEmulatorLossIncidentStore(timer);
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  sessions.stopCleanupTimer();
+  const pool = new DevicePool(
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer,
+      deviceManager: manager,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      emulatorLossIncidentStore: store,
+      recoveryPolicy: { onLoss, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: continuity,
+      retryExecutor: new DefaultRetryExecutor(timer),
+    }),
+  );
+  manager.bootedDevices = [original];
+  await pool.addDevice(original, image);
+  const child = exitedChild();
+  const internals = pool as unknown as DevicePoolProcessExitInternals;
+  await internals.trackStartedDeviceProcess(original, child);
+  await pool.bindOrReuseDeviceSession(
+    "session",
+    original.deviceId,
+    "android",
+    image,
+    child,
+    original,
+  );
+  return { timer, store, sessions, pool, manager, child, internals };
+}
+
+test.each([
+  { onLoss: true, continuity: true, listed: true, outcome: "recovered", state: "active" },
+  {
+    onLoss: false,
+    continuity: true,
+    listed: false,
+    outcome: "not-attempted",
+    state: "awaiting-device",
+  },
+  { onLoss: false, continuity: false, listed: false, outcome: "not-attempted", state: "released" },
+] as const)("both process tracks preserve main's settlement fields: %j", async (config) => {
+  const { timer, store, sessions, manager, child, internals } = await setupProcessExitPool(
+    config.onLoss,
+    config.continuity,
+  );
+  expect(child.listenerCount("exit")).toBe(2);
+  if (!config.listed) {
+    manager.bootedDevices = [];
+  }
+  child.exitCode = 1;
+  child.emit("exit", 1, null);
+  await drainUntilQuiescent(timer);
+  const rows = await store.list();
+  expect(rows).toHaveLength(1);
+  expect(internals.emulatorLossRecoverySettlements.size).toBe(0);
+  for (const row of rows) {
+    expect(row).toMatchObject({
+      deviceId: original.deviceId,
+      avdName: original.name,
+      detectionPath: "watched-process-exit",
+      processExit: { code: 1, signal: null },
+      session: { sessionUuid: "session", state: config.state },
+      recovery: {
+        outcome: config.outcome,
+        policy: { onLoss: config.onLoss, maxAttempts: 1 },
+        attempts: [],
+      },
+    });
+    expect(row.replacementDeviceId).toBeUndefined();
+  }
+  expect(sessions.getSession("session")?.assignedDevice ?? null).toBe(
+    config.listed ? original.deviceId : null,
+  );
+});
+
+test("a late dead-child track records a fresh loss and keeps its settlement guard armed", async () => {
+  class GatedExhaustedStore extends InMemoryEmulatorLossIncidentStore {
+    readonly completed = Promise.withResolvers<string>();
+    readonly release = Promise.withResolvers<void>();
+    override async completeRecovery(
+      id: string,
+      outcome: EmulatorRecoveryOutcome,
+      settlement?: EmulatorLossRecoverySettlement,
+    ) {
+      await super.completeRecovery(id, outcome, settlement);
+      if (outcome === "exhausted") {
+        this.completed.resolve(id);
+        await this.release.promise;
+      }
+    }
+  }
+  class FailingRelaunchManager extends FakeDeviceManager {
+    override async startDevice(): Promise<ChildProcess> {
+      throw new Error("relaunch failed");
+    }
+  }
+  const store = new GatedExhaustedStore(new FakeTimer());
+  const { timer, manager, child, internals } = await setupProcessExitPool(
+    true,
+    true,
+    store,
+    new FailingRelaunchManager(),
+  );
+  child.exitCode = 1;
+  child.emit("exit", 1, null);
+  await drainUntilQuiescent(timer);
+  const [first] = await store.list();
+  expect(first).toMatchObject({ recovery: { outcome: "recovered" }, session: { state: "active" } });
+  expect(internals.emulatorLossRecoverySettlements.size).toBe(0);
+  manager.bootedDevices = [];
+  const late = internals
+    .trackStartedDeviceProcess(original, child)
+    .catch((error: unknown) => error);
+  try {
+    const secondId = await store.completed.promise;
+    // An exhausted outcome is visible before cleanup finishes. The early-error
+    // guard must still see this new row as pending throughout that interval.
+    expect(internals.emulatorLossRecoverySettlements.has(secondId)).toBe(true);
+    expect(secondId).not.toBe(first.id);
+    expect(await store.get(first.id)).toEqual(first);
+  } finally {
+    store.release.resolve();
+    await late;
+    await drainUntilQuiescent(timer);
+  }
+  const rows = await store.list();
+  expect(rows).toHaveLength(2);
+  expect(await store.get(first.id)).toEqual(first);
+  expect(rows[0]).toMatchObject({
+    recovery: { outcome: "exhausted" },
+    session: { sessionUuid: "session", state: "awaiting-device" },
+  });
+  expect(internals.emulatorLossRecoverySettlements.size).toBe(0);
 });
 
 async function setupSettledRestart(outcome: "not-attempted" | "exhausted" = "not-attempted") {

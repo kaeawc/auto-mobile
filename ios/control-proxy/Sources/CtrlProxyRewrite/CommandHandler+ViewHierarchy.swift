@@ -3,12 +3,19 @@ import Foundation
 extension CommandHandler {
     // MARK: - View Hierarchy
 
-    /// Record only the raw filtered capture: SDK refreshes enrich it at publication time.
-    /// The actor hop is non-throwing and changes no polling or broadcast state.
     func captureHierarchy(disableAllFiltering: Bool = false) async throws -> ViewHierarchy {
-        let hierarchy = try await elementLocator.getViewHierarchy(disableAllFiltering: disableAllFiltering)
-        if !disableAllFiltering {
-            await hierarchyDebouncer?.recordCommandCapture(hierarchy)
+        try await captureAndRecordHierarchy(disableAllFiltering: disableAllFiltering)
+    }
+
+    /// Capture and record in one actor turn, with no suspension between the two.
+    /// Record only the raw filtered capture: SDK refreshes enrich it at publication time.
+    /// Recording is non-throwing and changes no polling or broadcast state.
+    @MainActor
+    private func captureAndRecordHierarchy(disableAllFiltering: Bool) throws -> ViewHierarchy {
+        let captureSequence = disableAllFiltering ? nil : hierarchyDebouncer?.beginCapture()
+        let hierarchy = try elementLocator.getViewHierarchy(disableAllFiltering: disableAllFiltering)
+        if let captureSequence {
+            hierarchyDebouncer?.recordCommandCapture(hierarchy, captureSequence: captureSequence)
         }
         return hierarchy
     }

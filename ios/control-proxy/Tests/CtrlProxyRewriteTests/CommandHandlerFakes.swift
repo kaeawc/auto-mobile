@@ -12,6 +12,7 @@ final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
     var appState: ObservedAppState = .notRunning
     private(set) var filteringRequests: [Bool] = []
     private let hierarchy: ViewHierarchy
+    var onCapture: (() throws -> Void)?
 
     init(hierarchy: ViewHierarchy = RewriteFakeElementLocator.defaultHierarchy) {
         self.hierarchy = hierarchy
@@ -32,6 +33,7 @@ final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
 
     func getViewHierarchy(disableAllFiltering: Bool) throws -> ViewHierarchy {
         filteringRequests.append(disableAllFiltering)
+        try onCapture?()
         return hierarchy
     }
 
@@ -49,8 +51,14 @@ final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
 final class RewriteFakeHierarchyDebouncer: HierarchyDebouncing {
     private(set) var recordedCaptures: [ViewHierarchy] = []
     private(set) var pollIntervals: [Int64] = []
+    private var captureSequence: UInt64 = 0
 
-    func recordCommandCapture(_ hierarchy: ViewHierarchy) {
+    func beginCapture() -> UInt64 {
+        captureSequence += 1
+        return captureSequence
+    }
+
+    func recordCommandCapture(_ hierarchy: ViewHierarchy, captureSequence _: UInt64) {
         recordedCaptures.append(hierarchy)
     }
 

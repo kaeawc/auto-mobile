@@ -9,6 +9,9 @@ import os
 /// `peek()`, or `snapshot(_:)`. A task-local UUID carries the active scope across actor hops, and
 /// the lock protects scope state and the shared completed-root/debounce pool.
 final class PerfProvider: PerfTracking {
+    /// Keep only the newest roots so background polling cannot grow the pool while a client is idle.
+    static let maximumCompletedRoots = 100
+
     private struct Interval {
         let name: String
         let startTime: Int64
@@ -143,7 +146,10 @@ final class PerfProvider: PerfTracking {
         scope.intervals[index].endTime = now
         guard scope.stack.isEmpty else { return }
 
-        completed.append(timing(at: index, in: scope.intervals, now: now))
+        completed.append(
+            timing(at: index, in: scope.intervals, now: now),
+            enforcingMaximumSize: Self.maximumCompletedRoots
+        )
         scope.intervals.removeAll(keepingCapacity: true)
     }
 

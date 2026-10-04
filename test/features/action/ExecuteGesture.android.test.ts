@@ -112,6 +112,7 @@ describe("ExecuteGesture Android swipe", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
+    expect(result.outcomeIndeterminate).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
@@ -126,6 +127,7 @@ describe("ExecuteGesture Android swipe", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
+    expect(result.outcomeIndeterminate).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 

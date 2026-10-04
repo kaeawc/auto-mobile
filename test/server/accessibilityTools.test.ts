@@ -97,6 +97,47 @@ describe("accessibilityTools", () => {
 
   describe("TalkBack prompt reporting", () => {
     test.each([true, false])(
+      "passes through a failure reason when present: %s",
+      async (hasReason) => {
+        const reasonFields = hasReason
+          ? {
+              reason:
+                "TalkBack requested enabled but observed disabled after 1500ms of confirmation waits",
+            }
+          : {};
+        const promptFields = {
+          warning: "System permission prompt; nothing was tapped",
+          blockingPrompt: {
+            kind: "runtime-permission" as const,
+            package: "com.google.android.permissioncontroller",
+            activity:
+              "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+          },
+        };
+        const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
+          new FakeAdbExecutor(),
+        );
+        const toggle = spyOn(TalkBackToggle.prototype, "toggle").mockResolvedValue({
+          supported: true,
+          applied: false,
+          currentState: false,
+          ...reasonFields,
+          ...promptFields,
+        });
+        try {
+          registerAccessibilityTools();
+          const response = await accessibilityHandler()(ANDROID_DEVICE, { talkback: hasReason });
+          const expected = { enabled: false, service: "unknown", ...reasonFields, ...promptFields };
+          expect(response).toHaveProperty("structuredContent", expected);
+          expect(accessibilityStateSchema.parse(expected)).toEqual(expected);
+        } finally {
+          toggle.mockRestore();
+          factory.mockRestore();
+        }
+      },
+    );
+
+    test.each([true, false])(
       "threads optional prompt fields when present: %s",
       async (hasPrompt) => {
         const blockingPrompt = {

@@ -152,6 +152,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   override fun executeSQL(databasePath: String, query: String): SQLExecutionResult {
     synchronized(databaseLock) {
       val trimmedQuery = query.trim()
+      requireSingleStatement(trimmedQuery)
       val (returnsRows, readOnly) = classifySQL(stripLeadingSqlComments(trimmedQuery))
 
       return if (returnsRows) {
@@ -167,6 +168,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   internal fun executeReadOnlySQL(databasePath: String, query: String): SQLExecutionResult.Query {
     synchronized(databaseLock) {
       val trimmedQuery = query.trim()
+      requireSingleStatement(trimmedQuery)
       val (_, classifiedReadOnly) = classifySQL(stripLeadingSqlComments(trimmedQuery))
       if (!classifiedReadOnly) throw DatabaseError.MutationNotAllowed()
 
@@ -447,7 +449,8 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       while (query.getOrNull(index)?.let(::isSqlTriviaWhitespace) == true) index++
       when {
         query.startsWith("--", index) -> {
-          val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
+          // SQLite line comments end at LF; a bare CR remains part of the comment.
+          val lineEnd = query.indexOf('\n', startIndex = index + 2)
           if (lineEnd < 0) return query.length
           index = lineEnd + 1
         }
@@ -522,74 +525,146 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     keywords: List<String>,
     requireCompletedGroupSinceLastComma: Boolean = false,
   ): Pair<String, Int>? {
-    var depth = 0
     var completedGroupSinceLastComma = false
-    var i = startIndex
-    var inSingleQuote = false
-    var inDoubleQuote = false
-    var inBacktickQuote = false
-    var inBracketQuote = false
-    var inLineComment = false
-    var inBlockComment = false
-
-    while (i < query.length) {
-      val char = query[i]
-      val next = query.getOrNull(i + 1)
-
+    var result: Pair<String, Int>? = null
+    scanSqlTokens(query, startIndex) { token, index, depth ->
       when {
-        inLineComment -> if (char == '\n' || char == '\r') inLineComment = false
-        inBlockComment -> {
-          if (char == '*' && next == '/') {
-            inBlockComment = false
-            i++
-          }
-        }
-        inSingleQuote -> {
-          if (char == '\'' && next == '\'') {
-            i++
-          } else if (char == '\'') {
-            inSingleQuote = false
-          }
-        }
-        inDoubleQuote -> {
-          if (char == '"' && next == '"') {
-            i++
-          } else if (char == '"') {
-            inDoubleQuote = false
-          }
-        }
-        inBacktickQuote -> if (char == '`') inBacktickQuote = false
-        inBracketQuote -> if (char == ']') inBracketQuote = false
-        char == '-' && next == '-' -> {
-          inLineComment = true
-          i++
-        }
-        char == '/' && next == '*' -> {
-          inBlockComment = true
-          i++
-        }
-        char == '\'' -> inSingleQuote = true
-        char == '"' -> inDoubleQuote = true
-        char == '`' -> inBacktickQuote = true
-        char == '[' -> inBracketQuote = true
-        char == '(' -> depth++
-        char == ')' && depth > 0 -> {
-          depth--
-          if (depth == 0) completedGroupSinceLastComma = true
-        }
-        char == ',' && depth == 0 -> completedGroupSinceLastComma = false
+        token == ")" && depth == 0 -> completedGroupSinceLastComma = true
+        token == "," && depth == 0 -> completedGroupSinceLastComma = false
         depth == 0 && (!requireCompletedGroupSinceLastComma || completedGroupSinceLastComma) -> {
-          for (keyword in keywords) {
-            if (matchesKeywordAt(query, i, keyword)) {
-              return Pair(keyword, i)
-            }
-          }
+          val keyword = keywords.firstOrNull { token.equals(it, ignoreCase = true) }
+          if (keyword != null) result = Pair(keyword, index)
         }
       }
-      i++
+      result == null
     }
+    return result
+  }
 
-    return null
+  /** Visits unquoted SQL words and punctuation, plus opaque quoted tokens, excluding trivia. */
+  private fun scanSqlTokens(
+    query: String,
+    startIndex: Int,
+    visit: (String, Int, Int) -> Boolean,
+  ) {
+    var index = startIndex
+    var depth = 0
+    while (index < query.length) {
+      index = skipSqlTrivia(query, index) ?: return
+      if (index >= query.length) return
+      val char = query[index]
+      val end =
+        when (char) {
+          '\'',
+          '"',
+          '`',
+          '[' -> readPragmaValueEnd(query, index) ?: query.length
+          '$',
+          '@',
+          ':',
+          '#' -> {
+            var tokenEnd = index + 1
+            while (tokenEnd < query.length) {
+              when {
+                isWordChar(query[tokenEnd]) -> tokenEnd++
+                query.startsWith("::", tokenEnd) -> tokenEnd += 2
+                query[tokenEnd] == '(' && tokenEnd > index + 1 -> {
+                  // SQLite's Tcl-style parameter suffix ends at the first ), not a nested group.
+                  tokenEnd++
+                  while (
+                    tokenEnd < query.length &&
+                      !query[tokenEnd].isWhitespace() &&
+                      query[tokenEnd] != ')'
+                  ) tokenEnd++
+                  if (query.getOrNull(tokenEnd) == ')') tokenEnd++
+                  break
+                }
+                else -> break
+              }
+            }
+            tokenEnd
+          }
+          else -> {
+            var tokenEnd = index + 1
+            if (isWordChar(char)) {
+              while (query.getOrNull(tokenEnd)?.let(::isWordChar) == true) tokenEnd++
+            }
+            tokenEnd
+          }
+        }
+      if (char == '(') depth++
+      if (char == ')' && depth > 0) depth--
+      if (!visit(query.substring(index, end), index, depth)) return
+      index = end
+    }
+  }
+
+  private enum class StatementBoundary {
+    START,
+    EXPLAIN,
+    CREATE,
+    NORMAL,
+    TRIGGER,
+    TRIGGER_SEPARATOR,
+    TRIGGER_END,
+    COMPLETE,
+  }
+
+  private fun requireSingleStatement(query: String) {
+    // android.database.sqlite exposes neither the sqlite3_prepare tail nor sqlite3_complete.
+    // Follow sqlite3_complete's lexical boundary rule for CREATE [TEMP] TRIGGER: ; END ;.
+    // END in an expression (including nested CASE expressions) never follows a body separator,
+    // so it cannot terminate the trigger. Standalone BEGIN/END use ordinary statement boundaries.
+    var state = StatementBoundary.START
+    scanSqlTokens(query, 0) { token, _, depth ->
+      if (depth > 0 && state != StatementBoundary.COMPLETE) return@scanSqlTokens true
+      state =
+        // Compare states directly to avoid a public synthetic enum-switch mapping class.
+        when {
+          state == StatementBoundary.START ->
+            when (token.uppercase()) {
+              ";" -> StatementBoundary.START
+              "EXPLAIN" -> StatementBoundary.EXPLAIN
+              "CREATE" -> StatementBoundary.CREATE
+              else -> StatementBoundary.NORMAL
+            }
+          state == StatementBoundary.EXPLAIN ->
+            when (token.uppercase()) {
+              "CREATE" -> StatementBoundary.CREATE
+              "QUERY",
+              "PLAN" -> StatementBoundary.EXPLAIN
+              ";" -> StatementBoundary.COMPLETE
+              else -> StatementBoundary.NORMAL
+            }
+          state == StatementBoundary.CREATE ->
+            when (token.uppercase()) {
+              "TEMP",
+              "TEMPORARY" -> StatementBoundary.CREATE
+              "TRIGGER" -> StatementBoundary.TRIGGER
+              ";" -> StatementBoundary.COMPLETE
+              else -> StatementBoundary.NORMAL
+            }
+          state == StatementBoundary.NORMAL ->
+            if (token == ";") StatementBoundary.COMPLETE else StatementBoundary.NORMAL
+          state == StatementBoundary.TRIGGER ->
+            if (token == ";") StatementBoundary.TRIGGER_SEPARATOR else StatementBoundary.TRIGGER
+          state == StatementBoundary.TRIGGER_SEPARATOR ->
+            when {
+              token == ";" -> StatementBoundary.TRIGGER_SEPARATOR
+              token.equals("END", ignoreCase = true) -> StatementBoundary.TRIGGER_END
+              else -> StatementBoundary.TRIGGER
+            }
+          state == StatementBoundary.TRIGGER_END ->
+            if (token == ";") StatementBoundary.COMPLETE else StatementBoundary.TRIGGER
+          else -> {
+            if (token != ";") {
+              throw DatabaseError.SqlError("Multiple SQL statements are not supported")
+            }
+            StatementBoundary.COMPLETE
+          }
+        }
+      true
+    }
   }
 
   private fun executeQuery(

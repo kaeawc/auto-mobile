@@ -254,11 +254,11 @@ find_simulator_device() {
     # "iPhone 16" does not also match "iPhone 16e" — the old `[^0-9]` matched
     # the 'e' and could select the 16e, defeating the preference order (#3652).
     local device_name=""
-    if echo "$devices" | grep -qE "iPhone 16([^0-9A-Za-z]|$)"; then
+    if grep -qE "iPhone 16([^0-9A-Za-z]|$)" <<<"${devices}"; then
         device_name=$(echo "$devices" | grep -E "iPhone 16([^0-9A-Za-z]|$)" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
-    elif echo "$devices" | grep -qE "iPhone 15([^0-9A-Za-z]|$)"; then
+    elif grep -qE "iPhone 15([^0-9A-Za-z]|$)" <<<"${devices}"; then
         device_name=$(echo "$devices" | grep -E "iPhone 15([^0-9A-Za-z]|$)" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
-    elif echo "$devices" | grep -q "iPhone"; then
+    elif [[ "${devices}" == *"iPhone"* ]]; then
         device_name=$(echo "$devices" | grep "iPhone" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
     fi
 
@@ -317,7 +317,7 @@ if [ "$NEEDS_DOWNLOAD" = true ]; then
             if [ "$VERBOSE" = true ]; then
                 echo "  $line" >&2
             else
-                if echo "$line" | grep -qE "Downloading|Installing|Progress|%"; then
+                if grep -qE "Downloading|Installing|Progress|%" <<<"${line}"; then
                     printf "\r  %s" "$line" >&2
                 fi
             fi

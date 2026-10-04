@@ -6451,7 +6451,7 @@ export class UnixSocketServer {
           throw new Error("resources/read requires params.uri");
         }
         return await this.withAdmittedBoundSession(this.boundSessionAdmissionArgs(request), () =>
-          mcpClient.readResource({ uri: request.params.uri }, undefined, requestOptions),
+          mcpClient.readResource({ uri: request.params.uri }, requestOptions),
         );
       }
       case "resources/list-templates": {

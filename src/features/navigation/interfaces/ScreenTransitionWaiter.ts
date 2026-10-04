@@ -12,5 +12,5 @@ export interface ScreenTransitionWaiter {
    * @param timeoutMs - Maximum time to wait in milliseconds
    * @returns true if screen was reached, false if timeout
    */
-  waitForScreen(screenName: string, timeoutMs: number): Promise<boolean>;
+  waitForScreen(screenName: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean>;
 }

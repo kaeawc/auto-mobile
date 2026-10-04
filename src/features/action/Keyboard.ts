@@ -421,22 +421,6 @@ export class Keyboard {
       };
     }
 
-    // A heuristic-only "open" (a node whose content-desc matches
-    // delete/enter/emoji/keyboard/shift) is NOT sufficient to send Back: an app
-    // can expose such a control while the IME is genuinely closed, and Back would
-    // then navigate the app or discard a form (#5899). Only issue Back when a real
-    // IME window corroborates the open state, or when window info is genuinely
-    // unavailable — the deliberate fallback for IMEs that never surface an IME
-    // window (e.g. one that exposes a window without bounds, or none at all).
-    const corroborated = state.imeWindowPresent === true || state.windowInfoAvailable !== true;
-    if (!corroborated) {
-      return {
-        success: true,
-        open: false,
-        message: "Keyboard not open (no IME window); skipped Back",
-      };
-    }
-
     throwIfAborted(signal);
     await awaitWhileRequestIsLive(
       this.adb.executeCommand(
@@ -555,7 +539,13 @@ export class Keyboard {
       };
     }
 
-    if (this.detectKeyboardInHierarchy(viewHierarchy)) {
+    // App labels can match the heuristic while the IME is closed (#5899 / #9384).
+    // Trust it only with an IME window (even without bounds), or as a deliberate
+    // fallback when window metadata is unavailable, so detect/open/close agree.
+    if (
+      (imeWindowPresent || !windowInfoAvailable) &&
+      this.detectKeyboardInHierarchy(viewHierarchy)
+    ) {
       return { open: true, source: "heuristic", windowInfoAvailable, imeWindowPresent };
     }
 

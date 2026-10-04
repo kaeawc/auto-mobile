@@ -4,6 +4,147 @@ import { parseArgs } from "../../src/cli/parseArgs";
 const logger = { warn: () => {} };
 
 describe("parseArgs (#4277)", () => {
+  test("video environment defaults are applied before CLI overrides and warnings", () => {
+    const values = {
+      AUTOMOBILE_VIDEO_QUALITY_PRESET: "medium",
+      AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS: "800",
+      AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS: "3.5",
+      AUTOMOBILE_VIDEO_FPS: "20",
+      AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB: "50",
+      AUTOMOBILE_VIDEO_FORMAT: "mp4",
+    };
+    const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, values);
+    try {
+      expect(
+        parseArgs(["--video-quality-preset", "high"], logger, {}).videoRecordingDefaults,
+      ).toEqual({
+        qualityPreset: "high",
+        targetBitrateKbps: 800,
+        maxThroughputMbps: 3.5,
+        fps: 20,
+        maxArchiveSizeMb: 50,
+        format: "mp4",
+      });
+      const logged: string[] = [];
+      parseArgs(
+        [
+          "--video-fps",
+          "bad",
+          "--plan-execution-lock-scope",
+          "bad",
+          "--runner-readiness-timeout-ms",
+          "bad",
+        ],
+        { warn: (message) => logged.push(message) },
+        {},
+      );
+      expect(logged[0]).toBe("Invalid video fps: bad");
+      expect(logged[1]).toBe("Invalid plan execution lock scope: bad. Using default: session");
+      expect(logged[2]).toContain(
+        "Invalid runner readiness timeout: bad; expected an integer from",
+      );
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
+  test.each([
+    {
+      args: ["--port", "0", "--host", "--debug"],
+      warnings: ["Invalid port: 0", "Invalid host: --debug"],
+      expected: { daemonPort: undefined, daemonHost: undefined, debug: true },
+    },
+    {
+      args: [
+        "--a11y-level",
+        "AA",
+        "--a11y-failure-mode",
+        "warn",
+        "--a11y-min-severity",
+        "critical",
+        "--a11y-use-baseline",
+      ],
+      warnings: [],
+      expected: {
+        a11yLevel: "AA",
+        a11yFailureMode: "warn",
+        a11yMinSeverity: "critical",
+        a11yUseBaseline: true,
+      },
+    },
+    {
+      args: [
+        "--video-quality",
+        "high",
+        "--video-target-bitrate-kbps",
+        "2000",
+        "--video-max-throughput-mbps",
+        "2.5",
+        "--video-fps",
+        "30",
+        "--video-format",
+        "mp4",
+        "--video-archive-size-mb",
+        "10.5",
+      ],
+      warnings: [],
+      expected: {
+        videoRecordingDefaults: {
+          qualityPreset: "high",
+          targetBitrateKbps: 2000,
+          maxThroughputMbps: 2.5,
+          fps: 30,
+          format: "mp4",
+          maxArchiveSizeMb: 10.5,
+        },
+      },
+    },
+    {
+      args: ["--video-quality", "bad", "--video-format", "gif"],
+      warnings: ["Invalid video quality preset (cli): bad", "Invalid video format (cli): gif"],
+      expected: { videoRecordingDefaults: {} },
+    },
+    {
+      args: ["--cli", "listApps", "--port", "9000"],
+      warnings: [],
+      expected: { cliArgs: ["listApps", "--port", "9000"], daemonPort: undefined },
+    },
+  ])("characterizes argv $args", ({ args, warnings, expected }) => {
+    const logged: string[] = [];
+    expect(parseArgs(args, { warn: (message) => logged.push(message) }, {})).toMatchObject(
+      expected,
+    );
+    expect(logged).toEqual(warnings);
+  });
+
+  test.each([
+    {
+      args: ["--enable-tool", "tapOn", "--disable-tool", "tapOn"],
+      environment: {},
+      message: "Tool 'tapOn' cannot be both enabled and disabled by CLI defaults.",
+    },
+    {
+      args: [],
+      environment: { AUTOMOBILE_ENABLED_TOOLS: "tapOn", AUTOMOBILE_DISABLED_TOOLS: "tapOn" },
+      message: "Tool 'tapOn' cannot be both enabled and disabled by environment defaults.",
+    },
+    {
+      args: [],
+      environment: { AUTOMOBILE_TOOLSET_OLD: "1" },
+      message:
+        "AUTOMOBILE_TOOLSET_OLD is retired; use AUTOMOBILE_ENABLED_TOOLS or AUTOMOBILE_DISABLED_TOOLS.",
+    },
+  ])("characterizes parsing errors $message", ({ args, environment, message }) => {
+    expect(() => parseArgs(args, logger, environment)).toThrow(message);
+  });
+
   test("parses CLI feature flags without loading the server entrypoint", () => {
     const parsed = parseArgs(["--cli", "listApps", "--embedded-sdk", "--network-mockable"], logger);
 

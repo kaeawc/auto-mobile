@@ -3723,7 +3723,10 @@ export async function runOperationWithinDeadline<T>(
   const operationPromise = runWithAbortSignal(signal, () => operation(signal)).finally(() => {
     operationSettled = true;
   });
-  void operationPromise.catch(() => {});
+  void operationPromise.catch((error) => {
+    // The deadline race owns the failure; this observer also handles late abort rejection.
+    logger.debug(`Provision operation rejection observed: ${errorMessage(error)}`);
+  });
 
   try {
     return await raceWithDeadline(operationPromise, {

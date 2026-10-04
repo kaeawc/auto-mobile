@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "tabBar",
+      "stateKey": "absent",
+      "items": [
+        {
+          "label": "x"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.stateKey"
+}

@@ -266,7 +266,12 @@ export type A11yImeActionResult = ActionTimingResult;
 export type A11ySelectAllResult = BaseResult;
 
 /** Accessibility action result */
-export type A11yActionResult = ActionTimingResult;
+export type A11yActionResult = ActionTimingResult & {
+  /** The request was sent to the runner. */
+  dispatched?: boolean;
+  /** The runner replied, including an explicit refusal. False after a lost reply. */
+  acknowledged?: boolean;
+};
 
 /** Clipboard operation result from accessibility service */
 export interface A11yClipboardResult extends BaseResult {

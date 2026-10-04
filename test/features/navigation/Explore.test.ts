@@ -260,6 +260,146 @@ describe("Explore", () => {
     }
   });
 
+  describe("execute characterization", () => {
+    function executionSeams(instance: Explore) {
+      return instance as unknown as {
+        performInteraction: () => Promise<boolean>;
+        resetToHome: () => Promise<void>;
+        loopDetection: Map<string, number>;
+        previousScreen: string | null;
+        consecutiveNoChangeCount: number;
+      };
+    }
+
+    test("tracks first, unchanged, missing and returning screens only after successful interactions", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      const outcomes = ["A", "A", null, "B", "A", "B", "A"];
+      spyOn(seams, "performInteraction").mockImplementation(async () => {
+        fakeGraph.setCurrentScreenValue(outcomes.shift() ?? null);
+        return true;
+      });
+
+      const result = await explore.execute({ maxInteractions: 20 });
+
+      expect(result.interactionsPerformed).toBe(7);
+      expect(result.stopReason).toBe("Detected navigation loop on screen: A");
+      expect([...seams.loopDetection]).toEqual([
+        ["A", 3],
+        ["B", 2],
+      ]);
+      expect(seams.previousScreen).toBe("A");
+      expect(result.explorationPath).toEqual(["A", "B"]);
+    });
+
+    test("failed interactions retain previous-screen tracking and successful ones reset the no-change streak", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      const outcomes = [true, false, true];
+      spyOn(seams, "performInteraction").mockImplementation(async () => {
+        const success = outcomes.shift() ?? false;
+        fakeGraph.setCurrentScreenValue(success ? "A" : "Ignored");
+        return success;
+      });
+
+      const result = await explore.execute({ maxInteractions: 2 });
+
+      expect(result.interactionsPerformed).toBe(2);
+      expect([...seams.loopDetection]).toEqual([["A", 1]]);
+      expect(seams.previousScreen).toBe("A");
+      expect(seams.consecutiveNoChangeCount).toBe(0);
+    });
+
+    for (const reachesDestination of [true, false]) {
+      test(`validation ${reachesDestination ? "success precedes progress and reset" : "failure skips loop accounting, progress and reset"}`, async () => {
+        fakeGraph.setCurrentScreenValue("A");
+        fakeGraph.addEdge({
+          from: "A",
+          to: "B",
+          timestamp: 0,
+          edgeType: "tool",
+          uiState: { selectedElements: [{ text: "Settings" }] },
+        });
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+        const seams = executionSeams(explore);
+        const events: string[] = [];
+        spyOn(seams, "performInteraction").mockImplementation(async () => {
+          events.push("interact");
+          fakeGraph.setCurrentScreenValue(reachesDestination ? "B" : "Wrong");
+          return true;
+        });
+        spyOn(seams, "resetToHome").mockImplementation(async () => {
+          events.push("reset");
+        });
+        const stats = spyOn(fakeGraph, "getStats");
+
+        const result = await explore.execute(
+          { mode: "validate", maxInteractions: 1, resetToHome: true, resetInterval: 1 },
+          async (_current, _total, message) => {
+            events.push(message);
+            if (message.startsWith("Validating graph:")) {
+              expect(explore.graphTraversalState?.traversedEdges.size).toBe(1);
+              expect(seams.previousScreen).toBe("B");
+            }
+          },
+        );
+
+        expect(result.interactionsPerformed).toBe(1);
+        expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+          actualTo: reachesDestination ? "B" : "Wrong",
+          success: reachesDestination,
+          matchConfidence: 0.9,
+        });
+        expect(events).toEqual(
+          reachesDestination
+            ? [
+                "Starting exploration...",
+                "interact",
+                "Validating graph: 1/1 edges traversed (100%) - 1/1 interactions",
+                "reset",
+              ]
+            : ["Starting exploration...", "interact"],
+        );
+        expect([...seams.loopDetection]).toEqual(reachesDestination ? [["B", 1]] : []);
+        expect(stats).not.toHaveBeenCalled();
+      });
+    }
+
+    test("a rejected progress callback is wrapped before any periodic reset", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      spyOn(seams, "performInteraction").mockResolvedValue(true);
+      const reset = spyOn(seams, "resetToHome").mockResolvedValue(undefined);
+      const error = new Error("progress rejected");
+      const execution = explore.execute(
+        { maxInteractions: 1, resetToHome: true, resetInterval: 1 },
+        async (current) => {
+          if (current > 0) {
+            throw error;
+          }
+        },
+      );
+      await expect(execution).rejects.toThrow("Failed to execute exploration");
+      await expect(execution).rejects.toThrow("progress rejected");
+      expect(reset).not.toHaveBeenCalled();
+    });
+
+    test("an already aborted run skips observation and returns a cancelled partial report", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      const observe = spyOn(explore.observeScreen, "execute");
+      const controller = new AbortController();
+      controller.abort();
+      const result = await explore.execute({}, undefined, controller.signal);
+      expect(result.cancelled).toBe(true);
+      expect(result.interactionsPerformed).toBe(0);
+      expect(observe).not.toHaveBeenCalled();
+    });
+  });
+
   describe("element selection", () => {
     test("should prioritize navigation elements", async () => {
       const nodes = [

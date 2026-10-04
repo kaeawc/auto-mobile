@@ -10,7 +10,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger, type Logger } from "../../utils/logger";
 import WebSocket from "ws";
-import type { GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
+import type { DeviceService, GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
 import type {
   BaseResult,
   GestureTimingResult,
@@ -489,7 +489,7 @@ export function toTextResult(result: PlatformTextResult): TextResult {
  */
 export function toImeActionResult(
   result: PlatformImeActionResult,
-): import("./DeviceService").ImeActionResult {
+): Awaited<ReturnType<DeviceService["requestImeAction"]>> {
   return {
     success: result.success,
     totalTimeMs: result.totalTimeMs,

@@ -1,7 +1,10 @@
-import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
+import { NoOpPerformanceTracker, PerformanceTracker } from "../../src/utils/PerformanceTracker";
 
 /** Records block ownership while retaining the no-op tracker's operation execution. */
-export class FakeRecordingPerformanceTracker extends NoOpPerformanceTracker {
+export class FakeRecordingPerformanceTracker
+  extends NoOpPerformanceTracker
+  implements PerformanceTracker
+{
   readonly serialNames: string[] = [];
   endCalls = 0;
 

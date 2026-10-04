@@ -865,8 +865,11 @@ async function rebuildSameIdReplacement(
   stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
-  const rebuilt = await devicePool.replaceDeviceForShutdown(expectedPooledDevice, replacement, () =>
-    stopPerformanceMonitoring(device.deviceId),
+  const rebuilt = await devicePool.replaceDeviceForShutdown(
+    expectedPooledDevice,
+    replacement,
+    () => stopPerformanceMonitoring(device.deviceId),
+    { excludeExecutionId: getShutdownInitiatingExecutionId() },
   );
   if (!rebuilt) {
     return;
@@ -1071,7 +1074,9 @@ async function findReplacementOrRetainShutdownReservation(
     const ownership = captureCurrentShutdownPooledOwnership(device, expectedPooledDevice);
     if (
       ownership &&
-      (await ownership.devicePool.retireDeviceForShutdown(ownership.expectedPooledDevice))
+      (await ownership.devicePool.retireDeviceForShutdown(ownership.expectedPooledDevice, {
+        excludeExecutionId: getShutdownInitiatingExecutionId(),
+      }))
     ) {
       stopPerformanceMonitoring(device.deviceId);
     }
@@ -1260,7 +1265,11 @@ export async function retireShutdownOwnership(
   if (devicePool.getDevice(device.deviceId) !== capturedPooledDevice) {
     return;
   }
-  if (await devicePool.retireDeviceForShutdown(capturedPooledDevice)) {
+  if (
+    await devicePool.retireDeviceForShutdown(capturedPooledDevice, {
+      excludeExecutionId: getShutdownInitiatingExecutionId(),
+    })
+  ) {
     stopPerformanceMonitoring(device.deviceId);
   }
 }

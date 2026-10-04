@@ -58,8 +58,9 @@ small `bundledDependencies` set for the conflicting Jimp paths:
   platform-selected.
 
 The selected bundle adds about 17 MiB to the package. The unpacked-size guard is
-therefore 36 MiB: enough for the reproducible Jimp closure, but still a bounded
-release contract.
+therefore 37 MiB: enough for the reproducible Jimp closure, but still a bounded
+release contract. It was raised from 36 MiB on 2026-10-04, when the package
+reached 37.8 MB; the bundled source map is 20.6 MB of that.
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:

@@ -20,6 +20,11 @@ public enum StructuralHasher {
             hasher.combine(packageName)
         }
 
+        // Completeness changes must broadcast even when the retained nodes are unchanged.
+        if let reasons = hierarchy.truncationReasons {
+            hasher.combine(reasons)
+        }
+
         // Include hierarchy structure (but not bounds)
         if let root = hierarchy.hierarchy {
             hashElement(root, into: &hasher, depth: 0, maxDepth: 15)

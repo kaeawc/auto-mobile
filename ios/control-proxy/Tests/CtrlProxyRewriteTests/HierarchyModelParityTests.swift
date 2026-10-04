@@ -1,3 +1,4 @@
+import CtrlProxyRewrite
 import Foundation
 import XCTest
 
@@ -14,6 +15,34 @@ import XCTest
 /// cross-module hash equality). With the reference retired it is reference-free
 /// (idempotence + `JSONGolden` containment + the kebab-key survival check that was already here).
 final class HierarchyModelParityTests: XCTestCase {
+    func testCompleteHierarchyOmitsTruncationReasons() throws {
+        let variants: [[String]?] = [nil, []]
+        for reasons in variants {
+            let hierarchy = ViewHierarchy(updatedAt: 0, truncationReasons: reasons)
+            let object = try XCTUnwrap(JSONGolden.object(JSONEncoder().encode(hierarchy)))
+            XCTAssertNil(object["truncationReasons"])
+        }
+    }
+
+    func testTruncatedHierarchyEncodesExactAndroidKeyAndRoundTrips() throws {
+        let hierarchy = ViewHierarchy(updatedAt: 0, truncationReasons: ["max_depth"])
+        let encoded = try JSONEncoder().encode(hierarchy)
+        let object = try XCTUnwrap(JSONGolden.object(encoded))
+        XCTAssertEqual(object["truncationReasons"] as? [String], ["max_depth"])
+        XCTAssertEqual(try JSONDecoder().decode(ViewHierarchy.self, from: encoded).truncationReasons, ["max_depth"])
+    }
+
+    func testTruncationChangesBroadcastHashEvenWhenNodesAreUnchanged() {
+        let complete = ViewHierarchy(updatedAt: 0, hierarchy: UIElementInfo(text: "same"))
+        let truncated = ViewHierarchy(
+            updatedAt: 0,
+            hierarchy: UIElementInfo(text: "same"),
+            truncationReasons: ["max_depth"]
+        )
+        XCTAssertNotEqual(StructuralHasher.computeHash(complete), StructuralHasher.computeHash(truncated))
+        XCTAssertEqual(StructuralHasher.computeHash(complete), StructuralHasher.computeHash(complete))
+    }
+
     /// Rich enough to cover every kebab-case key and one level of nesting.
     private let goldenJSON = """
     {
@@ -96,7 +125,16 @@ final class HierarchyModelParityTests: XCTestCase {
 
         // Sanity: the kebab-case wire keys actually survived the round trip.
         let encodedString = String(decoding: first.encoded, as: UTF8.self)
-        for key in ["content-desc", "resource-id", "semantic-links", "accessibility-focused", "long-clickable", "view-id", "state-description", "hint-text"] {
+        for key in [
+            "content-desc",
+            "resource-id",
+            "semantic-links",
+            "accessibility-focused",
+            "long-clickable",
+            "view-id",
+            "state-description",
+            "hint-text",
+        ] {
             XCTAssertTrue(encodedString.contains("\"\(key)\""), "rewrite dropped wire key `\(key)`")
         }
     }

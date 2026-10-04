@@ -13,6 +13,9 @@ import type { CoordinateTapClient } from "../../../src/features/action/coordinat
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
 import { computeFreshness } from "../../../src/features/observe/observationFreshness";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
+import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
+import { resolveGestureCtrlProxyTimeoutMs } from "../../../src/features/action/gestureTransportTimeout";
+import type { RenderedObservationReader } from "../../../src/features/action/TargetDisplayAction";
 import { extractHierarchyScreenSize } from "../../../src/features/observe/hierarchyScreenSize";
 import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -41,6 +44,7 @@ function createAndroidTapAtWithClient(
   observations: ObserveResult[],
   androidClient: CoordinateTapClient,
   snapshotReferences?: SnapshotReferenceStore,
+  lastRenderedObservation?: RenderedObservationReader,
 ) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveSequence(observations);
@@ -50,6 +54,7 @@ function createAndroidTapAtWithClient(
     androidClient,
     iosClient: androidClient,
     snapshotReferences,
+    lastRenderedObservation,
   });
   tapAt.observeScreen = observeScreen;
   return { tapAt, observeScreen, adb };
@@ -577,6 +582,96 @@ describe("TapAtCoordinate", () => {
     expect(result.success).toBe(true);
     expect(androidDispatches).toHaveLength(1);
   });
+
+  test.each([false, true])(
+    "classifies explicit-display tap failure (dispatched %s)",
+    async (dispatched) => {
+      const client: CoordinateTapClient<() => void> = {
+        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+          if (dispatched) {
+            onDispatch?.();
+          }
+          return { success: false, error: "Tap timed out after 5000ms" };
+        },
+      };
+      const { tapAt, observeScreen, adb } = createAndroidTapAtWithClient(
+        [observation(100, 100)],
+        client,
+        undefined,
+        () => ({ display: { key: "0" } }),
+      );
+      observeScreen.setObserveResult({
+        ...observation(100, 100),
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      } as ObserveResult);
+      const result = await tapAt.execute({ x: 10, y: 20, display: "0" });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tap timed out after 5000ms");
+      if (dispatched) {
+        expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
+      } else {
+        expect(result.error).not.toMatch(/indeterminate/i);
+      }
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test.each(["tap", "longPress"] as const)(
+    "preserves explicit-display ADB %s timeout",
+    async (action) => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = {
+        supportsCommand: async () => false,
+        requestTapCoordinates: async () => ({ success: true }),
+      };
+      const observeScreen = new FakeObserveScreen();
+      observeScreen.setObserveResult({
+        ...observation(100, 100),
+        display: { key: "inner", role: "inner", posture: "opened", generation: 0 },
+      } as ObserveResult);
+      const tapAt = new TapAtCoordinate(
+        {
+          ...androidDevice,
+          displays: {
+            panels: [{ key: "inner", role: "inner", sizePx: { width: 100, height: 100 } }],
+            postures: [],
+          },
+        },
+        adb,
+        {
+          timer,
+          androidClient: client,
+          iosClient: client,
+          lastRenderedObservation: () => ({ display: { key: "inner" } }),
+        },
+      );
+      tapAt.observeScreen = observeScreen;
+      const displayId = spyOn(
+        ObservedAndroidDisplayCache.prototype,
+        "logicalIdForPanel",
+      ).mockResolvedValue(2);
+      try {
+        const result = await tapAt.execute({
+          x: 10,
+          y: 20,
+          display: "inner",
+          action,
+          ...(action === "longPress" ? { durationMs: 10000 } : {}),
+        });
+        expect(result.success).toBe(true);
+        expect(adb.getExecutedCommands()).toEqual([
+          `shell input touchscreen -d 2 ${action === "longPress" ? "swipe 10 20 10 20 10000" : "tap 10 20"}`,
+        ]);
+        expect(adb.getCommandCalls()[0].timeoutMs).toBe(
+          action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(10000) : undefined,
+        );
+      } finally {
+        displayId.mockRestore();
+      }
+    },
+  );
 
   test("keeps the existing path for a caller who has never observed", async () => {
     const { tapAt, androidDispatches } = createTapAt(

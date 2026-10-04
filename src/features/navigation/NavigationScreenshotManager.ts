@@ -163,11 +163,14 @@ export class NavigationScreenshotManager {
       for (const file of matching) {
         const fullPath = path.join(this.screenshotDir, file);
         if (fullPath !== keepPath) {
-          await this.fs.unlink(fullPath).catch(() => {});
+          await this.fs.unlink(fullPath).catch((error) => {
+            // Another capture may already have deleted this obsolete screenshot.
+            this.logger.debug(`Obsolete screenshot cleanup failed: ${errorMessage(error)}`, error);
+          });
         }
       }
-    } catch {
-      // Ignore errors
+    } catch (error) {
+      this.logger.warn(`Old screenshot discovery failed: ${errorMessage(error)}`, error);
     }
   }
 
@@ -231,7 +234,9 @@ export class NavigationScreenshotManager {
       const finalPath = path.join(this.screenshotDir, filename);
       await this.fs.writeFileBuffer(finalPath, resizedBuffer);
       await this.deleteOldScreenshots(appId, screenName, finalPath);
-      this.cleanupLRU().catch(() => {});
+      this.cleanupLRU().catch((error) => {
+        this.logger.warn(`Screenshot LRU cleanup failed: ${errorMessage(error)}`, error);
+      });
       logger.info(
         `[NAV_SCREENSHOT] Stored iOS screenshot for ${screenName} (${Math.round(resizedBuffer.length / 1024)}KB)`,
       );
@@ -283,7 +288,10 @@ export class NavigationScreenshotManager {
       await this.deleteOldScreenshots(appId, screenName, finalPath);
 
       // 5. Clean up the original screenshot
-      await this.fs.remove(result.path).catch(() => {});
+      await this.fs.remove(result.path).catch((error) => {
+        // The temporary capture may already be removed; the stored image is independent.
+        this.logger.debug(`Temporary screenshot cleanup failed: ${errorMessage(error)}`, error);
+      });
 
       // 6. Run LRU cleanup in background (fire-and-forget)
       this.cleanupLRU().catch((err) => {
@@ -336,8 +344,9 @@ export class NavigationScreenshotManager {
             size: stats.size,
             mtimeMs: stats.mtimeMs,
           });
-        } catch {
-          // File may have been deleted
+        } catch (error) {
+          // Concurrent cleanup may have deleted the file; skip its obsolete cache entry.
+          this.logger.debug(`Screenshot stat failed: ${errorMessage(error)}`, error);
         }
       }
 
@@ -364,8 +373,9 @@ export class NavigationScreenshotManager {
           await this.fs.unlink(file.path);
           currentSize -= file.size;
           deletedCount++;
-        } catch {
-          // Ignore deletion errors
+        } catch (error) {
+          // Concurrent cleanup may have removed this file; later sweeps retry remaining entries.
+          this.logger.debug(`Screenshot eviction failed: ${errorMessage(error)}`, error);
         }
       }
 

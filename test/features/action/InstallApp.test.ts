@@ -27,6 +27,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
 import AdmZip from "adm-zip";
 import type { IosPhysicalAppLister } from "../../../src/features/observe/ListInstalledApps";
@@ -60,6 +61,9 @@ class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
   private installSucceeded = false;
   postInstallListingError?: Error;
   reinstallError?: Error;
+  postRestoreListingError?: Error;
+  postRestoreAbortController?: AbortController;
+  private otherUserRestoreCompleted = false;
 
   override async executeCommand(
     command: string,
@@ -77,6 +81,15 @@ class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
       signal,
       waitForProcessSettlementAfterAbort,
     );
+    if (this.otherUserRestoreCompleted && command === "shell pm list packages --user 0") {
+      this.postRestoreAbortController?.abort();
+    }
+    if (command.includes("install-existing")) {
+      this.otherUserRestoreCompleted = true;
+    }
+    if (command.includes("install-existing") && this.postRestoreListingError) {
+      this.setCommandError("shell pm list packages --user 0", this.postRestoreListingError);
+    }
     if (command.startsWith("install ") && result.stdout.trim() === "Success") {
       this.installSucceeded = true;
       if (this.postInstallListingError) {
@@ -1336,6 +1349,7 @@ describe("InstallApp", () => {
           `uninstall ${packageName}`,
           installCommand,
           `shell pm install-existing --user 0 '${packageName}'`,
+          "shell pm list packages --user 0",
           "shell pm list packages --user 10",
         ]);
         expect(result.warning).toContain("App data was lost for users: 0, 10");
@@ -1443,20 +1457,151 @@ describe("InstallApp", () => {
       await expect(androidAction().execute(apkPath, 10)).rejects.toBe(error);
     });
 
-    test("unavailable user enumeration stops before uninstall", async () => {
-      configureDowngrade();
+    test("unavailable user enumeration falls back to the target user", async () => {
+      const installCommand = configureDowngrade();
       fakeAdb.setUsers([]);
-      await expect(androidAction().execute(apkPath, 10)).rejects.toThrow(
-        "Could not enumerate Android users",
+      const result = await androidAction().execute(apkPath, 10);
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain(
+        "Other users could not be checked and may have lost the app",
       );
+      const commands = fakeAdb.getExecutedCommands();
+      expect(commands.slice(commands.indexOf(`uninstall ${packageName}`))).toEqual([
+        `uninstall ${packageName}`,
+        installCommand,
+        "shell pm list packages --user 10",
+      ]);
+    });
+
+    test("failed other-user listing proceeds and names the unchecked user", async () => {
+      configureDowngrade();
+      fakeAdb.setCommandError("shell pm list packages --user 0", new Error("listing failed"));
+      const result = await androidAction().execute(apkPath, 10);
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("User 0 could not be checked and may have lost the app");
+      expect(result.warning).toContain("listing failed");
+      expect(fakeAdb.wasCommandExecuted(`uninstall ${packageName}`)).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("install-existing")).toBe(false);
+    });
+
+    test("cancellation during other-user listing still propagates", async () => {
+      configureDowngrade();
+      const cancellation = new DOMException("Listing aborted", "AbortError");
+      fakeAdb.setCommandError("shell pm list packages --user 0", cancellation);
+      await expect(androidAction().execute(apkPath, 10)).rejects.toBe(cancellation);
       expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
     });
 
-    test("failed other-user listing stops before uninstall", async () => {
+    test("cancel mid-restore reports progress and issues no further adb commands", async () => {
       configureDowngrade();
-      fakeAdb.setCommandError("shell pm list packages --user 0", new Error("listing failed"));
-      await expect(androidAction().execute(apkPath, 10)).rejects.toThrow("listing failed");
-      expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
+      fakeAdb.setUsers([
+        { userId: 0, name: "Owner", flags: 0x13, running: true },
+        { userId: 10, name: "Work", flags: 0x30, running: true },
+        { userId: 11, name: "Other", flags: 0x30, running: false },
+      ]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 11", present());
+      const controller = new AbortController();
+      const restoreCommand = `shell pm install-existing --user 0 '${packageName}'`;
+      // Deliberately lenient fake: the action must stop even if ADB ignores the signal.
+      fakeAdb.abortAfterCommand(restoreCommand, controller);
+      const execution = androidAction().execute(apkPath, 10, controller.signal);
+      await expect(execution).rejects.toBeInstanceOf(ActionableError);
+      await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
+      await expect(execution).rejects.toThrow("was uninstalled");
+      await expect(execution).rejects.toThrow("reinstalled for target user 10");
+      await expect(execution).rejects.toThrow("restored for users: 0");
+      await expect(execution).rejects.toThrow("NOT restored for users: 11");
+      const commands = fakeAdb.getExecutedCommands();
+      expect(commands.slice(commands.indexOf(restoreCommand))).toEqual([restoreCommand]);
+    });
+
+    test("thrown restore cancellation preserves its cause and stops other users", async () => {
+      configureDowngrade();
+      const cancellation = new DOMException("Restore aborted", "AbortError");
+      const restoreCommand = `shell pm install-existing --user 0 '${packageName}'`;
+      fakeAdb.setCommandError(restoreCommand, cancellation);
+      const execution = androidAction().execute(apkPath, 10);
+      await expect(execution).rejects.toBeInstanceOf(ActionableError);
+      await expect(execution).rejects.toHaveProperty("cause", cancellation);
+      await expect(execution).rejects.toThrow("NOT restored for users: 0");
+      const commands = fakeAdb.getExecutedCommands();
+      expect(commands.slice(commands.indexOf(restoreCommand))).toEqual([restoreCommand]);
+    });
+
+    test("cancellation after restore confirmation stops before target verification", async () => {
+      configureDowngrade();
+      const controller = new AbortController();
+      // The first listing is discovery; only the second listing confirms the restore.
+      fakeAdb.setCommandResponseSequence("shell pm list packages --user 0", [present(), present()]);
+      fakeAdb.postRestoreAbortController = controller;
+      const execution = androidAction().execute(apkPath, 10, controller.signal);
+      await expect(execution).rejects.toBeInstanceOf(ActionableError);
+      await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
+      await expect(execution).rejects.toThrow("reinstalled for target user 10");
+      const commands = fakeAdb.getExecutedCommands();
+      const restoreIndex = commands.indexOf(`shell pm install-existing --user 0 '${packageName}'`);
+      expect(commands.slice(restoreIndex)).toEqual([
+        `shell pm install-existing --user 0 '${packageName}'`,
+        "shell pm list packages --user 0",
+      ]);
+    });
+
+    test.each([false, true])(
+      "no users: none wording when no user had the package (reinstall fails: %s)",
+      async (fails) => {
+        const installCommand = configureDowngrade();
+        fakeAdb.setCommandResponse(
+          "shell pm list packages --user 0",
+          createExecResult("package:other"),
+        );
+        fakeAdb.setCommandResponseSequence("shell pm list packages --user 10", [
+          present(),
+          present(),
+          createExecResult("package:other"),
+          present(),
+        ]);
+        if (fails) {
+          fakeAdb.setCommandResponseSequence(installCommand, [
+            createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+            createExecResult("Failure [INSTALL_FAILED_INVALID_APK]"),
+          ]);
+        }
+        const result = await androidAction().execute(apkPath, 10);
+        expect(result.success).toBe(!fails);
+        expect(result.warning ?? result.error).not.toContain("users: none");
+        if (!fails) {
+          expect(result.warning).toBe(
+            `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`,
+          );
+        }
+      },
+    );
+
+    test("successful install-existing without package presence reports not restored", async () => {
+      configureDowngrade();
+      fakeAdb.setCommandResponseSequence("shell pm list packages --user 0", [
+        present(),
+        createExecResult("package:other"),
+      ]);
+      const result = await androidAction().execute(apkPath, 10);
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("NOT restored for users: 0");
+      expect(result.warning).toContain("Package restored for users: 10");
+      expect(fakeAdb.getExecutedCommands().slice(-2)).toEqual([
+        "shell pm list packages --user 0",
+        "shell pm list packages --user 10",
+      ]);
+    });
+
+    test("failed restore confirmation warns without failing the target install", async () => {
+      configureDowngrade();
+      fakeAdb.postRestoreListingError = new Error("confirmation offline");
+      const result = await androidAction().execute(apkPath, 10);
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("could not confirm");
+      expect(result.warning).toContain("user 0");
+      expect(result.warning).toContain("confirmation offline");
+      expect(result.warning).not.toContain("Package restored for users: 0");
     });
 
     test("does not restore users who did not have the package", async () => {

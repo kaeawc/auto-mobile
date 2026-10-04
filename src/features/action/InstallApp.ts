@@ -65,6 +65,17 @@ interface AndroidInstallAttempt {
   error?: unknown;
 }
 
+interface AndroidPackageUsers {
+  installedUserIds: number[];
+  warnings: string[];
+}
+
+interface AndroidRestoreProgress {
+  restoredUserIds: number[];
+  unconfirmedUserIds: number[];
+  warnings: string[];
+}
+
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
 }
@@ -422,23 +433,46 @@ export class InstallApp {
 
   private async listAndroidPackageUsers(
     packageName: string,
+    targetUserId: number,
     signal?: AbortSignal,
-  ): Promise<number[]> {
+  ): Promise<AndroidPackageUsers> {
     const users = await this.adb.listUsers(signal);
     throwIfAborted(signal);
     if (users.length === 0) {
-      throw new ActionableError(
-        "Could not enumerate Android users before downgrade recovery; the existing app was not uninstalled.",
-      );
+      const warning =
+        "Other users could not be checked and may have lost the app during downgrade recovery.";
+      logger.warn(`[InstallApp] ${warning}`);
+      return { installedUserIds: [targetUserId], warnings: [warning] };
     }
-    const installedUserIds: number[] = [];
+    const inventory: AndroidPackageUsers = { installedUserIds: [], warnings: [] };
     // Include stopped users: a package-wide uninstall removes their app and data too.
     for (const { userId } of users) {
-      if ((await this.listPackagesForUser(userId, signal)).has(packageName)) {
-        installedUserIds.push(userId);
-      }
+      await this.checkAndroidPackageUser(packageName, userId, inventory, signal);
     }
-    return installedUserIds.sort((a, b) => a - b);
+    inventory.installedUserIds.sort((a, b) => a - b);
+    return inventory;
+  }
+
+  private async checkAndroidPackageUser(
+    packageName: string,
+    userId: number,
+    inventory: AndroidPackageUsers,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      const packages = await this.listPackagesForUser(userId, signal);
+      throwIfAborted(signal);
+      if (packages.has(packageName)) {
+        inventory.installedUserIds.push(userId);
+      }
+    } catch (error) {
+      if (this.isAndroidCancellation(error, signal)) {
+        throw error;
+      }
+      const warning = `User ${userId} could not be checked and may have lost the app during downgrade recovery: ${errorMessage(error)}`;
+      logger.warn(`[InstallApp] ${warning}`, error);
+      inventory.warnings.push(warning);
+    }
   }
 
   private async recoverAndroidDowngrade(
@@ -448,7 +482,8 @@ export class InstallApp {
     perf: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<{ installAttempt: AndroidInstallAttempt; warning?: string }> {
-    const installedUserIds = await this.listAndroidPackageUsers(packageName, signal);
+    const inventory = await this.listAndroidPackageUsers(packageName, targetUserId, signal);
+    const { installedUserIds } = inventory;
     logger.warn(
       `[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`,
     );
@@ -457,7 +492,12 @@ export class InstallApp {
     );
     this.cacheInvalidator.invalidate(this.device);
     await this.markInstalledAppsCacheStale(true);
-    const failureContext = `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE); the device now has no copy of the app (removed for users: ${installedUserIds.join(", ") || "none"}).`;
+    const removedUsers =
+      installedUserIds.length > 0 ? ` (removed for users: ${installedUserIds.join(", ")})` : "";
+    const failureContext = [
+      `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE); the device now has no copy of the app${removedUsers}.`,
+      ...inventory.warnings,
+    ].join(" ");
     let installAttempt: AndroidInstallAttempt;
     try {
       installAttempt = await perf.track("adbReinstall", () =>
@@ -481,7 +521,7 @@ export class InstallApp {
     const warning = await this.restoreAndroidPackageUsers(
       packageName,
       targetUserId,
-      installedUserIds,
+      inventory,
       signal,
     );
     return { installAttempt, warning };
@@ -490,29 +530,114 @@ export class InstallApp {
   private async restoreAndroidPackageUsers(
     packageName: string,
     targetUserId: number,
-    installedUserIds: number[],
+    inventory: AndroidPackageUsers,
     signal?: AbortSignal,
   ): Promise<string> {
-    const restoredUserIds = [targetUserId];
-    const warnings: string[] = [];
-    for (const userId of installedUserIds.filter((id) => id !== targetUserId)) {
-      const restoration = await this.restoreAndroidPackageUser(packageName, userId, signal);
-      if (restoration.warning) {
-        warnings.push(restoration.warning);
-      } else {
-        restoredUserIds.push(userId);
+    const { installedUserIds } = inventory;
+    const progress: AndroidRestoreProgress = {
+      restoredUserIds: [],
+      unconfirmedUserIds: [],
+      warnings: [],
+    };
+    try {
+      for (const userId of installedUserIds.filter((id) => id !== targetUserId)) {
+        signal?.throwIfAborted();
+        const restoration = await this.restoreAndroidPackageUser(packageName, userId, signal);
+        if (restoration.warning) {
+          progress.warnings.push(restoration.warning);
+        } else {
+          progress.restoredUserIds.push(userId);
+        }
       }
+      signal?.throwIfAborted();
+      await this.confirmAndroidPackageUsers(packageName, progress, signal);
+      signal?.throwIfAborted();
+    } catch (error) {
+      throw this.androidRestoreStoppedError(packageName, targetUserId, inventory, progress, error);
     }
     const originalWarning = `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`;
-    if (installedUserIds.length === 1 && installedUserIds[0] === targetUserId) {
-      return originalWarning;
+    if (installedUserIds.every((id) => id === targetUserId)) {
+      return [originalWarning, ...inventory.warnings].join(" ");
     }
+    const restored = [targetUserId, ...progress.restoredUserIds].sort((a, b) => a - b);
     return [
       originalWarning,
-      `App data was lost for users: ${installedUserIds.join(", ") || "none"}.`,
-      `Package restored for users: ${restoredUserIds.sort((a, b) => a - b).join(", ")} (app data was not restored).`,
-      ...warnings,
+      `App data was lost for users: ${installedUserIds.join(", ")}.`,
+      `Package restored for users: ${restored.join(", ")} (app data was not restored).`,
+      ...inventory.warnings,
+      ...progress.warnings,
     ].join(" ");
+  }
+
+  private androidRestoreStoppedError(
+    packageName: string,
+    targetUserId: number,
+    inventory: AndroidPackageUsers,
+    progress: AndroidRestoreProgress,
+    error: unknown,
+  ): ActionableError {
+    const notRestored = inventory.installedUserIds.filter(
+      (id) =>
+        id !== targetUserId &&
+        !progress.restoredUserIds.includes(id) &&
+        !progress.unconfirmedUserIds.includes(id),
+    );
+    return new ActionableError(
+      [
+        `The previous version of ${packageName} was uninstalled during downgrade recovery; the package was reinstalled for target user ${targetUserId}.`,
+        progress.restoredUserIds.length > 0
+          ? `Package restored for users: ${progress.restoredUserIds.join(", ")} (app data was not restored; restore confirmation may be incomplete).`
+          : "No other-user restoration was completed.",
+        notRestored.length > 0 ? `Package NOT restored for users: ${notRestored.join(", ")}.` : "",
+        ...inventory.warnings,
+        ...progress.warnings,
+        this.extractErrorText(error),
+      ].join(" "),
+      { cause: error },
+    );
+  }
+
+  private async confirmAndroidPackageUsers(
+    packageName: string,
+    progress: AndroidRestoreProgress,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    // Confirm only other-user restores; the normal target verification remains unchanged.
+    for (const userId of [...progress.restoredUserIds]) {
+      signal?.throwIfAborted();
+      const confirmation = await this.confirmAndroidPackageUser(packageName, userId, signal);
+      if (confirmation.warning) {
+        progress.warnings.push(confirmation.warning);
+        if (confirmation.unknown) {
+          progress.unconfirmedUserIds.push(userId);
+        }
+        progress.restoredUserIds = progress.restoredUserIds.filter((id) => id !== userId);
+      }
+    }
+  }
+
+  private async confirmAndroidPackageUser(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<{ warning?: string; unknown?: boolean }> {
+    try {
+      const packages = await this.listPackagesForUser(userId, signal);
+      signal?.throwIfAborted();
+      if (packages.has(packageName)) {
+        return {};
+      }
+      const warning = `Package NOT restored for users: ${userId}; the package was absent from the post-restore listing.`;
+      logger.warn(`[InstallApp] ${warning}`);
+      return { warning };
+    } catch (error) {
+      if (this.isAndroidCancellation(error, signal)) {
+        throw error;
+      }
+      const warning = `Install completed but could not confirm package restoration for user ${userId}: ${errorMessage(error)}`;
+      logger.warn(`[InstallApp] ${warning}`, error);
+      return { warning, unknown: true };
+    }
   }
 
   private async restoreAndroidPackageUser(
@@ -537,7 +662,10 @@ export class InstallApp {
       }
       return {};
     } catch (error) {
-      // Restoration is best-effort per user, including cancellation after the target reinstall.
+      if (this.isAndroidCancellation(error, signal)) {
+        throw error;
+      }
+      // A non-cancellation failure affects only this user; continue restoring the others.
       const warning = `Could not restore package for user ${userId}: ${errorMessage(error)}`;
       logger.warn(`[InstallApp] ${warning}`, error);
       return { warning };

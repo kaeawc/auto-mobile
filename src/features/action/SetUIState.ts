@@ -1301,9 +1301,16 @@ export class SetUIState extends BaseVisualChange {
     screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
   ): Element | null {
     const matched = this.finder.findElementByText(viewHierarchy, text, undefined, true, false);
+    if (!matched) {
+      return this.selector.selectByText(viewHierarchy, text, {
+        intentAction: "focus-input",
+        allowHintFallback: true,
+        screenSizeOptions,
+      }).element;
+    }
     // Preserve legacy matching and all classified controls. Only an unclassified
     // label may use the same bounded label-to-input promotion as sendKeys.
-    if (!matched || this.fieldTypeDetector.detect(matched) !== "unknown") {
+    if (this.fieldTypeDetector.detect(matched) !== "unknown") {
       return matched;
     }
     const identity = matched["resource-id"] || matched["view-id"];

@@ -92,6 +92,7 @@ import {
   type DaemonSelfIdentity,
 } from "./daemonHandshake";
 import { InputText, type AppendKeyEventValidator } from "../features/action/InputText";
+import { imeActionFailedAfterTextEntered } from "../features/action/imeActionFailedAfterTextEntered";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
@@ -5672,14 +5673,30 @@ export class UnixSocketServer {
       });
     }
     try {
-      return withAppendProgress(await client.requestImeAction(imeAction, remainingTimeoutMs));
+      const result = await client.requestImeAction(imeAction, remainingTimeoutMs);
+      if (!result.success) {
+        const message = imeActionFailedAfterTextEntered(imeAction, result.error || "unknown error");
+        logger.warn(`[input/typeText] ${message}`);
+        return withAppendProgress({ ...result, error: message });
+      }
+      return withAppendProgress(result);
     } catch (error) {
+      const message = imeActionFailedAfterTextEntered(
+        imeAction,
+        errorMessage(error) || "unknown error",
+      );
+      logger.warn(`[input/typeText] ${message}`, error);
       if (appendCharsSent === undefined) {
-        throw error;
+        // Preserve runner error identity, class, and structured failure metadata.
+        if (error instanceof Error) {
+          error.message = message;
+          throw error;
+        }
+        throw new ActionableError(message, { cause: error });
       }
       return {
         success: false,
-        error: errorMessage(error),
+        error: message,
         charsSent: appendCharsSent,
       };
     }

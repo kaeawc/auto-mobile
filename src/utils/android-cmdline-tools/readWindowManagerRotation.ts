@@ -13,15 +13,16 @@ export const WINDOW_MANAGER_ROTATION_MAX_BUFFER = 4 * 1024 * 1024;
 
 export async function readWindowManagerRotation(
   adb: Pick<AdbExecutor, "executeCommand">,
-  options: { displayId?: number; signal?: AbortSignal } = {},
+  options: { displayId?: number; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<number | null> {
+  const timeoutMs = options.timeoutMs ?? WINDOW_MANAGER_ROTATION_TIMEOUT_MS;
   const defaultDisplay = (options.displayId ?? 0) === 0;
   let fallbackReason = "display 0 rotation is missing";
   let fallbackError: unknown;
   try {
     const { stdout } = await adb.executeCommand(
       WINDOW_MANAGER_ROTATION_COMMAND,
-      WINDOW_MANAGER_ROTATION_TIMEOUT_MS,
+      timeoutMs,
       WINDOW_MANAGER_ROTATION_MAX_BUFFER,
       undefined,
       options.signal,
@@ -49,7 +50,7 @@ export async function readWindowManagerRotation(
   );
   const { stdout } = await adb.executeCommand(
     WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
-    WINDOW_MANAGER_ROTATION_TIMEOUT_MS,
+    timeoutMs,
     WINDOW_MANAGER_ROTATION_MAX_BUFFER,
     undefined,
     options.signal,

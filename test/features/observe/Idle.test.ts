@@ -5,6 +5,13 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, TouchIdleResult } from "../../../src/models";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import {
+  WINDOW_MANAGER_ROTATION_COMMAND,
+  WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+} from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 describe("Idle - Unit Tests", function () {
   let idle: Idle;
@@ -642,7 +649,66 @@ describe("Idle - Unit Tests", function () {
     });
   });
 
+  describe("getRotationStatus captured displays", () => {
+    test.each([
+      ["mirror-landscape", 1],
+      ["mirror-portrait", 0],
+      ["nomirror-landscape", 1],
+      ["nomirror-portrait", 0],
+    ] as const)("reads display 0 from %s", async (capture, rotation) => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell dumpsys window displays", {
+        stdout: readFileSync(
+          join(__dirname, "windowDumps", `dumpsys-window-displays-${capture}.txt`),
+          "utf8",
+        ),
+        stderr: "",
+      });
+      const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+      const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
+
+      expect(await rotationIdle.getRotationStatus(rotation, timer.now(), 500)).toEqual({
+        rotationComplete: true,
+        currentRotation: rotation,
+        shouldContinue: false,
+      });
+      expect(adb.getExecutedCommands()).toEqual(["shell dumpsys window displays"]);
+    });
+  });
+
   describe("getRotationStatus error handling", function () {
+    test.each([500, 5000])(
+      "computes the remaining budget inside perf.track with a floor (budget=%s)",
+      async (budget) => {
+        const timer = new FakeTimer();
+        timer.setCurrentTime(100);
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
+          stdout: "mRotation=1",
+          stderr: "",
+        });
+        const rotationIdle = new Idle(
+          { deviceId: "d", name: "d", platform: "android" },
+          new FakeAdbClientFactory(adb),
+          timer,
+        );
+        const perf = new NoOpPerformanceTracker();
+        const trackSpy = spyOn(perf, "track").mockImplementation(async (_name, fn) => {
+          timer.advanceTime(17);
+          return fn();
+        });
+        try {
+          await rotationIdle.getRotationStatus(1, 100, budget, perf);
+          expect(adb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([
+            Math.max(budget - 17, ROTATION_READ_FLOOR_MS),
+          ]);
+        } finally {
+          trackSpy.mockRestore();
+        }
+      },
+    );
+
     for (const { stdout, currentRotation } of [
       { stdout: "mRotation=0", currentRotation: 0 },
       { stdout: "unparseable output", currentRotation: null },
@@ -654,10 +720,11 @@ describe("Idle - Unit Tests", function () {
         timer.setCurrentTime(493);
         const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
           stdout,
           stderr: "",
         });
+        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND, { stdout, stderr: "" });
         const executeCommand = adb.executeCommand.bind(adb);
         adb.executeCommand = async (...args) => {
           const result = await executeCommand(...args);
@@ -674,10 +741,10 @@ describe("Idle - Unit Tests", function () {
           currentRotation,
           shouldContinue: false,
         });
-        expect(timer.now()).toBe(1493);
-        expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([
-          ROTATION_READ_FLOOR_MS,
-        ]);
+        expect(timer.now()).toBe(493 + (currentRotation === null ? 2 : 1) * ROTATION_READ_FLOOR_MS);
+        expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual(
+          Array.from({ length: currentRotation === null ? 2 : 1 }, () => ROTATION_READ_FLOOR_MS),
+        );
       });
     }
 
@@ -689,7 +756,7 @@ describe("Idle - Unit Tests", function () {
           const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
           const adb = new FakeAdbExecutor();
           const controller = new AbortController();
-          adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+          adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
             stdout: `mRotation=${currentRotation}`,
             stderr: "",
           });
@@ -710,8 +777,8 @@ describe("Idle - Unit Tests", function () {
           });
           expect(adb.getCommandCalls()).toEqual([
             expect.objectContaining({
-              command: 'shell dumpsys window | grep -i "mRotation="',
-              timeoutMs: 1000,
+              command: WINDOW_MANAGER_ROTATION_COMMAND,
+              timeoutMs: ROTATION_READ_FLOOR_MS,
               signal: controller.signal,
             }),
           ]);
@@ -762,7 +829,7 @@ describe("Idle - Unit Tests", function () {
       };
       const throwingAdb = new FakeAdbExecutor();
       throwingAdb.setDefaultError(new Error("adb: device offline"));
-      const throwingIdle = new Idle(device, new FakeAdbClientFactory(throwingAdb));
+      const throwingIdle = new Idle(device, new FakeAdbClientFactory(throwingAdb), new FakeTimer());
 
       const debugSpy = spyOn(logger, "debug");
 
@@ -770,6 +837,7 @@ describe("Idle - Unit Tests", function () {
 
       expect(result.rotationComplete).toBe(false);
       expect(result.currentRotation).toBeNull();
+      expect(result.shouldContinue).toBe(true);
 
       const traced = debugSpy.mock.calls.some(
         (call) => typeof call[0] === "string" && call[0].includes("Rotation idle check failed"),

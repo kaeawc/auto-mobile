@@ -49,6 +49,28 @@ describe("readWindowManagerRotation", () => {
     },
   );
 
+  test.each([undefined, 1234])(
+    "uses the default or supplied timeout for primary and fallback (timeoutMs=%s)",
+    async (timeoutMs) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError(WINDOW_MANAGER_ROTATION_COMMAND, new Error("displays unavailable"));
+      adb.setCommandResponse(
+        WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+        fixtureResult("api28-settings-window-dump.log"),
+      );
+
+      expect(await readWindowManagerRotation(adb, { timeoutMs })).toBe(3);
+      expect(adb.getExecutedCommands()).toEqual([
+        WINDOW_MANAGER_ROTATION_COMMAND,
+        WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+      ]);
+      expect(adb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([
+        timeoutMs ?? WINDOW_MANAGER_ROTATION_TIMEOUT_MS,
+        timeoutMs ?? WINDOW_MANAGER_ROTATION_TIMEOUT_MS,
+      ]);
+    },
+  );
+
   test("passes an explicitly requested display to the parser", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

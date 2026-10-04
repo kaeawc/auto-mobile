@@ -1,6 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { Idle, ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
+import {
+  WINDOW_MANAGER_ROTATION_COMMAND,
+  WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+} from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -167,12 +171,16 @@ describe("AwaitIdle rotation polling", () => {
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
     const controller = new AbortController();
-    adb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+    adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
       { stdout: "mRotation=0", stderr: "" },
       { stdout: "mRotation=1", stderr: "" },
     ]);
 
-    await createAwaitIdle(adb, timer).waitForRotation(1, 100, controller.signal);
+    await createAwaitIdle(adb, timer).waitForRotation(
+      1,
+      ROTATION_READ_FLOOR_MS / 10,
+      controller.signal,
+    );
 
     expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([1000, 1000]);
     expect(adb.getCommandCalls().map(({ signal }) => signal)).toEqual([
@@ -185,7 +193,7 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+    adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
       { stdout: "mRotation=0", stderr: "" },
       { stdout: "mRotation=1", stderr: "" },
     ]);
@@ -200,7 +208,7 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+    adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
       ...Array.from({ length: 30 }, () => ({ stdout: "mRotation=0", stderr: "" })),
       { stdout: "mRotation=1", stderr: "" },
     ]);
@@ -219,7 +227,7 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
       stdout: "mRotation=0",
       stderr: "",
     });
@@ -258,15 +266,15 @@ describe("AwaitIdle rotation polling", () => {
       "Timeout waiting for rotation to 1 after 5000ms",
     );
 
-    expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([5000]);
+    expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([5000, 5000]);
     expect(timer.getSleepHistory()).toEqual([]);
-    expect(timer.now()).toBe(5000);
+    expect(timer.now()).toBe(10000);
   });
 
   test("rejects an abort without resolving the pending poll sleep", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
       stdout: "mRotation=0",
       stderr: "",
     });
@@ -320,7 +328,7 @@ describe("AwaitIdle rotation polling", () => {
         })(),
       ]);
       expect(settled).toMatchObject({ message: "Operation cancelled" });
-      expect(timer.getPendingSleeps()).toEqual([1000]);
+      expect(timer.getPendingSleeps()).toEqual([ROTATION_READ_FLOOR_MS]);
       expect(timer.now()).toBe(0);
       expect(adb.getCommandCalls()).toHaveLength(1);
       expect(adb.getCommandCalls()[0]?.signal).toBe(controller.signal);
@@ -330,7 +338,7 @@ describe("AwaitIdle rotation polling", () => {
     }
   });
 
-  test("stops after a wedged read finishes at the deadline", async () => {
+  test("a primary timeout attempts fallback with the same remaining-budget bound", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new DeadlineAdbExecutor(timer, () => true, true);
@@ -339,17 +347,17 @@ describe("AwaitIdle rotation polling", () => {
       "Timeout waiting for rotation to 1 after 5000ms",
     );
 
-    expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([5000]);
-    expect(timer.getSleepHistory()).toEqual([5000]);
-    expect(timer.now()).toBe(5000);
-    expect(timer.now()).toBeLessThanOrEqual(5000 + ROTATION_READ_FLOOR_MS);
+    expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([5000, 5000]);
+    expect(timer.getSleepHistory()).toEqual([5000, 5000]);
+    expect(timer.now()).toBe(10000);
+    expect(timer.now()).toBeLessThanOrEqual(2 * 5000);
   });
 
-  test("bounds a wedged final read with a budget smaller than the floor", async () => {
+  test("bounds the wedged final primary and fallback reads by the floor", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new DeadlineAdbExecutor(timer, () => timer.now() >= 100, true);
-    adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
       stdout: "mRotation=0",
       stderr: "",
     });
@@ -359,11 +367,16 @@ describe("AwaitIdle rotation polling", () => {
     );
 
     expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual([
-      1000, 1000, 1000, 1000, 1000, 1000, 1000,
+      1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000,
     ]);
-    expect(timer.getSleepHistory()).toEqual([17, 17, 17, 17, 17, 15, 1000]);
-    expect(timer.now()).toBe(1100);
-    expect(timer.now()).toBeLessThanOrEqual(100 + ROTATION_READ_FLOOR_MS);
+    expect(timer.getSleepHistory()).toEqual([17, 17, 17, 17, 17, 15, 1000, 1000]);
+    // Ordinary primary timeouts trigger fallback; each wedged command consumes the floor.
+    expect(adb.getExecutedCommands().slice(-2)).toEqual([
+      WINDOW_MANAGER_ROTATION_COMMAND,
+      WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+    ]);
+    expect(timer.now()).toBe(2100);
+    expect(timer.now()).toBeLessThanOrEqual(100 + 2 * ROTATION_READ_FLOOR_MS);
   });
 
   test("stops after a wedged read starting just before the deadline", async () => {
@@ -378,7 +391,7 @@ describe("AwaitIdle rotation polling", () => {
       },
       true,
     );
-    adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
       stdout: "mRotation=0",
       stderr: "",
     });
@@ -387,15 +400,16 @@ describe("AwaitIdle rotation polling", () => {
       "Timeout waiting for rotation to 1 after 500ms",
     );
 
-    expect(timer.now()).toBe(1493);
-    expect(timer.now()).toBeLessThanOrEqual(500 + ROTATION_READ_FLOOR_MS);
-    expect(readStarts).toEqual(Array.from({ length: 30 }, (_, index) => index * 17));
-    expect(adb.getCommandCalls()).toHaveLength(30);
+    expect(timer.now()).toBe(2493);
+    expect(timer.now()).toBeLessThanOrEqual(500 + 2 * ROTATION_READ_FLOOR_MS);
+    expect(readStarts).toEqual([...Array.from({ length: 30 }, (_, index) => index * 17), 1493]);
+    expect(adb.getCommandCalls()).toHaveLength(31);
     expect(adb.getCommandCalls().map(({ timeoutMs }) => timeoutMs)).toEqual(
-      Array.from({ length: 30 }, () => ROTATION_READ_FLOOR_MS),
+      Array.from({ length: 31 }, () => ROTATION_READ_FLOOR_MS),
     );
     expect(timer.getSleepHistory()).toEqual([
       ...Array.from({ length: 29 }, () => 17),
+      ROTATION_READ_FLOOR_MS,
       ROTATION_READ_FLOOR_MS,
     ]);
   });
@@ -429,7 +443,7 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+    adb.setCommandResponseSequence(WINDOW_MANAGER_ROTATION_COMMAND, [
       { stdout: "mRotation=0", stderr: "" },
       { stdout: "mRotation=0", stderr: "" },
       { stdout: "mRotation=1", stderr: "" },
@@ -446,7 +460,7 @@ describe("AwaitIdle rotation polling", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+    adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
       stdout: "mRotation=0",
       stderr: "",
     });

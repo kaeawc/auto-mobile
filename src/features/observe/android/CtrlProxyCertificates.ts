@@ -10,6 +10,7 @@ import WebSocket from "ws";
 import fs from "fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { shellQuote } from "../../../utils/shellQuote";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -25,6 +26,8 @@ import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtoco
 
 /** Directory on device for pushing certificate files */
 const DEVICE_CERT_DIR = "/sdcard/Download/automobile/ca_certs";
+// Bound best-effort cleanup independently of the certificate installation timeout.
+const DEVICE_CERT_CLEANUP_TIMEOUT_MS = 1500;
 
 export interface CertificateFileSystem {
   stat(filePath: string): Promise<{ size: number; isFile(): boolean }>;
@@ -158,6 +161,7 @@ export class CtrlProxyCertificates {
       };
     }
 
+    let devicePath: string | undefined;
     try {
       const stats = await this.fileSystem.stat(resolvedPath);
       if (!stats.isFile()) {
@@ -178,9 +182,10 @@ export class CtrlProxyCertificates {
         };
       }
 
-      const devicePath = await perf.track("pushCertificate", async () => {
+      const pushedDevicePath = await perf.track("pushCertificate", async () => {
         return this.pushCertificateToDevice(resolvedPath);
       });
+      devicePath = pushedDevicePath;
 
       const connected = await perf.track("ensureConnection", () =>
         this.context.ensureConnected(perf),
@@ -216,7 +221,7 @@ export class CtrlProxyCertificates {
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.installCaCertFromPath({ requestId, devicePath }),
+          ctrlProxyRequests.installCaCertFromPath({ requestId, devicePath: pushedDevicePath }),
         );
         ws.send(message);
         logger.debug(
@@ -239,12 +244,21 @@ export class CtrlProxyCertificates {
 
       return result;
     } catch (error) {
+      logger.warn("[CTRL_PROXY] CA cert file install request failed", error);
       return {
         success: false,
         action: "install",
         totalTimeMs: this.context.timer.now() - startTime,
         error: errorMessage(error),
       };
+    } finally {
+      if (devicePath !== undefined) {
+        // Do not await: cleanup must not delay the install result or cancellation.
+        this.removeDeviceCertificate(devicePath).catch((error: unknown) => {
+          // Best-effort removal from the temporary cert directory must not replace the install result.
+          logger.debug("[CTRL_PROXY] Could not remove temporary certificate file", error);
+        });
+      }
     }
   }
 
@@ -591,6 +605,17 @@ export class CtrlProxyCertificates {
     );
 
     return devicePath;
+  }
+
+  private async removeDeviceCertificate(devicePath: string): Promise<void> {
+    await this.context.adb.executeCommand(
+      `shell rm -f ${shellQuote(devicePath)}`,
+      DEVICE_CERT_CLEANUP_TIMEOUT_MS,
+      undefined,
+      true,
+      // Override ADB's ambient request signal so cancellation still permits bounded cleanup.
+      new AbortController().signal,
+    );
   }
 
   /**

@@ -26,6 +26,8 @@ public struct ViewHierarchy: Codable, Sendable {
     public let insets: ObservationInsetsInfo
     public let error: String?
     public let fallbackToSpringboard: Bool?
+    /// Android-compatible capture truncation codes; omitted for a complete walk.
+    public let truncationReasons: [String]?
 
     public init(
         updatedAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
@@ -43,7 +45,8 @@ public struct ViewHierarchy: Codable, Sendable {
         systemInsets: EdgeInsetsInfo? = nil,
         insets: ObservationInsetsInfo = .unavailable,
         error: String? = nil,
-        fallbackToSpringboard: Bool? = nil
+        fallbackToSpringboard: Bool? = nil,
+        truncationReasons: [String]? = nil
     ) {
         self.updatedAt = updatedAt
         self.packageName = packageName
@@ -61,5 +64,6 @@ public struct ViewHierarchy: Codable, Sendable {
         self.insets = insets
         self.error = error
         self.fallbackToSpringboard = fallbackToSpringboard
+        self.truncationReasons = truncationReasons?.isEmpty == false ? truncationReasons : nil
     }
 }

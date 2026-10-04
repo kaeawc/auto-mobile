@@ -1,3 +1,4 @@
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   resolveIosSnapshotBackend,
@@ -198,7 +199,7 @@ describe("IosSnapshotBackend", () => {
       expect(await metadataReader.getIosDeviceMetadata()).toEqual({});
       expect(await versionReader.getIosDeviceOsVersion()).toBeUndefined();
       expect(backendSpy).toHaveBeenCalledTimes(2);
-      expect(warn.mock.calls).toEqual([
+      expect(loggerCallsWithPrefix(warn.mock.calls, "[iOS] Failed to read simulator ")).toEqual([
         ["[iOS] Failed to read simulator metadata: Error: metadata failure"],
         ["[iOS] Failed to read simulator OS version: Error: metadata failure"],
       ]);

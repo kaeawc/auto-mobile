@@ -21,7 +21,7 @@ import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionRe
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { observation } from "../../helpers/tapAtCoordinate";
+import { observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
 
 const device: BootedDevice = {
   deviceId: "typed-display-fence",
@@ -209,6 +209,7 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
         dispatchIosCoordinateTap: dispatch,
         invalidateIosCache: () => {},
       });
+      setFakeTapAtWindow(action);
       action.observeScreen = h.observe;
       h.observe.setObserveResult((index) => {
         if ((site === "E" && index === 0) || (site === "F-fresh-retry" && index === 1)) {

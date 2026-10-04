@@ -21,6 +21,9 @@ export interface TraversalOrderResult {
    */
   totalCount: number;
 
+  /** Reasons the traversal is incomplete; absent for older or untruncated results. */
+  truncationReasons?: string[];
+
   /**
    * Total time taken to extract traversal order in milliseconds
    */

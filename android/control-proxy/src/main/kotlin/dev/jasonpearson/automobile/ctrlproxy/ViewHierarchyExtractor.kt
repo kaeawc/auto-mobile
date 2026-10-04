@@ -2182,6 +2182,7 @@ internal constructor(
 
     // Collect focusable elements in traversal order
     val focusableElements = mutableListOf<UIElementInfo>()
+    val truncationReasons = linkedSetOf<String>()
     var focusedIndex: Int? = null
 
     collectFocusableElements(
@@ -2190,6 +2191,7 @@ internal constructor(
       screenDimensions,
       accessibilityFocusedNode,
       focusableElements,
+      truncationReasons,
     )
 
     // Find the focused element index
@@ -2200,6 +2202,7 @@ internal constructor(
     return TraversalOrderResult(
       elements = focusableElements,
       focusedIndex = focusedIndex,
+      truncationReasons = truncationReasons.toList().ifEmpty { null },
     )
   }
 
@@ -2234,6 +2237,7 @@ internal constructor(
     }
 
     val focusableElements = mutableListOf<UIElementInfo>()
+    val truncationReasons = linkedSetOf<String>()
     var focusedIndex: Int? = null
 
     // Collect from each window, sorted by layer
@@ -2246,6 +2250,7 @@ internal constructor(
         screenDimensions,
         accessibilityFocusedNode,
         focusableElements,
+        truncationReasons,
       )
     }
 
@@ -2257,6 +2262,7 @@ internal constructor(
     return TraversalOrderResult(
       elements = focusableElements,
       focusedIndex = focusedIndex,
+      truncationReasons = truncationReasons.toList().ifEmpty { null },
     )
   }
 
@@ -2270,6 +2276,7 @@ internal constructor(
     screenDimensions: ScreenDimensions?,
     accessibilityFocusedNode: AccessibilityNodeInfo?,
     result: MutableList<UIElementInfo>,
+    truncationReasons: MutableSet<String>,
   ) {
     if (depth > MAX_DEPTH) {
       return
@@ -2313,7 +2320,11 @@ internal constructor(
       }
 
       // Recursively collect from children (depth-first traversal)
-      val childCount = min(node.childCount, MAX_CHILDREN)
+      val totalChildCount = node.childCount
+      val childCount = min(totalChildCount, MAX_CHILDREN)
+      if (totalChildCount > MAX_CHILDREN) {
+        truncationReasons += "max_children"
+      }
       for (i in 0 until childCount) {
         val child = node.getChild(i)
         if (child != null) {
@@ -2323,6 +2334,7 @@ internal constructor(
             screenDimensions,
             accessibilityFocusedNode,
             result,
+            truncationReasons,
           )
           child.recycle()
         }

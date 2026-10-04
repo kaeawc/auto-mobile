@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 import {
   computeBuildIdentity,
@@ -7,9 +7,35 @@ import {
   describeBuildIdentity,
   type BuildIdentity,
 } from "../../src/daemon/buildIdentity";
+import { logger } from "../../src/utils/logger";
 
 describe("buildIdentity", () => {
   describe("computeBuildIdentity", () => {
+    let warn: ReturnType<typeof spyOn<typeof logger, "warn">> | undefined;
+
+    afterEach(() => {
+      warn?.mockRestore();
+      warn = undefined;
+    });
+
+    test("warns once when hashing fails and returns an unknown identity", () => {
+      warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const error = new Error("boom-read-failure");
+      const hashFile = () => {
+        throw error;
+      };
+
+      const identity = computeBuildIdentity("/does/not/exist.js", hashFile);
+
+      const warnings = warn.mock.calls.filter(([message]) =>
+        message.startsWith("Failed to compute build identity"),
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0][0]).toContain("boom-read-failure");
+      expect(warnings[0][1]).toBe(error);
+      expect(identity).toEqual({ entryScript: resolve("/does/not/exist.js"), buildId: "unknown" });
+    });
+
     test("returns a stable hash for identical contents", () => {
       const hashFile = () => "deadbeefcafef00d";
       const a = computeBuildIdentity("/a/dist/index.js", hashFile);

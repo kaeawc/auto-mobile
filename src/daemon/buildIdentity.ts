@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 
 /**
  * Identity of a particular AutoMobile build.
@@ -44,7 +46,8 @@ export function computeBuildIdentity(
   const absolute = resolve(entryScript);
   try {
     return { entryScript: absolute, buildId: hashFile(absolute) };
-  } catch {
+  } catch (error) {
+    logger.warn(`Failed to compute build identity: ${errorMessage(error)}`, error);
     // The entry script should always be readable; if it is not, fall back to an
     // unknown id rather than crashing the connection path. The entryScript path
     // is still recorded so callers can fall back to path identity.

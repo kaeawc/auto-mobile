@@ -28,20 +28,36 @@ export class FocusElementMatcher {
       return null;
     }
 
+    const identityIndex = elements.indexOf(currentFocus);
+    if (identityIndex >= 0) {
+      return identityIndex;
+    }
+
     const resourceId = this.getResourceId(currentFocus);
     if (resourceId) {
-      return this.findIndexByValue(elements, (element) => this.getResourceId(element), resourceId);
+      return this.findIndexByValue(
+        elements,
+        currentFocus,
+        (element) => this.getResourceId(element),
+        resourceId,
+      );
     }
 
     const testTag = this.getTestTag(currentFocus);
     if (testTag) {
-      return this.findIndexByValue(elements, (element) => this.getTestTag(element), testTag);
+      return this.findIndexByValue(
+        elements,
+        currentFocus,
+        (element) => this.getTestTag(element),
+        testTag,
+      );
     }
 
     const contentDesc = this.getContentDesc(currentFocus);
     if (contentDesc) {
       return this.findIndexByValue(
         elements,
+        currentFocus,
         (element) => this.getContentDesc(element),
         contentDesc,
         true,
@@ -50,7 +66,13 @@ export class FocusElementMatcher {
 
     const text = this.getText(currentFocus);
     if (text) {
-      return this.findIndexByValue(elements, (element) => this.getText(element), text, true);
+      return this.findIndexByValue(
+        elements,
+        currentFocus,
+        (element) => this.getText(element),
+        text,
+        true,
+      );
     }
 
     if (currentFocus.bounds) {
@@ -212,20 +234,28 @@ export class FocusElementMatcher {
 
   private findIndexByValue(
     elements: Element[],
+    currentFocus: Element,
     getter: (element: Element) => string | undefined,
     value: string,
     caseInsensitive: boolean = false,
   ): number | null {
     const target = caseInsensitive ? value.toLowerCase() : value;
-    const index = elements.findIndex((element) => {
+    const matches = elements.flatMap((element, index) => {
       const candidate = getter(element);
       if (!candidate) {
-        return false;
+        return [];
       }
       const normalized = caseInsensitive ? candidate.toLowerCase() : candidate;
-      return normalized === target;
+      return normalized === target ? [{ element, index }] : [];
     });
-    return index === -1 ? null : index;
+    if (matches.length === 1) {
+      return matches[0].index;
+    }
+    const bounds = currentFocus.bounds;
+    if (!bounds) {
+      return null;
+    }
+    return matches.find(({ element }) => this.boundsMatch(element, bounds))?.index ?? null;
   }
 
   private getResourceId(element: Element): string | undefined {

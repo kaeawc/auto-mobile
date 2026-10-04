@@ -69,6 +69,25 @@ describe("FocusPathCalculator", () => {
     expect(path?.direction).toBe("backward");
   });
 
+  test("calculates a backward path from a later row with repeated resource ids", () => {
+    const calculator = new FocusPathCalculator();
+    const orderedElements = [0, 1, 2, 3].map((index) =>
+      makeElement(index, { "resource-id": "row_title" }),
+    );
+
+    const path = calculator.calculatePath(
+      orderedElements[3],
+      { resourceId: "row_title", bounds: orderedElements[1].bounds },
+      orderedElements,
+    );
+
+    expect(path).not.toBeNull();
+    expect(path?.currentFocusIndex).toBe(3);
+    expect(path?.targetFocusIndex).toBe(1);
+    expect(path?.swipeCount).toBe(2);
+    expect(path?.direction).toBe("backward");
+  });
+
   test("defaults to index 0 when there is no current focus", () => {
     const calculator = new FocusPathCalculator();
     const orderedElements = [

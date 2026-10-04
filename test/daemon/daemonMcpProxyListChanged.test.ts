@@ -353,3 +353,152 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     expect(calls).not.toContain(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
   });
 });
+
+describe("DaemonMcpProxy resource subscriptions", () => {
+  test("replays only surviving subscriptions after daemon reconnect and clears them on close", async () => {
+    mockDaemonAvailable();
+    const first = createFakeClient();
+    const second = createFakeClient();
+    let next = first;
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => next,
+      daemonManager: runningManager(),
+      autoStartDaemon: false,
+    });
+    const received: string[] = [];
+    const stop = proxy.onResourceUpdated((uri) => {
+      received.push(uri);
+    });
+    try {
+      await proxy.subscribeResource("automobile:one");
+      await proxy.subscribeResource("automobile:two");
+      await proxy.ensureConnected();
+      first.emitConnectionClosed();
+      await proxy.unsubscribeResource("automobile:two");
+      next = second;
+      await proxy.ensureConnected();
+      expect(second.callDaemonMethodCalls).toEqual([
+        { method: "resources/subscribe", params: { uri: "automobile:one" } },
+      ]);
+      second.emitNotification(
+        "notifications/resources/updated",
+        undefined,
+        undefined,
+        undefined,
+        "automobile:two",
+      );
+      second.emitNotification("notifications/resources/updated");
+      second.emitNotification(
+        "notifications/resources/updated",
+        undefined,
+        undefined,
+        undefined,
+        "automobile:one",
+      );
+      expect(received).toEqual(["automobile:one"]);
+      stop();
+      second.emitNotification(
+        "notifications/resources/updated",
+        undefined,
+        undefined,
+        undefined,
+        "automobile:one",
+      );
+      expect(received).toEqual(["automobile:one"]);
+      await proxy.close();
+      expect(
+        (proxy as unknown as { resourceSubscriptions: Set<string> }).resourceSubscriptions.size,
+      ).toBe(0);
+    } finally {
+      stop();
+      await proxy.close();
+    }
+  });
+
+  test("throwing update listener does not block siblings", async () => {
+    mockDaemonAvailable();
+    const client = createFakeClient();
+    const proxy = createProxy(client);
+    const received: string[] = [];
+    proxy.onResourceUpdated(() => {
+      throw new Error("closed transport");
+    });
+    proxy.onResourceUpdated((uri) => {
+      received.push(uri);
+    });
+    try {
+      await proxy.ensureConnected();
+      await proxy.subscribeResource("automobile:one");
+      client.emitNotification(
+        "notifications/resources/updated",
+        undefined,
+        undefined,
+        undefined,
+        "automobile:one",
+      );
+      expect(received).toEqual(["automobile:one"]);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
+describe("DaemonMcpProxy resource subscription synchronization", () => {
+  test("unsubscribe during reconnect replay is sent after the in-flight subscribe", async () => {
+    mockDaemonAvailable();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const client = new FakeDaemonClient({
+      onCallDaemonMethod: async (method) => {
+        if (method === "resources/subscribe") {
+          started.resolve();
+          await release.promise;
+        }
+      },
+    });
+    const proxy = createProxy(client);
+    try {
+      await proxy.subscribeResource("automobile:one");
+      const connecting = proxy.ensureConnected();
+      await started.promise;
+      const unsubscribing = proxy.unsubscribeResource("automobile:one");
+      release.resolve();
+      await connecting;
+      await unsubscribing;
+      expect(client.callDaemonMethodCalls).toEqual([
+        { method: "resources/subscribe", params: { uri: "automobile:one" } },
+        { method: "resources/unsubscribe", params: { uri: "automobile:one" } },
+      ]);
+    } finally {
+      release.resolve();
+      await proxy.close();
+    }
+  });
+
+  test("a rejected replay fails connection establishment and permits a later replay", async () => {
+    mockDaemonAvailable();
+    let rejectSubscription = true;
+    const client = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (rejectSubscription && method === "resources/subscribe") {
+          throw new Error("subscription rejected");
+        }
+      },
+    });
+    const proxy = createProxy(client);
+    try {
+      await proxy.subscribeResource("automobile:one");
+      await expect(proxy.ensureConnected()).rejects.toThrow("subscription rejected");
+      expect(proxy.isConnected()).toBe(false);
+      rejectSubscription = false;
+      await proxy.ensureConnected();
+      expect(proxy.isConnected()).toBe(true);
+      expect(client.callDaemonMethodCalls).toEqual([
+        { method: "resources/subscribe", params: { uri: "automobile:one" } },
+        { method: "resources/subscribe", params: { uri: "automobile:one" } },
+      ]);
+    } finally {
+      await proxy.close();
+    }
+  });
+});

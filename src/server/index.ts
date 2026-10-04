@@ -686,7 +686,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     },
     {
       capabilities: {
-        resources: {},
+        resources: { subscribe: true, listChanged: true },
         tools: {},
         prompts: {},
       },

@@ -38,11 +38,17 @@ import {
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   PROGRESS_NOTIFICATION_METHOD,
+  RESOURCE_SUBSCRIBE_METHOD,
+  RESOURCE_UNSUBSCRIBE_METHOD,
   type DaemonNotification,
   type DaemonOptions,
   type DaemonStatus,
 } from "./types";
-import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
+import {
+  listChangedKindForMethod,
+  RESOURCE_UPDATED_NOTIFICATION_METHOD,
+  type ListChangedKind,
+} from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
@@ -71,7 +77,7 @@ import {
   describeBuildIdentity,
   getCurrentBuildIdentity,
 } from "./buildIdentity";
-import { ActionableError } from "../models";
+import { ActionableError, toActionableError } from "../models";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError } from "./McpTimeoutError";
 import {
@@ -901,6 +907,9 @@ export class DaemonMcpProxy {
   private cachedResources: ProxiedResourceDefinition[] | null = null;
   private cachedResourceTemplates: ProxiedResourceTemplate[] | null = null;
 
+  private readonly resourceSubscriptions = new Set<string>();
+  private readonly resourceUpdatedListeners = new Set<(uri: string) => void>();
+  private resourceSubscriptionSync: Promise<void> = Promise.resolve();
   // Listeners for daemon-forwarded list-changed notifications (issue #3223),
   // fired after the matching cache is invalidated so a re-fetch is never stale.
   private readonly listChangedListeners = new Set<(kind: ListChangedKind) => void>();
@@ -1108,11 +1117,7 @@ export class DaemonMcpProxy {
     // Publishing connected=true now would pair the flag with a null client. No
     // request was dispatched on the lost transport, so surface it as a preflight
     // failure that withRecoverableReconnect reconnects from.
-    if (this.client !== client) {
-      throw new DaemonPreflightConnectionError(
-        new DaemonUnavailableError("Daemon socket closed during connection establishment"),
-      );
-    }
+    this.assertConnectedClient(client);
     this.connected = true;
     this.cancelBackgroundConnectRetry();
 
@@ -1120,6 +1125,9 @@ export class DaemonMcpProxy {
     // so callers do not race later requests ahead of notification opt-in. Failure
     // was converted to a warning above and preserves the prior best-effort policy.
     await notificationSubscription;
+    if (this.resourceSubscriptions.size > 0) {
+      await this.replayResourceSubscriptions(client);
+    }
 
     // If a client `tools/list` was served statically before this connection
     // existed (issue #5879), prompt it to re-fetch now that the daemon can
@@ -1268,10 +1276,95 @@ export class DaemonMcpProxy {
     };
   }
 
+  onResourceUpdated(listener: (uri: string) => void): () => void {
+    this.resourceUpdatedListeners.add(listener);
+    return () => {
+      this.resourceUpdatedListeners.delete(listener);
+    };
+  }
+
+  async subscribeResource(uri: string): Promise<void> {
+    this.throwIfClosing();
+    this.resourceSubscriptions.add(uri);
+    if (this.connected) {
+      await this.syncResourceSubscription(uri);
+    }
+  }
+
+  async unsubscribeResource(uri: string): Promise<void> {
+    this.throwIfClosing();
+    this.resourceSubscriptions.delete(uri);
+    if (this.connected) {
+      await this.syncResourceSubscription(uri);
+    }
+  }
+
+  private assertConnectedClient(client: DaemonClientLike): void {
+    if (this.client !== client) {
+      throw new DaemonPreflightConnectionError(
+        new DaemonUnavailableError("Daemon socket closed during connection establishment"),
+      );
+    }
+  }
+
+  private async replayResourceSubscriptions(client: DaemonClientLike): Promise<void> {
+    try {
+      for (const uri of this.resourceSubscriptions) {
+        await this.syncResourceSubscription(uri);
+      }
+      this.throwIfClosing();
+      this.assertConnectedClient(client);
+    } catch (error) {
+      if (this.client === client) {
+        await this.resetConnection();
+      }
+      throw toActionableError(error, "Failed to replay resource subscriptions");
+    }
+  }
+
+  private syncResourceSubscription(uri: string): Promise<void> {
+    const client = this.client;
+    const operation = this.resourceSubscriptionSync.then(async () => {
+      if (!client || this.client !== client || this.closing) {
+        return;
+      }
+      const method = this.resourceSubscriptions.has(uri)
+        ? RESOURCE_SUBSCRIBE_METHOD
+        : RESOURCE_UNSUBSCRIBE_METHOD;
+      await client.callDaemonMethod(method, { uri });
+    });
+    // Keep subsequent mutations/replay ordered even after a failed RPC; its caller still rejects.
+    this.resourceSubscriptionSync = operation.catch((error) => {
+      logger.warn("[DaemonMcpProxy] Failed to synchronize resource subscription", error);
+    });
+    return operation;
+  }
+
+  private handleResourceUpdated(
+    notification: DaemonNotification,
+    sourceClient: DaemonClientLike,
+  ): void {
+    const uri = notification.uri;
+    if (sourceClient !== this.client || !uri || !this.resourceSubscriptions.has(uri)) {
+      return;
+    }
+    for (const listener of this.resourceUpdatedListeners) {
+      try {
+        listener(uri);
+      } catch (error) {
+        logger.warn("[DaemonMcpProxy] resource update listener failed", error);
+      }
+    }
+  }
+
   private handleDaemonNotification(
     notification: DaemonNotification,
     sourceClient: DaemonClientLike,
   ): void {
+    if (notification.method === RESOURCE_UPDATED_NOTIFICATION_METHOD) {
+      this.handleResourceUpdated(notification, sourceClient);
+      return;
+    }
     if (notification.method === SESSION_RELEASED_NOTIFICATION_METHOD) {
       this.handleSessionReleasedNotification(notification);
       return;
@@ -2271,6 +2364,7 @@ export class DaemonMcpProxy {
   private async resetConnection(): Promise<void> {
     const shutdownDisconnectResolve = this.resolveDaemonShutdownDisconnect;
     const staleClient = this.client;
+    this.resourceSubscriptionSync = Promise.resolve();
     this.connected = false;
     this.client = null;
     this.structuredSessionNotFound = false;
@@ -3975,6 +4069,9 @@ export class DaemonMcpProxy {
    */
   async close(): Promise<void> {
     this.closing = true;
+    this.connected = false;
+    this.resourceSubscriptions.clear();
+    this.resourceUpdatedListeners.clear();
     this.structuredSessionNotFound = false;
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();

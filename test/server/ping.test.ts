@@ -42,3 +42,24 @@ describe("MCP Ping", () => {
     expect(result).toEqual({});
   });
 });
+
+test("direct initialize advertises resource subscribe and listChanged", async () => {
+  const restore = installHermeticServerFixture();
+  const fixture = new McpTestFixture();
+  try {
+    await fixture.setup();
+    expect(fixture.client.getServerCapabilities()?.resources).toEqual({
+      subscribe: true,
+      listChanged: true,
+    });
+    expect(await fixture.client.subscribeResource({ uri: "automobile:devices/booted" })).toEqual(
+      {},
+    );
+    expect(await fixture.client.unsubscribeResource({ uri: "automobile:devices/booted" })).toEqual(
+      {},
+    );
+  } finally {
+    await fixture.teardown();
+    restore();
+  }
+});

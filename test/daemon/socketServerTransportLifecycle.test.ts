@@ -1,10 +1,15 @@
+import {
+  ResourceUpdatedBroadcaster,
+  type ResourceUpdateTargets,
+} from "../../src/server/listChangedBroadcast";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { Socket } from "node:net";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest, DaemonResponse, DaemonNotification } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -16,6 +21,10 @@ import {
 } from "../../src/server/mcpRecordingManager";
 
 interface ServerInternals {
+  resourceSubscriptions: Map<string, Set<string>>;
+  notificationSubscribers: Set<string>;
+  broadcastResourceUpdated(resolve: ResourceUpdateTargets): void;
+
   handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
   mcpClients: Map<string, Client>;
   resetMcpClient(key: string): Promise<void>;
@@ -208,5 +217,123 @@ describe("daemon socket transport lifecycle", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.params).toEqual({ text: "日" });
+  });
+});
+
+describe("daemon socket resource subscription routing", () => {
+  test("routes registered updates to exact socket subscriptions, preserves pages and cleans disconnects", async () => {
+    const timer = new FakeTimer();
+    const server = new UnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      timer,
+      null,
+      {},
+      new CountingIdGenerator("resource-socket"),
+    );
+    const internals = server as unknown as ServerInternals;
+    internals.acceptingRequests = true;
+    const first = new RpcSocket();
+    const second = new RpcSocket();
+    const third = new RpcSocket();
+    internals.handleConnection(first as unknown as Socket);
+    internals.handleConnection(second as unknown as Socket);
+    internals.handleConnection(third as unknown as Socket);
+    const canonical = "automobile:socket/one?appId=x";
+    const page = `${canonical}&limit=10&offset=0`;
+    ResourceRegistry.registerTemplate(
+      "automobile:socket/{id}{?appId,limit,offset}",
+      "Socket",
+      "Socket",
+      "text/plain",
+      async () => ({ uri: canonical, text: "value" }),
+      ["limit", "offset"],
+    );
+    const stop = ResourceUpdatedBroadcaster.subscribe((resolve) =>
+      internals.broadcastResourceUpdated(resolve),
+    );
+    const request = (sessionId: string, socket: RpcSocket, method: string, uri: string) =>
+      internals.handleRequest(
+        sessionId,
+        socket as unknown as Socket,
+        { id: method, type: "mcp_request", method, params: { uri } },
+        timer.now(),
+      );
+    try {
+      expect(await request("resource-socket-1", first, "resources/subscribe", page)).toMatchObject({
+        success: true,
+        result: {},
+      });
+      expect(
+        await request(
+          "resource-socket-2",
+          second,
+          "resources/subscribe",
+          "automobile:socket/two?appId=x",
+        ),
+      ).toMatchObject({ success: true, result: {} });
+      expect(
+        await request("resource-socket-3", third, "resources/unsubscribe", canonical),
+      ).toMatchObject({ success: true, result: {} });
+      await ResourceRegistry.notifyResourceUpdated(canonical);
+      expect(first.getWrittenMessages<DaemonNotification>()).toEqual([
+        { type: "daemon_notification", method: "notifications/resources/updated", uri: page },
+      ]);
+      expect(second.getWrittenMessages()).toEqual([]);
+      expect(third.getWrittenMessages()).toEqual([]);
+      await ResourceRegistry.notifyResourceUpdated("automobile:socket/two?appId=x");
+      expect(second.getWrittenMessages<DaemonNotification>()[0]?.uri).toBe(
+        "automobile:socket/two?appId=x",
+      );
+      expect(
+        await request("resource-socket-1", first, "resources/unsubscribe", page),
+      ).toMatchObject({ success: true, result: {} });
+      await ResourceRegistry.notifyResourceUpdated(canonical);
+      expect(first.getWrittenMessages()).toHaveLength(1);
+      expect(internals.resourceSubscriptions.has("resource-socket-1")).toBe(false);
+      internals.notificationSubscribers.add("resource-socket-2");
+      second.emit("close");
+      expect(internals.resourceSubscriptions.size).toBe(0);
+      expect(internals.notificationSubscribers.size).toBe(0);
+      await ResourceRegistry.notifyResourceUpdated("automobile:socket/two?appId=x");
+      expect(second.getWrittenMessages()).toHaveLength(1);
+    } finally {
+      stop();
+      first.emit("close");
+      second.emit("close");
+      third.emit("close");
+      ResourceRegistry.clearResources();
+    }
+  });
+
+  test("rejects a malformed subscription instead of retaining it", async () => {
+    const timer = new FakeTimer();
+    const server = new UnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      timer,
+      null,
+      {},
+      new CountingIdGenerator("invalid-resource"),
+    );
+    const internals = server as unknown as ServerInternals;
+    const socket = new RpcSocket();
+    internals.acceptingRequests = true;
+    internals.handleConnection(socket as unknown as Socket);
+    try {
+      expect(
+        await internals.handleRequest(
+          "invalid-resource-1",
+          socket as unknown as Socket,
+          { id: "invalid", type: "mcp_request", method: "resources/subscribe", params: {} },
+          timer.now(),
+        ),
+      ).toMatchObject({ success: false, error: "Resource subscription requires params.uri" });
+      expect(internals.resourceSubscriptions.size).toBe(0);
+    } finally {
+      socket.emit("close");
+    }
   });
 });

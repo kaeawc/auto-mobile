@@ -4833,6 +4833,7 @@ export class DevicePool {
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
     beforeReplacementPublishes?: () => void,
+    excludeExecutionId?: string,
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.assignmentMutex.runExclusive(async () => {
       // The caller's marker must cover the entire visible replacement
@@ -4861,6 +4862,7 @@ export class DevicePool {
           replacement,
           sourceImage,
           beforeReplacementPublishes,
+          excludeExecutionId,
         );
         await this.trackStartedDeviceProcess(replacement, childProcess);
         if (this.devices.get(replacementDevice.id) !== replacementDevice) {
@@ -4985,6 +4987,7 @@ export class DevicePool {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     beforeReplacementPublishes?: () => void,
+    excludeExecutionId?: string,
   ): Promise<PooledDevice> {
     const priorAssignmentCount = expectedDevice.assignmentCount;
     const priorLastUsedAt = expectedDevice.lastUsedAt;
@@ -4993,6 +4996,11 @@ export class DevicePool {
     if (existingReplacement && existingReplacement !== expectedDevice) {
       this.assertPooledSystemUiAnrReplacement(existingReplacement, sourceImage);
       if (this.devices.get(expectedDevice.id) === expectedDevice) {
+        await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
+          expectedDevice.id,
+          deviceLossCancellationReason(expectedDevice.id),
+          { excludeExecutionId },
+        );
         this.releaseCapturedDeviceForShutdown(expectedDevice);
         await this.removeDevice(expectedDevice.id, false, expectedDevice);
       }
@@ -5007,6 +5015,11 @@ export class DevicePool {
     // removeDevice rejects busy entries, so detach pool ownership only after
     // capturing any session that must be rebound below. The replacement remains
     // unavailable through the caller's readiness reservation while this runs.
+    await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
+      expectedDevice.id,
+      deviceLossCancellationReason(expectedDevice.id),
+      { excludeExecutionId },
+    );
     this.releaseCapturedDeviceForShutdown(expectedDevice);
     await this.removeDevice(expectedDevice.id, false, expectedDevice);
     if (this.devices.has(replacement.deviceId)) {

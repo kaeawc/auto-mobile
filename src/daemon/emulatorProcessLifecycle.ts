@@ -110,11 +110,18 @@ export class EmulatorProcessOutputTail {
   }
 }
 
+// Diagnostic sharing must not hold another handler's dead-device cleanup indefinitely.
+const SHARED_PROCESS_EXIT_INCIDENT_WAIT_MS = 1_000;
+
+interface PendingProcessExitIncident {
+  incident: Promise<string | undefined>;
+  waitWarningLogged: boolean;
+}
+
 /** Tracks started emulator processes and responds to their exits against live pool state. */
 export class EmulatorProcessLifecycle {
-  // Keep settled results too: a later bind must observe the same exit incident.
-  // Weak keys retire the record with the child, without retaining old processes.
-  private readonly processExitIncidents = new WeakMap<ChildProcess, Promise<string | undefined>>();
+  // Share through the recording handler's entire eviction/recovery pass, not just the write.
+  private readonly processExitIncidents = new WeakMap<ChildProcess, PendingProcessExitIncident>();
 
   constructor(private readonly pool: EmulatorProcessLifecyclePoolPort) {}
 
@@ -311,32 +318,89 @@ export class EmulatorProcessLifecycle {
       : null;
     const preparation = this.pool.prepareSessionPreservingRecovery(deviceId, device);
     try {
-      const incidentId = await this.recordProcessExitIncident(deviceId, code, signal, childProcess);
-      if (
-        this.pool.getDevices().get(deviceId) !== device ||
-        device.assignmentCount !== assignmentCountAtExit ||
-        device.sessionId !== sessionIdAtExit ||
-        (sessionAtExit !== null &&
-          this.pool.getSessionManager().getSession(sessionAtExit.sessionId) !== sessionAtExit)
-      ) {
-        await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
-        return;
-      }
-      try {
-        await this.pool.evictMissingPooledDevice(
-          device,
-          `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-          true,
-          incidentId,
-          true,
-          preparation,
-        );
-      } catch (error) {
-        await this.finishFailedEvictionIncident(incidentId);
-        throw error;
-      }
+      await this.withProcessExitIncident(
+        deviceId,
+        code,
+        signal,
+        childProcess,
+        async (incidentId) => {
+          if (
+            this.pool.getDevices().get(deviceId) !== device ||
+            device.assignmentCount !== assignmentCountAtExit ||
+            device.sessionId !== sessionIdAtExit ||
+            (sessionAtExit !== null &&
+              this.pool.getSessionManager().getSession(sessionAtExit.sessionId) !== sessionAtExit)
+          ) {
+            await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
+            return;
+          }
+          try {
+            await this.pool.evictMissingPooledDevice(
+              device,
+              `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
+              true,
+              incidentId,
+              true,
+              preparation,
+            );
+          } catch (error) {
+            await this.finishFailedEvictionIncident(incidentId);
+            throw error;
+          }
+        },
+      );
     } finally {
       this.pool.finishSessionPreservingRecoveryPreparation(preparation);
+    }
+  }
+
+  private async withProcessExitIncident(
+    deviceId: string,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    childProcess: ChildProcess | undefined,
+    handleIncident: (incidentId: string | undefined) => Promise<void>,
+  ): Promise<void> {
+    childProcess ??= this.pool.getStartedDeviceProcesses().get(deviceId);
+    const existing = childProcess && this.processExitIncidents.get(childProcess);
+    const pending =
+      existing ?? this.recordProcessExitIncident(deviceId, code, signal, childProcess);
+    try {
+      const incidentId = existing
+        ? await this.waitForSharedProcessExitIncident(deviceId, existing)
+        : await pending.incident;
+      await handleIncident(incidentId);
+    } finally {
+      // Only the recorder retires sharing, including failed eviction/settlement.
+      if (!existing && childProcess && this.processExitIncidents.get(childProcess) === pending) {
+        this.processExitIncidents.delete(childProcess);
+      }
+    }
+  }
+
+  private async waitForSharedProcessExitIncident(
+    deviceId: string,
+    pending: PendingProcessExitIncident,
+  ): Promise<string | undefined> {
+    const timedOut = Symbol("shared-incident-write-timeout");
+    try {
+      return await raceWithDeadline(pending.incident, {
+        timer: this.pool.getTimer(),
+        timeoutMs: SHARED_PROCESS_EXIT_INCIDENT_WAIT_MS,
+        label: "Shared emulator-loss incident write",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
+      }
+      if (!pending.waitWarningLogged) {
+        pending.waitWarningLogged = true;
+        logger.warn(
+          `[DevicePool] Timed out waiting for shared emulator-loss incident for ${deviceId}; continuing cleanup`,
+        );
+      }
+      return undefined;
     }
   }
 
@@ -345,11 +409,7 @@ export class EmulatorProcessLifecycle {
     code: number | null,
     signal: NodeJS.Signals | null,
     childProcess = this.pool.getStartedDeviceProcesses().get(deviceId),
-  ): Promise<string | undefined> {
-    const existing = childProcess && this.processExitIncidents.get(childProcess);
-    if (existing) {
-      return existing;
-    }
+  ): PendingProcessExitIncident {
     // Publish before invoking the store, including synchronous/reentrant fakes.
     // The first recorder owns the session snapshot; later handlers only reuse it.
     const incident = Promise.resolve()
@@ -362,10 +422,11 @@ export class EmulatorProcessLifecycle {
         // cleans up without retrying a write that may already have committed.
         return undefined;
       });
+    const pending = { incident, waitWarningLogged: false };
     if (childProcess) {
-      this.processExitIncidents.set(childProcess, incident);
+      this.processExitIncidents.set(childProcess, pending);
     }
-    return incident;
+    return pending;
   }
 
   private async finishFailedEvictionIncident(incidentId: string | undefined): Promise<void> {

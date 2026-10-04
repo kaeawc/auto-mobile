@@ -98,6 +98,69 @@ describe("production CoreDevice wiring", () => {
     expect((await h.invoker.invoke("sim-1", "info displays")).kind).toBe("failed");
   });
 
+  test.each([
+    ["direct string", false, false],
+    ["direct buffer", false, true],
+    ["wrapped string", true, false],
+    ["wrapped buffer", true, true],
+  ] as const)(
+    "preserves %s devicectl stderr when the result file is missing",
+    async (_name, wrapped, buffer) => {
+      const h = harness();
+      // Reused from DeviceAppManager.test.ts's unrelated terminate failure regression.
+      const stderr = "ERROR: The device is locked. Unlock it and try again.";
+      const commandError = Object.assign(new Error("exit 1"), {
+        code: 1,
+        stderr: buffer ? Buffer.from(stderr) : stderr,
+      });
+      const failure = wrapped ? new Error("Command failed", { cause: commandError }) : commandError;
+      h.setFailure(failure);
+      h.files.readFile = async () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory, result.json"), {
+          code: "ENOENT",
+        });
+      };
+
+      expect(await h.invoker.invoke("sim-1", "info lockState")).toMatchObject({
+        kind: "failed",
+        message: expect.stringContaining(stderr),
+      });
+      expect(h.logger.at("warn").some((entry) => entry.args.includes(failure))).toBe(true);
+      expect(h.removed).toEqual(["/fake/probe"]);
+    },
+  );
+
+  test("preserves devicectl failure when its result file contains invalid JSON", async () => {
+    const h = harness();
+    h.setOutput("invalid JSON");
+    const failure = new Error("devicectl command failed");
+    h.setFailure(failure);
+
+    expect(await h.invoker.invoke("sim-1", "info lockState")).toEqual({
+      kind: "failed",
+      message: failure.message,
+    });
+    expect(h.logger.at("warn")[0].args).toContain(failure);
+  });
+
+  test("reports the missing result file when exec succeeds", async () => {
+    const h = harness();
+    h.setFailure();
+    const failure = Object.assign(new Error("ENOENT: no such file or directory, result.json"), {
+      code: "ENOENT",
+    });
+    h.files.readFile = async () => {
+      throw failure;
+    };
+
+    expect(await h.invoker.invoke("sim-1", "info lockState")).toEqual({
+      kind: "failed",
+      message: failure.message,
+    });
+    expect(h.logger.at("warn")[0].args).toContain(failure);
+    expect(h.removed).toEqual(["/fake/probe"]);
+  });
+
   test("composition-owned holders are independent and a shared injected probe spawns nothing on construction", () => {
     const first = createCoreDeviceProbeHolder();
     const second = createCoreDeviceProbeHolder();

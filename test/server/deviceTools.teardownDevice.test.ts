@@ -28,6 +28,8 @@ import {
 } from "../../src/server/directSessionDeviceRegistry";
 import {
   registerDeviceTools,
+  getDeviceTeardownService,
+  getDeviceToolsDependencies,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
   teardownDeviceSchema,
@@ -62,6 +64,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { logger } from "../../src/utils/logger";
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
   override async upsertActiveSession(): Promise<void> {}
@@ -3905,6 +3908,130 @@ describe("deleteDevice handler", () => {
     expect(parsed.success).toBe(false);
     expect(manager.getExecutedOperations()).toEqual([]);
     expect(manager.destroyRequests).toEqual([]);
+  });
+
+  test("reports a plain AVD delete error as operation_failed with the real message", async () => {
+    const device: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+    manager.setDeviceImages("android", [device]);
+    manager.destroyError = new Error("AVD manager refused deletion");
+
+    const body = responseBody(await teardownTool().handler(request("android", device.name)));
+
+    expect(manager.destroyRequests).toHaveLength(1);
+    expect(body).toMatchObject({
+      success: false,
+      error: "AVD manager refused deletion",
+      failure: {
+        code: "operation_failed",
+        phase: "destroy",
+        message: "AVD manager refused deletion",
+      },
+    });
+  });
+
+  test("reports a lease release error escaping phase conversion as operation_failed", async () => {
+    const device: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+    manager.setDeviceImages("android", [device]);
+    manager.destroyError = new Error("AVD manager refused deletion");
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: {
+        reserve: async (identity, options) => {
+          const lease = await coordinator.reserve(identity, options);
+          return {
+            ...lease,
+            release: () => {
+              lease.release();
+              throw new Error("Lifecycle lease release failed");
+            },
+          };
+        },
+      },
+    });
+
+    const body = responseBody(await teardownTool().handler(request("android", device.name)));
+
+    expect(manager.destroyRequests).toHaveLength(1);
+    expect(body).toMatchObject({
+      success: false,
+      error: "Lifecycle lease release failed",
+      failure: {
+        code: "operation_failed",
+        phase: "precondition",
+        message: "Lifecycle lease release failed",
+      },
+    });
+  });
+
+  test("logs and reports an unexpected teardown service rejection as operation_failed", async () => {
+    const error = new Error("Teardown bookkeeping failed");
+    const service = getDeviceTeardownService(getDeviceToolsDependencies());
+    const teardown = spyOn(service, "teardown").mockRejectedValue(error);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const body = responseBody(await teardownTool().handler(request("android", "Pixel_8_API_35")));
+
+      expect(body).toMatchObject({
+        success: false,
+        error: error.message,
+        failure: { code: "operation_failed", phase: "precondition", message: error.message },
+      });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(error.message), error);
+    } finally {
+      teardown.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test("does not relabel an unrelated service failure when the caller also aborts", async () => {
+    const controller = new AbortController();
+    const error = new Error("Teardown bookkeeping failed");
+    const service = getDeviceTeardownService(getDeviceToolsDependencies());
+    const teardown = spyOn(service, "teardown").mockImplementation(async () => {
+      controller.abort(new Error("Caller disconnected"));
+      throw error;
+    });
+    try {
+      const body = responseBody(
+        await teardownTool().handler(
+          request("android", "Pixel_8_API_35"),
+          undefined,
+          controller.signal,
+        ),
+      );
+
+      expect(body).toMatchObject({
+        error: error.message,
+        failure: { code: "operation_failed", message: error.message },
+      });
+    } finally {
+      teardown.mockRestore();
+    }
+  });
+
+  test("reports a default caller abort before acceptance as operation_cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const body = responseBody(
+      await teardownTool().handler(
+        request("android", "Pixel_8_API_35"),
+        undefined,
+        controller.signal,
+      ),
+    );
+
+    expect(body).toMatchObject({
+      success: false,
+      error: controller.signal.reason.message,
+      failure: {
+        code: "operation_cancelled",
+        phase: "precondition",
+        message: controller.signal.reason.message,
+      },
+    });
+    expect(manager.destroyRequests).toHaveLength(0);
+    expect(manager.bootedDiscoveryCount).toBe(0);
   });
 
   test("retains the resolved platform in a destroy failure diagnostic", async () => {

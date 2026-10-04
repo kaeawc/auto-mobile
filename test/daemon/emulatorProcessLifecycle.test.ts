@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import {
@@ -11,6 +11,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
 
 const deviceId = "emulator-5554";
 const booted = { deviceId, name: "Pixel", platform: "android" as const };
@@ -59,9 +60,13 @@ function harness() {
   const devices = new Map<string, PooledDevice>();
   const calls: string[] = [];
   const settlements: Array<[string | undefined, "not-attempted" | "exhausted"]> = [];
+  const evictionIncidents: Array<string | undefined> = [];
   let reserved = false;
-  let onRecord: (() => void) | undefined;
+  let onRecord: (() => void | Promise<void>) | undefined;
+  let removeOnEviction = false;
+  let recordCount = 0;
   let evictionError: Error | undefined;
+  let onEvict: (() => Promise<void>) | undefined;
   const port: EmulatorProcessLifecyclePoolPort = {
     getTimer: () => timer,
     getStartedDeviceProcesses: () => processes,
@@ -78,18 +83,26 @@ function harness() {
     },
     recordEmulatorLossIncident: async () => {
       calls.push("record");
-      onRecord?.();
-      return "incident";
+      const incidentId = ++recordCount === 1 ? "incident" : `incident-${recordCount}`;
+      await onRecord?.();
+      return incidentId;
     },
     finishEmulatorLossIncident: async (incidentId, outcome) => {
       calls.push("settle");
       settlements.push([incidentId, outcome]);
     },
-    evictMissingPooledDevice: async (_device, reason) => {
+    evictMissingPooledDevice: async (device, reason, _recover, incidentId) => {
       expect(reason).toBe("emulator process exited after startup (code=1, signal=null)");
       calls.push("evict");
+      evictionIncidents.push(incidentId);
+      if (onEvict) {
+        await onEvict();
+      }
       if (evictionError) {
         throw evictionError;
+      }
+      if (removeOnEviction) {
+        devices.delete(device.id);
       }
     },
   };
@@ -101,19 +114,227 @@ function harness() {
     devices,
     calls,
     settlements,
+    evictionIncidents,
+    removeOnEviction: () => {
+      removeOnEviction = true;
+    },
+    onEvict: (callback: () => Promise<void>) => {
+      onEvict = callback;
+    },
     throwOnEviction: (error: Error) => {
       evictionError = error;
     },
     reserve: () => {
       reserved = true;
     },
-    onRecord: (callback: () => void) => {
+    onRecord: (callback: () => void | Promise<void>) => {
       onRecord = callback;
     },
   };
 }
 
 describe("EmulatorProcessLifecycle", () => {
+  test("startup and bind tracks record one incident and share it for both evictions", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    const process = child();
+    await h.lifecycle.trackStartedDeviceProcess(booted, process);
+    await h.lifecycle.trackStartedDeviceProcess(booted, process);
+    expect(process.listenerCount("exit")).toBe(2);
+
+    process.exitCode = 1;
+    process.emit("exit", 1, null);
+    await flushUntil(() => h.calls.filter((call) => call === "finish").length === 2);
+
+    expect(h.calls.filter((call) => call === "record")).toHaveLength(1);
+    expect(h.evictionIncidents).toEqual(["incident", "incident"]);
+  });
+
+  test("bind during a pending incident write still rejects and evicts the dead device", async () => {
+    const h = harness();
+    const write = Promise.withResolvers<void>();
+    h.onRecord(() => write.promise);
+    h.removeOnEviction();
+    h.devices.set(deviceId, pooled());
+    const process = child();
+    await h.lifecycle.trackStartedDeviceProcess(booted, process);
+    process.exitCode = 1;
+    process.emit("exit", 1, null);
+    await flushUntil(() => h.calls.includes("record"));
+
+    const binding = h.lifecycle.trackStartedDeviceProcess(booted, process);
+    const result = binding.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(process.listenerCount("exit")).toBe(1);
+    expect(h.devices.has(deviceId)).toBe(true);
+    expect(h.calls.filter((call) => call === "prepare")).toHaveLength(2);
+    expect(h.evictionIncidents).toEqual([]);
+    write.resolve();
+    expect(await result).toBeInstanceOf(Error);
+    expect(String(await result)).toContain("exited before process tracking completed");
+    await flushUntil(() => h.calls.filter((call) => call === "finish").length === 2);
+
+    expect(h.devices.has(deviceId)).toBe(false);
+    expect(h.calls.filter((call) => call === "record")).toHaveLength(1);
+    expect(h.evictionIncidents).toEqual(["incident"]);
+  });
+
+  test("a second track after a settled pass rejects and records its own incident", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    const process = child();
+    await h.lifecycle.trackStartedDeviceProcess(booted, process);
+    process.exitCode = 1;
+    process.emit("exit", 1, null);
+    await flushUntil(() => h.calls.includes("finish"));
+
+    await expect(h.lifecycle.trackStartedDeviceProcess(booted, process)).rejects.toThrow(
+      "exited before process tracking completed",
+    );
+
+    expect(h.calls.filter((call) => call === "record")).toHaveLength(2);
+    expect(h.evictionIncidents).toEqual(["incident", "incident-2"]);
+  });
+
+  test("a track overlapping recovery shares the written incident until the recorder settles", async () => {
+    const h = harness();
+    const eviction = Promise.withResolvers<void>();
+    h.onEvict(() => eviction.promise);
+    h.devices.set(deviceId, pooled());
+    const process = child();
+    await h.lifecycle.trackStartedDeviceProcess(booted, process);
+    process.exitCode = 1;
+    process.emit("exit", 1, null);
+    await flushUntil(() => h.evictionIncidents.length === 1);
+    const binding = h.lifecycle
+      .trackStartedDeviceProcess(booted, process)
+      .catch((error: unknown) => error);
+    await flushUntil(() => h.evictionIncidents.length === 2);
+    expect(h.calls.filter((call) => call === "record")).toHaveLength(1);
+    expect(h.evictionIncidents).toEqual(["incident", "incident"]);
+    eviction.resolve();
+    expect(await binding).toBeInstanceOf(Error);
+    await flushUntil(() => h.calls.filter((call) => call === "finish").length === 2);
+  });
+
+  test("only the recorder's write is wedged: bind evicts and rejects at the shared deadline", async () => {
+    const h = harness();
+    const write = Promise.withResolvers<void>();
+    h.onRecord(() =>
+      h.calls.filter((call) => call === "record").length === 1 ? write.promise : undefined,
+    );
+    h.removeOnEviction();
+    h.devices.set(deviceId, pooled());
+    const process = child();
+    const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await h.lifecycle.trackStartedDeviceProcess(booted, process);
+      process.exitCode = 1;
+      process.emit("exit", 1, null);
+      await flushUntil(() => h.calls.includes("record"));
+      let settled = false;
+      const binding = h.lifecycle
+        .trackStartedDeviceProcess(booted, process)
+        .catch((error: unknown) => {
+          settled = true;
+          return error;
+        });
+      h.timer.advanceTime(999);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(h.devices.has(deviceId)).toBe(true);
+      h.timer.advanceTime(1);
+      await flushUntil(() => settled);
+      expect(String(await binding)).toContain("exited before process tracking completed");
+      expect(h.devices.has(deviceId)).toBe(false);
+      expect(h.evictionIncidents).toEqual([undefined]);
+      expect(h.calls.filter((call) => call === "finish")).toHaveLength(1);
+      expect(warnings).toHaveBeenCalledTimes(1);
+      expect(warnings).toHaveBeenCalledWith(
+        expect.stringContaining("Timed out waiting for shared emulator-loss incident"),
+      );
+      write.resolve();
+      await flushUntil(() => h.calls.filter((call) => call === "finish").length === 2);
+      expect(h.calls.filter((call) => call === "record")).toHaveLength(1);
+      expect(h.evictionIncidents).toEqual([undefined]);
+      expect(warnings).toHaveBeenCalledTimes(1);
+      expect(h.timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      write.resolve();
+      warnings.mockRestore();
+    }
+  });
+
+  test("a failed recorder pass clears sharing for a later track", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    h.throwOnEviction(new Error("eviction failed"));
+    const process = child();
+    process.exitCode = 1;
+    await expect(h.lifecycle.trackStartedDeviceProcess(booted, process)).rejects.toThrow(
+      "eviction failed",
+    );
+    await expect(h.lifecycle.trackStartedDeviceProcess(booted, process)).rejects.toThrow(
+      "eviction failed",
+    );
+    expect(h.evictionIncidents).toEqual(["incident", "incident-2"]);
+  });
+
+  test("different children at the same serial each record their own incident", async () => {
+    const h = harness();
+    for (let index = 0; index < 2; index += 1) {
+      h.devices.set(deviceId, pooled());
+      const process = child();
+      await h.lifecycle.trackStartedDeviceProcess(booted, process);
+      await h.lifecycle.trackStartedDeviceProcess(booted, process);
+      process.exitCode = 1;
+      process.emit("exit", 1, null);
+      await flushUntil(
+        () => h.calls.filter((call) => call === "finish").length === (index + 1) * 2,
+      );
+    }
+
+    expect(h.calls.filter((call) => call === "record")).toHaveLength(2);
+    expect(h.evictionIncidents).toEqual(["incident", "incident", "incident-2", "incident-2"]);
+  });
+
+  test("a failed shared incident write is logged once while both handlers finish cleanup", async () => {
+    const h = harness();
+    const write = Promise.withResolvers<void>();
+    const failure = new Error("incident store unavailable");
+    const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+    h.onRecord(() => write.promise);
+    h.devices.set(deviceId, pooled());
+    const process = child();
+    try {
+      await h.lifecycle.trackStartedDeviceProcess(booted, process);
+      process.exitCode = 1;
+      process.emit("exit", 1, null);
+      await flushUntil(() => h.calls.includes("record"));
+      const binding = h.lifecycle.trackStartedDeviceProcess(booted, process);
+      const result = binding.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      write.reject(failure);
+      expect(await result).toBeInstanceOf(Error);
+      expect(String(await result)).toContain("exited before process tracking completed");
+      await flushUntil(() => h.calls.filter((call) => call === "finish").length === 2);
+
+      expect(h.calls.filter((call) => call === "record")).toHaveLength(1);
+      expect(h.evictionIncidents).toEqual([undefined, undefined]);
+      expect(warnings).toHaveBeenCalledTimes(1);
+      expect(warnings).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to record emulator-loss incident"),
+        failure,
+      );
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
   test("tracks a process and evicts the current device after exit", async () => {
     const h = harness();
     h.devices.set(deviceId, pooled());

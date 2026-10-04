@@ -1293,6 +1293,134 @@ describe("IOSCtrlProxyClient", function () {
   });
 
   describe("getLatestHierarchy", function () {
+    test("hierarchy failure exposes the runner error to observe without a cached fallback", async () => {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, timer);
+      try {
+        await client.ensureConnected();
+        const socket = getSocket()!;
+        const before = timer.now();
+        const pending = client.getLatestHierarchy(true, 1000);
+        const request = await waitForMessageType(socket, "request_hierarchy");
+        // Built from WebSocketResponse.error in
+        // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+        const message = {
+          type: "hierarchy_update",
+          requestId: request.requestId,
+          success: false,
+          totalTimeMs: 17,
+          error: "Command execution failed: Failed to get view hierarchy: boom",
+        };
+        socket.simulateMessage(JSON.stringify(message));
+        expect(await pending).toMatchObject({
+          hierarchy: null,
+          fresh: false,
+          unavailableReason: "unknown",
+          unavailableDetail: message.error,
+        });
+        expect(timer.now()).toBe(before);
+        expect(client["cachedHierarchy"]).toBeNull();
+        expect(timer.getPendingTimeouts()).not.toContain(1000);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test.each([true, false])(
+      "hierarchy failure with pending request=%p preserves cache and emits no hierarchy effects",
+      async (hasPendingRequest) => {
+        const timer = new FakeTimer(); // Manual clock: the response must settle without advancing it.
+        const ingestor = new FakeIosSdkEventIngestor();
+        const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+        const client = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          factory,
+          timer,
+          undefined,
+          undefined,
+          undefined,
+          ingestor,
+        );
+        const cached = {
+          hierarchy: { updatedAt: 1, packageName: "com.example.ios", hierarchy: { text: "old" } },
+          receivedAt: 0,
+          fresh: true,
+        };
+        client["cachedHierarchy"] = cached;
+        const push = spyOn(client, "pushHierarchyToObservationStream").mockImplementation(() => {});
+        const navigation = spyOn(client, "handleHierarchyUpdateForNavigation").mockImplementation(
+          () => {},
+        );
+        const debug = spyOn(logger, "debug").mockImplementation(() => {});
+        const updates: CtrlProxyHierarchy[] = [];
+        const unsubscribe = client.onPushUpdate((hierarchy) => updates.push(hierarchy));
+        const options: NonNullable<
+          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[5]
+        > = {
+          failureSink: {},
+        };
+        const failureSink = options.failureSink!;
+        try {
+          await client.ensureConnected();
+          const socket = getSocket()!;
+          expect(socket.readyState).toBe(WebSocketState.OPEN);
+          const before = timer.now();
+          let requestId = "no-pending-hierarchy";
+          const pending = hasPendingRequest
+            ? client["hierarchy"].requestHierarchySync(
+                undefined,
+                false,
+                undefined,
+                1000,
+                false,
+                options,
+              )
+            : undefined;
+          if (hasPendingRequest) {
+            const request = await waitForMessageType(socket, "request_hierarchy_if_stale");
+            expect(typeof request.requestId).toBe("string");
+            requestId = String(request.requestId);
+            expect(client["getRequestManager"]().isPending(requestId)).toBe(true);
+            expect(timer.getPendingTimeouts()).toContain(1000);
+          }
+          // Built from WebSocketResponse.error in
+          // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+          const message = {
+            type: "hierarchy_update",
+            requestId,
+            success: false,
+            totalTimeMs: 17,
+            error: "Command execution failed: Failed to get view hierarchy: boom",
+          };
+          expect(() => socket.simulateMessage(JSON.stringify(message))).not.toThrow();
+          if (hasPendingRequest) {
+            expect(await pending).toBeNull();
+            expect(failureSink.value).toEqual({ reason: "unknown", detail: message.error });
+          } else {
+            expect(debug).toHaveBeenCalledWith(
+              `[RequestManager] No pending request found for id: ${requestId} (may have timed out)`,
+            );
+          }
+          expect(client["getRequestManager"]().isPending(requestId)).toBe(false);
+          expect(timer.getPendingTimeouts()).not.toContain(1000);
+          expect(timer.now()).toBe(before);
+          expect(client["cachedHierarchy"]).toBe(cached);
+          expect(push).not.toHaveBeenCalled();
+          expect(navigation).not.toHaveBeenCalled();
+          expect(ingestor.layoutEvents).toEqual([]);
+          expect(updates).toEqual([]);
+        } finally {
+          unsubscribe();
+          push.mockRestore();
+          navigation.mockRestore();
+          debug.mockRestore();
+          await client.close();
+        }
+      },
+    );
+
     test("should return hierarchy data when WebSocket receives fresh data", async function () {
       const mockHierarchyData: CtrlProxyHierarchy = {
         updatedAt: 1750934583218,

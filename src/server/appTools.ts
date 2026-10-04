@@ -161,6 +161,7 @@ export interface TerminateAppExecutor {
     options?: {
       skipUiStability?: boolean;
     },
+    signal?: AbortSignal,
   ): Promise<TerminateAppResult>;
 }
 
@@ -1037,9 +1038,13 @@ export function registerAppTools() {
       }
       const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
       mutationMayHaveHappened = true;
-      const result = await terminateApp.execute(args.appId, {
-        skipUiStability: true, // skip the 12+ second stability polling
-      });
+      const result = await terminateApp.execute(
+        args.appId,
+        {
+          skipUiStability: true, // skip the 12+ second stability polling
+        },
+        signal,
+      );
 
       // A typed failure (e.g. an iOS installed-app listing that failed, or a
       // devicectl termination error) must surface as an error rather than a

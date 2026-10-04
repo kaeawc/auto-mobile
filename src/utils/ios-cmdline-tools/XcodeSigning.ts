@@ -255,7 +255,24 @@ export class XcodeSigningManager {
     let entries: string[];
     try {
       entries = await this.dependencies.readDir(this.profileDirectory());
-    } catch {
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        // Provisioning profiles are optional when automatic signing is used.
+        logger.debug(
+          `[XcodeSigning] No provisioning profile directory: ${errorMessage(error)}`,
+          error,
+        );
+      } else {
+        logger.warn(
+          `[XcodeSigning] Failed to list provisioning profiles: ${errorMessage(error)}`,
+          error,
+        );
+      }
       return [];
     }
 

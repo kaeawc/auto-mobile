@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   SimCtlClient,
   type SimCtlFileSystem,
@@ -49,6 +50,71 @@ describe("SimCtlClient pushNotification", () => {
     platform: "ios",
     source: "local",
   };
+
+  test("warns on payload-write and cleanup failures while retaining the write failure", async () => {
+    const fileSystem = createFakeSimCtlFileSystem();
+    const failure = new Error("payload write failed");
+    const cleanupFailure = new Error("cleanup denied");
+    fileSystem.writeFile = async () => {
+      throw failure;
+    };
+    fileSystem.rm = async () => {
+      throw cleanupFailure;
+    };
+    const simctl = new SimCtlClient(
+      device,
+      async () => createExecResult("", ""),
+      undefined,
+      undefined,
+      undefined,
+      fileSystem,
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await simctl.pushNotification(device.deviceId, "com.example.app", "{}")).toEqual({
+        success: false,
+        error: "payload write failed",
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to push notification"),
+        failure,
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to remove push notification directory"),
+        cleanupFailure,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("warns on cleanup failure without changing successful delivery", async () => {
+    const fileSystem = createFakeSimCtlFileSystem();
+    const failure = new Error("cleanup denied");
+    fileSystem.rm = async () => {
+      throw failure;
+    };
+    const simctl = new SimCtlClient(
+      device,
+      async () => createExecResult("simctl version 1.0.0", ""),
+      undefined,
+      undefined,
+      undefined,
+      fileSystem,
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await simctl.pushNotification(device.deviceId, "com.example.app", "{}")).toEqual({
+        success: true,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to remove push notification directory"),
+        failure,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   // Issue #6517: `simctl push` can exit 0 (delivered) while still writing
   // advisory/diagnostic text to stderr. Success must be driven by the exit

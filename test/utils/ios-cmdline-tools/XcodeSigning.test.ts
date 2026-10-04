@@ -391,6 +391,28 @@ describe("XcodeSigningManager profile eligibility (env-selected preferred profil
 });
 
 describe("XcodeSigningManager", () => {
+  for (const code of ["ENOENT", "EACCES"] as const) {
+    test(`logs ${code} profile-directory failures and preserves the empty list`, async () => {
+      const { deps } = createFakeDependencies();
+      const failure = Object.assign(new Error("profile directory unavailable"), { code });
+      deps.readDir = async () => {
+        throw failure;
+      };
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await new XcodeSigningManager(deps).listProvisioningProfiles()).toEqual([]);
+        expect(code === "ENOENT" ? debug : warn).toHaveBeenCalledWith(
+          expect.stringContaining("profile"),
+          failure,
+        );
+        expect(code === "ENOENT" ? warn : debug).not.toHaveBeenCalled();
+      } finally {
+        debug.mockRestore();
+        warn.mockRestore();
+      }
+    });
+  }
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   afterEach(() => {

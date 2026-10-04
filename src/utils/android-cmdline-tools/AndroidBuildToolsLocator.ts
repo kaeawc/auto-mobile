@@ -1,4 +1,6 @@
 import { join } from "path";
+import { errorMessage } from "../describeUnknownError";
+import { logger } from "../logger";
 import { FileSystem, DefaultFileSystem } from "../filesystem/DefaultFileSystem";
 import { SystemDetection, DefaultSystemDetection } from "../system/SystemDetection";
 import {
@@ -74,7 +76,11 @@ export class DefaultAndroidBuildToolsLocator implements AndroidBuildToolsLocator
       let versions: string[] = [];
       try {
         versions = await this.fileSystem.readdir(buildToolsDir);
-      } catch {
+      } catch (error) {
+        logger.warn(
+          `Failed to read Android build-tools at ${buildToolsDir}: ${errorMessage(error)}`,
+          error,
+        );
         continue;
       }
 

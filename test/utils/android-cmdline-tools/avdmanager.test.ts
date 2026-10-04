@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, mock } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
@@ -64,6 +64,33 @@ describe("AVDManager", function () {
   });
 
   // Helper function to create mock dependencies
+  for (const operation of ["acceptLicenses", "installSystemImage"] as const) {
+    test(`${operation} warns and preserves the failure message when tool detection rejects`, async () => {
+      const failure = new Error("SDK unavailable");
+      const warn = mock(() => {});
+      const deps = createDependencies({
+        detectAndroidCommandLineTools: async () => {
+          throw failure;
+        },
+        logger: { info() {}, debug() {}, error() {}, warn },
+      });
+      const result =
+        operation === "acceptLicenses"
+          ? await avdmanager.acceptLicenses(deps)
+          : await avdmanager.installSystemImage(
+              "system-images;android-35;google_apis;x86_64",
+              true,
+              deps,
+            );
+      const message =
+        operation === "acceptLicenses"
+          ? "Failed to accept licenses: SDK unavailable"
+          : "Failed to install system image system-images;android-35;google_apis;x86_64: SDK unavailable";
+      expect(result).toEqual({ success: false, message });
+      expect(warn).toHaveBeenCalledWith(message, failure);
+    });
+  }
+
   function createDependencies(
     overrides: Partial<AvdManagerDependencies> = {},
   ): AvdManagerDependencies {

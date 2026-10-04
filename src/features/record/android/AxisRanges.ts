@@ -1,5 +1,7 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
 
 interface AxisRanges {
   xMin: number;
@@ -77,8 +79,11 @@ export async function queryRotation(adb: AdbExecutor): Promise<number> {
     if (match) {
       return normalizeDumpsysRotation(parseInt(match[1], 10));
     }
-  } catch {
-    // fall through to default
+  } catch (error) {
+    logger.warn(
+      `[AxisRanges] Failed to query rotation; using portrait: ${errorMessage(error)}`,
+      error,
+    );
   }
   return 0;
 }
@@ -111,8 +116,11 @@ export async function queryDensity(adb: AdbExecutor): Promise<number> {
     if (match) {
       return parseInt(match[1], 10) / 160;
     }
-  } catch {
-    // fall through to default
+  } catch (error) {
+    logger.warn(
+      `[AxisRanges] Failed to query density; using 440 dpi: ${errorMessage(error)}`,
+      error,
+    );
   }
   return 2.75;
 }

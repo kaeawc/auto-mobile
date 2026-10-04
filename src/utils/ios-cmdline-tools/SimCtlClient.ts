@@ -3024,9 +3024,18 @@ export class SimCtlClient implements SimCtl {
       }
       return { success: true };
     } catch (error) {
+      logger.warn(
+        `[iOS] Failed to push notification to ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
       return { success: false, error: errorMessage(error) };
     } finally {
-      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch(() => {});
+      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch((error) => {
+        logger.warn(
+          `[iOS] Failed to remove push notification directory ${dir}: ${errorMessage(error)}`,
+          error,
+        );
+      });
     }
   }
 

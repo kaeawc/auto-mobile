@@ -1,4 +1,5 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { logger } from "../../../src/utils/logger";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { TouchLatencyTracker } from "../../../src/features/performance/TouchLatencyTracker";
 import { BootedDevice, ScreenSize } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -1310,23 +1311,33 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
     test("should handle errors gracefully and return error result", async function () {
       const errorAdb = new FakeAdbExecutor();
-      errorAdb.setDefaultError(new Error("ADB connection failed"));
+      const failure = new Error("ADB connection failed");
+      errorAdb.setDefaultError(failure);
       const factory: AdbClientFactory = { create: () => errorAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
-      const result = await runWithFakeTimer(
-        tracker.measureLatency(
-          "com.example.app",
-          screenSize,
-          { sampleCount: 1, maxWaitMs: 200 },
-          perf,
-        ),
-        fakeTimer,
-      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await runWithFakeTimer(
+          tracker.measureLatency(
+            "com.example.app",
+            screenSize,
+            { sampleCount: 1, maxWaitMs: 200 },
+            perf,
+          ),
+          fakeTimer,
+        );
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("ADB connection failed");
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("ADB connection failed");
+        expect(warn).toHaveBeenCalledWith(
+          "[TouchLatency] Failed to measure touch latency: ADB connection failed",
+          failure,
+        );
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

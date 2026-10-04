@@ -143,8 +143,9 @@ describe("AvdManagerClient", () => {
   for (const operation of ["createAvd", "deleteAvd"] as const) {
     test(`${operation} propagates mid-run cancellation without logging a failure`, async () => {
       const errorLog = mock(() => {});
+      const warnLog = mock(() => {});
       const { client, child } = createClient({
-        logger: { info() {}, warn() {}, error: errorLog },
+        logger: { info() {}, warn: warnLog, error: errorLog },
       });
       const controller = new AbortController();
       const options = { signal: controller.signal };
@@ -161,6 +162,7 @@ describe("AvdManagerClient", () => {
       await expect(pending).rejects.not.toBe(controller.signal.reason);
       expect(child.kills).toEqual(["SIGTERM"]);
       expect(errorLog).not.toHaveBeenCalled();
+      expect(warnLog).not.toHaveBeenCalled();
     });
 
     test(`${operation} preserves a timeout that precedes request cancellation`, async () => {
@@ -182,9 +184,9 @@ describe("AvdManagerClient", () => {
     });
 
     test(`${operation} logs a non-abort spawn failure and returns a typed failure`, async () => {
-      const errorLog = mock(() => {});
+      const warnLog = mock(() => {});
       const { client, child } = createClient({
-        logger: { info() {}, warn() {}, error: errorLog },
+        logger: { info() {}, warn: warnLog, error() {} },
       });
       const options = { signal: new AbortController().signal };
       const pending =
@@ -196,7 +198,7 @@ describe("AvdManagerClient", () => {
 
       const message = `Failed to ${operation === "createAvd" ? "create" : "delete"} AVD pixel: Failed to spawn avdmanager: spawn unavailable`;
       await expect(pending).resolves.toEqual({ success: false, message });
-      expect(errorLog).toHaveBeenCalledWith(message);
+      expect(warnLog).toHaveBeenCalledWith(message, expect.any(Error));
       expect(child.kills).toEqual([]);
     });
   }

@@ -79,6 +79,20 @@ import {
   validateNavigation,
 } from "./ExploreValidateMode";
 
+interface ExplorationLoopContext {
+  options: ExploreOptions;
+  maxInteractions: number;
+  timeoutMs: number;
+  startTime: number;
+  strategy: ExplorationStrategy;
+  mode: ExplorationMode;
+  resetInterval: number;
+  initialNodeCount: number;
+  perf: PerformanceTracker;
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+}
+
 /**
  * Explore implements intelligent app navigation exploration.
  * Perpetually explores until all navigation destinations have been reached by
@@ -170,21 +184,7 @@ export class Explore extends BaseVisualChange {
       const mode = options.mode ?? "hybrid";
       const resetInterval = options.resetInterval ?? Explore.DEFAULT_RESET_INTERVAL;
 
-      // Reset exploration state for fresh run
-      this.exploredElements.clear();
-      this.loopDetection.clear();
-      this.elementSelections = [];
-      this.explorationPath = [];
-      this.interactionCount = 0;
-      this.lastResetAt = 0;
-      this.consecutiveBackCount = 0;
-      this.consecutiveNoChangeCount = 0;
-      this.permissionDialogIdentity = null;
-      this.permissionDialogTapAttempts = 0;
-      this.stopReason = "";
-      this.previousScreen = null;
-      this.consecutiveOutOfAppCount = 0;
-      this.targetPackageName = options.packageName?.trim() || null;
+      this.resetExplorationState(options);
 
       if (progress) {
         await progress(0, maxInteractions, "Starting exploration...");
@@ -196,193 +196,265 @@ export class Explore extends BaseVisualChange {
 
       // Initialize graph traversal for validate mode
       if (mode === "validate") {
-        this.graphTraversalState = await initializeGraphTraversal(this.navigationManager);
-        logger.info(
-          `[Explore] Validate mode: traversing ${this.graphTraversalState?.totalEdgesInGraph ?? 0} known edges`,
-        );
+        await this.initializeValidateTraversal();
       }
 
-      // Main exploration loop
-      while (this.shouldContinue(maxInteractions, timeoutMs, startTime)) {
-        if (signal?.aborted) {
-          this.stopReason = OPERATION_CANCELLED_MESSAGE;
-          break;
-        }
-        // Get current screen state
-        const observation = await this.observeScreen.execute({
-          perf,
-          skipWaitForFresh: true,
-          signal,
-        });
-
-        const permissionOutcome = await this.handlePermissionDialogFastPath(observation, progress);
-        if (permissionOutcome === "break") {
-          break;
-        }
-        if (permissionOutcome === "continue") {
-          continue;
-        }
-
-        if (!this.targetPackageName) {
-          this.targetPackageName = this.getObservationPackageName(observation);
-          if (this.targetPackageName) {
-            logger.info(`[Explore] Defaulting to foreground package: ${this.targetPackageName}`);
-          }
-        }
-
-        if (this.targetPackageName) {
-          const enforcement = await this.enforceTargetApp(
-            observation,
-            this.targetPackageName,
-            progress,
-          );
-          if (enforcement === "handled") {
-            continue;
-          }
-          if (enforcement === "stop") {
-            break;
-          }
-        }
-
-        // Check for blocker screens (auth, permissions, etc.) and handle them
-        const blockerHandled = await detectAndHandleBlockers(
-          observation,
-          this.device,
-          this.adb,
-          this.elementParser,
-          (p) => this.handleDeadEnd(p),
-          progress,
-          this.blockerHandlerDeps(),
-        );
-        if (blockerHandled) {
-          // Re-observe after handling blocker
-          continue;
-        }
-
-        // Check for safety conditions
-        if (this.shouldBreakForSafety(observation)) {
-          logger.warn("[Explore] Safety condition triggered, stopping exploration");
-          break;
-        }
-
-        // Update current screen in path
-        const currentScreen = this.navigationManager.getCurrentScreen();
-        if (currentScreen && !this.explorationPath.includes(currentScreen)) {
-          this.explorationPath.push(currentScreen);
-        }
-
-        // Select next element to interact with
-        const nextElement = await this.selectNextElement(observation, strategy, mode, perf);
-
-        if (!nextElement) {
-          logger.info("[Explore] No suitable element found, attempting back navigation");
-          await this.handleDeadEnd(progress);
-          continue;
-        }
-
-        // Perform interaction
-        throwIfAborted(signal);
-        const interactionSuccess = await this.performInteraction(
-          nextElement,
-          observation,
-          progress,
-          perf,
-          signal,
-        );
-
-        if (interactionSuccess) {
-          this.interactionCount++;
-          this.consecutiveNoChangeCount = 0;
-
-          // Validate navigation in validate mode
-          if (mode === "validate" && this.currentTargetEdge && this.graphTraversalState) {
-            const validationSuccess = await validateNavigation(
-              this.currentTargetEdge,
-              this.graphTraversalState,
-              this.navigationManager,
-              this.timer,
-              this.currentElementConfidence,
-              (reason) => {
-                this.stopReason = reason;
-              },
-            );
-
-            if (!validationSuccess) {
-              // Navigation validation failed - stop exploration
-              logger.error("[Explore] Stopping exploration due to navigation validation failure");
-              break;
-            }
-          }
-        } else {
-          this.consecutiveNoChangeCount++;
-        }
-
-        // Update loop detection - only increment when navigating back to a previously visited screen
-        if (interactionSuccess) {
-          const newScreen = this.navigationManager.getCurrentScreen();
-
-          // Check if we navigated to a different screen
-          if (this.previousScreen !== null && newScreen && newScreen !== this.previousScreen) {
-            // We changed screens - check if we've been to this screen before
-            const visitCount = this.loopDetection.get(newScreen) ?? 0;
-            if (visitCount > 0) {
-              // We're returning to a previously visited screen - increment loop counter
-              this.loopDetection.set(newScreen, visitCount + 1);
-              logger.debug(
-                `[Explore] Returning to screen ${newScreen}, visit count: ${visitCount + 1}`,
-              );
-            } else {
-              // First visit to this screen - initialize counter
-              this.loopDetection.set(newScreen, 1);
-            }
-          } else if (newScreen && this.previousScreen === null) {
-            // First screen we're tracking
-            this.loopDetection.set(newScreen, 1);
-          }
-
-          // Update previous screen for next iteration
-          if (newScreen) {
-            this.previousScreen = newScreen;
-          }
-        }
-
-        // Report progress
-        if (progress) {
-          if (mode === "validate" && this.graphTraversalState) {
-            // Report graph traversal progress
-            const edgesTraversed = this.graphTraversalState.traversedEdges.size;
-            const totalEdges = this.graphTraversalState.totalEdgesInGraph;
-            const coveragePercent =
-              totalEdges > 0 ? Math.round((edgesTraversed / totalEdges) * 100) : 0;
-            await progress(
-              this.interactionCount,
-              maxInteractions,
-              `Validating graph: ${edgesTraversed}/${totalEdges} edges traversed (${coveragePercent}%) - ${this.interactionCount}/${maxInteractions} interactions`,
-            );
-          } else {
-            // Report discovery progress
-            const currentStats = await this.navigationManager.getStats();
-            const currentNodeCount = currentStats.nodeCount;
-            await progress(
-              this.interactionCount,
-              maxInteractions,
-              `Explored ${currentNodeCount - initialNodeCount} new screens (${this.interactionCount}/${maxInteractions} interactions)`,
-            );
-          }
-        }
-
-        // Periodic reset if configured
-        if (options.resetToHome && this.isResetDue(resetInterval)) {
-          this.lastResetAt = this.interactionCount;
-          await this.resetToHome(progress, signal);
-        }
-      }
+      await this.runExplorationLoop({
+        options,
+        maxInteractions,
+        timeoutMs,
+        startTime,
+        strategy,
+        mode,
+        resetInterval,
+        initialNodeCount,
+        perf,
+        progress,
+        signal,
+      });
 
       perf.end();
       return await this.generateReport(initialGraph, startTime, signal?.aborted === true);
     } catch (error) {
       perf.end();
       throw toActionableError(error, `Failed to execute exploration`);
+    }
+  }
+
+  private async initializeValidateTraversal(): Promise<void> {
+    this.graphTraversalState = await initializeGraphTraversal(this.navigationManager);
+    logger.info(
+      `[Explore] Validate mode: traversing ${this.graphTraversalState?.totalEdgesInGraph ?? 0} known edges`,
+    );
+  }
+
+  private resetExplorationState(options: ExploreOptions): void {
+    // Reset exploration state for fresh run
+    this.exploredElements.clear();
+    this.loopDetection.clear();
+    this.elementSelections = [];
+    this.explorationPath = [];
+    this.interactionCount = 0;
+    this.lastResetAt = 0;
+    this.consecutiveBackCount = 0;
+    this.consecutiveNoChangeCount = 0;
+    this.permissionDialogIdentity = null;
+    this.permissionDialogTapAttempts = 0;
+    this.stopReason = "";
+    this.previousScreen = null;
+    this.consecutiveOutOfAppCount = 0;
+    this.targetPackageName = options.packageName?.trim() || null;
+  }
+
+  private async runExplorationLoop(context: ExplorationLoopContext): Promise<void> {
+    const { maxInteractions, timeoutMs, startTime, strategy, mode, perf, progress, signal } =
+      context;
+    while (this.shouldContinue(maxInteractions, timeoutMs, startTime)) {
+      if (signal?.aborted) {
+        this.stopReason = OPERATION_CANCELLED_MESSAGE;
+        break;
+      }
+      // Get current screen state
+      const observation = await this.observeScreen.execute({
+        perf,
+        skipWaitForFresh: true,
+        signal,
+      });
+
+      const preparation = await this.prepareExplorationObservation(observation, progress);
+      if (preparation === "break") {
+        break;
+      }
+      if (preparation === "continue") {
+        continue;
+      }
+
+      this.recordCurrentScreenInPath();
+
+      // Select next element to interact with
+      const nextElement = await this.selectNextElement(observation, strategy, mode, perf);
+
+      if (!nextElement) {
+        logger.info("[Explore] No suitable element found, attempting back navigation");
+        await this.handleDeadEnd(progress);
+        continue;
+      }
+
+      // Perform interaction
+      throwIfAborted(signal);
+      const interactionSuccess = await this.performInteraction(
+        nextElement,
+        observation,
+        progress,
+        perf,
+        signal,
+      );
+
+      if (!(await this.recordInteractionResult(interactionSuccess, mode))) {
+        break;
+      }
+
+      await this.reportProgressAndReset(context);
+    }
+  }
+
+  private async prepareExplorationObservation(
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+  ): Promise<"none" | "continue" | "break"> {
+    const permissionOutcome = await this.handlePermissionDialogFastPath(observation, progress);
+    if (permissionOutcome === "break") {
+      return "break";
+    }
+    if (permissionOutcome === "continue") {
+      return "continue";
+    }
+
+    if (!this.targetPackageName) {
+      this.targetPackageName = this.getObservationPackageName(observation);
+      if (this.targetPackageName) {
+        logger.info(`[Explore] Defaulting to foreground package: ${this.targetPackageName}`);
+      }
+    }
+
+    if (this.targetPackageName) {
+      const enforcement = await this.enforceTargetApp(
+        observation,
+        this.targetPackageName,
+        progress,
+      );
+      if (enforcement === "handled") {
+        return "continue";
+      }
+      if (enforcement === "stop") {
+        return "break";
+      }
+    }
+
+    // Check for blocker screens (auth, permissions, etc.) and handle them
+    const blockerHandled = await detectAndHandleBlockers(
+      observation,
+      this.device,
+      this.adb,
+      this.elementParser,
+      (p) => this.handleDeadEnd(p),
+      progress,
+      this.blockerHandlerDeps(),
+    );
+    if (blockerHandled) {
+      // Re-observe after handling blocker
+      return "continue";
+    }
+
+    // Check for safety conditions
+    if (this.shouldBreakForSafety(observation)) {
+      logger.warn("[Explore] Safety condition triggered, stopping exploration");
+      return "break";
+    }
+
+    return "none";
+  }
+
+  private recordCurrentScreenInPath(): void {
+    // Update current screen in path
+    const currentScreen = this.navigationManager.getCurrentScreen();
+    if (currentScreen && !this.explorationPath.includes(currentScreen)) {
+      this.explorationPath.push(currentScreen);
+    }
+  }
+
+  private async recordInteractionResult(
+    interactionSuccess: boolean,
+    mode: ExplorationMode,
+  ): Promise<boolean> {
+    if (!interactionSuccess) {
+      this.consecutiveNoChangeCount++;
+      return true;
+    }
+    this.interactionCount++;
+    this.consecutiveNoChangeCount = 0;
+
+    // Validate navigation in validate mode
+    if (mode === "validate" && this.currentTargetEdge && this.graphTraversalState) {
+      const validationSuccess = await validateNavigation(
+        this.currentTargetEdge,
+        this.graphTraversalState,
+        this.navigationManager,
+        this.timer,
+        this.currentElementConfidence,
+        (reason) => {
+          this.stopReason = reason;
+        },
+      );
+
+      if (!validationSuccess) {
+        // Navigation validation failed - stop exploration
+        logger.error("[Explore] Stopping exploration due to navigation validation failure");
+        return false;
+      }
+    }
+    this.recordSuccessfulScreenChange();
+    return true;
+  }
+
+  private recordSuccessfulScreenChange(): void {
+    const newScreen = this.navigationManager.getCurrentScreen();
+
+    // Check if we navigated to a different screen
+    if (this.previousScreen !== null && newScreen && newScreen !== this.previousScreen) {
+      // We changed screens - check if we've been to this screen before
+      const visitCount = this.loopDetection.get(newScreen) ?? 0;
+      if (visitCount > 0) {
+        // We're returning to a previously visited screen - increment loop counter
+        this.loopDetection.set(newScreen, visitCount + 1);
+        logger.debug(`[Explore] Returning to screen ${newScreen}, visit count: ${visitCount + 1}`);
+      } else {
+        // First visit to this screen - initialize counter
+        this.loopDetection.set(newScreen, 1);
+      }
+    } else if (newScreen && this.previousScreen === null) {
+      // First screen we're tracking
+      this.loopDetection.set(newScreen, 1);
+    }
+
+    // Update previous screen for next iteration
+    if (newScreen) {
+      this.previousScreen = newScreen;
+    }
+  }
+
+  private async reportProgressAndReset(context: ExplorationLoopContext): Promise<void> {
+    const { progress, mode, maxInteractions, initialNodeCount, options, resetInterval, signal } =
+      context;
+    // Report progress
+    if (progress) {
+      if (mode === "validate" && this.graphTraversalState) {
+        // Report graph traversal progress
+        const edgesTraversed = this.graphTraversalState.traversedEdges.size;
+        const totalEdges = this.graphTraversalState.totalEdgesInGraph;
+        const coveragePercent =
+          totalEdges > 0 ? Math.round((edgesTraversed / totalEdges) * 100) : 0;
+        await progress(
+          this.interactionCount,
+          maxInteractions,
+          `Validating graph: ${edgesTraversed}/${totalEdges} edges traversed (${coveragePercent}%) - ${this.interactionCount}/${maxInteractions} interactions`,
+        );
+      } else {
+        // Report discovery progress
+        const currentStats = await this.navigationManager.getStats();
+        const currentNodeCount = currentStats.nodeCount;
+        await progress(
+          this.interactionCount,
+          maxInteractions,
+          `Explored ${currentNodeCount - initialNodeCount} new screens (${this.interactionCount}/${maxInteractions} interactions)`,
+        );
+      }
+    }
+
+    // Periodic reset if configured
+    if (options.resetToHome && this.isResetDue(resetInterval)) {
+      this.lastResetAt = this.interactionCount;
+      await this.resetToHome(progress, signal);
     }
   }
 

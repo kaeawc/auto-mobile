@@ -506,7 +506,7 @@ export class DefaultElementFinder implements ElementFinder {
 
   private findFocusedTextInputInRoots(
     rootNodes: ViewHierarchyNode[],
-    ANDROID_INPUT_CLASSES: string[],
+    ANDROID_INPUT_CLASSES: readonly string[],
   ): Element | null {
     for (const rootNode of rootNodes) {
       let foundElement: Element | null = null;

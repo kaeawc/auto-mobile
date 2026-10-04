@@ -10,8 +10,10 @@ internal class SdkEventBatchBroadcastHandler(
   private val log: LogSink,
   private val recentBatchCapacity: Int = 256,
 ) {
-  // Insertion order bounds memory and preserves the oldest-accepted eviction policy. 256 covers
-  // the SDK's default 100-file backlog plus the processor's 64 queued batches with headroom.
+  // Insertion order retains the last 256 accepted chunk ids device-wide, across all senders;
+  // repeats do not refresh the window. Live traffic can evict ids for still-pending SDK files.
+  // This set is in memory on the service instance and clears on a CtrlProxy restart, exactly
+  // when an SDK may replay a file whose first delivery succeeded before its deletion.
   private val acceptedBatchIds = LinkedHashSet<String>()
 
   init {

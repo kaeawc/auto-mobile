@@ -188,7 +188,14 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
     expectedAvdName?: string,
   ): Promise<VmSnapshotReclaimOutcome> {
     const adb = this.adbFactory.create({ deviceId, name: deviceId, platform: "android" });
-    const command = buildVmSnapshotCommand("delete", snapshotName);
+    let command: string;
+    try {
+      command = buildVmSnapshotCommand("delete", snapshotName);
+    } catch (error) {
+      const reason = errorMessage(error);
+      logger.warn(`[AvdSnapshot] ${reason}`, error);
+      return { reclaimed: false, reason };
+    }
     const identityAbortController =
       expectedAvdName === undefined ? undefined : new AbortController();
     const identitySignal = identityAbortController

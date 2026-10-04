@@ -3961,10 +3961,10 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     return new Promise((resolve) => {
-      function done() {
+      const done = () => {
         signal.removeEventListener("abort", onAbort);
         resolve();
-      }
+      };
       const onAbort = () => {
         this.timer.clearTimeout(timeout);
         done();

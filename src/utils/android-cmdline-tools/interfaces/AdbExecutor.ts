@@ -149,13 +149,13 @@ export interface AdbExecutor {
    * Check if the device screen is currently on
    * @returns Promise<boolean> - true if screen is on (Awake), false otherwise
    */
-  isScreenOn(): Promise<boolean>;
+  isScreenOn(signal?: AbortSignal): Promise<boolean>;
 
   /**
    * Get the device wakefulness state
    * @returns Promise with wakefulness state: "Awake", "Asleep", "Dozing", or null if unknown
    */
-  getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null>;
+  getWakefulness(signal?: AbortSignal): Promise<"Awake" | "Asleep" | "Dozing" | null>;
 
   /**
    * Get the device lock state (keyguard showing / secure vs swipe).

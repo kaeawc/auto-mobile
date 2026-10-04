@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { getDatabase } from "../../db/database";
 import type { NewRecompositionMetrics } from "../../db/types";
 import {
@@ -344,17 +345,24 @@ export class RecompositionTracker {
         .slice(0, 10);
       for (const entry of active) {
         const isExcessive = entry.rolling1sAverage > 2;
-        recorder.recordLayoutEvent({
-          timestamp: this.timer.now(),
-          applicationId: packageName,
-          subType: isExcessive ? "excessive_recomposition" : "recomposition",
-          composableName: entry.composableName ?? null,
-          composableId: entry.id,
-          recompositionCount: Math.round(entry.rolling1sAverage),
-          durationMs: entry.durationMs ?? null,
-          likelyCause: entry.likelyCause ?? null,
-          detailsJson: null,
-        });
+        recorder
+          .recordLayoutEvent({
+            timestamp: this.timer.now(),
+            applicationId: packageName,
+            subType: isExcessive ? "excessive_recomposition" : "recomposition",
+            composableName: entry.composableName ?? null,
+            composableId: entry.id,
+            recompositionCount: Math.round(entry.rolling1sAverage),
+            durationMs: entry.durationMs ?? null,
+            likelyCause: entry.likelyCause ?? null,
+            detailsJson: null,
+          })
+          .catch((error) => {
+            logger.warn(
+              `[RecompositionTracker] Layout telemetry failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
       }
 
       await this.pruneOldRecords(db);

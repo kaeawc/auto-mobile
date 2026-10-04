@@ -96,11 +96,15 @@ describe("DefaultIosSdkEventIngestor", () => {
   let ingestor: DefaultIosSdkEventIngestor;
 
   const buildIngestor = (
-    overrides: { navigationScreenshotsEnabled?: () => boolean; deviceId?: string } = {},
+    overrides: {
+      navigationScreenshotsEnabled?: () => boolean;
+      deviceId?: string;
+      timer?: FakeTimer;
+    } = {},
   ): DefaultIosSdkEventIngestor =>
     new DefaultIosSdkEventIngestor({
       deviceId: overrides.deviceId ?? DEVICE_ID,
-      timer: new FakeTimer(),
+      timer: overrides.timer ?? new FakeTimer(),
       getNavigationGraphManager: () => navSink,
       captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
       telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
@@ -725,6 +729,17 @@ describe("DefaultIosSdkEventIngestor", () => {
         windows: [],
         updatedAt: 123,
       }) as unknown as ViewHierarchyResult;
+
+    test("timestamps layout telemetry with the advanced injected timer", () => {
+      const timer = new FakeTimer();
+      const localIngestor = buildIngestor({ timer });
+      timer.advanceTime(123456);
+
+      localIngestor.recordLayoutTelemetryEvent(hierarchy());
+
+      expect(recorder.layout).toHaveLength(1);
+      expect(recorder.layout[0].event.timestamp).toBe(123456);
+    });
 
     test("records a hierarchy_change layout event with a node count", () => {
       ingestor.recordLayoutTelemetryEvent(hierarchy());

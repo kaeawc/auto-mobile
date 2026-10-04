@@ -1,14 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import java.io.BufferedReader
-import java.io.BufferedWriter
 import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
-import java.nio.channels.SocketChannel
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.UUID
 import kotlinx.serialization.Serializable
@@ -104,11 +96,26 @@ interface WebRtcStreamClient {
  * The default provider returns null for callers that do not own a session-bound desktop app run;
  * the desktop host supplies a provider from `DesktopDaemonSession` for Unix-daemon connections.
  */
-class WebRtcStreamSocketClient(
+class WebRtcStreamSocketClient
+internal constructor(
   private val socketPathValue: String = AutoMobileSocketPaths.socketPath(WEBRTC_STREAM_SOCKET_FILE),
   private val json: Json = DaemonJson,
   private val sessionUuidProvider: () -> String? = { null },
+  private val requestTimeoutMs: Long = WEBRTC_STREAM_REQUEST_TIMEOUT_MS,
+  private val watchdog: SocketRequestWatchdog,
 ) : WebRtcStreamClient {
+  constructor(
+    socketPathValue: String = AutoMobileSocketPaths.socketPath(WEBRTC_STREAM_SOCKET_FILE),
+    json: Json = DaemonJson,
+    sessionUuidProvider: () -> String? = { null },
+    requestTimeoutMs: Long = WEBRTC_STREAM_REQUEST_TIMEOUT_MS,
+  ) : this(
+    socketPathValue,
+    json,
+    sessionUuidProvider,
+    requestTimeoutMs,
+    SharedSocketRequestWatchdog,
+  )
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())
 
@@ -139,27 +146,21 @@ class WebRtcStreamSocketClient(
   private fun send(request: WebRtcStreamSocketRequest): WebRtcStreamSocketResponse {
     ensureSocketExists()
 
-    val address = UnixDomainSocketAddress.of(socketPathValue)
-    SocketChannel.open(address).use { channel ->
-      val reader =
-        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
-      val writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-        )
+    val line =
+      oneShotSocketRequest(
+        socketPath = socketPathValue,
+        requestLine = json.encodeToString(serializer<WebRtcStreamSocketRequest>(), request),
+        timeoutMs = requestTimeoutMs,
+        label = "WebRTC stream",
+        watchdog = watchdog,
+      )
 
-      writer.write(json.encodeToString(serializer<WebRtcStreamSocketRequest>(), request))
-      writer.newLine()
-      writer.flush()
+    val response = json.decodeFromString(serializer<WebRtcStreamSocketResponse>(), line)
 
-      val line = reader.readLine() ?: throw McpConnectionException("WebRTC stream socket closed")
-      val response = json.decodeFromString(serializer<WebRtcStreamSocketResponse>(), line)
-
-      if (!response.success) {
-        throw McpConnectionException(response.error ?: "WebRTC stream request failed")
-      }
-      return response
+    if (!response.success) {
+      throw McpConnectionException(response.error ?: "WebRTC stream request failed")
     }
+    return response
   }
 
   private fun ensureSocketExists() {

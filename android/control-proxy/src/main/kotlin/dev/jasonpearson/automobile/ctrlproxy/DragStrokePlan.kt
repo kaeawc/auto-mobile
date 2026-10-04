@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import kotlin.math.abs
-
-/** A finite, single-pointer drag: press, travel, then release at the requested target. */
+/**
+ * A finite, single-pointer drag: press, travel, then release at the requested target. The press is
+ * a stationary stroke that only puts the pointer down; [DragStrokeSession] holds it for the planned
+ * time.
+ */
 internal fun dragStrokePlan(
   from: GesturePoint,
   to: GesturePoint,
@@ -15,31 +17,17 @@ internal fun dragStrokePlan(
     add(to to dragDurationMs.coerceAtLeast(1L))
     if (holdDurationMs > 0) add(to to holdDurationMs)
   }
-  val dx = to.x - from.x
-  val dy = to.y - from.y
-  val nudge =
-    when {
-      abs(dx) > abs(dy) -> GesturePoint(if (dx < 0) -1f else 1f, 0f)
-      abs(dy) > abs(dx) -> GesturePoint(0f, if (dy < 0) -1f else 1f)
-      else -> GesturePoint(1f, 0f)
-    }
   var current = from
   return phases.mapIndexed { index, (target, duration) ->
     val start = current
-    val isHold = start == target
-    val willContinue = index < phases.lastIndex
-    // A stationary continued stroke can complete immediately because it emits no timed MOVE or
-    // UP. One pixel changes the rounded position below touch slop, preserving the full duration.
-    val end =
-      if (isHold && willContinue) GesturePoint(start.x + nudge.x, start.y + nudge.y) else target
-    current = end
+    current = target
     GestureSegment(
       from = start,
-      to = end,
+      to = target,
       durationMs = duration,
-      willContinue = willContinue,
+      willContinue = index < phases.lastIndex,
       isInitial = index == 0,
-      isHold = isHold,
+      isHold = start == target,
     )
   }
 }

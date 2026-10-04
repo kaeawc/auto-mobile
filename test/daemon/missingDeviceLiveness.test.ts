@@ -48,6 +48,8 @@ function harness() {
   const devices = new Map<string, PooledDevice>();
   const misses = new Map<string, number>();
   const calls: string[] = [];
+  const outcomes: string[] = [];
+  const settlements: (string | undefined)[] = [];
   const mutex = new Mutex();
   let generation = 1;
   let reboot = false;
@@ -84,17 +86,21 @@ function harness() {
       calls.push("release");
       return true;
     },
-    finishEmulatorLossIncident: async () => {
+    finishEmulatorLossIncident: async (id, outcome) => {
+      outcomes.push(outcome);
+      settlements.push(id);
       calls.push("finish incident");
     },
     removeDisconnectedDevice: async () => {
       calls.push("disconnect");
       devices.delete(deviceId);
     },
-    completeEmulatorLossRecovery: async () => {
+    completeEmulatorLossRecovery: async (_id, outcome) => {
+      outcomes.push(outcome);
       calls.push("complete");
     },
-    settleEmulatorLossIncident: () => {
+    settleEmulatorLossIncident: (id) => {
+      settlements.push(id);
       calls.push("settle");
     },
     removeDevice: async (_id, _cleanup, expected) => {
@@ -118,6 +124,8 @@ function harness() {
     devices,
     misses,
     calls,
+    outcomes,
+    settlements,
     port,
     setGeneration: (value: number) => {
       generation = value;
@@ -361,6 +369,21 @@ describe("MissingDeviceLiveness", () => {
     expect(h.devices.get(deviceId)).toBe(device);
   });
 
+  test("finishes a supplied incident when shutdown reservation aborts eviction", async () => {
+    const h = harness();
+    const device = pooled();
+    h.devices.set(deviceId, device);
+    h.setReserved();
+    await h.liveness.evictMissingPooledDevice(device, "absent", {
+      attemptDeviceLossRecovery: true,
+      incidentId: "incident",
+    });
+    expect(h.calls).toEqual(["finish incident"]);
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
+    expect(h.devices.get(deviceId)).toBe(device);
+  });
+
   test("releases an assigned session before removing its device", async () => {
     const h = harness();
     const device = pooled();
@@ -409,11 +432,13 @@ describe("MissingDeviceLiveness", () => {
     h.devices.set(deviceId, device);
     let stale = false;
     h.port.comparePooledIdentityEvidence = () => (stale ? "stale" : "equal");
-    h.port.completeEmulatorLossRecovery = async () => {
+    h.port.completeEmulatorLossRecovery = async (_id, outcome) => {
       h.calls.push("complete");
+      h.outcomes.push(outcome);
       stale = true;
     };
     await h.liveness.evictMissingPooledDevice(device, "identity changed", {
+      attemptDeviceLossRecovery: true,
       identityObservation: {
         deviceId,
         name: "Other Pixel",
@@ -421,8 +446,145 @@ describe("MissingDeviceLiveness", () => {
         observedAt: 1,
       },
     });
-    expect(h.calls).toEqual(["finish preparation", "complete"]);
+    expect(h.calls).toEqual(["record", "finish preparation", "complete", "settle"]);
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
     expect(h.devices.get(deviceId)).toBe(device);
+  });
+
+  test.each([false, true])(
+    "settles removal failure with lockPoolRemoval=%s and preserves the error",
+    async (lockPoolRemoval) => {
+      const h = harness();
+      const device = pooled();
+      h.devices.set(deviceId, device);
+      const failure = new Error("remove failed");
+      h.port.removeDevice = async () => {
+        throw failure;
+      };
+      await expect(
+        h.liveness.evictMissingPooledDevice(device, "absent", {
+          attemptDeviceLossRecovery: true,
+          lockPoolRemoval,
+        }),
+      ).rejects.toBe(failure);
+      expect(h.outcomes).toEqual(["not-attempted", "exhausted"]);
+      expect(h.calls).toEqual(["record", "finish preparation", "complete", "complete", "settle"]);
+      expect(h.settlements).toEqual(["incident"]);
+    },
+  );
+
+  test("finishes an opened incident when session release declines", async () => {
+    const h = harness();
+    const device = pooled();
+    device.sessionId = "session";
+    h.devices.set(deviceId, device);
+    h.port.releaseSessionForEvictedDevice = async () => false;
+    await h.liveness.evictMissingPooledDevice(device, "absent", {
+      attemptDeviceLossRecovery: true,
+    });
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
+    expect(h.devices.get(deviceId)).toBe(device);
+  });
+
+  test("does not finish again when session release already finished a replaced incarnation", async () => {
+    const h = harness();
+    const device = pooled();
+    device.sessionId = "session";
+    h.devices.set(deviceId, device);
+    h.port.releaseSessionForEvictedDevice = async () => {
+      h.devices.set(deviceId, pooled());
+      await h.port.finishEmulatorLossIncident("incident", "not-attempted");
+      return false;
+    };
+    await h.liveness.evictMissingPooledDevice(device, "absent", {
+      attemptDeviceLossRecovery: true,
+    });
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
+  });
+
+  test("settles a throwing session release and rethrows its original error", async () => {
+    const h = harness();
+    const device = pooled();
+    device.sessionId = "session";
+    h.devices.set(deviceId, device);
+    const failure = new Error("release failed");
+    h.port.releaseSessionForEvictedDevice = async () => {
+      throw failure;
+    };
+    await expect(
+      h.liveness.evictMissingPooledDevice(device, "absent", { attemptDeviceLossRecovery: true }),
+    ).rejects.toBe(failure);
+    expect(h.outcomes).toEqual(["exhausted"]);
+    expect(h.settlements).toEqual(["incident"]);
+  });
+
+  test("finishes a supplied incident on an upfront stale identity exit", async () => {
+    const h = harness();
+    const device = pooled();
+    h.devices.set(deviceId, device);
+    h.port.comparePooledIdentityEvidence = () => "stale";
+    await h.liveness.evictMissingPooledDevice(device, "stale", {
+      incidentId: "incident",
+      identityObservation: { deviceId, name: "Pixel", platform: "android", observedAt: 1 },
+    });
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
+  });
+
+  test("finishes an incident when identity becomes stale before recovery dispatch", async () => {
+    const h = harness();
+    const device = pooled();
+    h.devices.set(deviceId, device);
+    h.setReboot();
+    let stale = false;
+    h.port.comparePooledIdentityEvidence = () => (stale ? "stale" : "equal");
+    h.port.tryPreserveSessionForMissingDevice = async () => {
+      stale = true;
+      return false;
+    };
+    await h.liveness.evictMissingPooledDevice(device, "absent", {
+      attemptDeviceLossRecovery: true,
+      identityObservation: { deviceId, name: "Pixel", platform: "android", observedAt: 1 },
+    });
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
+    expect(h.calls).not.toContain("disconnect");
+  });
+
+  test("leaves a deferred incident to session-preserving recovery", async () => {
+    const h = harness();
+    const device = pooled();
+    device.sessionId = "session";
+    h.devices.set(deviceId, device);
+    const deferred = new Map<string, string>();
+    h.port.tryPreserveSessionForMissingDevice = async (_device, _attempt, id) => {
+      if (id) {
+        deferred.set("session", id);
+      }
+      return true;
+    };
+    await h.liveness.evictMissingPooledDevice(device, "absent", {
+      attemptDeviceLossRecovery: true,
+    });
+    expect(deferred.get("session")).toBe("incident");
+    expect(h.outcomes).toEqual([]);
+    expect(h.settlements).toEqual([]);
+    await h.port.finishEmulatorLossIncident(deferred.get("session"), "not-attempted");
+    expect(h.settlements).toEqual(["incident"]);
+  });
+
+  test("settles successful removal exactly once", async () => {
+    const h = harness();
+    const device = pooled();
+    h.devices.set(deviceId, device);
+    await h.liveness.evictMissingPooledDevice(device, "absent", {
+      attemptDeviceLossRecovery: true,
+    });
+    expect(h.outcomes).toEqual(["not-attempted"]);
+    expect(h.settlements).toEqual(["incident"]);
   });
 
   test("logs a rejected detached recovering eviction", async () => {

@@ -1057,7 +1057,7 @@ export class Daemon {
     this.httpServer.headersTimeout = 0;
     this.httpServer.timeout = 0;
 
-    this.httpServer.on("request", async (req, res) => {
+    const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       // Check every path before parsing the URL or handling preflight requests.
       if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
         res.writeHead(403, { "Content-Type": "application/json" });
@@ -1248,28 +1248,7 @@ export class Daemon {
           }
 
           // Setup cleanup handlers
-          streamableTransport.onclose = async () => {
-            if (streamableTransport.sessionId) {
-              this.clearHttpSessionIdleTimer(streamableTransport.sessionId);
-              this.activeHttpRequests.delete(streamableTransport.sessionId);
-              const cancelled = await executionTracker.cancelSessionExecutions(
-                streamableTransport.sessionId,
-                this.shutdownInProgress
-                  ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
-                  : "streamable_http_onclose",
-              );
-              this.transports.delete(streamableTransport.sessionId);
-              logger.info(
-                `Streamable HTTP session closed: ${streamableTransport.sessionId} (cancelled ${cancelled} executions)`,
-              );
-            }
-          };
-
-          streamableTransport.onerror = async (error) => {
-            if (streamableTransport.sessionId) {
-              this.handleHttpTransportError(streamableTransport.sessionId, error);
-            }
-          };
+          this.configureHttpTransportCallbacks(streamableTransport);
 
           try {
             logger.info("Connecting MCP server to Streamable HTTP transport");
@@ -1294,7 +1273,7 @@ export class Daemon {
         // SSE comment lines (`:`) are ignored by EventSourceParserStream.
         const keepaliveTimer =
           req.method === "POST"
-            ? defaultTimer.setInterval(() => {
+            ? this.timer.setInterval(() => {
                 if (res.headersSent && !res.writableEnded && !res.destroyed) {
                   res.write(":keepalive\n\n");
                 }
@@ -1303,7 +1282,7 @@ export class Daemon {
 
         const clearKeepalive = () => {
           if (keepaliveTimer) {
-            defaultTimer.clearInterval(keepaliveTimer);
+            this.timer.clearInterval(keepaliveTimer);
           }
         };
         res.on("close", clearKeepalive);
@@ -1330,6 +1309,15 @@ export class Daemon {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Not found" }));
       }
+    };
+    this.httpServer.on("request", (req, res) => {
+      handleRequest(req, res).catch((error) => {
+        logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+        }
+        res.end();
+      });
     });
 
     // Start HTTP server
@@ -1360,6 +1348,45 @@ export class Daemon {
         reject(error);
       });
     });
+  }
+
+  private configureHttpTransportCallbacks(
+    streamableTransport: StreamableHTTPServerTransport,
+  ): void {
+    const handleClose = async (): Promise<void> => {
+      if (streamableTransport.sessionId) {
+        this.clearHttpSessionIdleTimer(streamableTransport.sessionId);
+        this.activeHttpRequests.delete(streamableTransport.sessionId);
+        const cancelled = await executionTracker.cancelSessionExecutions(
+          streamableTransport.sessionId,
+          this.shutdownInProgress
+            ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
+            : "streamable_http_onclose",
+        );
+        this.transports.delete(streamableTransport.sessionId);
+        logger.info(
+          `Streamable HTTP session closed: ${streamableTransport.sessionId} (cancelled ${cancelled} executions)`,
+        );
+      }
+    };
+    streamableTransport.onclose = () => {
+      handleClose().catch((error) => {
+        logger.warn(`HTTP transport close callback failed: ${errorMessage(error)}`, error);
+      });
+    };
+    const handleError = async (error: Error): Promise<void> => {
+      if (streamableTransport.sessionId) {
+        this.handleHttpTransportError(streamableTransport.sessionId, error);
+      }
+    };
+    streamableTransport.onerror = (error) => {
+      handleError(error).catch((callbackError) => {
+        logger.warn(
+          `HTTP transport error callback failed: ${errorMessage(callbackError)}`,
+          callbackError,
+        );
+      });
+    };
   }
 
   private registerHttpTransport(
@@ -2149,7 +2176,7 @@ export class Daemon {
       lastFailureKind = "unknown";
     };
 
-    this.healthCheckTimer = this.timer.setInterval(async () => {
+    const checkHealth = async (): Promise<void> => {
       try {
         // Check if HTTP server is responsive
         if (!this.httpServer) {
@@ -2190,6 +2217,10 @@ export class Daemon {
         logger.warn(`Health check error: ${error}`);
         recordHealthCheckFailure("unknown");
       }
+    };
+    this.healthCheckTimer = this.timer.setInterval(() => {
+      // checkHealth logs failures and updates the failure counter internally.
+      void checkHealth();
     }, HEALTH_CHECK_INTERVAL);
 
     // Keep timer alive even if there are no other references

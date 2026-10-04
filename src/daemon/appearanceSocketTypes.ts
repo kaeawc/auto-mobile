@@ -26,6 +26,7 @@ export type AppearanceSocketResponse = {
   result?: {
     config?: AppearanceConfig;
     appliedMode?: AppearanceMode;
+    warning?: string;
   };
   error?: string;
 };

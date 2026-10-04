@@ -1,3 +1,5 @@
+import { runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { promises as nodeFs } from "node:fs";
 import { join, posix } from "node:path";
 import { tmpdir } from "node:os";
@@ -30,6 +32,9 @@ import {
 
 const DOWNLOADS_DIRECTORY = "Download";
 const SHARED_STORAGE_PUSH_TIMEOUT_MS = 120_000;
+const SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS = 5000;
+const SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS = 15000;
+const SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND = 64;
 
 interface SharedStorageStats {
   size: number;
@@ -266,7 +271,7 @@ class DefaultSharedStorageService implements SharedStorageService {
         adb,
         destinationDirectory,
         writtenPaths,
-        request.signal,
+        this.timer,
       );
       throw new ActionableError(
         `Android media-library batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
@@ -293,9 +298,22 @@ class DefaultSharedStorageService implements SharedStorageService {
         ? Buffer.from(file.contentText ?? "", "utf8")
         : Buffer.from(file.contentBase64, "base64");
     const directory = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-shared-storage-"));
-    const path = join(directory, "content");
-    await this.fileSystem.writeFileBuffer(path, buffer);
-    return { path, byteCount: buffer.byteLength, cleanup: () => this.fileSystem.rm(directory) };
+    try {
+      const path = join(directory, "content");
+      await this.fileSystem.writeFileBuffer(path, buffer);
+      return { path, byteCount: buffer.byteLength, cleanup: () => this.fileSystem.rm(directory) };
+    } catch (error) {
+      try {
+        await this.fileSystem.rm(directory);
+      } catch (cleanupError) {
+        // Cleanup failure must not mask the original preparation error.
+        logger.warn(
+          `Failed to remove inline shared-storage directory: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      throw error;
+    }
   }
 }
 
@@ -308,22 +326,54 @@ async function rollbackStagedFiles(
   adb: AdbExecutor,
   destinationDirectory: string,
   writtenPaths: string[],
-  signal?: AbortSignal,
+  timer: Timer,
 ): Promise<{ rolledBack: string[]; failures: string[] }> {
-  const rolledBack: string[] = [];
-  const failures: string[] = [];
-  for (const relativePath of [...writtenPaths].reverse()) {
-    const path = posix.join(destinationDirectory, relativePath);
-    try {
-      await execute(adb, `shell rm -f ${shellQuote(path)}`, signal);
-      rolledBack.push(relativePath);
-    } catch (error) {
-      const failure = `${relativePath}: ${errorMessage(error)}`;
-      failures.push(failure);
-      logger.warn(`[SharedStorage] Failed to roll back staged media file ${failure}`, error);
+  return runWithAbortSignal(undefined, async () => {
+    const rolledBack: string[] = [];
+    const failures: string[] = [];
+    const deadline = timer.now() + SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS;
+    const reversePaths = [...writtenPaths].reverse();
+    for (
+      let offset = 0;
+      offset < reversePaths.length;
+      offset += SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND
+    ) {
+      const chunk = reversePaths.slice(
+        offset,
+        offset + SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND,
+      );
+      const remainingMs = Math.max(0, deadline - timer.now());
+      const timeoutMs = Math.min(SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS, remainingMs);
+      const cleanup = new AbortController();
+      try {
+        if (remainingMs === 0) {
+          throw new ActionableError(
+            `Shared-storage batch rollback exceeded total timeout of ${SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS}ms`,
+          );
+        }
+        const paths = chunk.map((path) => shellQuote(posix.join(destinationDirectory, path)));
+        await raceWithDeadline(
+          () => execute(adb, `shell rm -f ${paths.join(" ")}`, cleanup.signal, timeoutMs),
+          {
+            timer,
+            timeoutMs,
+            signal: cleanup.signal,
+            label: "Shared-storage batch rollback",
+            onTimeout: () => cleanup.abort(),
+          },
+        );
+        rolledBack.push(...chunk);
+      } catch (error) {
+        // A failed command may have removed some paths; none have confirmed success.
+        failures.push(...chunk.map((path) => `${path}: ${errorMessage(error)}`));
+        logger.warn(
+          `[SharedStorage] Failed to roll back staged media files ${chunk.join(", ")}`,
+          error,
+        );
+      }
     }
-  }
-  return { rolledBack, failures };
+    return { rolledBack, failures };
+  });
 }
 
 async function execute(

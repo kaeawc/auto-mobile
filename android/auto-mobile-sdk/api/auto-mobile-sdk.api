@@ -880,7 +880,8 @@ public final class dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster {
   public final dev.jasonpearson.automobile.sdk.events.DropCounter getDropCounter$auto_mobile_sdk();
   public final void setDropCounter$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.events.DropCounter);
   public final void reset$auto_mobile_sdk();
-  public final void broadcastBatch$auto_mobile_sdk(android.content.Context, java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>);
+  public final void broadcastBatch$auto_mobile_sdk(android.content.Context, java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, kotlin.jvm.functions.Function1<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, kotlin.Unit>, kotlin.jvm.functions.Function1<? super java.lang.Boolean, kotlin.Unit>);
+  public static void broadcastBatch$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster, android.content.Context, java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public final java.util.List<java.lang.String> splitIntoBatches$auto_mobile_sdk(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, java.lang.String, int);
   public static java.util.List splitIntoBatches$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster, java.util.List, java.lang.String, int, int, java.lang.Object);
 }
@@ -891,8 +892,9 @@ public final class dev.jasonpearson.automobile.sdk.events.SdkEventBuffer$WhenMap
 Compiled from "SdkEventBuffer.kt"
 public final class dev.jasonpearson.automobile.sdk.events.SdkEventBuffer {
   public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, kotlin.Unit>, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy, java.util.concurrent.Executor);
+  public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy, java.util.concurrent.Executor, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, kotlin.Unit>, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy);
-  public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final boolean isEnabled();
   public final void setEnabled(boolean);
   public final void start();
@@ -900,6 +902,7 @@ public final class dev.jasonpearson.automobile.sdk.events.SdkEventBuffer {
   public final void flush();
   public final void execute(java.lang.Runnable);
   public final void shutdown();
+  public final void persistUndelivered$auto_mobile_sdk(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>);
 }
 Compiled from "AutoMobileFailures.kt"
 public final class dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures {
@@ -1369,6 +1372,7 @@ public final class dev.jasonpearson.automobile.sdk.noop.NoOpEventPersistence imp
   public java.util.List<kotlin.Pair<java.lang.String, java.util.List<dev.jasonpearson.automobile.protocol.SdkEvent>>> loadPending();
   public void removeBatch(java.lang.String);
   public void cleanup(int);
+  public boolean recordReplayFailure(java.lang.String);
 }
 Compiled from "NoOpEventProcessor.kt"
 public final class dev.jasonpearson.automobile.sdk.noop.NoOpEventProcessor implements dev.jasonpearson.automobile.sdk.events.EventProcessor {
@@ -1404,8 +1408,14 @@ public final class dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents {
   public static final void access$setLastBatteryPct$p(java.lang.String);
   public static final void access$setLastBatteryCharging$p(java.lang.Boolean);
 }
+Compiled from "EventBatchReplay.kt"
+public final class dev.jasonpearson.automobile.sdk.persistence.EventBatchReplayKt {
+  public static final int MAX_REPLAY_BATCHES_PER_LAUNCH = 20;
+  public static final void replayEventBatches(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, kotlin.jvm.functions.Function1<? super java.lang.Runnable, kotlin.Unit>, kotlin.jvm.functions.Function2<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, ? super kotlin.jvm.functions.Function1<? super java.lang.Boolean, kotlin.Unit>, kotlin.Unit>);
+}
 Compiled from "EventPersistence.kt"
 public final class dev.jasonpearson.automobile.sdk.persistence.EventPersistence$DefaultImpls {
+  public static boolean recordReplayFailure(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.lang.String);
   public static void cleanup$default(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, int, int, java.lang.Object);
 }
 Compiled from "EventPersistence.kt"
@@ -1413,18 +1423,22 @@ public interface dev.jasonpearson.automobile.sdk.persistence.EventPersistence {
   public abstract java.lang.String persist(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>);
   public abstract java.util.List<kotlin.Pair<java.lang.String, java.util.List<dev.jasonpearson.automobile.protocol.SdkEvent>>> loadPending();
   public abstract void removeBatch(java.lang.String);
+  public default boolean recordReplayFailure(java.lang.String);
   public abstract void cleanup(int);
   public static void cleanup$default(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, int, int, java.lang.Object);
+  public static boolean access$recordReplayFailure$jd(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.lang.String);
 }
 Compiled from "EventPersistence.kt"
 public final class dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence implements dev.jasonpearson.automobile.sdk.persistence.EventPersistence {
   public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence(java.io.File, kotlin.jvm.functions.Function0<java.lang.Long>, kotlin.jvm.functions.Function0<java.lang.String>, int, dev.jasonpearson.automobile.sdk.events.DropCounter, int, kotlin.jvm.functions.Function1<? super java.io.File, java.lang.Boolean>);
+  public dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence(java.io.File, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, dev.jasonpearson.automobile.sdk.events.DropCounter, int, kotlin.jvm.functions.Function1, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence(java.io.File, kotlin.jvm.functions.Function0<java.lang.Long>, kotlin.jvm.functions.Function0<java.lang.String>);
-  public dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence(java.io.File, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
-  public java.lang.String persist(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>);
-  public java.util.List<kotlin.Pair<java.lang.String, java.util.List<dev.jasonpearson.automobile.protocol.SdkEvent>>> loadPending();
-  public void removeBatch(java.lang.String);
-  public void cleanup(int);
+  public synchronized java.lang.String persist(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>);
+  public synchronized java.util.List<kotlin.Pair<java.lang.String, java.util.List<dev.jasonpearson.automobile.protocol.SdkEvent>>> loadPending();
+  public synchronized void removeBatch(java.lang.String);
+  public synchronized void cleanup(int);
+  public synchronized boolean recordReplayFailure(java.lang.String);
   public final java.lang.String serializeEvents$auto_mobile_sdk(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>);
   public final java.util.List<dev.jasonpearson.automobile.protocol.SdkEvent> deserializeEvents$auto_mobile_sdk(java.lang.String);
 }

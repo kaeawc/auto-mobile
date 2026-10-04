@@ -5,7 +5,9 @@ import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledThreadPoolExecutor
@@ -14,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import org.junit.Test
 
@@ -55,6 +58,32 @@ class SdkEventBufferTest {
 
     fun releaseTimer() {
       allowTimer.countDown()
+    }
+  }
+
+  @Test
+  fun `published nine-argument constructor flushes an event`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    val buffer =
+      SdkEventBuffer(
+        50,
+        500L,
+        { flushed.add(it) },
+        null,
+        Executors.newSingleThreadScheduledExecutor(),
+        null,
+        emptyList(),
+        500,
+        BackPressureStrategy.DROP_OLDEST,
+      )
+    val event = makeEvent(1)
+
+    try {
+      buffer.add(event)
+      buffer.flush()
+      assertEquals(listOf(listOf(event)), flushed)
+    } finally {
+      buffer.shutdown()
     }
   }
 
@@ -635,8 +664,10 @@ class SdkEventBufferTest {
   /** Counts persist() calls so we can assert the happy path never writes to disk. */
   private class CountingPersistence : EventPersistence {
     val persistCount = AtomicInteger(0)
+    val persistThread = AtomicReference<Thread>()
 
     override fun persist(events: List<SdkEvent>): String? {
+      persistThread.set(Thread.currentThread())
       persistCount.incrementAndGet()
       return "batch-id"
     }
@@ -700,17 +731,343 @@ class SdkEventBufferTest {
   @Test
   fun `failed delivery persists for retry`() {
     val persistence = CountingPersistence()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer =
       SdkEventBuffer(
         maxBufferSize = 1_000,
         flushIntervalMs = 60_000,
         onFlush = { throw RuntimeException("delivery failed") },
         persistence = persistence,
+        executor = executor,
       )
 
-    buffer.add(makeEvent(1))
-    buffer.flush()
+    try {
+      buffer.add(makeEvent(1))
+      buffer.flush()
+      drainExecutor(executor)
+      assertEquals(1, persistence.persistCount.get())
+      assertNotEquals(Thread.currentThread(), persistence.persistThread.get())
+    } finally {
+      buffer.shutdown()
+    }
+  }
 
+  @Test
+  fun `undelivered batch persists on buffer executor without a drop`() {
+    val executor = Executors.newSingleThreadScheduledExecutor { Thread(it, "persist-test") }
+    val recorded = CopyOnWriteArrayList<List<SdkEvent>>()
+    val threads = CopyOnWriteArrayList<String>()
+    val counter = DefaultDropCounter()
+    val persistence =
+      object : EventPersistence {
+        override fun persist(events: List<SdkEvent>): String {
+          recorded.add(events)
+          threads.add(Thread.currentThread().name)
+          return "id"
+        }
+
+        override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+
+        override fun removeBatch(batchId: String) {}
+
+        override fun cleanup(maxAgeDays: Int) {}
+      }
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        executor = executor,
+        dropCounter = counter,
+      )
+    val events = listOf(makeEvent(1), makeEvent(2))
+    try {
+      buffer.persistUndelivered(events)
+      drainExecutor(executor)
+      assertEquals(listOf(events), recorded.toList())
+      assertEquals(listOf("persist-test"), threads.toList())
+      assertTrue(counter.snapshot().isEmpty())
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `null persistence result counts terminal delivery drops`() {
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val counter = DefaultDropCounter()
+    val persistence =
+      object : EventPersistence {
+        override fun persist(events: List<SdkEvent>): String? = null
+
+        override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+
+        override fun removeBatch(batchId: String) {}
+
+        override fun cleanup(maxAgeDays: Int) {}
+      }
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        executor = executor,
+        dropCounter = counter,
+      )
+    try {
+      buffer.persistUndelivered(listOf(makeEvent(1), makeEvent(2)))
+      drainExecutor(executor)
+      assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `throwing persistence on executor is contained and counts terminal drops`() {
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val counter = DefaultDropCounter()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = ThrowingPersistence(),
+        executor = executor,
+        dropCounter = counter,
+      )
+    try {
+      buffer.persistUndelivered(listOf(makeEvent(1), makeEvent(2)))
+      drainExecutor(executor)
+      assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  /** Explicitly queued tasks prove callbacks do not persist inline; draining uses a worker. */
+  private class QueuedPersistenceExecutor : Executor {
+    val tasks = ArrayDeque<Runnable>()
+
+    override fun execute(command: Runnable) {
+      tasks.addLast(command)
+    }
+
+    fun drain() {
+      while (tasks.isNotEmpty()) {
+        val task = tasks.removeFirst()
+        val error = AtomicReference<Throwable>()
+        val worker =
+          Thread(
+            {
+              try {
+                task.run()
+              } catch (failure: Throwable) {
+                error.set(failure)
+              }
+            },
+            "fallback-test-background",
+          )
+        worker.isDaemon = true
+        worker.start()
+        worker.join(1000)
+        assertFalse(worker.isAlive, "Persistence must not block on the buffer lock")
+        error.get()?.let { throw it }
+      }
+    }
+  }
+
+  @Test
+  fun `throwing persistence after shutdown is contained and counts drops`() {
+    val counter = DefaultDropCounter()
+    val fallback = QueuedPersistenceExecutor()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = ThrowingPersistence(),
+        dropCounter = counter,
+        persistenceExecutor = fallback,
+      )
+    buffer.shutdown()
+    buffer.persistUndelivered(listOf(makeEvent(1), makeEvent(2)))
+    assertTrue(counter.snapshot().isEmpty())
+    fallback.drain()
+    assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `undelivered batch after shutdown persists on fallback executor`() {
+    val persistence = CountingPersistence()
+    val counter = DefaultDropCounter()
+    val fallback = QueuedPersistenceExecutor()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        dropCounter = counter,
+        persistenceExecutor = fallback,
+      )
+    buffer.shutdown()
+    val caller = Thread.currentThread()
+    buffer.persistUndelivered(listOf(makeEvent(1)))
+    assertEquals(0, persistence.persistCount.get(), "Shutdown callback must never persist inline")
+    assertEquals(1, fallback.tasks.size)
+    fallback.drain()
     assertEquals(1, persistence.persistCount.get())
+    assertNotEquals(caller, persistence.persistThread.get())
+    assertTrue(counter.snapshot().isEmpty())
+  }
+
+  @Test
+  fun `fallback rejection counts terminal drops without inline persistence`() {
+    val persistence = CountingPersistence()
+    val counter = DefaultDropCounter()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        dropCounter = counter,
+        persistenceExecutor = Executor { throw RejectedExecutionException("stopped") },
+      )
+    buffer.shutdown()
+    buffer.persistUndelivered(listOf(makeEvent(1), makeEvent(2)))
+    assertEquals(0, persistence.persistCount.get())
+    assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+  }
+
+  @Test
+  fun `executor rejection race queues persistence on fallback`() {
+    val executor =
+      object : ScheduledThreadPoolExecutor(1) {
+        override fun execute(command: Runnable) {
+          throw RejectedExecutionException("shutdown raced submission")
+        }
+      }
+    val fallback = QueuedPersistenceExecutor()
+    val persistence = CountingPersistence()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        executor = executor,
+        persistenceExecutor = fallback,
+      )
+    try {
+      buffer.persistUndelivered(listOf(makeEvent(1)))
+      assertEquals(0, persistence.persistCount.get())
+      assertEquals(1, fallback.tasks.size)
+      fallback.drain()
+      assertEquals(1, persistence.persistCount.get())
+      assertNotEquals(Thread.currentThread(), persistence.persistThread.get())
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `fallback submission is outside buffer lock`() {
+    val counter = DefaultDropCounter()
+    lateinit var buffer: SdkEventBuffer
+    val fallback = Executor { command ->
+      val error = AtomicReference<Throwable>()
+      val worker =
+        Thread(
+          {
+            try {
+              buffer.flush() // Acquires the buffer lock before doing any disk work.
+              command.run()
+            } catch (failure: Throwable) {
+              error.set(failure)
+            }
+          },
+          "fallback-lock-test",
+        )
+      worker.isDaemon = true
+      worker.start()
+      worker.join(1000)
+      assertFalse(worker.isAlive, "Submission must not hold the buffer lock")
+      error.get()?.let { throw it }
+    }
+    val persistence = CountingPersistence()
+    buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        persistence = persistence,
+        dropCounter = counter,
+        persistenceExecutor = fallback,
+      )
+    buffer.shutdown()
+    buffer.persistUndelivered(listOf(makeEvent(1)))
+    assertEquals(1, persistence.persistCount.get())
+    assertNotEquals(Thread.currentThread(), persistence.persistThread.get())
+    assertTrue(counter.snapshot().isEmpty())
+  }
+
+  @Test
+  fun `caller flush failure queues persistence and preserves FLUSH_ERROR accounting`() {
+    val fallback = QueuedPersistenceExecutor()
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val counter = DefaultDropCounter()
+    val persistence = CountingPersistence()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = { throw IllegalStateException("flush failed") },
+        persistence = persistence,
+        executor = executor,
+        dropCounter = counter,
+        persistenceExecutor = fallback,
+      )
+    buffer.add(makeEvent(1))
+    buffer.add(makeEvent(2))
+    // Force the fallback path without shutting down the still-populated buffer.
+    executor.shutdown()
+    buffer.flush()
+    assertEquals(0, persistence.persistCount.get())
+    assertEquals(mapOf(DropReason.FLUSH_ERROR to 2L), counter.snapshot())
+    fallback.drain()
+    assertEquals(1, persistence.persistCount.get())
+    assertNotEquals(Thread.currentThread(), persistence.persistThread.get())
+    assertEquals(mapOf(DropReason.FLUSH_ERROR to 2L), counter.snapshot())
+    buffer.shutdown()
+  }
+
+  @Test
+  fun `flush persistence rejection preserves FLUSH_ERROR without double counting`() {
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val counter = DefaultDropCounter()
+    val persistence = CountingPersistence()
+    val buffer =
+      SdkEventBuffer(
+        onFlush = { error("flush failed") },
+        persistence = persistence,
+        executor = executor,
+        dropCounter = counter,
+        persistenceExecutor = Executor { throw RejectedExecutionException() },
+      )
+    buffer.add(makeEvent(1))
+    executor.shutdown()
+    buffer.flush()
+    assertEquals(0, persistence.persistCount.get())
+    assertEquals(mapOf(DropReason.FLUSH_ERROR to 1L), counter.snapshot())
+    buffer.shutdown()
+  }
+
+  @Test
+  fun `replay execute after shutdown refuses work without running inline`() {
+    val buffer = SdkEventBuffer(onFlush = {})
+    buffer.shutdown()
+    var ran = false
+    buffer.execute { ran = true }
+    assertFalse(ran)
+  }
+
+  @Test
+  fun `replay execute after external executor shutdown refuses work without running inline`() {
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val buffer = SdkEventBuffer(onFlush = {}, executor = executor)
+    try {
+      executor.shutdown()
+      var ran = false
+      buffer.execute { ran = true }
+      assertFalse(ran)
+    } finally {
+      buffer.shutdown()
+    }
   }
 }

@@ -1,14 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import java.io.BufferedReader
-import java.io.BufferedWriter
 import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
-import java.nio.channels.SocketChannel
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.UUID
 import kotlinx.serialization.Serializable
@@ -71,11 +63,24 @@ interface VideoRecordingConfigClient {
  * A *config* socket: `config/get` and `config/set` only. Starting and stopping recordings is an MCP
  * tool action, exposed through [VideoRecordingActions].
  */
-class VideoRecordingSocketClient(
+class VideoRecordingSocketClient
+internal constructor(
   private val socketPathValue: String =
     AutoMobileSocketPaths.socketPath(VIDEO_RECORDING_SOCKET_FILE),
   private val json: Json = DaemonJson,
+  private val requestTimeoutMs: Long = VIDEO_RECORDING_REQUEST_TIMEOUT_MS,
+  private val watchdog: SocketRequestWatchdog,
 ) : VideoRecordingConfigClient {
+  constructor(
+    socketPathValue: String = AutoMobileSocketPaths.socketPath(VIDEO_RECORDING_SOCKET_FILE),
+    json: Json = DaemonJson,
+    requestTimeoutMs: Long = VIDEO_RECORDING_REQUEST_TIMEOUT_MS,
+  ) : this(
+    socketPathValue,
+    json,
+    requestTimeoutMs,
+    SharedSocketRequestWatchdog,
+  )
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())
 
@@ -94,33 +99,27 @@ class VideoRecordingSocketClient(
   private fun send(request: VideoRecordingSocketRequest): VideoRecordingConfigResult {
     ensureSocketExists()
 
-    val address = UnixDomainSocketAddress.of(socketPathValue)
-    SocketChannel.open(address).use { channel ->
-      val reader =
-        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
-      val writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-        )
-
-      writer.write(json.encodeToString(serializer<VideoRecordingSocketRequest>(), request))
-      writer.newLine()
-      writer.flush()
-
-      val line = reader.readLine() ?: throw McpConnectionException("Video recording socket closed")
-      val response = json.decodeFromString(serializer<VideoRecordingSocketResponse>(), line)
-
-      if (!response.success) {
-        throw McpConnectionException(response.error ?: "Video recording request failed")
-      }
-      val result =
-        response.result ?: throw McpConnectionException("Video recording response missing result")
-
-      return VideoRecordingConfigResult(
-        config = result.config,
-        evictedRecordingIds = result.evictedRecordingIds,
+    val line =
+      oneShotSocketRequest(
+        socketPath = socketPathValue,
+        requestLine = json.encodeToString(serializer<VideoRecordingSocketRequest>(), request),
+        timeoutMs = requestTimeoutMs,
+        label = "Video recording",
+        watchdog = watchdog,
       )
+
+    val response = json.decodeFromString(serializer<VideoRecordingSocketResponse>(), line)
+
+    if (!response.success) {
+      throw McpConnectionException(response.error ?: "Video recording request failed")
     }
+    val result =
+      response.result ?: throw McpConnectionException("Video recording response missing result")
+
+    return VideoRecordingConfigResult(
+      config = result.config,
+      evictedRecordingIds = result.evictedRecordingIds,
+    )
   }
 
   private fun ensureSocketExists() {

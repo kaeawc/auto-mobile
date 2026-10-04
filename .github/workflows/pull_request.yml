@@ -79,9 +79,14 @@ jobs:
               /^\.lycherc\.toml$/         // .lycherc.toml
             ];
 
+            // Tests under test/lint read these contracts.
+            // Doc-only edits must still run Node tests.
+            const testGuardedDocs = ["docs/using/screen-control.md"];
+
             // Check if a file matches any documentation pattern
             const isDocFile = (filename) => {
-              return docPatterns.some(pattern => pattern.test(filename));
+              return !testGuardedDocs.includes(filename) &&
+                docPatterns.some(pattern => pattern.test(filename));
             };
 
             // Check if ALL files are documentation files
@@ -178,7 +183,11 @@ jobs:
               /^mkdocs\.yml$/,
               /^\.lycherc\.toml$/
             ];
-            const isDocFile = (filename) => docPatterns.some(pattern => pattern.test(filename));
+            // Keep auto-chore consistent with docs_only for test-guarded docs.
+            const testGuardedDocs = ["docs/using/screen-control.md"];
+            const isDocFile = (filename) =>
+              !testGuardedDocs.includes(filename) &&
+              docPatterns.some(pattern => pattern.test(filename));
 
             const labelNames = labels.map(label => label.name);
             const sameRepo = pr.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`;
@@ -882,7 +891,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,schema-copy-drift,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,mkdocs-nav,docs-github-markdown,docs-assets,ktfmt,claude-plugin,codex-skills,github-python-lock \
+            --only yaml,schema-copy-drift,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -2901,7 +2910,8 @@ jobs:
           # colour/contrast/typography/shape/asset tests live in
           # :playground:design:system, which :playground:app:assembleDebug does
           # not exercise, so without this they never gate.
-          gradle-tasks: ":playground:app:assembleDebug :playground:design:system:testDebugUnitTest"
+          # Discover host unit tests (including Long Press Drag reorder) also gate here.
+          gradle-tasks: ":playground:app:assembleDebug :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

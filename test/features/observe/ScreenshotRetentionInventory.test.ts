@@ -208,14 +208,25 @@ test("reconcile drops externally deleted files from capacity", async () => {
   expect(files.entries.size).toBe(1);
 });
 
+test("a temporary screenshot vanishing before lstat does not block admission", async () => {
+  files.setFile("/screenshots/screenshot_x.png.temp", "temporary frame");
+  await expect(write("crop-a.png")).resolves.toBeUndefined();
+  expect(files.calls.lstat).toBe(1);
+  expect(files.entries.has("/screenshots/crop-a.png")).toBe(true);
+});
+
 test.each(["readdir", "lstat"])(
   "a failed %s inventory refuses admission until reconciliation succeeds",
   async (method) => {
     await write("crop-local.png");
-    const failure = spyOn(files, method).mockRejectedValue(new Error("inventory denied"));
+    const failure = spyOn(files, method).mockRejectedValue(
+      Object.assign(new Error("inventory denied"), { code: "EACCES" }),
+    );
     try {
       await protection.sweep("/screenshots", files);
-      await expect(write("crop-refused.png")).rejects.toThrow();
+      await expect(write("crop-refused.png")).rejects.toThrow(
+        method === "lstat" ? "Cannot verify screenshot retention capacity" : "inventory denied",
+      );
       expect(files.entries.size).toBe(1);
     } finally {
       failure.mockRestore();

@@ -1812,7 +1812,7 @@ describe("display routing capability lookup fences", () => {
             );
           }
           if (interrupt === "cancel") {
-            if (gesture === "swipe" || gesture === "pinch") {
+            if (gesture === "swipe" || gesture === "pinch" || gesture === "drag") {
               await expect(pending).rejects.toThrow("Operation cancelled");
             } else {
               const result = await pending;
@@ -1987,7 +1987,7 @@ describe("display gesture dispatch boundary race", () => {
           } else if (phase === "abort") {
             expect(sent).toHaveLength(0);
             expect(inputs).toEqual([]);
-            if (kind === "swipe" || kind === "pinch") {
+            if (kind === "swipe" || kind === "pinch" || kind === "drag") {
               expect(outcome.error).toBeInstanceOf(Error);
               expect((outcome.error as Error).message).toContain("Operation cancelled");
             } else {

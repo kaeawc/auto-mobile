@@ -37,6 +37,15 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 
+function createTestSessionManager(
+  ...[provider, adbFactory, options]: Parameters<typeof DeviceSessionManager.createInstance>
+): DeviceSessionManager {
+  return DeviceSessionManager.createInstance(provider, adbFactory, {
+    ...options,
+    appearanceOnConnectDependencies: { isSyncEnabled: () => true },
+  });
+}
+
 // Inline minimal AndroidCtrlProxy where each test sets only the methods it
 // exercises — the Android fake lacks per-call `waitForConnection` /
 // `verifyServiceReady` toggles needed to cover the cache-stale and
@@ -133,7 +142,7 @@ describe("DeviceSessionManager", () => {
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({ isConnected: () => false }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
@@ -154,7 +163,7 @@ describe("DeviceSessionManager", () => {
         waitForConnection: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("enable")).toBe(true);
@@ -176,7 +185,7 @@ describe("DeviceSessionManager", () => {
         waitForConnection: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("isVersionCompatible")).toBe(true);
@@ -197,7 +206,7 @@ describe("DeviceSessionManager", () => {
         waitForConnection: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await expect(
       manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true }),
     ).rejects.toThrow("Accessibility service version mismatch");
@@ -217,7 +226,7 @@ describe("DeviceSessionManager", () => {
         verifyServiceReady: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
@@ -235,7 +244,7 @@ describe("DeviceSessionManager", () => {
       }),
     });
 
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     for (const { result, reason } of [
       {
         result: { success: false, message: "Setup already attempted" },
@@ -264,7 +273,7 @@ describe("DeviceSessionManager", () => {
     });
 
     await expect(
-      DeviceSessionManager.createInstance(provider).verifyAndroidDevice(device.deviceId),
+      createTestSessionManager(provider).verifyAndroidDevice(device.deviceId),
     ).resolves.toBeUndefined();
     expect(accessibilityManager.getCallCount("setup")).toBe(1);
   });
@@ -299,7 +308,7 @@ describe("DeviceSessionManager", () => {
         verifyServiceReady: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     const first = manager.verifyAndroidDevice(device.deviceId);
     await firstSetupStarted.promise;
     const second = manager.verifyAndroidDevice(device.deviceId);
@@ -346,7 +355,7 @@ describe("DeviceSessionManager", () => {
     });
     provider.getAndroidCtrlProxyManager = (target) =>
       target.deviceId === device.deviceId ? firstManager : secondManager;
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     const first = manager.verifyAndroidDevice(device.deviceId);
     await firstSetupStarted.promise;
     const second = manager.verifyAndroidDevice(otherDevice.deviceId);
@@ -363,7 +372,7 @@ describe("DeviceSessionManager", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
       window: fakeWindow,
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     await expect(
       manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
@@ -381,7 +390,7 @@ describe("DeviceSessionManager", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
       window: fakeWindow,
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     await expect(
       manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
@@ -418,7 +427,7 @@ describe("DeviceSessionManager", () => {
     } as ExecResult);
     fakeAdb.setDevices([resolvedA]);
     const provider = new DefaultDeviceClientProvider(factory);
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     await manager.verifyAndroidDevice(resolvedA.deviceId, { readiness: "booted" });
     await manager.verifyAndroidDevice(resolvedA.deviceId, { readiness: "booted" });
@@ -435,7 +444,7 @@ describe("DeviceSessionManager", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
       window: notReadyWindow,
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     await expect(
       manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
@@ -455,7 +464,7 @@ describe("DeviceSessionManager", () => {
         waitForConnection: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     // When installed, enabled, and WebSocket connects - service is working, no need for setup
@@ -475,7 +484,7 @@ describe("DeviceSessionManager", () => {
         waitForConnection: () => Promise.resolve(false), // WebSocket fails - cache is stale
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     // Cache was stale (claimed installed but WebSocket failed), so setup should run
@@ -519,7 +528,7 @@ describe("DeviceSessionManager", () => {
         verifyServiceReady: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     expect(waitForConnectionCalls).toBe(2);
@@ -538,7 +547,7 @@ describe("DeviceSessionManager", () => {
         verifyServiceReady: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     expect(accessibilityManager.getExecutedOperations()).toEqual([]);
@@ -562,7 +571,7 @@ describe("DeviceSessionManager", () => {
         },
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     // Issue #7554: a connected-but-unresponsive socket must be terminated
@@ -591,7 +600,7 @@ describe("DeviceSessionManager", () => {
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubClient,
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     expect(clientFromProvider).toBeGreaterThan(0);
@@ -627,7 +636,7 @@ describe("DeviceSessionManager", () => {
         waitForConnection: () => Promise.resolve(true),
       }),
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     // Window.getActive must have been called exclusively on the injected fake.
@@ -665,7 +674,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       isAvailable: true,
     });
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any);
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     await expect(
       manager.verifyIosDevice("ios-booted-only", { readiness: "booted" }),
@@ -705,7 +714,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       observeScreenCache: observeCache,
     });
 
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
     await manager.verifyIosDevice("ios-push-1");
 
     // Listener registered; cache untouched until update fires.
@@ -753,7 +762,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       fakeSimctl as any,
       options,
     );
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     await manager.verifyIosDevice(deviceId);
     await manager.verifyIosDevice(deviceId);
@@ -795,7 +804,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     try {
       IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
@@ -852,7 +861,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
       lifecycleCoordinator,
       ...(useConfiguredReadinessTimeout ? {} : { runnerReadinessTimeoutMs: 1_000 }),
     };
-    return DeviceSessionManager.createInstance(provider, undefined, options);
+    return createTestSessionManager(provider, undefined, options);
   }
 
   test("fails auto-start with the original CtrlProxy setup diagnostic", async () => {
@@ -951,7 +960,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
-    const manager = DeviceSessionManager.createInstance(provider, undefined, {
+    const manager = createTestSessionManager(provider, undefined, {
       lifecycleCoordinator,
     });
     setDeviceCreationGate(new FakeDeviceCreationGate(true));
@@ -1097,7 +1106,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
       fakeSimctl as never,
       { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
     );
-    return DeviceSessionManager.createInstance(provider, undefined, {
+    return createTestSessionManager(provider, undefined, {
       runnerReadinessTimer: timer,
     });
   }
@@ -1159,7 +1168,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
       fakeSimctl as never,
       { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
     );
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     await manager.findOrStartIosDevice({ readiness: "booted" });
     expect(presentations).toHaveLength(1);
@@ -1242,7 +1251,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   }
 
   test("should throw when both platforms connected and no active device or deviceId", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     await expect(manager.ensureDeviceReady("either")).rejects.toThrow(
       "pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
@@ -1256,7 +1265,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const original = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = os.tmpdir(); // a directory
     try {
-      const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+      const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
       await expect(
         manager.verifyIosDevice(iosDevice.deviceId, { skipCtrlProxyDownload: true }),
       ).rejects.toThrow(/BUNDLE_PATH.*unusable|directory/);
@@ -1276,7 +1285,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     await fs.writeFile(ipa, ipaBytes());
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = ipa;
     try {
-      const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+      const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
       const result = await manager.ensureDeviceReady("ios", iosDevice.deviceId, {
         skipCtrlProxyDownload: true,
       });
@@ -1292,7 +1301,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve to ios when setActiveDevice was called with ios", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     manager.setCurrentDevice(iosDevice, "ios");
 
@@ -1302,7 +1311,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("resolves the other platform by providedDeviceId even when setActiveDevice selected a different one (#5870)", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     // Ambient platform is Android (a prior setActiveDevice), but the caller now
     // targets the iOS device by id with no explicit platform — switching must
@@ -1315,7 +1324,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve to active platform without deviceId when setActiveDevice was called", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     manager.setCurrentDevice(iosDevice, "ios");
 
@@ -1325,7 +1334,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("explicit pin wins over a later ambient device resolution", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
     manager.setCurrentDevice(iosDevice, "ios");
     manager.setExplicitDevicePin(iosDevice);
     manager.setCurrentDevice(androidDevice, "android");
@@ -1336,7 +1345,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve ios device by providedDeviceId when no active device set", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     const result = await manager.ensureDeviceReady("either", "ios-sim-1");
     expect(result.platform).toBe("ios");
@@ -1345,7 +1354,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
   test("reserves a provided simulator through readiness verification", async () => {
     const lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory, {
       lifecycleCoordinator,
     });
 
@@ -1358,7 +1367,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve android device by providedDeviceId when no active device set", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     const result = await manager.ensureDeviceReady("either", "emulator-5554");
     expect(result.platform).toBe("android");
@@ -1369,7 +1378,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     // This test ensures that when platform="either" and currentDevice is Android,
     // verifyDevice is called with "android" (resolvedPlatform) instead of "either" (raw platform).
     // Bug fix: previously "either" was passed to verifyDevice which treated it as iOS.
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     // Set current device to Android (simulating a prior setActiveDevice call)
     manager.setCurrentDevice(androidDevice, "android");
@@ -1384,7 +1393,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("request cancellation preserves the current device selection", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
     const controller = new AbortController();
     manager.setCurrentDevice(androidDevice, "android");
     controller.abort(new Error("request cancelled"));
@@ -1402,7 +1411,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
   test("reserves the current simulator through readiness verification", async () => {
     const lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory, {
       lifecycleCoordinator,
     });
     manager.setCurrentDevice(iosDevice, "ios");
@@ -1416,7 +1425,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should return android device when platform is explicitly 'android' even with iOS active", async () => {
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     // Set current device to iOS (simulating a prior setActiveDevice call to iOS)
     manager.setCurrentDevice(iosDevice, "ios");
@@ -1435,7 +1444,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     // Configure fakeDeviceUtils so findOrStartDevice can find Android devices
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
 
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     // Set current device to iOS first
     manager.setCurrentDevice(iosDevice, "ios");
@@ -1459,7 +1468,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
     fakeAdb.setDevices([startedDevice]);
 
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     await manager.findOrStartAndroidDevice();
 
@@ -1476,7 +1485,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
         isRunningStateKnown: false,
       },
     ]);
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 
     await expect(manager.findOrStartAndroidDevice()).rejects.toThrow(
       "Cannot safely cold-boot Android AVD 'Pixel_9_Pro': its running state is unknown.",
@@ -1517,7 +1526,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
         signal?.addEventListener("abort", abort, { once: true });
       });
     };
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory, {
       lifecycleCoordinator,
       runnerReadinessTimer: timer,
     });
@@ -1554,7 +1563,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
         platform: "android",
       },
     ]);
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory, {
       lifecycleCoordinator,
     });
 
@@ -1578,7 +1587,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       platform: "android",
     };
     const second: BootedDevice = { ...first, deviceId: "R5CT10BBBBB" };
-    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory, {
       lifecycleCoordinator,
     });
 
@@ -1628,7 +1637,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const provider = buildProvider();
     const windowProvider = new DefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
-    const manager = DeviceSessionManager.createInstance(provider);
+    const manager = createTestSessionManager(provider);
 
     fakeDeviceUtils.setBootedDevices("android", [first]);
     fakeAdb.setDevices([raw(first)]);
@@ -1678,7 +1687,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const provider = buildProvider();
     const windowProvider = new DefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
-    const manager = DeviceSessionManager.createInstance(provider, fakeAdbFactory);
+    const manager = createTestSessionManager(provider, fakeAdbFactory);
 
     fakeDeviceUtils.setBootedDevices("android", [first]);
     fakeAdb.setDevices([raw(first)]);
@@ -1704,7 +1713,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const provider = buildProvider();
     const windowProvider = new DefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
-    const manager = DeviceSessionManager.createInstance(provider, fakeAdbFactory);
+    const manager = createTestSessionManager(provider, fakeAdbFactory);
     manager.setCurrentDevice(raw(first), "android");
 
     fakeDeviceUtils.setBootedDevices("android", [first]);
@@ -1754,7 +1763,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const raw: BootedDevice = { ...newer, name: newer.deviceId };
     const { createdFor, factory } = trackWindowFactories();
     fakeAdb.setDevices([raw]);
-    const manager = DeviceSessionManager.createInstance(new DefaultDeviceClientProvider(factory));
+    const manager = createTestSessionManager(new DefaultDeviceClientProvider(factory));
 
     await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, newer);
     await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, older);
@@ -1785,7 +1794,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
   };
 
   test("verifyAndroidDevice matches the device id when the Android name differs", async () => {
-    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+    const manager = createTestSessionManager(makeProvider([androidDevice]));
 
     await expect(
       manager.verifyAndroidDevice(androidDevice.deviceId, { skipCtrlProxyDownload: true }),
@@ -1793,7 +1802,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
   });
 
   test("ensureDeviceReady names the available devices instead of [object Object]", async () => {
-    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+    const manager = createTestSessionManager(makeProvider([androidDevice]));
 
     await expect(
       manager.ensureDeviceReady("android", "no-such-device", { skipCtrlProxyDownload: true }),
@@ -1801,7 +1810,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
   });
 
   test("ensureDeviceReady never renders [object Object]", async () => {
-    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+    const manager = createTestSessionManager(makeProvider([androidDevice]));
 
     let message = "";
     try {
@@ -1814,7 +1823,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
   });
 
   test("ensureDeviceReady still reports 'none' when no devices are present", async () => {
-    const manager = DeviceSessionManager.createInstance(makeProvider([]));
+    const manager = createTestSessionManager(makeProvider([]));
 
     let message = "";
     try {
@@ -1828,7 +1837,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
   });
 
   test("verifyAndroidDevice names the available devices instead of [object Object]", async () => {
-    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+    const manager = createTestSessionManager(makeProvider([androidDevice]));
 
     let message = "";
     try {
@@ -1842,7 +1851,7 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
   });
 
   test("verifyAndroidDevice still reports 'none' when no devices are present", async () => {
-    const manager = DeviceSessionManager.createInstance(makeProvider([]));
+    const manager = createTestSessionManager(makeProvider([]));
 
     let message = "";
     try {

@@ -2,7 +2,11 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
 import type { RestoreSnapshotResult } from "../../src/features/action/RestoreSnapshot";
-import { deviceSnapshotSchema, registerSnapshotTools } from "../../src/server/snapshotTools";
+import {
+  deviceSnapshotSchema,
+  registerSnapshotTools,
+  MAX_VM_SNAPSHOT_TIMEOUT_MS,
+} from "../../src/server/snapshotTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetDeviceSnapshotManagerDependencies,
@@ -353,4 +357,28 @@ describe("snapshot tool", () => {
       } as any),
     ).rejects.toThrow("snapshotName is required");
   });
+});
+
+describe("VM snapshot timeout validation", () => {
+  for (const action of ["capture", "restore"] as const) {
+    test.each([-1, 0, 1.5, MAX_VM_SNAPSHOT_TIMEOUT_MS + 1, NaN, Infinity, -Infinity])(
+      `${action} rejects invalid timeout %s`,
+      (vmSnapshotTimeoutMs) => {
+        expect(
+          deviceSnapshotSchema.safeParse({ action, snapshotName: "timeout", vmSnapshotTimeoutMs })
+            .success,
+        ).toBe(false);
+      },
+    );
+
+    test.each([undefined, 1, 30000, MAX_VM_SNAPSHOT_TIMEOUT_MS])(
+      `${action} accepts valid or omitted timeout %s`,
+      (vmSnapshotTimeoutMs) => {
+        expect(
+          deviceSnapshotSchema.safeParse({ action, snapshotName: "timeout", vmSnapshotTimeoutMs })
+            .success,
+        ).toBe(true);
+      },
+    );
+  }
 });

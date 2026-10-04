@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import { getAppearanceConfig, resolveAppearanceMode } from "../server/appearanceManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
 
 const DEFAULT_SYNC_INTERVAL_MS = 10000;
 export const DEFAULT_APPEARANCE_APPLY_DEADLINE_MS = 10_000;
@@ -49,7 +50,7 @@ export class AppearanceSyncScheduler {
       resolveMode: resolveAppearanceMode,
       getTargets: () => this.getSyncTargets(),
       apply: applyAppearanceToDevice,
-      isEnabled: () => true,
+      isEnabled: isAppearanceSyncEnabledFromEnvironment,
     },
   ) {
     this.timer = timer;
@@ -76,7 +77,10 @@ export class AppearanceSyncScheduler {
   private scope: AppearanceSyncScope | undefined;
 
   private isEnabled(): boolean {
-    return (this.dependencies.isEnabled?.() ?? true) && (this.scope?.isEnabled?.() ?? true);
+    return (
+      (this.dependencies.isEnabled ?? isAppearanceSyncEnabledFromEnvironment)() &&
+      (this.scope?.isEnabled?.() ?? true)
+    );
   }
 
   async syncDevice(device: AppearanceSyncTarget): Promise<void> {
@@ -171,6 +175,9 @@ export class AppearanceSyncScheduler {
   }
 
   private async applyToDevice(device: AppearanceSyncTarget, mode: AppearanceMode): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
     if (this.inFlightApplies.has(device.deviceId)) {
       // A timed-out apply cannot be cancelled; a later tick can retry after it settles.
       logger.debug(`[Appearance] Skipping ${device.deviceId}: appearance apply still in flight`);

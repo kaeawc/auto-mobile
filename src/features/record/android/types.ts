@@ -1,3 +1,5 @@
+import type { InteractionEvent } from "../../observe/android/AndroidCtrlProxyClient";
+
 /**
  * Shared types for Android test recording via getevent + CtrlProxy.
  */
@@ -87,8 +89,12 @@ export interface GestureEmitter {
 /**
  * Minimal subset of CtrlProxyClient needed by DualTrackRecorder.
  */
+export interface ReceivedInteraction extends Omit<InteractionEvent, "type"> {
+  type: string;
+}
+
 export interface A11ySource {
   ensureConnected(): Promise<boolean>;
   getSupportedCommands(): Promise<string[] | null>;
-  onInteraction(listener: (event: { type: string; [key: string]: unknown }) => void): () => void;
+  onInteraction(listener: (event: ReceivedInteraction) => void): () => void;
 }

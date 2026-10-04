@@ -1,10 +1,4 @@
-import {
-  Element,
-  SwipeDirection,
-  SwipeOnOptions,
-  ViewHierarchyNode,
-  ViewHierarchyResult,
-} from "../../../models";
+import { Element, SwipeDirection, ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
 import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
@@ -12,7 +6,7 @@ import { SwipeInterval, OverlayCandidate, OverlayAnalyzer } from "./types";
 import { toSearchable } from "../../utility/SearchableNode";
 import { boundsArea, boundsEqual, clamp } from "../../../utils/bounds";
 import { nodeBounds } from "../../../models/ViewHierarchyResult";
-import { isTruthyFlag, buildContainerFromElement } from "../../utility/elementProperties";
+import { isTruthyFlag } from "../../utility/elementProperties";
 
 export class OverlayDetector implements OverlayAnalyzer {
   private static readonly OVERLAY_PADDING = 8;
@@ -26,14 +20,8 @@ export class OverlayDetector implements OverlayAnalyzer {
 
   collectOverlayCandidates(
     viewHierarchy: ViewHierarchyResult,
-    container: SwipeOnOptions["container"] | undefined,
     containerElement: Element,
   ): OverlayCandidate[] {
-    const containerSelector = container ?? buildContainerFromElement(containerElement);
-    if (!containerSelector) {
-      return [];
-    }
-
     const parser = this.elementParser;
 
     const windowRootGroups = parser.extractWindowRootGroups(viewHierarchy, "topmost-first");

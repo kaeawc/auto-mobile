@@ -7,6 +7,7 @@ import {
 } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, ObserveResult } from "../../src/models";
+import { FakeAccessibilityDetector } from "../fakes/FakeAccessibilityDetector";
 
 isolateToolRegistry();
 
@@ -16,13 +17,16 @@ describe("observe accessibility readiness", () => {
   test.each([
     [true, []],
     [false, ["reset", "invalidate:owner:accessibility service disabled"]],
-  ] as const)("synthetic=%s produces actions %j", (detectionSkipped, expected) => {
+  ] as const)("synthetic=%s produces actions %j", async (detectionSkipped, expected) => {
     const calls: string[] = [];
+    const detector = new FakeAccessibilityDetector();
+    detector.setCtrlProxyServiceEnabled(device.deviceId, false);
     const result = {
       accessibilityState: { enabled: false, service: "unknown", detectionSkipped },
     } as ObserveResult;
 
-    invalidateReadinessForDisabledAccessibility(device, result, "owner", {
+    await invalidateReadinessForDisabledAccessibility(device, result, "owner", {
+      accessibilityDetector: detector,
       resetSetupState: () => calls.push("reset"),
       isDaemonInitialized: () => true,
       invalidateAutomationReadiness: (sessionUuid, reason) =>
@@ -30,6 +34,7 @@ describe("observe accessibility readiness", () => {
     });
 
     expect(calls).toEqual(expected);
+    expect(detector.getInvalidatedDevices()).toEqual(detectionSkipped ? [] : [device.deviceId]);
   });
 });
 

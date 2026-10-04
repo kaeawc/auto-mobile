@@ -22,6 +22,7 @@ export async function ensureAndroidRoot(
     }
     return { success: true };
   } catch (error) {
+    signal?.throwIfAborted();
     logger.warn("Failed to establish root ADB shell", error);
     return {
       success: false,

@@ -10,12 +10,13 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { ActionableError } from "../models/ActionableError";
 import type { MigrationLock } from "./migrationLock";
 import { NoOpMigrationLock } from "./migrationLock";
+import { asMigratorDb, type MigratorSchema } from "./migratorSchema";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 const DISABLED_RECOVERY_VALUES = new Set(["0", "false", "no", "off"]);
 
 /** Kysely seeds this lock table with one row; it must be ignored by the populated-DB check. */
-const MIGRATION_LOCK_TABLE = `${DEFAULT_MIGRATION_TABLE}_lock`;
+const MIGRATION_LOCK_TABLE = `${DEFAULT_MIGRATION_TABLE}_lock` as const;
 
 /**
  * Write a backup of the database before a destructive migration reset drops
@@ -25,7 +26,7 @@ const MIGRATION_LOCK_TABLE = `${DEFAULT_MIGRATION_TABLE}_lock`;
 type BackupDatabase = () => Promise<void>;
 
 /** Count rows in a single table. Seam so the fail-safe path can be unit-tested. */
-type CountTableRows = (db: Kysely<unknown>, tableName: string) => Promise<number>;
+type CountTableRows<DB> = (db: Kysely<DB>, tableName: string) => Promise<number>;
 
 export interface RunMigrationsOptions {
   /** Override the migration source (defaults to the on-disk migration folder). */
@@ -90,9 +91,9 @@ function isCorruptedMigrationError(error: unknown): error is Error {
   return error instanceof Error && error.message.includes("corrupted migrations");
 }
 
-async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
+async function tableExists(db: Kysely<MigratorSchema>, tableName: string): Promise<boolean> {
   const result = await db
-    .selectFrom("sqlite_master" as any)
+    .selectFrom("sqlite_master")
     .select("name")
     .where("type", "=", "table")
     .where("name", "=", tableName)
@@ -101,7 +102,7 @@ async function tableExists(db: Kysely<unknown>, tableName: string): Promise<bool
   return result !== undefined;
 }
 
-async function ensureMigrationTableExists(db: Kysely<unknown>): Promise<void> {
+async function ensureMigrationTableExists(db: Kysely<MigratorSchema>): Promise<void> {
   await db.schema
     .createTable(DEFAULT_MIGRATION_TABLE)
     .addColumn("name", "varchar(255)", (col) => col.notNull().primaryKey())
@@ -111,7 +112,7 @@ async function ensureMigrationTableExists(db: Kysely<unknown>): Promise<void> {
 }
 
 async function rebuildMigrationTable(
-  db: Kysely<unknown>,
+  db: Kysely<MigratorSchema>,
   migrator: Migrator,
   timer: Timer = defaultTimer,
 ): Promise<{ pruned: string[]; kept: string[] }> {
@@ -123,7 +124,7 @@ async function rebuildMigrationTable(
   const availableMigrations = await migrator.getMigrations();
   const availableNames = new Set(availableMigrations.map((migration) => migration.name));
   const executedRows = await db
-    .selectFrom(DEFAULT_MIGRATION_TABLE as any)
+    .selectFrom(DEFAULT_MIGRATION_TABLE)
     .select(["name", "timestamp"])
     .execute();
 
@@ -138,12 +139,12 @@ async function rebuildMigrationTable(
   await ensureMigrationTableExists(db);
 
   await db.transaction().execute(async (trx) => {
-    await trx.deleteFrom(DEFAULT_MIGRATION_TABLE as any).execute();
+    await trx.deleteFrom(DEFAULT_MIGRATION_TABLE).execute();
 
     if (kept.length > 0) {
       const baseTimestamp = timer.now();
       await trx
-        .insertInto(DEFAULT_MIGRATION_TABLE as any)
+        .insertInto(DEFAULT_MIGRATION_TABLE)
         .values(
           kept.map((name, index) => ({
             name,
@@ -224,14 +225,15 @@ export function isBenignForwardSkew(availableNames: string[], executedNames: str
  * corrupted-migrations state is benign forward version-skew (see
  * {@link isBenignForwardSkew}).
  */
-async function isForwardVersionSkew(db: Kysely<unknown>, migrator: Migrator): Promise<boolean> {
+async function isForwardVersionSkew(
+  db: Kysely<MigratorSchema>,
+  migrator: Migrator,
+): Promise<boolean> {
   if (!(await tableExists(db, DEFAULT_MIGRATION_TABLE))) {
     return false;
   }
   const availableNames = (await migrator.getMigrations()).map((migration) => migration.name);
-  // Raw sql (like defaultCountTableRows) rather than selectFrom(... as any), which
-  // resolves to `never` under Kysely<unknown> and would add a fresh typecheck-
-  // baseline error.
+  // Keep the existing raw SQL query so its emitted SQL remains unchanged.
   const executedRows = await sql<{ name: string }>`select name from ${sql.table(
     DEFAULT_MIGRATION_TABLE,
   )}`.execute(db);
@@ -239,22 +241,22 @@ async function isForwardVersionSkew(db: Kysely<unknown>, migrator: Migrator): Pr
   return isBenignForwardSkew(availableNames, executedNames);
 }
 
-const defaultCountTableRows: CountTableRows = async (db, tableName) => {
+async function defaultCountTableRows<DB>(db: Kysely<DB>, tableName: string): Promise<number> {
   const result = await sql<{ count: number }>`select count(*) as count from ${sql.table(
     tableName,
   )}`.execute(db);
   return Number(result.rows[0]?.count ?? 0);
-};
+}
 
 /**
  * Returns true if any of the given tables has at least one row. Fails safe: if a
  * count throws (a torn schema is exactly why recovery is running), assume the DB
  * is populated and refuse the destructive reset — never swallow the error.
  */
-export async function isAnyTableNonEmpty(
-  db: Kysely<unknown>,
+export async function isAnyTableNonEmpty<DB>(
+  db: Kysely<DB>,
   tableNames: string[],
-  countTableRows: CountTableRows = defaultCountTableRows,
+  countTableRows: CountTableRows<DB> = defaultCountTableRows,
 ): Promise<boolean> {
   for (const tableName of tableNames) {
     try {
@@ -284,7 +286,7 @@ export async function isAnyTableNonEmpty(
  * to commit — by which point every referencing table is also gone — while leaving
  * the connection's `foreign_keys` pragma untouched (it auto-resets at commit).
  */
-async function dropAllTables(db: Kysely<unknown>, tableNames: string[]): Promise<void> {
+async function dropAllTables(db: Kysely<MigratorSchema>, tableNames: string[]): Promise<void> {
   await db.transaction().execute(async (trx) => {
     await sql`PRAGMA defer_foreign_keys = ON`.execute(trx);
     for (const name of tableNames) {
@@ -300,43 +302,37 @@ interface MigrationHistoryRow {
 
 /** Snapshot the current migration history so it can be restored if recovery refuses. */
 async function snapshotMigrationHistory(
-  db: Kysely<unknown>,
+  db: Kysely<MigratorSchema>,
 ): Promise<MigrationHistoryRow[] | null> {
   if (!(await tableExists(db, DEFAULT_MIGRATION_TABLE))) {
     return null;
   }
-  const rows = await db
-    .selectFrom(DEFAULT_MIGRATION_TABLE as any)
-    .select(["name", "timestamp"])
-    .execute();
+  const rows = await db.selectFrom(DEFAULT_MIGRATION_TABLE).select(["name", "timestamp"]).execute();
   return rows.map((row) => ({ name: String(row.name), timestamp: String(row.timestamp) }));
 }
 
 /** Replace the migration history with a previously captured snapshot. */
 async function restoreMigrationHistory(
-  db: Kysely<unknown>,
+  db: Kysely<MigratorSchema>,
   snapshot: MigrationHistoryRow[],
 ): Promise<void> {
   await ensureMigrationTableExists(db);
   await db.transaction().execute(async (trx) => {
-    await trx.deleteFrom(DEFAULT_MIGRATION_TABLE as any).execute();
+    await trx.deleteFrom(DEFAULT_MIGRATION_TABLE).execute();
     if (snapshot.length > 0) {
-      await trx
-        .insertInto(DEFAULT_MIGRATION_TABLE as any)
-        .values(snapshot)
-        .execute();
+      await trx.insertInto(DEFAULT_MIGRATION_TABLE).values(snapshot).execute();
     }
   });
 }
 
 async function resetDatabaseState(
-  db: Kysely<unknown>,
+  db: Kysely<MigratorSchema>,
   options: RunMigrationsOptions,
   env: NodeJS.ProcessEnv,
   originalHistory: MigrationHistoryRow[] | null,
 ): Promise<void> {
   const tables = await db
-    .selectFrom("sqlite_master" as any)
+    .selectFrom("sqlite_master")
     .select("name")
     .where("type", "=", "table")
     .where("name", "not like", "sqlite_%")
@@ -411,7 +407,7 @@ async function runMigrationsOnce(migrator: Migrator) {
  * skew); throws otherwise.
  */
 async function handleMigrationFailure(
-  db: Kysely<unknown>,
+  db: Kysely<MigratorSchema>,
   migrator: Migrator,
   error: unknown,
   options: RunMigrationsOptions,
@@ -452,7 +448,7 @@ async function handleMigrationFailure(
 }
 
 async function recoverCorruptedMigrations(
-  db: Kysely<unknown>,
+  db: Kysely<MigratorSchema>,
   migrator: Migrator,
   error: Error,
   options: RunMigrationsOptions,
@@ -522,7 +518,7 @@ export async function runMigrations(
     const { error } = await runMigrationsOnce(migrator);
 
     if (error) {
-      await handleMigrationFailure(db, migrator, error, options, env);
+      await handleMigrationFailure(asMigratorDb(db), migrator, error, options, env);
       return;
     }
 

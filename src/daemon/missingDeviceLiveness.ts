@@ -86,7 +86,7 @@ export interface MissingDeviceLivenessPoolPort {
   ): Promise<void>;
   completeEmulatorLossRecovery(
     incidentId: string | undefined,
-    outcome: "not-attempted",
+    outcome: "not-attempted" | "exhausted",
   ): Promise<void>;
   settleEmulatorLossIncident(incidentId: string | undefined): void;
   removeDevice(
@@ -414,7 +414,11 @@ export class MissingDeviceLiveness {
       identityObservation,
       lockPoolRemoval,
     } = options;
-    if (this.shouldAbortEvictionUpfront(device, reason, identityObservation)) {
+    const abortReason = this.shouldAbortEvictionUpfront(device, reason, identityObservation);
+    if (abortReason) {
+      if (incidentId) {
+        await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
+      }
       return;
     }
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
@@ -432,15 +436,12 @@ export class MissingDeviceLiveness {
         correlatedIncidentId,
       )
     ) {
+      // SessionPreservingRecovery owns settlement, including its deferred recovery record.
       return;
     }
     if (
       device.sessionId &&
-      !(await this.pool.releaseSessionForEvictedDevice(
-        device,
-        correlatedIncidentId,
-        identityObservation,
-      ))
+      !(await this.releaseSessionForEviction(device, correlatedIncidentId, identityObservation))
     ) {
       return;
     }
@@ -451,17 +452,64 @@ export class MissingDeviceLiveness {
     this.prepareEvictedDeviceForRemoval(device, lockPoolRemoval);
     if (attemptDeviceLossRecovery && this.pool.shouldRebootDisconnectedAndroidDevice(device)) {
       if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
+        await this.pool.finishEmulatorLossIncident(correlatedIncidentId, "not-attempted");
         return;
       }
       await this.pool.removeDisconnectedDevice(device.id, false, correlatedIncidentId);
       return;
     }
-    await this.pool.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
-    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-      return;
+    await this.completeEvictionWithoutRecovery(
+      device,
+      correlatedIncidentId,
+      identityObservation,
+      lockPoolRemoval,
+    );
+  }
+
+  private async releaseSessionForEviction(
+    device: PooledDevice,
+    incidentId: string | undefined,
+    identityObservation?: IdentityObservation,
+  ): Promise<boolean> {
+    try {
+      const released = await this.pool.releaseSessionForEvictedDevice(
+        device,
+        incidentId,
+        identityObservation,
+      );
+      // The pool already finishes the incident when release sees a replacement.
+      if (!released && this.pool.getDevices().get(device.id) === device) {
+        await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
+      }
+      return released;
+    } catch (error) {
+      await this.pool.completeEmulatorLossRecovery(incidentId, "exhausted");
+      this.pool.settleEmulatorLossIncident(incidentId);
+      logger.warn(`[DevicePool] Eviction session release failed for ${device.id}`, error);
+      throw error;
     }
-    await this.removeEvictedDevice(device, lockPoolRemoval);
-    this.pool.settleEmulatorLossIncident(correlatedIncidentId);
+  }
+
+  private async completeEvictionWithoutRecovery(
+    device: PooledDevice,
+    incidentId: string | undefined,
+    identityObservation?: IdentityObservation,
+    lockPoolRemoval?: boolean,
+  ): Promise<void> {
+    try {
+      await this.pool.completeEmulatorLossRecovery(incidentId, "not-attempted");
+      if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
+        return;
+      }
+      await this.removeEvictedDevice(device, lockPoolRemoval);
+    } catch (error) {
+      // No coordinator ran here: cleanup failure replaces only our preliminary outcome.
+      await this.pool.completeEmulatorLossRecovery(incidentId, "exhausted");
+      logger.warn(`[DevicePool] Eviction cleanup failed for ${device.id}`, error);
+      throw error;
+    } finally {
+      this.pool.settleEmulatorLossIncident(incidentId);
+    }
   }
 
   private async removeEvictedDevice(
@@ -491,18 +539,18 @@ export class MissingDeviceLiveness {
     device: PooledDevice,
     reason: string,
     identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-  ): boolean {
+  ): "stale" | "shutdown-reserved" | undefined {
     if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-      return true;
+      return "stale";
     }
     if (this.pool.isReservedForShutdown(device)) {
       // killDevice alone owns a shutdown-reserved incarnation until it either
       // retires it or atomically hands off a same-ID replacement. Discovery
       // pruning must not remove it in the middle of that handoff.
       logger.debug(`Deferring eviction of shutdown-reserved device ${device.id}: ${reason}`);
-      return true;
+      return "shutdown-reserved";
     }
-    return false;
+    return undefined;
   }
 
   private shouldAbortEvictionForStaleIdentityObservation(

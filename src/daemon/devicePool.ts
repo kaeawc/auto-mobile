@@ -1354,6 +1354,8 @@ export class DevicePool {
       suppressAutoStartForDevice: (device) => this.suppressAutoStartForDevice(device),
       completeEmulatorLossRecovery: (incidentId, outcome) =>
         this.completeEmulatorLossRecovery(incidentId, outcome),
+      refreshEmulatorLossRecoverySettlement: (incidentId, outcome) =>
+        this.refreshEmulatorLossRecoverySettlement(incidentId, outcome),
       getRecoveryPolicy: () => this.getRecoveryPolicy(),
       isAndroidEmulatorActiveRelaunchEligible: (device) =>
         this.isAndroidEmulatorActiveRelaunchEligible(device),
@@ -1486,6 +1488,10 @@ export class DevicePool {
    */
   refreshDevices(): Promise<number> {
     return this.refreshCoordinator.refreshDevices();
+  }
+
+  refreshDevicesWithOutcome(): Promise<DevicePoolRefreshResult> {
+    return this.refreshDevicesInternal(false);
   }
 
   /** @internal Test support for checking removal-stamp retention. */

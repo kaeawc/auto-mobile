@@ -81,11 +81,46 @@ class TapGestureClassifierTest {
   }
 
   @Test
-  fun `second UP after a tap is judged against the same DOWN`() {
+  fun `UP without DOWN is not a tap with a small timestamp`() {
+    assertEquals(NotTap, classifier.classify(Action.UP, 0f, 0f, 100L))
+  }
+
+  @Test
+  fun `second UP after a tap without a new DOWN is not a tap`() {
     classifier.classify(Action.DOWN, 100f, 200f, 1000L)
     assertEquals(Tap(105f, 205f, 100L), classifier.classify(Action.UP, 105f, 205f, 1100L))
-    assertEquals(Tap(110f, 210f, 200L), classifier.classify(Action.UP, 110f, 210f, 1200L))
-    assertEquals(NotTap, classifier.classify(Action.UP, 100f, 200f, 1500L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 110f, 210f, 1200L))
+  }
+
+  @Test
+  fun `new DOWN permits a tap after the previous DOWN is consumed`() {
+    classifier.classify(Action.DOWN, 100f, 200f, 1000L)
+    assertEquals(Tap(105f, 205f, 100L), classifier.classify(Action.UP, 105f, 205f, 1100L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 110f, 210f, 1200L))
+    classifier.classify(Action.DOWN, 300f, 400f, 2000L)
+    assertEquals(Tap(305f, 405f, 100L), classifier.classify(Action.UP, 305f, 405f, 2100L))
+  }
+
+  @Test
+  fun `UP after a rejected gesture without a new DOWN is not a tap`() {
+    classifier.classify(Action.DOWN, 0f, 0f, 1000L)
+    assertEquals(NotTap, classifier.classify(Action.UP, 21f, 0f, 1100L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 0f, 0f, 1200L))
+  }
+
+  @Test
+  fun `stale DOWN followed by ignored events and a late UP is not a tap`() {
+    classifier.classify(Action.DOWN, 100f, 200f, 1000L)
+    assertEquals(NoDecision, classifier.classify(Action.OTHER, 900f, 800f, 1100L))
+    assertEquals(NoDecision, classifier.classify(Action.OTHER, 900f, 800f, 1500L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 100f, 200f, 2000L))
+  }
+
+  @Test
+  fun `late UP after a tap without a new DOWN is not a tap`() {
+    classifier.classify(Action.DOWN, 100f, 200f, 1000L)
+    assertEquals(Tap(105f, 205f, 100L), classifier.classify(Action.UP, 105f, 205f, 1100L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 100f, 200f, 2000L))
   }
 
   @Test
@@ -99,7 +134,9 @@ class TapGestureClassifierTest {
   fun `diagonal slop uses the sum of both squared axes`() {
     classifier.classify(Action.DOWN, 0f, 0f, 1000L)
     assertEquals(Tap(12f, 15f, 100L), classifier.classify(Action.UP, 12f, 15f, 1100L))
+    classifier.classify(Action.DOWN, 0f, 0f, 1000L)
     assertEquals(NotTap, classifier.classify(Action.UP, 12f, 16f, 1100L))
+    classifier.classify(Action.DOWN, 0f, 0f, 1000L)
     assertEquals(NotTap, classifier.classify(Action.UP, 15f, 15f, 1100L))
   }
 
@@ -107,6 +144,7 @@ class TapGestureClassifierTest {
   fun `negative deltas use the same squared distance`() {
     classifier.classify(Action.DOWN, 100f, 200f, 1000L)
     assertEquals(Tap(88f, 185f, 100L), classifier.classify(Action.UP, 88f, 185f, 1100L))
+    classifier.classify(Action.DOWN, 100f, 200f, 1000L)
     assertEquals(NotTap, classifier.classify(Action.UP, 88f, 184f, 1100L))
   }
 
@@ -121,9 +159,9 @@ class TapGestureClassifierTest {
   fun `ignored events return no decision before and after a gesture`() {
     assertEquals(NoDecision, classifier.classify(Action.OTHER, 900f, 800f, 500L))
     classifier.classify(Action.DOWN, 100f, 200f, 1000L)
-    classifier.classify(Action.UP, 100f, 200f, 1100L)
+    assertEquals(Tap(100f, 200f, 100L), classifier.classify(Action.UP, 100f, 200f, 1100L))
     assertEquals(NoDecision, classifier.classify(Action.OTHER, 900f, 800f, 1150L))
-    assertEquals(Tap(100f, 200f, 200L), classifier.classify(Action.UP, 100f, 200f, 1200L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 100f, 200f, 1200L))
   }
 
   @Test
@@ -131,13 +169,22 @@ class TapGestureClassifierTest {
     val classifier = TapGestureClassifier(slopPx = 5, timeoutMs = 10L)
     classifier.classify(Action.DOWN, 0f, 0f, 1000L)
     assertEquals(Tap(4f, 0f, 9L), classifier.classify(Action.UP, 4f, 0f, 1009L))
+    classifier.classify(Action.DOWN, 0f, 0f, 1000L)
     assertEquals(NotTap, classifier.classify(Action.UP, 5f, 0f, 1009L))
+    classifier.classify(Action.DOWN, 0f, 0f, 1000L)
     assertEquals(NotTap, classifier.classify(Action.UP, 4f, 0f, 1010L))
   }
 
   @Test
-  fun `backward clock retains the original negative duration behavior`() {
+  fun `backward clock step is not a tap`() {
     classifier.classify(Action.DOWN, 100f, 200f, 1000L)
-    assertEquals(Tap(100f, 200f, -1L), classifier.classify(Action.UP, 100f, 200f, 999L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 100f, 200f, 999L))
+    assertEquals(NotTap, classifier.classify(Action.UP, 100f, 200f, 1100L))
+  }
+
+  @Test
+  fun `zero duration with a DOWN at zero is a tap`() {
+    classifier.classify(Action.DOWN, 100f, 200f, 0L)
+    assertEquals(Tap(100f, 200f, 0L), classifier.classify(Action.UP, 100f, 200f, 0L))
   }
 }

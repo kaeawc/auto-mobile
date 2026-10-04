@@ -1,6 +1,6 @@
 import { FakeSpawnedProcess as FakeProcess } from "../../fakes/FakeSpawnedProcess";
 import { FakeSocket } from "../../fakes/FakeNetServer";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   InMemoryActiveVideoSessionRegistry,
@@ -22,6 +22,7 @@ import {
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
@@ -775,6 +776,45 @@ describe("PersistentEncoderH264Source", () => {
     );
   });
 
+  test("logs an already-exited owned process at debug when stop wins before PID handoff", async () => {
+    const lease = JSON.stringify({
+      version: 1,
+      socketName: SESSION_SOCKET,
+      sessionTokenHash: hashToken(SESSION_TOKEN),
+      pid: 1234,
+      ownerPid: process.pid,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: Number(FORWARD_PORT),
+      startedAtMs: 1_000,
+      heartbeatAtMs: 95_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    // issue #9155 daemon log: the exited process's cmdline stdout is empty (0 bytes).
+    const ctx = makeSource({ leaseOutput: lease, processCommandLine: "" });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const startPromise = ctx.source.start();
+      await tick();
+      await ctx.source.stop();
+      ctx.processes[0].exit();
+      await expect(startPromise).rejects.toThrow(/exited before ready/);
+
+      expect(ctx.commands).toContain("shell cat /proc/1234/cmdline");
+      expect(ctx.commands).not.toContain("shell kill -2 1234");
+      expect(ctx.commands).toContain(
+        `shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_SOCKET}.json`,
+      );
+      expect(warning).not.toHaveBeenCalledWith(
+        expect.stringContaining("refusing stale-session process cleanup"),
+      );
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining("process already exited"));
+    } finally {
+      warning.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
   test("rejects start when the server exits before ready", async () => {
     const ctx = makeSource();
     const startPromise = ctx.source.start();
@@ -1258,6 +1298,53 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
   });
 
+  test.each([
+    ["empty", ""],
+    ["NUL-only", "\u0000\u0000"],
+  ])("logs an already-exited stale process at debug for %s cmdline", async (_label, cmdline) => {
+    const staleLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionTokenHash: hashToken("stale-session"),
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 60_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLease,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      // issue #9155 daemon log: empty cmdline stdout (0 bytes) after the process exits.
+      processCommandLine: cmdline,
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const startPromise = ctx.source.start();
+      await tick();
+      ctx.processes[0].ready();
+      await startPromise;
+      await ctx.source.stop();
+
+      expect(ctx.commands).toContain("shell cat /proc/987/cmdline");
+      expect(ctx.commands).not.toContain("shell kill -2 987");
+      expect(ctx.commands).toContain("forward --remove tcp:61234");
+      expect(ctx.commands).toContain(
+        `shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/automobile_video_stale.json`,
+      );
+      expect(warning).not.toHaveBeenCalledWith(
+        expect.stringContaining("refusing stale-session process cleanup"),
+      );
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining("process already exited"));
+    } finally {
+      warning.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
   test("reconciles a stale lease when multiple lease records are listed", async () => {
     const staleLease = JSON.stringify({
       version: 1,
@@ -1452,15 +1539,22 @@ describe("PersistentEncoderH264Source", () => {
       processCommandLine: `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_other`,
     });
 
-    const startPromise = ctx.source.start();
-    await tick();
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const startPromise = ctx.source.start();
+      await tick();
+      ctx.processes[0].ready();
+      await startPromise;
+      await ctx.source.stop();
 
-    expect(ctx.commands).toContain("forward --remove tcp:61234");
-    expect(ctx.commands).not.toContain("shell kill -2 987");
-
-    ctx.processes[0].ready();
-    await startPromise;
-    await ctx.source.stop();
+      expect(ctx.commands).toContain("forward --remove tcp:61234");
+      expect(ctx.commands).not.toContain("shell kill -2 987");
+      expect(warning).toHaveBeenCalledWith(
+        "[PersistentEncoderH264Source] refusing stale-session process cleanup socket=automobile_video_stale: PID/socket mismatch",
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   test("refuses stale cleanup when the lease socket name is not the --socket-name value", async () => {

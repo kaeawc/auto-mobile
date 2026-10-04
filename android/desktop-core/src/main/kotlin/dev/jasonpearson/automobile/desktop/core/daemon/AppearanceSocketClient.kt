@@ -1,14 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import java.io.BufferedReader
-import java.io.BufferedWriter
 import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
-import java.nio.channels.SocketChannel
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.UUID
 import kotlinx.serialization.Serializable
@@ -81,11 +73,26 @@ interface AppearanceClient {
 }
 
 /** Client for `~/.auto-mobile/appearance.sock`. One request per connection. */
-class AppearanceSocketClient(
+class AppearanceSocketClient
+internal constructor(
   private val socketPathValue: String = AutoMobileSocketPaths.socketPath(APPEARANCE_SOCKET_FILE),
   private val json: Json = DaemonJson,
   private val sessionUuidProvider: () -> String? = { null },
+  private val requestTimeoutMs: Long = APPEARANCE_REQUEST_TIMEOUT_MS,
+  private val watchdog: SocketRequestWatchdog,
 ) : AppearanceClient {
+  constructor(
+    socketPathValue: String = AutoMobileSocketPaths.socketPath(APPEARANCE_SOCKET_FILE),
+    json: Json = DaemonJson,
+    sessionUuidProvider: () -> String? = { null },
+    requestTimeoutMs: Long = APPEARANCE_REQUEST_TIMEOUT_MS,
+  ) : this(
+    socketPathValue,
+    json,
+    sessionUuidProvider,
+    requestTimeoutMs,
+    SharedSocketRequestWatchdog,
+  )
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())
 
@@ -108,33 +115,27 @@ class AppearanceSocketClient(
   private fun send(request: AppearanceSocketRequest): AppearanceResult {
     ensureSocketExists()
 
-    val address = UnixDomainSocketAddress.of(socketPathValue)
-    SocketChannel.open(address).use { channel ->
-      val reader =
-        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
-      val writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-        )
-
-      writer.write(json.encodeToString(serializer<AppearanceSocketRequest>(), request))
-      writer.newLine()
-      writer.flush()
-
-      val line = reader.readLine() ?: throw McpConnectionException("Appearance socket closed")
-      val response = json.decodeFromString(serializer<AppearanceSocketResponse>(), line)
-
-      if (!response.success) {
-        throw McpConnectionException(response.error ?: "Appearance request failed")
-      }
-      val result =
-        response.result ?: throw McpConnectionException("Appearance response missing result")
-
-      return AppearanceResult(
-        config = result.config ?: AppearanceConfig(),
-        appliedMode = AppearanceSyncMode.fromWireName(result.appliedMode),
+    val line =
+      oneShotSocketRequest(
+        socketPath = socketPathValue,
+        requestLine = json.encodeToString(serializer<AppearanceSocketRequest>(), request),
+        timeoutMs = requestTimeoutMs,
+        label = "Appearance",
+        watchdog = watchdog,
       )
+
+    val response = json.decodeFromString(serializer<AppearanceSocketResponse>(), line)
+
+    if (!response.success) {
+      throw McpConnectionException(response.error ?: "Appearance request failed")
     }
+    val result =
+      response.result ?: throw McpConnectionException("Appearance response missing result")
+
+    return AppearanceResult(
+      config = result.config ?: AppearanceConfig(),
+      appliedMode = AppearanceSyncMode.fromWireName(result.appliedMode),
+    )
   }
 
   private fun ensureSocketExists() {

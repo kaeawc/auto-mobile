@@ -10,6 +10,7 @@ import { z } from "zod/v4";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
@@ -527,6 +528,154 @@ describe("NavigateTo", () => {
         },
       };
     }
+
+    function setPath(path: NavigationEdge[]): void {
+      fakeGraph.setCurrentScreenValue("HomeScreen");
+      fakeGraph.setPathResult({
+        found: true,
+        path,
+        startScreen: "HomeScreen",
+        targetScreen: "TargetScreen",
+      });
+    }
+
+    test("reports failure and current screen when the final edge is not reached", async () => {
+      setPath([toolEdge("HomeScreen", "TargetScreen")]);
+      const progressMessages: string[] = [];
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        { setupUIState: async () => [], setupScrollPosition: async () => null },
+        { waitForScreen: async () => false },
+        fakeGraph,
+        new FakeTimer(),
+      );
+
+      const result = await navigateTo.execute(
+        { targetScreen: "TargetScreen", platform: "android" },
+        async (_current, _total, message) => {
+          progressMessages.push(message);
+        },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('did not reach "TargetScreen"');
+      expect(result.message).toContain('"HomeScreen"');
+      expect(result.message).not.toContain("Successfully navigated");
+      expect(result.error).toBe(result.message);
+      expect(result.currentScreen).toBe("HomeScreen");
+      expect(result.stepsExecuted).toBe(1);
+      expect(result.path).toHaveLength(1);
+      expect(progressMessages.at(-1)).toBe("Waiting for TargetScreen");
+    });
+
+    test("default waiter advances only with the injected FakeTimer", async () => {
+      setPath([toolEdge("HomeScreen", "TargetScreen")]);
+      const timer = new FakeTimer();
+      // Fail immediately if the default waiter tries to use real time, including before the fix.
+      const realSleepSpy = spyOn(defaultTimer, "sleep").mockImplementation(async () => {
+        throw new Error("Unexpected real timer sleep");
+      });
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        { setupUIState: async () => [], setupScrollPosition: async () => null },
+        null,
+        fakeGraph,
+        timer,
+      );
+      let settled = false;
+      const execution = navigateTo
+        .execute({ targetScreen: "TargetScreen", platform: "android" })
+        .then((result) => {
+          settled = true;
+          return result;
+        });
+
+      try {
+        // Drain the asynchronous tool replay without advancing fake time.
+        for (let i = 0; i < 30; i++) {
+          await Promise.resolve();
+        }
+        expect(realSleepSpy).not.toHaveBeenCalled();
+        expect(timer.getPendingSleeps()).toEqual([500]);
+        expect(settled).toBe(false);
+        for (let elapsed = 500; elapsed < 5000; elapsed += 500) {
+          await timer.advanceTimeAsync(500);
+          expect(settled).toBe(false);
+        }
+        await timer.advanceTimeAsync(500);
+        const result = await execution;
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('did not reach "TargetScreen"');
+        expect(result.durationMs).toBe(5000);
+        expect(timer.getSleepHistory()).toEqual(Array(10).fill(500));
+      } finally {
+        realSleepSpy.mockRestore();
+      }
+    });
+
+    test.each([{ path: [] }, { path: [toolEdge("HomeScreen", "OtherScreen")] }])(
+      "does not claim arrival when the path does not end at the requested target: %j",
+      async ({ path }) => {
+        setPath(path);
+        navigateTo = new NavigateTo(
+          device,
+          fakeAdbFactory,
+          { setupUIState: async () => [], setupScrollPosition: async () => null },
+          { waitForScreen: async () => true },
+          fakeGraph,
+          new FakeTimer(),
+        );
+
+        const result = await navigateTo.execute({
+          targetScreen: "TargetScreen",
+          platform: "android",
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('did not reach "TargetScreen"');
+        expect(result.error).toBe(result.message);
+      },
+    );
+
+    test("continues after an intermediate timeout and succeeds when the final target is reached", async () => {
+      setPath([
+        toolEdge("HomeScreen", "IntermediateScreen"),
+        toolEdge("IntermediateScreen", "TargetScreen"),
+      ]);
+      const waitedScreens: string[] = [];
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        { setupUIState: async () => [], setupScrollPosition: async () => null },
+        {
+          waitForScreen: async (screen) => {
+            waitedScreens.push(screen);
+            if (screen === "TargetScreen") {
+              fakeGraph.setCurrentScreenValue(screen);
+              return true;
+            }
+            return false;
+          },
+        },
+        fakeGraph,
+        new FakeTimer(),
+      );
+
+      const result = await navigateTo.execute({
+        targetScreen: "TargetScreen",
+        platform: "android",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Successfully navigated to "TargetScreen"');
+      expect(result.error).toBeUndefined();
+      expect(result.currentScreen).toBe("TargetScreen");
+      expect(result.stepsExecuted).toBe(2);
+      expect(waitedScreens).toEqual(["IntermediateScreen", "TargetScreen"]);
+    });
 
     test("aborts with a timeout envelope once the 30s ceiling is crossed", async () => {
       await fakeGraph.recordNavigationEvent({

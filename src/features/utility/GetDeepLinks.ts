@@ -1,4 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { getAbortSignal } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
 import { DeepLinkManager } from "./DeepLinkManager";
 import { BootedDevice, DeepLinkResult } from "../../models";
@@ -31,6 +32,10 @@ export class GetDeepLinks {
 
       return result;
     } catch (error) {
+      if (getAbortSignal()?.aborted) {
+        // Preserve the callee's cancellation error at the tool boundary.
+        throw error;
+      }
       logger.error(`[GetDeepLinks] Failed to get deep links for ${appId}: ${error}`);
 
       return {

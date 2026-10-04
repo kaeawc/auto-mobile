@@ -66,7 +66,7 @@ check_npm() {
   # Match npm's own error code, not a bare "404". npm appends a debug-log path
   # whose millisecond field can itself be 404 (…T10_27_54_404Z-debug-0.log),
   # which would make any npm failure -- ENOTFOUND, auth, 500 -- read as missing.
-  if printf '%s\n' "$out" | grep -q 'E404'; then
+  if printf '%s\n' "$out" | grep 'E404' >/dev/null; then
     echo missing
     return 0
   fi

@@ -225,7 +225,7 @@ remove_bun() {
         if brew list oven-sh/bun/bun >/dev/null 2>&1; then
             run_cmd brew uninstall oven-sh/bun/bun || true
         fi
-        if brew tap 2>/dev/null | grep -q "oven-sh/bun"; then
+        if brew tap 2>/dev/null | grep "oven-sh/bun" >/dev/null; then
             run_cmd brew untap oven-sh/bun || true
         fi
     fi

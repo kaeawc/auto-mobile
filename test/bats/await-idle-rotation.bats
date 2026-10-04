@@ -24,3 +24,23 @@ SCRIPT="scripts/await_idle.sh"
   [ "$status" -eq 0 ]
   [ "$output" = "3" ]
 }
+
+@test "process idle accepts flags at the start of a large dumpsys response" {
+  local fixture="$BATS_TEST_TMPDIR/idle-helper.sh"
+  awk '/^wait_for_process_idle\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$SCRIPT" > "$fixture"
+  cat > "$BATS_TEST_TMPDIR/adb" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' 'mSleeping=false mBooted=true mBooting=false'
+awk 'BEGIN { for (i=0; i<20000; i++) print "activity filler record" }'
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/adb"
+  run bash -euo pipefail -c '
+    source "$1"
+    gdate() { echo 0; }
+    sleep() { exit 1; }
+    ADB_CMD="$2"
+    wait_for_process_idle
+  ' _ "$fixture" "$BATS_TEST_TMPDIR/adb"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Device is process idle" ]
+}

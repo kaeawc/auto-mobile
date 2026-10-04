@@ -85,13 +85,13 @@ blocks_scanned=0
 # not match `<WORD>` and so never mask a real block.
 block_is_illustrative() {
   local content="$1"
-  if printf '%s' "$content" | grep -qE '<[A-Za-z_][A-Za-z0-9_ .…-]*>'; then
+  if printf '%s' "$content" | grep -E '<[A-Za-z_][A-Za-z0-9_ .…-]*>' >/dev/null; then
     return 0
   fi
-  if printf '%s' "$content" | grep -q '…'; then
+  if printf '%s' "$content" | grep '…' >/dev/null; then
     return 0
   fi
-  if printf '%s' "$content" | grep -qE '^[[:space:]]*#[[:space:]]*md-bash-lint:[[:space:]]*skip[[:space:]]*$'; then
+  if printf '%s' "$content" | grep -E '^[[:space:]]*#[[:space:]]*md-bash-lint:[[:space:]]*skip[[:space:]]*$' >/dev/null; then
     return 0
   fi
   return 1

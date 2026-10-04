@@ -10,6 +10,31 @@ import XCTest
 /// reference oracle: (1) SDK-supplied cutout metadata surfaces on the merged insets,
 /// and (2) with no SDK cutout the merged insets keep the `.unknown` sentinel.
 final class HierarchyMergerCutoutTests: XCTestCase {
+    func testMergeRetainsCaptureTruncationWithAndWithoutSdkRoot() {
+        let xcuitest = ViewHierarchy(
+            updatedAt: 0,
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(className: "UIView"),
+            truncationReasons: ["max_depth"]
+        )
+        let roots: [SdkViewNode?] = [
+            nil,
+            SdkViewNode(className: "UIView", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100)),
+        ]
+        for root in roots {
+            let sdk = SdkViewHierarchy(
+                timestamp: 0,
+                bundleId: "com.test.app",
+                screenScale: 3,
+                screenWidth: 375,
+                screenHeight: 812,
+                root: root
+            )
+            XCTAssertEqual(HierarchyMerger.merge(xcuitest: xcuitest, sdk: sdk).truncationReasons, ["max_depth"])
+        }
+        XCTAssertEqual(HierarchyMerger.merge(xcuitest: xcuitest, sdk: nil).truncationReasons, ["max_depth"])
+    }
+
     func testMergePropagatesDisplayCutoutMetadata() {
         // Empty XCUITest hierarchy (insets default to `.unavailable`); the SDK side carries
         // safe-area + cutout, so the merge enters the SDK-enriched insets branch.

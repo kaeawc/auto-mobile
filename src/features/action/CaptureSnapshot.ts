@@ -318,30 +318,37 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     const settings: any = {};
 
     for (const type of settingsTypes) {
-      try {
-        let captured = false;
-        try {
-          const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-          const a11yResult = await a11y.requestSettingsList(type as SettingsNamespace);
-          if (a11yResult.success && a11yResult.entries) {
-            settings[type] = a11yResult.entries;
-            captured = true;
-          }
-        } catch (error) {
-          logger.debug(`[CaptureSnapshot] a11y settings list failed for ${type}: ${error}`);
-        }
-        if (!captured) {
-          const result = await this.adb.executeCommand(`shell settings list ${type}`);
-          settings[type] = this.parseSettings(result.stdout);
-        }
-        logger.info(`Captured ${Object.keys(settings[type]).length} ${type} settings`);
-      } catch (error) {
-        logger.warn(`Failed to capture ${type} settings: ${error}`);
-        settings[type] = {};
-      }
+      await this.captureSettingsNamespace(type, settings);
     }
 
     return settings;
+  }
+
+  private async captureSettingsNamespace(
+    type: string,
+    settings: Record<string, Record<string, string>>,
+  ): Promise<void> {
+    try {
+      let captured = false;
+      try {
+        const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+        const a11yResult = await a11y.requestSettingsList(type as SettingsNamespace);
+        if (a11yResult.success && a11yResult.entries) {
+          settings[type] = a11yResult.entries;
+          captured = true;
+        }
+      } catch (error) {
+        logger.debug(`[CaptureSnapshot] a11y settings list failed for ${type}: ${error}`);
+      }
+      if (!captured) {
+        const result = await this.adb.executeCommand(`shell settings list ${type}`);
+        settings[type] = this.parseSettings(result.stdout);
+      }
+      logger.info(`Captured ${Object.keys(settings[type]).length} ${type} settings`);
+    } catch (error) {
+      logger.warn(`Failed to capture ${type} settings: ${error}`);
+      settings[type] = {};
+    }
   }
 
   /**

@@ -3779,6 +3779,48 @@ describe("IOSCtrlProxyClient", function () {
   });
 
   describe("caching", function () {
+    test("ignores an older hierarchy push without replacing or restamping the cache", () => {
+      const current: CtrlProxyHierarchy = {
+        updatedAt: 2_000,
+        packageName: "com.test.app",
+        hierarchy: { text: "current" },
+      };
+      ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data: current });
+      const cached = ctrlProxyClient["cachedHierarchy"];
+      const captureReceivedAt = cached?.captureReceivedAt;
+      fakeTimer.advanceTime(100);
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        ctrlProxyClient["processMessage"]({
+          type: "hierarchy_update",
+          data: { ...current, updatedAt: 1_000, hierarchy: { text: "old" } },
+        });
+
+        expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(2_000);
+        expect(ctrlProxyClient["cachedHierarchy"]?.captureReceivedAt).toBe(captureReceivedAt);
+        expect(debug).toHaveBeenCalledWith(expect.stringContaining("pushed=1000 cached=2000"));
+      } finally {
+        debug.mockRestore();
+      }
+    });
+
+    test("a newer hierarchy push replaces the cached capture and its receipt stamp", () => {
+      const current: CtrlProxyHierarchy = {
+        updatedAt: 2_000,
+        packageName: "com.test.app",
+        hierarchy: { text: "current" },
+      };
+      ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data: current });
+      fakeTimer.advanceTime(100);
+      const newer = { ...current, updatedAt: 3_000, hierarchy: { text: "newer" } };
+      ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data: newer });
+
+      expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(newer);
+      expect(ctrlProxyClient["cachedHierarchy"]?.receivedAt).toBe(fakeTimer.now());
+      expect(ctrlProxyClient["cachedHierarchy"]?.captureReceivedAt).toBe(fakeTimer.now());
+    });
+
     test("hasCachedHierarchy should return true after receiving hierarchy", async function () {
       const testTimer = fakeTimer;
 

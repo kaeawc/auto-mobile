@@ -2981,6 +2981,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
+  private ignoreOlderHierarchyPush(message: WebSocketMessage): boolean {
+    if (
+      message.type !== "hierarchy_update" ||
+      message.requestId ||
+      !message.data ||
+      this.cachedHierarchy === null ||
+      !(message.data.updatedAt < this.cachedHierarchy.hierarchy.updatedAt)
+    ) {
+      return false;
+    }
+    logger.debug(
+      `[IOSCtrlProxyClient] Ignoring older hierarchy push: pushed=${message.data.updatedAt} cached=${this.cachedHierarchy.hierarchy.updatedAt}`,
+    );
+    return true;
+  }
+
   private processMessage(message: WebSocketMessage): void {
     const { type, requestId } = message;
     if (
@@ -3028,6 +3044,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         this.transientObserver &&
         (!requestId || !this.observerHierarchyRequestIds.has(requestId))
       ) {
+        return;
+      }
+      // Reject out-of-order pushes before they can affect cache or observation state.
+      if (this.ignoreOlderHierarchyPush(message)) {
         return;
       }
       // Retain the additive #4548 scale metadata on RECEIPT — the moment the hierarchy first

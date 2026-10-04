@@ -11,6 +11,7 @@ import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { UserTargetRequest } from "../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ActionableError } from "../../src/models/ActionableError";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -33,6 +34,143 @@ function adbFactoryFor(executor: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("SharedStorageService", () => {
+  for (const chunkCount of [1, 2]) {
+    test(`reports ${chunkCount} failed rollback chunks without multiplying embedded commands`, async () => {
+      const executor = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+      const files = Array.from({ length: chunkCount * 64 }, (_, index) => ({
+        sourcePath: `/fixtures/file-${index}.png`,
+        destinationPath: `file-${index}-${"x".repeat(32)}.png`,
+      }));
+      const execute = executor.executeCommand.bind(executor);
+      spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+        const [command] = args;
+        if (
+          command.includes("MEDIA_SCANNER_SCAN_FILE") &&
+          command.includes(files.at(-1)!.destinationPath)
+        ) {
+          throw new Error("indexing failed");
+        }
+        if (command.startsWith("shell rm -f")) {
+          throw new Error(`Command failed: adb ${command}\nrm: Permission denied`);
+        }
+        return execute(...args);
+      });
+      const service = createSharedStorageServiceForTesting({
+        adbFactory: adbFactoryFor(executor),
+        timer,
+        fileSystem: {
+          stat: async () => ({ size: 3, isFile: () => true }),
+          mkdtemp: async () => "/fake/unused",
+          writeFileBuffer: async () => {},
+          rm: async () => {},
+        },
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const error = await service
+          .stage({
+            device: androidDevice,
+            namespace: "chunk-failure",
+            rollbackOnFailure: true,
+            files,
+          })
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+        expect(error).toBeInstanceOf(ActionableError);
+        if (!(error instanceof ActionableError)) {
+          throw new Error("Expected staging to fail with ActionableError");
+        }
+        console.log(`Rollback message (${chunkCount} chunks): ${error.message.length} characters`);
+        expect(error.cause).toBeInstanceOf(Error);
+        expect(warn).toHaveBeenCalledTimes(chunkCount);
+        const loggedError = warn.mock.calls[0]?.[1];
+        expect(loggedError).toBeInstanceOf(ActionableError);
+        if (!(loggedError instanceof ActionableError)) {
+          throw new Error("Expected the full rollback error to be logged");
+        }
+        expect(loggedError.message).toContain("rm -f");
+        expect(error.message.length).toBeLessThan(20_000);
+        expect(error.message.split("rm -f").length - 1).toBeLessThanOrEqual(1);
+        const failures = error.message.split("Rollback failures: ")[1] ?? "";
+        const entries = failures.split("; ");
+        expect(entries).toHaveLength(chunkCount);
+        for (const [index, entry] of entries.entries()) {
+          const paths = files
+            .map((file) => file.destinationPath)
+            .reverse()
+            .slice(index * 64, (index + 1) * 64);
+          expect(entry).toContain(
+            `${paths.join(", ")}: Android shared-storage operation failed: Command failed`,
+          );
+          expect(entry).toContain("Permission denied");
+          for (const path of paths) {
+            expect(failures.split(path)).toHaveLength(2);
+          }
+        }
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
+
+  for (const reason of ["cleanup denied", `cleanup denied: ${"x".repeat(30_000)}`]) {
+    test(`single-path rollback preserves short reasons and caps long ones (${reason.length} characters)`, async () => {
+      const executor = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const execute = executor.executeCommand.bind(executor);
+      spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+        const [command] = args;
+        if (command.includes("MEDIA_SCANNER_SCAN_FILE")) {
+          throw new Error("indexing failed");
+        }
+        if (command.startsWith("shell rm -f")) {
+          throw new Error(reason);
+        }
+        return execute(...args);
+      });
+      const service = createSharedStorageServiceForTesting({
+        adbFactory: adbFactoryFor(executor),
+        timer,
+        fileSystem: {
+          stat: async () => ({ size: 3, isFile: () => true }),
+          mkdtemp: async () => "/fake/unused",
+          writeFileBuffer: async () => {},
+          rm: async () => {},
+        },
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const error = await service
+          .stage({
+            device: androidDevice,
+            namespace: "single-failure",
+            rollbackOnFailure: true,
+            files: [{ sourcePath: "/fixtures/file.png", destinationPath: "file.png" }],
+          })
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+        if (!(error instanceof ActionableError)) {
+          throw new Error("Expected staging to fail with ActionableError");
+        }
+        const fullReason = `Android shared-storage operation failed: ${reason}`;
+        const expectedReason =
+          fullReason.length > 256 ? `${fullReason.slice(0, 253)}...` : fullReason;
+        expect(error.message.split("Rollback failures: ")[1]).toBe(`file.png: ${expectedReason}.`);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
+
   test("detached rollback removes both files after cancellation on the second push", async () => {
     const executor = new FakeAdbExecutor();
     const timer = new FakeTimer();
@@ -179,10 +317,8 @@ describe("SharedStorageService", () => {
             const reason =
               cleanupOutcome === "failure" ? "cleanup denied" : "timed out after 5000ms";
             expect(message).toContain("Rolled back: none. Rollback failures:");
-            for (const path of reversePaths) {
-              expect(message).toContain(`${path}:`);
-            }
-            expect(message.split(reason)).toHaveLength(13);
+            expect(message).toContain(`${reversePaths.join(", ")}:`);
+            expect(message.split(reason)).toHaveLength(2);
             expect(warn).toHaveBeenCalled();
           }
           expect(cleanupSignal?.aborted).toBe(cleanupOutcome === "timeout");
@@ -287,16 +423,17 @@ describe("SharedStorageService", () => {
       expect(timeouts).toEqual([5000, 5000, 5000, 1000]);
       expect(message).toContain(`Rolled back: ${reversePaths.slice(0, 64).join(", ")}.`);
       const failureReport = message.split("Rollback failures: ")[1] ?? "";
-      expect(failureReport.split("; ")).toHaveLength(193);
-      for (const [index, path] of reversePaths.slice(64).entries()) {
-        let reason = "timed out after 5000ms";
-        if (index >= 128) {
-          reason = "timed out after 1000ms";
-        }
-        if (index >= 192) {
-          reason = "exceeded total timeout of 15000ms";
-        }
-        expect(failureReport).toContain(`${path}: Shared-storage batch rollback ${reason}`);
+      expect(failureReport.split("; ")).toHaveLength(4);
+      for (const [index, reason] of [
+        "timed out after 5000ms",
+        "timed out after 5000ms",
+        "timed out after 1000ms",
+        "exceeded total timeout of 15000ms",
+      ].entries()) {
+        const paths = reversePaths.slice((index + 1) * 64, (index + 2) * 64);
+        expect(failureReport).toContain(
+          `${paths.join(", ")}: Shared-storage batch rollback ${reason}`,
+        );
       }
       expect(cleanupSignals.map((signal) => signal.aborted)).toEqual([false, true, true, true]);
       expect(new Set(cleanupSignals).size).toBe(4);

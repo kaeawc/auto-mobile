@@ -12,12 +12,13 @@ import {
 } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
+import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { shellQuote } from "../../utils/shellQuote";
 
 /**
- * Never starve a rotation read with a nearly-spent budget. A wedged dumpsys
- * can overshoot the budget by at most this floor instead of the 15 s ADB default.
+ * Never starve a rotation read with a nearly-spent budget. Each dumpsys gets
+ * the remaining budget or this floor instead of the 15 s ADB default; a legacy
+ * fallback may consume the same bound a second time.
  */
 export const ROTATION_READ_FLOOR_MS = 1000;
 
@@ -122,21 +123,14 @@ export class Idle {
   ): Promise<RotationCheckResult> {
     try {
       // Check the current rotation through window manager service
-      const { stdout } = await perf.track("adbDumpsysWindowRotation", () => {
+      const currentRotation = await perf.track("adbDumpsysWindowRotation", () => {
         signal?.throwIfAborted();
         const remainingBudgetMs = startTime + timeoutMs - this.timer.now();
-        return this.adb.executeCommand(
-          'shell dumpsys window | grep -i "mRotation="',
-          Math.max(remainingBudgetMs, ROTATION_READ_FLOOR_MS),
-          undefined,
-          undefined,
+        return readWindowManagerRotation(this.adb, {
           signal,
-        );
+          timeoutMs: Math.max(remainingBudgetMs, ROTATION_READ_FLOOR_MS),
+        });
       });
-      // parseWindowManagerRotation selects the authoritative display rotation
-      // and skips stale/unrelated `mRotation=` occurrences elsewhere in the
-      // dump (e.g. a cached TaskSnapshot) — see issue #6199.
-      const currentRotation = parseWindowManagerRotation(stdout);
 
       if (currentRotation !== null) {
         logger.debug(`Current rotation: ${currentRotation}, target: ${targetRotation}`);

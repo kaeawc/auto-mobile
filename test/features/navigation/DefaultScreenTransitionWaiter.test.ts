@@ -90,4 +90,35 @@ describe("DefaultScreenTransitionWaiter", function () {
     expect(await waiter.waitForScreen("TargetScreen", 1000)).toBe(false);
     expect(pollCount()).toBe(0);
   });
+  test("abort rejects a pending poll without advancing the timeout", async () => {
+    const { manager, pollCount } = stubManager(["Other"]);
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const waiter = new DefaultScreenTransitionWaiter(manager, 500, timer);
+    let outcome: unknown;
+    const waiting = waiter.waitForScreen("Target", 5000, controller.signal).then(
+      (value) => {
+        outcome = value;
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+    expect(timer.getPendingSleeps()).toEqual([500]);
+    controller.abort();
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    try {
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).toHaveProperty("message", "Operation cancelled");
+      expect(timer.now()).toBe(0);
+      expect(timer.getSleepHistory()).toEqual([500]);
+      expect(pollCount()).toBe(1);
+    } finally {
+      timer.enableAutoAdvance();
+      timer.resolveAll();
+      await waiting;
+    }
+  });
 });

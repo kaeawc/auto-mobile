@@ -16,6 +16,87 @@ describe("ServerConfig", () => {
     serverConfig.setToolOutputsDir(previousToolOutputsDir);
     serverConfig.setDismissKeyboardAfterInputEnabled(previousDismissKeyboard);
   });
+  describe("plan execution leases", () => {
+    const releases: (() => void)[] = [];
+
+    beforeEach(() => {
+      serverConfig.setPlanExecutionActive(false);
+    });
+
+    afterEach(() => {
+      for (const release of releases.splice(0)) {
+        release();
+      }
+      serverConfig.setPlanExecutionActive(false);
+    });
+
+    const acquire = () => {
+      const lease = serverConfig.acquirePlanExecutionLease();
+      releases.push(() => lease.release());
+      return lease;
+    };
+
+    test("a single lease keeps the guard active until released", () => {
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+      const lease = acquire();
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      lease.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+    });
+
+    test("releasing one of two leases keeps the other active", () => {
+      const first = acquire();
+      const second = acquire();
+      first.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      second.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+    });
+
+    test("release is idempotent across active and later leases without underflow", () => {
+      const first = acquire();
+      const second = acquire();
+      first.release();
+      first.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      second.release();
+      second.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+      const later = acquire();
+      first.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      later.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+    });
+
+    test("compatibility setter preserves boolean semantics for repeated calls", () => {
+      serverConfig.setPlanExecutionActive(true);
+      serverConfig.setPlanExecutionActive(true);
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      serverConfig.setPlanExecutionActive(false);
+      serverConfig.setPlanExecutionActive(false);
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+      serverConfig.setPlanExecutionActive(true);
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      serverConfig.setPlanExecutionActive(false);
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+    });
+
+    test("compatibility setter only releases its own lease", () => {
+      const lease = acquire();
+      serverConfig.setPlanExecutionActive(false);
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      serverConfig.setPlanExecutionActive(true);
+      serverConfig.setPlanExecutionActive(true);
+      serverConfig.setPlanExecutionActive(false);
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      serverConfig.setPlanExecutionActive(true);
+      lease.release();
+      expect(serverConfig.isPlanExecutionActive()).toBe(true);
+      serverConfig.setPlanExecutionActive(false);
+      expect(serverConfig.isPlanExecutionActive()).toBe(false);
+    });
+  });
   describe("tool output artifacts", () => {
     beforeEach(() => {
       serverConfig.setToolOutputsDir(undefined);

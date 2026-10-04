@@ -104,3 +104,9 @@ export interface A11ySource {
   getSupportedCommands(): Promise<string[] | null>;
   onInteraction(listener: (event: ReceivedInteraction) => void): () => void;
 }
+
+/** First terminal getevent failure, timestamped by the recorder's injected timer. */
+export interface TouchTrackFailure {
+  error: Error;
+  failedAt: number;
+}

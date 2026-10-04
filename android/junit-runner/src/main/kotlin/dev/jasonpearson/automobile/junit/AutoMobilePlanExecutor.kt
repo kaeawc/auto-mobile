@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.validation.ToolResultEntry
 import dev.jasonpearson.automobile.validation.ToolResultParser
 import java.io.File
 import java.util.UUID
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -460,7 +461,7 @@ internal object AutoMobilePlanExecutor {
       }
 
       val errorMessage = response.error ?: parsed.errorMessage
-      if (attempt > maxRetries || !isTransientError(errorMessage)) {
+      if (attempt > maxRetries || !(parsed.retryable || isTransientError(errorMessage))) {
         break
       }
 
@@ -659,45 +660,73 @@ internal object AutoMobilePlanExecutor {
 
     val resultElement =
       response.result ?: return ParsedToolResult(false, "Daemon returned empty result")
-    val resultObject = resultElement.jsonObject
-    val contentArray = resultObject["content"]
-    if (contentArray is JsonArray && contentArray.isNotEmpty()) {
-      val first = contentArray[0].jsonObject
-      val type = first["type"]?.jsonPrimitive?.content
-      if (type == "text") {
-        val text = first["text"]?.jsonPrimitive?.content
-        if (text != null) {
-          val parsed = json.parseToJsonElement(text).jsonObject
-          val success = parsed["success"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()
-          if (success == false) {
-            val failedStepObj = parsed["failedStep"]?.jsonObject
-            val errorMessage =
-              if (failedStepObj != null) {
-                val stepIndex =
-                  failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                val tool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
-                val stepError =
-                  failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown step error"
-                val executedSteps = parsed["executedSteps"]?.jsonPrimitive?.content?.toIntOrNull()
-                val totalSteps = parsed["totalSteps"]?.jsonPrimitive?.content?.toIntOrNull()
-                buildString {
-                  append("Test plan execution failed at step ${stepIndex + 1} ($tool):")
-                  append("\n  Error: $stepError")
-                  if (executedSteps != null && totalSteps != null) {
-                    append("\n  Executed: $executedSteps/$totalSteps steps")
-                  }
-                }
-              } else {
-                parsed["error"]?.jsonPrimitive?.content ?: "AutoMobile plan failed"
-              }
-            return ParsedToolResult(false, errorMessage)
+    val resultObject =
+      resultElement as? JsonObject
+        ?: return ParsedToolResult(false, "Unexpected daemon response format: $resultElement")
+    val isError = resultObject["isError"] == JsonPrimitive(true)
+    val contentText =
+      (resultObject["content"] as? JsonArray)
+        ?.firstOrNull { (it as? JsonObject)?.get("type") == JsonPrimitive("text") }
+        ?.let { (it as JsonObject)["text"] as? JsonPrimitive }
+        ?.content
+    val parsed =
+      (resultObject["structuredContent"] as? JsonObject)
+        ?: contentText?.let {
+          try {
+            json.parseToJsonElement(it) as? JsonObject
+          } catch (e: SerializationException) {
+            println("Warning: Failed to parse daemon result: ${e.message}")
+            return ParsedToolResult(false, "Malformed daemon result: $it")
           }
-          return ParsedToolResult(true, "")
+        }
+        ?: return ParsedToolResult(false, "Unexpected daemon response format: $resultElement")
+
+    // JSON strings such as "true" are not an affirmative boolean plan result.
+    val success = parsed["success"] == JsonPrimitive(true)
+    val errorObject = parsed["error"] as? JsonObject
+    val retryable =
+      errorObject?.get("retryable") == JsonPrimitive(true) ||
+        parsed["retryable"] == JsonPrimitive(true)
+    if (isError || parsed.containsKey("error") || !success) {
+      return ParsedToolResult(false, planFailureMessage(parsed, isError), retryable)
+    }
+    return ParsedToolResult(true, "")
+  }
+
+  private fun planFailureMessage(payload: JsonObject, isError: Boolean): String {
+    val errorObject = payload["error"] as? JsonObject
+    val failedStepObj = payload["failedStep"] as? JsonObject
+    if (failedStepObj != null && errorObject == null && payload["code"] == null) {
+      val stepIndex = (failedStepObj["stepIndex"] as? JsonPrimitive)?.intOrNull ?: 0
+      val tool = (failedStepObj["tool"] as? JsonPrimitive)?.content ?: "unknown"
+      val stepError = (failedStepObj["error"] as? JsonPrimitive)?.content ?: "Unknown step error"
+      val executedSteps = (payload["executedSteps"] as? JsonPrimitive)?.intOrNull
+      val totalSteps = (payload["totalSteps"] as? JsonPrimitive)?.intOrNull
+      return buildString {
+        append("Test plan execution failed at step ${stepIndex + 1} ($tool):")
+        append("\n  Error: $stepError")
+        if (executedSteps != null && totalSteps != null) {
+          append("\n  Executed: $executedSteps/$totalSteps steps")
         }
       }
     }
+    val daemonError = errorObject ?: payload
+    val details =
+      listOfNotNull(
+        (daemonError["code"] as? JsonPrimitive)?.content,
+        (daemonError["message"] as? JsonPrimitive)?.content,
+        (daemonError["deviceId"] as? JsonPrimitive)?.content,
+      )
+    if (errorObject != null || payload.containsKey("code") || payload.containsKey("message")) {
+      if (details.isNotEmpty()) return details.joinToString(": ")
+    }
 
-    return ParsedToolResult(false, "Unexpected daemon response format")
+    return (payload["error"] as? JsonPrimitive)?.content
+      ?: when {
+        isError -> "Daemon tool returned an error: $payload"
+        payload["success"] == JsonPrimitive(false) -> "AutoMobile plan failed"
+        else -> "Daemon result did not confirm plan success: $payload"
+      }
   }
 
   private fun parseToolResults(
@@ -970,5 +999,9 @@ internal object AutoMobilePlanExecutor {
     val toolResults: List<ToolResultEntry> = emptyList(),
   )
 
-  private data class ParsedToolResult(val success: Boolean, val errorMessage: String)
+  private data class ParsedToolResult(
+    val success: Boolean,
+    val errorMessage: String,
+    val retryable: Boolean = false,
+  )
 }

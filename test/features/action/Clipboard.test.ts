@@ -5,6 +5,7 @@ import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 import { FakeKeyboardHierarchyProvider } from "../../fakes/FakeKeyboardHierarchyProvider";
@@ -520,6 +521,60 @@ describe("Clipboard Android", () => {
     platform: "android",
     deviceId: "test-android",
   };
+
+  test.each([
+    "timeout",
+    "socket closed",
+    "thrown after send",
+    "WebSocket not connected",
+    "send failed",
+    "device refused",
+    "unsupported",
+    "success",
+  ])("paste delivery: %s", async (reason) => {
+    const adb = new FakeAdbExecutor();
+    const factory = new FakeAdbClientFactory(adb);
+    adb.setCommandResponse("shell cmd clipboard get", { stdout: "hello", stderr: "" });
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const undelivered = reason === "WebSocket not connected" || reason === "send failed";
+    const acknowledged =
+      reason === "device refused" || reason === "unsupported" || reason === "success";
+    const action = new Clipboard(
+      androidDevice,
+      factory,
+      () => ({
+        requestClipboard: async (
+          _action,
+          _text,
+          _timeout,
+          _perf,
+          _signal,
+          onDispatch?: () => void,
+        ) => {
+          if (!undelivered) {
+            onDispatch?.();
+          }
+          if (reason === "thrown after send") {
+            throw new Error(reason);
+          }
+          return { success: reason === "success", totalTimeMs: 5000, error: reason, acknowledged };
+        },
+      }),
+      undefined,
+      timer,
+    );
+    const result = await action.execute("paste");
+    const indeterminate = !undelivered && !acknowledged;
+    expect(result.success).toBe(!indeterminate);
+    if (indeterminate) {
+      expect(result.error).toContain("may have been applied");
+      expect(result.error).toContain("Observe before retrying");
+    }
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("KEYCODE_PASTE")),
+    ).toEqual(indeterminate || reason === "success" ? [] : ["shell input keyevent KEYCODE_PASTE"]);
+  });
 
   // Regression for https://github.com/kaeawc/auto-mobile/issues/2227.
   // AndroidCtrlProxyClient.getInstance expects an AdbClientFactory and calls

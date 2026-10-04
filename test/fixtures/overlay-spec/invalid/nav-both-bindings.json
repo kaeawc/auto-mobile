@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "bottomNav",
+      "pager": "p",
+      "stateKey": "x",
+      "items": [
+        {
+          "label": "x"
+        },
+        {
+          "label": "y"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.pager"
+}

@@ -243,7 +243,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             // IMPORTANT: Create a FRESH XCUIApplication instance for each snapshot to avoid
             // stale accessibility cache. Cached instances may not reflect system-presented
             // alerts like permission dialogs.
-            let (snapshot, typedTextInputSnapshots, keyboardFocusFrame, screenMetrics) = try tracked("snapshot") {
+            let (snapshot, typedTextInputSnapshots, keyboardFocus, screenMetrics) = try tracked("snapshot") {
                 try catchingObjCException {
                     let capture = try DeviceRotation.capture {
                         let freshApp = XCUIApplication(bundleIdentifier: bundleId)
@@ -257,30 +257,30 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
                         // Prefer focus from the captured tree; keep the predicate fallback
                         // for fields whose snapshots do not report keyboard input focus.
-                        let focusFrame: CGRect?
+                        let focus: KeyboardFocus?
                         switch Self.keyboardFocusDecision(
                             textInputCandidates: typedInputs.map { (frame: $0.frame, hasFocus: $0.hasFocus) }
                         ) {
                         case .skip:
-                            focusFrame = nil
+                            focus = nil
                         case let .useSnapshotFrame(frame):
-                            focusFrame = frame
+                            focus = KeyboardFocus(frame: frame, source: .snapshot)
                         case .liveQuery:
                             do {
-                                focusFrame = try catchingObjCException {
+                                focus = try catchingObjCException {
                                     let focused = freshApp.descendants(matching: .any)
                                         .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                                         .firstMatch
                                     // Resolve once: separate exists/frame reads race app backgrounding.
-                                    return try focused.snapshot().frame
+                                    return try KeyboardFocus(frame: focused.snapshot().frame, source: .liveQuery)
                                 }
                             } catch {
                                 // Missing focus safely falls back to snapshot.hasFocus when building the hierarchy.
                                 logger.debug("Keyboard focus snapshot unavailable: \(error)")
-                                focusFrame = nil
+                                focus = nil
                             }
                         }
-                        return (snap, typedInputs, focusFrame, UIScreen.main.bounds)
+                        return (snap, typedInputs, focus, UIScreen.main.bounds)
                     }
 
                     return (
@@ -307,7 +307,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     snapshot,
                     depth: 0,
                     screenBounds: screenBounds,
-                    keyboardFocusFrame: keyboardFocusFrame,
+                    keyboardFocus: keyboardFocus,
                     disableAllFiltering: disableAllFiltering
                 )
             }
@@ -320,7 +320,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         screenBounds: screenBounds,
                         parentPath: "typed-text-input",
                         childIndex: index,
-                        keyboardFocusFrame: keyboardFocusFrame,
+                        keyboardFocus: keyboardFocus,
                         disableAllFiltering: disableAllFiltering
                     )
                 }
@@ -357,7 +357,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             // 2. Alerts in SpringBoard's tree (system dialogs managed by SpringBoard)
             // System permission dialogs may appear in either location depending on iOS version.
             let systemAlertCapture = try tracked("systemAlerts") {
-                try getSystemAlerts(appSnapshot: snapshot, keyboardFocusFrame: keyboardFocusFrame)
+                try getSystemAlerts(appSnapshot: snapshot, keyboardFocus: keyboardFocus)
             }
 
             // If there are system alerts, include them in the hierarchy

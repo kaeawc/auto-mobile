@@ -12,10 +12,6 @@ const definitions: readonly {
 
 const exemptions = {
   observe: "Owns projection at the payload top level, rather than under .observation.",
-  hitTest:
-    "Advertised projection mismatch: returns hit candidates, with no observation to project.",
-  setPosture:
-    "Advertised projection mismatch: observes internally but returns posture/display metadata only.",
 };
 
 const advertisers = definitions.filter((definition) =>
@@ -23,6 +19,25 @@ const advertisers = definitions.filter((definition) =>
 );
 
 describe("skeleton default schema drift", () => {
+  test.each(["hitTest", "setPosture"])("%s has no generated observation controls", (name) => {
+    const definition = definitions.find((definition) => definition.name === name);
+    expect(definition).toBeDefined();
+    expect(definition!.inputSchema.properties).not.toHaveProperty("raw");
+    expect(definition!.inputSchema.properties).not.toHaveProperty("project");
+  });
+
+  test("observation control properties match the action set regardless of descriptions", () => {
+    const names = definitions
+      .filter(
+        ({ inputSchema }) =>
+          Object.hasOwn(inputSchema.properties ?? {}, "raw") &&
+          Object.hasOwn(inputSchema.properties ?? {}, "project"),
+      )
+      .map(({ name }) => name)
+      .filter((name) => !Object.hasOwn(exemptions, name))
+      .sort();
+    expect(names).toEqual([...SKELETON_DEFAULT_ACTION_TOOLS].sort());
+  });
   test("every advertised skeleton default is implemented or explicitly exempted", () => {
     expect(advertisers.length).toBeGreaterThan(0);
     expect(

@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -682,10 +684,12 @@ data class TraversalOrderResult(
 ) : WebSocketResponse()
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class TraversalOrderData(
   val elements: List<String>, // JSON strings of elements
   val focusedIndex: Int?,
   val totalCount: Int,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
 )
 
 @Serializable

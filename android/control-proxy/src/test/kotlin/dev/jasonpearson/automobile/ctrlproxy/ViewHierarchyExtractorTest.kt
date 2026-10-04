@@ -2044,6 +2044,64 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `child cap keeps 256 children and reports only the affected window`() {
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(1, 0, budgetTree("App", 300), focused = true),
+          fakeWindow(2, 1, budgetTree("Small", 0)),
+        ),
+        null,
+        disableAllFiltering = true,
+      )
+    val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
+    val children =
+      (roots[0] as kotlinx.serialization.json.JsonObject)["node"]
+        as kotlinx.serialization.json.JsonArray
+    assertEquals(256, children.size)
+    assertEquals(257, countWireNodes(roots[0]))
+    assertEquals(listOf("max_children"), result.windows!!.first { it.id == 1 }.truncationReasons)
+    assertNull(result.windows.first { it.id == 2 }.truncationReasons)
+    assertEquals(listOf("max_children"), result.truncationReasons)
+  }
+
+  @Test
+  fun `exactly 256 children remains complete and omits truncation metadata`() {
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(fakeWindow(1, 0, budgetTree("App", 256), focused = true)),
+        null,
+        disableAllFiltering = true,
+      )
+    assertEquals(257, countWireNodes(result.hierarchy!!.node!!))
+    assertNull(result.windows!!.single().truncationReasons)
+    assertNull(result.truncationReasons)
+    val encoded =
+      Json { encodeDefaults = true }.encodeToJsonElement(ViewHierarchy.serializer(), result)
+        as kotlinx.serialization.json.JsonObject
+    assertFalse(encoded["windows"].toString().contains("truncationReasons"))
+  }
+
+  @Test
+  fun `nested child caps are deduplicated per window and snapshot`() {
+    val root =
+      fakeNode(
+        packageName = "example.app",
+        text = "Root",
+        children = listOf(budgetTree("First", 300), budgetTree("Second", 300)),
+      )
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(fakeWindow(1, 0, root, focused = true)),
+        null,
+        disableAllFiltering = true,
+      )
+    assertEquals(515, countWireNodes(result.hierarchy!!.node!!))
+    assertEquals(listOf("max_children"), result.windows!!.single().truncationReasons)
+    assertEquals(listOf("max_children"), result.truncationReasons)
+  }
+
+  @Test
   fun `depth truncation belongs only to the window that exceeds the depth limit`() {
     val result =
       extractor.extractFromAllWindows(

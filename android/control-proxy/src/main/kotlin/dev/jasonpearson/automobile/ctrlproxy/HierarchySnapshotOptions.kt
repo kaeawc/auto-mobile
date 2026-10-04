@@ -98,5 +98,10 @@ private constructor(
     return true
   }
 
+  fun recordChildCapTruncation() {
+    reasons += "max_children"
+    shared.reasons += "max_children"
+  }
+
   fun truncationReasons(): List<String> = (if (isScope) reasons else shared.reasons).toList()
 }

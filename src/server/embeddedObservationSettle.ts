@@ -86,6 +86,10 @@ export async function settleEmbeddedObservation(
       pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
       signal: combineAbortSignals(input.signal, deadline),
       initialMinTimestampMs: hierarchyUpdatedAtToMillis(input.observation.viewHierarchy),
+      // A still screen pushes nothing newer than the action's capture. Skip
+      // the push wait so a rejected cache triggers sync re-extraction (#6099)
+      // with a newer device timestamp, leaving time for the second stable read.
+      skipWaitForFresh: true,
       // The poll already drops the screenshot and the accessibility audit as
       // intermediate state; the performance audit has to go too. It drives up
       // to three synthetic touches plus ADB/database work that honours neither

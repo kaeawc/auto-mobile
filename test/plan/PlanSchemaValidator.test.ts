@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll } from "bun:test";
+import Ajv from "ajv";
+import { dump } from "js-yaml";
 import { PlanSchemaValidator } from "../../src/utils/plan/PlanSchemaValidator";
 
 describe("PlanSchemaValidator", () => {
@@ -15,6 +17,52 @@ describe("PlanSchemaValidator", () => {
     // cold compile inside a test body was clocked at 106.32ms in CI (#6244
     // related run).
     validator.validateYaml("name: warmup\nsteps:\n  - tool: observe\n");
+  });
+
+  it.each([
+    ["valid", { name: "Plan", steps: [{ tool: "observe" }] }],
+    ["additional property", { name: "Plan", steps: [{ tool: "observe" }], unknown: true }],
+    ["required", { steps: [{ tool: "observe" }] }],
+    ["enum", { name: "Plan", platform: "other", steps: [{ tool: "observe" }] }],
+    ["type", { name: 42, steps: [{ tool: "observe" }] }],
+    ["root type", []],
+    ["minimum items", { name: "Plan", steps: [] }],
+    ["minimum length", { name: "", steps: [{ tool: "observe" }] }],
+    ["default message", { name: "Plan", mcpVersion: "bad", steps: [{ tool: "observe" }] }],
+    ["nested location", { name: "Plan", metadata: { version: 42 }, steps: [{ tool: "observe" }] }],
+    ["array location", { name: "Plan", secretParameters: [""], steps: [{ tool: "observe" }] }],
+  ])("preserves the complete validation result for %s", (_name, plan) => {
+    expect(validator.validateYaml(dump(plan))).toMatchSnapshot();
+  });
+
+  it.each([
+    [
+      "plural items",
+      { properties: { steps: { type: "array", minItems: 2 } } },
+      { steps: [] },
+      { field: "steps", message: "Must have at least 2 items", line: 1, column: 1 },
+    ],
+    [
+      "plural characters",
+      { properties: { name: { type: "string", minLength: 2 } } },
+      { name: "" },
+      { field: "name", message: "Must be at least 2 characters long", line: 1, column: 1 },
+    ],
+    [
+      "missing AJV message",
+      { properties: { mcpVersion: { type: "string", pattern: "^valid$" } } },
+      { mcpVersion: "invalid" },
+      { field: "mcpVersion", message: "Validation error", line: 1, column: 1 },
+    ],
+  ])("preserves the full result for %s", (_name, schema, plan, expectedError) => {
+    const original = Reflect.get(validator, "validateFn");
+    const ajv = new Ajv({ allErrors: true, verbose: true, messages: false });
+    Reflect.set(validator, "validateFn", ajv.compile({ type: "object", ...schema }));
+    try {
+      expect(validator.validateYaml(dump(plan))).toEqual({ valid: false, errors: [expectedError] });
+    } finally {
+      Reflect.set(validator, "validateFn", original);
+    }
   });
 
   it.each(["inline", "params"])("enforces the normalized clock instant window (%s)", (form) => {

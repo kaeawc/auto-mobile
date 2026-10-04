@@ -1,3 +1,4 @@
+import { inputDurationArgument } from "./touchscreenInput";
 import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
   resolveGestureCtrlProxyTimeoutMs,
@@ -50,6 +51,7 @@ export async function dispatchAndroidCoordinateTap(
   frameContext?: string,
   signal?: AbortSignal,
   assertCurrent?: () => void,
+  onTapDelivered?: () => void,
 ): Promise<void> {
   throwIfAborted(signal);
   let dispatched = false;
@@ -87,6 +89,9 @@ export async function dispatchAndroidCoordinateTap(
           undefined,
           assertCurrent,
         );
+  if (result.success) {
+    onTapDelivered?.();
+  }
   throwIfAborted(signal);
   if (result.success) {
     return;
@@ -107,7 +112,9 @@ export async function dispatchAndroidCoordinateTap(
   );
   await executeTouchscreenInput(
     adb,
-    durationMs >= LONG_PRESS_MIN_MS ? `swipe ${x} ${y} ${x} ${y} ${durationMs}` : `tap ${x} ${y}`,
+    durationMs >= LONG_PRESS_MIN_MS
+      ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`
+      : `tap ${x} ${y}`,
     undefined,
     signal,
     assertCurrent,
@@ -116,6 +123,8 @@ export async function dispatchAndroidCoordinateTap(
         durationMs >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
     },
   );
+  onTapDelivered?.();
+  throwIfAborted(signal);
 }
 
 /** Dispatch one iOS coordinate tap and preserve CtrlProxy's actionable failure. */
@@ -183,7 +192,9 @@ export async function androidDisplayTapDispatch(
     } else {
       await executeTouchscreenInput(
         adb,
-        options.action === "longPress" ? `swipe ${x} ${y} ${x} ${y} ${duration}` : `tap ${x} ${y}`,
+        options.action === "longPress"
+          ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
+          : `tap ${x} ${y}`,
         target.displayId,
         signal,
         target.assertCurrent,

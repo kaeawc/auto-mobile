@@ -122,6 +122,28 @@ export class ScreenshotComparator {
     }
   }
 
+  private static getComparisonDimensions(
+    dims1: { width: number; height: number },
+    dims2: { width: number; height: number },
+    fastMode: boolean,
+  ): { width: number; height: number } {
+    const targetWidth = fastMode
+      ? Math.min(dims1.width, dims2.width, 400) // Cap at 400px width for fast mode
+      : Math.min(dims1.width, dims2.width);
+    const targetHeight = fastMode
+      ? Math.min(dims1.height, dims2.height, 600) // Cap at 600px height for fast mode
+      : Math.min(dims1.height, dims2.height);
+    return { width: targetWidth, height: targetHeight };
+  }
+
+  private static dimensionsMatch(
+    dimensions: { width: number; height: number },
+    width: number,
+    height: number,
+  ): boolean {
+    return dimensions.width === width && dimensions.height === height;
+  }
+
   /**
    * Compare two image buffers and return detailed comparison result
    * @param buffer1 First image buffer
@@ -160,15 +182,11 @@ export class ScreenshotComparator {
       logger.debug(`Image 2 dimensions: ${dims2.width}x${dims2.height}`);
 
       // In fast mode, use smaller target dimensions for quicker comparison
-      const targetWidth = fastMode
-        ? Math.min(dims1.width, dims2.width, 400) // Cap at 400px width for fast mode
-        : Math.min(dims1.width, dims2.width);
-      const targetHeight = fastMode
-        ? Math.min(dims1.height, dims2.height, 600) // Cap at 600px height for fast mode
-        : Math.min(dims1.height, dims2.height);
+      const { width: targetWidth, height: targetHeight } =
+        ScreenshotComparator.getComparisonDimensions(dims1, dims2, fastMode);
 
       // Resize images to match if needed (use the smaller dimensions for performance)
-      if (dims1.width !== targetWidth || dims1.height !== targetHeight) {
+      if (!ScreenshotComparator.dimensionsMatch(dims1, targetWidth, targetHeight)) {
         png1Buffer = await ScreenshotComparator.resizeImageIfNeeded(
           png1Buffer,
           targetWidth,
@@ -176,7 +194,7 @@ export class ScreenshotComparator {
           backend,
         );
       }
-      if (dims2.width !== targetWidth || dims2.height !== targetHeight) {
+      if (!ScreenshotComparator.dimensionsMatch(dims2, targetWidth, targetHeight)) {
         png2Buffer = await ScreenshotComparator.resizeImageIfNeeded(
           png2Buffer,
           targetWidth,

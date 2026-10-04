@@ -2,7 +2,7 @@ import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient"
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
 import { InstalledAppsRepository } from "../../../src/db/installedAppsRepository";
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   UninstallApp as ProductionUninstallApp,
   DeviceAppUninstaller,
@@ -321,6 +321,28 @@ describe("UninstallApp (Android)", () => {
     resetDbWriteBarrier();
     fakeAdb = new FakeAdbClient();
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+  });
+
+  test("install-aware targeting uninstalls a personal-only background app", async () => {
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    fakeAdb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x13, running: true },
+      { userId: 10, name: "Work", flags: 0x30, running: true },
+    ]);
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
+      { stdout: "package:com.example.app" },
+      { stdout: "package:com.example.app" },
+      { stdout: "package:com.android.settings" },
+    ]);
+    setupNoApp(fakeAdb, 10);
+    const usersSpy = spyOn(fakeAdb, "listUsers");
+    const result = await new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb)).execute(
+      "com.example.app",
+    );
+    expect(result).toMatchObject({ success: true, wasInstalled: true, userId: 0 });
+    expect(fakeAdb.wasCommandExecuted("shell pm uninstall --user 0 'com.example.app'")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("shell pm uninstall --user 10")).toBe(false);
+    expect(usersSpy).toHaveBeenCalledTimes(1);
   });
 
   test("emits force-stop then a data-clearing pm uninstall for the target user", async () => {
@@ -714,6 +736,8 @@ describe("UninstallApp (Android)", () => {
     // App installed under work profile (userId 10)
     setupNoApp(fakeAdb, 0);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 10", [
+      // Resolution probes installation before the action's own pre-uninstall check.
+      { stdout: "package:com.example.app\npackage:com.android.settings" },
       { stdout: "package:com.example.app\npackage:com.android.settings" },
       { stdout: "package:com.android.settings" },
     ]);

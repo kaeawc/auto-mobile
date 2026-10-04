@@ -1,6 +1,6 @@
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
 import { SetUIStateOptions, FieldSpec, ElementSelector } from "../../models/SetUIStateOptions";
@@ -223,7 +223,7 @@ export class SetUIState extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     dependencies: SetUIStateDependencies = {},
     finder: ElementFinder = new DefaultElementFinder(),
   ) {

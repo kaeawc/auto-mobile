@@ -7,6 +7,7 @@ import {
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 
 const deleteCommand = (count: number): string =>
@@ -35,6 +36,15 @@ describe("clearTextWithKeyEvents", () => {
       expect(deleteCommands(count)).toHaveLength(Math.ceil(count / DELETE_KEYEVENT_CHUNK_SIZE));
     },
   );
+
+  test("uses exact Ctrl+End before batched deletes when supported", async () => {
+    const adb = new FakeAdbExecutor();
+    await clearTextWithKeyEvents(adb, 51, undefined, undefined, true);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
+      ...deleteCommands(51),
+    ]);
+  });
 
   test("keeps MOVE_END as the only call for zero or negative counts", async () => {
     const adb = new FakeAdbExecutor();
@@ -169,7 +179,7 @@ describe("ClearText Android ADB fallback", () => {
     configure?: (clearText: ClearText) => void,
     signal?: AbortSignal,
   ) => {
-    const clearText = new ClearText(device, fakeAdb as any);
+    const clearText = new ClearText(device, fakeAdb as any, undefined, new FakeTimer());
     observedSpy = spyOn(
       clearText as unknown as {
         observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
@@ -185,6 +195,7 @@ describe("ClearText Android ADB fallback", () => {
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setAndroidApiLevel(30);
     fakeA11yService = new FakeCtrlProxy();
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       fakeA11yService as unknown as AndroidCtrlProxyClient,
@@ -198,6 +209,111 @@ describe("ClearText Android ADB fallback", () => {
     getInstanceSpy = null;
     observedSpy = null;
     refreshSpy = null;
+  });
+
+  test.each([31, 34, 30, null])(
+    "resolves API %s once across repeated clears before exact key events",
+    async (apiLevel) => {
+      fakeAdb.setAndroidApiLevel(apiLevel);
+      fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+      const controller = new AbortController();
+      let instance: ClearText | undefined;
+      const result = await runClearText(
+        focusedFieldObserve("x".repeat(51)),
+        (clearText) => {
+          instance = clearText;
+        },
+        controller.signal,
+      );
+      expect(result.success).toBe(true);
+      expect((await instance!.execute(undefined, controller.signal)).success).toBe(true);
+      const move =
+        apiLevel !== null && apiLevel >= 31
+          ? "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END"
+          : "shell input keyevent KEYCODE_MOVE_END";
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        ...(apiLevel === null ? ["shell getprop ro.build.version.sdk"] : []),
+        move,
+        ...deleteCommands(51),
+        move,
+        ...deleteCommands(51),
+      ]);
+      expect(fakeAdb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
+    },
+  );
+
+  test("first caller abort does not cancel a concurrent clear's shared capability probe", async () => {
+    fakeAdb.setAndroidApiLevel(34);
+    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+    let releaseProbe!: () => void;
+    const probePending = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    let probeStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      probeStarted = resolve;
+    });
+    const readApiLevel = fakeAdb.getAndroidApiLevel.bind(fakeAdb);
+    fakeAdb.getAndroidApiLevel = async (...options) => {
+      const level = await readApiLevel(...options);
+      probeStarted();
+      await probePending;
+      return level;
+    };
+    const controller = new AbortController();
+    let instance!: ClearText;
+    const first = runClearText(
+      focusedFieldObserve("old"),
+      (clearText) => {
+        instance = clearText;
+      },
+      controller.signal,
+    );
+    const second = Promise.allSettled([instance.execute(undefined, new AbortController().signal)]);
+    await started;
+    controller.abort();
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    releaseProbe();
+    expect(await second).toMatchObject([{ status: "fulfilled", value: { success: true } }]);
+    expect(fakeAdb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
+      deleteCommand(3),
+    ]);
+  });
+
+  test("falls back after a failed bounded API read before clearing", async () => {
+    fakeAdb.setAndroidApiLevel(null);
+    fakeAdb.setCommandError("shell getprop ro.build.version.sdk", new Error("disconnected"));
+    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+    expect((await runClearText(focusedFieldObserve("old"))).success).toBe(true);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell getprop ro.build.version.sdk",
+      "shell input keyevent KEYCODE_MOVE_END",
+      deleteCommand(3),
+    ]);
+    expect(fakeAdb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
+  });
+
+  test("cancels capability discovery before any caret or delete event", async () => {
+    const controller = new AbortController();
+    fakeAdb.abortAfterApiLevel(controller);
+    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+    let instance: ClearText | undefined;
+    await expect(
+      runClearText(
+        focusedFieldObserve("old"),
+        (clearText) => {
+          instance = clearText;
+        },
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    expect(fakeAdb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
+    expect((await instance!.execute()).success).toBe(true);
+    expect(fakeAdb.getApiLevelCalls()).toHaveLength(1);
   });
 
   test("clears via the accessibility service and never touches ADB when a11y succeeds", async () => {
@@ -371,6 +487,7 @@ describe("ClearText Android ADB fallback", () => {
     { after: "", success: true },
     { after: undefined, success: false },
   ])("verifies the focused field after ADB deletes: %j", async ({ after, success }) => {
+    fakeAdb.setAndroidApiLevel(34);
     fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
     const result = await runClearText(focusedFieldObserve("first\nlater\nlines"), (clearText) => {
       refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
@@ -386,7 +503,7 @@ describe("ClearText Android ADB fallback", () => {
       expect(result.error).toContain("Cannot verify");
     }
     expect(fakeAdb.getExecutedCommands()).toEqual([
-      "shell input keyevent KEYCODE_MOVE_END",
+      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
       deleteCommand(17),
     ]);
   });

@@ -1,8 +1,8 @@
-import type { AppearanceMode, BootedDevice } from "../../models";
-import { getAppearanceConfig, resolveAppearanceMode } from "../../server/appearanceManager";
-import { applyAppearanceToDevice } from "../deviceAppearance";
-import { logger } from "../logger";
-import { isAppearanceSyncEnabledFromEnvironment } from "./appearanceSyncPolicy";
+import type { AppearanceMode, BootedDevice } from "../models";
+import { getAppearanceConfig, resolveAppearanceMode } from "./appearanceManager";
+import { applyAppearanceToDevice } from "../utils/deviceAppearance";
+import { logger } from "../utils/logger";
+import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
 
 export interface AppearanceOnConnectDependencies {
   isSyncEnabled: () => boolean;

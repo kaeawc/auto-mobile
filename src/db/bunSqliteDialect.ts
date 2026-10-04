@@ -216,6 +216,10 @@ export class BunSqliteConnectionState {
     this.#timer = retry?.timer ?? defaultTimer;
     this.#random = retry?.random ?? defaultRandom;
 
+    this.#startPeriodicOptimize(optimizeIntervalMs);
+  }
+
+  #startPeriodicOptimize(optimizeIntervalMs?: number): void {
     if (optimizeIntervalMs && optimizeIntervalMs > 0) {
       this.#optimizeTimer = this.#timer.setInterval(
         () => this.#runPeriodicOptimize(),
@@ -303,14 +307,7 @@ export class BunSqliteConnectionState {
         try {
           return await this.#executeOnce<R>(sql, parameters);
         } catch (error) {
-          if (!this.#shouldRetry(error, attempt)) {
-            throw error;
-          }
-          const delayMs = this.#retryDelayMs(attempt);
-          logger.warn(
-            `SQLite busy/locked (attempt ${attempt}/${this.#maxRetryAttempts}); ` +
-              `retrying in ${delayMs}ms: ${sql}`,
-          );
+          const delayMs = this.#prepareRetry(error, attempt, sql);
           await this.#timer.sleep(delayMs);
         }
       }
@@ -318,6 +315,18 @@ export class BunSqliteConnectionState {
       this.#activeQueries -= 1;
       this.#pump();
     }
+  }
+
+  #prepareRetry(error: unknown, attempt: number, sql: string): number {
+    if (!this.#shouldRetry(error, attempt)) {
+      throw error;
+    }
+    const delayMs = this.#retryDelayMs(attempt);
+    logger.warn(
+      `SQLite busy/locked (attempt ${attempt}/${this.#maxRetryAttempts}); ` +
+        `retrying in ${delayMs}ms: ${sql}`,
+    );
+    return delayMs;
   }
 
   /**
@@ -380,39 +389,7 @@ export class BunSqliteConnectionState {
       // word char, so `\breturning\b` correctly rejects `returning_items`.
       const hasReturning = /\breturning\b/.test(sqlLower);
 
-      try {
-        if (isSelect || hasReturning) {
-          // For SELECT queries or queries with RETURNING, return all rows
-          const rows = stmt.all(...(parameters as any[])) as R[];
-          const result = {
-            rows,
-            numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
-          };
-          if (schemaChanging) {
-            this.#clearStatementCache();
-          }
-          return result;
-        } else {
-          // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
-          const writeResult = stmt.run(...(parameters as any[]));
-          const result = {
-            rows: [],
-            numAffectedRows: BigInt(writeResult.changes),
-            insertId:
-              writeResult.lastInsertRowid !== undefined
-                ? BigInt(writeResult.lastInsertRowid)
-                : undefined,
-          };
-          if (schemaChanging) {
-            this.#clearStatementCache();
-          }
-          return result;
-        }
-      } finally {
-        if (schemaChanging) {
-          stmt.finalize();
-        }
-      }
+      return this.#executeStatement<R>(stmt, parameters, isSelect, hasReturning, schemaChanging);
     } catch (error) {
       // BigInt-safe: Kysely can bind BigInt params, and a bare
       // JSON.stringify(parameters) throws on BigInt — which would mask the real
@@ -432,6 +409,48 @@ export class BunSqliteConnectionState {
       throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
         cause: error,
       });
+    }
+  }
+
+  #executeStatement<R>(
+    stmt: BunStatement,
+    parameters: readonly unknown[],
+    isSelect: boolean,
+    hasReturning: boolean,
+    schemaChanging: boolean,
+  ): QueryResult<R> {
+    try {
+      if (isSelect || hasReturning) {
+        // For SELECT queries or queries with RETURNING, return all rows
+        const rows = stmt.all(...(parameters as any[])) as R[];
+        const result = {
+          rows,
+          numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
+        };
+        if (schemaChanging) {
+          this.#clearStatementCache();
+        }
+        return result;
+      } else {
+        // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
+        const writeResult = stmt.run(...(parameters as any[]));
+        const result = {
+          rows: [],
+          numAffectedRows: BigInt(writeResult.changes),
+          insertId:
+            writeResult.lastInsertRowid !== undefined
+              ? BigInt(writeResult.lastInsertRowid)
+              : undefined,
+        };
+        if (schemaChanging) {
+          this.#clearStatementCache();
+        }
+        return result;
+      }
+    } finally {
+      if (schemaChanging) {
+        stmt.finalize();
+      }
     }
   }
 

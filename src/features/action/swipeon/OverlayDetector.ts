@@ -161,22 +161,14 @@ export class OverlayDetector implements OverlayAnalyzer {
     const secondaryEnd = isVertical ? bounds.right : bounds.bottom;
 
     const candidates = this.buildCandidateCoordinates(secondaryStart, secondaryEnd);
-    let bestCandidate: { coordinate: number; interval: SwipeInterval } | null = null;
-
-    for (const coordinate of candidates) {
-      const blocked = isVertical
-        ? this.getBlockedIntervalsForX(overlayBounds, bounds, coordinate)
-        : this.getBlockedIntervalsForY(overlayBounds, bounds, coordinate);
-
-      const largestGap = this.findLargestGap(primaryStart, primaryEnd, blocked);
-      if (!largestGap) {
-        continue;
-      }
-
-      if (!bestCandidate || largestGap.length > bestCandidate.interval.length) {
-        bestCandidate = { coordinate, interval: largestGap };
-      }
-    }
+    const bestCandidate = this.findBestSwipeCandidate(
+      isVertical,
+      bounds,
+      overlayBounds,
+      candidates,
+      primaryStart,
+      primaryEnd,
+    );
 
     if (!bestCandidate) {
       return null;
@@ -220,6 +212,34 @@ export class OverlayDetector implements OverlayAnalyzer {
         : undefined;
 
     return { startX, startY, endX, endY, warning };
+  }
+
+  private findBestSwipeCandidate(
+    isVertical: boolean,
+    bounds: Element["bounds"],
+    overlayBounds: Element["bounds"][],
+    candidates: number[],
+    primaryStart: number,
+    primaryEnd: number,
+  ): { coordinate: number; interval: SwipeInterval } | null {
+    let bestCandidate: { coordinate: number; interval: SwipeInterval } | null = null;
+
+    for (const coordinate of candidates) {
+      const blocked = isVertical
+        ? this.getBlockedIntervalsForX(overlayBounds, bounds, coordinate)
+        : this.getBlockedIntervalsForY(overlayBounds, bounds, coordinate);
+
+      const largestGap = this.findLargestGap(primaryStart, primaryEnd, blocked);
+      if (!largestGap) {
+        continue;
+      }
+
+      if (!bestCandidate || largestGap.length > bestCandidate.interval.length) {
+        bestCandidate = { coordinate, interval: largestGap };
+      }
+    }
+
+    return bestCandidate;
   }
 
   private getBlockedIntervalsForX(

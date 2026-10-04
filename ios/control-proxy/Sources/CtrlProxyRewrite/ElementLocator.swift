@@ -219,10 +219,12 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         /// Detect a usable keyboard in the captured tree without additional IPC.
         private static func keyboardVisibleInSnapshot(_ snapshot: XCUIElementSnapshot) -> Bool {
-            if snapshot.elementType == .keyboard, !snapshot.frame.isEmpty {
-                return true
-            }
-            return snapshot.children.contains { keyboardVisibleInSnapshot($0) }
+            keyboardVisibleInSnapshot(
+                snapshot,
+                isKeyboard: { $0.elementType == .keyboard },
+                frame: { $0.frame },
+                children: { $0.children }
+            )
         }
 
         public func getViewHierarchy(disableAllFiltering: Bool = false) throws -> ViewHierarchy {

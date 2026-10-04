@@ -132,6 +132,7 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
         );
         const payload = JSON.parse(result.finalizedResponse.content[0].text);
         expect(payload.observation.display.key).toBe("external-key");
+        expect(payload.observation.settled).toBe(!wrongPanel);
         expect(sessions.getLastRenderedDisplayKey(sessionUuid)).toBe("external-key");
         expect(sessions.getLastRenderedObservation(sessionUuid)?.display.key).toBe("external-key");
         expect(sessions.getSession(sessionUuid)?.cacheData.lastHierarchy).toEqual(
@@ -159,32 +160,56 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
     },
   );
 
-  test("a single-display action with no display still polls the default and adopts the settled capture", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const fake = new FakeObserveScreen();
-    const action = obs("loading", 10);
-    action.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
-    const settled = obs("settled", 20);
-    settled.display = { ...action.display };
-    fake.setObserveSequence([
-      settled,
-      { ...settled, updatedAt: 30, viewHierarchy: { ...settled.viewHierarchy!, updatedAt: 30 } },
-    ]);
+  test.each(["android", "ios"] as const)(
+    "a default %s action adopts the settled capture with a different display key",
+    async (platform) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeObserveScreen();
+      const action = obs("loading", 10);
+      action.platform = platform;
+      action.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
+      action.selectedElements = [];
+      const settled = obs("settled", 20);
+      settled.platform = platform;
+      settled.display = {
+        key: "focused-panel",
+        role: "unknown",
+        posture: "unknown",
+        generation: 0,
+      };
+      if (platform === "ios") {
+        action.activeWindow = settled.activeWindow = { appId: "com.example.app" };
+        action.screenSize = { width: 0, height: 0 };
+        settled.screenSize = { width: 1170, height: 2532 };
+        action.viewHierarchy!.packageName = settled.viewHierarchy!.packageName = "com.example.app";
+        action.viewHierarchy!.hierarchy = {
+          node: { class: "XCUIElementTypeStaticText", label: "Loading" },
+        };
+        settled.viewHierarchy!.hierarchy = {
+          node: { class: "XCUIElementTypeStaticText", label: "Ready" },
+        };
+      }
+      fake.setObserveSequence([
+        settled,
+        { ...settled, updatedAt: 30, viewHierarchy: { ...settled.viewHierarchy!, updatedAt: 30 } },
+      ]);
 
-    const result = await runAfterToolCall(
-      handlerWith(fake),
-      "tapOn",
-      createStructuredToolResponse({ success: true, observation: action }),
-      timer,
-      { args: { raw: true } },
-    );
-    const payload = JSON.parse(result.finalizedResponse.content[0].text);
-    expect(payload.observation.display.key).toBe("0");
-    expect(payload.observation.updatedAt).toBe(30);
-    expect(payload.observation.settled).toBe(true);
-    expect(fake.getExecuteOptions().every((options) => options.display === undefined)).toBe(true);
-  });
+      const result = await runAfterToolCall(
+        handlerWith(fake),
+        "tapOn",
+        createStructuredToolResponse({ success: true, observation: action }),
+        timer,
+        { args: { raw: true }, device: { ...device, platform } },
+      );
+      const payload = JSON.parse(result.finalizedResponse.content[0].text);
+      expect(payload.observation.display.key).toBe("focused-panel");
+      expect(payload.observation.selectedElements).toEqual([]);
+      expect(payload.observation.updatedAt).toBe(30);
+      expect(payload.observation.settled).toBe(true);
+      expect(fake.getExecuteOptions().every((options) => options.display === undefined)).toBe(true);
+    },
+  );
 
   test("tapOn's finalized observation is the settled capture, flagged settled:true", async () => {
     const timer = new FakeTimer();

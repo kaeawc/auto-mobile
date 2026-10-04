@@ -590,7 +590,9 @@ export class CtrlProxyHierarchy {
     // identifier. Rewrite those generated ids at ingest just as the Android
     // converter does, so an iOS skeleton elementId is directly resolvable by
     // the shared element selector rather than advertising an opaque UUID.
-    assignStableViewIds(filteredNode);
+    // SDK-only children can move between parents as the SDK snapshot catches up
+    // with XCUITest frames. Their sdk.source marker survives beside $ in extras.
+    assignStableViewIds(filteredNode, { excludeSdkInjectedNodes: true });
 
     return {
       hierarchy: {

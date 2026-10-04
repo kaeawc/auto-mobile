@@ -14,6 +14,9 @@
 # SHELL_PIPEFAIL_GREPQ_ROOT and SHELL_PIPEFAIL_GREPQ_BASELINE isolate fixture runs.
 set -euo pipefail
 export LC_ALL=C
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+source "$SCRIPT_DIR/../lib/file-selection.sh"
 ROOT="${SHELL_PIPEFAIL_GREPQ_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BASELINE="${SHELL_PIPEFAIL_GREPQ_BASELINE:-$ROOT/scripts/shellcheck/pipefail-grepq-baseline.txt}"
 MODE=check
@@ -30,6 +33,22 @@ for arg in "$@"; do
 done
 if [[ "$ALLOW_GROW" == true && "$MODE" != update ]]; then
   echo '--allow-grow requires --update' >&2
+  exit 2
+fi
+# The installer runs in a child process; expose its manual-install location here.
+export PATH="$HOME/.local/bin:$PATH"
+if [[ "${CI:-false}" == true ]]; then
+  INSTALL_SHFMT_WHEN_MISSING="${INSTALL_SHFMT_WHEN_MISSING-true}"
+else
+  INSTALL_SHFMT_WHEN_MISSING="${INSTALL_SHFMT_WHEN_MISSING-false}"
+fi
+# Check jq first so a missing dependency does not trigger an unnecessary download.
+if ! command -v jq > /dev/null 2>&1; then
+  echo 'jq is required for shell AST scanning; install jq and ensure it is on PATH.' >&2
+  exit 2
+fi
+if ! ensure_tool shfmt "$SCRIPT_DIR/install_shfmt.sh" "$INSTALL_SHFMT_WHEN_MISSING" >&2; then
+  echo "shfmt is required for shell AST scanning; install it with bash '$SCRIPT_DIR/install_shfmt.sh' or set INSTALL_SHFMT_WHEN_MISSING=true and retry." >&2
   exit 2
 fi
 cd "$ROOT"

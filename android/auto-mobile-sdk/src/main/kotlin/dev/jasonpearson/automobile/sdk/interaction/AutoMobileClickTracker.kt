@@ -140,17 +140,16 @@ internal object AutoMobileClickTracker {
               TapGestureClassifier.Action.DOWN,
               event.rawX,
               event.rawY,
-              System.currentTimeMillis(),
+              event.eventTime,
             )
           }
           MotionEvent.ACTION_UP -> {
-            val now = System.currentTimeMillis()
             val result =
               tapClassifier.classify(
                 TapGestureClassifier.Action.UP,
                 event.rawX,
                 event.rawY,
-                now,
+                event.eventTime,
               )
             if (result is TapGestureClassifier.Result.Tap) {
               // Post to avoid adding latency to the touch event dispatch

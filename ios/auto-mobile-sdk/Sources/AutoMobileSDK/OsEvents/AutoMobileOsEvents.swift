@@ -48,6 +48,24 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     // MARK: - Initialization
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
+        #if canImport(UIKit) && !os(watchOS)
+            // Hop before acquiring `lock`, preserving synchronous setup and teardown.
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { initializeOnCurrentThread(bundleId: bundleId, buffer: buffer) }
+            } else {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { self.initializeOnCurrentThread(bundleId: bundleId, buffer: buffer) }
+                }
+            }
+        #else
+            initializeOnCurrentThread(bundleId: bundleId, buffer: buffer)
+        #endif
+    }
+
+    #if canImport(UIKit) && !os(watchOS)
+        @MainActor
+    #endif
+    private func initializeOnCurrentThread(bundleId: String?, buffer: SdkEventBuffer) {
         lock.lock()
         defer { lock.unlock() }
         guard !_isInitialized else { return }
@@ -73,6 +91,25 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     }
 
     func shutdown() {
+        #if canImport(UIKit) && !os(watchOS)
+            // Serializing the whole lifecycle on main keeps the battery side effect
+            // in the same critical section as observer registration/removal.
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { shutdownOnCurrentThread() }
+            } else {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { self.shutdownOnCurrentThread() }
+                }
+            }
+        #else
+            shutdownOnCurrentThread()
+        #endif
+    }
+
+    #if canImport(UIKit) && !os(watchOS)
+        @MainActor
+    #endif
+    private func shutdownOnCurrentThread() {
         lock.lock()
         _isInitialized = false
         _isEnabled = true
@@ -148,6 +185,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
 
         // MARK: - Battery Tracking
 
+        @MainActor
         private func setupBatteryTrackingLocked() {
             UIDevice.current.isBatteryMonitoringEnabled = true
 

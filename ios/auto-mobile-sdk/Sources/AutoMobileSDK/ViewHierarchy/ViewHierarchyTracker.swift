@@ -152,7 +152,16 @@
         }
 
         private func refreshApplicationActiveState() {
-            setApplicationActive(UIApplication.shared.applicationState == .active)
+            // Both callers enter without holding `lock`; acquire it only after the UIKit read.
+            let isActive: Bool
+            if Thread.isMainThread {
+                isActive = MainActor.assumeIsolated { UIApplication.shared.applicationState == .active }
+            } else {
+                isActive = DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { UIApplication.shared.applicationState == .active }
+                }
+            }
+            setApplicationActive(isActive)
         }
 
         private func setApplicationActive(_ isActive: Bool) {

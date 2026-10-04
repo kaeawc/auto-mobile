@@ -1,5 +1,5 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class AutoMobileFailuresTests: XCTestCase {
     override func tearDown() {
@@ -45,11 +45,31 @@ final class AutoMobileFailuresTests: XCTestCase {
             buffer: SdkEventBuffer(maxBufferSize: 1000, flushIntervalMs: 60000) { _ in }
         )
 
-        for i in 0..<150 {
+        for i in 0 ..< 150 {
             let error = NSError(domain: "Test", code: i)
             AutoMobileFailures.shared.recordHandledException(error)
         }
 
         XCTAssertEqual(AutoMobileFailures.shared.eventCount, 100)
+    }
+
+    func testDeviceInfoProviderCanReenterAndRecordedFailureUsesCache() {
+        let failures = AutoMobileFailures.shared
+        failures.reset()
+        let buffer = SdkEventBuffer(timerFactory: { FakeTimer() }, onFlush: { _ in })
+        failures.initialize(bundleId: "test.bundle", buffer: buffer)
+        let expected = SdkDeviceInfo(model: "fixture", osVersion: "17.0", systemName: "iOS")
+
+        failures.cacheDeviceInfo {
+            // Reads the same state lock: device info must be obtained before locking it.
+            XCTAssertEqual(failures.eventCount, 0)
+            return expected
+        }
+        failures.recordHandledException(NSError(domain: "cached-device", code: 1))
+
+        let deviceInfo = failures.getRecentEvents().first?.deviceInfo
+        XCTAssertEqual(deviceInfo?.model, expected.model)
+        XCTAssertEqual(deviceInfo?.osVersion, expected.osVersion)
+        XCTAssertEqual(deviceInfo?.systemName, expected.systemName)
     }
 }

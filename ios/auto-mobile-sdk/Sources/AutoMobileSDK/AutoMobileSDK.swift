@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 /// Main entry point for the AutoMobile iOS SDK.
@@ -75,11 +75,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
             let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("automobile_events")
             persistence = FileEventPersistence(directory: tmpDir, dateProvider: dateProvider)
         }
-        self.eventPersistence = persistence
+        eventPersistence = persistence
         SdkEventBroadcaster.shared.persistence = persistence
-
-        // Cache device info while on main thread
-        AutoMobileFailures.shared.cacheDeviceInfo()
 
         let buffer = SdkEventBuffer(
             maxBufferSize: configuration.bufferSize,
@@ -91,13 +88,22 @@ public final class AutoMobileSDK: @unchecked Sendable {
             let bundleId = self?.bundleId
             SdkEventBroadcaster.shared.broadcastBatch(bundleId: bundleId, events: events)
         }
-        self.eventBuffer = buffer
+        eventBuffer = buffer
         lock.unlock()
+
+        // Device info may synchronously hop to main; the SDK lock must be released first.
+        AutoMobileFailures.shared.cacheDeviceInfo()
 
         buffer.start()
         SdkEventBroadcaster.shared.broadcastBatch(
             bundleId: resolvedBundleId,
-            events: [SdkLifecycleEvent(state: "sdk_session_started", bundleId: resolvedBundleId, sessionId: newSessionId, sessionEpoch: newSessionEpoch, trackingGeneration: 0)]
+            events: [SdkLifecycleEvent(
+                state: "sdk_session_started",
+                bundleId: resolvedBundleId,
+                sessionId: newSessionId,
+                sessionEpoch: newSessionEpoch,
+                trackingGeneration: 0
+            )]
         )
 
         // Replay any pending batches from previous sessions and clean up old ones
@@ -130,7 +136,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileInteractionTracker.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         ViewBodyTracker.shared.initialize(buffer: buffer, dateProvider: dateProvider)
         #if canImport(UIKit) && !os(watchOS)
-        ViewHierarchyTracker.shared.initialize(buffer: buffer)
+            ViewHierarchyTracker.shared.initialize(buffer: buffer)
         #endif
         UserDefaultsInspector.shared.initialize(buffer: buffer)
         DatabaseInspector.shared.initialize()
@@ -141,27 +147,27 @@ public final class AutoMobileSDK: @unchecked Sendable {
         // Session tracking
         let tracker = SessionTracker()
         lock.lock()
-        self.sessionTracker = tracker
+        sessionTracker = tracker
         lock.unlock()
 
         #if canImport(UIKit) && !os(watchOS)
-        let fgObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak tracker] _ in
-            tracker?.onForeground()
-        }
-        let bgObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak tracker] _ in
-            tracker?.onBackground()
-        }
-        lock.lock()
-        sessionObservers.append(contentsOf: [fgObserver, bgObserver])
-        lock.unlock()
+            let fgObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak tracker] _ in
+                tracker?.onForeground()
+            }
+            let bgObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification,
+                object: nil,
+                queue: .main
+            ) { [weak tracker] _ in
+                tracker?.onBackground()
+            }
+            lock.lock()
+            sessionObservers.append(contentsOf: [fgObserver, bgObserver])
+            lock.unlock()
         #endif
     }
 
@@ -304,7 +310,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileInteractionTracker.shared.reset()
         ViewBodyTracker.shared.reset()
         #if canImport(UIKit) && !os(watchOS)
-        ViewHierarchyTracker.shared.reset()
+            ViewHierarchyTracker.shared.reset()
         #endif
         UserDefaultsInspector.shared.reset()
         DatabaseInspector.shared.reset()
@@ -392,7 +398,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         // Screen identity is control-plane state. Send this transition directly
         // instead of through the disabled buffer so CtrlProxy can discard an
         // identity that would otherwise outlive SDK tracking.
-        if initialized && wasEnabled != enabled {
+        if initialized, wasEnabled != enabled {
             SdkEventBroadcaster.shared.broadcastBatch(
                 bundleId: bundleId,
                 events: [SdkLifecycleEvent(
@@ -454,7 +460,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     }
 
     /// The event buffer (for subsystems that need direct access).
-    internal func getEventBuffer() -> SdkEventBuffer? {
+    func getEventBuffer() -> SdkEventBuffer? {
         lock.lock()
         defer { lock.unlock() }
         return eventBuffer
@@ -463,7 +469,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     // MARK: - Context
 
     /// The SDK context holding ambient state attached to events.
-    internal var sdkContext: SdkContext? {
+    var sdkContext: SdkContext? {
         lock.lock()
         defer { lock.unlock() }
         return _sdkContext
@@ -485,7 +491,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     }
 
     /// The drop counter tracking events lost due to buffer overflow, disabled state, or flush errors.
-    internal var dropCounter: (any DropCounting)? {
+    var dropCounter: (any DropCounting)? {
         lock.lock()
         defer { lock.unlock() }
         return _dropCounter
@@ -502,7 +508,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     // MARK: - Testing Support
 
     /// Reset the SDK for testing. Not for production use.
-    internal func reset() {
+    func reset() {
         shutdown()
     }
 }

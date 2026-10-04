@@ -30,8 +30,13 @@ public final class AutoMobileFailures: Sendable {
 
     /// Cache device info from the main thread during SDK initialization.
     /// This avoids accessing UIDevice.current from background threads.
-    func cacheDeviceInfo() {
-        state.withLock { $0.cachedDeviceInfo = Self.currentDeviceInfo() }
+    func cacheDeviceInfo(
+        deviceInfoProvider: @Sendable ()
+            -> SdkDeviceInfo = { AutoMobileFailures.currentDeviceInfo() }
+    ) {
+        // UIKit reads may hop to main. Never hold the state lock across that hop.
+        let deviceInfo = deviceInfoProvider()
+        state.withLock { $0.cachedDeviceInfo = deviceInfo }
     }
 
     /// Record a handled exception/error.
@@ -43,12 +48,13 @@ public final class AutoMobileFailures: Sendable {
         guard AutoMobileSDK.shared.isEnabled else { return }
         let nsError = error as NSError
 
-        let (deviceInfo, currentBundleId) = state.withLock { state in
+        let (cachedDeviceInfo, currentBundleId) = state.withLock { state in
             (
-                state.cachedDeviceInfo ?? Self.currentDeviceInfo(),
+                state.cachedDeviceInfo,
                 state.bundleId ?? Bundle.main.bundleIdentifier ?? ""
             )
         }
+        let deviceInfo = cachedDeviceInfo ?? Self.currentDeviceInfo()
 
         let event = HandledExceptionEvent(
             timestamp: Int64(Date().timeIntervalSince1970 * 1000),
@@ -107,12 +113,13 @@ public final class AutoMobileFailures: Sendable {
 
     static func currentDeviceInfo() -> SdkDeviceInfo {
         #if canImport(UIKit) && !os(watchOS)
-            let device = UIDevice.current
-            return SdkDeviceInfo(
-                model: device.model,
-                osVersion: device.systemVersion,
-                systemName: device.systemName
-            )
+            if Thread.isMainThread {
+                // Assertion only after confirming main-thread execution, as in ViewHierarchyWalker.
+                return MainActor.assumeIsolated { readDeviceInfo() }
+            }
+            return DispatchQueue.main.sync {
+                MainActor.assumeIsolated { readDeviceInfo() }
+            }
         #else
             var systemInfo = utsname()
             uname(&systemInfo)
@@ -128,6 +135,18 @@ public final class AutoMobileFailures: Sendable {
             )
         #endif
     }
+
+    #if canImport(UIKit) && !os(watchOS)
+        @MainActor
+        private static func readDeviceInfo() -> SdkDeviceInfo {
+            let device = UIDevice.current
+            return SdkDeviceInfo(
+                model: device.model,
+                osVersion: device.systemVersion,
+                systemName: device.systemName
+            )
+        }
+    #endif
 
     // MARK: - Testing Support
 

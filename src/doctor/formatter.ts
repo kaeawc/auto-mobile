@@ -31,7 +31,9 @@ function formatCheckLine(check: CheckResult, useColors: boolean): string {
 
   let line = `${color}${icon}${reset} ${check.name}`;
 
-  if (check.value !== undefined && check.value !== null) {
+  if (check.status === "skip" && check.message) {
+    line += `: ${check.message}`;
+  } else if (check.value !== undefined && check.value !== null) {
     line += `: ${check.value}`;
   } else if (check.message) {
     line += `: ${check.message}`;

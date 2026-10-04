@@ -419,10 +419,26 @@ describe("UnixSocketServer input/swipe", () => {
       endY: 2,
       durationMs: 60_001,
     });
+    const fractional = await sendRequest(socketPath, "input/swipe", {
+      platform: "android",
+      startX: 1,
+      startY: 1,
+      endX: 2,
+      endY: 2,
+      durationMs: 1.5,
+    });
 
     expect(zero.success).toBe(false);
-    expect(zero.error).toBe("input/swipe durationMs must be between 1 and 60000 milliseconds");
+    expect(zero.error).toBe(
+      "input/swipe durationMs must be integer milliseconds between 1 and 60000",
+    );
     expect(tooLarge.success).toBe(false);
-    expect(tooLarge.error).toBe("input/swipe durationMs must be between 1 and 60000 milliseconds");
+    expect(tooLarge.error).toBe(
+      "input/swipe durationMs must be integer milliseconds between 1 and 60000",
+    );
+    expect(fractional.success).toBe(false);
+    expect(fractional.error).toBe(
+      "input/swipe durationMs must be integer milliseconds between 1 and 60000",
+    );
   });
 });

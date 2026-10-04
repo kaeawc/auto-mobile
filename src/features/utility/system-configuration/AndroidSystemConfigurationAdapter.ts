@@ -85,6 +85,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       await this.runShellCommand(`shell setprop persist.sys.locale ${shellQuote(languageTag)}`);
       await this.runShellCommand("shell stop; start");
     } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to set device-wide locale: ${errorMessage(error)}`,
+        error,
+      );
       const errorMsg = errorMessage(error);
       return {
         success: false,
@@ -198,6 +202,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${targetUserId} --locales ${shellQuote(languageTag)}`,
       );
     } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to set app locale: ${errorMessage(error)}`,
+        error,
+      );
       const errorMsg = errorMessage(error);
       return {
         success: false,
@@ -287,6 +295,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         method: "setprop persist.sys.timezone",
       };
     } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to set time zone: ${errorMessage(error)}`,
+        error,
+      );
       const errorMsg = errorMessage(error);
       return {
         success: false,
@@ -362,6 +374,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         previousFormat: normalizeTimeFormat(previousFormat),
       };
     } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to set 24-hour format: ${errorMessage(error)}`,
+        error,
+      );
       const errorMsg = errorMessage(error);
       return {
         success: false,
@@ -395,6 +411,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         previousCalendarSystem,
       };
     } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to set calendar system: ${errorMessage(error)}`,
+        error,
+      );
       const errorMsg = errorMessage(error);
       return {
         success: false,

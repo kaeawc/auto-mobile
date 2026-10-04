@@ -149,9 +149,11 @@ export class CtrlProxyVoiceOver {
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
-      unsupportedCommandError: () => ({
+      // Capability misses and unknown-command replies already carry actionable
+      // unsupported errors; preserve other runner failures verbatim as well.
+      unsupportedCommandError: (_messageType, error) => ({
         success: false,
-        error: "Connected iOS runner does not support semantic accessibility-link activation",
+        error,
       }),
       timeoutError: () => ({
         success: false,

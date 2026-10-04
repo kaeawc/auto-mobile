@@ -241,10 +241,10 @@ object AutoMobileSDK {
         // thread
         val handler = Handler(Looper.getMainLooper())
         mainHandler = handler
-        handler.post {
+        val initializeOnMain: () -> Unit = initializeOnMain@{
           try {
             // Guard: if shutdown() was called before this posted block runs, no-op.
-            if (this@AutoMobileSDK.context == null) return@post
+            if (this@AutoMobileSDK.context == null) return@initializeOnMain
             AutoMobileOsEvents.initialize(appContext, buffer) { kind ->
               notifyRuntimeContextChanged(kind)
             }
@@ -275,6 +275,12 @@ object AutoMobileSDK {
             logger.e(TAG, error) { "AutoMobileSDK main-thread initialization failed; rolling back" }
             shutdown()
           }
+        }
+        // Register during onCreate so the launching Activity's start/resume callbacks are observed.
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+          initializeOnMain()
+        } else {
+          handler.post { initializeOnMain() }
         }
       } catch (error: Exception) {
         shutdown()

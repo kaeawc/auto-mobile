@@ -31,6 +31,63 @@ function obs(updatedAt: number, marker: string): ObserveResult {
 }
 
 describe("pollObserveUntil minTimestamp floor (#6284)", () => {
+  test("caps a long poll sleep at the remaining budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs(10, "baseline"));
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10000 },
+      () => false,
+    );
+
+    expect(timer.getSleepHistory()).toEqual([100]);
+    expect(outcome).toMatchObject({ polls: 1, waitMs: 100, terminalReason: "timeout" });
+  });
+
+  test("rejects an abort while the poll sleep is still pending", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs(10, "baseline"));
+    const controller = new AbortController();
+    const pending = pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10000, signal: controller.signal },
+      () => false,
+    );
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingSleepCount()).toBe(1);
+    controller.abort(new Error("cancel poll sleep"));
+    // Give cancellation a chance to settle without resolving the fake sleep.
+    const settled = await Promise.race([
+      pending.then(
+        () => "resolved",
+        (error: unknown) => error,
+      ),
+      (async () => {
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
+        return "still pending";
+      })(),
+    ]);
+    try {
+      expect(settled).toBeInstanceOf(Error);
+      expect(settled).toMatchObject({ message: "Operation cancelled" });
+      expect(timer.now()).toBe(0);
+      expect(timer.getPendingSleepCount()).toBe(1);
+    } finally {
+      timer.resolveAll();
+      await pending.catch(() => undefined);
+    }
+  });
+
   test("returns the last trustworthy observation when sleep passes the deadline", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -47,6 +104,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect(outcome.observation).toBe(last);
     expect(fake.getExecuteCallCount()).toBe(2);
     expect(fake.getExecuteOptions().map((options) => options.timeoutMs)).toEqual([100, 40]);
+    expect(timer.getSleepHistory()).toEqual([60, 40]);
   });
 
   test("returns the last received observation when no complete hierarchy was trustworthy", async () => {

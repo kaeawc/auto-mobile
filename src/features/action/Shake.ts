@@ -10,6 +10,7 @@ import { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { emulatorConsoleReportsFailure } from "../utility/DeviceState";
 
 export class Shake extends BaseVisualChange {
   private shakeTimer: Timer;
@@ -96,13 +97,18 @@ export class Shake extends BaseVisualChange {
             throwIfAborted(signal);
             // Once acceleration is dispatched, always reset it, even on cancellation.
             try {
-              await awaitWhileRequestIsLive(
+              const result = await awaitWhileRequestIsLive(
                 this.adb.executeCommand(
                   `emu sensor set acceleration ${intensity}:${intensity}:${intensity}`,
                 ),
                 signal,
               );
               throwIfAborted(signal);
+              if (emulatorConsoleReportsFailure(result.stdout, result.stderr)) {
+                throw new Error(
+                  `Emulator rejected shake acceleration: ${[result.stdout, result.stderr].filter(Boolean).join("\n").trim()}. Verify that the emulator supports the acceleration sensor.`,
+                );
+              }
               await awaitWhileRequestIsLive(this.shakeTimer.sleep(duration), signal);
             } finally {
               await this.resetAcceleration();

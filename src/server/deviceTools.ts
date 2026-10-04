@@ -307,8 +307,8 @@ const startDeviceParametersSchema = z.object({
     .describe("Required display capabilities from device inventory"),
   screenSize: z
     .object({
-      width: z.number().describe("Screen width in pixels"),
-      height: z.number().describe("Screen height in pixels"),
+      width: z.number().positive().finite().describe("Screen width in pixels"),
+      height: z.number().positive().finite().describe("Screen height in pixels"),
     })
     .optional()
     .describe("Desired screen dimensions"),

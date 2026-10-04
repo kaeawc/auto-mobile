@@ -1,3 +1,5 @@
+import { parsePort, parsePositiveNumber, type ParseLogger } from "../../cli/numericValidators";
+import { logger } from "../../utils/logger";
 import { shouldSkipCtrlProxyDownload } from "../../utils/ctrlProxyDownloadControl";
 import {
   hasEventAllMarkersCliOverride,
@@ -16,9 +18,63 @@ import {
 import { resolveDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import type { DaemonOptions } from "../types";
 
+const numericFlags: Partial<
+  Record<
+    string,
+    {
+      field:
+        | "videoTargetBitrateKbps"
+        | "videoMaxThroughputMbps"
+        | "videoFps"
+        | "videoMaxArchiveSizeMb";
+      label: string;
+      allowFloat: boolean;
+    }
+  >
+> = {
+  "--video-target-bitrate-kbps": {
+    field: "videoTargetBitrateKbps",
+    label: "video target bitrate",
+    allowFloat: false,
+  },
+  "--video-max-throughput-mbps": {
+    field: "videoMaxThroughputMbps",
+    label: "video max throughput",
+    allowFloat: true,
+  },
+  "--video-fps": { field: "videoFps", label: "video fps", allowFloat: false },
+  "--video-archive-size-mb": {
+    field: "videoMaxArchiveSizeMb",
+    label: "video max archive size",
+    allowFloat: true,
+  },
+};
+
+const stringFlags: Partial<
+  Record<
+    string,
+    | "videoQualityPreset"
+    | "videoFormat"
+    | "accessibilityLevel"
+    | "accessibilityFailureMode"
+    | "accessibilityMinSeverity"
+  >
+> = {
+  "--video-quality": "videoQualityPreset",
+  "--video-quality-preset": "videoQualityPreset",
+  "--video-format": "videoFormat",
+  "--accessibility-level": "accessibilityLevel",
+  "--a11y-level": "accessibilityLevel",
+  "--accessibility-failure-mode": "accessibilityFailureMode",
+  "--a11y-failure-mode": "accessibilityFailureMode",
+  "--accessibility-min-severity": "accessibilityMinSeverity",
+  "--a11y-min-severity": "accessibilityMinSeverity",
+};
+
 export function parseDaemonArgs(
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
+  log: ParseLogger = logger,
 ): DaemonOptions {
   const options: DaemonOptions = shouldSkipCtrlProxyDownload(args, env)
     ? { skipCtrlProxyDownload: true }
@@ -43,9 +99,30 @@ export function parseDaemonArgs(
   // --daemon-socket-path=<encoded path> is a discovery marker, intentionally
   // ignored here: the manager forwards the authoritative namespace through ENV.
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--port") {
-      options.port = parseInt(args[i + 1], 10);
-      i++;
+    const value = args[i + 1];
+    const hasValue = value !== undefined && !value.startsWith("--");
+    const numericFlag = Object.hasOwn(numericFlags, args[i]) ? numericFlags[args[i]] : undefined;
+    const stringField = Object.hasOwn(stringFlags, args[i]) ? stringFlags[args[i]] : undefined;
+    if (numericFlag) {
+      options[numericFlag.field] = parsePositiveNumber(
+        value,
+        numericFlag.label,
+        numericFlag.allowFloat,
+        log,
+      );
+      if (hasValue) {
+        i++;
+      }
+    } else if (stringField) {
+      if (hasValue) {
+        options[stringField] = value;
+        i++;
+      }
+    } else if (args[i] === "--port") {
+      options.port = parsePort(value, log);
+      if (hasValue) {
+        i++;
+      }
     } else if (args[i] === "--host") {
       const host = args[i + 1];
       if (host && !host.startsWith("--")) {
@@ -70,24 +147,6 @@ export function parseDaemonArgs(
         options.runnerReadinessTimeoutMs = timeoutMs;
         i++;
       }
-    } else if (args[i] === "--video-quality" || args[i] === "--video-quality-preset") {
-      options.videoQualityPreset = args[i + 1];
-      i++;
-    } else if (args[i] === "--video-target-bitrate-kbps") {
-      options.videoTargetBitrateKbps = parseInt(args[i + 1], 10);
-      i++;
-    } else if (args[i] === "--video-max-throughput-mbps") {
-      options.videoMaxThroughputMbps = Number(args[i + 1]);
-      i++;
-    } else if (args[i] === "--video-fps") {
-      options.videoFps = parseInt(args[i + 1], 10);
-      i++;
-    } else if (args[i] === "--video-format") {
-      options.videoFormat = args[i + 1];
-      i++;
-    } else if (args[i] === "--video-archive-size-mb") {
-      options.videoMaxArchiveSizeMb = Number(args[i + 1]);
-      i++;
     } else if (args[i] === TOOL_OUTPUTS_DIR_FLAG || args[i] === TOOL_OUTPUT_DIR_FLAG_ALIAS) {
       const toolOutputsDir = args[i + 1];
       if (toolOutputsDir && !toolOutputsDir.startsWith("--")) {
@@ -130,15 +189,6 @@ export function parseDaemonArgs(
       options.memPerfAudit = true;
     } else if (args[i] === "--accessibility-audit") {
       options.accessibilityAudit = true;
-    } else if (args[i] === "--accessibility-level" || args[i] === "--a11y-level") {
-      options.accessibilityLevel = args[i + 1];
-      i++;
-    } else if (args[i] === "--accessibility-failure-mode" || args[i] === "--a11y-failure-mode") {
-      options.accessibilityFailureMode = args[i + 1];
-      i++;
-    } else if (args[i] === "--accessibility-min-severity" || args[i] === "--a11y-min-severity") {
-      options.accessibilityMinSeverity = args[i + 1];
-      i++;
     } else if (args[i] === "--accessibility-use-baseline" || args[i] === "--a11y-use-baseline") {
       options.accessibilityUseBaseline = true;
     } else if (args[i] === "--predictive-ui" || args[i] === "--predictive") {

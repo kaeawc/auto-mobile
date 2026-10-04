@@ -229,7 +229,11 @@ extension DisplayLinkFPSMonitor {
         guard result == KERN_SUCCESS, let threads = threadList else { return nil }
 
         defer {
-            vm_deallocate(
+            // task_threads gives us a send right for each thread as well as the array allocation.
+            for i in 0 ..< Int(threadCount) {
+                _ = mach_port_deallocate(mach_task_self_, threads[i])
+            }
+            _ = vm_deallocate(
                 mach_task_self_,
                 vm_address_t(bitPattern: threads),
                 vm_size_t(Int(threadCount) * MemoryLayout<thread_t>.stride)

@@ -33,6 +33,14 @@ export interface DaemonLaunchLogOwner {
   launchLogPath: string | null | undefined;
 }
 
+/** Namespace discovery supplied by the daemon layer, without an upward import. */
+export interface LogRetentionNamespaceSource {
+  listDaemonPidFilesSync(): DaemonPidFileEnumeration;
+  readPidFileDataSync(pidFilePath: string): { pid: number } | null;
+  readDaemonOwnerForRetentionSync(pidFilePath: string): DaemonLaunchLogOwner | undefined;
+  readDaemonLaunchLogOwnerTombstoneSync(launchLogPath: string): DaemonLaunchLogOwner | undefined;
+}
+
 export interface LogPruneOptions {
   /** Directory containing the `.log` files. */
   dir: string;

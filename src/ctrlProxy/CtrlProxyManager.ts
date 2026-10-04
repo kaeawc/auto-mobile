@@ -2340,6 +2340,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perfTiming: perf.getTimings(),
       };
     } catch (error) {
+      logger.warn(`[CTRL_PROXY] Setup failed: ${errorMessage(error)}`, error);
       const errorMsg = errorMessage(error);
       const { message, category } = AndroidCtrlProxyManager.classifySetupError(errorMsg);
 

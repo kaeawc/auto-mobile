@@ -260,42 +260,76 @@ enum WebSocketFraming {
 
     // MARK: - HTTP framing
 
-    /// Returns the byte count of one complete HTTP request, including its body, or
-    /// `nil` until another network read supplies the missing bytes.
-    static func completeHTTPRequestLength(in data: Data) -> Int? {
-        let separator = Data("\r\n\r\n".utf8)
-        guard let headerRange = data.range(of: separator) else {
-            return nil
+    enum HTTPRequestFraming: Equatable {
+        case incomplete
+        case complete(length: Int)
+        case rejected(HTTPRequestRejection)
+    }
+
+    enum HTTPRequestRejection: Equatable {
+        case badRequest
+        case payloadTooLarge
+
+        private static let badRequestResponse =
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        private static let payloadTooLargeResponse =
+            "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+        var response: Data {
+            switch self {
+            case .badRequest: return Data(Self.badRequestResponse.utf8)
+            case .payloadTooLarge: return Data(Self.payloadTooLargeResponse.utf8)
+            }
+        }
+    }
+
+    private static let httpHeaderSeparator = Data("\r\n\r\n".utf8)
+    private static let httpLineSeparator = "\r\n"
+    private static let httpHeaderDelimiter: Character = ":"
+    private static let contentLengthHeaderName = "Content-Length"
+    private static let asciiDigitRange: ClosedRange<UInt8> = 0x30 ... 0x39
+
+    /// Classifies one request, rejecting malformed or oversized declarations as
+    /// soon as its headers arrive, without waiting for the body.
+    static func classifyHTTPRequest(in data: Data) -> HTTPRequestFraming {
+        guard let headerRange = data.range(of: httpHeaderSeparator) else {
+            return .incomplete
         }
 
         let headerLength = headerRange.upperBound
         guard let header = String(data: data.prefix(headerLength), encoding: .utf8) else {
-            return nil
+            return .rejected(.badRequest)
         }
 
-        let contentLength = header
-            .components(separatedBy: "\r\n")
-            .compactMap { line -> Int? in
+        let values = header
+            .components(separatedBy: httpLineSeparator)
+            .compactMap { line -> String? in
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard let delimiter = trimmed.firstIndex(of: ":") else {
+                guard let delimiter = trimmed.firstIndex(of: httpHeaderDelimiter) else {
                     return nil
                 }
                 let name = String(trimmed[..<delimiter])
-                guard name.caseInsensitiveCompare("Content-Length") == .orderedSame
+                guard name.caseInsensitiveCompare(contentLengthHeaderName) == .orderedSame
                 else {
                     return nil
                 }
-                let value = String(trimmed[trimmed.index(after: delimiter)...].trimmingCharacters(in: .whitespaces))
-                return Int(value)
+                return trimmed[trimmed.index(after: delimiter)...].trimmingCharacters(in: .whitespaces)
             }
-            .first ?? 0
-        guard contentLength >= 0,
-              headerLength <= maximumHTTPRequestLength - contentLength
-        else {
-            return nil
+        // Validate every value before parsing so bad syntax wins over overflow,
+        // including on a later duplicate header. Preserve the first-length policy.
+        guard values.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy { asciiDigitRange.contains($0) } }) else {
+            return .rejected(.badRequest)
+        }
+        let lengths = values.compactMap { Int($0) }
+        guard lengths.count == values.count else {
+            return .rejected(.payloadTooLarge)
+        }
+        let contentLength = lengths.first ?? 0
+        guard headerLength <= maximumHTTPRequestLength - contentLength else {
+            return .rejected(.payloadTooLarge)
         }
 
         let requestLength = headerLength + contentLength
-        return data.count >= requestLength ? requestLength : nil
+        return data.count >= requestLength ? .complete(length: requestLength) : .incomplete
     }
 }

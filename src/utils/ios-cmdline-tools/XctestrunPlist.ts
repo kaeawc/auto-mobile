@@ -96,7 +96,7 @@ export const parsePlist = async (xml: string): Promise<PlistValue> => {
   return nodeToValue(root);
 };
 
-const escapeXml = (value: string): string =>
+export const escapeXml = (value: string): string =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const indent = (depth: number): string => "\t".repeat(depth);

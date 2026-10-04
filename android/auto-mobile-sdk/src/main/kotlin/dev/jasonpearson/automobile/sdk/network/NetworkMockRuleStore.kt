@@ -6,7 +6,6 @@ import android.content.IntentFilter
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -83,7 +82,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     val expiresAtEpochMs: Long,
   )
 
-  private val rules = CopyOnWriteArrayList<CompiledMockRule>()
+  @Volatile private var rules: List<CompiledMockRule> = emptyList()
   @Volatile private var errorSimulation: ErrorSimulationConfig? = null
 
   private val json = Json { ignoreUnknownKeys = true }
@@ -107,30 +106,32 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     }
 
   fun setRules(dtos: List<NetworkMockRuleDto>) {
-    rules.clear()
-    for (dto in dtos) {
-      try {
-        rules.add(
-          CompiledMockRule(
-            mockId = dto.mockId,
-            hostRegex = Regex(dto.host),
-            pathRegex = Regex(dto.path),
-            method = dto.method,
-            limit = dto.limit,
-            remaining = dto.remaining?.let { AtomicInteger(it) },
-            statusCode = dto.statusCode,
-            responseHeaders = dto.responseHeaders,
-            responseBody = dto.responseBody,
-            contentType = dto.contentType,
+    val compiledRules = buildList {
+      for (dto in dtos) {
+        try {
+          add(
+            CompiledMockRule(
+              mockId = dto.mockId,
+              hostRegex = Regex(dto.host),
+              pathRegex = Regex(dto.path),
+              method = dto.method,
+              limit = dto.limit,
+              remaining = dto.remaining?.let { AtomicInteger(it) },
+              statusCode = dto.statusCode,
+              responseHeaders = dto.responseHeaders,
+              responseBody = dto.responseBody,
+              contentType = dto.contentType,
+            )
           )
-        )
-      } catch (e: Exception) {
-        AutoMobileSDK.logger.w(TAG) {
-          "Skipping mock rule ${dto.mockId}: invalid regex: ${e.message}"
+        } catch (e: Exception) {
+          AutoMobileSDK.logger.w(TAG) {
+            "Skipping mock rule ${dto.mockId}: invalid regex: ${e.message}"
+          }
         }
       }
     }
-    AutoMobileSDK.logger.d(TAG) { "Updated mock rules: ${rules.size} active" }
+    rules = compiledRules
+    AutoMobileSDK.logger.d(TAG) { "Updated mock rules: ${compiledRules.size} active" }
   }
 
   fun setErrorSimulation(
@@ -154,7 +155,8 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
   }
 
   fun findMatchingRule(host: String, path: String, method: String): MatchedMockRule? {
-    for (rule in rules) {
+    val snapshot = rules
+    for (rule in snapshot) {
       if (rule.method != "*" && !rule.method.equals(method, ignoreCase = true)) continue
       if (!rule.hostRegex.containsMatchIn(host)) continue
       if (!rule.pathRegex.containsMatchIn(path)) continue
@@ -195,7 +197,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
   }
 
   fun clear() {
-    rules.clear()
+    rules = emptyList()
     errorSimulation = null
   }
 

@@ -3,6 +3,10 @@ import { DeepLinkManager, type HostExec } from "../../../src/features/utility/De
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { AppBundleMetadata } from "../../../src/utils/ios-cmdline-tools/AppBundleMetadataClient";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
 const SIM_UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
@@ -73,7 +77,107 @@ function fakeMetadata(entitlements: Record<string, unknown> | null = null): AppB
   return { readEntitlements: async () => entitlements };
 }
 
+function managerWithSimctl(
+  simctl: FakeSimCtlClient,
+  metadata: AppBundleMetadata = fakeMetadata(),
+): DeepLinkManager {
+  const { exec, plist } = fakeHostExec([]);
+  return new DeepLinkManager(
+    iosDevice,
+    new FakeAdbClientFactory(),
+    simctl,
+    exec,
+    plist,
+    metadata,
+    undefined,
+    new FakeTimer(),
+  );
+}
+
 describe("DeepLinkManager iOS", () => {
+  test.each(["simctl timed out after 10000ms", "Invalid device: unavailable", "permission denied"])(
+    "container failure preserves reason: %s",
+    async (reason) => {
+      const simctl = new FakeSimCtlClient();
+      simctl.setCommandArgsError(
+        ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
+        new Error(reason),
+      );
+      const manager = managerWithSimctl(simctl);
+
+      const result = await manager.getDeepLinks("com.example.myapp");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(reason);
+      expect(result.error).not.toContain("not installed");
+    },
+  );
+
+  test("missing-app error still reports not installed on the simulator", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsError(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
+      new Error("No such file or directory"),
+    );
+
+    const result = await managerWithSimctl(simctl).getDeepLinks("com.example.myapp");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(`App com.example.myapp is not installed on ${SIM_UDID}`);
+  });
+
+  test("already cancelled discovery rejects without a container lookup", async () => {
+    const simctl = new FakeSimCtlClient();
+    const manager = managerWithSimctl(simctl);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runWithAbortSignal(controller.signal, () => manager.getDeepLinks("com.example.myapp")),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
+  test("cancellation during a rejected container lookup propagates through both catches", async () => {
+    const controller = new AbortController();
+    class CancellingSimCtlClient extends FakeSimCtlClient {
+      override async executeCommandArgs(args: string[]): Promise<ExecResult> {
+        controller.abort();
+        return super.executeCommandArgs(args);
+      }
+    }
+    const simctl = new CancellingSimCtlClient();
+    simctl.setCommandArgsError(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
+      new Error("simctl timed out after 10000ms"),
+    );
+    const manager = managerWithSimctl(simctl);
+
+    await expect(
+      runWithAbortSignal(controller.signal, () => manager.getDeepLinks("com.example.myapp")),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+  });
+
+  test("cancellation during metadata inspection propagates through the outer catch", async () => {
+    const controller = new AbortController();
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
+      "/sim/MyApp.app",
+    );
+    const metadata: AppBundleMetadata = {
+      readEntitlements: async () => {
+        controller.abort();
+        throw new Error("codesign is unavailable");
+      },
+    };
+    const manager = managerWithSimctl(simctl, metadata);
+
+    await expect(
+      runWithAbortSignal(controller.signal, () => manager.getDeepLinks("com.example.myapp")),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+  });
+
   test("returns schemes from CFBundleURLTypes for a schemes-only app", async () => {
     const simctl = new FakeSimCtlClient();
     const appPath = "/sim/Containers/Bundle/Application/ABC/MyApp.app";
@@ -92,14 +196,7 @@ describe("DeepLinkManager iOS", () => {
       { match: "plutil -convert json", stdout: infoPlist },
     ]);
 
-    const manager = new DeepLinkManager(
-      iosDevice,
-      null,
-      simctl as any,
-      exec,
-      plist,
-      fakeMetadata(),
-    );
+    const manager = new DeepLinkManager(iosDevice, null, simctl, exec, plist, fakeMetadata());
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(true);
@@ -150,7 +247,7 @@ describe("DeepLinkManager iOS", () => {
     const manager = new DeepLinkManager(
       iosDevice,
       null,
-      simctl as any,
+      simctl,
       exec,
       plist,
       fakeMetadata(JSON.parse(entitlements)),
@@ -177,14 +274,7 @@ describe("DeepLinkManager iOS", () => {
     const infoPlist = JSON.stringify({ CFBundleURLTypes: [{ CFBundleURLSchemes: ["myapp"] }] });
     const { exec, plist } = fakeHostExec([{ match: "plutil -convert json", stdout: infoPlist }]);
 
-    const manager = new DeepLinkManager(
-      iosDevice,
-      null,
-      simctl as any,
-      exec,
-      plist,
-      fakeMetadata(),
-    );
+    const manager = new DeepLinkManager(iosDevice, null, simctl, exec, plist, fakeMetadata());
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(true);
@@ -206,7 +296,7 @@ describe("DeepLinkManager iOS", () => {
         throw new Error("codesign is unavailable");
       },
     };
-    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, metadata);
+    const manager = new DeepLinkManager(iosDevice, null, simctl, exec, plist, metadata);
 
     const result = await manager.getDeepLinks("com.example.myapp");
 
@@ -219,14 +309,7 @@ describe("DeepLinkManager iOS", () => {
     // get_app_container ... app returns empty (FakeSimCtlClient default for app variant)
     const { exec, plist } = fakeHostExec([]);
 
-    const manager = new DeepLinkManager(
-      iosDevice,
-      null,
-      simctl as any,
-      exec,
-      plist,
-      fakeMetadata(),
-    );
+    const manager = new DeepLinkManager(iosDevice, null, simctl, exec, plist, fakeMetadata());
     const result = await manager.getDeepLinks("com.example.notinstalled");
 
     expect(result.success).toBe(false);
@@ -244,14 +327,7 @@ describe("DeepLinkManager iOS", () => {
       { match: "plutil -convert json", stdout: "<<<not json>>>" },
     ]);
 
-    const manager = new DeepLinkManager(
-      iosDevice,
-      null,
-      simctl as any,
-      exec,
-      plist,
-      fakeMetadata(),
-    );
+    const manager = new DeepLinkManager(iosDevice, null, simctl, exec, plist, fakeMetadata());
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(false);
@@ -268,14 +344,7 @@ describe("DeepLinkManager iOS", () => {
       deviceId: PHYSICAL_UDID,
     };
 
-    const manager = new DeepLinkManager(
-      physicalDevice,
-      null,
-      simctl as any,
-      exec,
-      plist,
-      fakeMetadata(),
-    );
+    const manager = new DeepLinkManager(physicalDevice, null, simctl, exec, plist, fakeMetadata());
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(false);

@@ -56,6 +56,8 @@ export interface ResolutionIntent {
   action: ResolutionAction;
   /** Preserve tap ranking while inspect keeps bounded inert labels addressable. */
   preferTap?: boolean;
+  /** Prefer bounded checkable matches and their checkable descendants. */
+  preferToggle?: boolean;
   /** An action lookup cannot use an unbounded ID match as its target. */
   requireBounds?: boolean;
   viewport?: { width: number; height: number };
@@ -487,6 +489,31 @@ export class ElementResolver {
     result.candidates.sort((a, b) => compareSelectionRank(rank(a), rank(b), intent.preferTap));
   }
 
+  private toggleMatches(
+    matches: ElementResolution["matches"],
+    snapshot: ResolverSnapshot,
+    intent: ResolutionIntent,
+  ): ElementResolution["matches"] {
+    const toggles = new Map<SearchableEntry, ElementResolution["matches"][number]>();
+    for (const match of matches) {
+      for (const node of snapshot.nodes) {
+        if (
+          node.affordances.includes("toggle") &&
+          hasVisibleBounds(node, intent) &&
+          (node === match.node || isWithin(node, match.node, snapshot.nodes))
+        ) {
+          const existing = toggles.get(node);
+          toggles.set(node, {
+            ...match,
+            node,
+            sourceNodes: [...new Set([...(existing?.sourceNodes ?? []), match.node])],
+          });
+        }
+      }
+    }
+    return [...toggles.values()];
+  }
+
   private prepareMatches(
     matched: Pick<ElementResolution, "matches" | "matchMode" | "error">,
     selector: ResolverSelector,
@@ -495,6 +522,12 @@ export class ElementResolver {
     intent: ResolutionIntent,
     preserveTextScope: boolean,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+    if (intent.preferToggle && selector.index === undefined && selector.elementId === undefined) {
+      const toggles = this.toggleMatches(matched.matches, snapshot, intent);
+      if (toggles.length > 0) {
+        matched.matches = toggles;
+      }
+    }
     if (preserveTextScope) {
       matched.matches = matched.matches.filter(
         ({ node }) =>

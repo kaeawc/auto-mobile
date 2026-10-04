@@ -184,7 +184,10 @@ export class ResolverElementSelector implements ElementSelector {
         action:
           options.intentAction ??
           (options.selectionIntent === "focus-input" ? "focus-input" : "tap"),
-        preferTap: options.intentAction === "inspect" && options.selectionIntent === "tap",
+        preferToggle: options.selectionIntent === "toggle",
+        preferTap:
+          options.intentAction === "inspect" &&
+          (options.selectionIntent === "tap" || options.selectionIntent === "toggle"),
         requireBounds: options.intentAction === "inspect",
       },
     );

@@ -1,7 +1,7 @@
 import type { Element } from "../../models/Element";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 
-export type TextSelectionIntent = "tap" | "focus-input";
+export type TextSelectionIntent = "tap" | "focus-input" | "toggle";
 
 export interface ElementFinder {
   findElementsByText(

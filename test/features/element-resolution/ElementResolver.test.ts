@@ -3,6 +3,8 @@ import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
+import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
+import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ViewHierarchyResult } from "../../../src/models";
 
@@ -494,4 +496,144 @@ test("contains matching uses the advertised synthetic view ID", () => {
   expect(
     resolver.resolve(capture, { elementId: "stable", match: "contains" }, tap).chosen?.nodeKey,
   ).toBe("s-stable-123");
+});
+
+describe("ensureChecked selection intent", () => {
+  const settings = (label = "Wi-Fi", checkable = true): ViewHierarchyResult => ({
+    hierarchy: {
+      node: node("row", "Wi-Fi", {
+        bounds: { left: 0, top: 826, right: 1080, bottom: 981 },
+        node: checkable
+          ? [
+              node("switch", label, {
+                checkable: true,
+                checked: true,
+                bounds: { left: 901, top: 840, right: 1038, bottom: 966 },
+              }),
+            ]
+          : [],
+      }),
+    },
+  });
+  const selector = new ResolverElementSelector();
+  const options = { intentAction: "inspect" as const, selectionIntent: "toggle" as const };
+
+  test("baseline inspect tap lookup picks the labelled row", () => {
+    expect(
+      selector.selectByText(settings(), "Wi-Fi", {
+        intentAction: "inspect",
+        selectionIntent: "tap",
+      }).element?.["resource-id"],
+    ).toBe("row");
+  });
+  test("toggle intent selects the same-label switch and its checked state", () => {
+    const selected = selector.selectByText(settings(), "Wi-Fi", options);
+    expect(selected.element?.["resource-id"]).toBe("switch");
+    expect(selected.element?.checked).toBe(true);
+  });
+  test("toggle intent selects an unlabelled descendant switch", () => {
+    expect(selector.selectByText(settings(""), "Wi-Fi", options).element?.["resource-id"]).toBe(
+      "switch",
+    );
+  });
+  test("toggle intent without a checkable descendant still selects the row", () => {
+    expect(
+      selector.selectByText(settings("", false), "Wi-Fi", options).element?.["resource-id"],
+    ).toBe("row");
+  });
+  test("the legacy selector uses the same toggle preference", () => {
+    const legacy = new DefaultElementSelector();
+    expect(legacy.selectByText(settings(), "Wi-Fi", options).element?.["resource-id"]).toBe(
+      "switch",
+    );
+    expect(legacy.selectByText(settings(""), "Wi-Fi", options).element?.["resource-id"]).toBe(
+      "switch",
+    );
+    expect(
+      legacy.selectByText(settings(), "Wi-Fi", { ...options, index: 0 }).element?.["resource-id"],
+    ).toBe(
+      legacy.selectByText(settings(), "Wi-Fi", { selectionIntent: "tap", index: 0 }).element?.[
+        "resource-id"
+      ],
+    );
+  });
+  test("exact text precedes substring toggles and narrows within exact matches", () => {
+    const capture = {
+      hierarchy: {
+        node: [
+          node("row", "Wi-Fi"),
+          node("partial", "Wi-Fi backup", { checkable: true }),
+          node("exact", "Wi-Fi", { checkable: true }),
+        ],
+      },
+    };
+    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe("exact");
+    const partialOnly = { hierarchy: { node: capture.hierarchy.node.slice(0, 2) } };
+    expect(selector.selectByText(partialOnly, "Wi-Fi", options).element?.["resource-id"]).toBe(
+      "row",
+    );
+  });
+  for (const [name, textSelector] of [
+    ["resolver", selector],
+    ["legacy", new DefaultElementSelector()],
+  ] as const) {
+    test(`${name} toggle intent keeps the exact row when only a substring has a switch`, () => {
+      const capture = {
+        hierarchy: {
+          node: [node("row", "Wi-Fi"), node("backup", "Wi-Fi backup", { checkable: true })],
+        },
+      };
+      expect(textSelector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
+        "row",
+      );
+    });
+    test(`${name} toggle intent selects the exact row's descendant before a substring switch`, () => {
+      const capture = settings("");
+      capture.hierarchy.node = [
+        node("backup", "Wi-Fi backup", { checkable: true }),
+        capture.hierarchy.node,
+      ];
+      expect(textSelector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
+        "switch",
+      );
+    });
+    test(`${name} toggle intent uses a substring switch when there is no exact match`, () => {
+      const capture = {
+        hierarchy: { node: node("backup", "Wi-Fi backup", { checkable: true }) },
+      };
+      expect(textSelector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
+        "backup",
+      );
+    });
+  }
+  test("toggle candidates retain window and size ordering", () => {
+    const capture = settings();
+    capture.windows = [
+      { windowLayer: 10, hierarchy: { node: node("dialog", "Wi-Fi", { checkable: true }) } },
+    ];
+    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
+      "dialog",
+    );
+  });
+  test("explicit index and element ID retain their targets", () => {
+    expect(
+      selector.selectByText(settings(), "Wi-Fi", { ...options, index: 0 }).element?.["resource-id"],
+    ).toBe("row");
+    expect(selector.selectByResourceId(settings(), "row", options).element?.["resource-id"]).toBe(
+      "row",
+    );
+  });
+});
+
+test("toggle intent selects the iOS descendant control with checked state", () => {
+  const result = new ResolverElementSelector().selectByText(
+    iosFormsSwitch("true"),
+    "Enable Notifications",
+    {
+      intentAction: "inspect",
+      selectionIntent: "toggle",
+    },
+  );
+  expect(result.element?.checked).toBe("true");
+  expect(result.element?.bounds).toEqual({ left: 301, top: 296, right: 364, bottom: 324 });
 });

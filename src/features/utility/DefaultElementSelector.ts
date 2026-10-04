@@ -5,6 +5,8 @@ import type { ElementSelectionStrategy } from "../../models/ElementSelectionStra
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { defaultRandom } from "../../utils/Random";
+import { isTruthyFlag } from "./elementProperties";
+import { ResolverElementSelector } from "./ResolverElementSelector";
 import { DefaultElementFinder } from "./ElementFinder";
 import {
   isElementCenterOffScreen,
@@ -27,6 +29,15 @@ export class DefaultElementSelector implements ElementSelector {
     this.screenSizeOptions = typeof options === "function" ? {} : options;
   }
 
+  private toggleSelector(options?: {
+    selectionIntent?: TextSelectionIntent;
+    index?: number;
+  }): ResolverElementSelector | undefined {
+    return options?.selectionIntent === "toggle" && options.index === undefined
+      ? new ResolverElementSelector(undefined, undefined, this.screenSizeOptions)
+      : undefined;
+  }
+
   selectByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
@@ -40,6 +51,10 @@ export class DefaultElementSelector implements ElementSelector {
       selectionIntent?: TextSelectionIntent;
     } = {},
   ): ElementSelectionResult {
+    const toggleSelector = this.toggleSelector(options);
+    if (toggleSelector) {
+      return toggleSelector.selectByText(viewHierarchy, text, options);
+    }
     const strategy = options.strategy ?? "first";
     const matches = this.finder.findElementsByText(
       viewHierarchy,
@@ -49,7 +64,7 @@ export class DefaultElementSelector implements ElementSelector {
       options.caseSensitive ?? false,
       false,
       true,
-      options.selectionIntent,
+      options.selectionIntent === "toggle" ? "tap" : options.selectionIntent,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, {
       index: options.index,
@@ -87,11 +102,19 @@ export class DefaultElementSelector implements ElementSelector {
     testTag: string,
     options?: {
       container?: { elementId?: string; text?: string } | null;
+      selectionIntent?: TextSelectionIntent;
       strategy?: ElementSelectionStrategy;
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
+    const toggleSelector = this.toggleSelector(options);
+    if (toggleSelector) {
+      const selected = toggleSelector.selectByTestTag(viewHierarchy, testTag, options);
+      if (isTruthyFlag(selected.element?.checkable)) {
+        return selected;
+      }
+    }
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findElementsByTestTag(
       viewHierarchy,
@@ -130,11 +153,19 @@ export class DefaultElementSelector implements ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     options?: {
       container?: { elementId?: string; text?: string } | null;
+      selectionIntent?: TextSelectionIntent;
       strategy?: ElementSelectionStrategy;
       scrollableContainer?: boolean;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
+    const toggleSelector = this.toggleSelector(options);
+    if (toggleSelector) {
+      const selected = toggleSelector.selectClickable(viewHierarchy, options);
+      if (isTruthyFlag(selected.element?.checkable)) {
+        return selected;
+      }
+    }
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findClickableElementsInContainer(
       viewHierarchy,
@@ -149,26 +180,34 @@ export class DefaultElementSelector implements ElementSelector {
   selectClickableSiblingOfText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    options?: {
+    options: {
       container?: { elementId?: string; text?: string } | null;
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
+      selectionIntent?: TextSelectionIntent;
       strategy?: ElementSelectionStrategy;
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
+    } = {},
   ): ElementSelectionResult {
-    const strategy = options?.strategy ?? "first";
+    const toggleSelector = this.toggleSelector(options);
+    if (toggleSelector) {
+      const selected = toggleSelector.selectClickableSiblingOfText(viewHierarchy, text, options);
+      if (isTruthyFlag(selected.element?.checkable)) {
+        return selected;
+      }
+    }
+    const strategy = options.strategy ?? "first";
     const matches = this.finder.findClickableSiblingsOfText(
       viewHierarchy,
       text,
-      options?.container ?? null,
-      options?.fuzzyMatch ?? true,
-      options?.caseSensitive ?? false,
+      options.container ?? null,
+      options.fuzzyMatch ?? true,
+      options.caseSensitive ?? false,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, {
-      index: options?.index,
-      screenSizeOptions: options?.screenSizeOptions,
+      index: options.index,
+      screenSizeOptions: options.screenSizeOptions,
     });
   }
 
@@ -178,11 +217,23 @@ export class DefaultElementSelector implements ElementSelector {
     options?: {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
+      selectionIntent?: TextSelectionIntent;
       strategy?: ElementSelectionStrategy;
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
+    const toggleSelector = this.toggleSelector(options);
+    if (toggleSelector) {
+      const selected = toggleSelector.selectClickableSiblingOfResourceId(
+        viewHierarchy,
+        resourceId,
+        options,
+      );
+      if (isTruthyFlag(selected.element?.checkable)) {
+        return selected;
+      }
+    }
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findClickableSiblingsOfResourceId(
       viewHierarchy,

@@ -23,10 +23,10 @@ export interface ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
+      selectionIntent?: TextSelectionIntent;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-      selectionIntent?: TextSelectionIntent;
     },
   ): ElementSelectionResult;
 
@@ -38,6 +38,7 @@ export interface ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
+      selectionIntent?: TextSelectionIntent;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
@@ -51,6 +52,7 @@ export interface ElementSelector {
       container?: ElementContainerSelector | null;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
+      selectionIntent?: TextSelectionIntent;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
@@ -63,6 +65,7 @@ export interface ElementSelector {
       container?: ElementContainerSelector | null;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
+      selectionIntent?: TextSelectionIntent;
       scrollableContainer?: boolean;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
@@ -77,6 +80,7 @@ export interface ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
+      selectionIntent?: TextSelectionIntent;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
@@ -91,6 +95,7 @@ export interface ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
+      selectionIntent?: TextSelectionIntent;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;

@@ -29,13 +29,13 @@ const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
   ["siri", "kTCCServiceSiri"],
 ]);
 
-export interface TccPermissionRow {
+export type TccPermissionRow = {
   service: string;
   client: string;
   auth_value?: number | null;
   allowed?: number | null;
   prompt_count?: number | null;
-}
+};
 
 export interface TccPermissionReader {
   readPermissions(

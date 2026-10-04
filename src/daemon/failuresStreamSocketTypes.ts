@@ -5,6 +5,7 @@ import type {
   FailureType,
   FailureSeverity,
 } from "../server/failuresResources";
+import type { SocketRequest } from "./socketServer/SocketServerTypes";
 
 /**
  * Commands supported by the failures stream socket
@@ -28,7 +29,7 @@ export type DateRangePreset = "1h" | "24h" | "3d" | "7d" | "30d";
 /**
  * Request to the failures stream socket
  */
-export interface FailuresStreamSocketRequest {
+export interface FailuresStreamSocketRequest extends SocketRequest {
   command: FailuresStreamCommand;
 
   // Cursor-based pagination for polling

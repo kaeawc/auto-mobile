@@ -51,6 +51,67 @@ import type {
 // Re-export types for convenience
 export type { NavigationEvent, NavigationEdge, UIState };
 
+async function loadEdgeInteraction(
+  repository: NavigationRepository,
+  dbEdge: DBNavigationEdge,
+  toolName: string,
+): Promise<ToolCallInteraction> {
+  const interaction: ToolCallInteraction = {
+    toolName,
+    args: stripNavigationToolParams(dbEdge.tool_args ? JSON.parse(dbEdge.tool_args) : {}),
+    timestamp: dbEdge.timestamp,
+  };
+
+  // Load UI elements
+  const uiElements = await repository.getUIElementsForEdge(dbEdge.id);
+  if (uiElements.length > 0) {
+    interaction.uiState = {
+      selectedElements: uiElements.map((el) => ({
+        text: el.text || undefined,
+        resourceId: el.resource_id || undefined,
+        contentDesc: el.content_description || undefined,
+      })),
+    };
+  }
+
+  // Load scroll position
+  const scrollPos = await repository.getScrollPosition(dbEdge.id);
+  if (scrollPos) {
+    // Initialize uiState if not already present
+    if (!interaction.uiState) {
+      interaction.uiState = {
+        selectedElements: [],
+      };
+    }
+    interaction.uiState.scrollPosition = convertDBScrollPosition(scrollPos);
+  }
+  return interaction;
+}
+
+function convertDBScrollPosition(
+  scrollPos: NonNullable<Awaited<ReturnType<NavigationRepository["getScrollPosition"]>>>,
+): ScrollPosition {
+  const position: ScrollPosition = {
+    targetElement: {
+      text: scrollPos.targetElement.text || undefined,
+      resourceId: scrollPos.targetElement.resource_id || undefined,
+      contentDesc: scrollPos.targetElement.content_description || undefined,
+    },
+    direction: scrollPos.direction as "up" | "down" | "left" | "right",
+    speed: scrollPos.speed as "slow" | "normal" | "fast" | undefined,
+  };
+
+  // Add container if present
+  if (scrollPos.containerElement) {
+    position.container = {
+      text: scrollPos.containerElement.text || undefined,
+      resourceId: scrollPos.containerElement.resource_id || undefined,
+      contentDesc: scrollPos.containerElement.content_description || undefined,
+    };
+  }
+  return position;
+}
+
 /** Above SQLite's 5s busy timeout and normal loaded writes; callers only log failures, while 15s bounds a wedged tracking queue. */
 const NAVIGATION_WRITE_TIMEOUT_MS = 15_000;
 
@@ -1547,52 +1608,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
 
       if (dbEdge.tool_name) {
-        edge.interaction = {
-          toolName: dbEdge.tool_name,
-          args: stripNavigationToolParams(dbEdge.tool_args ? JSON.parse(dbEdge.tool_args) : {}),
-          timestamp: dbEdge.timestamp,
-        };
-
-        // Load UI elements
-        const uiElements = await this.repository.getUIElementsForEdge(dbEdge.id);
-        if (uiElements.length > 0) {
-          edge.interaction.uiState = {
-            selectedElements: uiElements.map((el) => ({
-              text: el.text || undefined,
-              resourceId: el.resource_id || undefined,
-              contentDesc: el.content_description || undefined,
-            })),
-          };
-        }
-
-        // Load scroll position
-        const scrollPos = await this.repository.getScrollPosition(dbEdge.id);
-        if (scrollPos) {
-          // Initialize uiState if not already present
-          if (!edge.interaction.uiState) {
-            edge.interaction.uiState = {
-              selectedElements: [],
-            };
-          }
-          edge.interaction.uiState.scrollPosition = {
-            targetElement: {
-              text: scrollPos.targetElement.text || undefined,
-              resourceId: scrollPos.targetElement.resource_id || undefined,
-              contentDesc: scrollPos.targetElement.content_description || undefined,
-            },
-            direction: scrollPos.direction as "up" | "down" | "left" | "right",
-            speed: scrollPos.speed as "slow" | "normal" | "fast" | undefined,
-          };
-
-          // Add container if present
-          if (scrollPos.containerElement) {
-            edge.interaction.uiState.scrollPosition.container = {
-              text: scrollPos.containerElement.text || undefined,
-              resourceId: scrollPos.containerElement.resource_id || undefined,
-              contentDesc: scrollPos.containerElement.content_description || undefined,
-            };
-          }
-        }
+        edge.interaction = await loadEdgeInteraction(this.repository, dbEdge, dbEdge.tool_name);
 
         // Copy interaction.uiState to edge.uiState for backward compatibility
         if (edge.interaction.uiState) {

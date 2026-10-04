@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import type { UIState } from "../../utils/interfaces/NavigationGraph";
 import type { Element } from "../../models";
 import type { NavigationEdge, NavigationGraphManager } from "./NavigationGraphManager";
 import type { Timer } from "../../utils/SystemTimer";
@@ -181,6 +182,28 @@ export function selectNextEdgeToTraverse(
   return untraversedFromCurrent ? untraversedFromCurrent[0] : null;
 }
 
+interface EdgeElementMatchState {
+  match: { element: Element; confidence: number } | null;
+  score: number;
+}
+
+function matchSelectedElements(
+  element: Element,
+  uiState: UIState,
+  best: EdgeElementMatchState,
+): void {
+  // Try to match against selected elements in the edge's UI state
+  if (uiState.selectedElements && uiState.selectedElements.length > 0) {
+    for (const selected of uiState.selectedElements) {
+      const score = scoreSelectedElementMatch(element, selected);
+      if (score > best.score) {
+        best.score = score;
+        best.match = { element, confidence: score };
+      }
+    }
+  }
+}
+
 /**
  * Find element on screen that matches a target edge
  */
@@ -194,43 +217,33 @@ export function findElementMatchingEdge(
     return null;
   }
 
-  let bestMatch: { element: Element; confidence: number } | null = null;
-  let bestScore = 0;
+  const best: EdgeElementMatchState = { match: null, score: 0 };
 
   for (const element of elements) {
-    // Try to match against selected elements in the edge's UI state
-    if (uiState.selectedElements && uiState.selectedElements.length > 0) {
-      for (const selected of uiState.selectedElements) {
-        const score = scoreSelectedElementMatch(element, selected);
-        if (score > bestScore) {
-          bestScore = score;
-          bestMatch = { element, confidence: score };
-        }
-      }
-    }
+    matchSelectedElements(element, uiState, best);
 
     // Try to match against scroll position if present
     if (uiState.scrollPosition) {
       const score = scoreScrollPositionMatch(element, uiState.scrollPosition);
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = { element, confidence: score };
+      if (score > best.score) {
+        best.score = score;
+        best.match = { element, confidence: score };
       }
     }
   }
 
   // Require minimum confidence threshold
   const MIN_CONFIDENCE = 0.6;
-  if (bestMatch && bestMatch.confidence >= MIN_CONFIDENCE) {
+  if (best.match && best.match.confidence >= MIN_CONFIDENCE) {
     logger.debug(
-      `[Explore] Matched element for edge ${edge.from}->${edge.to} with confidence ${bestMatch.confidence.toFixed(2)}`,
+      `[Explore] Matched element for edge ${edge.from}->${edge.to} with confidence ${best.match.confidence.toFixed(2)}`,
     );
-    return bestMatch;
+    return best.match;
   }
 
   logger.warn(
     `[Explore] No confident match for edge ${edge.from}->${edge.to} ` +
-      `(best score: ${bestScore.toFixed(2)}, threshold: ${MIN_CONFIDENCE})`,
+      `(best score: ${best.score.toFixed(2)}, threshold: ${MIN_CONFIDENCE})`,
   );
   return null;
 }

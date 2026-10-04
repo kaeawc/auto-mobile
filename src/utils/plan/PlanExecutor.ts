@@ -27,8 +27,8 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
-import { isDeviceLostError } from "../../server/deviceLossOutcome";
-import { formatToolParamError } from "../../server/toolParamError";
+import { isDeviceLostError } from "../../models/DeviceLostError";
+import { formatToolParamError } from "../toolParamError";
 import { stripUndeclaredSessionUuid } from "../toolParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {

@@ -1066,7 +1066,11 @@ internal constructor(
       val currentPath = if (parentPath.isEmpty()) segment else "$parentPath/$segment"
 
       val children = mutableListOf<UIElementInfo>()
-      val childCount = min(node.childCount, MAX_CHILDREN)
+      val totalChildCount = node.childCount
+      val childCount = min(totalChildCount, MAX_CHILDREN)
+      if (totalChildCount > MAX_CHILDREN) {
+        budget.recordChildCapTruncation()
+      }
 
       for (i in 0 until childCount) {
         val child = node.getChild(i)

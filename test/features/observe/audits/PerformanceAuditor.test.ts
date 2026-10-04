@@ -656,6 +656,17 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
     expect(decision.skipTouchLatency).toBe(true);
   });
 
+  test("skips touch-latency for a device child cap truncation reason", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {}, truncationReasons: ["max_children"] },
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
   test("skips touch-latency for a cancelled truncation reason", () => {
     const result = makeResult({
       viewHierarchy: { hierarchy: {} as any, truncationReasons: ["cancelled"] } as any,

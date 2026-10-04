@@ -102,6 +102,7 @@ import {
 } from "../ScreenshotMetadata";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
+import { serializeIosRequest } from "./serializeIosRequest";
 import { iosMutationTokens } from "../../storage/IosMutationTokens";
 
 /** Pending requests lose their transport when the service endpoint changes. */
@@ -1757,6 +1758,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
+      serializeRequest: serializeIosRequest,
       getReconnectStatus: () => this.getReconnectStatus(),
       isCommandSupported: (messageType) => this.isCommandSupported(messageType),
       getSupportedCommands: () => this.getSupportedCommands(),
@@ -4557,7 +4559,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     this.sendMessage(
-      JSON.stringify({
+      serializeIosRequest({
         type: "set_hierarchy_poll_interval",
         intervalMs,
       }),

@@ -1,0 +1,141 @@
+{
+  "id": "boundaries",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "row",
+    "children": [
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      },
+      {
+        "type": "image",
+        "asset": "same"
+      }
+    ]
+  }
+}

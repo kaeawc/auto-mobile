@@ -21,6 +21,7 @@ export function registerSharedStorageTools(
       ...args,
       device,
       signal,
+      rollbackOnFailure: true,
     });
     (deps.registerPendingDeviceCleanup ?? registerPendingDeviceCleanup)(
       device.deviceId,

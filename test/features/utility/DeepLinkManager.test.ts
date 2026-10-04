@@ -1,10 +1,25 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { readFileSync } from "node:fs";
 import { DeepLinkManager } from "../../../src/features/utility/DeepLinkManager";
 import { ViewHierarchyResult, BootedDevice } from "../../../src/models";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+
+const playgroundAppId = "dev.jasonpearson.automobile.playground";
+const installedPackageDump = readFileSync(
+  new URL("../../fixtures/android-dumpsys-package/dumpsys-package-installed.txt", import.meta.url),
+  "utf8",
+);
+const missingPackageDump = readFileSync(
+  new URL(
+    "../../fixtures/android-dumpsys-package/dumpsys-package-not-installed.txt",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const stderrWarning = "avc: denied { read } for name=package";
 
 describe("DeepLinkManager", () => {
   let deepLinkManager: DeepLinkManager;
@@ -159,6 +174,7 @@ Receiver Resolver Table:
       const result = await manager.getDeepLinks("com.example.app");
 
       expect(result.success).toBe(false);
+      expect(result.error).toBe("ADB command failed");
       expect(result.deepLinks.schemes).toHaveLength(0);
       expect(result.deepLinks.hosts).toHaveLength(0);
     });
@@ -175,15 +191,15 @@ Receiver Resolver Table:
     });
 
     test("should report a missing package with actionable guidance", async () => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.missing'", {
-        stdout: "Unable to find package: com.example.missing",
+      fakeAdb.setCommandResponse("dumpsys package 'com.example.not.installed'", {
+        stdout: missingPackageDump,
         stderr: "",
       });
 
-      const result = await deepLinkManager.getDeepLinks("com.example.missing");
+      const result = await deepLinkManager.getDeepLinks("com.example.not.installed");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("com.example.missing");
+      expect(result.error).toContain("com.example.not.installed");
       expect(result.error).toContain("listApps");
       expect(result.deepLinks).toEqual({
         schemes: [],
@@ -191,6 +207,48 @@ Receiver Resolver Table:
         intentFilters: [],
         supportedMimeTypes: [],
       });
+    });
+
+    test.each([stderrWarning, ""])(
+      "should parse a captured installed package with stderr %j",
+      async (stderr) => {
+        fakeAdb.setCommandResponse(`dumpsys package '${playgroundAppId}'`, {
+          stdout: installedPackageDump,
+          stderr,
+        });
+
+        const result = await deepLinkManager.getDeepLinks(playgroundAppId);
+
+        expect(result.success).toBe(true);
+        expect(result.deepLinks.schemes).toContain("automobile");
+        expect(result.deepLinks.hosts).toContain("playground");
+        expect(result.error).toBeUndefined();
+        expect(result.rawOutput).toBe(installedPackageDump);
+      },
+    );
+
+    test("should fail for a captured missing package with stderr", async () => {
+      fakeAdb.setCommandResponse("dumpsys package 'com.example.not.installed'", {
+        stdout: missingPackageDump,
+        stderr: stderrWarning,
+      });
+
+      const result = await deepLinkManager.getDeepLinks("com.example.not.installed");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(stderrWarning);
+    });
+
+    test("should fail for captured stdout without a package marker and with stderr", async () => {
+      fakeAdb.setCommandResponse(`dumpsys package '${playgroundAppId}'`, {
+        stdout: installedPackageDump.split("\n").slice(0, 10).join("\n"),
+        stderr: stderrWarning,
+      });
+
+      const result = await deepLinkManager.getDeepLinks(playgroundAppId);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(stderrWarning);
     });
 
     test("should succeed for an installed package without deep links", async () => {

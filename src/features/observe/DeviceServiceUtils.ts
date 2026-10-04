@@ -374,7 +374,9 @@ export async function sendCommand<T>(
     }
   }
 
-  const msg = createMessage(options.messageType, requestId, options.params);
+  const msg = context.serializeRequest
+    ? context.serializeRequest({ type: options.messageType, requestId, ...options.params })
+    : createMessage(options.messageType, requestId, options.params);
   try {
     if (!options.abortSignal?.aborted) {
       const ws = context.getWebSocket();

@@ -39,7 +39,15 @@ class DatabaseInspectorProvider : ContentProvider() {
     return true
   }
 
-  override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+  override fun call(method: String, arg: String?, extras: Bundle?): Bundle =
+    callWithCapabilities(method, extras, AutoMobileSDK.capabilities)
+
+  @JvmSynthetic
+  internal fun callWithCapabilities(
+    method: String,
+    extras: Bundle?,
+    capabilities: SdkCapabilityDocument,
+  ): Bundle {
     DebugInspectorAccess.enforceCaller(context)
     val result = Bundle()
 
@@ -57,13 +65,21 @@ class DatabaseInspectorProvider : ContentProvider() {
           "listTables" -> handleListTables(driver, extras)
           "getTableData" -> handleGetTableData(driver, extras)
           "getTableStructure" -> handleGetTableStructure(driver, extras)
-          "executeSQL" -> handleExecuteSQL(driver, extras)
+          "executeSQL" -> handleExecuteSQL(driver, extras, capabilities)
           else -> throw IllegalArgumentException("Unknown method: $method")
         }
       result.putBoolean("success", true)
       result.putString("result", response.toString())
     } catch (e: DatabaseError) {
-      result.putError(e::class.simpleName ?: "UNKNOWN", e.message ?: "Unknown error")
+      val multipleStatements =
+        e is DatabaseError.SqlError &&
+          e.message == "SQL error: Multiple SQL statements are not supported"
+      result.putError(
+        if (multipleStatements) "multiple_statements_not_supported"
+        else e::class.simpleName ?: "UNKNOWN",
+        if (multipleStatements) "Multiple SQL statements are not supported"
+        else e.message ?: "Unknown error",
+      )
     } catch (e: IllegalArgumentException) {
       result.putError("INVALID_ARGUMENT", e.message ?: "Invalid argument")
     } catch (e: Exception) {

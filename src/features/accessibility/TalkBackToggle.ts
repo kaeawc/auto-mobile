@@ -13,6 +13,8 @@ const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
 const TALKBACK_SERVICE_FALLBACK = `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.TalkBackService`;
 const DIALOG_DISMISS_RETRIES = 4; // 1 immediate + 3 × 500ms = 1500ms max wait
 const DIALOG_DISMISS_DELAY_MS = 500;
+const TALKBACK_STATE_CONFIRM_ATTEMPTS = 4; // 1 immediate + 3 × 500ms = 1500ms max wait
+const TALKBACK_STATE_CONFIRM_DELAY_MS = 500;
 const UIAUTOMATOR_DUMP_TIMEOUT_MS = 30_000;
 
 /** Foreground activity identifies a runtime prompt, not the requested permission. */
@@ -125,17 +127,37 @@ export class TalkBackToggle {
       };
     }
 
-    // Step 5: Invalidate the detection cache and re-detect to CONFIRM the state
-    // actually changed — never report success optimistically. If dialog dismissal
-    // failed (or TalkBack never fully activated), `applied` reflects the real
-    // post-apply state instead of the requested one (#3921).
-    const confirmedEnabled = await this.detectTalkBackEnabled();
+    // Step 5: Re-detect immediately, then allow asynchronous state changes a
+    // bounded wait. Each read invalidates the same cache as the idempotency check.
+    return {
+      ...(await this.confirmTalkBackState(enabled)),
+      ...(blockingPrompt ? { blockingPrompt, warning } : {}),
+    };
+  }
+
+  private async confirmTalkBackState(enabled: boolean): Promise<TalkBackResult> {
+    let confirmedEnabled = await this.detectTalkBackEnabled();
+    for (
+      let attempt = 1;
+      confirmedEnabled !== enabled && attempt < TALKBACK_STATE_CONFIRM_ATTEMPTS;
+      attempt++
+    ) {
+      await this.timer.sleep(TALKBACK_STATE_CONFIRM_DELAY_MS);
+      confirmedEnabled = await this.detectTalkBackEnabled();
+    }
+
+    let reason: string | undefined;
+    if (confirmedEnabled !== enabled) {
+      const waitMs = (TALKBACK_STATE_CONFIRM_ATTEMPTS - 1) * TALKBACK_STATE_CONFIRM_DELAY_MS;
+      reason = `TalkBack requested ${enabled ? "enabled" : "disabled"} but observed ${confirmedEnabled ? "enabled" : "disabled"} after ${waitMs}ms of confirmation waits`;
+      logger.warn(`[TalkBackToggle] ${reason}`);
+    }
 
     return {
       supported: true,
       applied: confirmedEnabled === enabled,
       currentState: confirmedEnabled,
-      ...(blockingPrompt ? { blockingPrompt, warning } : {}),
+      ...(reason ? { reason } : {}),
     };
   }
 

@@ -31,6 +31,71 @@ function obs(updatedAt: number, marker: string): ObserveResult {
 }
 
 describe("pollObserveUntil minTimestamp floor (#6284)", () => {
+  test("admits only post-baseline evidence after exact poll intervals and preserves cache ordering", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    const baseline = obs(10, "baseline");
+    const stale = obs(30, "stale");
+    stale.freshness = { isFresh: false, verified: false };
+    const fresh = obs(20, "fresh");
+    fake.setObserveSequence([baseline, stale, fresh]);
+    const calls: Array<{
+      observation: ObserveResult;
+      previous: ObserveResult | undefined;
+      time: number;
+    }> = [];
+    const pending = pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 25, pollMs: 10 },
+      (observation, previous) => {
+        calls.push({ observation, previous, time: timer.now() });
+        return true;
+      },
+    );
+    for (let turn = 0; turn < 20; turn++) {
+      await Promise.resolve();
+    }
+    expect(fake.getExecuteCallCount()).toBe(1);
+    timer.advanceTime(9);
+    for (let turn = 0; turn < 20; turn++) {
+      await Promise.resolve();
+    }
+    expect(fake.getExecuteCallCount()).toBe(1);
+    timer.advanceTime(1);
+    for (let turn = 0; turn < 20; turn++) {
+      await Promise.resolve();
+    }
+    expect(fake.getExecuteCallCount()).toBe(2);
+    timer.advanceTime(10);
+    const outcome = await pending;
+    expect(calls).toEqual([
+      { observation: baseline, previous: undefined, time: 0 },
+      { observation: fresh, previous: baseline, time: 20 },
+    ]);
+    expect(outcome).toMatchObject({
+      observation: fresh,
+      polls: 3,
+      waitMs: 20,
+      terminalReason: "matched",
+    });
+    expect(
+      fake.getExecuteOptions().map((options) => [options.minTimestamp, options.timeoutMs]),
+    ).toEqual([
+      [0, 25],
+      [11, 15],
+      [11, 5],
+    ]);
+    expect(timer.getSleepHistory()).toEqual([10, 10]);
+    expect(fake.getExecutedOperations()).toEqual([
+      "execute",
+      "execute",
+      "execute",
+      "collectDeferredBackStack",
+      "cacheObserveResult",
+    ]);
+  });
+
   test("caps a long poll sleep at the remaining budget", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

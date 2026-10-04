@@ -1,0 +1,14 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button"
+    }
+  },
+  "expectedPath": "root.type"
+}

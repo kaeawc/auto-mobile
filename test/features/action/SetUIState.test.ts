@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { logger } from "../../../src/utils/logger";
 import { SetUIState } from "../../../src/features/action/SetUIState";
+import { resolveSwipeDirection } from "../../../src/features/action/swipeon/swipeOnUtils";
+import type { SwipeDirection, SwipeOnOptions } from "../../../src/models/SwipeOnOptions";
 import type { Keyboard } from "../../../src/features/action/Keyboard";
 import { KeyboardOcclusionError } from "../../../src/models/KeyboardOcclusionError";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
@@ -891,64 +893,95 @@ describe("SetUIState", () => {
   });
 
   describe("scroll to find", () => {
-    test("scrolls to find element when not visible", async () => {
-      // First observation has no element, after scroll it appears
-      let callCount = 0;
-      fakeObserve.setResultFactory(() => {
-        callCount++;
-        if (callCount <= 1) {
-          return createObserveResult({ hierarchy: { node: [] } });
-        }
-        return createObserveResult(
-          createHierarchyWithElement({
-            "resource-id": "hidden_field",
-            text: "found!",
-            class: "android.widget.EditText",
-          }),
-        );
-      });
+    const modelSearch = (revealOn: "up" | "down" | "visible") => {
+      let visible = revealOn === "visible";
+      const fingerDirections: SwipeDirection[] = [];
+      const executeSwipe = fakeSwipe.execute.bind(fakeSwipe);
+      spyOn(fakeSwipe, "execute").mockImplementation(
+        async (
+          options: Parameters<FakeSwipeOn["execute"]>[0] & Pick<SwipeOnOptions, "gestureType">,
+        ) => {
+          const { direction } = options;
+          if (direction !== "up" && direction !== "down") {
+            throw new Error(`Unexpected search direction: ${direction}`);
+          }
+          const finger = resolveSwipeDirection({ ...options, direction }).direction;
+          if (!finger) {
+            throw new Error("Search swipe did not resolve a finger direction");
+          }
+          fingerDirections.push(finger);
+          visible ||= finger === revealOn;
+          return executeSwipe(options);
+        },
+      );
+      fakeObserve.setResultFactory(() =>
+        createObserveResult(
+          visible
+            ? createHierarchyWithElement({
+                "resource-id": "field",
+                text: "found!",
+                class: "android.widget.EditText",
+              })
+            : { hierarchy: { node: [] } },
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("field", "text");
+      fakeFieldTypeDetector.setTextValue("field", "found!");
+      return fingerDirections;
+    };
 
-      fakeFieldTypeDetector.setFieldType("hidden_field", "text");
-      fakeFieldTypeDetector.setTextValue("hidden_field", "found!");
-
-      const setUIState = createSetUIState();
-      const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "hidden_field" }, value: "found!" }],
+    test("default search reveals a field below the fold after one finger-up swipe", async () => {
+      const fingerDirections = modelSearch("up");
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { elementId: "field" }, value: "found!" }],
       });
 
       expect(result.success).toBe(true);
-      expect(fakeSwipe.getCallCount()).toBeGreaterThanOrEqual(1);
+      expect(result.fields[0].success).toBe(true);
+      expect(fingerDirections).toEqual(["up"]);
+      expect(fakeSwipe.getCallCount()).toBe(1);
     });
 
-    test("respects scrollDirection option", async () => {
-      // First observation: empty, second: element appears after scroll
-      let callCount = 0;
-      fakeObserve.setResultFactory(() => {
-        callCount++;
-        if (callCount <= 1) {
-          return createObserveResult({ hierarchy: { node: [] } });
-        }
-        return createObserveResult(
-          createHierarchyWithElement({
-            "resource-id": "field",
-            text: "test",
-            class: "android.widget.EditText",
-          }),
-        );
+    test("reverse search reveals a field above the fold after three futile swipes", async () => {
+      // Start scrolled down: only a finger-down swipe reveals the field above.
+      const fingerDirections = modelSearch("down");
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { elementId: "field" }, value: "found!" }],
       });
 
-      fakeFieldTypeDetector.setFieldType("field", "text");
-      fakeFieldTypeDetector.setTextValue("field", "test");
-
-      const setUIState = createSetUIState();
-      await setUIState.execute({
-        fields: [{ selector: { elementId: "field" }, value: "test" }],
-        scrollDirection: "up",
-      });
-
-      // First scroll should be in the specified direction
-      expect(fakeSwipe.getCalls()[0].options.direction).toBe("up");
+      expect(result.success).toBe(true);
+      expect(result.fields[0].success).toBe(true);
+      expect(fingerDirections).toEqual(["up", "up", "up", "down"]);
     });
+
+    test("does not swipe when the field is already on screen", async () => {
+      const fingerDirections = modelSearch("visible");
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { elementId: "field" }, value: "found!" }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(fingerDirections).toEqual([]);
+      expect(fakeSwipe.getCallCount()).toBe(0);
+    });
+
+    test.each([
+      { scrollDirection: "up", fingerDirection: "down" },
+      { scrollDirection: "down", fingerDirection: "up" },
+    ] as const)(
+      "respects scrollDirection option $scrollDirection with finger movement $fingerDirection",
+      async ({ scrollDirection, fingerDirection }) => {
+        const fingerDirections = modelSearch(fingerDirection);
+        const result = await createSetUIState().execute({
+          fields: [{ selector: { elementId: "field" }, value: "found!" }],
+          scrollDirection,
+        });
+
+        expect(result.success).toBe(true);
+        expect(fingerDirections).toEqual([fingerDirection]);
+        expect(fakeSwipe.getCallCount()).toBe(1);
+      },
+    );
   });
 
   describe("retry logic", () => {

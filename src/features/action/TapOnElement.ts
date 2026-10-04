@@ -3565,6 +3565,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapOnElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    // Internal orchestration policy; never part of TapOnElementOptions or tool schemas.
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<TapOnElementResult> {
     if (options.display !== undefined) {
       const result = await this.executeOnDisplay(options, signal);
@@ -4031,15 +4033,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     } catch (error) {
       perf.end();
 
-      logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
-      // Android form orchestration must recover before this refusal becomes prose.
+      // Only opted-in Android form orchestration receives the typed recovery signal.
       if (
+        recovery?.throwOnKeyboardOcclusion &&
         this.device.platform === "android" &&
         requestedAction === "focus" &&
         error instanceof KeyboardOcclusionError
       ) {
+        logger.debug(`Tap on element awaits IME recovery: ${errorMessage(error)}`, error);
         throw error;
       }
+      logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
       if (error instanceof StaleDisplayError) {
         return withStaleDisplay(this.createErrorResult(options.action, error.message), error);
       }

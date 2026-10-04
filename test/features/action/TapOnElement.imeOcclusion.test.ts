@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import type { ElementBounds, ObserveResult } from "../../../src/models";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -32,6 +33,7 @@ async function executeAt(
     matchedBounds,
     elementId,
     action = "tap",
+    throwOnKeyboardOcclusion = false,
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -42,6 +44,7 @@ async function executeAt(
     matchedBounds?: ElementBounds;
     elementId?: string;
     action?: "tap" | "focus";
+    throwOnKeyboardOcclusion?: boolean;
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -124,10 +127,12 @@ async function executeAt(
   tap.captureTerminalObservationScreenshot = async () => {};
   tap.recordDeferredPredictionOutcome = async () => {};
   tap.enforceFreshnessConsistencyWithEffect = () => {};
-  const result = await tap.execute({
-    ...(elementId ? { elementId } : { text: label }),
-    action,
-  });
+  const result = await tap.execute(
+    { ...(elementId ? { elementId } : { text: label }), action },
+    undefined,
+    undefined,
+    throwOnKeyboardOcclusion ? { throwOnKeyboardOcclusion: true } : undefined,
+  );
   return { result, points, actionError };
 }
 
@@ -155,10 +160,32 @@ describe("tapOn Android IME occlusion", () => {
     expect(result.error).toContain("covered by the soft keyboard");
   });
 
-  test("Android focus preserves the typed IME refusal for orchestrators", async () => {
-    await expect(executeAt("Continue as Guest", { action: "focus" })).rejects.toBeInstanceOf(
-      KeyboardOcclusionError,
-    );
+  test("Android focus returns the pre-PR structured IME failure by default", async () => {
+    const { result, points } = await executeAt("Continue as Guest", { action: "focus" });
+    expect(result).toEqual({
+      success: false,
+      action: "tap",
+      searchUntil: { durationMs: 0, requestCount: 0, changeCount: 0 },
+      error:
+        'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.',
+      element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+    });
+    expect(points).toEqual([]);
+  });
+
+  test("Android focus opt-in throws the typed IME refusal without warning", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        executeAt("Continue as Guest", {
+          action: "focus",
+          throwOnKeyboardOcclusion: true,
+        }),
+      ).rejects.toBeInstanceOf(KeyboardOcclusionError);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("uses the caller text selector when the matched element has no label", async () => {

@@ -9,7 +9,7 @@ import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { InputTextMode } from "./InputText";
 import type { Keyboard } from "./Keyboard";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError } from "../../models/ActionableError";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
@@ -40,6 +40,7 @@ interface TapOnElementLike {
     },
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<{
     success: boolean;
     element?: Element;
@@ -619,7 +620,7 @@ export class SetUIState extends BaseVisualChange {
 
         // Fail fast on failure
         if (!result.success) {
-          logger.warn(
+          logger.debug(
             `[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`,
           );
           const notAttemptedReason = `Not attempted: setUIState stopped after field ${this.describeSelector(fieldSpec.selector)} failed`;
@@ -1387,24 +1388,28 @@ export class SetUIState extends BaseVisualChange {
           : this.buildTapOptions(fieldSpec.selector, "focus"),
         progress,
         signal,
+        { throwOnKeyboardOcclusion: true },
       );
     try {
       return await focus(element);
     } catch (error) {
       throwIfAborted(signal);
       if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
-        throw toActionableError(error, "Failed to focus text field");
+        // Preserve the field-error contract while keeping thrown errors structured.
+        throw error instanceof ActionableError
+          ? error
+          : new ActionableError(errorMessage(error), { cause: error });
       }
       if (recovery.occlusionError) {
+        logger.warn("[SetUIState] IME recovery failed", error);
         throw recovery.occlusionError;
       }
       recovery.occlusionError = error;
-      logger.warn("[SetUIState] Text field is covered by the IME; closing the keyboard", error);
+      logger.debug("[SetUIState] Text field is covered by the IME; closing the keyboard", error);
       try {
         const dismissal = await this.getKeyboard().execute("close", signal);
         throwIfAborted(signal);
         if (!dismissal.success) {
-          logger.warn("[SetUIState] Keyboard dismissal failed", dismissal);
           throw error;
         }
         const refreshed = await this.refreshFieldElement(fieldSpec, element, signal);
@@ -1412,7 +1417,6 @@ export class SetUIState extends BaseVisualChange {
         const result = await focus(refreshed);
         throwIfAborted(signal);
         if (!result.success || result.focusVerified !== true) {
-          logger.warn("[SetUIState] Focus after keyboard dismissal failed", result);
           throw error;
         }
         return result;
@@ -1588,7 +1592,6 @@ export class SetUIState extends BaseVisualChange {
       }
     } catch (error) {
       signal?.throwIfAborted();
-      logger.warn("[SetUIState] Applying field value failed", error);
       return {
         success: false,
         error: errorMessage(error),

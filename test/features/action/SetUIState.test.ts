@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { logger } from "../../../src/utils/logger";
 import { SetUIState } from "../../../src/features/action/SetUIState";
 import type { Keyboard } from "../../../src/features/action/Keyboard";
 import { KeyboardOcclusionError } from "../../../src/models/KeyboardOcclusionError";
@@ -59,8 +60,8 @@ describe("SetUIState", () => {
     viewHierarchy: hierarchy,
   });
 
-  const createSetUIState = (keyboard?: Pick<Keyboard, "execute">) => {
-    return new SetUIState(device, null, {
+  const createSetUIState = (keyboard?: Pick<Keyboard, "execute">, platform = device.platform) => {
+    return new SetUIState({ ...device, platform }, null, {
       keyboard,
       tapOnElement: fakeTap,
       inputText: {
@@ -96,6 +97,7 @@ describe("SetUIState", () => {
 
   describe("text field handling", () => {
     const keyboardRecoveryScenario = ({
+      platform = device.platform,
       initiallyOpen = false,
       stillOccluded = false,
       focusError = new KeyboardOcclusionError("Original IME refusal"),
@@ -147,8 +149,11 @@ describe("SetUIState", () => {
       });
       const executeInput = fakeInput.execute.bind(fakeInput);
       spyOn(fakeInput, "execute").mockImplementation(async (text, imeAction) => {
-        fakeFieldTypeDetector.setTextValue(focusedKey, text);
-        return executeInput(text, imeAction);
+        const result = await executeInput(text, imeAction);
+        if (result.success) {
+          fakeFieldTypeDetector.setTextValue(focusedKey, text);
+        }
+        return result;
       });
       const keyboard: Pick<Keyboard, "execute"> = {
         execute: async (action) => {
@@ -163,7 +168,7 @@ describe("SetUIState", () => {
         },
       };
       return {
-        action: createSetUIState(keyboard),
+        action: createSetUIState(keyboard, platform),
         dismissCalls: () => dismissCalls,
         events,
         focusError,
@@ -213,7 +218,80 @@ describe("SetUIState", () => {
       expect(scenario.dismissCalls()).toBe(0);
       expect(fakeClear.getCallCount()).toBe(0);
       expect(result.fields[0].attempts).toBe(3);
+      expect(result.fields[0].error).toBe(scenario.focusError.message);
     });
+
+    test.each(["android", "ios"] as const)(
+      "%s non-occlusion focus throw preserves the unprefixed field error",
+      async (platform) => {
+        const scenario = keyboardRecoveryScenario({
+          platform,
+          initiallyOpen: true,
+          focusError: new Error("Focus transport failed"),
+        });
+        const result = await scenario.action.execute({
+          fields: [{ selector: { text: "Password" }, value: "pw-label-2" }],
+        });
+        expect(result.fields[0].error).toBe("Focus transport failed");
+        expect(scenario.dismissCalls()).toBe(0);
+      },
+    );
+
+    test("successful IME recovery emits zero warnings", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const scenario = keyboardRecoveryScenario({ initiallyOpen: true });
+        const result = await scenario.action.execute({
+          fields: [{ selector: { text: "Password" }, value: "pw-label-2" }],
+        });
+        expect(result.success).toBe(true);
+        expect(warn).not.toHaveBeenCalled();
+        expect(fakeTap.execute).toHaveBeenCalledWith(
+          { elementId: "password", action: "focus" },
+          undefined,
+          undefined,
+          { throwOnKeyboardOcclusion: true },
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("later occlusion after a successful recovery warns once without dismissing again", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const scenario = keyboardRecoveryScenario({ initiallyOpen: true });
+        fakeInput.setResult({ success: false, text: "pw-label-2", error: "Input failed" });
+        const result = await scenario.action.execute({
+          fields: [{ selector: { text: "Password" }, value: "pw-label-2" }],
+        });
+        expect(result.success).toBe(false);
+        expect(result.fields[0].error).toBe(scenario.focusError.message);
+        expect(scenario.dismissCalls()).toBe(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toBe("[SetUIState] IME recovery failed");
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test.each(["stillOccluded", "dismissFails", "dismissThrows"] as const)(
+      "failed IME recovery emits exactly one SetUIState warning when %s",
+      async (failure) => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const scenario = keyboardRecoveryScenario({ initiallyOpen: true, [failure]: true });
+          const result = await scenario.action.execute({
+            fields: [{ selector: { text: "Password" }, value: "pw-label-2" }],
+          });
+          expect(result.success).toBe(false);
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(warn.mock.calls[0][0]).toBe("[SetUIState] IME recovery failed");
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
 
     test.each(["stillOccluded", "dismissFails", "dismissThrows"] as const)(
       "surfaces the original occlusion error without repeated recovery when %s",

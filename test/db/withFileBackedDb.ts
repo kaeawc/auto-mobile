@@ -1,3 +1,4 @@
+import { afterEach, beforeEach } from "bun:test";
 import path from "path";
 import { mkdtemp as fsMkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,8 +29,10 @@ import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
  *   4. apply {@link WINDOWS_FILE_DB_TEST_TIMEOUT_MS} to the slow-but-correct
  *      migration body.
  *
- * A suite wires `createFileBackedDbHarness()` into `beforeEach` (fresh env
- * snapshot per test) and `harness.cleanup()` into `afterEach`. It then either
+ * Prefer `const getHarness = bindFileBackedDbHarness()` inside `describe` to
+ * register a fresh env snapshot in `beforeEach` and cleanup in `afterEach`.
+ * Suites needing explicit lifecycle control can still wire
+ * `createFileBackedDbHarness()` and `harness.cleanup()` themselves. A suite either
  * drives the module directly via the primitives ({@link makeTempDbDir},
  * {@link importFreshDatabaseModule}) for tests that control the migration
  * lifecycle mid-flight, or uses {@link openLifecycleTestDb} for the common
@@ -211,6 +214,36 @@ export function createFileBackedDbHarness(deps: FileBackedDbHarnessDeps = {}): F
     importFreshDatabaseModule: importModule,
     openLifecycleTestDb,
     cleanup,
+  };
+}
+
+/**
+ * Register the standard per-test harness hooks in the current `describe` scope.
+ * The getter is available after this binder's `beforeEach` and until its
+ * `afterEach` starts cleanup. It throws before the first test and after cleanup;
+ * it never lazily creates a harness that could escape the cleanup hooks.
+ * Use the primitives directly when controlling migration lifecycle mid-flight.
+ */
+export function bindFileBackedDbHarness(
+  deps: FileBackedDbHarnessDeps = {},
+): () => FileBackedDbHarness {
+  let harness: FileBackedDbHarness | undefined;
+
+  beforeEach(() => {
+    harness = createFileBackedDbHarness(deps);
+  });
+
+  afterEach(async () => {
+    const current = harness;
+    harness = undefined;
+    await current?.cleanup();
+  });
+
+  return () => {
+    if (!harness) {
+      throw new Error("File-backed DB harness is only available between beforeEach and afterEach");
+    }
+    return harness;
   };
 }
 

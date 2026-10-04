@@ -1,3 +1,4 @@
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
@@ -1392,6 +1393,92 @@ describe("SessionManager", () => {
           androidEmulator: false,
         });
         expect(persisted.release_reason).toBe("identity-recovery-target-absent");
+      } finally {
+        restarted.stopCleanupTimer();
+      }
+    });
+
+    test("keeps a named pending recovery error nonterminal and permits the same UUID to retry", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "missing-legacy-physical-session",
+        device_id: "R5CT123ABC",
+        stable_device_id: null,
+        platform: "android",
+        status: "active",
+        source: null,
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-15T00:00:00.000Z",
+        updated_at: "2026-09-15T00:00:00.000Z",
+      };
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          persisted.status = status;
+          persisted.released_at_ms = releasedAtMs;
+          persisted.release_reason = releaseReason;
+        },
+      };
+      const restarted = new SessionManager(fakeTimer, persistence);
+      let recoveryTarget: Parameters<SessionDeviceAssigner["assignDeviceToSession"]>[2];
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionUuid, _platform, target): Promise<string> {
+          recoveryTarget = target;
+          if (!target) {
+            throw new Error("persisted recovery target was not supplied");
+          }
+          throw new SessionRecoveryAssignmentError({
+            sessionUuid,
+            platform: target.platform,
+            deviceId: target.deviceId,
+            stableDeviceId: target.stableDeviceId,
+            recoveryWindowRemainingMs: 120_000,
+          });
+        },
+      };
+
+      try {
+        await expect(
+          restarted.getOrCreateSession(
+            persisted.session_uuid,
+            devicePool,
+            "android",
+            undefined,
+            true,
+          ),
+        ).rejects.toThrow(`Cannot safely recover session ${persisted.session_uuid}`);
+        expect(recoveryTarget).toMatchObject({
+          stableDeviceId: persisted.device_id,
+          deviceId: persisted.device_id,
+          androidEmulator: false,
+        });
+        expect(persisted.release_reason).toBe("daemon-restart");
+        expect(restarted.getTerminalReleaseSnapshot(persisted.session_uuid)).toBeUndefined();
+        await expect(
+          restarted.admitIssuedSessionForAutomation(persisted.session_uuid),
+        ).resolves.toBeUndefined();
+        const error = await restarted
+          .getOrCreateSession(persisted.session_uuid, devicePool, "android", undefined, true)
+          .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(SessionRecoveryAssignmentError);
+        expect(error).toMatchObject({
+          name: "SessionRecoveryAssignmentError",
+          details: { code: "session_recovery_pending", retryable: true },
+        });
+        expect(persisted.release_reason).toBe("daemon-restart");
       } finally {
         restarted.stopCleanupTimer();
       }

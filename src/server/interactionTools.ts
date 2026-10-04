@@ -32,6 +32,11 @@ import {
 } from "../features/action/DragAndDrop";
 import {
   SWIPE_APEX_PAUSE_MIN_MS,
+  SWIPE_APEX_PAUSE_MAX_MS,
+  SWIPE_RETURN_SPEED_MAX,
+  SWIPE_RETURN_DURATION_MAX_MS,
+  SWIPE_BOOMERANG_MAX_MS,
+  validateSwipeTimingOptions,
   SWIPE_RETURN_SPEED_EXCLUSIVE_MIN,
 } from "../features/action/swipeon/swipeTiming";
 import { SwipeOn } from "../features/action/swipeon";
@@ -842,14 +847,22 @@ export const swipeOnSchema = withJsonSchemaOverride(
         boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
         apexPause: z
           .number()
+          .finite()
           .min(SWIPE_APEX_PAUSE_MIN_MS)
+          .max(SWIPE_APEX_PAUSE_MAX_MS)
           .optional()
-          .describe(`Pause duration at swipe apex in ms (>= ${SWIPE_APEX_PAUSE_MIN_MS})`),
+          .describe(
+            `Pause duration at swipe apex in ms (${SWIPE_APEX_PAUSE_MIN_MS}-${SWIPE_APEX_PAUSE_MAX_MS}; default: 100)`,
+          ),
         returnSpeed: z
           .number()
+          .finite()
           .gt(SWIPE_RETURN_SPEED_EXCLUSIVE_MIN)
+          .max(SWIPE_RETURN_SPEED_MAX)
           .optional()
-          .describe(`Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN})`),
+          .describe(
+            `Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN}, <= ${SWIPE_RETURN_SPEED_MAX}; default: 1); return duration <= ${SWIPE_RETURN_DURATION_MAX_MS} ms and total boomerang <= ${SWIPE_BOOMERANG_MAX_MS} ms`,
+          ),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
@@ -858,7 +871,16 @@ export const swipeOnSchema = withJsonSchemaOverride(
         ...responseShapeControlFields,
       })
       .strict(),
-  ),
+  ).superRefine((options, context) => {
+    const error = validateSwipeTimingOptions(options);
+    if (error) {
+      context.addIssue({
+        code: "custom",
+        message: error,
+        path: [error.startsWith("apexPause") ? "apexPause" : "returnSpeed"],
+      });
+    }
+  }),
   (js) => compactExclusiveSelectorProperties(js, ["container", "lookFor"]),
 );
 

@@ -204,10 +204,13 @@ events use `input -d` directly.
 `dragDurationMs` from 300 to 2000 ms, and `holdDurationMs` from 100 to 3000 ms.
 The schema and action share these bounds.
 
-With `swipeOn({ boomerang: true })`, `apexPause` accepts any nonnegative
-finite duration in milliseconds, and `returnSpeed` accepts any positive finite
-multiplier. Their defaults remain 100 ms and 1 respectively. There is no
-schema upper bound; long gestures remain subject to request/runner deadlines.
+With `swipeOn({ boomerang: true })`, `apexPause` accepts finite values from
+0 to 3000 ms, and `returnSpeed` accepts finite multipliers greater than 0 and
+at most 3000. Their defaults remain 100 ms and 1 respectively. The rounded return
+duration must be at most 3000 ms, and forward + pause + return must be at most
+5000 ms. Both schema and action reject unsafe timing before the forward swipe;
+increase `returnSpeed` or shorten the forward duration or pause to fit the budget.
+These timing options require `boomerang: true`.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional

@@ -1200,9 +1200,32 @@ test.each(["not-attempted", "exhausted"] as const)(
       .getOrCreateSession("session", pool, "android", undefined, true)
       .catch((error: unknown) => error);
     expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toMatchObject({
+      details: {
+        sessionUuid: "session",
+        platform: "android",
+        deviceId: original.deviceId,
+        stableDeviceId: original.name,
+        incidentId: incident.id,
+        detectionPath: "watched-process-exit",
+        processExit: { code: 1, signal: null },
+        recoveryOutcome: outcome,
+        code: "session_recovery_pending",
+        retryable: true,
+        recoveryWindowRemainingMs: 120_000,
+        recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+      },
+    });
+    expect(
+      String(error)
+        .toLowerCase()
+        .match(/acquire a new device/g),
+    ).toHaveLength(1);
+    expect(String(error).indexOf("The session can still resume")).toBeLessThan(
+      String(error).indexOf("acquire a new device"),
+    );
     expect(String(error)).toBe(
-      "Error: Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
-        "Acquire a new device with getAndroid or getApple. " +
+      "SessionRecoveryAssignmentError: Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
         `Loss incident ${incident.id}: watched-process-exit (code=1, signal=null); recovery outcome: ${outcome}. ` +
         "The session can still resume if the device returns before the recovery window ends " +
         "(120 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
@@ -1220,6 +1243,68 @@ test.each(["not-attempted", "exhausted"] as const)(
       status: "active",
       device_id: original.deviceId,
     });
+  },
+);
+
+test("restart assignment without an incident exposes same-session retry details", async () => {
+  const { timer, sessions, pool } = await setupPassiveRestart();
+  sessions.stopCleanupTimer();
+  const request = sessions
+    .getOrCreateSession("session", pool, "android", undefined, true, {
+      access: "acquire",
+      requestDeadlineMs: 3_500,
+    })
+    .catch((error: unknown) => error);
+  await drainUntilQuiescent(timer);
+  timer.advanceTime(2_500);
+  const error = await request;
+  expect(error).toBeInstanceOf(ActionableError);
+  expect(error).toMatchObject({
+    details: {
+      deviceId: original.deviceId,
+      stableDeviceId: original.name,
+      code: "session_recovery_pending",
+      retryable: true,
+      recoveryWindowRemainingMs: 177_500,
+      recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+    },
+  });
+  expect(error).not.toHaveProperty("details.incidentId");
+  expect(String(error)).toBe(
+    "SessionRecoveryAssignmentError: Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
+      "The session can still resume if the device returns before the recovery window ends " +
+      "(178 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
+  );
+});
+
+test.each([undefined, 60_000, 59_999])(
+  "recovery assignment outside the window preserves its text with deadline %s",
+  async (deadline) => {
+    const { timer, sessions, pool, incident, incidents } = await setupSettledRestart();
+    timer.advanceTime(60_000);
+    const buildError = Reflect.get(pool, "recoveryAssignmentError").bind(pool) as (
+      sessionId: string,
+      target: { platform: "android"; stableDeviceId: string; restartRecoveryDeadlineMs?: number },
+      loss?: typeof incident,
+    ) => ActionableError;
+    const settledIncident = await incidents.get(incident.id);
+    for (const loss of [undefined, settledIncident]) {
+      const error = buildError(
+        "session",
+        { platform: "android", stableDeviceId: original.name, restartRecoveryDeadlineMs: deadline },
+        loss,
+      );
+      expect(error.message).toBe(
+        "Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
+          "Acquire a new device with getAndroid or getApple. " +
+          (loss
+            ? `Loss incident ${incident.id}: watched-process-exit (code=1, signal=null); recovery outcome: not-attempted. `
+            : ""),
+      );
+      expect(error).not.toHaveProperty("details.recoveryWindowRemainingMs");
+      expect(error.message.toLowerCase().match(/acquire a new device/g)).toHaveLength(1);
+    }
+    sessions.stopCleanupTimer();
   },
 );
 
@@ -1244,9 +1329,14 @@ test.each([180_000, 240_000])(
     });
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await expect(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true),
-    ).rejects.toThrow(TerminalSessionError);
+    const terminalError = await sessions
+      .getOrCreateSession("session", pool, "android", undefined, true)
+      .catch((error: unknown) => error);
+    expect(terminalError).toBeInstanceOf(TerminalSessionError);
+    expect(terminalError.message).toBe(
+      "Session session is terminal after identity-recovery-target-absent and cannot be reused. " +
+        "Acquire a new device with getAndroid or getApple.",
+    );
   },
 );
 

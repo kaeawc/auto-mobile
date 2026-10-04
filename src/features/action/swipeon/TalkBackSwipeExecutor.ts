@@ -8,7 +8,11 @@ import { AccessibilityDetector } from "../../accessibility/interfaces/Accessibil
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
-import { getReturnDuration, resolveBoomerangConfig } from "./swipeTiming";
+import {
+  getReturnDuration,
+  resolveBoomerangConfig,
+  validateSwipeTimingOptions,
+} from "./swipeTiming";
 import { Timer } from "../../../utils/interfaces/Timer";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -157,6 +161,17 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
+    const timingError = validateSwipeTimingOptions(
+      {
+        boomerang: true,
+        apexPause: boomerang.apexPauseMs,
+        returnSpeed: boomerang.returnSpeed,
+      },
+      forwardDuration,
+    );
+    if (timingError) {
+      throw new ActionableError(timingError);
+    }
     const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
     const totalDuration = forwardDuration + boomerang.apexPauseMs + returnDuration;
 

@@ -5,6 +5,8 @@ import {
   stripInternalParams,
 } from "../../../src/features/record/McpCallRecorder";
 
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/constants";
+
 describe("McpCallRecorder", () => {
   describe("recording lifecycle", () => {
     test("starts in non-recording state", () => {
@@ -127,6 +129,27 @@ describe("McpCallRecorder", () => {
   });
 
   describe("param stripping", () => {
+    test("drops canonical transport metadata and reserved double-underscore keys", () => {
+      const recorder = new McpCallRecorder();
+      recorder.start();
+      const args = {
+        ...Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, "internal"])),
+        appId: "com.android.settings",
+        __mcpRequestTimeoutMs: 120000,
+        __mcpRequestDeadlineMs: 1790948577851,
+        __foo: "reserved",
+        _oneUnderscore: "keep",
+      };
+      recorder.record("launchApp", args);
+      expect(recorder.stop()).toEqual([
+        {
+          tool: "launchApp",
+          params: { appId: "com.android.settings", _oneUnderscore: "keep" },
+        },
+      ]);
+      expect(args.__foo).toBe("reserved");
+    });
+
     test("records only non-internal params", () => {
       const recorder = new McpCallRecorder();
       recorder.start();

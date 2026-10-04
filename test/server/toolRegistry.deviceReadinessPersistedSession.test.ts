@@ -25,6 +25,8 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { ActionableError } from "../../src/models/ActionableError";
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 
 /**
  * #6227: `createToolExecutionContext`'s persisted daemon-session path — a
@@ -233,6 +235,54 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     },
   );
 
+  test("registry settled restart loss carries recovery fields to the client error payload", async () => {
+    const { timer, call, persisted, incidents } = await setupRestartRecovery();
+    const incident = await incidents.open({
+      deviceId: androidA.deviceId,
+      avdName: androidA.name,
+      detectionPath: "watched-process-exit",
+      processExit: { code: null, signal: "SIGKILL" },
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      session: {
+        sessionUuid: persisted.session_uuid,
+        state: "recovering",
+        lastHeartbeatMs: 0,
+        hasReceivedHeartbeat: false,
+        heartbeatTimeoutMs: 60_000,
+      },
+    });
+    await incidents.completeRecovery(incident.id, "not-attempted");
+    timer.advanceTime(60_001);
+    const error = await call(120_000).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).not.toHaveProperty("code");
+    const details = {
+      sessionUuid: persisted.session_uuid,
+      platform: "android",
+      deviceId: androidA.deviceId,
+      stableDeviceId: androidA.name,
+      incidentId: incident.id,
+      detectionPath: "watched-process-exit",
+      processExit: { code: null, signal: "SIGKILL" },
+      recoveryOutcome: "not-attempted",
+      code: "session_recovery_pending",
+      retryable: true,
+      recoveryWindowRemainingMs: 119_999,
+      recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+    };
+    expect(error).toMatchObject({ details });
+    const result = shapeToolCallError(error, { toolName: "restartDeadlineProbe", source: "MCP" });
+    expect(result.isError).toBe(true);
+    expect(result).not.toHaveProperty("structuredContent");
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload).toEqual({ error: { message: error.message, ...details } });
+    expect(payload.error.message).toContain("(120 seconds remaining)");
+    expect(payload.error.message.toLowerCase().match(/acquire a new device/g)).toHaveLength(1);
+    expect(payload.error.message.indexOf("The session can still resume")).toBeLessThan(
+      payload.error.message.indexOf("acquire a new device"),
+    );
+  });
+
   test("registry restart recovery returns the actionable error before the request deadline", async () => {
     const { timer, call, targets, persisted, persistence } = await setupRestartRecovery();
     const originalRow = { ...persisted };
@@ -251,6 +301,21 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     expect(String(failure)).toContain("Cannot safely recover session");
     expect(String(failure)).toContain("getAndroid or getApple");
     expect(String(failure)).toContain("178 seconds remaining");
+    expect(failure).toMatchObject({
+      details: {
+        deviceId: androidA.deviceId,
+        stableDeviceId: androidA.name,
+        code: "session_recovery_pending",
+        retryable: true,
+        recoveryWindowRemainingMs: 177_500,
+        recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+      },
+    });
+    expect(failure).not.toHaveProperty("details.incidentId");
+    const result = shapeToolCallError(failure, { toolName: "restartDeadlineProbe", source: "MCP" });
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.error.recoveryWindowRemainingMs).toBe(177_500);
+    expect(payload.error).not.toHaveProperty("incidentId");
     expect(timer.now()).toBe(2_500);
     expect(timer.getPendingTimeouts()).toEqual([]);
     expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);

@@ -515,3 +515,30 @@ test("tap lookup falls back to a bounded Compose ID when exact native ID is unbo
     }).element?.["resource-id"],
   ).toBe("login");
 });
+
+test("selector adapter requires an explicit hint opt-in even for focus-input", () => {
+  const capture = {
+    hierarchy: {
+      node: {
+        bounds,
+        class: "android.widget.EditText",
+        "resource-id": "phone",
+        text: "5551234",
+        "hint-text": "Phone",
+        focusable: true,
+        clickable: true,
+      },
+    },
+  };
+  const selector = new ResolverElementSelector();
+  expect(selector.selectByText(capture, "Phone").element).toBeNull();
+  expect(
+    selector.selectByText(capture, "Phone", { intentAction: "focus-input" }).element,
+  ).toBeNull();
+  expect(
+    selector.selectByText(capture, "Phone", {
+      intentAction: "focus-input",
+      allowHintFallback: true,
+    }).element?.["resource-id"],
+  ).toBe("phone");
+});

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { InputText } from "../../src/features/action/InputText";
+import { imeActionFailedAfterTextEntered } from "../../src/features/action/imeActionFailedAfterTextEntered";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type {
   AdbExecuteOptions,
@@ -399,7 +400,7 @@ describe("UnixSocketServer input/typeText", () => {
 
     expect(response).toMatchObject({
       success: false,
-      error: "enter key unavailable",
+      error: imeActionFailedAfterTextEntered("done", "enter key unavailable"),
       charsSent: 2,
     });
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
@@ -434,7 +435,7 @@ describe("UnixSocketServer input/typeText", () => {
 
     expect(response).toMatchObject({
       success: false,
-      error: "CtrlProxy send failed",
+      error: imeActionFailedAfterTextEntered("done", "CtrlProxy send failed"),
       charsSent: 2,
     });
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
@@ -2042,7 +2043,7 @@ describe("UnixSocketServer input/typeText", () => {
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toBe("return key unavailable");
+    expect(response.error).toBe(imeActionFailedAfterTextEntered("done", "return key unavailable"));
     expect(response.charsSent).toBeUndefined();
     expect(requestSetText).toHaveBeenCalledWith("hi there", { timeoutMs: 30_000 });
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);

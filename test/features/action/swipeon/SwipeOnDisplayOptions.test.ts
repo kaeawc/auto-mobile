@@ -119,7 +119,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     { name: "no scrollables", nodes: [] },
     {
       name: "direction mismatch",
-      nodes: [{ ...real, bounds: "[20,70][180,90]" }],
+      nodes: [{ ...real, bounds: "[20,70][180,90]", orientation: "horizontal" }],
       warning:
         "Scrollable containers found but none matched the swipe direction; swiping the screen. Set autoTarget: false to force screen swipes.",
       candidates: [{ elementId: "real" }],

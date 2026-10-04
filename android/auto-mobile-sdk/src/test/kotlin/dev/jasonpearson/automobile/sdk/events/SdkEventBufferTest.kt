@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.events
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.PendingEventBatch
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
@@ -652,9 +653,10 @@ class SdkEventBufferTest {
 
   /** Always throws from persist() — persist is best-effort on the failure path. */
   private class ThrowingPersistence : EventPersistence {
-    override fun persist(events: List<SdkEvent>): String? = throw RuntimeException("boom")
+    override fun persist(events: List<SdkEvent>, deliveryId: String?): String? =
+      throw RuntimeException("boom")
 
-    override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+    override fun loadPending(): List<PendingEventBatch> = emptyList()
 
     override fun removeBatch(batchId: String) {}
 
@@ -666,13 +668,13 @@ class SdkEventBufferTest {
     val persistCount = AtomicInteger(0)
     val persistThread = AtomicReference<Thread>()
 
-    override fun persist(events: List<SdkEvent>): String? {
+    override fun persist(events: List<SdkEvent>, deliveryId: String?): String? {
       persistThread.set(Thread.currentThread())
       persistCount.incrementAndGet()
       return "batch-id"
     }
 
-    override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+    override fun loadPending(): List<PendingEventBatch> = emptyList()
 
     override fun removeBatch(batchId: String) {}
 
@@ -760,13 +762,13 @@ class SdkEventBufferTest {
     val counter = DefaultDropCounter()
     val persistence =
       object : EventPersistence {
-        override fun persist(events: List<SdkEvent>): String {
+        override fun persist(events: List<SdkEvent>, deliveryId: String?): String {
           recorded.add(events)
           threads.add(Thread.currentThread().name)
           return "id"
         }
 
-        override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+        override fun loadPending(): List<PendingEventBatch> = emptyList()
 
         override fun removeBatch(batchId: String) {}
 
@@ -797,9 +799,9 @@ class SdkEventBufferTest {
     val counter = DefaultDropCounter()
     val persistence =
       object : EventPersistence {
-        override fun persist(events: List<SdkEvent>): String? = null
+        override fun persist(events: List<SdkEvent>, deliveryId: String?): String? = null
 
-        override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+        override fun loadPending(): List<PendingEventBatch> = emptyList()
 
         override fun removeBatch(batchId: String) {}
 

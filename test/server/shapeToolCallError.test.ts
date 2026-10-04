@@ -1,3 +1,4 @@
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
@@ -17,6 +18,31 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("serializes pending recovery with the established error vocabulary", () => {
+    const error = new SessionRecoveryAssignmentError({
+      sessionUuid: "session-a",
+      platform: "android",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      recoveryWindowRemainingMs: 120_000,
+    });
+    const result = shapeToolCallError(error, context);
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      error: { message: error.message, ...error.details },
+    });
+    expect(error.details).toMatchObject({
+      code: "session_recovery_pending",
+      retryable: true,
+      recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+    });
+    expect(error.details).not.toHaveProperty("retry");
+    expect(error.details).not.toHaveProperty("fallback");
+    expect(error.message).toBe(
+      "Cannot safely recover session session-a: android device 'Pixel_8_API_35' is unavailable or already in use. The session can still resume if the device returns before the recovery window ends (120 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
+    );
   });
 
   test("shapes a plain Error", () => {

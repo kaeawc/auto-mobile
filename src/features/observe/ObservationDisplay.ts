@@ -28,6 +28,8 @@ export interface ObservedAndroidDisplay {
   panelKeysByLogicalId?: Readonly<Record<number, string>>;
 }
 
+export class AndroidDisplayReadError extends ActionableError {}
+
 function singlePanelKeyOrDefault(panels: readonly DisplayPanel[]): string {
   return panels.length === 1 ? panels[0].key : "0";
 }
@@ -157,7 +159,7 @@ export class ObservedAndroidDisplayCache {
     }
     const result = await readAndroidDisplayInfos(adb, signal);
     if (result.infos === null) {
-      throw new ActionableError(
+      throw new AndroidDisplayReadError(
         `Android display list could not be read while selecting panel "${key}": ${result.reason}. Retry the request.`,
       );
     }
@@ -267,22 +269,37 @@ export class ObservedAndroidDisplayCache {
     ) {
       return { ...cached.value, display: { ...cached.value.display } };
     }
-    const value = await observedAndroidDisplay(
+    const { value, cacheable } = await readObservedAndroidDisplay(
       device,
       adb,
       signal,
       lastKnownAndroidDisplay.get(device.deviceId),
     );
     signal?.throwIfAborted();
-    if (!this.readOnly) {
-      lastKnownAndroidDisplay.set(device.deviceId, value);
-      androidDisplayCache.set(device.deviceId, {
-        inventory,
-        value: { ...value, display: { ...value.display } },
-        at: this.timer.now(),
-      });
-    }
+    this.cacheRead(device.deviceId, inventory, value, cacheable);
     return value;
+  }
+
+  private cacheRead(
+    deviceId: string,
+    inventory: string,
+    value: ObservedAndroidDisplay,
+    cacheable: boolean,
+  ): void {
+    if (this.readOnly) {
+      return;
+    }
+    if (!cacheable) {
+      // Even a forced read failure must let the next owner resolve retry immediately.
+      androidDisplayCache.delete(deviceId);
+      return;
+    }
+    lastKnownAndroidDisplay.set(deviceId, value);
+    androidDisplayCache.set(deviceId, {
+      inventory,
+      value: { ...value, display: { ...value.display } },
+      at: this.timer.now(),
+    });
   }
 }
 
@@ -293,26 +310,45 @@ export async function observedAndroidDisplay(
   signal?: AbortSignal,
   previous?: ObservedAndroidDisplay,
 ): Promise<ObservedAndroidDisplay> {
+  return (await readObservedAndroidDisplay(device, adb, signal, previous)).value;
+}
+
+/** Keep read status private so best-effort fallbacks never become cached evidence. */
+async function readObservedAndroidDisplay(
+  device: BootedDevice,
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+  previous?: ObservedAndroidDisplay,
+): Promise<{ value: ObservedAndroidDisplay; cacheable: boolean }> {
   const panels = device.displays?.panels;
   if (!panels?.length) {
     // Single-screen discovery omits its inventory; avoid a shell probe.
     return {
-      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
-      logicalId: 0,
+      value: {
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+        logicalId: 0,
+      },
+      cacheable: true,
     };
   }
   const result = await readAndroidDisplayInfos(adb, signal);
   const infos = result.infos ?? [];
   if (infos.length === 0 && previous) {
-    return { ...previous, display: { ...previous.display } };
+    return {
+      value: { ...previous, display: { ...previous.display } },
+      cacheable: result.infos !== null,
+    };
   }
   return {
-    ...displayForAndroidInfos(panels, infos),
-    panelKeysByLogicalId: Object.fromEntries(
-      infos
-        .filter((info) => info.uniqueId)
-        .map((info) => [Number(info.logicalId), physicalPanelKey(info.uniqueId!)]),
-    ),
+    value: {
+      ...displayForAndroidInfos(panels, infos),
+      panelKeysByLogicalId: Object.fromEntries(
+        infos
+          .filter((info) => info.uniqueId)
+          .map((info) => [Number(info.logicalId), physicalPanelKey(info.uniqueId!)]),
+      ),
+    },
+    cacheable: result.infos !== null,
   };
 }
 

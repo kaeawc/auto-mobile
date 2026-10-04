@@ -23,7 +23,7 @@ afterEach(() => {
 
 function installed(sha: string | null) {
   adb.setCommandResponse("shell pm list packages", {
-    stdout: AndroidCtrlProxyManager.PACKAGE,
+    stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
     stderr: "",
   });
   adb.setCommandResponse("shell pm path", {

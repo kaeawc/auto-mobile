@@ -13,7 +13,7 @@ import { ActionableError } from "../models";
 import { defaultTimer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import type { BootedDevice } from "../devices/deviceUtils";
+import type { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {

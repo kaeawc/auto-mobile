@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { ToolSelectionProfileProvenanceRepository } from "../../src/db/toolSelectionProfileProvenanceRepository";
 import { PersistentToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
-import { createFileBackedDbHarness } from "./withFileBackedDb";
+import { bindFileBackedDbHarness } from "./withFileBackedDb";
 import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 
 /**
@@ -15,21 +15,13 @@ import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
  * `navigationProvenanceLifecycle.integration.test.ts`.
  */
 describe("tool-selection-profile provenance — real daemon-restart durability", () => {
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   test(
     "a minted profile is recognized after a real close+reopen; a fabricated one never is",
     async () => {
       // "Before restart": daemon process 1 mints and records a profile.
-      const before = await harness.openLifecycleTestDb("tool-selection-profile-provenance-");
+      const before = await getHarness().openLifecycleTestDb("tool-selection-profile-provenance-");
       const dir = before.dir;
       try {
         const dbBefore = before.module.getDatabase() as Kysely<Database>;
@@ -52,7 +44,7 @@ describe("tool-selection-profile provenance — real daemon-restart durability",
       // "After restart": daemon process 2 re-opens the SAME on-disk file (the
       // harness leaves AUTOMOBILE_DB_DIR bound to `dir`) with a fresh module
       // instance and a brand-new, empty in-memory registry.
-      const after = await harness.importFreshDatabaseModule();
+      const after = await getHarness().importFreshDatabaseModule();
       try {
         after.getDatabase();
         await after.ensureMigrations();

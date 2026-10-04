@@ -111,3 +111,21 @@ PRIOR
     "$WORK_DIR/CHANGELOG.md"
   [ "$status" -ne 0 ]
 }
+
+@test "tag presence check drains a large tag list and preserves writer failure" {
+  cat > "$STUB_DIR/git" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' 'v9.9.9'
+awk 'BEGIN { for (i=0; i<20000; i++) print "v9.9.9-filler-" i }'
+exit "${TAG_STATUS:-0}"
+STUB
+  chmod +x "$STUB_DIR/git"
+  local condition
+  condition=$(grep 'if git tag --list' "$SCRIPT")
+  run env PATH="$STUB_DIR:$PATH" CURRENT_TAG='v9.9.9*' bash -euo pipefail -c "$condition echo present; else echo absent; fi"
+  [ "$status" -eq 0 ]
+  [ "$output" = present ]
+  run env PATH="$STUB_DIR:$PATH" CURRENT_TAG='v9.9.9*' TAG_STATUS=7 bash -euo pipefail -c "$condition echo present; else echo absent; fi"
+  [ "$status" -eq 0 ]
+  [ "$output" = absent ]
+}

@@ -8,6 +8,7 @@ import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { logger } from "../utils/logger";
+import { deviceListRefreshFailureMessage } from "../daemon/devicePoolRefresh";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import {
   registerDirectSessionDevice,
@@ -55,12 +56,10 @@ async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<
   let device = pool.getDevice(deviceId);
   if (!device) {
     const outcome = await pool.refreshDevicesWithOutcome();
-    if (outcome.failure !== undefined) {
-      throw new ActionableError(
-        `Could not refresh device list: ${outcome.failure}. Resolve the cause and retry.`,
-      );
-    }
     device = pool.getDevice(deviceId);
+    if (!device && outcome.failure !== undefined) {
+      throw new ActionableError(deviceListRefreshFailureMessage(outcome.failure));
+    }
   }
   if (!device) {
     throw new ActionableError(`Device '${deviceId}' not found in device pool`);

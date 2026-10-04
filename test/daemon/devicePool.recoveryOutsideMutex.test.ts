@@ -6,6 +6,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -182,4 +183,84 @@ describe("DevicePool disconnect of an assigned device", () => {
       sessionManager.stopCleanupTimer();
     }
   });
+});
+
+describe("DevicePool exhausted session release ownership", () => {
+  test.each(["removed", "present", "new-owner", "new-assignment", "pool-failure"])(
+    "exhaustion frees only the removed session's original assignment: %s",
+    async (scenario) => {
+      const timer = new FakeTimer();
+      const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const manager = new FakeDeviceManager();
+      manager.bootedDevices = [handset];
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessions, "release-retry-ownership", {
+          timer,
+          deviceSessionRepository: new FakeDeviceSessionRepository(),
+          deviceManager: manager,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          retryExecutor: new DefaultRetryExecutor(timer),
+        }),
+      );
+      const failure = new Error("release failed");
+      const poolFailure = new Error("pool release failed");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const free = spyOn(pool, "releaseDevice");
+      if (scenario === "pool-failure") {
+        free.mockRejectedValue(poolFailure);
+      }
+      let attempts = 0;
+      try {
+        await pool.initializeWithDevices([handset]);
+        await pool.assignDeviceToSession("session", "android");
+        const device = pool.getDevice(handset.deviceId)!;
+        const retry = (
+          pool as unknown as {
+            retrySessionRelease(
+              id: string,
+              deviceId: string,
+              attempt: () => Promise<void>,
+            ): Promise<void>;
+          }
+        ).retrySessionRelease("session", handset.deviceId, async () => {
+          attempts++;
+          if (attempts === 1 && scenario !== "present") {
+            await sessions.releaseSession("session", "daemon-shutdown");
+            if (scenario === "new-owner") {
+              device.sessionId = "other-session";
+            }
+            if (scenario === "new-assignment") {
+              device.assignmentCount++;
+            }
+          }
+          throw failure;
+        });
+        // Attach the rejection check before fake time advances through retries.
+        const outcome = retry.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        expect(await timer.resolvePromise(outcome, 1000)).toBe(failure);
+        expect(attempts).toBe(3);
+        expect(free).toHaveBeenCalledTimes(
+          scenario === "removed" || scenario === "pool-failure" ? 1 : 0,
+        );
+        expect(device).toMatchObject({
+          sessionId:
+            scenario === "removed" ? null : scenario === "new-owner" ? "other-session" : "session",
+          status: scenario === "removed" ? "idle" : "busy",
+        });
+        if (scenario === "pool-failure") {
+          expect(warn).toHaveBeenCalledWith(
+            `Failed to free device ${handset.deviceId} after session session release retries`,
+            poolFailure,
+          );
+        }
+      } finally {
+        free.mockRestore();
+        warn.mockRestore();
+        sessions.stopCleanupTimer();
+      }
+    },
+  );
 });

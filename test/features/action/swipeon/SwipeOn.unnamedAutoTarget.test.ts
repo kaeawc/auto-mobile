@@ -338,12 +338,15 @@ describe("Android unnamed auto-target capture regression", () => {
 
   test("single direction mismatch preserves screen fallback in the safe area", async () => {
     const before = { ...scrollBefore, timestamp: 0 } as ObserveResult;
-    // Use the real named capture's vertical container as a single candidate.
+    // Add explicit axis metadata to the real captured container for this
+    // synthetic direction-mismatch case; its shape no longer implies an axis.
     const only = finder
       .findScrollableElements(before.viewHierarchy!)
       .find((element) => element["resource-id"] === "tap_screen_content")!;
     const h = harness({ before });
-    spyOn(DefaultElementFinder.prototype, "findScrollableElements").mockReturnValue([only]);
+    spyOn(DefaultElementFinder.prototype, "findScrollableElements").mockReturnValue([
+      { ...only, orientation: "vertical" },
+    ]);
     const result = await h.action.execute({ direction: "left" });
     expect(result.targetType).toBe("screen");
     expect(result.warning).toContain("none matched the swipe direction");

@@ -267,19 +267,26 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
       };
     }
 
-    const status =
-      settings.authorizationStatus !== undefined && settings.authorizationStatus < UN_AUTH.length
-        ? UN_AUTH[settings.authorizationStatus]
-        : undefined;
+    if (
+      !Number.isInteger(settings.authorizationStatus) ||
+      settings.authorizationStatus < 0 ||
+      settings.authorizationStatus >= UN_AUTH.length
+    ) {
+      return {
+        supported: true,
+        allowed: null,
+        method: "ios_bulletinboard_plist",
+        warning: `Notification section for ${bundleId} had unrecognized authorization status ${settings.authorizationStatus}`,
+      };
+    }
+
+    const status = UN_AUTH[settings.authorizationStatus];
 
     // iOS still delivers notifications for authorized (2), provisional (3, quiet
     // delivery) and ephemeral (4, App Clips), so all three count as "allowed".
     // Callers needing strict full authorization can check
     // `authorizationStatus === "authorized"`.
-    const allowed =
-      settings.authorizationStatus !== undefined &&
-      settings.authorizationStatus >= 2 &&
-      settings.authorizationStatus <= 4;
+    const allowed = settings.authorizationStatus >= 2 && settings.authorizationStatus <= 4;
 
     return {
       supported: true,

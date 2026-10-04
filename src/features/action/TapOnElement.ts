@@ -1,5 +1,10 @@
+import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
-import { resolveVoiceOverActivateCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
+import {
+  assertLongPressFitsRequestBudget,
+  resolveVoiceOverActivateCtrlProxyTimeoutMs,
+} from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
@@ -7,7 +12,7 @@ import {
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import {
   ElementResolver,
@@ -294,6 +299,31 @@ export interface TapPreTapStabilitySeam {
   rebuildSelectedElementMetadataAfterStability: TapOnElement["rebuildSelectedElementMetadataAfterStability"];
 }
 
+/** Internal focus evidence; symbol keys never enter JSON tool output. */
+export const tapFocusFailure: unique symbol = Symbol("tapFocusFailure");
+export type TapFocusFailure = "not-found" | "no-visible-tap-area" | "navigation-bar";
+export type TapOnFocusResult = TapOnElementResult & { [tapFocusFailure]?: TapFocusFailure };
+
+class TapTargetUnavailableError extends ActionableError {
+  constructor(
+    message: string,
+    readonly reason: TapFocusFailure,
+  ) {
+    super(message);
+  }
+}
+
+function markFocusFailure(
+  action: string,
+  result: TapOnElementResult,
+  error: unknown,
+): TapOnFocusResult {
+  if (action === "focus" && error instanceof TapTargetUnavailableError) {
+    Object.defineProperty(result, tapFocusFailure, { value: error.reason });
+  }
+  return result;
+}
+
 /**
  * Command to tap on UI element containing specified text
  */
@@ -483,15 +513,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @param error - The error message
    * @returns TapOnTextResult with error state
    */
-  private createErrorResult(action: string, error: string): TapOnElementResult {
-    return {
-      success: false,
-      action: action,
-      error,
-      element: {
-        bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-      } as Element,
-    };
+  private createErrorResult(action: string, error: string, cause?: unknown): TapOnFocusResult {
+    return markFocusFailure(
+      action,
+      {
+        success: false,
+        action: action,
+        error,
+        element: {
+          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+        } as Element,
+      },
+      cause,
+    );
   }
 
   private validateOptions(options: TapOnElementOptions): string | null {
@@ -1071,6 +1105,32 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
   }
 
+  private visibilityFailureReason(
+    selection: ElementSelectionResult,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
+  ): TapFocusFailure {
+    return this.isCoveredByNavigationBar(selection, hierarchy, screenSize)
+      ? "navigation-bar"
+      : "no-visible-tap-area";
+  }
+
+  private invisibleMatchFailure(
+    selection: ElementSelectionResult,
+    options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
+    fallback?: string,
+  ): TapTargetUnavailableError {
+    const reason = this.visibilityFailureReason(selection, hierarchy, screenSize);
+    return new TapTargetUnavailableError(
+      reason === "navigation-bar" || !fallback
+        ? this.invisibleMatchError(selection, options, hierarchy, screenSize)
+        : fallback,
+      reason,
+    );
+  }
+
   private navigationTapBounds(
     bounds: ElementBounds,
     hierarchy: ViewHierarchyResult,
@@ -1519,6 +1579,69 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapVerificationOptions,
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
+    try {
+      return this.selectElementInHierarchy(options, viewHierarchy);
+    } catch (error) {
+      if (
+        options.action !== "focus" ||
+        !(error instanceof ActionableError) ||
+        error instanceof TapTargetUnavailableError ||
+        (options.selectionStrategy !== "unique" &&
+          options.index === undefined &&
+          !options.container?.container) ||
+        !this.isContainerAvailable(viewHierarchy, options.container)
+      ) {
+        throw error;
+      }
+      return this.classifyFocusSelectionFailure(options, viewHierarchy, error);
+    }
+  }
+
+  private classifyFocusSelectionFailure(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+    error: ActionableError,
+  ): never {
+    // Strict selection may throw before handleElementNotFound. Inspect the same
+    // hierarchy with first-match selection to distinguish absence from ambiguity
+    // using selection evidence, while preserving the original diagnostic.
+    const inspected = this.selectElementInHierarchy(
+      { ...options, selectionStrategy: "first", index: undefined },
+      viewHierarchy,
+    ).selection;
+    if (inspected.totalMatches === 0 && !inspected.matchedElement) {
+      throw new TapTargetUnavailableError(error.message, "not-found");
+    }
+    const target = inspected.element ?? inspected.matchedElement;
+    if (
+      inspected.totalMatches === 1 &&
+      target &&
+      isFocusEditableElement(target) &&
+      this.isElementTapTargetOffScreen(
+        inspected,
+        viewHierarchy,
+        this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions),
+        options,
+      )
+    ) {
+      throw new TapTargetUnavailableError(
+        error.message,
+        this.isCoveredByNavigationBar(
+          inspected,
+          viewHierarchy,
+          this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions),
+        )
+          ? "navigation-bar"
+          : "no-visible-tap-area",
+      );
+    }
+    throw error;
+  }
+
+  private selectElementInHierarchy(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+  ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
     const intentAction =
       options.action === "longPress"
@@ -1563,6 +1686,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           caseSensitive: false,
           strategy: options.selectionStrategy,
           intentAction: lookupAction,
+          allowHintFallback: options.action === "tap" || options.action === "focus",
           index: options.index,
           selectionIntent,
         }),
@@ -1596,6 +1720,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 caseSensitive: false,
                 strategy: options.selectionStrategy,
                 intentAction: lookupAction,
+                allowHintFallback: options.action === "tap" || options.action === "focus",
                 index: options.index,
                 selectionIntent,
               }),
@@ -1619,8 +1744,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
       if (lastSelection) {
         if (options.selectionStrategy === "unique") {
-          throw new ActionableError(
+          throw new TapTargetUnavailableError(
             `Target not found${options.container ? " within container" : ""}: no textAny variant matched`,
+            "not-found",
           );
         }
         return { selection: lastSelection, containerFound };
@@ -2653,7 +2779,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
      * (issue #6284).
      */
     refreshedFromDevice: boolean;
-    visibilityError?: string;
+    visibilityError?: TapTargetUnavailableError;
   }> {
     const viewHierarchy = observeResult.viewHierarchy;
     if (!viewHierarchy) {
@@ -2665,7 +2791,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let requestCount = 0;
     let changeCount = 0;
     let offScreenRejections = 0;
-    let visibilityError: string | undefined;
+    let visibilityError: TapTargetUnavailableError | undefined;
     let lastHash = this.hashViewHierarchy(viewHierarchy);
 
     let latestViewHierarchy = viewHierarchy;
@@ -2679,7 +2805,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
     let selection = initialSearch.selection;
     const invisibleError = () =>
-      this.invisibleMatchError(selection, options, latestViewHierarchy, latestScreenSize);
+      this.invisibleMatchFailure(selection, options, latestViewHierarchy, latestScreenSize);
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
     if (!element && selection.matchedElement) {
@@ -2916,10 +3042,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         signal,
         this.visionAnalyzer,
       );
-      throw new ActionableError(enrichedMsg);
+      throw new TapTargetUnavailableError(enrichedMsg, "not-found");
     }
 
-    throw new ActionableError(baseError);
+    throw new TapTargetUnavailableError(baseError, "not-found");
   }
 
   private isContainerAvailable(
@@ -3281,7 +3407,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const { selection, hierarchy } = prepared;
     const element = selection.element;
     if (!element?.bounds) {
-      throw new ActionableError("Element not found on selected display");
+      throw new TapTargetUnavailableError("Element not found on selected display", "not-found");
     }
     const selectedElement = this.buildSelectedElementMetadata(selection);
     if (options.action === "focus") {
@@ -3320,7 +3446,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         screenSize: target.observation.screenSize,
       });
     if (!point) {
-      throw new ActionableError("Matched element has no visible tap area on selected display");
+      throw new TapTargetUnavailableError(
+        "Matched element has no visible tap area on selected display",
+        this.visibilityFailureReason(selection, hierarchy, target.observation.screenSize),
+      );
     }
     const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
     const dispatchAction = await this.androidDisplayDispatch(options, context);
@@ -3420,7 +3549,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!outcome.selection.element) {
       try {
         if (outcome.visibilityError) {
-          throw new ActionableError(outcome.visibilityError);
+          throw outcome.visibilityError;
         }
         // Vision screenshots are not display-aware. Omit the observation to keep
         // the shared base error without invoking default-display vision fallback.
@@ -3428,10 +3557,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       } catch (error) {
         logger.warn(`tapOn display resolution failed: ${errorMessage(error)}`, error);
         return {
-          result: {
-            ...this.createErrorResult(options.action, errorMessage(error)),
-            searchUntil: outcome.stats,
-          },
+          result: markFocusFailure(
+            options.action,
+            {
+              ...this.createErrorResult(options.action, errorMessage(error)),
+              searchUntil: outcome.stats,
+            },
+            error,
+          ),
         };
       }
     }
@@ -3518,6 +3651,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private async executeOnDisplay(
     options: TapOnElementOptions,
     signal?: AbortSignal,
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<TapOnElementResult | undefined> {
     const display = options.display;
     if (display !== undefined) {
@@ -3557,11 +3691,31 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           return await this.observedAndroidDisplayInteraction(options, { target, signal });
         }
       } catch (error) {
+        this.rethrowKeyboardOcclusion(error, options.action, recovery);
         logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
-        return withStaleDisplay(this.createErrorResult(options.action, errorMessage(error)), error);
+        return withStaleDisplay(
+          this.createErrorResult(options.action, errorMessage(error), error),
+          error,
+        );
       }
     }
     return undefined;
+  }
+
+  private rethrowKeyboardOcclusion(
+    error: unknown,
+    action: TapOnElementOptions["action"],
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
+  ): void {
+    if (
+      recovery?.throwOnKeyboardOcclusion &&
+      this.device.platform === "android" &&
+      action === "focus" &&
+      error instanceof KeyboardOcclusionError
+    ) {
+      logger.debug(`Tap on element awaits IME recovery: ${errorMessage(error)}`, error);
+      throw error;
+    }
   }
 
   /**
@@ -3576,9 +3730,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal,
     // Internal orchestration policy; never part of TapOnElementOptions or tool schemas.
     recovery?: { throwOnKeyboardOcclusion?: boolean },
-  ): Promise<TapOnElementResult> {
+    request?: { requestDeadlineMs?: number },
+  ): Promise<TapOnFocusResult> {
+    // Validate before display resolution/observation can issue any device command.
+    if (options.action === "longPress") {
+      assertLongPressFitsRequestBudget(
+        this.getLongPressDuration(options),
+        request?.requestDeadlineMs === undefined
+          ? undefined
+          : request.requestDeadlineMs - this.timer.now(),
+      );
+    }
     if (options.display !== undefined) {
-      const result = await this.executeOnDisplay(options, signal);
+      const result = await this.executeOnDisplay(options, signal, recovery);
       if (result) {
         return result;
       }
@@ -3664,7 +3828,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           viewHierarchy = searchOutcome.viewHierarchy;
           if (!searchOutcome.selection.element) {
             if (searchOutcome.visibilityError) {
-              throw new ActionableError(searchOutcome.visibilityError);
+              throw searchOutcome.visibilityError;
             }
             await this.handleElementNotFound(
               options,
@@ -3848,11 +4012,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             tapElement,
           );
           if (!visibleBounds) {
-            throw new ActionableError(
-              this.isCoveredByNavigationBar(finalSelection, viewHierarchy, screenSize)
-                ? this.invisibleMatchError(finalSelection, options, viewHierarchy, screenSize)
-                : "Matched element has no visible tap area on this screen. " +
-                    "Scroll it into view with swipeOn, then retry tapOn.",
+            throw this.invisibleMatchFailure(
+              finalSelection,
+              options,
+              viewHierarchy,
+              screenSize,
+              "Matched element has no visible tap area on this screen. " +
+                "Scroll it into view with swipeOn, then retry tapOn.",
             );
           }
           const tapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
@@ -3868,11 +4034,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             ],
           });
           if (!tapPoint) {
-            throw new ActionableError(
-              this.isCoveredByNavigationBar(finalSelection, viewHierarchy, screenSize)
-                ? this.invisibleMatchError(finalSelection, options, viewHierarchy, screenSize)
-                : "Matched element has no unobstructed visible tap area. " +
-                    "Dismiss the keyboard or scroll it into view, then retry tapOn.",
+            throw this.invisibleMatchFailure(
+              finalSelection,
+              options,
+              viewHierarchy,
+              screenSize,
+              "Matched element has no unobstructed visible tap area. " +
+                "Dismiss the keyboard or scroll it into view, then retry tapOn.",
             );
           }
           const tapBounds = tapElement.bounds;
@@ -4043,15 +4211,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       perf.end();
 
       // Only opted-in Android form orchestration receives the typed recovery signal.
-      if (
-        recovery?.throwOnKeyboardOcclusion &&
-        this.device.platform === "android" &&
-        requestedAction === "focus" &&
-        error instanceof KeyboardOcclusionError
-      ) {
-        logger.debug(`Tap on element awaits IME recovery: ${errorMessage(error)}`, error);
-        throw error;
-      }
+      this.rethrowKeyboardOcclusion(error, requestedAction, recovery);
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
       if (error instanceof StaleDisplayError) {
         return withStaleDisplay(this.createErrorResult(options.action, error.message), error);
@@ -4066,16 +4226,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
       // Return error result with debug info instead of throwing
       const errorMsg = errorMessage(error);
-      return {
-        success: false,
-        action: options.action,
-        error: `Failed to perform tap on element: ${errorMsg}`,
-        element: {
-          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-        } as Element,
-        ...(searchUntilStats ? { searchUntil: searchUntilStats } : {}),
-        ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
-      };
+      return markFocusFailure(
+        requestedAction,
+        {
+          success: false,
+          action: options.action,
+          error: `Failed to perform tap on element: ${errorMsg}`,
+          element: {
+            bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+          } as Element,
+          ...(searchUntilStats ? { searchUntil: searchUntilStats } : {}),
+          ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
+        },
+        error,
+      );
     }
   }
 
@@ -4775,6 +4939,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private getLongPressDuration(options: TapOnElementOptions): number {
+    if (options.duration !== undefined && options.duration > LONG_PRESS_HARD_MAX_MS) {
+      throw new ActionableError(
+        `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${options.duration} ms`,
+      );
+    }
     if (typeof options.duration === "number" && options.duration > 0) {
       return options.duration;
     }
@@ -4802,28 +4971,57 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     const longPressTimeoutMs = Math.min(durationMs + 2_000, MAX_SETTIMEOUT_DELAY_MS);
     try {
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      await this.adb.executeCommand(
-        `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-        longPressTimeoutMs,
-        undefined,
-        undefined,
-        signal,
-      );
+      try {
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence?.assertCurrent();
+        await this.adb.executeCommand(
+          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          longPressTimeoutMs,
+          undefined,
+          undefined,
+          signal,
+        );
+      } catch (error) {
+        logger.warn(`[TapOnElement] touch input swipe failed: ${errorMessage(error)}`, error);
+        this.throwIfLongPressInterrupted(error, durationMs, signal);
+        if (error instanceof StaleDisplayError) {
+          throw error;
+        }
+        throwIfAborted(signal);
+        // Only a non-cancellation failure may use the legacy input source.
+        fence?.assertCurrent();
+        await this.adb.executeCommand(
+          `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          longPressTimeoutMs,
+          undefined,
+          undefined,
+          signal,
+        );
+      }
     } catch (error) {
+      logger.warn(`[TapOnElement] Android long press failed: ${errorMessage(error)}`, error);
+      this.throwIfLongPressInterrupted(error, durationMs, signal);
       if (error instanceof StaleDisplayError) {
         throw error;
       }
-      logger.warn(`[TapOnElement] touch input swipe failed, falling back to input swipe: ${error}`);
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      await this.adb.executeCommand(
-        `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-        longPressTimeoutMs,
-        undefined,
-        undefined,
-        signal,
+      throw toActionableError(error, "Android long press failed");
+    }
+  }
+
+  private throwIfLongPressInterrupted(
+    error: unknown,
+    durationMs: number,
+    signal?: AbortSignal,
+  ): void {
+    if (
+      signal?.aborted ||
+      error instanceof AdbCommandTimeoutError ||
+      (error instanceof Error && error.name === "AbortError")
+    ) {
+      // Killing host adb cannot cancel input's system_server injection.
+      throw new ActionableError(
+        `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
+        { cause: error },
       );
     }
   }

@@ -710,6 +710,7 @@ export class SwipeOn extends BaseVisualChange {
                   previousObservation: target.observation,
                   signal,
                 },
+                { boomerang: resolveBoomerangConfig(options) },
               );
         }
       } catch (error) {
@@ -1021,6 +1022,7 @@ export class SwipeOn extends BaseVisualChange {
   private async observedSwipeInteraction(
     block: (observation: ObserveResult, fence?: DisplayFence) => Promise<SwipeOnResult>,
     options: Parameters<BaseVisualChange["observedInteraction"]>[1],
+    diagnostics: { boomerang?: BoomerangConfig },
   ): Promise<SwipeOnResult> {
     let previous: ObserveResult | null = null;
     const result: SwipeOnResult = await this.observedInteraction(async (observation, fence) => {
@@ -1031,6 +1033,10 @@ export class SwipeOn extends BaseVisualChange {
       return result;
     }
     result.effect = this.deriveInteractionEffect(previous, result.observation);
+    // Boomerangs return to the start, or only focus/announce a container in TalkBack mode.
+    if (diagnostics.boomerang) {
+      return result;
+    }
     if (
       result.success &&
       result.effect?.screenChanged === false &&
@@ -1068,6 +1074,7 @@ export class SwipeOn extends BaseVisualChange {
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
     let iosDispatchTimestamp: number | undefined;
+    const boomerang = this.resolveBoomerangConfig(options);
 
     return this.observedSwipeInteraction(
       async (observeResult: ObserveResult, fence) => {
@@ -1089,7 +1096,6 @@ export class SwipeOn extends BaseVisualChange {
         );
 
         const duration = this.getDuration(options);
-        const boomerang = this.resolveBoomerangConfig(options);
         const gestureOptions: FencedGestureOptions = {
           displayFence: fence,
           duration,
@@ -1169,6 +1175,7 @@ export class SwipeOn extends BaseVisualChange {
           toolArgs: this.buildPredictionArgs(options),
         },
       },
+      { boomerang },
     );
   }
 
@@ -1183,6 +1190,7 @@ export class SwipeOn extends BaseVisualChange {
       `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,
     );
     let iosDispatchTimestamp: number | undefined;
+    const boomerang = this.resolveBoomerangConfig(options);
 
     return this.observedSwipeInteraction(
       async (observeResult: ObserveResult, fence) => {
@@ -1208,7 +1216,6 @@ export class SwipeOn extends BaseVisualChange {
         );
 
         const duration = this.getDuration(options);
-        const boomerang = this.resolveBoomerangConfig(options);
         const gestureOptions: FencedGestureOptions = {
           displayFence: fence,
           duration,
@@ -1279,6 +1286,7 @@ export class SwipeOn extends BaseVisualChange {
           toolArgs: this.buildPredictionArgs(options),
         },
       },
+      { boomerang },
     );
   }
 

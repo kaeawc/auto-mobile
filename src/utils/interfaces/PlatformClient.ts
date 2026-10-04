@@ -1,5 +1,5 @@
 import type { BootedDevice } from "../../models";
-import type { CtrlProxyClient } from "../../features/observe/interfaces/CtrlProxyClient";
+import type { CtrlProxyClient } from "./DeviceService";
 import type { NotificationUIDetector } from "./NotificationUIDetector";
 import type { SystemConfigurationAdapter } from "./SystemConfigurationAdapter";
 import type { TapStrategy } from "./TapStrategy";

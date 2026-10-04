@@ -266,8 +266,11 @@ export function registerNavigationTools() {
         });
       }
 
+      const completion = result.stopReason?.startsWith("Left target app (")
+        ? `Exploration stopped: ${result.stopReason}.`
+        : "Exploration completed:";
       return createJSONToolResponse({
-        message: `Exploration completed: ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`,
+        message: `${completion} ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`,
         ...result,
       });
     } catch (error) {

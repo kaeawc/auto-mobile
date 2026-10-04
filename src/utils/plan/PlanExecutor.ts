@@ -27,8 +27,12 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
-import { isDeviceLostError } from "../../server/deviceLossOutcome";
-import { formatToolParamError } from "../../server/toolParamError";
+import {
+  type DeviceLostError,
+  isDeviceLostError,
+  rememberDeviceLossAbort,
+} from "../../models/DeviceLostError";
+import { formatToolParamError } from "../toolParamError";
 import { stripUndeclaredSessionUuid } from "../toolParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
@@ -93,6 +97,39 @@ interface StepExecutionResult {
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
+}
+
+interface ParallelTrackFailure {
+  failedStep: NonNullable<PlanExecutionResult["failedStep"]>;
+  deviceOrder: number;
+  abortConsequence: boolean;
+}
+
+/** Choose a stable failure after all tracks settle, preserving the abort's cause. */
+export function selectParallelFailure(
+  failures: readonly ParallelTrackFailure[],
+): PlanExecutionResult["failedStep"] {
+  let selected: ParallelTrackFailure | undefined;
+  for (const candidate of failures) {
+    if (!selected || (selected.abortConsequence && !candidate.abortConsequence)) {
+      selected = candidate;
+      continue;
+    }
+    if (candidate.abortConsequence !== selected.abortConsequence) {
+      continue;
+    }
+    const candidateIndex =
+      candidate.failedStep.stepIndex === -1 ? Infinity : candidate.failedStep.stepIndex;
+    const selectedIndex =
+      selected.failedStep.stepIndex === -1 ? Infinity : selected.failedStep.stepIndex;
+    if (
+      candidateIndex < selectedIndex ||
+      (candidateIndex === selectedIndex && candidate.deviceOrder < selected.deviceOrder)
+    ) {
+      selected = candidate;
+    }
+  }
+  return selected?.failedStep;
 }
 
 /**
@@ -706,7 +743,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
     executionOptions?: PlanExecutionOptions,
   ): Promise<PlanExecutionResult> {
     let executedSteps = 0;
-    const debugMode = isDebugModeEnabled();
     const startTime = this.timer.now();
     // Always capture step data for test recording, not just in debug mode
     const debugSteps: ExecutePlanStepDebugInfo[] = [];
@@ -739,13 +775,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
       for (let i = startStep; i < plan.steps.length; i++) {
         throwIfAborted(signal);
         if (executionOptions?.onBeforePlanStep) {
-          await executionOptions.onBeforePlanStep({
+          const beforeStep = executionOptions.onBeforePlanStep({
             stepIndex: i,
             totalSteps: plan.steps.length,
+            ...(signal ? { signal } : {}),
           });
+          await beforeStep.finally(() => throwIfAborted(signal));
         }
         const step = plan.steps[i];
-        const stepStartTime = debugMode ? this.timer.now() : 0;
+        const stepStartTime = this.timer.now();
         const stepLabel =
           step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);
         logger.info(
@@ -865,22 +903,41 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
   }
 
-  /**
-   * Execute a multi-device plan with parallel device tracks.
-   */
-  private async executeParallel(
+  private validateParallelStartStep(
     plan: Plan,
-    partitionedPlan: ReturnType<typeof PlanPartitioner.partition> & { devices: string[] },
     startStep: number,
-    platform?: string,
-    deviceId?: string,
-    sessionUuid?: string,
-    signal?: AbortSignal,
-    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
-    executionOptions?: PlanExecutionOptions,
-  ): Promise<PlanExecutionResult> {
-    const debugMode = isDebugModeEnabled();
+  ): PlanExecutionResult | undefined {
+    // Resume indices refer to plan.steps, not an individual device track.
+    // Negative indices already include every step; preserve that behavior.
+    if (plan.steps.length > 0 && startStep >= plan.steps.length) {
+      const error = new ActionableError(
+        `Start step index ${startStep} is out of bounds. Parallel plan has ${plan.steps.length} steps (plan-wide step index, valid range: 0-${plan.steps.length - 1})`,
+      );
+      logger.error(`Plan execution failed: ${error}`);
+      // Match executeSequential's caught validation error at the public boundary.
+      return {
+        success: false,
+        executedSteps: 0,
+        totalSteps: plan.steps.length,
+        failedStep: { stepIndex: -1, tool: "unknown", error: `${error}` },
+        debug: {
+          executionTimeMs: 0,
+          steps: [
+            {
+              step: "Plan execution error",
+              status: "failed",
+              durationMs: 0,
+              details: { error: `${error}` },
+            },
+          ],
+        },
+      };
+    }
 
+    return undefined;
+  }
+
+  private computeParallelResumeStep(plan: Plan, startStep: number): number {
     // AI recovery resumes a failed plan at its failed global step index, and each
     // device track skips lower-indexed steps independently. If that resume index
     // falls in the middle of a barrier/criticalSection generation, some devices'
@@ -896,7 +953,31 @@ export class DefaultPlanExecutor implements PlanExecutor {
           "resuming inside a barrier generation (issue #6234)",
       );
     }
-    startStep = effectiveStartStep;
+    return effectiveStartStep;
+  }
+
+  /**
+   * Execute a multi-device plan with parallel device tracks.
+   */
+  private async executeParallel(
+    plan: Plan,
+    partitionedPlan: ReturnType<typeof PlanPartitioner.partition> & { devices: string[] },
+    startStep: number,
+    platform?: string,
+    deviceId?: string,
+    sessionUuid?: string,
+    signal?: AbortSignal,
+    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
+    executionOptions?: PlanExecutionOptions,
+  ): Promise<PlanExecutionResult> {
+    const outOfBounds = this.validateParallelStartStep(plan, startStep);
+    if (outOfBounds) {
+      return outOfBounds;
+    }
+
+    const debugMode = isDebugModeEnabled();
+
+    startStep = this.computeParallelResumeStep(plan, startStep);
 
     logger.info(
       `[PARALLEL_EXEC] Starting parallel execution for ${partitionedPlan.devices.length} devices`,
@@ -907,21 +988,14 @@ export class DefaultPlanExecutor implements PlanExecutor {
     const combinedSignal = signal
       ? AbortSignal.any([signal, internalAbortController.signal])
       : internalAbortController.signal;
+    let firstDeviceLoss: DeviceLostError | undefined;
 
     // Track per-device results
     const perDeviceResults = new Map<string, DeviceExecutionResult>();
-    let firstFailure:
-      | {
-          device: string;
-          stepIndex: number;
-          tool: string;
-          error: string;
-          failureObservation?: FailureObservationSummary;
-        }
-      | undefined;
+    const failures: ParallelTrackFailure[] = [];
 
     // Execute each device track in parallel
-    const devicePromises = partitionedPlan.devices.map(async (device) => {
+    const devicePromises = partitionedPlan.devices.map(async (device, deviceOrder) => {
       const deviceStartTime = debugMode ? this.timer.now() : 0;
       const track = partitionedPlan.deviceTracks.get(device)!;
 
@@ -938,6 +1012,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           combinedSignal,
           executionOptions,
         );
+        // An ordinary failing callback aborts synchronously below. Failures
+        // observed after that abort may be cancelled siblings, even at a lower
+        // real plan index. Keep them in perDeviceResults but prefer the cause.
+        const abortConsequence = internalAbortController.signal.aborted;
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -964,15 +1042,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
             `[PARALLEL_EXEC][${device}] Device track failed at step ${result.failedStep?.stepIndex}`,
           );
 
-          // Record first failure
-          if (!firstFailure && result.failedStep) {
-            firstFailure = {
-              device,
-              stepIndex: result.failedStep.stepIndex,
-              tool: result.failedStep.tool,
-              error: result.failedStep.error,
-              failureObservation: result.failedStep.failureObservation,
-            };
+          if (result.failedStep) {
+            failures.push({
+              failedStep: {
+                device,
+                stepIndex: result.failedStep.stepIndex,
+                tool: result.failedStep.tool,
+                error: result.failedStep.error,
+                failureObservation: result.failedStep.failureObservation,
+              },
+              deviceOrder,
+              abortConsequence,
+            });
           }
 
           // Trigger abort based on strategy
@@ -988,8 +1069,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
         return result;
       } catch (error) {
         if (isDeviceLostError(error)) {
+          // Device loss overrides ordinary-failure abort strategies. Remember the
+          // originating error before abort listeners can reject sibling tracks.
+          firstDeviceLoss ??= error;
+          rememberDeviceLossAbort(internalAbortController.signal, firstDeviceLoss);
+          rememberDeviceLossAbort(combinedSignal, firstDeviceLoss);
+          internalAbortController.abort(firstDeviceLoss);
           throw error;
         }
+        const abortConsequence = internalAbortController.signal.aborted;
         const errorMsg = errorMessage(error);
         logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMsg}`);
 
@@ -1009,14 +1097,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
         perDeviceResults.set(device, deviceResult);
 
-        if (!firstFailure) {
-          firstFailure = {
+        failures.push({
+          failedStep: {
             device,
             stepIndex: -1,
             tool: "unknown",
             error: errorMsg,
-          };
-        }
+          },
+          deviceOrder,
+          abortConsequence,
+        });
 
         if (abortStrategy === "immediate") {
           internalAbortController.abort();
@@ -1038,8 +1128,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
     });
 
-    // Wait for all devices to complete
-    const results = await Promise.all(devicePromises);
+    // Keep plan ownership until every track, including in-flight tools, settles.
+    const results = await this.settleDeviceTracks(devicePromises, () => firstDeviceLoss);
 
     // Calculate total executed steps across all devices
     const totalExecutedSteps = results.reduce((sum, r) => sum + r.executedSteps, 0);
@@ -1077,18 +1167,27 @@ export class DefaultPlanExecutor implements PlanExecutor {
       success: allSucceeded,
       executedSteps: totalExecutedSteps,
       totalSteps,
-      failedStep: firstFailure
-        ? {
-            stepIndex: firstFailure.stepIndex,
-            tool: firstFailure.tool,
-            error: firstFailure.error,
-            device: firstFailure.device,
-            failureObservation: firstFailure.failureObservation,
-          }
-        : undefined,
+      failedStep: selectParallelFailure(failures),
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
     };
+  }
+
+  private async settleDeviceTracks<T>(
+    devicePromises: Promise<T>[],
+    getDeviceLoss: () => DeviceLostError | undefined,
+  ): Promise<T[]> {
+    const settled = await Promise.allSettled(devicePromises);
+    const deviceLoss = getDeviceLoss();
+    if (deviceLoss) {
+      throw deviceLoss;
+    }
+    return settled.map((result) => {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+      return result.value;
+    });
   }
 
   /**

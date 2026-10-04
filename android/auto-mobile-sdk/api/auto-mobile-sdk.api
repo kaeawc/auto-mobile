@@ -953,6 +953,12 @@ public final class dev.jasonpearson.automobile.sdk.events.SdkEventBuffer {
   public final void persistUndelivered$auto_mobile_sdk(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, java.lang.String);
   public static void persistUndelivered$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.util.List, java.lang.String, int, java.lang.Object);
 }
+Compiled from "SdkEventBroadcaster.kt"
+public final class dev.jasonpearson.automobile.sdk.events.UnsentEventBatchesException extends java.lang.RuntimeException {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.events.UnsentEventBatchesException(java.util.List<? extends kotlin.Pair<? extends java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, java.lang.String>>, java.lang.Exception);
+  public final java.util.List<kotlin.Pair<java.util.List<dev.jasonpearson.automobile.protocol.SdkEvent>, java.lang.String>> getBatches();
+}
 Compiled from "AutoMobileFailures.kt"
 public final class dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures {
   public static final dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures INSTANCE;
@@ -1030,10 +1036,12 @@ Compiled from "AutoMobileClickTracker.kt"
 public final class dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker {
   public static final dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker INSTANCE;
   public static final int $stable;
-  public final void initialize$auto_mobile_sdk(android.app.Application, java.lang.String);
+  public final void initialize$auto_mobile_sdk(android.content.Context, java.lang.String);
+  public final android.app.Activity findActivity$auto_mobile_sdk(android.content.Context);
   public final void shutdown(android.content.Context);
-  public static final java.util.WeakHashMap access$getWrappedActivities$p();
   public static final void access$wrapWindowCallback(dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker, android.app.Activity);
+  public static final void access$restoreWindowCallback(dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker, android.app.Activity);
+  public static final java.util.WeakHashMap access$getWrappedActivities$p();
   public static final android.os.Handler access$getHandler$p();
   public static final boolean access$isInitialized$p();
   public static final long access$getLastTapProcessedAt$p();

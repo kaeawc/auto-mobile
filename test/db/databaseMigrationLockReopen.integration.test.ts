@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import path from "path";
 import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import { createFileBackedDbHarness } from "./withFileBackedDb";
+import { bindFileBackedDbHarness } from "./withFileBackedDb";
 
 /**
  * Regression test for issue #2947 (sibling of the #2898 generation fence).
@@ -32,15 +32,7 @@ import { createFileBackedDbHarness } from "./withFileBackedDb";
 describe("in-process same-path reopen cannot steal an in-flight migration's lock (issue #2947)", () => {
   // Shared harness: fresh module import, tracked temp dirs cleaned with the
   // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   function setEnv(key: string, value: string | undefined): void {
     if (value === undefined) {
@@ -50,7 +42,7 @@ describe("in-process same-path reopen cannot steal an in-flight migration's lock
     }
   }
 
-  const makeTempDir = (prefix: string): Promise<string> => harness.makeTempDbDir(prefix);
+  const makeTempDir = (prefix: string): Promise<string> => getHarness().makeTempDbDir(prefix);
 
   /**
    * A migrations dir with one migration that WRITES to the DB (creates `probe`
@@ -139,7 +131,7 @@ export async function down(db) {
       // concurrent-migration collision scenario.
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", migrationsDir);
 
-      const db = await harness.importFreshDatabaseModule();
+      const db = await getHarness().importFreshDatabaseModule();
 
       // Generation 0: start the slow, WRITING migration and hold it in flight
       // (mid-run, still holding the migrate lock).

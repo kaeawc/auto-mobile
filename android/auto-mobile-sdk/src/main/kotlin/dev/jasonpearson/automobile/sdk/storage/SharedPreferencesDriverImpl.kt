@@ -128,14 +128,15 @@ internal class SharedPreferencesDriverImpl(
     val sharedPrefsListener =
       SharedPreferences.OnSharedPreferenceChangeListener { sharedPrefs, key ->
         // Capture the new value
-        val newValue = if (key != null) sharedPrefs.all[key] else null
+        val currentValues = sharedPrefs.all
+        val newValue = if (key != null) currentValues[key] else null
         val type = detectType(newValue)
         val timestamp = System.currentTimeMillis()
         val sequence = sequenceCounter.incrementAndGet()
 
         // Derive the prior value from the snapshot taken before this change. A
-        // null key means the whole file was cleared (API 30+), so there is no
-        // single prior value to report (#3000). Capture its own type so it stays
+        // null key signals clear on API 30+ when the compat change is enabled,
+        // so there is no single prior value to report (#3000). Capture its own type so it stays
         // valid JSON on the wire even when the new value's type is UNKNOWN.
         val previousValue = if (key != null) snapshot[key] else null
         val previousValueType = detectType(previousValue)
@@ -155,6 +156,10 @@ internal class SharedPreferencesDriverImpl(
         changeQueues[fileName]?.add(change)
 
         // Advance the snapshot to reflect the new state for the next change.
+        // API < 30 sends no clear callback; reconcile absent keys in place using this event's map.
+        // Clear followed by re-setting the same key before another event is indistinguishable
+        // from an update on those APIs, so its stale previous value cannot be detected here.
+        snapshot.keys.retainAll(currentValues.keys)
         if (key != null) {
           if (newValue != null) snapshot[key] = newValue else snapshot.remove(key)
         } else {

@@ -241,6 +241,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       planContent: result.planContent,
       stepCount: result.stepCount,
       durationMs: result.durationMs,
+      ...(result.error ? { error: result.error } : {}),
     };
   }
 

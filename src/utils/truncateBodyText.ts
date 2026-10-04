@@ -9,6 +9,9 @@
  * re-omitting it per repository ("one canonical primitive per concern").
  */
 
+import { logger } from "./logger";
+import { errorMessage } from "./describeUnknownError";
+
 /** Maximum retained body length, in UTF-16 code units (10&nbsp;KB). */
 export const BODY_TRUNCATION_LIMIT = 10_240;
 
@@ -97,7 +100,9 @@ export function boundStructuredField(
     let serialized: string | undefined;
     try {
       serialized = JSON.stringify(value);
-    } catch {
+    } catch (error) {
+      // Cycles/BigInt cannot be measured here; the caller's serializer remains responsible for rejecting them.
+      logger.debug(`Structured-field size probe could not serialize value: ${errorMessage(error)}`);
       return value;
     }
     if (serialized === undefined) {

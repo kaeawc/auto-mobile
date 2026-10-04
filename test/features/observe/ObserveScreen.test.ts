@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -19,6 +19,8 @@ import { normalizeIosHierarchy } from "../../../src/features/observe/HierarchyNo
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { resolveViewHierarchyForSearch } from "../../../src/features/utility/viewHierarchySearch";
+import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
+import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -1387,5 +1389,118 @@ describe("ObserveScreen", function () {
       const cached = await screenA.getMostRecentCachedObserveResult();
       expect(cached.viewHierarchy).toBe("A-hierarchy");
     });
+  });
+});
+
+describe("ObserveScreen terminal screenshot display selection", () => {
+  test.each([
+    { name: "inferred external panel", key: "external", expected: 2 },
+    { name: "inferred primary panel", key: "internal", expected: undefined },
+    { name: "unknown panel", key: "missing", expected: undefined, fallback: true },
+    {
+      name: "disconnected panel",
+      key: "external",
+      expected: undefined,
+      fallback: true,
+      disconnected: true,
+    },
+    { name: "constructor wins", display: "external", key: "internal", expected: 2 },
+    { name: "explicit primary keeps id", display: "internal", key: "external", expected: 0 },
+    {
+      name: "constructor active keeps legacy behavior",
+      display: "active",
+      key: "external",
+      expected: undefined,
+    },
+    { name: "iOS keeps legacy behavior", key: "external", expected: undefined, ios: true },
+    { name: "missing observation keeps legacy behavior", expected: undefined },
+    {
+      name: "single-panel default keeps legacy behavior",
+      key: "0",
+      expected: undefined,
+      single: true,
+    },
+  ])("$name", async (scenario) => {
+    const timer = new FakeTimer();
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("cmd display get-displays", {
+      stdout:
+        'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}' +
+        (scenario.disconnected
+          ? ""
+          : '\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}'),
+      stderr: "",
+    });
+    const device: BootedDevice = {
+      deviceId: "terminal-screenshot-display",
+      name: "Screenshot display",
+      platform: scenario.ios ? "ios" : "android",
+      displays: scenario.single
+        ? undefined
+        : {
+            panels: [
+              { key: "internal", role: "inner", sizePx: { width: 100, height: 100 } },
+              { key: "external", role: "external", sizePx: { width: 200, height: 200 } },
+            ],
+            postures: [],
+          },
+    };
+    class CaptureRecorder extends FakeScreenshotRecorder {
+      readonly ids: Array<number | undefined> = [];
+      override async captureFresh(
+        _id?: string,
+        _perf?: PerformanceTracker,
+        _signal?: AbortSignal,
+        displayId?: number,
+      ): Promise<void> {
+        this.ids.push(displayId);
+      }
+    }
+    const recorder = new CaptureRecorder();
+    const observe = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(executor),
+      {
+        display: scenario.display,
+        screenshotRecorder: recorder,
+      },
+      timer,
+    );
+    const observation = scenario.key === undefined ? undefined : observe.createBaseResult();
+    if (observation && scenario.key) {
+      observation.display.key = scenario.key;
+    }
+    const debug = spyOn(logger, "debug");
+    try {
+      await observe.captureScreenshot(undefined, undefined, observation, "fresh");
+      expect(recorder.ids).toEqual([scenario.expected]);
+      if (scenario.fallback) {
+        expect(debug.mock.calls).toContainEqual([
+          expect.stringMatching(
+            /^Screenshot panel .* could not be mapped; using default display: [^\n]+$/,
+          ),
+        ]);
+      }
+      if (scenario.ios || scenario.single || scenario.display === "active" || !scenario.key) {
+        expect(executor.getExecutedCommands()).toEqual([]);
+      }
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  test("constructor all preserves the single-panel resolution error", async () => {
+    const recorder = new FakeScreenshotRecorder();
+    const observe = new RealObserveScreen(
+      { deviceId: "terminal-all", name: "Android", platform: "android" },
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      { display: "all", screenshotRecorder: recorder },
+      new FakeTimer(),
+    );
+    const observation = observe.createBaseResult();
+    await expect(
+      observe.captureScreenshot(undefined, undefined, observation, "fresh"),
+    ).rejects.toThrow('display: "all" is not supported for single-panel targeting');
+    expect(recorder.captureFreshCalls).toBe(0);
   });
 });

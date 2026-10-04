@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, mock } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
@@ -165,6 +165,30 @@ describe("AVDManager", function () {
   }
 
   describe("acceptLicenses", () => {
+    test("logs at warn level with the underlying license-acceptance error and returns a failure", async () => {
+      const error = new Error("SDK discovery unavailable");
+      const warnLog = mock((message: string, error?: unknown) => {});
+      const errorLog = mock(() => {});
+      const mockDeps = createDependencies({
+        detectAndroidCommandLineTools: async () => {
+          throw error;
+        },
+      });
+      mockDeps.logger.warn = warnLog;
+      mockDeps.logger.error = errorLog;
+
+      expect(await avdmanager.acceptLicenses(mockDeps)).toEqual({
+        success: false,
+        message: "Failed to accept licenses: SDK discovery unavailable",
+      });
+      expect(warnLog).toHaveBeenCalledTimes(1);
+      expect(warnLog).toHaveBeenCalledWith(
+        "Failed to accept licenses: SDK discovery unavailable",
+        error,
+      );
+      expect(errorLog).not.toHaveBeenCalled();
+    });
+
     test("should accept licenses successfully", async () => {
       const mockDeps = createDependencies();
       const originalSpawn = mockDeps.spawn;
@@ -887,6 +911,31 @@ id: 52 or "pixel_9"
   });
 
   describe("installSystemImage", () => {
+    test("logs at warn level with the underlying system-image error and returns a failure", async () => {
+      const error = new Error("SDK discovery unavailable");
+      const warnLog = mock((message: string, error?: unknown) => {});
+      const errorLog = mock(() => {});
+      const mockDeps = createDependencies({
+        detectAndroidCommandLineTools: async () => {
+          throw error;
+        },
+      });
+      mockDeps.logger.warn = warnLog;
+      mockDeps.logger.error = errorLog;
+      const packageName = "system-images;android-35;google_apis;arm64-v8a";
+
+      expect(await avdmanager.installSystemImage(packageName, true, mockDeps)).toEqual({
+        success: false,
+        message: `Failed to install system image ${packageName}: SDK discovery unavailable`,
+      });
+      expect(warnLog).toHaveBeenCalledTimes(1);
+      expect(warnLog).toHaveBeenCalledWith(
+        `Failed to install system image ${packageName}: SDK discovery unavailable`,
+        error,
+      );
+      expect(errorLog).not.toHaveBeenCalled();
+    });
+
     test("should install system image successfully", async () => {
       const mockDeps = createDependencies();
       const originalSpawn = mockDeps.spawn;

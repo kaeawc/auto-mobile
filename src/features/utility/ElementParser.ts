@@ -135,7 +135,7 @@ export class DefaultElementParser implements ElementParser {
     return [hierarchy];
   }
 
-  private sortWindows<T extends { windowLayer: number }>(
+  private sortWindows<T extends { windowLayer?: number }>(
     windows: T[],
     order: WindowSearchOrder,
   ): T[] {

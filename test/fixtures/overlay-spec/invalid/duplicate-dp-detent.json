@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "boundaries",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "bottomSheet",
+      "child": {
+        "type": "spacer"
+      },
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "detents": [
+        {
+          "dp": 240
+        },
+        {
+          "dp": 240.0
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.detents[1]"
+}

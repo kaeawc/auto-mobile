@@ -1,3 +1,4 @@
+import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
 import { describe, expect, spyOn, test } from "bun:test";
@@ -86,8 +87,13 @@ describe("SharedStorageService", () => {
         }
         console.log(`Rollback message (${chunkCount} chunks): ${error.message.length} characters`);
         expect(error.cause).toBeInstanceOf(Error);
-        expect(warn).toHaveBeenCalledTimes(chunkCount);
-        const loggedError = warn.mock.calls[0]?.[1];
+        const warnings = loggerCallsWithPrefix(
+          warn.mock.calls,
+          "[SharedStorage]",
+          "Failed to remove inline shared-storage directory:",
+        );
+        expect(warnings).toHaveLength(chunkCount);
+        const loggedError = warnings[0]?.[1];
         expect(loggedError).toBeInstanceOf(ActionableError);
         if (!(loggedError instanceof ActionableError)) {
           throw new Error("Expected the full rollback error to be logged");
@@ -439,7 +445,13 @@ describe("SharedStorageService", () => {
       expect(new Set(cleanupSignals).size).toBe(4);
       expect(timer.now()).toBe(15000);
       expect(timer.getPendingTimeoutCount()).toBe(0);
-      expect(warn).toHaveBeenCalledTimes(4);
+      expect(
+        loggerCallsWithPrefix(
+          warn.mock.calls,
+          "[SharedStorage]",
+          "Failed to remove inline shared-storage directory:",
+        ),
+      ).toHaveLength(4);
       pending.reject(new Error("late rollback failure"));
     } finally {
       warn.mockRestore();
@@ -799,7 +811,13 @@ describe("SharedStorageService", () => {
             cleanupError,
           );
         } else {
-          expect(warn).not.toHaveBeenCalled();
+          expect(
+            loggerCallsWithPrefix(
+              warn.mock.calls,
+              "[SharedStorage]",
+              "Failed to remove inline shared-storage directory:",
+            ),
+          ).toHaveLength(0);
         }
       } finally {
         warn.mockRestore();

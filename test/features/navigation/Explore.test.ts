@@ -31,6 +31,7 @@ import type { ElementParser } from "../../../src/utils/interfaces/ElementParser"
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
+import { PressButton } from "../../../src/features/action/PressButton";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
 import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
 
@@ -258,6 +259,146 @@ describe("Explore", () => {
         expect(result.screensDiscovered).toBe(1);
       });
     }
+  });
+
+  describe("execute characterization", () => {
+    function executionSeams(instance: Explore) {
+      return instance as unknown as {
+        performInteraction: () => Promise<boolean>;
+        resetToHome: () => Promise<void>;
+        loopDetection: Map<string, number>;
+        previousScreen: string | null;
+        consecutiveNoChangeCount: number;
+      };
+    }
+
+    test("tracks first, unchanged, missing and returning screens only after successful interactions", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      const outcomes = ["A", "A", null, "B", "A", "B", "A"];
+      spyOn(seams, "performInteraction").mockImplementation(async () => {
+        fakeGraph.setCurrentScreenValue(outcomes.shift() ?? null);
+        return true;
+      });
+
+      const result = await explore.execute({ maxInteractions: 20 });
+
+      expect(result.interactionsPerformed).toBe(7);
+      expect(result.stopReason).toBe("Detected navigation loop on screen: A");
+      expect([...seams.loopDetection]).toEqual([
+        ["A", 3],
+        ["B", 2],
+      ]);
+      expect(seams.previousScreen).toBe("A");
+      expect(result.explorationPath).toEqual(["A", "B"]);
+    });
+
+    test("failed interactions retain previous-screen tracking and successful ones reset the no-change streak", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      const outcomes = [true, false, true];
+      spyOn(seams, "performInteraction").mockImplementation(async () => {
+        const success = outcomes.shift() ?? false;
+        fakeGraph.setCurrentScreenValue(success ? "A" : "Ignored");
+        return success;
+      });
+
+      const result = await explore.execute({ maxInteractions: 2 });
+
+      expect(result.interactionsPerformed).toBe(2);
+      expect([...seams.loopDetection]).toEqual([["A", 1]]);
+      expect(seams.previousScreen).toBe("A");
+      expect(seams.consecutiveNoChangeCount).toBe(0);
+    });
+
+    for (const reachesDestination of [true, false]) {
+      test(`validation ${reachesDestination ? "success precedes progress and reset" : "failure skips loop accounting, progress and reset"}`, async () => {
+        fakeGraph.setCurrentScreenValue("A");
+        fakeGraph.addEdge({
+          from: "A",
+          to: "B",
+          timestamp: 0,
+          edgeType: "tool",
+          uiState: { selectedElements: [{ text: "Settings" }] },
+        });
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+        const seams = executionSeams(explore);
+        const events: string[] = [];
+        spyOn(seams, "performInteraction").mockImplementation(async () => {
+          events.push("interact");
+          fakeGraph.setCurrentScreenValue(reachesDestination ? "B" : "Wrong");
+          return true;
+        });
+        spyOn(seams, "resetToHome").mockImplementation(async () => {
+          events.push("reset");
+        });
+        const stats = spyOn(fakeGraph, "getStats");
+
+        const result = await explore.execute(
+          { mode: "validate", maxInteractions: 1, resetToHome: true, resetInterval: 1 },
+          async (_current, _total, message) => {
+            events.push(message);
+            if (message.startsWith("Validating graph:")) {
+              expect(explore.graphTraversalState?.traversedEdges.size).toBe(1);
+              expect(seams.previousScreen).toBe("B");
+            }
+          },
+        );
+
+        expect(result.interactionsPerformed).toBe(1);
+        expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+          actualTo: reachesDestination ? "B" : "Wrong",
+          success: reachesDestination,
+          matchConfidence: 0.9,
+        });
+        expect(events).toEqual(
+          reachesDestination
+            ? [
+                "Starting exploration...",
+                "interact",
+                "Validating graph: 1/1 edges traversed (100%) - 1/1 interactions",
+                "reset",
+              ]
+            : ["Starting exploration...", "interact"],
+        );
+        expect([...seams.loopDetection]).toEqual(reachesDestination ? [["B", 1]] : []);
+        expect(stats).not.toHaveBeenCalled();
+      });
+    }
+
+    test("a rejected progress callback is wrapped before any periodic reset", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      spyOn(seams, "performInteraction").mockResolvedValue(true);
+      const reset = spyOn(seams, "resetToHome").mockResolvedValue(undefined);
+      const error = new Error("progress rejected");
+      const execution = explore.execute(
+        { maxInteractions: 1, resetToHome: true, resetInterval: 1 },
+        async (current) => {
+          if (current > 0) {
+            throw error;
+          }
+        },
+      );
+      await expect(execution).rejects.toThrow("Failed to execute exploration");
+      await expect(execution).rejects.toThrow("progress rejected");
+      expect(reset).not.toHaveBeenCalled();
+    });
+
+    test("an already aborted run skips observation and returns a cancelled partial report", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      const observe = spyOn(explore.observeScreen, "execute");
+      const controller = new AbortController();
+      controller.abort();
+      const result = await explore.execute({}, undefined, controller.signal);
+      expect(result.cancelled).toBe(true);
+      expect(result.interactionsPerformed).toBe(0);
+      expect(observe).not.toHaveBeenCalled();
+    });
   });
 
   describe("element selection", () => {
@@ -1215,6 +1356,203 @@ describe("Explore", () => {
   });
 
   describe("graph-based navigation (validate mode)", () => {
+    const completionReason = "All edges in navigation graph have been traversed";
+
+    function addValidateEdge(from: string, to: string, text: string): void {
+      fakeGraph.addEdge({
+        from,
+        to,
+        edgeType: "tool",
+        timestamp: fakeTimer.now(),
+        uiState: { selectedElements: [{ text }] },
+      });
+    }
+
+    function setupValidateRun(options: { returnToA?: boolean; emptyLeaf?: boolean } = {}) {
+      fakeGraph.setCurrentScreenValue("A");
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      const backStopReasons: unknown[] = [];
+      const observation = spyOn(explore.observeScreen, "execute").mockImplementation(async () => {
+        if (options.emptyLeaf && fakeGraph.getCurrentScreen() !== "A") {
+          return { viewHierarchy: { hierarchy: { node: [] }, packageName: "com.test.app" } };
+        }
+        return createMockObservation();
+      });
+      const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async (args) => {
+        fakeGraph.setCurrentScreenValue(args.elementId === "com.test:id/profile_btn" ? "C" : "B");
+        return { success: true, action: "tap", element: createMockElement() };
+      });
+      const back = spyOn(PressButton.prototype, "press").mockImplementation(async (button) => {
+        expect(button).toBe("back");
+        backStopReasons.push(Reflect.get(explore, "stopReason"));
+        if (options.returnToA) {
+          fakeGraph.setCurrentScreenValue("A");
+        }
+        return { success: true, button, keyCode: 4 };
+      });
+      return {
+        backStopReasons,
+        restore: () => {
+          observation.mockRestore();
+          tap.mockRestore();
+          back.mockRestore();
+        },
+      };
+    }
+
+    for (const emptyLeaf of [false, true]) {
+      test(`validate regression: recovers from ${emptyLeaf ? "empty" : "interactive"} leaf to validate both branches`, async () => {
+        addValidateEdge("A", "B", "Settings");
+        addValidateEdge("A", "C", "Profile");
+        const run = setupValidateRun({ returnToA: true, emptyLeaf });
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+          expect(result.graphTraversal?.edgesTraversed).toBe(2);
+          expect(result.graphTraversal?.totalEdges).toBe(2);
+          expect(result.stopReason).toBe(completionReason);
+          expect(result.graphTraversal?.edgeValidationResults.every((edge) => edge.success)).toBe(
+            true,
+          );
+          expect(run.backStopReasons).toEqual([""]);
+          expect(fakeGraph.getCurrentScreen()).toBe("C");
+          expect(fakeTimer.getSleepHistory()).toEqual([500, 1000, 500]);
+        } finally {
+          run.restore();
+        }
+      });
+    }
+
+    test("validate regression: reports unreachable pending sources at the existing back limit", async () => {
+      addValidateEdge("A", "B", "Settings");
+      addValidateEdge("X", "Y", "Profile");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toContain("Too many consecutive back navigations (5)");
+        expect(result.stopReason).toContain("Validated 1 of 2 edges");
+        expect(result.stopReason).toContain("1 remain pending");
+        expect(result.stopReason).toContain("X->Y");
+        expect(result.stopReason).not.toContain(completionReason);
+        expect(result.graphTraversal?.edgesTraversed).toBe(1);
+        expect(run.backStopReasons).toEqual(["", "", "", "", ""]);
+        expect(fakeTimer.getSleepHistory()).toEqual([500, 1000, 1000, 1000, 1000, 1000]);
+      } finally {
+        run.restore();
+      }
+    });
+
+    for (const emptyLeaf of [false, true]) {
+      test(`validate regression: single edge completes on ${emptyLeaf ? "empty" : "interactive"} leaf without Back`, async () => {
+        addValidateEdge("A", "B", "Settings");
+        const run = setupValidateRun({ emptyLeaf });
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+          expect(result.graphTraversal?.edgesTraversed).toBe(1);
+          expect(result.graphTraversal?.totalEdges).toBe(1);
+          expect(result.stopReason).toBe(completionReason);
+          expect(run.backStopReasons).toEqual([]);
+          expect(fakeTimer.getSleepHistory()).toEqual([500]);
+        } finally {
+          run.restore();
+        }
+      });
+    }
+
+    test("validate regression: missing element stops without Back and preserves pending summary", async () => {
+      addValidateEdge("A", "B", "Missing button");
+      addValidateEdge("X", "Y", "Profile");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toContain("Cannot find element matching edge A->B");
+        expect(result.stopReason).toContain("Validated 0 of 2 edges");
+        expect(result.stopReason).toContain("1 failed validation");
+        expect(result.stopReason).toContain("1 remain pending");
+        expect(result.stopReason).toContain("X->Y");
+        expect(result.graphTraversal?.edgeValidationResults[0]?.success).toBe(false);
+        expect(run.backStopReasons).toEqual([]);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("validate regression: screen with no candidates stops on element divergence without Back", async () => {
+      addValidateEdge("A", "B", "Settings");
+      const run = setupValidateRun();
+      const observation = spyOn(explore.observeScreen, "execute").mockResolvedValue({
+        viewHierarchy: { hierarchy: { node: [] }, packageName: "com.test.app" },
+      });
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toContain("Cannot find element matching edge A->B");
+        expect(result.graphTraversal?.edgeValidationResults[0]?.success).toBe(false);
+        expect(run.backStopReasons).toEqual([]);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        observation.mockRestore();
+        run.restore();
+      }
+    });
+
+    test("validate regression: single-screen graph completes without Back", async () => {
+      addValidateEdge("A", "A", "Settings");
+      const run = setupValidateRun();
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
+        success: true,
+        action: "tap",
+        element: createMockElement(),
+      });
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toBe(completionReason);
+        expect(result.graphTraversal?.edgesTraversed).toBe(1);
+        expect(result.graphTraversal?.totalEdges).toBe(1);
+        expect(run.backStopReasons).toEqual([]);
+        expect(fakeTimer.getSleepHistory()).toEqual([500]);
+      } finally {
+        tap.mockRestore();
+        run.restore();
+      }
+    });
+
+    for (const budget of [{ maxInteractions: 1 }, { timeoutMs: 500 }]) {
+      test(`validate regression: preserves ${"maxInteractions" in budget ? "interaction" : "time"} budget and reports remaining edges`, async () => {
+        addValidateEdge("A", "B", "Settings");
+        addValidateEdge("A", "C", "Profile");
+        const run = setupValidateRun({ returnToA: true });
+        try {
+          const result = await explore.execute({
+            mode: "validate",
+            maxInteractions: 10,
+            ...budget,
+          });
+          expect(result.stopReason).toContain("Reached");
+          expect(result.stopReason).toContain("Validated 1 of 2 edges");
+          expect(result.stopReason).toContain("1 remain pending");
+          expect(result.stopReason).toContain("A->C");
+          expect(run.backStopReasons).toEqual([]);
+          expect(fakeTimer.getSleepHistory()).toEqual([500]);
+        } finally {
+          run.restore();
+        }
+      });
+    }
+
+    test("validate regression: empty graph completes without Back", async () => {
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.graphTraversal?.edgesTraversed).toBe(0);
+        expect(result.graphTraversal?.totalEdges).toBe(0);
+        expect(result.stopReason).toBe(completionReason);
+        expect(run.backStopReasons).toEqual([]);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        run.restore();
+      }
+    });
+
     test("should initialize graph traversal state in validate mode", async () => {
       // Pre-populate the graph with some nodes and edges
       fakeGraph.recordNavigationEvent({

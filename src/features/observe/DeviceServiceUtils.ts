@@ -10,7 +10,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger, type Logger } from "../../utils/logger";
 import WebSocket from "ws";
-import type { GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
+import type { DeviceService, GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
 import type {
   BaseResult,
   GestureTimingResult,
@@ -374,7 +374,9 @@ export async function sendCommand<T>(
     }
   }
 
-  const msg = createMessage(options.messageType, requestId, options.params);
+  const msg = context.serializeRequest
+    ? context.serializeRequest({ type: options.messageType, requestId, ...options.params })
+    : createMessage(options.messageType, requestId, options.params);
   try {
     if (!options.abortSignal?.aborted) {
       const ws = context.getWebSocket();
@@ -489,7 +491,7 @@ export function toTextResult(result: PlatformTextResult): TextResult {
  */
 export function toImeActionResult(
   result: PlatformImeActionResult,
-): import("./DeviceService").ImeActionResult {
+): Awaited<ReturnType<DeviceService["requestImeAction"]>> {
   return {
     success: result.success,
     totalTimeMs: result.totalTimeMs,

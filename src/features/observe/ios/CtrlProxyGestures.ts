@@ -9,7 +9,8 @@ import {
   SharedGestureDelegate,
   type TapDiagnosticParameters,
 } from "../shared/SharedGestureDelegate";
-import type { DelegateContext, GestureTimingResult } from "./types";
+import type { DelegateContext } from "./types";
+import type { GestureTimingResult } from "../shared/types";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
 import { sendCommand } from "../DeviceServiceUtils";

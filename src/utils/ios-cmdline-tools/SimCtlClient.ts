@@ -255,6 +255,9 @@ export interface SimCtl {
    */
   getBootedSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<BootedDevice[]>;
 
+  /** List booted simulators without swallowing discovery failures. */
+  getBootedSimulatorsChecked(timeoutMs?: number, signal?: AbortSignal): Promise<BootedDevice[]>;
+
   /**
    * Get device information by UDID
    * @param udid - Device UDID
@@ -280,6 +283,9 @@ export interface SimCtl {
    * @returns Promise with array of runtimes
    */
   getRuntimes(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]>;
+
+  /** List runtimes without swallowing malformed output. */
+  getRuntimesChecked(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]>;
 
   /**
    * Create a new simulator
@@ -2492,8 +2498,11 @@ export class SimCtlClient implements SimCtl {
   }
 
   /** Get available runtimes and preserve malformed simctl output as an error. */
-  async getRuntimesChecked(): Promise<AppleDeviceRuntime[]> {
-    const result = await this.executeCommandArgs(["list", "runtimes", "--json"]);
+  async getRuntimesChecked(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<AppleDeviceRuntime[]> {
+    const result = await this.executeCommandArgs(["list", "runtimes", "--json"], timeoutMs, signal);
     const data = JSON.parse(result.stdout) as { runtimes?: unknown };
     if (!Array.isArray(data?.runtimes)) {
       throw new Error("simctl runtimes response does not contain a runtimes array");
@@ -3024,9 +3033,12 @@ export class SimCtlClient implements SimCtl {
       }
       return { success: true };
     } catch (error) {
+      logger.warn(`[iOS] Failed to push simulator notification: ${errorMessage(error)}`);
       return { success: false, error: errorMessage(error) };
     } finally {
-      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch(() => {});
+      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch((error) => {
+        logger.warn(`[iOS] Failed to clean up simulator notification file: ${errorMessage(error)}`);
+      });
     }
   }
 

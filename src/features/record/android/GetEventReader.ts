@@ -69,8 +69,8 @@ export class GetEventReader implements GestureEmitter {
       logger.error(`[GetEventReader] spawn error: ${normalized.message}`);
       if (generation === this.generation) {
         this.starting = false;
+        onError?.(normalized);
       }
-      onError?.(normalized);
       return;
     }
     this.starting = false;
@@ -80,6 +80,7 @@ export class GetEventReader implements GestureEmitter {
     }
 
     let lineBuffer = "";
+    let stderrTail = "";
 
     const onData = (data: Buffer): void => {
       lineBuffer += data.toString();
@@ -110,6 +111,7 @@ export class GetEventReader implements GestureEmitter {
     };
 
     const onStderr = (data: Buffer): void => {
+      stderrTail = (stderrTail + data.toString()).slice(-4096);
       logger.debug(`[GetEventReader] stderr: ${data.toString().trim()}`);
     };
 
@@ -129,18 +131,25 @@ export class GetEventReader implements GestureEmitter {
     const ignoreError = (): void => {};
     const onChildError = (err: Error): void => {
       cleanup();
-      logger.warn(`[GetEventReader] process error: ${err.message}`);
-      onError?.(err);
+      const error = stderrTail.trim()
+        ? new Error(
+            `[GetEventReader] getevent process error: ${err.message}; stderr tail: ${stderrTail.trim()}`,
+            { cause: err },
+          )
+        : err;
+      logger.warn(`[GetEventReader] process error: ${error.message}`);
+      onError?.(error);
     };
     const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       cleanup();
-      if ((code !== null && code !== 0) || signal) {
-        const error = new Error(
-          `[GetEventReader] getevent exited with ${signal ? `signal ${signal}` : `code ${code}`}`,
-        );
-        logger.warn(error.message);
-        onError?.(error);
-      }
+      // getevent is a continuous stream: even code 0 is unexpected before stop.
+      // stop() detaches this listener before killing the child.
+      const error = new Error(
+        `[GetEventReader] getevent exited with ${signal ? `signal ${signal}` : `code ${code}`}` +
+          (stderrTail.trim() ? `; stderr tail: ${stderrTail.trim()}` : ""),
+      );
+      logger.warn(error.message);
+      onError?.(error);
     };
 
     this.cleanupChild = cleanup;

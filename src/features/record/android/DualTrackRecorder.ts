@@ -365,16 +365,23 @@ export class DualTrackRecorder {
 
   private isPairCandidate(pending: PendingGesture, event: BufferedInteraction): boolean {
     const gesture = pending.gesture;
-    if (
-      Math.abs(event.receivedAt - pending.arrivedAt) > MERGE_WINDOW_MS ||
-      !isCompatibleType(gesture.type, event.type, !hasUnknownAxes(gesture))
-    ) {
+    if (Math.abs(event.receivedAt - pending.arrivedAt) > MERGE_WINDOW_MS) {
       return false;
     }
     if (hasUnknownAxes(gesture)) {
-      return Boolean(event.element?.bounds && buildSelector(event.element));
+      // Low displacement on a reported axis cannot rule out scrolling on an
+      // unreported axis. Only a directional scroll can supply that evidence.
+      const directionalScroll =
+        (gesture.type === "tap" || gesture.type === "longPress") &&
+        event.type === "scroll" &&
+        resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY) !== null;
+      return Boolean(
+        (directionalScroll || isCompatibleType(gesture.type, event.type, false)) &&
+        event.element?.bounds &&
+        buildSelector(event.element),
+      );
     }
-    return gestureHitsElement(gesture, event.element);
+    return isCompatibleType(gesture.type, event.type) && gestureHitsElement(gesture, event.element);
   }
 
   private isUnambiguousUnknownPair(
@@ -578,6 +585,9 @@ function buildMergedStep(
     case "tap":
     case "doubleTap":
     case "longPress": {
+      if (gesture.type !== "doubleTap" && hasUnknownAxes(gesture) && event.type === "scroll") {
+        return buildSwipeStep(gesture, event);
+      }
       if (selector) {
         return { tool: "tapOn", params: { action: gesture.type, ...selector } };
       }

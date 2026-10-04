@@ -96,7 +96,8 @@ public enum HierarchyMerger {
                 systemInsets: safeArea ?? xcuitest.systemInsets,
                 insets: enrichedInsets,
                 error: xcuitest.error,
-                fallbackToSpringboard: xcuitest.fallbackToSpringboard
+                fallbackToSpringboard: xcuitest.fallbackToSpringboard,
+                truncationReasons: xcuitest.truncationReasons
             )
         }
         guard let xcuitestRoot = xcuitest.hierarchy else { return xcuitest }
@@ -149,7 +150,8 @@ public enum HierarchyMerger {
             systemInsets: safeArea ?? xcuitest.systemInsets,
             insets: enrichedInsets,
             error: xcuitest.error,
-            fallbackToSpringboard: xcuitest.fallbackToSpringboard
+            fallbackToSpringboard: xcuitest.fallbackToSpringboard,
+            truncationReasons: xcuitest.truncationReasons
         )
     }
 

@@ -1,4 +1,5 @@
 import { TapAtCoordinate } from "../../src/features/action/TapAtCoordinate";
+import type { Window } from "../../src/features/observe/Window";
 import type { CoordinateTapClient } from "../../src/features/action/coordinateTapDispatch";
 import type { SnapshotReferenceStore } from "../../src/features/observe/SnapshotReferenceStore";
 import type { RenderedObservationReader } from "../../src/features/action/TargetDisplayAction";
@@ -6,6 +7,12 @@ import type { BootedDevice, ObserveResult } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeWindow } from "../fakes/FakeWindow";
+
+export function setFakeTapAtWindow(tapAt: TapAtCoordinate): void {
+  // Coordinate dispatch tests must not read the persistent per-device window cache.
+  tapAt.window = new FakeWindow() as unknown as Window;
+}
 
 export function observation(
   width: number,
@@ -58,7 +65,8 @@ export function createTapAt(
   const unusedClient: CoordinateTapClient = {
     requestTapCoordinates: async () => ({ success: true }),
   };
-  const tapAt = new TapAtCoordinate(device, new FakeAdbExecutor(), {
+  const adb = new FakeAdbExecutor();
+  const tapAt = new TapAtCoordinate(device, adb, {
     timer,
     renderedDisplayRevision,
     snapshotReferences,
@@ -80,9 +88,11 @@ export function createTapAt(
       iosCacheInvalidations++;
     },
   });
+  setFakeTapAtWindow(tapAt);
   tapAt.observeScreen = observeScreen;
   return {
     tapAt,
+    adb,
     observeScreen,
     androidDispatches,
     iosDispatches,

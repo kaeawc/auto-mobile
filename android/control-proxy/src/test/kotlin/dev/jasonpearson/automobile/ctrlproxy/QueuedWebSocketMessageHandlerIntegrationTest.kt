@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.SetHierarchyInterval
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -298,7 +299,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         },
       )
     try {
-      fixture.dispatch(RequestHierarchy(requestId = "hierarchy"))
+      fixture.dispatch(SetHierarchyInterval(requestId = "hierarchy"))
       runCurrent()
       // Inline broadcast(response) drops an orphaned correlation, even for an unowned type.
       assertTrue(fixture.first.frames.isEmpty())
@@ -312,7 +313,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
   fun `unowned handler error reaches only its originating client`() = runTest {
     val fixture = RoutingFixture(this, handler { throw IllegalStateException("hierarchy failed") })
     try {
-      fixture.dispatch(RequestHierarchy(requestId = "hierarchy"))
+      fixture.dispatch(SetHierarchyInterval(requestId = "hierarchy"))
       runCurrent()
       // Fails on base: yes (EXTERNAL_ERROR broadcasts the failure to both clients).
       assertEquals(1, fixture.first.frames.size)
@@ -541,11 +542,11 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
   fun `loopback unowned handler failure targets origin and leaves peer stream clean`() = runTest {
     withLoopbackClients(
       handler { request ->
-        if (request is RequestHierarchy) error("hierarchy failed")
+        if (request is SetHierarchyInterval) error("hierarchy failed")
         CorrelatedErrorReporter.frame(request.requestId, "barrier")
       }
     ) { fixture ->
-      send(fixture.first, RequestHierarchy(requestId = "failure"))
+      send(fixture.first, SetHierarchyInterval(requestId = "failure"))
       val failure = fixture.first.incoming.receive() as Frame.Text
       assertEquals("failure", requestId(failure))
       assertTrue(failure.readText().contains("Handler error: hierarchy failed"))
@@ -553,6 +554,42 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       assertEquals("barrier", requestId(fixture.second.incoming.receive()))
       assertTrue(fixture.second.incoming.tryReceive().isFailure)
       assertTrue(fixture.first.incoming.tryReceive().isFailure)
+    }
+  }
+
+  @Test
+  fun `owned hierarchy queue full rejection targets requester and releases owner`() = runTest {
+    val held = CompletableDeferred<Unit>()
+    val fixture =
+      RoutingFixture(
+        this,
+        handler { request ->
+          if (request.requestId == "held") held.await()
+          CorrelatedErrorReporter.frame(request.requestId, "reply")
+        },
+        capacity = 1,
+      )
+    try {
+      fixture.dispatch(RequestHierarchy(requestId = "held"))
+      runCurrent()
+      fixture.dispatch(RequestHierarchy(requestId = "pending"))
+      fixture.dispatch(RequestHierarchy(requestId = "rejected"))
+      runCurrent()
+      assertEquals(1, fixture.first.frames.size)
+      assertEquals("rejected", WebSocketServer.extractRequestId(fixture.first.frames.single()))
+      assertTrue(fixture.first.frames.single().contains("ctrlproxy_busy"))
+      assertTrue(fixture.second.frames.isEmpty())
+      assertFalse(fixture.server.hasRequestOwner("rejected"))
+      assertTrue(fixture.server.hasRequestOwner("held"))
+      assertTrue(fixture.server.hasRequestOwner("pending"))
+      held.complete(Unit)
+      runCurrent()
+      assertFalse(fixture.server.hasRequestOwner("held"))
+      assertFalse(fixture.server.hasRequestOwner("pending"))
+      assertTrue(fixture.second.frames.isEmpty())
+    } finally {
+      held.complete(Unit)
+      fixture.close()
     }
   }
 
@@ -574,12 +611,12 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         },
         capacity = 1,
       ) { fixture ->
-        send(fixture.first, RequestHierarchy(requestId = "held"))
+        send(fixture.first, SetHierarchyInterval(requestId = "held"))
         started.await()
         assertEquals("held", fixture.accepted.receive())
-        send(fixture.first, RequestHierarchy(requestId = "pending"))
+        send(fixture.first, SetHierarchyInterval(requestId = "pending"))
         assertEquals("pending", fixture.accepted.receive())
-        send(fixture.first, RequestHierarchy(requestId = "rejected"))
+        send(fixture.first, SetHierarchyInterval(requestId = "rejected"))
         val rejection = fixture.first.incoming.receive() as Frame.Text
         assertEquals("rejected", requestId(rejection))
         assertTrue(rejection.readText().contains("ctrlproxy_busy"))

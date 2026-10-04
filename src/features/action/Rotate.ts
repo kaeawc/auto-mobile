@@ -15,6 +15,7 @@ import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/rea
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { verifyIosRotation } from "./iosRotateVerification";
+import { ROTATION_READ_FLOOR_MS } from "../observe/Idle";
 
 export interface RotationRestoreState {
   accelerometerRotation: 0 | 1 | null;
@@ -28,6 +29,7 @@ export interface RotationRestoreSlot {
 }
 
 export interface RotateOptions {
+  deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
 }
 
@@ -281,7 +283,15 @@ export class Rotate extends BaseVisualChange {
   private async readLiveRotation(signal?: AbortSignal): Promise<number | null> {
     throwIfAborted(signal);
     try {
-      return await awaitWhileRequestIsLive(readWindowManagerRotation(this.adb, { signal }), signal);
+      const deadlineMs = this.options.deadlineMs;
+      const readOptions =
+        deadlineMs === undefined
+          ? { signal }
+          : { signal, timeoutMs: Math.max(deadlineMs - this.timer.now(), ROTATION_READ_FLOOR_MS) };
+      return await awaitWhileRequestIsLive(
+        readWindowManagerRotation(this.adb, readOptions),
+        signal,
+      );
     } catch (error) {
       throwIfAborted(signal);
       logger.warn("[Rotate] Failed to read live rotation via dumpsys window", error);

@@ -216,6 +216,7 @@ export class Idle {
         updatedPrevMissedVsync: null,
         updatedPrevSlowUiThread: null,
         updatedPrevFrameDeadlineMissed: null,
+        updatedPrevTotalFrames: null,
         updatedFirstGfxInfoLog: false,
       };
     }

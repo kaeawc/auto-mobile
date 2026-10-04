@@ -694,7 +694,7 @@ jobs:
             echo '::error::The self-hosted desktop build requires an installed JDK 21.' >&2
             exit 1
           fi
-          if ! ("$jdk_home/bin/javac" -version 2>&1 | grep -Eq '^javac 21([.]|$)'); then
+          if ! javac_version=$("$jdk_home/bin/javac" -version 2>&1) || ! grep -Eq '^javac 21([.]|$)' <<<"$javac_version"; then
             echo "::error::The selected JDK at $jdk_home does not provide javac 21." >&2
             exit 1
           fi

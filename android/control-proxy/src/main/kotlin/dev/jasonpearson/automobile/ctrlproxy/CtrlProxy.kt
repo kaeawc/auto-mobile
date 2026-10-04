@@ -1349,6 +1349,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
     }
 
+  private val eventBatchBroadcastHandler =
+    SdkEventBatchBroadcastHandler(
+      enqueue = { batch -> sdkEventBatchProcessor.enqueue(batch) },
+      log =
+        object : SdkEventBatchBroadcastHandler.LogSink {
+          override fun debug(message: String) {
+            Log.d(TAG, message)
+          }
+
+          override fun warn(message: String) {
+            Log.w(TAG, message)
+          }
+        },
+    )
+
   private val eventBatchReceiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
@@ -1357,17 +1372,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
 
         try {
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON) ?: return
-          val batch = SdkEventSerializer.eventBatchFromJson(eventJson) ?: return
+          val ordered = isOrderedBroadcast
+          val setBroadcastResult = this::setResultCode
+          eventBatchBroadcastHandler.handle(
+            intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
+            object : SdkEventBatchBroadcastHandler.ResultSink {
+              override val isOrdered = ordered
 
-          Log.d(TAG, "Received event batch with ${batch.events.size} events")
-
-          if (!sdkEventBatchProcessor.enqueue(batch)) {
-            Log.w(
-              TAG,
-              "Dropping SDK event batch with ${batch.events.size} events because the queue is full",
-            )
-          }
+              override fun setResultCode(code: Int) {
+                setBroadcastResult(code)
+              }
+            },
+          )
         } catch (e: Exception) {
           Log.e(TAG, "Error handling event batch broadcast", e)
         }

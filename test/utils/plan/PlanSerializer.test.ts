@@ -49,6 +49,20 @@ describe("YamlPlanSerializer", () => {
   });
 
   describe("importPlanFromYaml", () => {
+    test.each([
+      { name: "leading document marker", content: "---\nname: x\nsteps: []\n" },
+      { name: "trailing document marker", content: "name: x\nsteps: []\n...\n" },
+      { name: "both document markers", content: "---\nname: x\nsteps: []\n...\n" },
+    ])("imports a single document with $name", ({ content }) => {
+      expect(serializer.importPlanFromYaml(content)).toMatchObject({ name: "x", steps: [] });
+    });
+
+    test("rejects a multi-document YAML stream with a clear parsing error", () => {
+      expect(() => serializer.importPlanFromYaml("---\na: 1\n---\nb: 2\n")).toThrow(
+        "expected a single document in the stream, but found more",
+      );
+    });
+
     test("imports a valid plan with name and steps", () => {
       const yamlContent = yaml.dump({
         name: "My Plan",

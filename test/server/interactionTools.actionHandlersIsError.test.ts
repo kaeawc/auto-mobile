@@ -1,3 +1,6 @@
+import { TapAnyElement } from "../../src/features/action/TapAnyElement";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { warmedTests } from "../helpers/interactionCancellation";
 import { afterEach, describe, expect } from "bun:test";
 import {
@@ -78,6 +81,44 @@ describe("tapAnyHandler (registered handler wiring)", () => {
       element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
       ...overrides,
     }) as TapOnElementResult;
+
+  test.each([undefined, 123456])(
+    "forwards transport deadline %s through internal context",
+    async (deadline) => {
+      let received: { requestDeadlineMs?: number } | undefined;
+      setTapAnyElementFactory(() => ({
+        execute: async (_options, _progress, _signal, request) => {
+          received = request;
+          return fakeResult({ success: true });
+        },
+      }));
+      const internalArgs = { ...args, __mcpRequestDeadlineMs: deadline };
+      await tapAnyHandler(fakeDevice, internalArgs);
+      expect(received).toEqual({ requestDeadlineMs: deadline });
+    },
+  );
+
+  test("over-budget longPress returns the real tapAny MCP failure payload before device work", async () => {
+    const device: BootedDevice = { name: "Test", deviceId: "budget-tap-any", platform: "android" };
+    const timer = new FakeTimer();
+    timer.advanceTime(1000);
+    const adb = new FakeAdbExecutor();
+    const action = new TapAnyElement(device, adb, { timer });
+    setTapAnyElementFactory(() => action);
+
+    const response = await tapAnyHandler(device, {
+      action: "longPress",
+      duration: 20000,
+      __mcpRequestDeadlineMs: timer.now() + 5000,
+    });
+    const error =
+      "Failed to tap clickable element: longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started. Increase the request timeout or use a shorter duration.";
+    expect(response.isError).toBe(true);
+    expect(parsePayload(response).message).toBe(error);
+    expect(parsePayload(response).success).toBe(false);
+    expect(response.structuredContent).toMatchObject({ success: false, message: error, error });
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
 
   test("a failure sets isError and reports the failure, not a completed tap", async () => {
     setTapAnyElementFactory(() => ({

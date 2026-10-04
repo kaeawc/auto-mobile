@@ -1,8 +1,55 @@
 import { describe, expect, test } from "bun:test";
 import { parseCliArgs } from "../../src/cli";
+import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
+
+describe("parseCliArgs YAML document values (#7164)", () => {
+  test("consumes leading --- YAML as the full planContent string", () => {
+    const content = "---\nname: x\nsteps: []\n";
+    const { params } = parseCliArgs([
+      "executePlan",
+      "--platform",
+      "android",
+      "--planContent",
+      content,
+    ]);
+
+    expect(params.planContent).toBe(content);
+    expect(typeof params.planContent).toBe("string");
+  });
+
+  test("passes a single document with both markers from CLI to the plan parser", () => {
+    const content = "---\nname: x\nsteps: []\n...\n";
+    const { params } = parseCliArgs(["executePlan", "--planContent", content]);
+
+    expect(params.planContent).toBe(content);
+    expect(new YamlPlanSerializer().importPlanFromYaml(params.planContent)).toMatchObject({
+      name: "x",
+      steps: [],
+    });
+  });
+
+  test.each(["---", "--- name: x", "---\tname: x", "---\r\nname: x\nsteps: []\n...\n"])(
+    "consumes a document marker with an end-of-token or whitespace boundary: %p",
+    (content) => {
+      expect(parseCliArgs(["executePlan", "--planContent", content]).params.planContent).toBe(
+        content,
+      );
+    },
+  );
+
+  test.each([
+    { args: ["--a", "--b"], expected: { a: true, b: true } },
+    { args: ["--flag", "--other-flag"], expected: { flag: true, otherFlag: true } },
+    { args: ["--planContent", "---foo"], expected: { planContent: true, Foo: true } },
+    { args: ["--planContent", "----"], expected: { planContent: true, "--": true } },
+    { args: ["--planContent", "--name"], expected: { planContent: true, name: true } },
+  ])("preserves non-document flag handling for $args", ({ args, expected }) => {
+    expect(parseCliArgs(["executePlan", ...args]).params).toEqual(expected);
+  });
+});
 
 // The CLI ran every value through JSON.parse, so a numeric-looking string
 // argument arrived as a number and string-typed params rejected it (#4241).

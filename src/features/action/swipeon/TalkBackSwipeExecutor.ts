@@ -8,7 +8,11 @@ import { AccessibilityDetector } from "../../accessibility/interfaces/Accessibil
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
-import { getReturnDuration, resolveBoomerangConfig } from "./swipeTiming";
+import {
+  getReturnDuration,
+  resolveBoomerangConfig,
+  validateSwipeTimingOptions,
+} from "./swipeTiming";
 import { Timer } from "../../../utils/interfaces/Timer";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -157,6 +161,17 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
+    const timingError = validateSwipeTimingOptions(
+      {
+        boomerang: true,
+        apexPause: boomerang.apexPauseMs,
+        returnSpeed: boomerang.returnSpeed,
+      },
+      forwardDuration,
+    );
+    if (timingError) {
+      throw new ActionableError(timingError);
+    }
     const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
     const totalDuration = forwardDuration + boomerang.apexPauseMs + returnDuration;
 
@@ -288,6 +303,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
+    const indeterminateResult = (reason: string): SwipeResult => ({
+      success: false,
+      x1,
+      y1,
+      x2,
+      y2,
+      duration: gestureOptions?.duration || 300,
+      error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
+    });
+
     // Try accessibility scroll actions if container is known and has resource-id
     if (containerElement && containerElement["resource-id"]) {
       // `direction` is the FINGER direction; see scrollActionForFingerDirection.
@@ -316,17 +341,21 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
             y2,
             duration: gestureOptions?.duration || 300,
           };
-        } else {
-          logger.warn(
-            `[SwipeOn] ACTION_SCROLL failed: ${result.error}, falling back to two-finger swipe`,
-          );
         }
+        if (result.dispatched && result.acknowledged !== true) {
+          logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${result.error}`);
+          return indeterminateResult(result.error ?? "unknown error");
+        }
+        logger.warn(
+          `[SwipeOn] ACTION_SCROLL failed: ${result.error}, falling back to two-finger swipe`,
+        );
       } catch (error) {
         if (error instanceof StaleDisplayError) {
           throw error;
         }
         throwIfAborted(signal);
-        logger.warn(`[SwipeOn] ACTION_SCROLL error: ${error}, falling back to two-finger swipe`);
+        logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${error}`);
+        return indeterminateResult(String(error));
       }
     } else {
       logger.debug("[SwipeOn] No container with resource-id, skipping ACTION_SCROLL");

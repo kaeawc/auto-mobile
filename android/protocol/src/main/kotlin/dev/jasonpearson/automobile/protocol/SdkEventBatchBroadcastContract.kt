@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
 /**
- * Result-code contract for [SdkEventSerializer.ACTION_SDK_EVENT_BATCH].
+ * Acknowledgement and delivery-identity contract for [SdkEventSerializer.ACTION_SDK_EVENT_BATCH].
  *
  * Only ordered broadcasts receive a result. Non-ordered broadcasts have no acknowledgement and
  * receivers must not set their result code. The sender must initialize an ordered broadcast with a
@@ -11,7 +11,10 @@ package dev.jasonpearson.automobile.protocol
  * Acceptance is a synchronous queue handoff, not durable storage or downstream WebSocket delivery.
  */
 object SdkEventBatchBroadcastContract {
-  /** The processor synchronously accepted the parsed batch into its bounded queue. */
+  /** Optional opaque delivery id, stable across retries and persisted replay. */
+  const val EXTRA_BATCH_ID = "dev.jasonpearson.automobile.sdk.EVENT_BATCH_ID"
+
+  /** The processor accepted the batch into its queue, or already accepted its delivery id. */
   const val RESULT_BATCH_ACCEPTED = 1000
 
   /** The processor synchronously rejected the parsed batch because its queue is full. */

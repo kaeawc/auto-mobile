@@ -152,263 +152,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         if (version?.accepted === false) {
           return;
         }
-        switch (event.type) {
-          case "network_request":
-            // URLSession's adapter emits task metrics in metadata.duration_ms.
-            // Keep the existing top-level duration when present.
-            const metricDuration = Number(
-              (p.metadata as Record<string, string> | undefined)?.duration_ms,
-            );
-            await recorder.recordNetworkEvent({
-              timestamp: ts,
-              applicationId,
-              url: (p.url as string) ?? "",
-              method: (p.method as string) ?? "GET",
-              statusCode: (p.statusCode as number) ?? 0,
-              durationMs:
-                (p.durationMs as number | undefined) ??
-                (Number.isFinite(metricDuration) ? metricDuration : 0),
-              requestBodySize: (p.requestBodySize as number) ?? -1,
-              responseBodySize: (p.responseBodySize as number) ?? -1,
-              protocol: (p.protocolName as string) ?? (p.protocol as string) ?? null,
-              requestId: (p.requestId as string) ?? null,
-              connectionId: (p.connectionId as string) ?? null,
-              direction: (p.direction as string) ?? null,
-              metadata: (p.metadata as Record<string, string>) ?? null,
-              sequenceNumber: (p.sequenceNumber as number) ?? null,
-              host: (p.host as string) ?? null,
-              path: (p.path as string) ?? null,
-              error: (p.error as string) ?? null,
-              requestHeaders: (p.requestHeaders as Record<string, string>) ?? null,
-              responseHeaders: (p.responseHeaders as Record<string, string>) ?? null,
-              requestBody: (p.requestBody as string) ?? null,
-              responseBody: (p.responseBody as string) ?? null,
-              contentType: (p.contentType as string) ?? null,
-            });
-            break;
-          case "log":
-            await recorder.recordLogEvent({
-              timestamp: ts,
-              applicationId,
-              level: (p.level as number) ?? 0,
-              tag: (p.tag as string) ?? "",
-              message: (p.message as string) ?? "",
-              filterName: (p.filterName as string) ?? "",
-            });
-            break;
-          case "lifecycle":
-            await recorder.recordOsEvent({
-              timestamp: ts,
-              applicationId,
-              category: "lifecycle",
-              kind: (p.state as string) ?? "unknown",
-              details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
-            });
-            break;
-          case "navigation": {
-            const destination = (p.destination as string) ?? "unknown";
-            const navSource = (p.source as string) ?? null;
-            const navArgs = (p.arguments as Record<string, string>) ?? null;
-            const navMeta = (p.metadata as Record<string, string>) ?? null;
-            let screenshotUri: string | null = null;
-            if (applicationId && destination) {
-              // Barrier-tracked via trackExisting so graceful shutdown drains this
-              // fire-and-forget write without a track() await hop perturbing the
-              // nav-event↔hierarchy-update ordering (issue #2885); a mid-flight
-              // shutdown race is dropped cleanly by Part 1 (issue #2792).
-              const navWrite = this.getNavigationGraphManager().recordNavigationEvent({
-                applicationId,
-                destination,
-                source: navSource,
-                arguments: navArgs ?? {},
-                metadata: navMeta ?? {},
-                triggeringInteraction: null,
-              } as NavigationEvent);
-              void getDbWriteBarrier().trackExisting(navWrite);
-              await navWrite;
-
-              if (this.navigationScreenshotsEnabled()) {
-                try {
-                  const path = await this.captureNavigationScreenshot(applicationId, destination);
-                  if (path) {
-                    await this.getNavigationGraphManager().updateNodeScreenshot(
-                      applicationId,
-                      destination,
-                      path,
-                    );
-                    try {
-                      const nodeId = await this.findNavigationNodeId(applicationId, destination);
-                      if (nodeId !== undefined) {
-                        // Scope by applicationId (in scope) so a cross-app client
-                        // resolves this node's screenshot under the named app, not
-                        // the daemon's current foreground app (#5851 / #5534).
-                        screenshotUri = buildNavigationNodeScreenshotUri(nodeId, applicationId);
-                      }
-                    } catch {
-                      /* non-fatal */
-                    }
-                  }
-                } catch {
-                  /* non-fatal */
-                }
-              }
-            }
-            await recorder.recordNavigationEvent({
-              timestamp: ts,
-              applicationId,
-              destination,
-              source: navSource,
-              arguments: navArgs,
-              metadata: navMeta,
-              screenshotUri,
-            });
-            break;
-          }
-          case "custom": {
-            // Custom events are merged into log events
-            const customName = (p.name as string) ?? "custom";
-            const customProps = (p.properties as Record<string, string>) ?? {};
-            const propsStr =
-              Object.keys(customProps).length > 0 ? ` ${JSON.stringify(customProps)}` : "";
-            await recorder.recordLogEvent({
-              timestamp: ts,
-              applicationId,
-              level: 4,
-              tag: "CustomEvent",
-              message: `${customName}${propsStr}`,
-              filterName: "custom",
-            });
-            break;
-          }
-          case "handled_exception": {
-            const failureRecorder = this.failureRecorder;
-            const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
-            const exMsg =
-              (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
-            const stackStr = (p.stackTrace as string) ?? "";
-            const stackFrames = stackStr
-              .split("\n")
-              .filter(Boolean)
-              .map((line) => ({
-                className: "",
-                methodName: line.trim(),
-                fileName: null as string | null,
-                lineNumber: null as number | null,
-                isAppCode: line.includes(applicationId ?? ""),
-              }));
-            await failureRecorder.recordNonFatal({
-              exceptionType: exType,
-              exceptionMessage: exMsg,
-              stackTrace: stackFrames,
-              customMessage: (p.customMessage as string) ?? undefined,
-              deviceId: this.deviceId,
-              deviceModel: "iOS Simulator",
-              os: "iOS",
-              appVersion: "1.0",
-              sessionId: `ios-${this.deviceId}-${ts}`,
-              currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
-            });
-            break;
-          }
-          case "crash": {
-            const crashRecorder = this.failureRecorder;
-            const crashType =
-              (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
-            const crashMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Crash";
-            const crashStack = ((p.stackTrace as string) ?? "")
-              .split("\n")
-              .filter(Boolean)
-              .map((line) => ({
-                className: "",
-                methodName: line.trim(),
-                fileName: null as string | null,
-                lineNumber: null as number | null,
-                isAppCode: line.includes(applicationId ?? ""),
-              }));
-            await crashRecorder.recordCrash({
-              exceptionType: crashType,
-              exceptionMessage: crashMsg,
-              stackTrace: crashStack,
-              deviceId: this.deviceId,
-              deviceModel: "iOS Simulator",
-              os: "iOS",
-              appVersion: "1.0",
-              sessionId: `ios-${this.deviceId}-${ts}`,
-              currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
-            });
-            break;
-          }
-          case "hang":
-            await recorder.recordOsEvent({
-              timestamp: ts,
-              applicationId,
-              category: "hang",
-              kind: `${(p.durationMs as number) ?? 0}ms`,
-              details: { durationMs: String((p.durationMs as number) ?? 0) },
-            });
-            break;
-          case "webview":
-            await recorder.recordOsEvent({
-              timestamp: ts,
-              applicationId,
-              category: "webview",
-              kind: (p.name as string) ?? "unknown",
-              details: {
-                webViewId: (p.webViewId as string) ?? "",
-                url: (p.url as string) ?? "",
-                frameId: (p.frameId as string) ?? "",
-                requestId: (p.requestId as string) ?? "",
-                ...((p.metadata as Record<string, string>) ?? {}),
-              },
-            });
-            break;
-          case "storage_changed": {
-            // The iOS SDK's SdkStorageChangedEvent serializes as suiteName/key/newValue/
-            // valueType/changeType/sequenceNumber (ios/auto-mobile-sdk/.../SdkEvent.swift).
-            // It carries no `value` and no `operation`; the recorder REQUIRES valueType +
-            // changeType (issue #3001). Map: suiteName→fileName, newValue→value, pass
-            // valueType through, and use the SDK-diffed changeType (add/modify/remove).
-            // Older SDK builds emitted no change kind — fall back to `operation` then
-            // "modify" for wire compatibility.
-            const changeType = (p.changeType as string) ?? (p.operation as string) ?? "modify";
-            // Resolve the prior value:
-            //  - "add" ⇒ the key had no prior value by definition. Assert null
-            //    EXPLICITLY: Swift's synthesized Encodable omits nil optionals, so the
-            //    SDK's `previousValue: nil` for adds never reaches the wire, and without
-            //    this the repository's auto-lookup could attribute a stale earlier row
-            //    (e.g. a key removed while offline then re-added) as the previous value.
-            //  - otherwise ⇒ thread the runner-supplied prior value when present, else
-            //    omit so the repository's `previousValue !== undefined` guard falls
-            //    through to the auto-lookup (#3000). An explicit null is honored verbatim.
-            const previousValue: string | null | undefined =
-              changeType === "add"
-                ? null
-                : "previousValue" in p
-                  ? (p.previousValue as string | null)
-                  : undefined;
-            await recorder.recordStorageEvent({
-              timestamp: ts,
-              applicationId,
-              fileName: (p.suiteName as string) ?? "",
-              key: (p.key as string) ?? null,
-              value: (p.newValue as string) ?? (p.value as string) ?? null,
-              valueType: (p.valueType as string) ?? null,
-              changeType,
-              ...(previousValue !== undefined ? { previousValue } : {}),
-            });
-            break;
-          }
-          default:
-            // Record unknown types as log events
-            await recorder.recordLogEvent({
-              timestamp: ts,
-              applicationId,
-              level: 4,
-              tag: "UnknownEvent",
-              message: `${event.type}: ${JSON.stringify(p).substring(0, 1000)}`,
-              filterName: "custom",
-            });
-        }
+        await this.recordAcceptedSdkEvent(event, recorder, ts, p, applicationId);
       } finally {
         // Restore previous context so Android events aren't affected
         recorder.setContext(prevContext.deviceId, prevContext.sessionId);
@@ -416,6 +160,370 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     } catch (error) {
       logger.warn("[IosSdkEventIngestor] Failed to record SDK event", error);
     }
+  }
+
+  private recordAcceptedSdkEvent(
+    event: SdkEvent,
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<unknown> {
+    switch (event.type) {
+      case "network_request":
+        return this.recordNetworkSdkEvent(recorder, ts, p, applicationId);
+      case "log":
+        return this.recordLogSdkEvent(recorder, ts, p, applicationId);
+      case "lifecycle":
+        return this.recordLifecycleSdkEvent(recorder, ts, p, applicationId);
+      case "navigation":
+        return this.recordNavigationSdkEvent(recorder, ts, p, applicationId);
+      case "custom":
+        return this.recordCustomSdkEvent(recorder, ts, p, applicationId);
+      case "handled_exception":
+        return this.recordHandledExceptionSdkEvent(recorder, ts, p, applicationId);
+      case "crash":
+        return this.recordCrashSdkEvent(recorder, ts, p, applicationId);
+      case "hang":
+        return this.recordHangSdkEvent(recorder, ts, p, applicationId);
+      case "webview":
+        return this.recordWebViewSdkEvent(recorder, ts, p, applicationId);
+      case "storage_changed":
+        return this.recordStorageSdkEvent(recorder, ts, p, applicationId);
+      default:
+        return this.recordUnknownSdkEvent(recorder, ts, p, applicationId, event);
+    }
+  }
+
+  private recordNetworkSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    // URLSession's adapter emits task metrics in metadata.duration_ms.
+    // Keep the existing top-level duration when present.
+    const metricDuration = Number((p.metadata as Record<string, string> | undefined)?.duration_ms);
+    return recorder.recordNetworkEvent({
+      timestamp: ts,
+      applicationId,
+      url: (p.url as string) ?? "",
+      method: (p.method as string) ?? "GET",
+      statusCode: (p.statusCode as number) ?? 0,
+      durationMs:
+        (p.durationMs as number | undefined) ??
+        (Number.isFinite(metricDuration) ? metricDuration : 0),
+      requestBodySize: (p.requestBodySize as number) ?? -1,
+      responseBodySize: (p.responseBodySize as number) ?? -1,
+      ...this.networkConnectionFields(p),
+      ...this.networkBodyFields(p),
+    });
+  }
+
+  private networkConnectionFields(p: Record<string, unknown>) {
+    return {
+      protocol: (p.protocolName as string) ?? (p.protocol as string) ?? null,
+      requestId: (p.requestId as string) ?? null,
+      connectionId: (p.connectionId as string) ?? null,
+      direction: (p.direction as string) ?? null,
+      metadata: (p.metadata as Record<string, string>) ?? null,
+      sequenceNumber: (p.sequenceNumber as number) ?? null,
+      host: (p.host as string) ?? null,
+      path: (p.path as string) ?? null,
+      error: (p.error as string) ?? null,
+    };
+  }
+
+  private networkBodyFields(p: Record<string, unknown>) {
+    return {
+      requestHeaders: (p.requestHeaders as Record<string, string>) ?? null,
+      responseHeaders: (p.responseHeaders as Record<string, string>) ?? null,
+      requestBody: (p.requestBody as string) ?? null,
+      responseBody: (p.responseBody as string) ?? null,
+      contentType: (p.contentType as string) ?? null,
+    };
+  }
+
+  private recordLogSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    return recorder.recordLogEvent({
+      timestamp: ts,
+      applicationId,
+      level: (p.level as number) ?? 0,
+      tag: (p.tag as string) ?? "",
+      message: (p.message as string) ?? "",
+      filterName: (p.filterName as string) ?? "",
+    });
+  }
+
+  private recordLifecycleSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    return recorder.recordOsEvent({
+      timestamp: ts,
+      applicationId,
+      category: "lifecycle",
+      kind: (p.state as string) ?? "unknown",
+      details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
+    });
+  }
+
+  private async navigationScreenshotUri(
+    applicationId: string,
+    destination: string,
+  ): Promise<string | null> {
+    let screenshotUri: string | null = null;
+    try {
+      const path = await this.captureNavigationScreenshot(applicationId, destination);
+      if (!path) {
+        return screenshotUri;
+      }
+      await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
+      try {
+        const nodeId = await this.findNavigationNodeId(applicationId, destination);
+        if (nodeId !== undefined) {
+          // Scope by applicationId (in scope) so a cross-app client
+          // resolves this node's screenshot under the named app, not
+          // the daemon's current foreground app (#5851 / #5534).
+          screenshotUri = buildNavigationNodeScreenshotUri(nodeId, applicationId);
+        }
+      } catch {
+        /* non-fatal */
+      }
+    } catch {
+      /* non-fatal */
+    }
+    return screenshotUri;
+  }
+
+  private async recordNavigationSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    const destination = (p.destination as string) ?? "unknown";
+    const navSource = (p.source as string) ?? null;
+    const navArgs = (p.arguments as Record<string, string>) ?? null;
+    const navMeta = (p.metadata as Record<string, string>) ?? null;
+    let screenshotUri: string | null = null;
+    if (applicationId && destination) {
+      // Barrier-tracked via trackExisting so graceful shutdown drains this
+      // fire-and-forget write without a track() await hop perturbing the
+      // nav-event↔hierarchy-update ordering (issue #2885); a mid-flight
+      // shutdown race is dropped cleanly by Part 1 (issue #2792).
+      const navWrite = this.getNavigationGraphManager().recordNavigationEvent({
+        applicationId,
+        destination,
+        source: navSource,
+        arguments: navArgs ?? {},
+        metadata: navMeta ?? {},
+        triggeringInteraction: null,
+      } as NavigationEvent);
+      void getDbWriteBarrier().trackExisting(navWrite);
+      await navWrite;
+
+      if (this.navigationScreenshotsEnabled()) {
+        screenshotUri = await this.navigationScreenshotUri(applicationId, destination);
+      }
+    }
+    await recorder.recordNavigationEvent({
+      timestamp: ts,
+      applicationId,
+      destination,
+      source: navSource,
+      arguments: navArgs,
+      metadata: navMeta,
+      screenshotUri,
+    });
+  }
+
+  private recordCustomSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    // Custom events are merged into log events
+    const customName = (p.name as string) ?? "custom";
+    const customProps = (p.properties as Record<string, string>) ?? {};
+    const propsStr = Object.keys(customProps).length > 0 ? ` ${JSON.stringify(customProps)}` : "";
+    return recorder.recordLogEvent({
+      timestamp: ts,
+      applicationId,
+      level: 4,
+      tag: "CustomEvent",
+      message: `${customName}${propsStr}`,
+      filterName: "custom",
+    });
+  }
+
+  private recordHandledExceptionSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): ReturnType<FailureRecorderService["recordNonFatal"]> {
+    const failureRecorder = this.failureRecorder;
+    const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
+    const exMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
+    const stackStr = (p.stackTrace as string) ?? "";
+    const stackFrames = stackStr
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => ({
+        className: "",
+        methodName: line.trim(),
+        fileName: null as string | null,
+        lineNumber: null as number | null,
+        isAppCode: line.includes(applicationId ?? ""),
+      }));
+    return failureRecorder.recordNonFatal({
+      exceptionType: exType,
+      exceptionMessage: exMsg,
+      stackTrace: stackFrames,
+      customMessage: (p.customMessage as string) ?? undefined,
+      deviceId: this.deviceId,
+      deviceModel: "iOS Simulator",
+      os: "iOS",
+      appVersion: "1.0",
+      sessionId: `ios-${this.deviceId}-${ts}`,
+      currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
+    });
+  }
+
+  private recordCrashSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): ReturnType<FailureRecorderService["recordCrash"]> {
+    const crashRecorder = this.failureRecorder;
+    const crashType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
+    const crashMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Crash";
+    const crashStack = ((p.stackTrace as string) ?? "")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => ({
+        className: "",
+        methodName: line.trim(),
+        fileName: null as string | null,
+        lineNumber: null as number | null,
+        isAppCode: line.includes(applicationId ?? ""),
+      }));
+    return crashRecorder.recordCrash({
+      exceptionType: crashType,
+      exceptionMessage: crashMsg,
+      stackTrace: crashStack,
+      deviceId: this.deviceId,
+      deviceModel: "iOS Simulator",
+      os: "iOS",
+      appVersion: "1.0",
+      sessionId: `ios-${this.deviceId}-${ts}`,
+      currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
+    });
+  }
+
+  private recordHangSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    return recorder.recordOsEvent({
+      timestamp: ts,
+      applicationId,
+      category: "hang",
+      kind: `${(p.durationMs as number) ?? 0}ms`,
+      details: { durationMs: String((p.durationMs as number) ?? 0) },
+    });
+  }
+
+  private recordWebViewSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    return recorder.recordOsEvent({
+      timestamp: ts,
+      applicationId,
+      category: "webview",
+      kind: (p.name as string) ?? "unknown",
+      details: {
+        webViewId: (p.webViewId as string) ?? "",
+        url: (p.url as string) ?? "",
+        frameId: (p.frameId as string) ?? "",
+        requestId: (p.requestId as string) ?? "",
+        ...((p.metadata as Record<string, string>) ?? {}),
+      },
+    });
+  }
+
+  private recordStorageSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+  ): Promise<void> {
+    // The iOS SDK's SdkStorageChangedEvent serializes as suiteName/key/newValue/
+    // valueType/changeType/sequenceNumber (ios/auto-mobile-sdk/.../SdkEvent.swift).
+    // It carries no `value` and no `operation`; the recorder REQUIRES valueType +
+    // changeType (issue #3001). Map: suiteName→fileName, newValue→value, pass
+    // valueType through, and use the SDK-diffed changeType (add/modify/remove).
+    // Older SDK builds emitted no change kind — fall back to `operation` then
+    // "modify" for wire compatibility.
+    const changeType = (p.changeType as string) ?? (p.operation as string) ?? "modify";
+    // Resolve the prior value:
+    //  - "add" ⇒ the key had no prior value by definition. Assert null
+    //    EXPLICITLY: Swift's synthesized Encodable omits nil optionals, so the
+    //    SDK's `previousValue: nil` for adds never reaches the wire, and without
+    //    this the repository's auto-lookup could attribute a stale earlier row
+    //    (e.g. a key removed while offline then re-added) as the previous value.
+    //  - otherwise ⇒ thread the runner-supplied prior value when present, else
+    //    omit so the repository's `previousValue !== undefined` guard falls
+    //    through to the auto-lookup (#3000). An explicit null is honored verbatim.
+    const previousValue: string | null | undefined =
+      changeType === "add"
+        ? null
+        : "previousValue" in p
+          ? (p.previousValue as string | null)
+          : undefined;
+    return recorder.recordStorageEvent({
+      timestamp: ts,
+      applicationId,
+      fileName: (p.suiteName as string) ?? "",
+      key: (p.key as string) ?? null,
+      value: (p.newValue as string) ?? (p.value as string) ?? null,
+      valueType: (p.valueType as string) ?? null,
+      changeType,
+      ...(previousValue !== undefined ? { previousValue } : {}),
+    });
+  }
+
+  private recordUnknownSdkEvent(
+    recorder: IosTelemetryRecorder,
+    ts: number,
+    p: Record<string, unknown>,
+    applicationId: string | null,
+    event: SdkEvent,
+  ): Promise<void> {
+    // Record unknown types as log events
+    return recorder.recordLogEvent({
+      timestamp: ts,
+      applicationId,
+      level: 4,
+      tag: "UnknownEvent",
+      message: `${event.type}: ${JSON.stringify(p).substring(0, 1000)}`,
+      filterName: "custom",
+    });
   }
 
   private acceptNetworkVersion(

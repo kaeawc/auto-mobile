@@ -765,6 +765,13 @@ export class DeviceRuntimeIdentity {
       return;
     }
     this.deferredQuarantineCancellations.delete(pooled);
+    await this.cancelQuarantinedDeviceExecutions(pooled, options);
+  }
+
+  private async cancelQuarantinedDeviceExecutions(
+    pooled: PooledDevice,
+    options: DiscoveryReconcileOptions,
+  ): Promise<void> {
     await this.cancelPooledDeviceExecutions(pooled, options, pooled.sessionId);
   }
 

@@ -84,6 +84,72 @@ describe("NavigateTo", () => {
   });
 
   describe("execute", () => {
+    for (const [hasBudget, sessionUuid] of [
+      [true, "current-session"],
+      [false, "current-session"],
+      [false, undefined],
+    ] as const) {
+      test(`replays legacy edges with current request metadata (budget: ${hasBudget}, session: ${sessionUuid})`, async () => {
+        const args = {
+          text: "Settings",
+          action: "tap",
+          sessionUuid: "old-session",
+          __mcpRequestTimeoutMs: 2,
+          __mcpRequestDeadlineMs: 1,
+          __futureInternal: true,
+          _foo: "keep",
+          sessionUuidX: "keep",
+          session: "keep",
+        };
+        fakeGraph.recordToolCall("tapOn", args);
+        for (const [destination, timestamp] of [
+          ["HomeScreen", 100],
+          ["SettingsScreen", 200],
+          ["HomeScreen", 300],
+        ] as const) {
+          await fakeGraph.recordNavigationEvent({ destination, timestamp });
+        }
+        navigationMap.set("Settings", "SettingsScreen");
+        navigateTo = new NavigateTo(
+          device,
+          fakeAdbFactory,
+          { setupUIState: async () => [], setupScrollPosition: async () => null },
+          { waitForScreen: async () => true },
+          fakeGraph,
+          new FakeTimer(),
+        );
+        const call = spyOn(ToolRegistry, "callInternal");
+        try {
+          const result = await navigateTo.execute({
+            targetScreen: "SettingsScreen",
+            platform: "android",
+            ...(sessionUuid ? { sessionUuid } : {}),
+            ...(hasBudget ? { __mcpRequestTimeoutMs: 500, __mcpRequestDeadlineMs: 1500 } : {}),
+          });
+          expect(result.success).toBe(true);
+          const replay = call.mock.calls[0][1];
+          expect(replay).toMatchObject({
+            _foo: "keep",
+            sessionUuidX: "keep",
+            session: "keep",
+            ...(sessionUuid ? { sessionUuid } : {}),
+          });
+          expect(replay.sessionUuid).toBe(sessionUuid);
+          expect(Object.hasOwn(replay, "sessionUuid")).toBe(sessionUuid !== undefined);
+          expect(replay.__futureInternal).toBeUndefined();
+          expect(Object.hasOwn(replay, "__mcpRequestTimeoutMs")).toBe(hasBudget);
+          expect(Object.hasOwn(replay, "__mcpRequestDeadlineMs")).toBe(hasBudget);
+          expect(replay.__mcpRequestTimeoutMs).toBe(hasBudget ? 500 : undefined);
+          expect(replay.__mcpRequestDeadlineMs).toBe(hasBudget ? 1500 : undefined);
+          expect(JSON.stringify(result.path)).not.toContain("__");
+          expect(JSON.stringify(result.path)).not.toContain("old-session");
+          expect(args.sessionUuid).toBe("old-session");
+        } finally {
+          call.mockRestore();
+        }
+      });
+    }
+
     test("creates the default UI-state setup after resolving an options session", async () => {
       navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
 
@@ -559,14 +625,13 @@ describe("NavigateTo", () => {
       );
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('did not reach "TargetScreen"');
-      expect(result.message).toContain('"HomeScreen"');
-      expect(result.message).not.toContain("Successfully navigated");
-      expect(result.error).toBe(result.message);
+      expect(result.error).toContain('did not reach expected screen "TargetScreen"');
+      expect(result.error).toContain('"HomeScreen"');
+      expect(result.error).not.toContain("Successfully navigated");
       expect(result.currentScreen).toBe("HomeScreen");
       expect(result.stepsExecuted).toBe(1);
-      expect(result.path).toHaveLength(1);
-      expect(progressMessages.at(-1)).toBe("Waiting for TargetScreen");
+      expect(result.partialPath).toHaveLength(1);
+      expect(progressMessages.at(-1)).toBe("Navigating: HomeScreen → TargetScreen");
     });
 
     test("default waiter advances only with the injected FakeTimer", async () => {
@@ -608,7 +673,7 @@ describe("NavigateTo", () => {
         const result = await execution;
 
         expect(result.success).toBe(false);
-        expect(result.message).toContain('did not reach "TargetScreen"');
+        expect(result.error).toContain('did not reach expected screen "TargetScreen"');
         expect(result.durationMs).toBe(5000);
         expect(timer.getSleepHistory()).toEqual(Array(10).fill(500));
       } finally {
@@ -640,7 +705,7 @@ describe("NavigateTo", () => {
       },
     );
 
-    test("continues after an intermediate timeout and succeeds when the final target is reached", async () => {
+    test("stops after an intermediate timeout before dispatching the final target interaction", async () => {
       setPath([
         toolEdge("HomeScreen", "IntermediateScreen"),
         toolEdge("IntermediateScreen", "TargetScreen"),
@@ -669,12 +734,14 @@ describe("NavigateTo", () => {
         platform: "android",
       });
 
-      expect(result.success).toBe(true);
-      expect(result.message).toBe('Successfully navigated to "TargetScreen"');
-      expect(result.error).toBeUndefined();
-      expect(result.currentScreen).toBe("TargetScreen");
-      expect(result.stepsExecuted).toBe(2);
-      expect(waitedScreens).toEqual(["IntermediateScreen", "TargetScreen"]);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("step 1");
+      expect(result.error).toContain('expected screen "IntermediateScreen"');
+      expect(result.currentScreen).toBe("HomeScreen");
+      expect(result.stepsExecuted).toBe(1);
+      expect(result.partialPath).toHaveLength(1);
+      expect(toolCallLog).toHaveLength(1);
+      expect(waitedScreens).toEqual(["IntermediateScreen"]);
     });
 
     test("aborts with a timeout envelope once the 30s ceiling is crossed", async () => {

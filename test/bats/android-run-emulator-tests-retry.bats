@@ -122,3 +122,28 @@ exit 21
   [[ "$output" == *"Command failed with non-transient error"* ]]
   [[ "$output" == *"First attempt error:"*"device offline: first retryable diagnostic"* ]]
 }
+
+@test "retry helper recognizes a transient error before a large command log" {
+  make_test_script '
+attempt=0
+[ -f "$ATTEMPTS_FILE" ] && attempt="$(cat "$ATTEMPTS_FILE")"
+attempt=$((attempt + 1))
+printf "%s\n" "$attempt" > "$ATTEMPTS_FILE"
+if [ "$attempt" -eq 1 ]; then
+  echo "device offline"
+  awk '\''BEGIN { for (i=0; i<20000; i++) print "command log filler" }'\''
+  exit 17
+fi
+'
+  awk '/^retry_with_backoff\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$SCRIPT" > "$MOCK_BIN/retry-helper.sh"
+  run env PATH="$MOCK_BIN:$PATH" bash -euo pipefail -c '
+    source "$1"
+    print_success() { :; }; print_warning() { :; }; print_error() { :; }
+    sleep() { :; }
+    BLUE=""; NC=""; RETRY_MAX_ATTEMPTS=2; RETRY_INITIAL_DELAY=0
+    retry_log_dir="$2"
+    retry_with_backoff "$2/test-script"
+  ' _ "$MOCK_BIN/retry-helper.sh" "$MOCK_BIN"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ATTEMPTS_FILE")" -eq 2 ]
+}

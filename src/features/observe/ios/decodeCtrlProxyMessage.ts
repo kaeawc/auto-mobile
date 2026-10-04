@@ -35,6 +35,32 @@ export function rewriteUnknownCommandError(error: string): string {
   return rewritePlatformUnknownCommandError(error, "ios");
 }
 
+function decodeHierarchyUpdate(
+  message: WebSocketMessage,
+  requestId: string,
+): DecodedCtrlProxyMessage {
+  // Swift CommandHandler failures use hierarchy_update without data. Updates
+  // carrying a hierarchy retain their existing result shape, even with an error.
+  if (!message.data && (message.success === false || message.error)) {
+    return {
+      requestId,
+      errorMessage: rewriteUnknownCommandError(
+        message.error || "iOS runner failed to produce a view hierarchy",
+      ),
+      ...(message.perfTiming ? { perfTiming: message.perfTiming } : {}),
+      totalTimeMs: message.totalTimeMs ?? 0,
+    };
+  }
+  return {
+    requestId,
+    result: {
+      hierarchy: message.data,
+      perfTiming: message.perfTiming,
+      frameContext: message.frameContext,
+    },
+  };
+}
+
 /**
  * Decode a request/response message into the shape the request manager resolves.
  * Returns `null` for push messages (no `requestId`) — those are handled by the
@@ -79,12 +105,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
   switch (type) {
     case "hierarchy_update":
-      result = {
-        hierarchy: message.data,
-        perfTiming: message.perfTiming,
-        frameContext: message.frameContext,
-      };
-      break;
+      return decodeHierarchyUpdate(message, requestId);
 
     case "screenshot":
       result = {

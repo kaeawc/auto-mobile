@@ -12,6 +12,14 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 
+import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
+import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
+import { logger } from "../../src/utils/logger";
+
 let sessions: SessionManager;
 
 afterEach(() => {
@@ -320,4 +328,99 @@ describe("daemon/refreshDevices outcome", () => {
         "Could not refresh device list: tracking persistence unavailable. Resolve the cause and retry.",
     });
   });
+});
+
+describe("Android discovery failure refresh outcome", () => {
+  function setup(failure?: string) {
+    const timer = new FakeTimer();
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const iosDevice: BootedDevice = { deviceId: "SIM-FRESH", name: "iPhone", platform: "ios" };
+    const iosDiscovery = async () => [iosDevice];
+    const deviceManager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      {
+        isAvailable: async () => true,
+        getBootedSimulatorsChecked: iosDiscovery,
+      } as unknown as SimCtlClient,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => {
+          if (failure) {
+            throw new Error(failure);
+          }
+          return [];
+        },
+      }),
+      undefined,
+      undefined,
+      { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+    );
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "android-discovery-failure", {
+        timer,
+        deviceManager,
+      }),
+    );
+    DaemonState.getInstance().initialize(sessions, pool);
+    return { pool, iosDevice };
+  }
+
+  test("setActiveDevice surfaces the caught adb reason through the refresh outcome", async () => {
+    setup(`${"x".repeat(300)}\r\nsecond line must stay in logs`);
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    await expect(
+      handler({ deviceId: "emulator-5604", sessionUuid: "selection" }),
+    ).rejects.toMatchObject({
+      message: `Could not refresh device list: ${("Android booted-device discovery failed: " + "x".repeat(300)).slice(0, 256)}. Resolve the cause and retry.`,
+    });
+  });
+
+  test("working adb with an absent device preserves the exact selection error", async () => {
+    setup();
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    await expect(
+      handler({ deviceId: "emulator-5604", sessionUuid: "selection" }),
+    ).rejects.toMatchObject({
+      message: "Device 'emulator-5604' not found in device pool",
+    });
+  });
+
+  test.each(["idle", "busy"] as const)(
+    "failed Android discovery retains %s pooled devices while iOS refresh still adds devices",
+    async (status) => {
+      const { pool, iosDevice } = setup("adb devices -l exited 1");
+      const warn = spyOn(logger, "warn");
+      try {
+        await pool.initializeWithDevices([
+          { deviceId: "emulator-5600", name: "Pixel", platform: "android" },
+        ]);
+        const pooled = pool.getDevice("emulator-5600")!;
+        pooled.status = status;
+        if (status === "busy") {
+          pooled.sessionId = "held-session";
+          await sessions.createSession("held-session", pooled.id, "android");
+        }
+        for (let refresh = 0; refresh < 4; refresh++) {
+          const outcome = await pool.refreshDevicesWithOutcome();
+          expect(outcome.failure).toBe(
+            "Android booted-device discovery failed: adb devices -l exited 1",
+          );
+          expect(outcome.completeness?.succeededPlatforms.has("android")).toBe(false);
+          expect(outcome.completeness?.succeededPlatforms.has("ios")).toBe(true);
+          expect(pool.getDevice("emulator-5600")).toBe(pooled);
+          expect(pooled.status).toBe(status);
+          if (status === "busy") {
+            expect(sessions.getSession("held-session")?.assignedDevice).toBe(pooled.id);
+          }
+          expect(pool.getDevice(iosDevice.deviceId)?.status).toBe("idle");
+        }
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Android booted-device discovery failed; retaining tracked Android devices",
+          ),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 });

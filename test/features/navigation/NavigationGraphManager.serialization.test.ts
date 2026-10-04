@@ -52,6 +52,222 @@ describe("NavigationGraphManager navigation write ordering", () => {
     await harness.dispose();
   });
 
+  test("sanitizes legacy edge arguments on graph reads and pathfinding without rewriting storage", async () => {
+    const args = {
+      text: "Continue",
+      sessionUuid: "old",
+      __mcpRequestDeadlineMs: 1,
+      __mcpRequestTimeoutMs: 2,
+      __futureInternal: true,
+      _foo: "keep",
+      sessionUuidX: "keep",
+      session: "keep",
+    };
+    await repository.createEdge(appId, "Other", "Home", "tapOn", args, 4000);
+    const expected = { text: "Continue", _foo: "keep", sessionUuidX: "keep", session: "keep" };
+    expect((await manager.getEdgesFrom("Other"))[0].interaction?.args).toEqual(expected);
+    expect((await manager.findPath("Home")).path[0].interaction?.args).toEqual(expected);
+    expect(JSON.parse((await repository.getEdgesFrom(appId, "Other"))[0].tool_args!)).toEqual(args);
+  });
+
+  for (const variant of ["empty", "selected", "scroll", "combined"] as const) {
+    test(`edge conversion preserves ${variant} UI state, empty identifiers and modal stacks`, async () => {
+      const edge = await repository.createEdge(appId, "Other", "Home", "tapOn", null, 4000);
+      const selected = await repository.getOrCreateUIElement(
+        appId,
+        { text: "", resourceId: "id/tab", contentDescription: "" },
+        4000,
+      );
+      const target = await repository.getOrCreateUIElement(
+        appId,
+        { text: "Target", resourceId: "", contentDescription: "Target description" },
+        4000,
+      );
+      const container = await repository.getOrCreateUIElement(
+        appId,
+        { text: "", resourceId: "id/list", contentDescription: "" },
+        4000,
+      );
+      if (variant === "selected" || variant === "combined") {
+        await repository.linkUIElementsToEdge(edge.id, [selected.id]);
+      }
+      if (variant === "scroll" || variant === "combined") {
+        await repository.setScrollPosition(
+          edge.id,
+          target.id,
+          "down",
+          variant === "combined" ? container.id : undefined,
+          variant === "combined" ? "fast" : undefined,
+        );
+      }
+      await repository.setEdgeModals(edge.id, "from", ["dialog", "menu"]);
+      await repository.setEdgeModals(edge.id, "to", ["sheet"]);
+
+      const [converted] = await manager.getEdgesFrom("Other");
+      expect(converted).toMatchObject({
+        from: "Other",
+        to: "Home",
+        timestamp: 4000,
+        edgeType: "tool",
+        interaction: { toolName: "tapOn", args: {}, timestamp: 4000 },
+      });
+      expect(converted.fromModalStack).toEqual([
+        { type: "overlay", identifier: "dialog", layer: 0 },
+        { type: "overlay", identifier: "menu", layer: 1 },
+      ]);
+      expect(converted.toModalStack).toEqual([{ type: "overlay", identifier: "sheet", layer: 0 }]);
+      expect(converted.uiState).toBe(converted.interaction?.uiState);
+      if (variant === "empty") {
+        expect(converted.uiState).toBeUndefined();
+        return;
+      }
+      expect(converted.uiState?.selectedElements).toEqual(
+        variant === "scroll"
+          ? []
+          : [{ text: undefined, resourceId: "id/tab", contentDesc: undefined }],
+      );
+      expect(converted.uiState?.scrollPosition).toEqual(
+        variant === "selected"
+          ? undefined
+          : {
+              targetElement: {
+                text: "Target",
+                resourceId: undefined,
+                contentDesc: "Target description",
+              },
+              direction: "down",
+              speed: variant === "combined" ? "fast" : undefined,
+              ...(variant === "combined"
+                ? { container: { text: undefined, resourceId: "id/list", contentDesc: undefined } }
+                : {}),
+            },
+      );
+    });
+  }
+
+  test("unknown edges skip interaction reads but retain modal stacks", async () => {
+    const edge = await repository.createEdge(appId, "Other", "Home", null, null, 4000);
+    await repository.setEdgeModals(edge.id, "to", ["sheet"]);
+    const ui = spyOn(repository, "getUIElementsForEdge");
+    const scroll = spyOn(repository, "getScrollPosition");
+    try {
+      const [converted] = await manager.getEdgesFrom("Other");
+      expect(converted.edgeType).toBe("unknown");
+      expect(converted.interaction).toBeUndefined();
+      expect(converted.uiState).toBeUndefined();
+      expect(converted.fromModalStack).toBeUndefined();
+      expect(converted.toModalStack).toEqual([{ type: "overlay", identifier: "sheet", layer: 0 }]);
+      expect(ui).not.toHaveBeenCalled();
+      expect(scroll).not.toHaveBeenCalled();
+    } finally {
+      ui.mockRestore();
+      scroll.mockRestore();
+    }
+  });
+
+  test("edge reads await UI, scroll, from modals and to modals before starting the next edge", async () => {
+    const first = await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
+    const second = await repository.createEdge(appId, "Other", "Home", "swipeOn", {}, 5000);
+    const gates = Array.from({ length: 4 }, () => deferred());
+    const started = Array.from({ length: 4 }, () => deferred());
+    const calls: string[] = [];
+    const ui = spyOn(repository, "getUIElementsForEdge").mockImplementation(async (id) => {
+      calls.push(`ui:${id}`);
+      if (id === first.id) {
+        started[0].resolve();
+        await gates[0].promise;
+      }
+      return [];
+    });
+    const scroll = spyOn(repository, "getScrollPosition").mockImplementation(async (id) => {
+      calls.push(`scroll:${id}`);
+      if (id === first.id) {
+        started[1].resolve();
+        await gates[1].promise;
+      }
+      return null;
+    });
+    const modals = spyOn(repository, "getEdgeModals").mockImplementation(async (id, position) => {
+      calls.push(`${position}:${id}`);
+      if (id === first.id) {
+        const index = position === "from" ? 2 : 3;
+        started[index].resolve();
+        await gates[index].promise;
+      }
+      return [];
+    });
+    try {
+      const reading = manager.getEdgesFrom("Other");
+      for (let index = 0; index < gates.length; index++) {
+        await started[index].promise;
+        expect(calls).toEqual(
+          [`ui:${first.id}`, `scroll:${first.id}`, `from:${first.id}`, `to:${first.id}`].slice(
+            0,
+            index + 1,
+          ),
+        );
+        gates[index].resolve();
+      }
+      expect(await reading).toHaveLength(2);
+      expect(calls).toEqual([
+        `ui:${first.id}`,
+        `scroll:${first.id}`,
+        `from:${first.id}`,
+        `to:${first.id}`,
+        `ui:${second.id}`,
+        `scroll:${second.id}`,
+        `from:${second.id}`,
+        `to:${second.id}`,
+      ]);
+    } finally {
+      for (const gate of gates) {
+        gate.resolve();
+      }
+      ui.mockRestore();
+      scroll.mockRestore();
+      modals.mockRestore();
+    }
+  });
+
+  test("invalid stored JSON throws before any interaction or modal reads", async () => {
+    const edge = await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
+    await harness.db
+      .updateTable("navigation_edges")
+      .set({ tool_args: "{" })
+      .where("id", "=", edge.id)
+      .execute();
+    const ui = spyOn(repository, "getUIElementsForEdge");
+    const scroll = spyOn(repository, "getScrollPosition");
+    const modals = spyOn(repository, "getEdgeModals");
+    try {
+      await expect(manager.getEdgesFrom("Other")).rejects.toBeInstanceOf(SyntaxError);
+      expect(ui).not.toHaveBeenCalled();
+      expect(scroll).not.toHaveBeenCalled();
+      expect(modals).not.toHaveBeenCalled();
+    } finally {
+      ui.mockRestore();
+      scroll.mockRestore();
+      modals.mockRestore();
+    }
+  });
+
+  test("a UI read rejection propagates unchanged before scroll or modal reads", async () => {
+    await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
+    const failure = new Error("UI read failed");
+    const ui = spyOn(repository, "getUIElementsForEdge").mockRejectedValue(failure);
+    const scroll = spyOn(repository, "getScrollPosition");
+    const modals = spyOn(repository, "getEdgeModals");
+    try {
+      await expect(manager.getEdgesFrom("Other")).rejects.toBe(failure);
+      expect(scroll).not.toHaveBeenCalled();
+      expect(modals).not.toHaveBeenCalled();
+    } finally {
+      ui.mockRestore();
+      scroll.mockRestore();
+      modals.mockRestore();
+    }
+  });
+
   for (const releaseHierarchyFirst of [true, false]) {
     test(`preserves invocation order when ${releaseHierarchyFirst ? "hierarchy" : "event"} gate releases first`, async () => {
       const eventGate = deferred();

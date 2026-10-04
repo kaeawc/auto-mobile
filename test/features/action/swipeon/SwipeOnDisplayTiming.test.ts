@@ -137,6 +137,24 @@ const timingCases: Array<{
   durations: number[];
   pause: number;
 }> = [
+  {
+    name: "maximum pause and speed",
+    options: { boomerang: true, apexPause: 3000, returnSpeed: 3000 },
+    durations: [300, 1],
+    pause: 3000,
+  },
+  {
+    name: "maximum return",
+    options: { boomerang: true, apexPause: 0, returnSpeed: 0.1 },
+    durations: [300, 3000],
+    pause: 0,
+  },
+  {
+    name: "maximum total",
+    options: { boomerang: true, apexPause: 1700, returnSpeed: 0.1 },
+    durations: [300, 3000],
+    pause: 1700,
+  },
   { name: "unset speed", options: {}, durations: [300], pause: 0 },
   { name: "slow", options: { speed: "slow" }, durations: [600], pause: 0 },
   { name: "normal", options: { speed: "normal" }, durations: [300], pause: 0 },
@@ -243,9 +261,18 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     for (const [options, error] of [
       [{ apexPause: 10 }, "apexPause/returnSpeed require boomerang=true"],
       [{ returnSpeed: 2 }, "apexPause/returnSpeed require boomerang=true"],
-      [{ boomerang: true, apexPause: -1 }, "apexPause must be >= 0"],
-      [{ boomerang: true, returnSpeed: 0 }, "returnSpeed must be > 0"],
-      [{ boomerang: true, returnSpeed: -1 }, "returnSpeed must be > 0"],
+      [
+        { boomerang: true, apexPause: -1 },
+        "apexPause must be finite and >= 0 and <= 3000ms; shorten the apex pause",
+      ],
+      [
+        { boomerang: true, returnSpeed: 0 },
+        "returnSpeed must be finite, > 0 and <= 3000, and produce a finite return duration <= 3000ms; increase returnSpeed or shorten the forward duration",
+      ],
+      [
+        { boomerang: true, returnSpeed: -1 },
+        "returnSpeed must be finite, > 0 and <= 3000, and produce a finite return duration <= 3000ms; increase returnSpeed or shorten the forward duration",
+      ],
     ] satisfies Array<[Partial<SwipeOnOptions>, string]>) {
       test(`invalid ${JSON.stringify(options)}`, async () => {
         const h = harness({ route });
@@ -375,4 +402,55 @@ test("iOS display boomerang falls through with config to the existing default ex
   expect(executor.mock.calls[0]?.[8]).toEqual({ apexPauseMs: 25, returnSpeed: 2 });
   expect(h.gesture.getSwipeCalls().map((leg) => leg.options?.duration)).toEqual([100, 50]);
   expect(h.timer.getSleepHistory()).toEqual([25]);
+});
+
+for (const display of [undefined, "external"]) {
+  for (const timing of [
+    { apexPause: 3001 },
+    { apexPause: Infinity },
+    { apexPause: NaN },
+    { returnSpeed: 1e-320 },
+    { returnSpeed: 0.02 },
+    { returnSpeed: 3001 },
+    { duration: 1500, apexPause: 3000, returnSpeed: 1 },
+    { duration: Infinity },
+    { duration: NaN },
+    { speed: "slow", returnSpeed: 0.1 },
+  ] satisfies Array<Partial<SwipeOnOptions>>) {
+    test(`unsafe boomerang dispatches zero legs: ${display} ${JSON.stringify(timing)}`, async () => {
+      const h = harness({ route: "adb" });
+      const result = await h.action.execute({
+        direction: "up",
+        autoTarget: false,
+        display,
+        boomerang: true,
+        ...timing,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/apexPause|returnSpeed|duration/);
+      expect(h.commands()).toEqual([]);
+      expect(h.gesture.getSwipeCalls()).toEqual([]);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    });
+  }
+}
+test("shared return duration rejects non-finite and over-budget results", () => {
+  for (const returnSpeed of [1e-320, 0.02, Infinity, NaN, 0, -1]) {
+    expect(() => getReturnDuration({ forwardDuration: 300, returnSpeed })).toThrow(/returnSpeed/);
+  }
+});
+
+test("action preflight uses the injected geometry preset duration", async () => {
+  const h = harness({ route: "adb" });
+  spyOn(DefaultElementGeometry.prototype, "getSwipeDurationFromSpeed").mockReturnValue(2000);
+  const result = await h.action.execute({
+    direction: "up",
+    display: "external",
+    boomerang: true,
+    returnSpeed: 0.5,
+  });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("return duration <= 3000ms");
+  expect(h.commands()).toEqual([]);
+  expect(h.gesture.getSwipeCalls()).toEqual([]);
 });

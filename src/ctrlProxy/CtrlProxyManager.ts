@@ -14,6 +14,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../utils/logger";
+import { packageListingContains } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../utils/shellQuote";
 import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
 import * as fs from "fs/promises";
@@ -858,7 +859,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       logger.debug("[CTRL_PROXY] Checking if accessibility service is installed");
       const result = await this.adb.executeCommand(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
         undefined,
         undefined,
         true,
@@ -871,7 +872,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       if (deviceError) {
         throw deviceError;
       }
-      const isInstalled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
+      const isInstalled = packageListingContains(result.stdout, AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
       this.cachedInstallation = {
@@ -1850,12 +1851,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     let uninstallAttempted = false;
     try {
       const result = await this.adb.executeCommand(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
+        `shell pm list packages ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
         undefined,
         undefined,
         true,
       );
-      if (!result.stdout.includes(AndroidCtrlProxyManager.LEGACY_PACKAGE)) {
+      if (!packageListingContains(result.stdout, AndroidCtrlProxyManager.LEGACY_PACKAGE)) {
         return;
       }
       logger.info(
@@ -1868,7 +1869,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Failed to check/uninstall legacy package: ${error}`);
+      // Legacy cleanup is best-effort; failure must not block setup of the current package.
+      logger.warn(
+        `[CTRL_PROXY] Failed to check/uninstall legacy package: ${errorMessage(error)}`,
+        error,
+      );
     } finally {
       if (uninstallAttempted) {
         this.clearAvailabilityCache();

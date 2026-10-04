@@ -1,3 +1,7 @@
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+} from "../daemon/constants";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
@@ -7,7 +11,7 @@ import { NavigationGraphManager } from "../features/navigation/NavigationGraphMa
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { throwIfAborted, createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 
@@ -61,6 +65,8 @@ export const exploreSchema = addDeviceTargetingToSchema(
 
 // Export interfaces for type safety
 export interface NavigateToArgs {
+  [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]?: number;
+  [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]?: number;
   targetScreen: string;
   platform?: Platform;
   sessionUuid?: string;
@@ -122,15 +128,24 @@ export const navigateToHandler = async (
   device: BootedDevice,
   args: NavigateToArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) => {
   try {
+    throwIfAborted(signal);
     const navigateTo = navigateToFactory(device, args);
     const options: NavigateToOptions = {
+      ...(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
+        ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
+        : {}),
+      ...(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
+        ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
+        : {}),
       targetScreen: args.targetScreen,
       platform: args.platform || device.platform,
       sessionUuid: args.sessionUuid,
     };
-    const result = await navigateTo.execute(options, progress);
+    const result = await navigateTo.execute(options, progress, signal);
+    throwIfAborted(signal);
 
     if (result.success) {
       return createJSONToolResponse({
@@ -149,6 +164,7 @@ export const navigateToHandler = async (
       };
     }
   } catch (error) {
+    throwIfAborted(signal);
     throw toActionableError(error, `Failed to navigate`);
   }
 };
@@ -243,7 +259,7 @@ export function registerNavigationTools() {
       };
       const result = await explore.execute(options, progress, signal);
 
-      if ("dryRun" in result && result.dryRun) {
+      if ("dryRun" in result) {
         return createJSONToolResponse({
           message: `Exploration dry run completed: ${result.plannedInteractions.length} planned interactions`,
           ...result,

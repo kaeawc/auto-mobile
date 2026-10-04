@@ -127,7 +127,7 @@ for file in "${skill_files[@]}"; do
     errors=1
   fi
 
-  if [[ -n "$skill_name" ]] && printf '%s\n' "${skill_names[@]-}" | grep -Fxq "$skill_name"; then
+  if [[ -n "$skill_name" ]] && printf '%s\n' "${skill_names[@]-}" | grep -Fx "$skill_name" >/dev/null; then
     echo "[ERROR] ${rel_path}: duplicate skill name '${skill_name}'" >&2
     errors=1
   fi
@@ -318,7 +318,7 @@ while IFS=$'\t' read -r listed_name listed_path; do
     errors=1
   fi
 
-  if printf '%s\n' "${agents_names[@]-}" | grep -Fxq "$listed_name"; then
+  if printf '%s\n' "${agents_names[@]-}" | grep -Fx "$listed_name" >/dev/null; then
     echo "[ERROR] AGENTS.md: duplicate skill entry '${listed_name}'" >&2
     errors=1
   fi

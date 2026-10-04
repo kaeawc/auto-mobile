@@ -1997,6 +1997,22 @@ describe("killDevice handler", () => {
       const sessionlessExecution = executionTracker.startExecution("observe");
       executionTracker.bindDeviceExecution(sessionlessExecution.id, image.deviceId!);
       executionTracker.bindDeviceExecution(initiatingKill.id, image.deviceId!);
+      const reconcile = pool.reconcileDiscoveryObservation.bind(pool);
+      let protectedQuarantineObservations = 0;
+      pool.reconcileDiscoveryObservation = async (...args) => {
+        await reconcile(...args);
+        if (
+          args[0].some((device) => device.name === `Unknown (${image.deviceId})`) &&
+          (await pool.isShutdownReservationHeld(image.deviceId!))
+        ) {
+          // Identity quarantine cannot cancel work while this incarnation's
+          // shutdown reservation is held, whichever discovery observes it first.
+          expect(pool.getDevice(image.deviceId!)?.identityUnresolved).toBe(true);
+          expect(cancelledSessions).toEqual([]);
+          expect(initiatingKill.abortController.signal.aborted).toBe(false);
+          protectedQuarantineObservations++;
+        }
+      };
       // Exercise the real daemon monitor tick without its socket/DB services.
       const monitor = Object.assign(Object.create(Daemon.prototype), {
         timer,
@@ -2117,6 +2133,7 @@ describe("killDevice handler", () => {
           return;
         }
         await outcome;
+        expect(protectedQuarantineObservations).toBeGreaterThan(0);
 
         // Retirement flushes deferred cancellation after the kill is confirmed.
         expect(cancelledSessions).toEqual(["session-1"]);

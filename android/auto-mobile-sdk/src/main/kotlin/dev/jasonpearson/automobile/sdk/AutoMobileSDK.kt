@@ -25,6 +25,7 @@ import dev.jasonpearson.automobile.sdk.context.SdkContext
 import dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
 import dev.jasonpearson.automobile.sdk.events.DefaultDropCounter
 import dev.jasonpearson.automobile.sdk.events.DropCounter
 import dev.jasonpearson.automobile.sdk.events.DropReason
@@ -40,13 +41,14 @@ import dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor
 import dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents
+import dev.jasonpearson.automobile.sdk.persistence.EventBatchReplay
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
-import dev.jasonpearson.automobile.sdk.persistence.replayEventBatches
 import dev.jasonpearson.automobile.sdk.session.SessionTracker
 import dev.jasonpearson.automobile.sdk.storage.DataStoreInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -123,7 +125,8 @@ object AutoMobileSDK {
    * Initialize the SDK with application context. Required for broadcasting navigation events across
    * processes.
    *
-   * @param context Application context (use applicationContext, not activity context)
+   * @param context Application context, or the current Activity context to catch up late tap
+   *   tracking. Only the application context is retained.
    */
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
   fun initialize(context: Context) {
@@ -133,7 +136,8 @@ object AutoMobileSDK {
   /**
    * Initialize the SDK with application context and custom configuration.
    *
-   * @param context Application context (use applicationContext, not activity context)
+   * @param context Application context, or the current Activity context to catch up late tap
+   *   tracking. Only the application context is retained.
    * @param configuration SDK configuration built via [AutoMobileConfiguration.Builder]
    */
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
@@ -175,6 +179,7 @@ object AutoMobileSDK {
 
         // Create shared event buffer with broadcast flush callback and disk persistence
         lateinit var buffer: SdkEventBuffer
+        val replay = EventBatchReplay()
         buffer =
           SdkEventBuffer(
             maxBufferSize = configuration.bufferSize,
@@ -184,6 +189,11 @@ object AutoMobileSDK {
                 appContext,
                 events,
                 onUndelivered = buffer::persistUndelivered,
+                onAcknowledged = {
+                  buffer.execute {
+                    replayPendingBatches(appContext, eventPersistence, buffer, replay)
+                  }
+                },
               )
             },
             persistence = eventPersistence,
@@ -192,6 +202,13 @@ object AutoMobileSDK {
             maxPendingEvents = configuration.maxPendingEvents,
             backPressureStrategy = configuration.backPressureStrategy,
           )
+        SdkEventBroadcaster.deliveryScheduler =
+          object : BatchDeliveryScheduler {
+            override fun schedule(task: Runnable, delayMs: Long): (() -> Unit)? =
+              buffer.scheduleDelivery(task, delayMs)
+
+            override fun execute(task: Runnable) = buffer.executeDelivery(task)
+          }
         buffer.isEnabled = _isEnabled
         buffer.start()
         eventBuffer = buffer
@@ -208,8 +225,7 @@ object AutoMobileSDK {
         // Replay pending batches and clean up old ones on the buffer's executor
         // to avoid blocking the calling thread with disk I/O.
         buffer.execute {
-          eventPersistence.cleanup()
-          replayPendingBatches(appContext, eventPersistence, buffer)
+          replayPendingBatches(appContext, eventPersistence, buffer, replay)
         }
 
         // Thread-safe subsystems — can initialize from any thread
@@ -241,6 +257,7 @@ object AutoMobileSDK {
         // thread
         val handler = Handler(Looper.getMainLooper())
         mainHandler = handler
+        val initializationActivity = WeakReference(AutoMobileClickTracker.findActivity(context))
         val initializeOnMain: () -> Unit = initializeOnMain@{
           try {
             // Guard: if shutdown() was called before this posted block runs, no-op.
@@ -269,7 +286,10 @@ object AutoMobileSDK {
             FrameMetricsCollector.setEnabled(_isEnabled)
             AutoMobileNotifications.initialize(appContext)
             if (appContext is Application) {
-              AutoMobileClickTracker.initialize(appContext, appContext.packageName)
+              AutoMobileClickTracker.initialize(
+                initializationActivity.get() ?: appContext,
+                appContext.packageName,
+              )
             }
           } catch (error: Exception) {
             logger.e(TAG, error) { "AutoMobileSDK main-thread initialization failed; rolling back" }
@@ -603,9 +623,18 @@ object AutoMobileSDK {
     context: Context,
     persistence: EventPersistence,
     buffer: SdkEventBuffer,
+    replay: EventBatchReplay,
   ) {
-    replayEventBatches(persistence, buffer::execute) { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
+    replay.replay(persistence, buffer::execute) { events, deliveryId, complete ->
+      SdkEventBroadcaster.broadcastBatch(
+        context,
+        events,
+        onUndelivered = { _, _ -> },
+        // Invalid payload is terminal: the broadcaster counts it, and replay removes its file.
+        onFinished = complete,
+        splitBatches = false,
+        batchId = deliveryId,
+      )
     }
   }
 

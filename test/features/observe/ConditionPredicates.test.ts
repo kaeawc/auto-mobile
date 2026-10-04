@@ -536,3 +536,28 @@ describe("scoped wait predicates", () => {
     expect(appear(resolver, { elementId: "remove" })(obs([remove(), remove()])).matched).toBe(true);
   });
 });
+
+test("disappear by hint succeeds once an Android field is filled", () => {
+  const observation = obs([
+    node({
+      class: "android.widget.EditText",
+      text: "5551234",
+      "hint-text": "Phone",
+      focusable: true,
+    }),
+  ]);
+  const evaluation = disappear(new ElementResolver(), { text: "Phone" })(observation);
+  expect(evaluation.matched).toBe(true);
+});
+
+test("appear by hint does not match a filled Android field", () => {
+  const observation = obs([
+    node({
+      class: "android.widget.EditText",
+      text: "5551234",
+      "hint-text": "Phone",
+      focusable: true,
+    }),
+  ]);
+  expect(appear(new ElementResolver(), { text: "Phone" })(observation).matched).toBe(false);
+});

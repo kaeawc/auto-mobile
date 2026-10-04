@@ -388,6 +388,18 @@ export function deleteInternalToolParams(params: Record<string, unknown>): void 
   }
 }
 
+/** Copy replayable navigation arguments, excluding request-local metadata. */
+export function stripNavigationToolParams(args: Record<string, unknown>): Record<string, unknown> {
+  const clean = { ...args };
+  deleteInternalToolParams(clean);
+  for (const key of Object.keys(clean)) {
+    if (key.startsWith("__") || key === "sessionUuid") {
+      delete clean[key];
+    }
+  }
+  return clean;
+}
+
 /** Loopback-only header for a released session's inactive resource-read capability. */
 export const DAEMON_RELEASED_SESSION_HEADER = "x-auto-mobile-released-session-uuid";
 

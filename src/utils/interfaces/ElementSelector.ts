@@ -24,6 +24,8 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
       selectionIntent?: TextSelectionIntent;
+      /** Internal action-target opt-in; discovery and predicates leave this off. */
+      allowHintFallback?: boolean;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;

@@ -8,6 +8,8 @@ import type {
   AndroidSdkEventPayload,
 } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 import type { SdkEvent } from "../../../../src/features/observe/interfaces/SdkEventIngestor";
+import { FocusElementMatcher } from "../../../../src/features/talkback/FocusElementMatcher";
+import type { TraversalOrderResult } from "../../../../src/models";
 import type { BootedDevice } from "../../../../src/models";
 import { logger } from "../../../../src/utils/logger";
 import { PortManager } from "../../../../src/utils/PortManager";
@@ -171,6 +173,62 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     expect(client.requestManager.getPendingCount()).toBe(0);
     expect(timer.getCurrentTime()).toBe(0);
   });
+
+  test.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ])(
+    "traversal preserves valid nodes (malformed bounds: %s, focus dropped: %s)",
+    async (malformed, focusDropped) => {
+      // Synthetic protocol objects, not captured device fixtures. The current producer
+      // always supplies numeric bounds; omit them to exercise the nullable parser contract.
+      const first = { text: "First", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+      const target = { text: "Target", bounds: { left: 10, top: 0, right: 20, bottom: 10 } };
+      const nodes = [first, ...(malformed ? [{ text: "Invalid" }] : []), target];
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        const pending = client.requestManager.register<TraversalOrderResult>(
+          "traversal-1",
+          "get_traversal_order",
+          1000,
+          () => ({ elements: [], focusedIndex: null, totalCount: 0, totalTimeMs: 0 }),
+        );
+        await client.handleWebSocketMessage(
+          JSON.stringify({
+            type: "traversal_order_result",
+            requestId: "traversal-1",
+            totalTimeMs: 2,
+            result: {
+              elements: nodes,
+              focusedIndex: focusDropped ? 1 : nodes.length - 1,
+              totalCount: nodes.length,
+            },
+          }),
+        );
+        const result = await pending;
+        // Exercise the actual dereferencing consumer, before checking the array shape.
+        expect(new FocusElementMatcher().findTargetIndex(result.elements, { text: "Target" })).toBe(
+          1,
+        );
+        expect(result).toEqual({
+          elements: [first, target],
+          focusedIndex: focusDropped ? null : 1,
+          totalCount: 2,
+          totalTimeMs: 2,
+          requestId: "traversal-1",
+          error: undefined,
+        });
+        const drops = debug.mock.calls.filter(([message]) => String(message).includes("Dropped"));
+        expect(drops).toEqual(
+          malformed ? [["[CTRL_PROXY] Dropped 1 traversal nodes that failed conversion"]] : [],
+        );
+        expect(client.requestManager.getPendingCount()).toBe(0);
+      } finally {
+        debug.mockRestore();
+      }
+    },
+  );
 
   test("logs a truly unknown type once and otherwise ignores it", async () => {
     const debug = spyOn(logger, "debug").mockImplementation(() => {});

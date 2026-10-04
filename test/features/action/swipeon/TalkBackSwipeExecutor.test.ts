@@ -69,6 +69,24 @@ describe("TalkBackSwipeExecutor", () => {
     );
   });
 
+  test("unsafe return duration rejects before either gesture", async () => {
+    for (const returnSpeed of [1e-320, 0.02, Infinity, NaN]) {
+      await expect(
+        executor.executeBoomerangGesture(
+          100,
+          500,
+          100,
+          200,
+          { duration: 300 },
+          { apexPauseMs: 100, returnSpeed },
+          perf,
+        ),
+      ).rejects.toThrow(/returnSpeed/);
+      expect(fakeGestureExecutor.getSwipeCalls()).toEqual([]);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+    }
+  });
+
   test("abort after the forward boomerang swipe prevents the return command", async () => {
     const controller = new AbortController();
     const originalSwipe = fakeGestureExecutor.swipe.bind(fakeGestureExecutor);
@@ -554,6 +572,85 @@ describe("TalkBackSwipeExecutor", () => {
         expect(scrollActionForFingerDirection(fingerDirection)).toBe(expectedAction);
       },
     );
+
+    test("an acknowledged scroll never sends a fallback gesture", async () => {
+      fakeCtrlProxy.setActionResult({
+        success: true,
+        action: "scroll_forward",
+        totalTimeMs: 1,
+        dispatched: true,
+        acknowledged: true,
+      });
+      const result = await executor.executeAndroidSwipeWithAccessibility(
+        100,
+        500,
+        100,
+        200,
+        "up",
+        { "resource-id": "test:id/scrollView" },
+        { duration: 300 },
+        perf,
+      );
+      expect(result.success).toBe(true);
+      expect(fakeCtrlProxy.getActionHistory()).toHaveLength(1);
+      expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
+    });
+
+    test.each(["Action timeout after 5000ms", "WebSocket connection closed"])(
+      "does not repeat a dispatched scroll after %s",
+      async (error) => {
+        fakeCtrlProxy.setActionResult({
+          success: false,
+          action: "scroll_forward",
+          totalTimeMs: 5000,
+          dispatched: true,
+          acknowledged: false,
+          error,
+        });
+        const result = await executor.executeAndroidSwipeWithAccessibility(
+          100,
+          500,
+          100,
+          200,
+          "up",
+          { "resource-id": "test:id/scrollView" },
+          { duration: 300 },
+          perf,
+        );
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("outcome is indeterminate");
+        expect(result.error).toContain("Do not retry automatically");
+        expect(fakeCtrlProxy.getActionHistory()).toHaveLength(1);
+        expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
+        expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(0);
+      },
+    );
+
+    test.each([
+      { dispatched: false, acknowledged: false, error: "WebSocket not connected" },
+      { dispatched: true, acknowledged: true, error: "Scroll not supported" },
+      { dispatched: true, acknowledged: true, error: "node not found" },
+    ])("falls back once for a proven scroll refusal: %j", async (failure) => {
+      fakeCtrlProxy.setActionResult({
+        success: false,
+        action: "scroll_forward",
+        totalTimeMs: 1,
+        ...failure,
+      });
+      const result = await executor.executeAndroidSwipeWithAccessibility(
+        100,
+        500,
+        100,
+        200,
+        "up",
+        { "resource-id": "test:id/scrollView" },
+        { duration: 300 },
+        perf,
+      );
+      expect(result.success).toBe(true);
+      expect(fakeCtrlProxy.getActionHistory()).toHaveLength(1);
+      expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(1);
+    });
 
     test("falls back to two-finger swipe when ACTION_SCROLL fails", async () => {
       fakeCtrlProxy.setActionResult({

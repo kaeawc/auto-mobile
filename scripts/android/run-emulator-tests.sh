@@ -134,7 +134,7 @@ retry_with_backoff() {
     fi
 
     # Check if this is a transient/retryable error
-    if echo "$output" | grep -qiE "$transient_pattern"; then
+    if echo "$output" | grep -iE "$transient_pattern" >/dev/null; then
       if [ "$attempt" -lt "$max_attempts" ]; then
         print_warning "Transient error detected (attempt $attempt/$max_attempts)"
         echo "Retrying in ${delay}s with exponential backoff..."
@@ -318,7 +318,7 @@ else
     print_success "APK installed successfully (replaced existing)"
   else
     # Check if failure was due to signature mismatch
-    if echo "$install_output" | grep -q "INSTALL_FAILED_UPDATE_INCOMPATIBLE"; then
+    if echo "$install_output" | grep "INSTALL_FAILED_UPDATE_INCOMPATIBLE" >/dev/null; then
       print_warning "Signature mismatch detected - uninstalling old version and retrying"
       echo ""
 

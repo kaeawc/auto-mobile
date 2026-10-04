@@ -21,6 +21,14 @@ class SdkEventBatchBroadcastContractTest {
   }
 
   @Test
+  fun `batch id extra key is stable`() {
+    assertEquals(
+      "dev.jasonpearson.automobile.sdk.EVENT_BATCH_ID",
+      SdkEventBatchBroadcastContract.EXTRA_BATCH_ID,
+    )
+  }
+
+  @Test
   fun `ack capability metadata key is stable`() {
     assertEquals(
       "dev.jasonpearson.automobile.ctrlproxy.SDK_EVENT_BATCH_ACK_SUPPORTED",

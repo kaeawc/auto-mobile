@@ -24,7 +24,7 @@ if swift package plugin generate-documentation --help >/dev/null 2>&1; then
         # The plugin may fail with EPERM when moving the archive out of
         # the sandbox. If the archive was still produced we continue;
         # otherwise we surface the real failure.
-        if ! find "${DOCC_OUTPUTS}" -name "AutoMobileSDK.doccarchive" -type d 2>/dev/null | grep -q .; then
+        if ! find "${DOCC_OUTPUTS}" -name "AutoMobileSDK.doccarchive" -type d 2>/dev/null | grep . >/dev/null; then
             echo "ERROR: DocC generation failed and no archive was produced." >&2
             exit 1
         fi

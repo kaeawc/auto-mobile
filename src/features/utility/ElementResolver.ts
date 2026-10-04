@@ -63,6 +63,8 @@ export interface ResolutionIntent {
   viewport?: { width: number; height: number };
   requireResourceId?: boolean;
   negative?: boolean;
+  /** Action targets may use Android editable hints only after primary text misses. */
+  allowHintFallback?: boolean;
   matchMode?: MatchMode;
   ref?: ElementReference;
 }
@@ -397,8 +399,14 @@ export class ElementResolver {
       nodes = siblings.nodes;
       siblingCandidateNodes = siblings.candidateNodes;
     }
+    const { selected: selectionMatches, all: allMatches } = this.matchSelectionNodes(
+      snapshot,
+      selector,
+      intent,
+      { nodes, candidateNodes: siblingCandidateNodes, scope },
+    );
     const matched = this.prepareMatches(
-      this.match(nodes, selector, intent, snapshot, scope),
+      selectionMatches,
       selector,
       snapshot,
       scope,
@@ -440,16 +448,16 @@ export class ElementResolver {
     if (siblingCandidateNodes) {
       // Preserve the complete observed candidate list without letting another
       // anchor's smaller target override the first anchor's chosen sibling.
-      const allMatches = this.prepareMatches(
-        this.match(siblingCandidateNodes, selector, intent, snapshot, scope),
+      const preparedAll = this.prepareMatches(
+        allMatches,
         selector,
         snapshot,
         scope,
         intent,
         preserveTextScope,
       );
-      result.matches = allMatches.matches;
-      result.candidates = allMatches.matches.map(({ node }) => node).filter(actionableCandidate);
+      result.matches = preparedAll.matches;
+      result.candidates = preparedAll.matches.map(({ node }) => node).filter(actionableCandidate);
       if (result.chosen) {
         result.indexInMatches = result.candidates.findIndex(
           (candidate) => actionTarget(candidate) === result.chosen,
@@ -457,6 +465,36 @@ export class ElementResolver {
       }
     }
     return result;
+  }
+
+  private matchSelectionNodes(
+    snapshot: ResolverSnapshot,
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+    options: {
+      nodes: SearchableEntry[];
+      candidateNodes?: SearchableEntry[];
+      scope?: SearchableEntry;
+    },
+  ) {
+    const { nodes, candidateNodes, scope } = options;
+    // Apply hint fallback once over the same universe as reported matches.
+    const { usedHintFallback, ...all } = this.match(
+      candidateNodes ?? nodes,
+      selector,
+      intent,
+      snapshot,
+      scope,
+    );
+    if (!candidateNodes) {
+      return { selected: all, all };
+    }
+    // Keep the established per-anchor primary match mode (including iOS).
+    // Only the hint tier is shared across selection and diagnostic candidates.
+    const selected = usedHintFallback
+      ? { ...all, matches: all.matches.filter(({ node }) => nodes.includes(node)) }
+      : this.match(nodes, selector, { ...intent, allowHintFallback: false }, snapshot, scope);
+    return { selected, all };
   }
 
   private rankCandidates(
@@ -756,6 +794,7 @@ export class ElementResolver {
     anchor: SearchableEntry | undefined,
   ): SearchableEntry[] {
     let parent = anchor?.parentIndex;
+    let fallbackNodes: SearchableEntry[] = [];
     while (anchor && parent !== undefined) {
       const row = snapshot.nodes[parent];
       if (!row || row.collection) {
@@ -768,7 +807,11 @@ export class ElementResolver {
           !isWithin(node, anchor, snapshot.nodes) &&
           !this.crossesCollection(node, row, snapshot.nodes),
       );
-      if (this.match(siblings, selector, intent, snapshot, scope).matches.length > 0) {
+      fallbackNodes = siblings;
+      if (
+        this.match(siblings, selector, { ...intent, allowHintFallback: false }, snapshot, scope)
+          .matches.length > 0
+      ) {
         return siblings;
       }
       if (row === scope) {
@@ -776,7 +819,8 @@ export class ElementResolver {
       }
       parent = row.parentIndex;
     }
-    return [];
+    // No primary row matched. Apply the action-only fallback once in resolveInNodes.
+    return intent.allowHintFallback && !intent.negative ? fallbackNodes : [];
   }
 
   private crossesCollection(
@@ -875,7 +919,7 @@ export class ElementResolver {
     intent: ResolutionIntent,
     snapshot: ResolverSnapshot,
     scope?: SearchableEntry,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> & { usedHintFallback?: boolean } {
     if (selector.elementId !== undefined) {
       return this.matchId(
         nodes,
@@ -910,7 +954,52 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
-    return this.matchText(nodes, selector, intent, textQuery, snapshot, scope);
+    const primary = this.matchText(nodes, selector, intent, textQuery, snapshot, { scope });
+    // Preserve every existing text match (including substrings) before considering
+    // Android placeholders. Mixing the tiers would change targets and uniqueness.
+    // Reuse the same exact/contains/regex rules within the hint-only tier.
+    if (
+      intent.allowHintFallback === true &&
+      !intent.negative &&
+      selector.contentDescription === undefined &&
+      primary.matches.length === 0 &&
+      !primary.error
+    ) {
+      return {
+        ...this.matchText(nodes, selector, intent, textQuery, snapshot, {
+          scope,
+          hintFallback: true,
+        }),
+        usedHintFallback: true,
+      };
+    }
+    return primary;
+  }
+
+  private matchableTextFields(
+    node: SearchableEntry,
+    selector: ResolverSelector,
+    hintFallback: boolean | undefined,
+  ): readonly string[] {
+    if (hintFallback) {
+      const hint = node.properties["hint-text"];
+      const android =
+        node.className?.startsWith("android.") ||
+        node.className?.startsWith("androidx.") ||
+        (typeof node.properties["input-type"] === "string" &&
+          node.properties["input-type"].trim() !== "");
+      return android &&
+        isEditableElementProperties(node.properties) &&
+        typeof hint === "string" &&
+        hint.trim() !== ""
+        ? [hint]
+        : [];
+    }
+    return selector.contentDescription !== undefined
+      ? [node.textSources["content-desc"], node.accessibleLabel].filter(
+          (value): value is string => value !== undefined,
+        )
+      : node.textFields;
   }
 
   private matchText(
@@ -919,14 +1008,11 @@ export class ElementResolver {
     intent: ResolutionIntent,
     textQuery: string,
     snapshot: ResolverSnapshot,
-    scope?: SearchableEntry,
+    options: { scope?: SearchableEntry; hintFallback?: boolean },
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
-    const fields = (node: SearchableEntry): readonly string[] =>
-      selector.contentDescription !== undefined
-        ? [node.textSources["content-desc"], node.accessibleLabel].filter(
-            (value): value is string => value !== undefined,
-          )
-        : node.textFields;
+    const { scope, hintFallback } = options;
+    const fields = (node: SearchableEntry) =>
+      this.matchableTextFields(node, selector, hintFallback);
     const query = normalize(textQuery, selector.caseSensitive);
     if (!query) {
       return { matches: [], matchMode: "exact", error: "Text selector must not be blank" };

@@ -1,5 +1,6 @@
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { isSessionReleasing } from "./sessionReleaseState";
+import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
   InMemoryDeviceHealthMarkers,
   type DeviceHealthMarkers,
@@ -20,6 +21,10 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
+import {
+  SessionRecoveryAssignmentError,
+  formatSessionRecoveryIncidentContext,
+} from "../models/SessionRecoveryAssignmentError";
 import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
@@ -30,10 +35,11 @@ import {
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { SingleFlight } from "../utils/cache/SingleFlight";
+import { TTLCache } from "../utils/cache/Cache";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
-import { type RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import { type RetryExecutor, DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
   DevicePoolRefresh,
@@ -747,6 +753,7 @@ export class DevicePool {
   private readonly missingDeviceLiveness: MissingDeviceLiveness;
   private readonly refreshCoordinator: DevicePoolRefresh;
   private readonly allocationRefresh = new SingleFlight<"allocation", DevicePoolRefreshResult>();
+  private readonly recoveryRetryRefresh: TTLCache<"allocation", DevicePoolRefreshResult>;
   private readonly runtimeIdentity: DeviceRuntimeIdentity;
   private readonly shutdownReservationCoordinator: DeviceShutdownReservations;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
@@ -811,6 +818,9 @@ export class DevicePool {
   private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
   private readonly DEVICE_WAIT_INTERVAL_MS = 1000; // Check every 1 second
   private readonly RECOVERY_RESPONSE_MARGIN_MS = 1000;
+  // Match the daemon's 5s disconnect-monitor cadence: client retries must not
+  // turn the three-miss eviction threshold into a tight-loop reboot trigger.
+  private readonly RECOVERY_RETRY_REFRESH_INTERVAL_MS = 5000;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
 
@@ -828,7 +838,7 @@ export class DevicePool {
     deviceHealthRecoveryBackoff,
     installedAppsRepository,
     deviceManager = new MultiPlatformDeviceManager(),
-    retryExecutor = defaultRetryExecutor,
+    retryExecutor = new DefaultRetryExecutor(timer),
     deviceSessionRepository = new DeviceSessionRepository(),
     criteriaMatcher = new DeviceCriteriaMatcher(),
     releaseSessionForDisconnectedDevice,
@@ -855,6 +865,10 @@ export class DevicePool {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
+    this.recoveryRetryRefresh = new TTLCache(timer, {
+      ttlMs: this.RECOVERY_RETRY_REFRESH_INTERVAL_MS,
+      maxEntries: 1,
+    });
     this.deviceHealthMarkers = resolveDeviceHealthMarkers(deviceHealthMarkers, timer);
     sessionManager.setDeviceHealthMarkers(
       this.deviceHealthMarkers,
@@ -1398,8 +1412,36 @@ export class DevicePool {
       });
 
     this.sessionManager.setRecoveryExpiryReleaseHandler({
-      release: (sessionId, reason, attempt) =>
-        this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(sessionId, reason, attempt),
+      release: (sessionId, reason, attempt) => {
+        const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
+          sessionId,
+          reason,
+          attempt,
+        );
+        if (recoveryRelease) {
+          return recoveryRelease;
+        }
+        const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
+        if (!terminalRelease || !this.sessionManager.hasSession(sessionId)) {
+          return undefined;
+        }
+        // A retained explicit-release fence upgrades the expiry reason, so its
+        // notification captures ownership instead of freeing the device below.
+        let releasedDeviceId: string | null = null;
+        return releaseSessionAndDevice(
+          this.sessionManager,
+          this,
+          terminalRelease.deviceId,
+          sessionId,
+          reason,
+          {
+            release: async () => {
+              releasedDeviceId = await attempt();
+              return releasedDeviceId;
+            },
+          },
+        ).then(() => releasedDeviceId);
+      },
     });
 
     // Expiry has no caller available to return the device to the pool. Explicit
@@ -2718,7 +2760,7 @@ export class DevicePool {
       );
       return false;
     }
-    const released = await this.retrySessionRelease(sessionId, () =>
+    const released = await this.retrySessionRelease(sessionId, device.id, () =>
       this.releaseSessionForDisconnectedDevice(
         sessionId,
         device.id,
@@ -3115,21 +3157,50 @@ export class DevicePool {
   ): Promise<void> {
     await this.retrySessionRelease(
       sessionId,
+      deviceId,
       attempt ??
         (async () =>
           await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason)),
     );
   }
 
-  private async retrySessionRelease<T>(sessionId: string, attempt: () => Promise<T>): Promise<T> {
-    return await this.retryExecutor.executeOrThrow(attempt, {
-      onRetry: (error, attemptNumber, delay) => {
-        logger.warn(
-          `[DevicePool] Retrying recovery release for session ${sessionId} after attempt ${attemptNumber} failed; delay=${delay}ms: ${error}`,
-          error,
-        );
-      },
-    });
+  private async retrySessionRelease<T>(
+    sessionId: string,
+    deviceId: string,
+    attempt: () => Promise<T>,
+  ): Promise<T> {
+    const device = this.devices.get(deviceId);
+    const assignmentCount = device?.assignmentCount;
+    try {
+      return await this.retryExecutor.executeOrThrow(attempt, {
+        onRetry: (error, attemptNumber, delay) => {
+          logger.warn(
+            `[DevicePool] Retrying recovery release for session ${sessionId} after attempt ${attemptNumber} failed; delay=${delay}ms: ${error}`,
+            error,
+          );
+        },
+      });
+    } catch (releaseError) {
+      // Retain ownership throughout backoff. Only the exhausted release may
+      // free a removed session's device, and never a newer assignment.
+      if (
+        !this.sessionManager.hasSession(sessionId) &&
+        device &&
+        this.devices.get(deviceId) === device &&
+        device.assignmentCount === assignmentCount &&
+        device.sessionId === sessionId
+      ) {
+        try {
+          await this.releaseDevice(deviceId, sessionId);
+        } catch (poolError) {
+          logger.warn(
+            `Failed to free device ${deviceId} after session ${sessionId} release retries`,
+            poolError,
+          );
+        }
+      }
+      throw releaseError;
+    }
   }
 
   private async rebootDisconnectedAndroidDevice(
@@ -3616,13 +3687,8 @@ export class DevicePool {
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string> {
-    const { requestWaitDeadline, requestController, assignmentSignal } = recoveryTarget
-      ? this.recoveryAssignmentRequest(recoveryTarget)
-      : {};
-    const recoveryDeadline =
-      requestWaitDeadline === undefined
-        ? recoveryTarget?.restartRecoveryDeadlineMs
-        : Math.min(recoveryTarget?.restartRecoveryDeadlineMs ?? Infinity, requestWaitDeadline);
+    const assignmentSignal = recoveryTarget ? getAbortSignal() : undefined;
+    const recoveryDeadline = recoveryTarget?.restartRecoveryDeadlineMs;
     const timeoutMs =
       recoveryDeadline === undefined
         ? this.DEVICE_WAIT_TIMEOUT_MS
@@ -3636,43 +3702,25 @@ export class DevicePool {
     let firstAttemptLogged = false;
     let refreshFailure: string | undefined;
     let lossIncident: EmulatorLossIncident | undefined;
+    recoveryTarget?.onRecoveryWait?.({
+      responseMarginMs: this.RECOVERY_RESPONSE_MARGIN_MS,
+      restartDeadlineMs: recoveryTarget.restartRecoveryDeadlineMs,
+      timeoutError: () => this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident),
+    });
 
-    // Select synchronously: the ordinary path calls the original executor directly,
-    // with no deadline wrapper or additional promise hop before candidate capture.
-    const executeAssignment: RetryExecutor["execute"] =
-      requestWaitDeadline === undefined
-        ? this.retryExecutor.execute.bind(this.retryExecutor)
-        : (operation, options) =>
-            raceWithDeadline(
-              () =>
-                runWithAbortSignal(assignmentSignal, () =>
-                  this.retryExecutor.execute(operation, options),
-                ),
-              {
-                timer: this.timer,
-                timeoutMs: this.remainingStartDeadline(requestWaitDeadline),
-                label: "Session restart recovery",
-                timeoutError: () =>
-                  recoveryTarget
-                    ? this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident)
-                    : new ActionableError("Device assignment request budget exhausted"),
-                onTimeout: () =>
-                  requestController?.abort(
-                    new DevicePoolError("Recovery request budget exhausted", false),
-                  ),
-              },
-            );
-    const result = await executeAssignment(
+    const result = await this.retryExecutor.execute(
       async (attempt) => {
-        if (requestWaitDeadline !== undefined && this.timer.now() >= requestWaitDeadline) {
-          throw new DevicePoolError("Recovery request budget exhausted", false);
-        }
         // Ordinary allocation must capture candidates before yielding to release/readiness.
         if (recoveryTarget) {
-          lossIncident = await this.checkRecoveryAssignmentLoss(sessionId, recoveryTarget);
+          lossIncident = await this.settledRecoveryLossIncident(sessionId, recoveryTarget);
         }
         // Try to assign device (mutex ensures atomic assignment)
-        const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
+        const assignResult = await this.tryAssignDevice(
+          sessionId,
+          platform,
+          recoveryTarget,
+          lossIncident !== undefined,
+        );
         if (assignResult.refreshCompleted) {
           refreshFailure = assignResult.refreshFailure;
         }
@@ -3688,14 +3736,12 @@ export class DevicePool {
         }
 
         if (recoveryTarget) {
-          const recoveryFailure = this.recoveryFailure(
+          lossIncident = await this.checkRecoveryAssignmentFailure(
             sessionId,
             recoveryTarget,
             assignResult.refreshCompleteness,
+            lossIncident,
           );
-          if (recoveryFailure) {
-            throw recoveryFailure;
-          }
         }
 
         // No device available - check if we should wait or fail
@@ -3810,54 +3856,35 @@ export class DevicePool {
     );
   }
 
-  private recoveryAssignmentRequest(target?: SessionRecoveryTarget): {
-    requestWaitDeadline?: number;
-    requestController?: AbortController;
-    assignmentSignal?: AbortSignal;
-  } {
-    const deadline = target?.requestDeadlineMs;
-    const restartDeadline = target?.restartRecoveryDeadlineMs;
-    // Once the restart window closes, preserve the original identity-recovery
-    // attempt and terminalization, including when this request has no budget left.
-    if (
-      deadline === undefined ||
-      !Number.isFinite(deadline) ||
-      restartDeadline === undefined ||
-      this.timer.now() >= restartDeadline ||
-      deadline - this.RECOVERY_RESPONSE_MARGIN_MS >= restartDeadline
-    ) {
-      return {};
-    }
-    const requestController = new AbortController();
-    const callerSignal = getAbortSignal();
-    return {
-      requestWaitDeadline: deadline - this.RECOVERY_RESPONSE_MARGIN_MS,
-      requestController,
-      assignmentSignal: callerSignal
-        ? AbortSignal.any([callerSignal, requestController.signal])
-        : requestController.signal,
-    };
-  }
-
-  private async checkRecoveryAssignmentLoss(
+  private async checkRecoveryAssignmentFailure(
     sessionId: string,
     target: SessionRecoveryTarget,
+    refreshCompleteness: DiscoveryCompleteness | undefined,
+    incident: EmulatorLossIncident | undefined,
   ): Promise<EmulatorLossIncident | undefined> {
+    // Loss can settle while discovery is in flight. Re-read diagnostics before
+    // deciding whether this attempt should report pending.
+    incident ??= await this.settledRecoveryLossIncident(sessionId, target);
+    const failure = this.recoveryFailure(sessionId, target, refreshCompleteness);
+    // Proven serial reuse is terminal even inside the recovery window.
     if (
-      target.restartRecoveryDeadlineMs === undefined ||
-      this.timer.now() >= target.restartRecoveryDeadlineMs
+      failure instanceof SessionRecoveryIdentityLossError &&
+      failure.reason === "identity-continuity-lost"
     ) {
-      return undefined;
+      throw failure;
     }
-    const incident = await this.settledRecoveryLossIncident(sessionId, target);
-    // Reading diagnostics can cross the restart deadline. Only the existing
-    // recoveryFailure path may decide identity loss once that window closes.
+    // Reading diagnostics or discovery can cross the restart deadline. Only
+    // recoveryFailure may decide absence once that window closes.
     if (
       incident &&
+      target.restartRecoveryDeadlineMs !== undefined &&
       this.timer.now() < target.restartRecoveryDeadlineMs &&
       this.getDevicesMatchingRecoveryTarget(target).length === 0
     ) {
       throw this.recoveryAssignmentError(sessionId, target, incident);
+    }
+    if (failure) {
+      throw failure;
     }
     return incident;
   }
@@ -3867,24 +3894,39 @@ export class DevicePool {
     target: SessionRecoveryTarget,
     incident?: EmulatorLossIncident,
   ): ActionableError {
-    const context = incident
-      ? `Loss incident ${incident.id}: ${incident.detectionPath}` +
-        (incident.processExit
-          ? ` (code=${incident.processExit.code}, signal=${incident.processExit.signal})`
-          : "") +
-        `; recovery outcome: ${incident.recovery.outcome}. `
-      : "";
+    const now = this.timer.now();
+    if (target.restartRecoveryDeadlineMs !== undefined && now < target.restartRecoveryDeadlineMs) {
+      return new SessionRecoveryAssignmentError({
+        sessionUuid: sessionId,
+        platform: target.platform,
+        deviceId: target.deviceId,
+        stableDeviceId: target.stableDeviceId,
+        ...(incident
+          ? {
+              incidentId: incident.id,
+              detectionPath: incident.detectionPath,
+              ...(incident.processExit ? { processExit: { ...incident.processExit } } : {}),
+              recoveryOutcome: incident.recovery.outcome,
+            }
+          : {}),
+        recoveryWindowRemainingMs: target.restartRecoveryDeadlineMs - now,
+      });
+    }
+    const context = formatSessionRecoveryIncidentContext(
+      incident
+        ? {
+            incidentId: incident.id,
+            detectionPath: incident.detectionPath,
+            processExit: incident.processExit,
+            recoveryOutcome: incident.recovery.outcome,
+          }
+        : {},
+    );
     return new ActionableError(
       `Cannot safely recover session ${sessionId}: ${target.platform} device ` +
         `'${target.stableDeviceId}' is unavailable or already in use. ` +
         "Acquire a new device with getAndroid or getApple. " +
-        context +
-        (target.restartRecoveryDeadlineMs !== undefined &&
-        this.timer.now() < target.restartRecoveryDeadlineMs
-          ? "The session can still resume if the device returns before the recovery window ends " +
-            `(${Math.ceil((target.restartRecoveryDeadlineMs - this.timer.now()) / 1000)} seconds remaining); ` +
-            "otherwise acquire a new device with getAndroid or getApple."
-          : ""),
+        context,
     );
   }
 
@@ -3892,7 +3934,11 @@ export class DevicePool {
     sessionId: string,
     target: SessionRecoveryTarget,
   ): Promise<EmulatorLossIncident | undefined> {
-    if (target.platform !== "android" || target.restartRecoveryDeadlineMs === undefined) {
+    if (
+      target.platform !== "android" ||
+      target.restartRecoveryDeadlineMs === undefined ||
+      this.timer.now() >= target.restartRecoveryDeadlineMs
+    ) {
       return undefined;
     }
     try {
@@ -3923,6 +3969,7 @@ export class DevicePool {
     sessionId: string,
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
+    settledRecoveryLoss = false,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -3943,6 +3990,7 @@ export class DevicePool {
       recoveryTarget ? "recovery target pool empty" : "platform pool empty",
       () => this.hasPendingAndroidRecovery(platform),
       recoveryTarget,
+      settledRecoveryLoss,
     );
   }
 
@@ -3985,6 +4033,7 @@ export class DevicePool {
     emptyCandidatePoolReason: string,
     hasPendingRecovery: () => boolean,
     recoveryTarget?: SessionRecoveryTarget,
+    settledRecoveryLoss = false,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -4111,7 +4160,7 @@ export class DevicePool {
         // must not inherit one caller's cancellation; each waiter can stop alone.
         const refreshResult = await this.allocationRefresh.run(
           "allocation",
-          () => runWithAbortSignal(undefined, () => this.refreshDevicesInternal(false)),
+          () => this.refreshForAllocation(recoveryTarget, settledRecoveryLoss),
           getAbortSignal(),
         );
         refreshCompleteness = refreshResult.completeness;
@@ -4147,6 +4196,43 @@ export class DevicePool {
         };
       }
     }
+  }
+
+  private refreshForAllocation(
+    target: SessionRecoveryTarget | undefined,
+    settledRecoveryLoss: boolean,
+  ): Promise<DevicePoolRefreshResult> {
+    return runWithAbortSignal(undefined, () =>
+      target
+        ? this.refreshForRecoveryRetry(target, settledRecoveryLoss)
+        : this.refreshDevicesInternal(false),
+    );
+  }
+
+  private async refreshForRecoveryRetry(
+    target: SessionRecoveryTarget,
+    settledRecoveryLoss: boolean,
+  ): Promise<DevicePoolRefreshResult> {
+    if (
+      target.restartRecoveryDeadlineMs === undefined ||
+      this.timer.now() >= target.restartRecoveryDeadlineMs
+    ) {
+      return this.refreshDevicesInternal(false);
+    }
+    // Pool-wide, not per session: multiple recovering sessions must not each
+    // spend a miss against the same bystander. Ordinary refreshes are not cached
+    // here, so the first recovery retry still discovers after the loss.
+    // Only the settled-loss fast pending error enables cache reuse. Unsettled
+    // recovery retains its existing in-call polling and caller deadlines.
+    const recent = settledRecoveryLoss ? this.recoveryRetryRefresh.get("allocation") : undefined;
+    if (recent) {
+      return recent;
+    }
+    const result = await this.refreshDevicesInternal(false);
+    // Cache even inconclusive results to bound retries during discovery failure.
+    // SingleFlight owns this task independently of each caller's cancellation.
+    this.recoveryRetryRefresh.set("allocation", result);
+    return result;
   }
 
   private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {
@@ -4894,13 +4980,16 @@ export class DevicePool {
       preservedSession &&
       this.sessionManager.getSession(preservedSession.sessionId) === preservedSession
     ) {
-      await this.retrySessionRelease(preservedSession.sessionId, () =>
-        this.sessionManager.releaseSessionIfOwned(
-          preservedSession.sessionId,
-          preservedSession,
-          preservedSession.assignedDevice,
-          deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
-        ),
+      await this.retrySessionRelease(
+        preservedSession.sessionId,
+        preservedSession.assignedDevice,
+        () =>
+          this.sessionManager.releaseSessionIfOwned(
+            preservedSession.sessionId,
+            preservedSession,
+            preservedSession.assignedDevice,
+            deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
+          ),
       );
     }
   }

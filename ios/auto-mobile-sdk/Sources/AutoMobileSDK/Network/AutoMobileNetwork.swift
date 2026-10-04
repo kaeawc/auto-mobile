@@ -498,18 +498,19 @@ public class AutoMobileURLProtocol: URLProtocol {
             }
         }
     #endif
-    private var startTime: Date?
-    private var urlSession: URLSession?
-    private var dataTask: URLSessionDataTask?
-    private var receivedResponse: URLResponse?
-    private var receivedData = Data()
-    private var totalBytesReceived = 0
-    /// Guards the delayed-fault lifecycle across `stopLoading()` (called by the URL
-    /// loading system) and the global-queue timer block that serves a delayed fault.
-    /// `serveFault` checks `stopped` under this lock and delivers under it too, so the
-    /// check is atomic with delivery: stopLoading() cannot slip in between.
-    private let faultLock = NSLock()
-    private var stopped = false
+    private struct State: Sendable {
+        var startTime: Date?
+        var urlSession: URLSession?
+        var dataTask: URLSessionDataTask?
+        var receivedResponse: URLResponse?
+        var receivedData = Data()
+        var totalBytesReceived = 0
+        var stopped = false
+    }
+
+    // URL loading and session-delegate callbacks may run on different queues.
+    // Snapshot state under the lock; invoke sessions, tasks, and clients after unlocking.
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     private static let supportedSchemes: Set<String> = ["http", "https"]
 
@@ -528,9 +529,11 @@ public class AutoMobileURLProtocol: URLProtocol {
     }
 
     override public func startLoading() {
-        startTime = Date()
-        receivedData = Data()
-        totalBytesReceived = 0
+        state.withLock { state in
+            state.startTime = Date()
+            state.receivedData = Data()
+            state.totalBytesReceived = 0
+        }
 
         #if DEBUG
             if AutoMobileSDK.shared.isEnabled,
@@ -552,7 +555,7 @@ public class AutoMobileURLProtocol: URLProtocol {
                !fault.dryRun
             {
                 if let delayMs = fault.delayMs, delayMs > 0 {
-                    // The delayed serveFault checks `stopped` under faultLock before delivering,
+                    // The delayed serveFault checks `stopped` under the state lock before delivering,
                     // so a fault whose timer fires after stopLoading() never touches the client
                     // (the guard also covers the case where the timer already began executing —
                     // which a work-item cancel could not). No cancellation needed.
@@ -596,7 +599,7 @@ public class AutoMobileURLProtocol: URLProtocol {
                     statusCode: match.statusCode,
                     responseHeaders: headers,
                     responseBodySize: body.count,
-                    durationMs: startTime.map { Date().timeIntervalSince($0) * 1000 },
+                    durationMs: state.withLock { $0.startTime }.map { Date().timeIntervalSince($0) * 1000 },
                     error: "mocked:\(match.mockId)",
                     requestBody: request.httpBody.flatMap { data in
                         AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type"))
@@ -631,23 +634,54 @@ public class AutoMobileURLProtocol: URLProtocol {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = config.protocolClasses?.filter { $0 != AutoMobileURLProtocol.self }
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        urlSession = session
-        dataTask = session.dataTask(with: mutableRequest as URLRequest)
-        dataTask?.resume()
+        let task = session.dataTask(with: mutableRequest as URLRequest)
+        if storeTaskIfRunning(task, session: session), state.withLock({ !$0.stopped }) {
+            // Recheck cancellation after storage. Cancellation racing resume is
+            // handled by URLSession, without holding our lock across a task callout.
+            task.resume()
+        } else {
+            task.cancel()
+            session.invalidateAndCancel()
+        }
+    }
+
+    /// Accept a suspended task only while loading is active. Internal so the
+    /// stop-before-store interleaving can be tested without making a request.
+    func storeTaskIfRunning(_ task: URLSessionDataTask, session: URLSession) -> Bool {
+        let result = state.withLock { state in
+            guard !state.stopped else { return (false, state.urlSession, state.dataTask) }
+            let previous = (state.urlSession, state.dataTask)
+            state.urlSession = session
+            state.dataTask = task
+            return (true, previous.0, previous.1)
+        }
+        withExtendedLifetime(result) {}
+        return result.0
     }
 
     override public func stopLoading() {
         // Mark the protocol stopped so a delayed fault whose timer fires later (or is
-        // mid-serveFault) sees it under faultLock and does not invoke the client.
-        faultLock.lock()
-        stopped = true
-        faultLock.unlock()
+        // mid-serveFault) sees it under the state lock and does not invoke the client.
+        let (task, session) = state.withLock { state in
+            state.stopped = true
+            return (state.dataTask, state.urlSession)
+        }
 
-        dataTask?.cancel()
+        task?.cancel()
         // Invalidate session to break the retain cycle (session -> delegate -> self)
-        urlSession?.invalidateAndCancel()
-        urlSession = nil
-        dataTask = nil
+        session?.invalidateAndCancel()
+        clearSession()
+    }
+
+    private func clearSession() {
+        let previous = state.withLock { state in
+            let previous = (state.urlSession, state.dataTask)
+            state.urlSession = nil
+            state.dataTask = nil
+            return previous
+        }
+        // A replaced session/task can release its delegate; keep releases outside the lock.
+        withExtendedLifetime(previous) {}
     }
 
     #if DEBUG
@@ -660,9 +694,7 @@ public class AutoMobileURLProtocol: URLProtocol {
             // sub-microsecond window after this check) is the ordinary "response arrives as the
             // task is cancelled" race the URL loading system already tolerates — making it
             // fully atomic is not possible without reintroducing the deadlock above.
-            faultLock.lock()
-            let isStopped = stopped
-            faultLock.unlock()
+            let isStopped = state.withLock { $0.stopped }
             if isStopped { return }
 
             let method = request.httpMethod ?? "GET"
@@ -739,6 +771,7 @@ public class AutoMobileURLProtocol: URLProtocol {
 
         private func serveSimulatedError(_ simulation: NetworkMockRuleStore.ErrorSimulation, url: URL) {
             let method = request.httpMethod ?? "GET"
+            let startTime = state.withLock { $0.startTime }
             let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
             let requestBodySize = request.httpBody?.count
             let requestBodyData: Data?
@@ -808,23 +841,31 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        receivedResponse = response
+        let previous = state.withLock { state in
+            let previous = state.receivedResponse
+            state.receivedResponse = response
+            return previous
+        }
+        withExtendedLifetime(previous) {}
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         completionHandler(.allow)
     }
 
     public func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive data: Data) {
-        totalBytesReceived += data.count
         // Accumulate response data for body capture (up to configured limit)
         let maxBytes = AutoMobileNetwork.shared.maxBodyBytes
-        if receivedData.count < maxBytes {
-            receivedData.append(data.prefix(maxBytes - receivedData.count))
+        state.withLock { state in
+            state.totalBytesReceived += data.count
+            if state.receivedData.count < maxBytes {
+                state.receivedData.append(data.prefix(maxBytes - state.receivedData.count))
+            }
         }
         client?.urlProtocol(self, didLoad: data)
     }
 
     public func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
-        let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
+        let snapshot = state.withLock { $0 }
+        let durationMs = snapshot.startTime.map { Date().timeIntervalSince($0) * 1000 }
 
         if let error = error {
             AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
@@ -835,7 +876,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
             ))
             client?.urlProtocol(self, didFailWithError: error)
         } else {
-            let httpResponse = receivedResponse as? HTTPURLResponse
+            let httpResponse = snapshot.receivedResponse as? HTTPURLResponse
             let contentType = httpResponse?.value(forHTTPHeaderField: "Content-Type")
 
             // Capture request body from original request
@@ -847,8 +888,9 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
             }
 
             // Capture response body if text content type (already byte-truncated during streaming)
-            let responseBody: String? = AutoMobileNetwork.isTextContentType(contentType) && !receivedData.isEmpty
-                ? AutoMobileNetwork.utf8String(from: receivedData)
+            let responseBody: String? = AutoMobileNetwork.isTextContentType(contentType) && !snapshot.receivedData
+                .isEmpty
+                ? AutoMobileNetwork.utf8String(from: snapshot.receivedData)
                 : nil
 
             AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
@@ -858,7 +900,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
                 requestBodySize: request.httpBody?.count,
                 statusCode: httpResponse?.statusCode,
                 responseHeaders: httpResponse?.allHeaderFields as? [String: String],
-                responseBodySize: totalBytesReceived,
+                responseBodySize: snapshot.totalBytesReceived,
                 durationMs: durationMs,
                 requestBody: requestBody,
                 responseBody: responseBody,
@@ -868,8 +910,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
             client?.urlProtocolDidFinishLoading(self)
         }
         // Break retain cycle after completion
-        urlSession?.finishTasksAndInvalidate()
-        urlSession = nil
-        dataTask = nil
+        state.withLock { $0.urlSession }?.finishTasksAndInvalidate()
+        clearSession()
     }
 }

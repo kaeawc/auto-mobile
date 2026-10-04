@@ -1071,6 +1071,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     signal?: AbortSignal,
     displayId?: number,
     beforeSend?: () => void,
+    onDispatch?: () => void,
   ): Promise<A11yDragResult>;
 
   requestPinch(
@@ -3123,6 +3124,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     signal?: AbortSignal,
     displayId?: number,
     beforeSend?: () => void,
+    onDispatch?: () => void,
   ): Promise<A11yDragResult> {
     return this.gestures.requestDrag(
       x1,
@@ -3137,6 +3139,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       signal,
       displayId,
       beforeSend,
+      onDispatch,
     );
   }
 
@@ -3491,6 +3494,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const startTime = this.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
     let pendingRequestId: string | undefined;
+    let dispatched = false;
 
     this.cancelScreenshotBackoff();
 
@@ -3507,6 +3511,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: "Failed to connect to accessibility service",
+          dispatched: false,
+          acknowledged: false,
         };
       }
 
@@ -3526,8 +3532,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: `Action timeout after ${timeout}ms`,
+          acknowledged: false,
         }),
-        (error, totalTimeMs) => ({ success: false, action, totalTimeMs, error }),
+        (error, totalTimeMs) => ({
+          success: false,
+          action,
+          totalTimeMs,
+          error,
+          acknowledged: true,
+        }),
       );
 
       const cancellableAction = this.awaitCancellableRequest(
@@ -3545,6 +3558,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
         );
         this.ws.send(message);
+        dispatched = true;
         logger.debug(
           `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, ` +
             `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
@@ -3563,7 +3577,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         logger.warn(`[CTRL_PROXY] Action failed after ${clientDuration}ms: ${result.error}`);
       }
 
-      return result;
+      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
     } catch (error) {
       if (pendingRequestId) {
         this.requestManager.resolveError(
@@ -3574,7 +3588,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
-      return { success: false, action, totalTimeMs: duration, error: `${error}` };
+      return {
+        success: false,
+        action,
+        totalTimeMs: duration,
+        error: `${error}`,
+        dispatched,
+        acknowledged: false,
+      };
     }
   }
 
@@ -3699,7 +3720,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
-  ): Promise<A11yClipboardResult> {
+    onDispatch?: () => void,
+  ): Promise<A11yClipboardResult & { acknowledged?: boolean }> {
     const startTime = this.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
     let requestId: string | undefined;
@@ -3709,6 +3731,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (action === "copy" && !text) {
         return {
           success: false,
+          acknowledged: false,
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: "Text is required for copy action",
@@ -3723,6 +3746,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for clipboard");
         return {
           success: false,
+          acknowledged: false,
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: "Failed to connect to accessibility service",
@@ -3733,17 +3757,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       requestId = this.requestManager.generateId("clipboard");
       const clipboardRequestId = requestId;
 
-      const clipboardPromise = this.requestManager.register<A11yClipboardResult>(
-        clipboardRequestId,
-        "clipboard",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Clipboard ${action} timeout after ${timeout}ms`,
-        }),
-      );
+      const clipboardPromise = this.requestManager.register<
+        A11yClipboardResult & { acknowledged?: boolean }
+      >(clipboardRequestId, "clipboard", timeoutMs, (_id, _type, timeout) => ({
+        success: false,
+        acknowledged: false,
+        action,
+        totalTimeMs: this.timer.now() - startTime,
+        error: `Clipboard ${action} timeout after ${timeout}ms`,
+      }));
 
       await perf.track("sendRequest", async () => {
         combinedSignal?.throwIfAborted();
@@ -3754,6 +3776,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ctrlProxyRequests.requestClipboard({ requestId: clipboardRequestId, action, text }),
         );
         this.ws.send(message);
+        onDispatch?.();
         logger.debug(
           `[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`,
         );
@@ -3765,7 +3788,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           clipboardPromise,
           combinedSignal,
           startTime,
-        ),
+        ).then((result) => ({
+          ...result,
+          // Only a device reply confirms an outcome; timeout and local cancellation do not.
+          acknowledged: result.acknowledged ?? !combinedSignal?.aborted,
+        })),
       );
       const clientDuration = this.timer.now() - startTime;
 
@@ -3786,7 +3813,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Clipboard request failed after ${duration}ms: ${error}`);
-      return { success: false, action, totalTimeMs: duration, error: `${error}` };
+      return {
+        success: false,
+        action,
+        totalTimeMs: duration,
+        error: `${error}`,
+        acknowledged: false,
+      };
     }
   }
 
@@ -3946,7 +3979,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; action: string; totalTimeMs: number; error?: string }> {
+    onDispatch?: () => void,
+  ): Promise<{
+    success: boolean;
+    action: string;
+    totalTimeMs: number;
+    error?: string;
+    acknowledged?: boolean;
+  }> {
     const startTime = this.timer.now();
     // Combine with the ambient request signal so a cancelled request (e.g.
     // session teardown mid-home-press) can free this keyed device operation
@@ -3956,10 +3996,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     let requestId: string | undefined;
     try {
       // Fast-fail if not already connected to avoid stalling callers
-      // (all callers fall back to ADB keyevent on failure)
+      // (undelivered requests are safe to fall back to ADB keyevents)
       if (!this.isConnected()) {
         return {
           success: false,
+          acknowledged: false,
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: "WebSocket not connected",
@@ -3968,6 +4009,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (combinedSignal?.aborted) {
         return {
           success: false,
+          acknowledged: false,
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: OPERATION_CANCELLED_MESSAGE,
@@ -3980,11 +4022,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         action: string;
         totalTimeMs: number;
         error?: string;
+        acknowledged?: boolean;
       }>(requestId, "global_action", timeoutMs, (_id, _type, timeout) => ({
         success: false,
         action,
         totalTimeMs: this.timer.now() - startTime,
         error: `Global action timeout after ${timeout}ms`,
+        acknowledged: false,
       }));
 
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -3995,26 +4039,32 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ctrlProxyRequests.requestGlobalAction({ requestId, action, frameContext }),
         ),
       );
+      onDispatch?.();
       logger.debug(
         `[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`,
       );
 
-      return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
+      return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime).then(
+        (result) => ({
+          ...result,
+          // Only a device reply confirms an outcome; timeout and local cancellation do not.
+          acknowledged: result.acknowledged ?? !combinedSignal?.aborted,
+        }),
+      );
     } catch (error) {
       const logger = this.loggerInstance;
       // The local alias keeps the injected logger visible to the catch-convention lint rule.
       logger.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
       if (requestId) {
-        this.requestManager.reject(
-          requestId,
-          error instanceof Error ? error : new Error(String(error)),
-        );
+        // Settle the abandoned wait, as in requestClipboard; return the typed failure below.
+        this.requestManager.resolveError(requestId, String(error), this.timer.now() - startTime);
       }
       return {
         success: false,
         action,
         totalTimeMs: this.timer.now() - startTime,
         error: error instanceof Error ? error.toString() : errorMessage(error),
+        acknowledged: false,
       };
     }
   }
@@ -5334,13 +5384,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.resolvePendingResponse(message, (message): TraversalOrderResult => {
         const result = message.result;
         if (result && result.elements) {
-          const elements = result.elements.map((node: AccessibilityNode) =>
+          const converted = result.elements.map((node: AccessibilityNode) =>
             this.focus.convertAccessibilityNodeToElement(node),
           );
+          const elements = converted.filter((element) => element !== null);
+          const dropped = converted.length - elements.length;
+          if (dropped > 0) {
+            logger.debug(`[CTRL_PROXY] Dropped ${dropped} traversal nodes that failed conversion`);
+          }
+          const focusedElement =
+            result.focusedIndex === null ? null : converted[result.focusedIndex];
           return {
             elements,
-            focusedIndex: result.focusedIndex,
-            totalCount: result.totalCount,
+            focusedIndex: focusedElement ? elements.indexOf(focusedElement) : null,
+            totalCount: dropped > 0 ? elements.length : result.totalCount,
             totalTimeMs: message.totalTimeMs,
             requestId: message.requestId,
             error: message.error,

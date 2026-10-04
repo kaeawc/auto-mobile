@@ -1,3 +1,4 @@
+import { resolveTransportDeadlineMs } from "./formTools";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { toActionableError } from "../models/ActionableError";
@@ -8,15 +9,13 @@ import { TapOnElement } from "../features/action/TapOnElement";
 import {
   LONG_PRESS_MIN_MS,
   LONG_PRESS_MAX_MS,
+  LONG_PRESS_HARD_MAX_MS,
   LONG_PRESS_DEFAULT_MS,
 } from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
-import {
-  TapAnyElement,
-  TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
-} from "../features/action/TapAnyElement";
+import { TapAnyElement } from "../features/action/TapAnyElement";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../devices/DeviceLockStore";
 import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
@@ -33,6 +32,11 @@ import {
 } from "../features/action/DragAndDrop";
 import {
   SWIPE_APEX_PAUSE_MIN_MS,
+  SWIPE_APEX_PAUSE_MAX_MS,
+  SWIPE_RETURN_SPEED_MAX,
+  SWIPE_RETURN_DURATION_MAX_MS,
+  SWIPE_BOOMERANG_MAX_MS,
+  validateSwipeTimingOptions,
   SWIPE_RETURN_SPEED_EXCLUSIVE_MIN,
 } from "../features/action/swipeon/swipeTiming";
 import { SwipeOn } from "../features/action/swipeon";
@@ -414,7 +418,14 @@ export const tapOnSchema = withJsonSchemaOverride(
           ),
         // A negative duration used to be accepted and silently degraded a
         // longPress into a plain tap (#5769); bound it like the sibling params.
-        duration: z.number().min(0, "must be >= 0").optional().describe("Long press duration (ms)"),
+        duration: z
+          .number()
+          .min(0, "must be >= 0")
+          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
+          .optional()
+          .describe(
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
+          ),
         subtext: z
           .object({
             text: z
@@ -685,9 +696,10 @@ export const tapAnySchema = withJsonSchemaOverride(
         duration: z
           .number()
           .min(0, "must be >= 0")
+          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
           .optional()
           .describe(
-            `Long press duration (ms; maximum for action 'longPress': ${TAP_ANY_LONG_PRESS_MAX_DURATION_MS} ms after rounding)`,
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
           ),
         searchUntil: z
           .object({
@@ -835,14 +847,22 @@ export const swipeOnSchema = withJsonSchemaOverride(
         boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
         apexPause: z
           .number()
+          .finite()
           .min(SWIPE_APEX_PAUSE_MIN_MS)
+          .max(SWIPE_APEX_PAUSE_MAX_MS)
           .optional()
-          .describe(`Pause duration at swipe apex in ms (>= ${SWIPE_APEX_PAUSE_MIN_MS})`),
+          .describe(
+            `Pause duration at swipe apex in ms (${SWIPE_APEX_PAUSE_MIN_MS}-${SWIPE_APEX_PAUSE_MAX_MS}; default: 100)`,
+          ),
         returnSpeed: z
           .number()
+          .finite()
           .gt(SWIPE_RETURN_SPEED_EXCLUSIVE_MIN)
+          .max(SWIPE_RETURN_SPEED_MAX)
           .optional()
-          .describe(`Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN})`),
+          .describe(
+            `Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN}, <= ${SWIPE_RETURN_SPEED_MAX}; default: 1); return duration <= ${SWIPE_RETURN_DURATION_MAX_MS} ms and total boomerang <= ${SWIPE_BOOMERANG_MAX_MS} ms`,
+          ),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
@@ -851,7 +871,16 @@ export const swipeOnSchema = withJsonSchemaOverride(
         ...responseShapeControlFields,
       })
       .strict(),
-  ),
+  ).superRefine((options, context) => {
+    const error = validateSwipeTimingOptions(options);
+    if (error) {
+      context.addIssue({
+        code: "custom",
+        message: error,
+        path: [error.startsWith("apexPause") ? "apexPause" : "returnSpeed"],
+      });
+    }
+  }),
   (js) => compactExclusiveSelectorProperties(js, ["container", "lookFor"]),
 );
 
@@ -2019,10 +2048,10 @@ function buildTapOnSearchSummary(
     return undefined;
   }
   const freshness = result.observation?.freshness;
-  const hasFreshnessTimestamp =
-    typeof freshness?.requestedAfter === "number" && typeof freshness?.actualTimestamp === "number";
   const hasConfirmedFreshObservation =
-    hasFreshnessTimestamp && freshness.actualTimestamp >= freshness.requestedAfter;
+    typeof freshness?.requestedAfter === "number" &&
+    typeof freshness?.actualTimestamp === "number" &&
+    freshness.actualTimestamp >= freshness.requestedAfter;
   const shouldIncludeSearchSummary =
     searchStats.requestCount > 0 ||
     searchStats.changeCount > 0 ||
@@ -2096,6 +2125,8 @@ export async function tapOnHandler(
     },
     progress,
     signal,
+    undefined,
+    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -2221,6 +2252,7 @@ export async function tapAnyHandler(
     },
     progress,
     signal,
+    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapAnySearchSummary(result);

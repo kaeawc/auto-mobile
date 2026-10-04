@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
+import { DragAndDrop, getIosDragTimeoutMs } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { prepareTargetDisplayAction } from "../../../src/features/action/TargetDisplayAction";
 import { throwIfAborted } from "../../../src/utils/toolUtils";
+import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -25,7 +30,7 @@ const device = {
   },
 } as BootedDevice;
 
-function fixture(options: { supportsDisplay: boolean; display?: string }) {
+function fixture(options: { supportsDisplay: boolean; display?: string; autoAdvance?: boolean }) {
   displayTransitions.reset(device.deviceId);
   const adb = new FakeAdbClient();
   adb.setCommandResult(
@@ -61,7 +66,9 @@ function fixture(options: { supportsDisplay: boolean; display?: string }) {
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   const timer = new FakeTimer();
-  timer.enableAutoAdvance();
+  if (options.autoAdvance !== false) {
+    timer.enableAutoAdvance();
+  }
   const action = new DragAndDrop(device, adb as unknown as AdbClient, timer, {
     lastRenderedObservation: () => observation,
     hierarchyCapture: new FakeHierarchyCapture(() => hierarchy),
@@ -80,7 +87,7 @@ function fixture(options: { supportsDisplay: boolean; display?: string }) {
     AndroidCtrlProxyClient.removeInstance(device.deviceId);
     displayTransitions.reset(device.deviceId);
   });
-  return { action, adb, drag, capability, observe, observation, invalidate };
+  return { action, adb, drag, capability, observe, observation, invalidate, timer };
 }
 
 const restorers: Array<() => void> = [];
@@ -281,6 +288,7 @@ describe("dragAndDrop display durations", () => {
         undefined,
         2,
         expect.any(Function),
+        expect.any(Function),
       ]);
       expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
     });
@@ -335,4 +343,209 @@ describe("dragAndDrop display durations", () => {
     expect(args?.[10]).toBeUndefined();
     expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
   });
+});
+
+// Model transport replies/deadlines using fake time, independently of the stroke plan.
+describe("Android drag dispatch outcomes", () => {
+  for (const display of [undefined, "external"]) {
+    const label = display ?? "default";
+    test.each([
+      "displayId must be non-negative: -1",
+      "Gesture display routing requires Android 11 (API 30)",
+      ...["x1", "y1", "x2", "y2"].flatMap((field) =>
+        ["NaN", "Infinity", "-Infinity"].map(
+          (value) =>
+            `Non-finite gesture coordinate: ${field}=${value}. Coordinates must be finite (not NaN or Infinity).`,
+        ),
+      ),
+      "Stale frame context for input/drag; observe a fresh frame before retrying",
+      "Stale frame context; observe a fresh frame before retrying",
+      "Failed to dispatch gesture",
+    ])(`${label}: dispatched no-op reply stays plain: %s`, async (error) => {
+      const { action, drag, adb } = fixture({ supportsDisplay: true, display });
+      drag.mockImplementation(async (...args) => {
+        args[12]?.();
+        return { success: false, totalTimeMs: 20, error };
+      });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(error);
+      expect(drag).toHaveBeenCalledTimes(1);
+      expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
+    });
+
+    test.each([
+      "Drag stroke timed out",
+      "Streamed gesture stroke was cancelled",
+      "Gesture was cancelled",
+      "Failed to dispatch streamed gesture stroke",
+      "Failed to build or dispatch drag stroke",
+      "Drag stroke timed out; pointer release failed: Failed to dispatch streamed gesture stroke",
+      "Streamed gesture stroke was cancelled; pointer release failed: Drag stroke timed out",
+      "Failed to dispatch streamed gesture stroke; pointer release failed: Drag stroke timed out",
+      "Unknown runner failure",
+      undefined,
+      "Failed to dispatch gesture; pointer release failed: Drag stroke timed out",
+      "Non-finite gesture coordinate: x1=NaN. Unexpected suffix",
+      "displayId must be non-negative: -1\n",
+      "Non-finite gesture coordinate: x1=NaN. Coordinates must be finite (not NaN or Infinity).\n",
+    ])(`${label}: partial or unknown reply stays indeterminate: %s`, async (error) => {
+      const { action, drag } = fixture({ supportsDisplay: true, display });
+      drag.mockImplementation(async (...args) => {
+        args[12]?.();
+        return { success: false, totalTimeMs: 20, error };
+      });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Drag outcome is indeterminate");
+      expect(result.error).toContain(error ?? "unknown error");
+      expect(drag).toHaveBeenCalledTimes(1);
+    });
+
+    test(`${label}: transport rejection logs the shared indeterminate warning`, async () => {
+      const { action, drag } = fixture({ supportsDisplay: true, display });
+      const error = new Error("Connection lost");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      restorers.push(() => warn.mockRestore());
+      drag.mockImplementation(async (...args) => {
+        args[12]?.();
+        throw error;
+      });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.error).toContain("Drag outcome is indeterminate");
+      expect(warn).toHaveBeenCalledWith("Drag outcome indeterminate: Connection lost", error);
+    });
+
+    test(`${label}: accepts a reply beyond the old 600ms slack`, async () => {
+      const { action, drag, timer } = fixture({ supportsDisplay: true, display });
+      drag.mockImplementation(async (...args) => {
+        args[12]?.();
+        const reply = new Promise<{ success: boolean; totalTimeMs: number }>((resolve) => {
+          timer.setTimeout(() => resolve({ success: true, totalTimeMs: 1850 }), 1850);
+        });
+        return raceWithDeadline(reply, { timer, timeoutMs: args[7], label: "Drag" });
+      });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.success).toBe(true);
+      expect(drag).toHaveBeenCalledTimes(1);
+      expect(drag.mock.calls[0]?.[7]).toBe(getIosDragTimeoutMs(600, 300, 100));
+      expect(drag.mock.calls[0]?.[7]).toBeGreaterThanOrEqual(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+    });
+
+    test.each(["timeout", "transport rejection", "runner failure"] as const)(
+      `${label}: dispatched %s is indeterminate with no resend or fallback`,
+      async (failure) => {
+        const { action, drag, timer, adb } = fixture({ supportsDisplay: true, display });
+        let timeoutAt: number | undefined;
+        drag.mockImplementation(async (...args) => {
+          args[12]?.();
+          if (failure === "transport rejection") {
+            throw new Error("Connection lost");
+          }
+          if (failure === "runner failure") {
+            return { success: false, totalTimeMs: 20, error: "Gesture cancelled" };
+          }
+          const reply = new Promise<never>(() => {});
+          const timeout = new Error(`Drag timed out after ${args[7]}ms`);
+          try {
+            return await raceWithDeadline(reply, {
+              timer,
+              timeoutMs: args[7],
+              label: "Drag",
+              timeoutError: () => timeout,
+            });
+          } catch (error) {
+            if (error !== timeout) {
+              throw error;
+            }
+            timeoutAt = timer.now();
+            return { success: false, totalTimeMs: args[7], error: timeout.message };
+          }
+        });
+        const result = await action.execute({ ...endpoints, display });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Drag outcome is indeterminate");
+        expect(result.error).toContain("The gesture may have run. Do not retry automatically.");
+        if (failure === "timeout") {
+          expect(timeoutAt).toBe(getIosDragTimeoutMs(600, 300, 100));
+          expect(result.error).toContain(`Drag timed out after ${timeoutAt}ms`);
+        }
+        expect(drag).toHaveBeenCalledTimes(1);
+        expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
+      },
+    );
+
+    test(`${label}: pre-dispatch failure stays plain`, async () => {
+      const { action, drag } = fixture({ supportsDisplay: true, display });
+      drag.mockResolvedValue({ success: false, totalTimeMs: 0, error: "Not connected" });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.error).toBe("Not connected");
+      expect(drag).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([false, true])(
+      `${label}: abort stops waiting (dispatched=%s)`,
+      async (dispatched) => {
+        const { action, drag, timer, observe } = fixture({
+          supportsDisplay: true,
+          display,
+          autoAdvance: false,
+        });
+        const controller = new AbortController();
+        let forwardedSignal: AbortSignal | undefined;
+        const ready = Promise.withResolvers<void>();
+        drag.mockImplementation(async (...args) => {
+          forwardedSignal = args[9];
+          if (dispatched) {
+            args[12]?.();
+          }
+          timer.setTimeout(() => controller.abort(), 25);
+          // sendCommand registers its reply timer only after ensureConnected returns.
+          const reply = new Promise<never>(() => {});
+          const pending = dispatched
+            ? raceWithDeadline(reply, {
+                timer,
+                timeoutMs: args[7],
+                signal: args[9],
+                label: "Drag",
+              })
+            : reply;
+          ready.resolve();
+          return pending;
+        });
+        const pending = action.execute({ ...endpoints, display }, undefined, controller.signal);
+        await ready.promise;
+        expect(timer.getPendingTimeoutCount()).toBe(dispatched ? 2 : 1);
+        timer.advanceTime(25);
+        await expect(pending).rejects.toThrow("Operation cancelled");
+        expect(forwardedSignal).toBe(controller.signal);
+        expect(timer.now()).toBe(25);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(drag).toHaveBeenCalledTimes(1);
+        expect(observe.getExecuteCallCount()).toBe(display ? 1 : 0);
+      },
+    );
+  }
+});
+
+test("explicit-display helper throws an indeterminate ActionableError after dispatch", async () => {
+  const { action, adb, observe, observation, drag } = fixture({
+    supportsDisplay: true,
+    display: "external",
+  });
+  const target = await prepareTargetDisplayAction(
+    device,
+    "external",
+    observe,
+    adb as unknown as AdbClient,
+    () => observation,
+  );
+  drag.mockImplementation(async (...args) => {
+    args[12]?.();
+    return { success: false, totalTimeMs: args[7], error: "Drag timed out" };
+  });
+  const outcome = action["executeOnAndroidDisplay"]({ ...endpoints, display: "external" }, target);
+  await expect(outcome).rejects.toBeInstanceOf(ActionableError);
+  await expect(outcome).rejects.toThrow("Drag outcome is indeterminate");
+  expect(drag).toHaveBeenCalledTimes(1);
 });

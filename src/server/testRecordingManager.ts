@@ -1,5 +1,5 @@
 import * as yaml from "js-yaml";
-import { BootedDevice, Plan, PlanStep } from "../models";
+import { BootedDevice, Plan, PlanStep, type Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
@@ -14,7 +14,7 @@ interface TestRecordingStartResult {
   recordingId: string;
   startedAt: string;
   deviceId: string;
-  platform: string;
+  platform: Platform;
 }
 
 interface TestRecordingStopResult {
@@ -28,7 +28,7 @@ interface TestRecordingStopResult {
   planContent: string;
   stepCount: number;
   deviceId: string;
-  platform: string;
+  platform: Platform;
 }
 
 export interface TestRecordingStatus {
@@ -43,7 +43,7 @@ export interface TestRecordingStatus {
 interface RecordingSession {
   recordingId: string;
   deviceId: string;
-  platform: string;
+  platform: Platform;
   startedAt: number;
   recorder: TestRecorder;
 }

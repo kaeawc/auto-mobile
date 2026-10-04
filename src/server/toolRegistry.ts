@@ -1,3 +1,4 @@
+import { classifyToolResult } from "../utils/toolEnvelopePayload";
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
 import {
@@ -1202,9 +1203,11 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   }
 }
 
-function unwrapToolResponse(response: any): any {
-  const payload = readToolEnvelopePayload(response)?.payload;
-  return payload && "success" in payload ? payload : response;
+function unwrapToolResponse(response: unknown, toolName: string): any {
+  // Client calls permit unstructured text. Step executors enforce the strict
+  // policy; logging keeps its existing fallback for uninterpretable envelopes.
+  const result = classifyToolResult(response, toolName, null);
+  return result.kind === "payload" && "success" in result.payload ? result.payload : response;
 }
 
 /**
@@ -1246,7 +1249,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     // Unwrap MCP response envelope to get the inner result for success/error checks.
     // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
     // instead of a plain { success, error } object.
-    const unwrapped = unwrapToolResponse(response);
+    const unwrapped = unwrapToolResponse(response, name);
 
     const toolSuccess =
       unwrapped && typeof unwrapped === "object" && "success" in unwrapped

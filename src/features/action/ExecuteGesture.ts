@@ -1,3 +1,4 @@
+import { inputDurationArgument } from "./touchscreenInput";
 import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -89,7 +90,7 @@ export class ExecuteGesture extends BaseVisualChange {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
-    const duration = options.duration || 300; // Default duration
+    const duration = options.duration ?? 300; // Default duration
     const scrollMode = options.scrollMode || "adb"; // Default to ADB mode
 
     // Use accessibility service swipe if requested
@@ -106,7 +107,7 @@ export class ExecuteGesture extends BaseVisualChange {
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         options.displayFence?.assertCurrent();
         await this.adb.executeCommand(
-          `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+          `shell input swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
           undefined,
           undefined,
           undefined,
@@ -223,7 +224,7 @@ export class ExecuteGesture extends BaseVisualChange {
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         fence.assertCurrent();
         await this.adb.executeCommand(
-          `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+          `shell input swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
           undefined,
           undefined,
           undefined,
@@ -401,7 +402,7 @@ export class ExecuteGesture extends BaseVisualChange {
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
           await this.adb.executeCommand(
-            `shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
+            `shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${inputDurationArgument(duration)}`,
             undefined,
             undefined,
             undefined,

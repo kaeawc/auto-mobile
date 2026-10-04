@@ -30,6 +30,21 @@ describe("ExecuteGesture Android swipe", () => {
 
   const createGesture = () => new ExecuteGesture({ ...androidDevice }, fakeAdb);
 
+  test.each([
+    [250.5, 251],
+    [250, 250],
+    [0.1, 1],
+    [0, 0],
+  ] as const)(
+    "formats ADB duration %s as %s without changing coordinates",
+    async (duration, expected) => {
+      await createGesture().swipe(10.5, 20.5, 30.5, 40.5, { duration });
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        `shell input swipe 10.5 20.5 30.5 40.5 ${expected}`,
+      ]);
+    },
+  );
+
   test("dispatches an ADB input swipe with the given coordinates and duration in adb mode", async () => {
     const result = await createGesture().swipe(10, 20, 30, 40, { duration: 250 });
 

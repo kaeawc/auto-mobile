@@ -136,13 +136,18 @@ export class FailureEventRepository {
     return result.id;
   }
 
-  /**
-   * Save an ANR event to the database
-   */
-  async saveAnr(event: AnrEvent): Promise<number> {
-    const db = this.getDb();
+  private buildAnrLinkage(
+    event: AnrEvent,
+  ): Pick<NewAnr, "navigation_node_id" | "test_execution_id" | "session_uuid"> {
+    return {
+      navigation_node_id: event.navigationNodeId ?? null,
+      test_execution_id: event.testExecutionId ?? null,
+      session_uuid: event.sessionUuid ?? null,
+    };
+  }
 
-    const newAnr: NewAnr = {
+  private buildAnr(event: AnrEvent): NewAnr {
+    return {
       device_id: event.deviceId,
       package_name: event.packageName,
       timestamp: event.timestamp,
@@ -156,10 +161,17 @@ export class FailureEventRepository {
       stacktrace: event.stacktrace ?? null,
       detection_source: event.detectionSource,
       raw_log: event.rawLog ?? null,
-      navigation_node_id: event.navigationNodeId ?? null,
-      test_execution_id: event.testExecutionId ?? null,
-      session_uuid: event.sessionUuid ?? null,
+      ...this.buildAnrLinkage(event),
     };
+  }
+
+  /**
+   * Save an ANR event to the database
+   */
+  async saveAnr(event: AnrEvent): Promise<number> {
+    const db = this.getDb();
+
+    const newAnr = this.buildAnr(event);
 
     const result = await db
       .insertInto("anrs")
@@ -358,6 +370,25 @@ export class FailureEventRepository {
     return query.execute();
   }
 
+  private toAnrFailure(anr: Anr): FailureRecord {
+    return {
+      type: "anr",
+      id: anr.id,
+      timestamp: anr.timestamp,
+      deviceId: anr.device_id,
+      packageName: anr.package_name,
+      message: anr.reason,
+      stacktrace: anr.stacktrace,
+      detectionSource: anr.detection_source,
+      navigationNodeId: anr.navigation_node_id,
+      testExecutionId: anr.test_execution_id,
+      sessionUuid: anr.session_uuid,
+      reason: anr.reason ?? undefined,
+      activity: anr.activity ?? undefined,
+      waitDurationMs: anr.wait_duration_ms ?? undefined,
+    };
+  }
+
   /**
    * Get all failures (crashes, ANRs, tool call failures) unified into a single list
    */
@@ -388,22 +419,7 @@ export class FailureEventRepository {
     // Get ANRs
     const anrs = await this.getAnrs(options);
     for (const anr of anrs) {
-      failures.push({
-        type: "anr",
-        id: anr.id,
-        timestamp: anr.timestamp,
-        deviceId: anr.device_id,
-        packageName: anr.package_name,
-        message: anr.reason,
-        stacktrace: anr.stacktrace,
-        detectionSource: anr.detection_source,
-        navigationNodeId: anr.navigation_node_id,
-        testExecutionId: anr.test_execution_id,
-        sessionUuid: anr.session_uuid,
-        reason: anr.reason ?? undefined,
-        activity: anr.activity ?? undefined,
-        waitDurationMs: anr.wait_duration_ms ?? undefined,
-      });
+      failures.push(this.toAnrFailure(anr));
     }
 
     // Get tool call failures (if requested)

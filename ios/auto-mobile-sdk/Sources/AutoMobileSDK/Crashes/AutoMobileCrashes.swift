@@ -9,6 +9,10 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     public static let shared = AutoMobileCrashes()
 
     private let lock = NSLock()
+    // Only initialize/reset acquire this lock. Serialize the process-handler
+    // transaction without holding the state lock across injectable accessors;
+    // handleException never acquires it, even when called from an accessor.
+    private let lifecycleLock: any NSLocking
     private var bundleId: String?
     private var buffer: SdkEventBuffer?
     private var _isInitialized = false
@@ -64,34 +68,49 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         NSSetUncaughtExceptionHandler($0)
     }
 
-    private init() {}
+    private init(lifecycleLock: any NSLocking = NSLock()) {
+        self.lifecycleLock = lifecycleLock
+    }
 
     /// Test-only instance to exercise initialize/reset in isolation.
-    static func makeTestInstance() -> AutoMobileCrashes { AutoMobileCrashes() }
+    static func makeTestInstance(lifecycleLock: any NSLocking = NSLock()) -> AutoMobileCrashes {
+        AutoMobileCrashes(lifecycleLock: lifecycleLock)
+    }
+
+    private static func isOwnHandler(_ handler: (@convention(c) (NSException) -> Void)?) -> Bool {
+        handler.map {
+            unsafeBitCast($0, to: UnsafeRawPointer.self)
+                == unsafeBitCast(uncaughtExceptionHandler, to: UnsafeRawPointer.self)
+        } ?? false
+    }
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+
         lock.lock()
         guard !_isInitialized else {
             lock.unlock()
             return
         }
-        let reactivateInPlace = exceptionHandlerRetainedInChain
+        let retainedInChain = exceptionHandlerRetainedInChain
         lock.unlock()
 
         // Call the process accessor outside the state lock; the injected
-        // accessor may itself enter the exception handler.
-        let previousHandler = reactivateInPlace ? nil : captureUncaughtHandler()
+        // accessor may itself enter the exception handler. Lifecycle operations
+        // must not synchronously re-enter initialize/reset from these accessors.
+        let currentHandler = captureUncaughtHandler()
+        let ownsCurrentHandler = Self.isOwnHandler(currentHandler)
+        // A nil handler cannot chain to us. If our handler is current, reinstall
+        // it while preserving its saved predecessor rather than capturing itself.
+        let reactivateInPlace = retainedInChain && currentHandler != nil && !ownsCurrentHandler
         lock.lock()
-        // Another initializer may have finished while we captured the handler.
-        guard !_isInitialized else {
-            lock.unlock()
-            return
-        }
         _isInitialized = true
         self.bundleId = bundleId
         self.buffer = buffer
-        if !reactivateInPlace {
-            previousExceptionHandler = previousHandler
+        exceptionHandlerRetainedInChain = reactivateInPlace
+        if !reactivateInPlace, !ownsCurrentHandler {
+            previousExceptionHandler = currentHandler
         }
         lock.unlock()
 
@@ -192,6 +211,8 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     // MARK: - Testing Support
 
     func reset() {
+        lifecycleLock.lock()
+
         lock.lock()
         // If we were never initialized (e.g. host opted out via
         // enableCrashReporting: false, or shutdown() is called a second time),
@@ -199,6 +220,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         // current handler would destroy the host app's crash reporter.
         guard _isInitialized else {
             lock.unlock()
+            lifecycleLock.unlock()
             return
         }
         _isInitialized = false
@@ -213,14 +235,12 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         lock.unlock()
 
         let currentHandler = captureUncaughtHandler()
-        let ownsCurrentHandler = currentHandler.map {
-            unsafeBitCast($0, to: UnsafeRawPointer.self)
-                == unsafeBitCast(Self.uncaughtExceptionHandler, to: UnsafeRawPointer.self)
-        } ?? false
+        let ownsCurrentHandler = Self.isOwnHandler(currentHandler)
+        let retainedInChain = currentHandler != nil && !ownsCurrentHandler
 
         lock.lock()
-        exceptionHandlerRetainedInChain = !ownsCurrentHandler
-        if ownsCurrentHandler {
+        exceptionHandlerRetainedInChain = retainedInChain
+        if !retainedInChain {
             previousExceptionHandler = nil
         }
         lock.unlock()
@@ -230,6 +250,11 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         if ownsCurrentHandler {
             installUncaughtHandler(prevHandler)
         }
+        // A nil current handler was intentionally cleared by the host. Leave it
+        // alone and forget our predecessor: no process-handler chain reaches us.
+        lifecycleLock.unlock()
+        // A provider's deinit may re-enter lifecycle operations as well as state
+        // getters, so release it after both locks have been released.
         withExtendedLifetime(previousScreenProvider) {}
     }
 }

@@ -33,7 +33,8 @@ import java.io.InputStream
  * When an ANR is detected from a previous session:
  * 1. ApplicationExitInfo is queried for REASON_ANR entries
  * 2. New ANRs (not previously reported) are broadcast to AccessibilityService
- * 3. The ANR PID is persisted to avoid duplicate reporting
+ * 3. The latest reported timestamp and identities reported at that timestamp are persisted to avoid
+ *    duplicate reporting
  */
 object AutoMobileAnr {
   private const val TAG = "AutoMobileAnr"
@@ -44,6 +45,10 @@ object AutoMobileAnr {
 
   private const val PREFS_NAME = "automobile_anr_prefs"
   private const val KEY_LAST_REPORTED_TIMESTAMP = "last_reported_anr_timestamp"
+  private const val KEY_LAST_REPORTED_IDS = "last_reported_anr_ids_at_timestamp"
+
+  // Null identities mean a legacy watermark: every entry at that timestamp is already reported.
+  private data class AnrCursor(val timestamp: Long, val idsAtTimestamp: Set<String>?)
 
   /** Maximum number of historical exit reasons to query */
   private const val MAX_EXIT_REASONS = 5
@@ -98,36 +103,30 @@ object AutoMobileAnr {
       val exitInfos = am.getHistoricalProcessExitReasons(null, 0, MAX_EXIT_REASONS)
       AutoMobileSDK.logger.d(TAG) { "Found ${exitInfos.size} historical exit reasons" }
 
-      val lastReportedTimestamp = getLastReportedTimestamp(ctx)
-      AutoMobileSDK.logger.d(TAG) { "Last reported ANR timestamp: $lastReportedTimestamp" }
-      for (exitInfo in exitInfos) {
-        AutoMobileSDK.logger.d(TAG) {
-          "Exit reason: ${exitInfo.reason} (ANR=${ApplicationExitInfo.REASON_ANR}), pid=${exitInfo.pid}, timestamp=${exitInfo.timestamp}"
-        }
-        if (exitInfo.reason == ApplicationExitInfo.REASON_ANR) {
-          if (exitInfo.timestamp <= lastReportedTimestamp) {
-            AutoMobileSDK.logger.d(TAG) {
-              "Skipping already reported ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
-            }
-          }
-        }
-      }
+      val lastReported = getLastReportedCursor(ctx)
+      AutoMobileSDK.logger.d(TAG) { "Last reported ANR timestamp: ${lastReported.timestamp}" }
 
       val anrInfos = exitInfos.filter { it.reason == ApplicationExitInfo.REASON_ANR }
       AutoMobileSDK.logger.d(TAG) { "Found ${anrInfos.size} ANR(s) in exit history" }
-      val newestReportedTimestamp =
-        reportNewAnrs(anrInfos, { it.timestamp }, lastReportedTimestamp) { exitInfo ->
+      val newestReported =
+        reportNewAnrs(
+          anrInfos,
+          { it.timestamp },
+          // Length-prefix the name to distinguish null, empty, and names containing separators.
+          { "${it.pid}:${it.processName?.length ?: -1}:${it.processName.orEmpty()}" },
+          lastReported,
+        ) { exitInfo ->
           AutoMobileSDK.logger.d(TAG) {
             "Detected NEW previous ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
           }
           broadcastAnr(ctx, exitInfo)
         }
 
-      // Update the last reported timestamp
-      if (newestReportedTimestamp > lastReportedTimestamp) {
-        setLastReportedTimestamp(ctx, newestReportedTimestamp)
+      // Persist successful ties as well as timestamp advances, in one preferences transaction.
+      if (newestReported != lastReported) {
+        setLastReportedCursor(ctx, newestReported)
         AutoMobileSDK.logger.d(TAG) {
-          "Updated last reported timestamp to $newestReportedTimestamp"
+          "Updated last reported timestamp to ${newestReported.timestamp}"
         }
       }
     } catch (e: Exception) {
@@ -138,20 +137,32 @@ object AutoMobileAnr {
   // Private pure seams keep the javap-based public API signature unchanged.
   private fun readCappedAnrTrace(stream: InputStream?, maxChars: Int): String? {
     if (stream == null) return null
-    return stream.reader(Charsets.UTF_8).use { reader ->
-      require(maxChars >= 0) { "maxChars must not be negative" }
-      val trace = StringBuilder()
-      val buffer = CharArray(8192)
-      while (trace.length < maxChars) {
-        val count = reader.read(buffer, 0, minOf(buffer.size, maxChars - trace.length))
-        if (count == -1) break
-        trace.append(buffer, 0, count)
+    require(maxChars >= 0) { "maxChars must not be negative" }
+    val trace = StringBuilder()
+    var capped = false
+    var readFailed = false
+    try {
+      stream.reader(Charsets.UTF_8).use { reader ->
+        val buffer = CharArray(8192)
+        while (trace.length < maxChars) {
+          val count = reader.read(buffer, 0, minOf(buffer.size, maxChars - trace.length))
+          if (count == -1) break
+          trace.append(buffer, 0, count)
+        }
+        capped = trace.length == maxChars && reader.read() != -1
       }
-      if (trace.length == maxChars && reader.read() != -1) {
-        trace.append("\n(truncated — trace capped at $maxChars chars)\n")
+    } catch (e: Exception) {
+      AutoMobileSDK.logger.w(TAG, e) {
+        "Failed to read or close ANR trace after ${trace.length} chars"
       }
-      trace.toString()
+      readFailed = true
     }
+    val charsRead = trace.length
+    if (capped) trace.append("\n(truncated — trace capped at $maxChars chars)\n")
+    if (readFailed) {
+      trace.append("\n(truncated — trace read failed after $charsRead chars)\n")
+    }
+    return trace.toString()
   }
 
   /**
@@ -166,13 +177,32 @@ object AutoMobileAnr {
     lastReported: Long,
     send: (T) -> Boolean,
   ): Long {
-    var watermark = lastReported
-    val newItems = items.filter { timestampOf(it) > lastReported }.sortedBy(timestampOf)
-    for (item in newItems) {
+    // Retain the timestamp-only seam used by the existing pure-JVM tests.
+    return reportNewAnrs(items, timestampOf, { "" }, AnrCursor(lastReported, null), send).timestamp
+  }
+
+  private inline fun <T> reportNewAnrs(
+    items: List<T>,
+    noinline timestampOf: (T) -> Long,
+    identityOf: (T) -> String,
+    lastReported: AnrCursor,
+    send: (T) -> Boolean,
+  ): AnrCursor {
+    var watermark = lastReported.timestamp
+    var reportedIds = lastReported.idsAtTimestamp?.toMutableSet()
+    for (item in items.sortedBy(timestampOf)) {
+      val timestamp = timestampOf(item)
+      val identity = identityOf(item)
+      if (timestamp < watermark || (timestamp == watermark && reportedIds == null)) continue
+      if (timestamp == watermark && identity in reportedIds.orEmpty()) continue
       if (!send(item)) break
-      watermark = timestampOf(item)
+      if (timestamp > watermark) {
+        watermark = timestamp
+        reportedIds = mutableSetOf()
+      }
+      reportedIds?.add(identity)
     }
-    return watermark
+    return AnrCursor(watermark, reportedIds?.toSet())
   }
 
   @RequiresApi(Build.VERSION_CODES.R)
@@ -192,7 +222,7 @@ object AutoMobileAnr {
           timestamp = exitInfo.timestamp,
           applicationId = context.packageName,
           pid = exitInfo.pid,
-          processName = exitInfo.processName,
+          processName = exitInfo.processName.orEmpty(),
           importance = getImportanceName(exitInfo.importance),
           trace = trace,
           reason = "Application Not Responding",
@@ -264,11 +294,22 @@ object AutoMobileAnr {
     return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
   }
 
-  private fun getLastReportedTimestamp(context: Context): Long {
-    return getPrefs(context).getLong(KEY_LAST_REPORTED_TIMESTAMP, 0L)
+  private fun getLastReportedCursor(context: Context): AnrCursor {
+    val prefs = getPrefs(context)
+    val ids =
+      if (prefs.contains(KEY_LAST_REPORTED_TIMESTAMP) && !prefs.contains(KEY_LAST_REPORTED_IDS)) {
+        null
+      } else {
+        prefs.getStringSet(KEY_LAST_REPORTED_IDS, emptySet())?.toSet().orEmpty()
+      }
+    return AnrCursor(prefs.getLong(KEY_LAST_REPORTED_TIMESTAMP, 0L), ids)
   }
 
-  private fun setLastReportedTimestamp(context: Context, timestamp: Long) {
-    getPrefs(context).edit().putLong(KEY_LAST_REPORTED_TIMESTAMP, timestamp).apply()
+  private fun setLastReportedCursor(context: Context, cursor: AnrCursor) {
+    getPrefs(context)
+      .edit()
+      .putLong(KEY_LAST_REPORTED_TIMESTAMP, cursor.timestamp)
+      .putStringSet(KEY_LAST_REPORTED_IDS, cursor.idsAtTimestamp)
+      .apply()
   }
 }

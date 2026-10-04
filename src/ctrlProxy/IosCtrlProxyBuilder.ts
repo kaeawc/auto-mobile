@@ -27,6 +27,7 @@ import { hashAppBundle } from "../utils/ios-cmdline-tools/AppBundleHasher";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { getSharedAutoMobileDir, getTempDir } from "../utils/tempDir";
 import { ensureSecureDir } from "../utils/filesystem/securePermissions";
+import { shellQuote } from "../utils/shellQuote";
 import {
   buildPlist,
   injectUITestEnvironment,
@@ -75,11 +76,12 @@ export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV =
  * (`1`/`true`) and no explicit {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV} is set,
  * the pre-launch integrity gate stops comparing against the release-pinned
  * checksum — which a local build can never match — and instead DERIVES the
- * expected hash from the freshly built runner binary at post-extract, pins it in
- * memory, and re-verifies against that captured value before launch. The
- * verify→execute TOCTOU protection (issue #4759) is preserved (a binary swap
- * between post-extract and launch still fails closed); only the release-pinned
- * baseline is relaxed. Off by default so published runs keep the pinned guard.
+ * expected hash from the existing local runner binary on first verification,
+ * pins it with the file's size and mtime, and re-verifies before launch. A hash
+ * change with unchanged identity still fails closed (issue #4759); an identity
+ * change accepts a local rebuild and re-derives the pin. Local mode never downloads
+ * or extracts a release bundle; missing products require a local rebuild.
+ * Off by default so published runs keep the pinned guard.
  * This removes the run-fail-read-`Got:`-sha-rerun dance the manual-test flow
  * previously required.
  */
@@ -134,6 +136,12 @@ interface CtrlProxyIosBuildConfig {
 
 interface CtrlProxyIosBuilderDependencies {
   downloader?: CtrlProxyIosBundleDownloader;
+}
+
+interface LocalRunnerHashPin {
+  sha256: string;
+  size: number;
+  mtimeMs: number;
 }
 
 /**
@@ -252,11 +260,10 @@ export class IosCtrlProxyBuilder {
    */
   private cachedAppBundleHash: Map<IOSCtrlProxyPlatform, string | null> = new Map();
   /**
-   * Local-build-mode (#5561) derived runner SHA256, pinned per platform at
-   * post-extract so the pre-launch re-verification can still detect a binary
-   * swap even though there is no release-pinned baseline to compare against.
+   * Local-build-mode (#5561) runner hash and identity, pinned per platform.
+   * A rebuild changes identity; an unchanged identity retains the tamper guard.
    */
-  private derivedLocalRunnerSha256: Map<IOSCtrlProxyPlatform, string> = new Map();
+  private derivedLocalRunnerSha256: Map<IOSCtrlProxyPlatform, LocalRunnerHashPin> = new Map();
   /**
    * Single-flight guard for {@link build}. `IosCtrlProxyBuilder` is a
    * process-wide singleton shared by every `IOSCtrlProxyManager` device
@@ -422,9 +429,12 @@ export class IosCtrlProxyBuilder {
    * Get the .xctestrun file path
    */
   public async getXctestrunPath(platform?: IOSCtrlProxyPlatform): Promise<string | null> {
+    // Local discovery/prefetch follows the simulator default of build-product paths.
+    platform ??= this.isLocalBuildMode() ? "simulator" : undefined;
     const cacheKey = platform || "any";
     const cachedPath = this.cachedXctestrunPath.get(cacheKey);
-    if (cachedPath) {
+    // Local rebuilds can leave the old xctestrun alongside a newer filename.
+    if (cachedPath && !this.isLocalBuildMode()) {
       try {
         await fs.access(cachedPath);
         return cachedPath;
@@ -447,10 +457,13 @@ export class IosCtrlProxyBuilder {
         return null;
       }
 
-      const platformFilter = platform === "device" ? "iphoneos" : "iphonesimulator";
-      const candidates = platform
-        ? xctestrunFiles.filter((file) => file.includes(platformFilter))
-        : xctestrunFiles;
+      // An empty filter preserves platform-agnostic discovery in release mode.
+      const platformFilter = {
+        device: "iphoneos",
+        simulator: "iphonesimulator",
+        any: "",
+      }[cacheKey];
+      const candidates = xctestrunFiles.filter((file) => file.includes(platformFilter));
 
       if (candidates.length === 0) {
         return null;
@@ -597,6 +610,13 @@ export class IosCtrlProxyBuilder {
       return false;
     }
 
+    // Local products are authoritative, even with a fresh/stale release cache
+    // or a vendored bundle override. Never turn missing products into a download.
+    if (this.isLocalBuildMode()) {
+      await this.requireLocalBuildProducts(platform);
+      return false;
+    }
+
     // Fail closed here too: without this, an unknown explicit pin with a cached
     // bundle + metadata would return false and silently reuse the cached (possibly
     // wrong-version) runner without ever reaching verifyBundle's guard (#2746).
@@ -665,12 +685,20 @@ export class IosCtrlProxyBuilder {
     platform?: IOSCtrlProxyPlatform,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<CtrlProxyIosBuildResult> {
+    // Throw the actionable missing-build error before the download result's
+    // catch boundary; SKIP retains its existing short-circuit/result semantics.
+    if (this.isLocalBuildMode() && !isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
+      await this.requireLocalBuildProducts(platform);
+    }
     // Keep the shared artifact flight alive until every waiter has resolved
     // its platform paths, so another extraction cannot race those reads.
     this.buildWaiters++;
-    this.buildInFlight ??= this.doBuild(perf);
+    // Local validation is platform-specific and does not extract shared artifacts.
+    const build = this.isLocalBuildMode()
+      ? this.doBuild(perf, platform)
+      : (this.buildInFlight ??= this.doBuild(perf, platform));
     try {
-      const shared = await this.buildInFlight;
+      const shared = await build;
       if (!shared.success) {
         return shared;
       }
@@ -698,7 +726,10 @@ export class IosCtrlProxyBuilder {
     }
   }
 
-  private async doBuild(perf: PerformanceTracker): Promise<CtrlProxyIosBuildResult> {
+  private async doBuild(
+    perf: PerformanceTracker,
+    platform: IOSCtrlProxyPlatform = "simulator",
+  ): Promise<CtrlProxyIosBuildResult> {
     perf.serial("xcTestServiceDownload");
 
     if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
@@ -711,6 +742,12 @@ export class IosCtrlProxyBuilder {
     }
 
     try {
+      if (this.isLocalBuildMode()) {
+        await this.verifyLocalBuildProducts(platform);
+        perf.end();
+        return { success: true, message: "Using locally built CtrlProxy products" };
+      }
+
       const { bundlePath, usedCachedFallback, localOverridePath } = await perf.track(
         "downloadBundle",
         () => this.ensureBundleDownloaded(),
@@ -1170,12 +1207,15 @@ export class IosCtrlProxyBuilder {
   /**
    * Single source of truth for the iOS fail-closed decision: `AUTOMOBILE_VERSION`
    * names a concrete version absent from the checksum registry, with no escape hatch
-   * (vendored IPA/bundle path or explicit checksum override), so the CtrlProxy bundle
-   * cannot be integrity-verified (#2746). Reused by the build/reuse guards,
+   * (local-build mode, vendored IPA/bundle path or explicit checksum override),
+   * so the CtrlProxy bundle cannot be integrity-verified (#2746). Reused by the build/reuse guards,
    * `IOSCtrlProxyManager.setup()`, `doctor --ios`, and the booted-device compat check.
    */
   static isPinnedVersionUnverifiable(): boolean {
-    if (IosCtrlProxyBuilder.expectedChecksumOverride !== null) {
+    if (
+      IosCtrlProxyBuilder.expectedChecksumOverride !== null ||
+      IosCtrlProxyBuilder.isLocalBuildModeEnabled()
+    ) {
       return false;
     }
     const ipaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
@@ -1415,12 +1455,83 @@ export class IosCtrlProxyBuilder {
   }
 
   /** Whether the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch is active (#5561). */
-  private isLocalBuildMode(): boolean {
+  static isLocalBuildModeEnabled(): boolean {
     const override = IosCtrlProxyBuilder.useLocalBuildOverride;
     if (override !== null) {
       return override;
     }
     return isTruthyEnvValue(process.env[IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV]);
+  }
+
+  private isLocalBuildMode(): boolean {
+    return IosCtrlProxyBuilder.isLocalBuildModeEnabled();
+  }
+
+  /** Validate the existing local products without consulting release metadata. */
+  private async requireLocalBuildProducts(
+    platform: IOSCtrlProxyPlatform = "simulator",
+  ): Promise<void> {
+    const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
+    const rebuildCommand =
+      platform === "device"
+        ? `xcodebuild build-for-testing -project ios/control-proxy/CtrlProxy.xcodeproj ` +
+          `-scheme AutoMobileTest -destination 'generic/platform=iOS' ` +
+          `-derivedDataPath ${shellQuote(this.config.derivedDataPath)} -configuration Debug`
+        : `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=${shellQuote(this.config.derivedDataPath)} ` +
+          `bash scripts/ios/ctrl-proxy-build-for-testing.sh`;
+    const missingBuild = (expectedPath: string, cause?: unknown): ActionableError =>
+      new ActionableError(
+        `Local CtrlProxy build products missing or invalid at ${expectedPath}. ` +
+          `Local-build mode never installs the released bundle. ` +
+          (platform === "device"
+            ? `Device builds require valid code signing and a provisioning profile. `
+            : "") +
+          `Build with: ` +
+          rebuildCommand,
+        { cause },
+      );
+    const xctestrunPath = await this.getXctestrunPath(platform);
+    if (!xctestrunPath) {
+      const filter = `*${{ device: "iphoneos", simulator: "iphonesimulator" }[platform]}*`;
+      throw missingBuild(path.join(productsDir, `${filter}.xctestrun`));
+    }
+    const buildPath = path.join(
+      productsDir,
+      platform === "device" ? "Debug-iphoneos" : "Debug-iphonesimulator",
+    );
+    const runnerApp = path.join(buildPath, "CtrlProxyUITests-Runner.app");
+    const files = [
+      xctestrunPath,
+      path.join(runnerApp, "CtrlProxyUITests-Runner"),
+      path.join(runnerApp, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests"),
+    ];
+    for (const file of files) {
+      const stat = await fs.stat(file).catch((error: unknown) => {
+        throw missingBuild(file, error);
+      });
+      if (!stat.isFile() || stat.size === 0) {
+        throw missingBuild(file);
+      }
+    }
+    const appPath = await this.getAppBundlePath(platform);
+    if (!appPath) {
+      throw missingBuild(path.join(buildPath, "AutoMobileTest.app"));
+    }
+    const appStat = await fs.stat(appPath).catch((error: unknown) => {
+      throw missingBuild(appPath, error);
+    });
+    if (!appStat.isDirectory()) {
+      throw missingBuild(appPath);
+    }
+  }
+
+  /** Capture fresh integrity pins only when explicitly accepting a local rebuild. */
+  private async verifyLocalBuildProducts(platform: IOSCtrlProxyPlatform): Promise<void> {
+    await this.assertDerivedDataDirOwnedByCurrentUid();
+    // An explicit build() re-captures only the requested platform's pin.
+    this.derivedLocalRunnerSha256.delete(platform);
+    await this.requireLocalBuildProducts(platform);
+    await this.assertRunnerBinaryHash(platform, "post-extract");
   }
 
   /**
@@ -1437,11 +1548,10 @@ export class IosCtrlProxyBuilder {
 
   /**
    * Local-build-mode (#5561) runner integrity check. On the first call for a
-   * platform (post-extract) it computes and pins the freshly built runner's
+   * platform it computes and pins the existing local runner's
    * SHA256, warning loudly that the release-pinned guard is relaxed. Subsequent
-   * calls (pre-launch) re-hash and compare against that pinned value, so a binary
-   * swap in the verify→execute window still fails closed (issue #4759 TOCTOU
-   * protection preserved) even though there is no release baseline to match.
+   * calls re-hash and compare against that pin while identity is unchanged;
+   * a changed size or mtime accepts a rebuild without restarting the daemon.
    */
   private async assertLocalRunnerBinaryHash(
     platform: IOSCtrlProxyPlatform,
@@ -1452,22 +1562,35 @@ export class IosCtrlProxyBuilder {
     if (!runnerBinaryPath) {
       throw new ActionableError(`CtrlProxy runner binary missing for ${platform}`);
     }
+    const { size, mtimeMs } = await fs.stat(runnerBinaryPath);
     const { checksum } = await this.downloader.computeFileSha256(runnerBinaryPath);
     const normalized = checksum.toLowerCase();
     const pinned = this.derivedLocalRunnerSha256.get(platform);
     if (pinned === undefined) {
-      this.derivedLocalRunnerSha256.set(platform, normalized);
+      this.derivedLocalRunnerSha256.set(platform, { sha256: normalized, size, mtimeMs });
       logger.warn(
         `[IOSCtrlProxyBuilder] Local-build mode (${IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV}) active for ` +
-          `${platform}: trusting the locally built runner (${phase}) with derived SHA256 ${normalized}. ` +
+          `${platform}: captured the existing local runner with derived SHA256 ${normalized}. ` +
           `The release-pinned integrity guard is intentionally bypassed for this run.`,
       );
       return;
     }
-    if (normalized !== pinned) {
+    // Local-dev opt-in accepts rebuilds by identity. An attacker who also changes
+    // size/mtime within verify→spawn would be accepted; non-local runs retain the
+    // release-pinned guard instead of this intentional trade-off.
+    if (size !== pinned.size || mtimeMs !== pinned.mtimeMs) {
+      this.derivedLocalRunnerSha256.set(platform, { sha256: normalized, size, mtimeMs });
+      logger.info("[IOSCtrlProxyBuilder] New local build detected; runner SHA256 re-pinned", {
+        platform,
+        oldSha: pinned.sha256.slice(0, 12),
+        newSha: normalized.slice(0, 12),
+      });
+      return;
+    }
+    if (normalized !== pinned.sha256) {
       throw new ActionableError(
         `CtrlProxy runner binary SHA256 changed (${phase}) for ${platform} under local-build mode. ` +
-          `Pinned at post-extract: ${pinned}, Got: ${normalized}. Refusing to launch a runner whose ` +
+          `Pinned at first verification: ${pinned.sha256}, Got: ${normalized}. Refusing to launch a runner whose ` +
           `binary changed since it was verified (possible TOCTOU tampering).`,
       );
     }
@@ -1487,6 +1610,9 @@ export class IosCtrlProxyBuilder {
    * uid or a hash mismatch.
    */
   public async verifyRunnerBinaryBeforeLaunch(platform: IOSCtrlProxyPlatform): Promise<void> {
+    if (this.isLocalBuildMode()) {
+      await this.requireLocalBuildProducts(platform);
+    }
     await this.assertDerivedDataDirOwnedByCurrentUid();
     await this.assertRunnerBinaryHash(platform, "pre-launch");
     await this.verifyRunnerCodesign(platform);

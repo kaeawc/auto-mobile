@@ -3437,6 +3437,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       );
     }
 
+    // Re-verify the runner binary hash (and refuse a foreign-owned derived-data
+    // tree) IMMEDIATELY before launch, closing the verify→execute TOCTOU window
+    // left by post-extract verification alone (issue #4759).
+    await this.builder.verifyRunnerBinaryBeforeLaunch("device");
+
     this.ensureLocalServicePortAllocatedAndAvailable();
     await this.startIproxyTunnel();
     await this.verifyInstalledAppBundle();

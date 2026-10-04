@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.SetHierarchyInterval
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -298,7 +299,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         },
       )
     try {
-      fixture.dispatch(RequestHierarchy(requestId = "hierarchy"))
+      fixture.dispatch(SetHierarchyInterval(requestId = "hierarchy"))
       runCurrent()
       // Inline broadcast(response) drops an orphaned correlation, even for an unowned type.
       assertTrue(fixture.first.frames.isEmpty())
@@ -312,7 +313,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
   fun `unowned handler error reaches only its originating client`() = runTest {
     val fixture = RoutingFixture(this, handler { throw IllegalStateException("hierarchy failed") })
     try {
-      fixture.dispatch(RequestHierarchy(requestId = "hierarchy"))
+      fixture.dispatch(SetHierarchyInterval(requestId = "hierarchy"))
       runCurrent()
       // Fails on base: yes (EXTERNAL_ERROR broadcasts the failure to both clients).
       assertEquals(1, fixture.first.frames.size)
@@ -541,11 +542,11 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
   fun `loopback unowned handler failure targets origin and leaves peer stream clean`() = runTest {
     withLoopbackClients(
       handler { request ->
-        if (request is RequestHierarchy) error("hierarchy failed")
+        if (request is SetHierarchyInterval) error("hierarchy failed")
         CorrelatedErrorReporter.frame(request.requestId, "barrier")
       }
     ) { fixture ->
-      send(fixture.first, RequestHierarchy(requestId = "failure"))
+      send(fixture.first, SetHierarchyInterval(requestId = "failure"))
       val failure = fixture.first.incoming.receive() as Frame.Text
       assertEquals("failure", requestId(failure))
       assertTrue(failure.readText().contains("Handler error: hierarchy failed"))

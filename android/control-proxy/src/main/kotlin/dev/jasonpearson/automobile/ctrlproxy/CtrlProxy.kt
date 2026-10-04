@@ -1926,10 +1926,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       requestId,
     )
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
-    hierarchyDebouncer.extractIfStale(sinceTimestamp) {
+  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
+    val extract = {
       launchRequestScope(requestId) { extractHierarchyNow(requestId = requestId) }
+      Unit
     }
+    // A correlated wait needs its own terminal reply even if a newer event already fired.
+    if (requestId != null) extract() else hierarchyDebouncer.extractIfStale(sinceTimestamp, extract)
+  }
 
   override fun setHierarchyInterval(intervalMs: Long?) {
     val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
@@ -3660,11 +3664,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       )
     val hierarchy =
-      hierarchyDebouncer.extractImmediately(
-        skipFlowEmit = true,
-        disableAllFiltering = disableAllFiltering,
-        snapshotOptions = cancellableOptions,
-      )
+      try {
+        hierarchyDebouncer.extractImmediately(
+          skipFlowEmit = true,
+          disableAllFiltering = disableAllFiltering,
+          snapshotOptions = cancellableOptions,
+        )
+      } catch (e: CancellationException) {
+        // Command cancellation must unwind; an independently cancelled snapshot returns null.
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error extracting WebSocket hierarchy for requestId=$requestId", e)
+        if (requestId == null) throw e
+        commandJob?.let { it.ensureActive() }
+        serviceScope.coroutineContext[Job]?.ensureActive()
+        broadcastHierarchyExtractFrame(
+          HierarchyExtractErrorFrames.thrownFrame(requestId, e),
+          externallyCorrelated = false,
+        )
+        // The extraction failure is settled here, so neither the queue nor scope guard replies.
+        return
+      }
     if (hierarchy != null) {
       // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
       // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
@@ -3681,9 +3701,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             sync = true,
             serialized = serialized,
             requestId = requestId,
+            routeByRequestId = requestId != null,
           )
         },
         releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+      )
+    } else {
+      commandJob?.ensureActive()
+      serviceScope.coroutineContext[Job]?.ensureActive()
+      broadcastHierarchyExtractFrame(
+        HierarchyExtractErrorFrames.nullResultFrame(requestId),
+        externallyCorrelated = false,
       )
     }
   }
@@ -3888,14 +3916,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Routed through [ResultBroadcaster.guard] so a throw while *sending* this frame degrades to the
    * daemon's timeout rather than escaping the receiver coroutine (issue #3045 / #3085).
    */
-  private suspend fun broadcastHierarchyExtractFrame(frame: ErrorResponse?) {
+  private suspend fun broadcastHierarchyExtractFrame(
+    frame: ErrorResponse?,
+    externallyCorrelated: Boolean = true,
+  ) {
     // A null frame means there was nothing to correlate (blank/absent uuid, or a cooperative
     // cancellation that must propagate); HierarchyExtractErrorFrames already made that decision, so
     // there is no WebSocket frame to send here. See issue #3131.
     if (frame == null) return
     resultBroadcaster.guard(frame.requestId, "hierarchy_extract_error") {
       if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-        webSocketServer.broadcastExternallyCorrelatedResponse(frame)
+        if (externallyCorrelated) webSocketServer.broadcastExternallyCorrelatedResponse(frame)
+        else webSocketServer.broadcast(frame)
       }
     }
   }
@@ -3911,6 +3943,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     sync: Boolean = false,
     serialized: String? = null,
     requestId: String? = null,
+    routeByRequestId: Boolean = false,
   ) {
     val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
@@ -3948,13 +3981,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // Enqueue in call order; each client's sender preserves FIFO without waiting for
           // delivery.
           webSocketServer.broadcastWithPerfSync(
-            routeByRequestId = false,
+            routeByRequestId = routeByRequestId,
             messageBuilder = messageBuilder,
           )
         } else {
           // Async broadcast - for normal event-driven updates
           webSocketServer.broadcastWithPerf(
-            routeByRequestId = false,
+            routeByRequestId = routeByRequestId,
             messageBuilder = messageBuilder,
           )
         }

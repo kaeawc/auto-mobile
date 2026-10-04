@@ -873,8 +873,6 @@ class WebSocketServer(
    */
   internal fun recordsRequestOwner(request: ProtocolRequest): Boolean =
     when (request) {
-      is RequestHierarchy,
-      is RequestHierarchyIfStale,
       is SetHierarchyInterval,
       is SetRecompositionTracking,
       is SetAccessibilityFlags,

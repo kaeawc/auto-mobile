@@ -1,3 +1,4 @@
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { logger } from "../../../src/utils/logger";
@@ -74,7 +75,9 @@ describe("lenient simulator listing backend", () => {
     };
     try {
       expect(await resolveIosLenientAppListBackend(simulatorId, { simctl }).listApps()).toEqual([]);
-      expect(warn.mock.calls).toEqual([["Failed to list iOS apps: Error: transport failed"]]);
+      expect(loggerCallsWithPrefix(warn.mock.calls, "Failed to list iOS apps:")).toEqual([
+        ["Failed to list iOS apps: Error: transport failed"],
+      ]);
     } finally {
       warn.mockRestore();
     }
@@ -107,7 +110,7 @@ describe("lenient termination backend", () => {
         },
       });
       await expect(backend.terminateApp(bundleId)).resolves.toBeUndefined();
-      expect(warn.mock.calls).toEqual([
+      expect(loggerCallsWithPrefix(warn.mock.calls, "[iOS] Failed to terminate ")).toEqual([
         [`[iOS] Failed to terminate ${bundleId}: Error: not running`],
       ]);
     } finally {

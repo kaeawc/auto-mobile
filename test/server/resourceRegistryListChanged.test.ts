@@ -12,7 +12,10 @@ import {
   syncInstalledAppResources,
 } from "../../src/server/appResources";
 import { getRequestedResourceUri, ResourceRegistry } from "../../src/server/resourceRegistry";
-import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import {
+  ListChangedBroadcaster,
+  ResourceUpdatedBroadcaster,
+} from "../../src/server/listChangedBroadcast";
 import { InstalledAppsRepository } from "../../src/db/installedAppsRepository";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -702,5 +705,48 @@ describe("ResourceRegistry URI-template matching", () => {
 
     expect(handlerUri).toBe(requestedUri);
     expect(response.contents[0].uri).toBe(requestedUri);
+  });
+});
+
+describe("ResourceRegistry process-wide update event", () => {
+  test("known resources emit once without a loopback subscriber; unknown resources do not", async () => {
+    const resolved: string[][] = [];
+    ResourceRegistry.register("automobile:event", "Event", "Event", "text/plain", async () => ({
+      uri: "automobile:event",
+      text: "value",
+    }));
+    const stop = ResourceUpdatedBroadcaster.subscribe((resolve) => {
+      resolved.push(resolve(new Set(["automobile:event", "automobile:other"])));
+    });
+    try {
+      await ResourceRegistry.notifyResourceUpdated("automobile:unknown");
+      await ResourceRegistry.notifyResourceUpdated("automobile:event");
+      expect(resolved).toEqual([["automobile:event"]]);
+    } finally {
+      stop();
+    }
+  });
+
+  test("event resolver preserves per-page parity", async () => {
+    const canonical = "automobile:event/one?appId=x";
+    const page = `${canonical}&limit=10&offset=20`;
+    const resolved: string[][] = [];
+    ResourceRegistry.registerTemplate(
+      "automobile:event/{id}{?appId,limit,offset}",
+      "Event",
+      "Event",
+      "text/plain",
+      async () => ({ uri: canonical, text: "value" }),
+      ["limit", "offset"],
+    );
+    const stop = ResourceUpdatedBroadcaster.subscribe((resolve) => {
+      resolved.push(resolve(new Set([canonical, page, "automobile:event/one?appId=y&limit=10"])));
+    });
+    try {
+      await ResourceRegistry.notifyResourceUpdated(canonical);
+      expect(resolved).toEqual([[canonical, page]]);
+    } finally {
+      stop();
+    }
   });
 });

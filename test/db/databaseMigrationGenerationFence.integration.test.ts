@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import path from "path";
 import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import { createFileBackedDbHarness } from "./withFileBackedDb";
+import { bindFileBackedDbHarness } from "./withFileBackedDb";
 
 /**
  * Regression tests for issue #2898 (follow-up to #2889 / #2796).
@@ -32,15 +32,7 @@ import { createFileBackedDbHarness } from "./withFileBackedDb";
 describe("closeDatabase fences stale in-flight migration completions (issue #2898)", () => {
   // Shared harness: fresh module import, tracked temp dirs cleaned with the
   // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   function setEnv(key: string, value: string | undefined): void {
     if (value === undefined) {
@@ -50,7 +42,7 @@ describe("closeDatabase fences stale in-flight migration completions (issue #289
     }
   }
 
-  const makeTempDir = (prefix: string): Promise<string> => harness.makeTempDbDir(prefix);
+  const makeTempDir = (prefix: string): Promise<string> => getHarness().makeTempDbDir(prefix);
 
   /**
    * A migrations dir with a single migration whose `up()` blocks until a
@@ -146,7 +138,7 @@ export async function down(db) {
       setEnv("AUTOMOBILE_DB_DIR", dbDir1);
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", slowFailDir);
 
-      const db = await harness.importFreshDatabaseModule();
+      const db = await getHarness().importFreshDatabaseModule();
 
       // Generation 0: start the slow, will-fail migration and hold it in flight.
       db.getDatabase();
@@ -210,7 +202,7 @@ export async function down(db) {
       setEnv("AUTOMOBILE_DB_DIR", dbDir1);
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", slowSucceedDir);
 
-      const db = await harness.importFreshDatabaseModule();
+      const db = await getHarness().importFreshDatabaseModule();
 
       // Generation 0: start the slow, will-succeed migration and hold it.
       db.getDatabase();
@@ -291,7 +283,7 @@ export async function down(db) {
       setEnv("AUTOMOBILE_DB_DIR", sharedDbDir);
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", slowFailDir);
 
-      const db = await harness.importFreshDatabaseModule();
+      const db = await getHarness().importFreshDatabaseModule();
 
       // Generation 0: slow, will-fail migration on the shared DB path, held in flight.
       db.getDatabase();

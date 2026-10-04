@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
-import { createFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
+import { bindFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 import { runExclusiveResetTest } from "./resetTestSerialLock";
 
 /**
@@ -36,17 +36,9 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
   // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046). The
   // snapshot is taken per test (in `beforeEach`) so every mutated key is restored
   // regardless of which ones a given test touches.
-  let harness = createFileBackedDbHarness();
+  const getHarness = bindFileBackedDbHarness();
 
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
-
-  const makeTempDbDir = (prefix: string): Promise<string> => harness.makeTempDbDir(prefix);
+  const makeTempDbDir = (prefix: string): Promise<string> => getHarness().makeTempDbDir(prefix);
 
   function queryToolCalls(db: any) {
     return db
@@ -63,7 +55,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
         // tracked temp dir + `getDatabase()` then awaited migrations (the #2992/#3040
         // ordering). Querying a migrated table proves migrations actually ran
         // (migrationsRun became true).
-        const first = await harness.openLifecycleTestDb("auto-mobile-reset-first-");
+        const first = await getHarness().openLifecycleTestDb("auto-mobile-reset-first-");
         const databaseModule = first.module;
         expect(await queryToolCalls(databaseModule.getDatabase())).toEqual([]);
 
@@ -102,7 +94,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
       process.env.AUTOMOBILE_DB_DIR = firstDir;
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-      const databaseModule = await harness.importFreshDatabaseModule();
+      const databaseModule = await getHarness().importFreshDatabaseModule();
 
       // Resolve once so resolvedDbPath is cached (no DB file opened).
       expect(databaseModule.getDatabasePath()).toBe(path.join(firstDir, "auto-mobile.db"));
@@ -127,7 +119,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
         delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
         delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-        const databaseModule = await harness.importFreshDatabaseModule();
+        const databaseModule = await getHarness().importFreshDatabaseModule();
 
         const failingDb = databaseModule.getDatabase();
         await expect(queryToolCalls(failingDb)).rejects.toThrow(

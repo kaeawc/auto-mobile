@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
-import { createFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
+import { bindFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 import { runExclusiveResetTest } from "./resetTestSerialLock";
 
 /**
@@ -17,15 +17,7 @@ import { runExclusiveResetTest } from "./resetTestSerialLock";
 describe("database path lazy resolution", () => {
   // Shared harness: fresh module import, tracked temp dirs cleaned with the
   // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   test("resolves relative AUTOMOBILE_DB_DIR against the launch cwd set AFTER import", () =>
     runExclusiveResetTest(async () => {
@@ -37,7 +29,7 @@ describe("database path lazy resolution", () => {
       process.env.AUTOMOBILE_DB_DIR = ".automobile-db";
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-      const databaseModule = await harness.importFreshDatabaseModule();
+      const databaseModule = await getHarness().importFreshDatabaseModule();
 
       // Daemon.start() records the launch cwd only after import / before first use.
       process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
@@ -54,7 +46,7 @@ describe("database path lazy resolution", () => {
       process.env.AUTOMOBILE_DB_DIR = ".automobile-db";
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-      const databaseModule = await harness.importFreshDatabaseModule();
+      const databaseModule = await getHarness().importFreshDatabaseModule();
 
       process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
       const first = databaseModule.getDatabasePath();
@@ -70,11 +62,11 @@ describe("database path lazy resolution", () => {
     "queries issued immediately after getDatabase wait for startup migrations",
     () =>
       runExclusiveResetTest(async () => {
-        const dbDir = await harness.makeTempDbDir("auto-mobile-db-startup-");
+        const dbDir = await getHarness().makeTempDbDir("auto-mobile-db-startup-");
         process.env.AUTOMOBILE_DB_DIR = dbDir;
         delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-        const databaseModule = await harness.importFreshDatabaseModule();
+        const databaseModule = await getHarness().importFreshDatabaseModule();
         const db = databaseModule.getDatabase();
 
         try {
@@ -99,13 +91,13 @@ describe("database path lazy resolution", () => {
     "queries fail clearly and consistently when startup migrations fail",
     () =>
       runExclusiveResetTest(async () => {
-        const dbDir = await harness.makeTempDbDir("auto-mobile-db-startup-fail-");
+        const dbDir = await getHarness().makeTempDbDir("auto-mobile-db-startup-fail-");
         process.env.AUTOMOBILE_DB_DIR = dbDir;
         process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(dbDir, "missing-migrations");
         delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
         delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-        const databaseModule = await harness.importFreshDatabaseModule();
+        const databaseModule = await getHarness().importFreshDatabaseModule();
         const db = databaseModule.getDatabase();
         const query = () =>
           db

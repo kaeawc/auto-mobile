@@ -79,7 +79,7 @@ import {
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
 import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
-import { McpOverloadError } from "./McpTimeoutError";
+import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import {
   getConnectedStaticToolDefinitions,
   getStaticToolDefinitions,
@@ -89,6 +89,21 @@ import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository"
 import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
+
+function isPermanentResourceSubscriptionRejection(error: unknown): boolean {
+  if (error instanceof McpTimeoutError || error instanceof DaemonUnavailableError) {
+    return false;
+  }
+  if (error !== null && typeof error === "object" && "code" in error && error.code !== undefined) {
+    return error.code === -32601 || error.code === -32602;
+  }
+  // These daemon responses currently carry only text, not a structured rejection code.
+  const message = errorMessage(error);
+  return (
+    message.startsWith("Unsupported daemon method: resources/subscribe") ||
+    message === "Resource subscription requires params.uri"
+  );
+}
 export type VersionMismatchReason =
   | "autoStartDisabled"
   | "cooldown"
@@ -1287,7 +1302,14 @@ export class DaemonMcpProxy {
     this.throwIfClosing();
     this.resourceSubscriptions.add(uri);
     if (this.connected) {
-      await this.syncResourceSubscription(uri);
+      try {
+        await this.syncResourceSubscription(uri);
+      } catch (error) {
+        this.resourceSubscriptions.delete(uri);
+        throw toActionableError(error, "Failed to subscribe to resource");
+      }
+    } else {
+      this.connectResourceSubscriptionsInBackground();
     }
   }
 
@@ -1308,18 +1330,19 @@ export class DaemonMcpProxy {
   }
 
   private async replayResourceSubscriptions(client: DaemonClientLike): Promise<void> {
-    try {
-      for (const uri of this.resourceSubscriptions) {
+    for (const uri of this.resourceSubscriptions) {
+      try {
         await this.syncResourceSubscription(uri);
+      } catch (error) {
+        // Resource subscriptions are optional; rejection must not disable unrelated requests.
+        logger.warn(`[DaemonMcpProxy] Failed to replay resource subscription ${uri}`, error);
+        if (isPermanentResourceSubscriptionRejection(error)) {
+          this.resourceSubscriptions.delete(uri);
+        }
       }
-      this.throwIfClosing();
-      this.assertConnectedClient(client);
-    } catch (error) {
-      if (this.client === client) {
-        await this.resetConnection();
-      }
-      throw toActionableError(error, "Failed to replay resource subscriptions");
     }
+    this.throwIfClosing();
+    this.assertConnectedClient(client);
   }
 
   private syncResourceSubscription(uri: string): Promise<void> {
@@ -2402,7 +2425,7 @@ export class DaemonMcpProxy {
         // drains. Arm the same successor barrier before reset detaches this client.
         this.waitForDaemonShutdownDisconnect();
         this.completeDaemonShutdownDisconnect();
-        void this.resetConnection();
+        void this.resetConnection().then(() => this.connectResourceSubscriptionsInBackground());
       }
     });
   }
@@ -2512,6 +2535,16 @@ export class DaemonMcpProxy {
   // dedupes concurrent/polled calls, so at most one attempt is in flight.
   private serveResourcesColdAndConnectInBackground(): void {
     this.servedStaticResourceList = true;
+    this.connectResourcesInBackground();
+  }
+
+  private connectResourceSubscriptionsInBackground(): void {
+    if (this.resourceSubscriptions.size > 0 && !this.connected) {
+      this.connectResourcesInBackground();
+    }
+  }
+
+  private connectResourcesInBackground(): void {
     if (this.connecting || this.backgroundConnectRetry || this.closing) {
       return;
     }
@@ -2519,6 +2552,9 @@ export class DaemonMcpProxy {
   }
 
   private async ensureBackgroundResourceConnection(): Promise<void> {
+    if (!this.servedStaticResourceList && this.resourceSubscriptions.size === 0) {
+      return;
+    }
     try {
       await this.ensureConnected();
     } catch (error) {
@@ -2526,9 +2562,7 @@ export class DaemonMcpProxy {
       // visible via tools/list. A wedged/absent daemon must not surface here; the
       // the next actual request still reports the failure to the client. Retry
       // transient failures a bounded number of times for resource-only clients.
-      logger.debug(
-        `[DaemonMcpProxy] background connect after cold resource discovery failed: ${error}`,
-      );
+      logger.warn("[DaemonMcpProxy] background resource connect failed", error);
       this.scheduleBackgroundConnectRetry();
     }
   }

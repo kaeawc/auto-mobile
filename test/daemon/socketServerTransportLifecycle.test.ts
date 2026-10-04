@@ -4,7 +4,9 @@ import {
 } from "../../src/server/listChangedBroadcast";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { Socket } from "node:net";
-import { afterEach, describe, expect, test } from "bun:test";
+import * as net from "node:net";
+import * as securePermissions from "../../src/utils/filesystem/securePermissions";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -221,6 +223,131 @@ describe("daemon socket transport lifecycle", () => {
 });
 
 describe("daemon socket resource subscription routing", () => {
+  test("start registers resource updates and close removes the broadcaster listener", async () => {
+    const listener = new net.Server();
+    const listen = spyOn(listener, "listen").mockImplementation((_path, callback) => {
+      if (typeof callback === "function") {
+        callback();
+      }
+      return listener;
+    });
+    const close = spyOn(listener, "close").mockImplementation((callback) => {
+      callback?.();
+      return listener;
+    });
+    const create = spyOn(net, "createServer").mockImplementation((onConnection) => {
+      if (typeof onConnection === "function") {
+        listener.on("connection", onConnection);
+      }
+      return listener;
+    });
+    const mkdir = spyOn(securePermissions, "ensureSecureDir").mockResolvedValue();
+    const chmod = spyOn(securePermissions, "secureFile").mockResolvedValue();
+    const timer = new FakeTimer();
+    const server = new UnixSocketServer(
+      "/fake/resource-lifecycle/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      timer,
+      null,
+      {},
+      new CountingIdGenerator("started-resource"),
+      { bindLock: { acquire: () => true, release: () => {} } },
+    );
+    const internals = server as unknown as ServerInternals;
+    const socket = new RpcSocket();
+    const uri = "automobile:started-resource";
+    let resolutions = 0;
+    const emit = () =>
+      ResourceUpdatedBroadcaster.emit((subscriptions) => {
+        resolutions++;
+        return subscriptions.has(uri) ? [uri] : [];
+      });
+    try {
+      await server.start();
+      listener.emit("connection", socket);
+      expect(
+        await internals.handleRequest(
+          "started-resource-1",
+          socket as unknown as Socket,
+          { id: "subscribe", type: "mcp_request", method: "resources/subscribe", params: { uri } },
+          timer.now(),
+        ),
+      ).toMatchObject({ success: true, result: {} });
+      emit();
+      expect(socket.getWrittenMessages<DaemonNotification>()).toEqual([
+        { type: "daemon_notification", method: "notifications/resources/updated", uri },
+      ]);
+      expect(resolutions).toBe(1);
+      await server.close();
+      // Repopulate the routing state so clearing it on close cannot mask a leaked listener.
+      internals.clientSockets.set("started-resource-1", socket as unknown as Socket);
+      internals.resourceSubscriptions.set("started-resource-1", new Set([uri]));
+      emit();
+      expect(resolutions).toBe(1);
+      expect(socket.getWrittenMessages()).toHaveLength(1);
+    } finally {
+      await server.close();
+      create.mockRestore();
+      listen.mockRestore();
+      close.mockRestore();
+      mkdir.mockRestore();
+      chmod.mockRestore();
+    }
+  });
+
+  test("accepts an unknown subscription URI without sending updates for registered resources", async () => {
+    const timer = new FakeTimer();
+    const server = new UnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      timer,
+      null,
+      {},
+      new CountingIdGenerator("unknown-resource"),
+    );
+    const internals = server as unknown as ServerInternals;
+    internals.acceptingRequests = true;
+    const socket = new RpcSocket();
+    internals.handleConnection(socket as unknown as Socket);
+    const stop = ResourceUpdatedBroadcaster.subscribe((resolve) =>
+      internals.broadcastResourceUpdated(resolve),
+    );
+    ResourceRegistry.registerTemplate(
+      "automobile:known-resource",
+      "Known",
+      "Known",
+      "text/plain",
+      async () => ({ uri: "automobile:known-resource", text: "value" }),
+    );
+    try {
+      expect(
+        await internals.handleRequest(
+          "unknown-resource-1",
+          socket as unknown as Socket,
+          {
+            id: "unknown",
+            type: "mcp_request",
+            method: "resources/subscribe",
+            params: { uri: "unknown" },
+          },
+          timer.now(),
+        ),
+      ).toMatchObject({ success: true, result: {} });
+      expect(internals.resourceSubscriptions.get("unknown-resource-1")).toEqual(
+        new Set(["unknown"]),
+      );
+      await ResourceRegistry.notifyResourceUpdated("automobile:known-resource");
+      await ResourceRegistry.notifyResourceUpdated("unknown");
+      expect(socket.getWrittenMessages()).toEqual([]);
+    } finally {
+      stop();
+      socket.destroy();
+      ResourceRegistry.clearResources();
+    }
+  });
+
   test("routes registered updates to exact socket subscriptions, preserves pages and cleans disconnects", async () => {
     const timer = new FakeTimer();
     const server = new UnixSocketServer(

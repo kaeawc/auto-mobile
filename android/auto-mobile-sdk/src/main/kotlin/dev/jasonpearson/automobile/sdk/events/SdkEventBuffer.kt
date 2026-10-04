@@ -186,6 +186,17 @@ internal class SdkEventBuffer(
     }
   }
 
+  /** Share the existing scheduler with delivery timeouts; no extra worker is created. */
+  internal fun scheduleDelivery(task: Runnable, delayMs: Long): () -> Unit {
+    val future = executor.schedule(task, delayMs, TimeUnit.MILLISECONDS)
+    return { future.cancel(false) }
+  }
+
+  /** Dispatch result processing with the same late-completion fallback as persistence. */
+  internal fun executeDelivery(task: Runnable) {
+    persistInBackground(task)
+  }
+
   /** Shutdown the buffer, flushing remaining events. */
   fun shutdown() {
     lock.withLock {

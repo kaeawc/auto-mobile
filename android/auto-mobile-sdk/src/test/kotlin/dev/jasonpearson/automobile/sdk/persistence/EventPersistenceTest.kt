@@ -988,4 +988,31 @@ class EventPersistenceTest {
     assertTrue(id.startsWith("s00000000000000000002_"))
     assertEquals(listOf(id), persistence.loadPending().map { it.first })
   }
+
+  @Test
+  fun `byte cap evicts oldest and counts dropped events`() {
+    val events = List(2) { makeLifecycleEvent("same") }
+    val oneBatchBytes =
+      createPersistence().serializeEvents(events).toByteArray(Charsets.UTF_8).size.toLong()
+    val counter = DefaultDropCounter()
+    val persistence =
+      FileEventPersistence(tempFolder.root, dropCounter = counter, maxPendingBytes = oneBatchBytes)
+    persistence.persist(events)
+    val newest = persistence.persist(events)
+    assertNotNull(newest)
+    assertEquals(listOf(newest), persistence.loadPending().map { it.first })
+    assertEquals(2L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
+    assertTrue(tempFolder.root.listFiles()!!.sumOf { it.length() } <= oneBatchBytes)
+  }
+
+  @Test
+  fun `oversized batch is refused for buffer to count without evicting retained batch`() {
+    val small = listOf(makeLifecycleEvent("small"))
+    val bytes = createPersistence().serializeEvents(small).toByteArray(Charsets.UTF_8).size.toLong()
+    val persistence = FileEventPersistence(tempFolder.root, maxPendingBytes = bytes)
+    val retained = persistence.persist(small)
+    assertNotNull(retained)
+    assertNull(persistence.persist(listOf(makeLifecycleEvent("x".repeat(1000)))))
+    assertEquals(listOf(retained), persistence.loadPending().map { it.first })
+  }
 }

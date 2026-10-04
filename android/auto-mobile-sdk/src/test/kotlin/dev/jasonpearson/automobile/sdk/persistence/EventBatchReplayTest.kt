@@ -108,7 +108,7 @@ class EventBatchReplayTest {
   }
 
   @Test
-  fun `failed completion records attempt off callback thread before continuing`() {
+  fun `failed completion records attempt off callback thread and stops`() {
     val persistence = FakePersistence(2)
     val background = QueuedBackground()
     val completions = mutableListOf<(Boolean) -> Unit>()
@@ -122,7 +122,8 @@ class EventBatchReplayTest {
     background.runNext()
     assertEquals(listOf("batch-1"), persistence.failures)
     assertNotEquals(callbackThread, persistence.operationThreads.single())
-    assertEquals(2, completions.size)
+    assertEquals(1, completions.size)
+    assertEquals(2, persistence.pending.size)
     assertTrue(persistence.removed.isEmpty())
   }
 
@@ -167,7 +168,7 @@ class EventBatchReplayTest {
   }
 
   @Test
-  fun `throwing delivery records failure and chain continues`() {
+  fun `throwing delivery records failure and stops chain`() {
     val persistence = FakePersistence(2)
     val background = QueuedBackground()
     val delivered = mutableListOf<Long>()
@@ -178,9 +179,9 @@ class EventBatchReplayTest {
     }
     assertTrue(persistence.failures.isEmpty())
     background.drain()
-    assertEquals(listOf(1L, 2L), delivered)
+    assertEquals(listOf(1L), delivered)
     assertEquals(listOf("batch-1"), persistence.failures)
-    assertEquals(listOf("batch-2"), persistence.removed)
+    assertTrue(persistence.removed.isEmpty())
   }
 
   @Test
@@ -212,7 +213,7 @@ class EventBatchReplayTest {
   }
 
   @Test
-  fun `persistence completion errors are contained and allow next delivery`() {
+  fun `persistence completion errors are contained and stop replay`() {
     for (success in listOf(true, false)) {
       val persistence = FakePersistence(2)
       persistence.throwOnRemove = true
@@ -224,7 +225,7 @@ class EventBatchReplayTest {
         complete(success)
       }
       background.drain()
-      assertEquals(2, deliveries)
+      assertEquals(1, deliveries)
       assertEquals(2, persistence.pending.size)
     }
   }

@@ -1,3 +1,4 @@
+import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fs, type Dirent } from "fs";
 import * as os from "os";
@@ -215,8 +216,12 @@ describe("snapshot journal enumeration and discard", () => {
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       expect(await store.discardSnapshotArtifacts("save")).toEqual(failurePaths);
-      expect(warning).toHaveBeenCalledTimes(2);
-      expect(warning.mock.calls.map((call) => call[1])).toEqual([failure, failure]);
+      const warnings = loggerCallsWithPrefix(
+        warning.mock.calls,
+        "Failed to discard snapshot artifact ",
+      );
+      expect(warnings).toHaveLength(2);
+      expect(warnings.map((call) => call[1])).toEqual([failure, failure]);
       expect((await fs.readdir(root)).sort()).toEqual([
         "save.journal.tmp.replacing",
         "save.replacing",

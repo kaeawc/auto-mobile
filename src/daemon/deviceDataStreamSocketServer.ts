@@ -1088,56 +1088,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
     // Handle request_navigation_graph command
     if (request.command === "request_navigation_graph") {
-      try {
-        const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
-        const deviceId =
-          deviceSessionUuid === null
-            ? undefined
-            : (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined);
-        if (deviceSessionUuid !== null && deviceId === undefined) {
-          throw this.deviceSessionResolver.getSessionError(deviceSessionUuid);
-        }
-        this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
-        if (!this.onNavigationGraphRequested) {
-          this.sendJson(socket, {
-            id: request.id,
-            type: "subscription_response",
-            success: true,
-          } satisfies SubscriptionResponse);
-          return;
-        }
-        const graphData = await this.onNavigationGraphRequested(request.appId ?? null);
-        if (graphData) {
-          // Echo the requester's device-session key so the pane can attribute this
-          // on-demand response to its own device (epic #5256, item 3; #4837 AC2).
-          const message: DeviceDataStreamMessage = {
-            id: request.id,
-            type: "navigation_update",
-            deviceSessionUuid,
-            deviceId,
-            timestamp: this.timer.now(),
-            navigationGraph: graphData,
-          };
-          this.sendJson(socket, message);
-        } else {
-          const response: SubscriptionResponse = {
-            id: request.id,
-            type: "subscription_response",
-            success: true,
-          };
-          this.sendJson(socket, response);
-        }
-      } catch (error) {
-        logger.warn(`[DeviceDataStream] Error handling request_navigation_graph: ${error}`);
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: errorMessage(error),
-          ...deviceSessionErrorFields(error),
-        };
-        this.sendJson(socket, errorResponse);
-      }
+      await this.handleNavigationGraphRequest(socket, request);
       return;
     }
 
@@ -1171,36 +1122,104 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // subscriber raise the cadence while it is actively viewing the device and relax it when
     // backgrounded. Older daemons reply with a benign "unknown command" error.
     if (request.command === "update_cadence") {
-      const filter = request.subscriptionId
-        ? this.findSubscriber(socket, request.subscriptionId)?.filter
-        : undefined;
-      if (!filter) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: request.subscriptionId
-            ? `subscriptionId '${request.subscriptionId}' is not active; resubscribe before updating cadence`
-            : "subscriptionId is required; resubscribe before updating cadence",
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      filter.screenshotIntervalMs = this.parseScreenshotIntervalMs(request.screenshotIntervalMs);
-      filter.hierarchyIntervalMs = this.parseHierarchyIntervalMs(request.hierarchyIntervalMs);
-      const response: SubscriptionResponse = {
-        id: request.id,
-        type: "subscription_response",
-        success: true,
-      };
-      this.sendJson(socket, response);
-      this.notifyCadenceChangedForFilter(filter);
+      this.handleCadenceUpdate(socket, request);
       return;
     }
 
     // Delegate to base class for standard commands (subscribe, unsubscribe, pong)
     await super.processLine(socket, line);
+  }
+
+  private async handleNavigationGraphRequest(
+    socket: Socket,
+    request: { id?: string; sessionUuid?: string; deviceSessionUuid?: string; appId?: string },
+  ): Promise<void> {
+    try {
+      const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+      const deviceId =
+        deviceSessionUuid === null
+          ? undefined
+          : (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined);
+      if (deviceSessionUuid !== null && deviceId === undefined) {
+        throw this.deviceSessionResolver.getSessionError(deviceSessionUuid);
+      }
+      this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
+      if (!this.onNavigationGraphRequested) {
+        this.sendJson(socket, {
+          id: request.id,
+          type: "subscription_response",
+          success: true,
+        } satisfies SubscriptionResponse);
+        return;
+      }
+      const graphData = await this.onNavigationGraphRequested(request.appId ?? null);
+      if (graphData) {
+        // Echo the requester's device-session key so the pane can attribute this
+        // on-demand response to its own device (epic #5256, item 3; #4837 AC2).
+        const message: DeviceDataStreamMessage = {
+          id: request.id,
+          type: "navigation_update",
+          deviceSessionUuid,
+          deviceId,
+          timestamp: this.timer.now(),
+          navigationGraph: graphData,
+        };
+        this.sendJson(socket, message);
+      } else {
+        const response: SubscriptionResponse = {
+          id: request.id,
+          type: "subscription_response",
+          success: true,
+        };
+        this.sendJson(socket, response);
+      }
+    } catch (error) {
+      logger.warn(`[DeviceDataStream] Error handling request_navigation_graph: ${error}`);
+      const errorResponse: SubscriptionResponse = {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: errorMessage(error),
+        ...deviceSessionErrorFields(error),
+      };
+      this.sendJson(socket, errorResponse);
+    }
+  }
+
+  private handleCadenceUpdate(
+    socket: Socket,
+    request: {
+      id?: string;
+      subscriptionId?: string;
+      screenshotIntervalMs?: unknown;
+      hierarchyIntervalMs?: unknown;
+    },
+  ): void {
+    const filter = request.subscriptionId
+      ? this.findSubscriber(socket, request.subscriptionId)?.filter
+      : undefined;
+    if (!filter) {
+      const errorResponse: SubscriptionResponse = {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: request.subscriptionId
+          ? `subscriptionId '${request.subscriptionId}' is not active; resubscribe before updating cadence`
+          : "subscriptionId is required; resubscribe before updating cadence",
+      };
+      this.sendJson(socket, errorResponse);
+      return;
+    }
+
+    filter.screenshotIntervalMs = this.parseScreenshotIntervalMs(request.screenshotIntervalMs);
+    filter.hierarchyIntervalMs = this.parseHierarchyIntervalMs(request.hierarchyIntervalMs);
+    const response: SubscriptionResponse = {
+      id: request.id,
+      type: "subscription_response",
+      success: true,
+    };
+    this.sendJson(socket, response);
+    this.notifyCadenceChangedForFilter(filter);
   }
 
   private async handleObservationSubscribe(

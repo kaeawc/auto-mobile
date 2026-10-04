@@ -8,7 +8,7 @@ media_name="issue-5804-image.png"
 document_dump="/sdcard/automobile-issue-5804-document.xml"
 media_dump="/sdcard/automobile-issue-5804-media.xml"
 
-if ! adb -s "$device_id" get-state | grep -qx "device"; then
+if ! device_state=$(adb -s "$device_id" get-state) || ! grep -qx "device" <<<"${device_state}"; then
   echo "Android device is not ready: $device_id" >&2
   exit 1
 fi

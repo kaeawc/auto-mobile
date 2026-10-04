@@ -20,6 +20,11 @@ import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } fr
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 type MutableMetadataSource = "refresh" | "snapshot";
 
+export type DeviceRetirementOptions = Pick<DiscoveryReconcileOptions, "excludeExecutionId"> & {
+  /** ANR failure releases session work separately and retains sessionless work. */
+  cancelDeviceBoundExecutions?: boolean;
+};
+
 function unknownAndroidRuntimeName(deviceId: string): string {
   return `Unknown (${deviceId})`;
 }
@@ -778,9 +783,12 @@ export class DeviceRuntimeIdentity {
   /** A confirmed shutdown retires serial-bound work even without quarantine. */
   async cancelRetiredDeviceExecutions(
     pooled: PooledDevice,
-    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
+    options: DeviceRetirementOptions = {},
   ): Promise<void> {
     const deferred = this.deferredQuarantineCancellations.delete(pooled);
+    if (options.cancelDeviceBoundExecutions === false) {
+      return;
+    }
     await this.cancelPooledDeviceExecutions(pooled, options, deferred ? pooled.sessionId : null);
   }
 

@@ -125,7 +125,16 @@ final class HierarchyModelParityTests: XCTestCase {
 
         // Sanity: the kebab-case wire keys actually survived the round trip.
         let encodedString = String(decoding: first.encoded, as: UTF8.self)
-        for key in ["content-desc", "resource-id", "semantic-links", "accessibility-focused", "long-clickable", "view-id", "state-description", "hint-text"] {
+        for key in [
+            "content-desc",
+            "resource-id",
+            "semantic-links",
+            "accessibility-focused",
+            "long-clickable",
+            "view-id",
+            "state-description",
+            "hint-text",
+        ] {
             XCTAssertTrue(encodedString.contains("\"\(key)\""), "rewrite dropped wire key `\(key)`")
         }
     }

@@ -97,6 +97,42 @@ if producer | grep -q needle; then :; fi'
   [[ "$output" == *"scripts/example.sh:3: quiet grep pipeline under pipefail"* ]]
 }
 
+@test "numeric shfmt operators detect pipes but exclude logical lists" {
+  local real_shfmt
+  real_shfmt="$(command -v shfmt)"
+  restricted_path
+  ln -s "$(command -v jq)" "$FIX/bin/jq"
+  cat > "$FIX/bin/shfmt" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+"$REAL_SHFMT" "$@" | jq '
+  walk(if type == "object" and has("Op") then
+    .Op |= (if . == "|" then 12
+            elif . == "|&" then 13
+            elif . == "&&" then 10
+            elif . == "||" then 11
+            else . end)
+  else . end)
+'
+STUB
+  chmod +x "$FIX/bin/shfmt"
+  write 'set -o pipefail
+producer | grep -q needle
+producer |& grep -q needle
+producer && grep -q needle
+producer || grep -q needle'
+  run env REAL_SHFMT="$real_shfmt" HOME="$FIX/home" PATH="$FIX/bin" bash "$ABS"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"scripts/example.sh:3: quiet grep pipeline under pipefail"* ]]
+  [[ "$output" == *"scripts/example.sh:4: quiet grep pipeline under pipefail"* ]]
+  [[ "$output" != *"scripts/example.sh:5:"* && "$output" != *"scripts/example.sh:6:"* ]]
+  write 'set -o pipefail
+producer && grep -q needle
+producer || grep -q needle'
+  run env REAL_SHFMT="$real_shfmt" HOME="$FIX/home" PATH="$FIX/bin" bash "$ABS"
+  [ "$status" -eq 0 ]
+}
+
 @test "all quiet flags, split pipelines, pipe-and-stderr and split set flags" {
   for flag in -q -qE -Eq -qi -qF -xq --quiet --silent; do
     write "set -E -e -u -o pipefail

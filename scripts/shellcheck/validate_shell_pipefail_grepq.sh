@@ -47,7 +47,12 @@ if ! command -v jq > /dev/null 2>&1; then
   echo 'jq is required for shell AST scanning; install jq and ensure it is on PATH.' >&2
   exit 2
 fi
-if ! ensure_tool shfmt "$SCRIPT_DIR/install_shfmt.sh" "$INSTALL_SHFMT_WHEN_MISSING" >&2; then
+# Capture failure explicitly; a conditional function call suppresses set -e.
+set +e
+ensure_tool shfmt "$SCRIPT_DIR/install_shfmt.sh" "$INSTALL_SHFMT_WHEN_MISSING" >&2
+ensure_status=$?
+set -e
+if [[ $ensure_status != 0 ]]; then
   echo "shfmt is required for shell AST scanning; install it with bash '$SCRIPT_DIR/install_shfmt.sh' or set INSTALL_SHFMT_WHEN_MISSING=true and retry." >&2
   exit 2
 fi
@@ -71,6 +76,8 @@ while IFS= read -r file; do
     echo "Scanner failed: $file" >&2
     exit 2
   fi
+  # shfmt 3.10.0 emits numeric operator tokens (12 = |, 13 = |&); newer
+  # versions such as 3.14.1 emit strings. Accept both, excluding &&/|| (10/11).
   jq -r --arg file "$file" '
     def word:
       if .Type == "Lit" or .Type == "SglQuoted" then .Value
@@ -95,7 +102,7 @@ while IFS= read -r file; do
         ($a[.] // "" | test("^-[A-Za-z]*o$")) and $a[. + 1] == "pipefail")] | any) as $enabled |
     $errors[],
     (if $enabled then
-      .. | objects | select(.Type? == "BinaryCmd" and (.Op == "|" or .Op == "|&")) |
+      .. | objects | select(.Type? == "BinaryCmd" and (.Op == "|" or .Op == 12 or .Op == "|&" or .Op == 13)) |
       .Y.Cmd | select(.Type? == "CallExpr" and quiet) | .Pos.Line as $line |
       select(any($markers[]; (.Hash.Line == $line or .Hash.Line == $line - 1)) | not) |
       "\($file):\($line): quiet grep pipeline under pipefail"

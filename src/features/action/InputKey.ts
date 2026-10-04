@@ -4,6 +4,7 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -184,6 +185,7 @@ export class InputKey {
         keyCode,
       };
     } catch (error) {
+      throwIfAborted(signal);
       const message = errorMessage(error);
       logger.warn(`input/key failed for ${key}: ${message}`, error);
       return {

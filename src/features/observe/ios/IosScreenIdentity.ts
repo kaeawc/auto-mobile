@@ -142,6 +142,10 @@ function findNavigationTitle(root: HierarchyNodeLike | undefined): string | unde
   return title ?? fallback;
 }
 
+function isTabBarButtonClass(cls: string | undefined): boolean {
+  return cls === "UITabBarButton" || cls === "UIButton" || cls === "XCUIElementTypeButton";
+}
+
 function findSelectedTab(root: HierarchyNodeLike | undefined): string | undefined {
   let selectedTab: string | undefined;
   const walkForTab = (node: HierarchyNodeLike | undefined, inTabBar: boolean): void => {
@@ -154,9 +158,7 @@ function findSelectedTab(root: HierarchyNodeLike | undefined): string | undefine
     const nextInTabBar = inTabBar || cls === "UITabBar" || cls === "XCUIElementTypeTabBar";
     if (isTrue(attrs["selected"])) {
       const selectedByRole = role === "tab";
-      const selectedByTabBarChild =
-        nextInTabBar &&
-        (cls === "UITabBarButton" || cls === "UIButton" || cls === "XCUIElementTypeButton");
+      const selectedByTabBarChild = nextInTabBar && isTabBarButtonClass(cls);
       if (selectedByRole || selectedByTabBarChild) {
         selectedTab = textOf(attrs) ?? asString(attrs["resource-id"]);
         return;

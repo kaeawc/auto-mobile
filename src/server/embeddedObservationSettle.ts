@@ -32,6 +32,8 @@ export interface EmbeddedObservationSettleInput {
   actionClass: ObservationActionClass;
   /** The observation the action tool already captured. */
   observation: ObserveResult;
+  /** Selector presence only; the action observation owns the resolved panel key. */
+  args?: { display?: unknown };
   settleObserve: SettleObserve;
   signal?: AbortSignal;
 }
@@ -77,7 +79,10 @@ export async function settleEmbeddedObservation(
   try {
     const result = await input.settleObserve.execute({
       // Keep post-action polls on the panel selected at the shared tool boundary.
-      display: input.observation.display?.pinned ? input.observation.display.key : undefined,
+      display:
+        input.args?.display !== undefined || input.observation.display?.pinned
+          ? input.observation.display?.key
+          : undefined,
       timeoutMs: EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
       pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
       signal: combineAbortSignals(input.signal, deadline),
@@ -269,7 +274,7 @@ function isAdoptableCapture(
   settledObservation: ObserveResult,
 ): boolean {
   if (
-    actionObservation.display?.pinned &&
+    actionObservation.display?.key !== undefined &&
     settledObservation.display?.key !== actionObservation.display.key
   ) {
     return false;
@@ -420,6 +425,7 @@ export async function settleEmbeddedObservationInResponse(
     ? await settleEmbeddedObservation({
         actionClass,
         observation,
+        args: ctx.args,
         settleObserve,
         signal: ctx.signal,
       })

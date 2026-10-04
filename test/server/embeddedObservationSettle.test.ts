@@ -838,6 +838,97 @@ describe("handler settle verdicts skip the generic gate (#6890 review)", () => {
   });
 });
 
+describe("explicit-display embedded observation", () => {
+  test("settle polls use the action's resolved panel instead of its role selector", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.display = { key: "external-key", role: "external", posture: "unknown", generation: 2 };
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.display = { ...action.display };
+    let requestedDisplay: string | undefined;
+    const response = createStructuredToolResponse({ success: true, observation: action });
+
+    await settleEmbeddedObservationInResponse(response, {
+      name: "tapOn",
+      args: { display: "external" },
+      internal: false,
+      createSettleObserve: () => ({
+        execute: async (options) => {
+          requestedDisplay = options?.display;
+          return { observation: settled, settled: true, polls: 2 };
+        },
+      }),
+    });
+
+    expect(requestedDisplay).toBe("external-key");
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.observation).toEqual({ ...settled, settled: true });
+    expect(payload.observation.display).not.toHaveProperty("pinned");
+  });
+
+  test.each(["internal-key", undefined])(
+    "an unpinned capture cannot be replaced by panel %s",
+    async (key) => {
+      const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+      action.display = { key: "external-key", role: "external", posture: "unknown", generation: 2 };
+      const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+      if (key !== undefined) {
+        settled.display = { key, role: "inner", posture: "unknown", generation: 2 };
+      }
+      let requestedDisplay: string | undefined;
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: action,
+        args: { display: "external" },
+        settleObserve: {
+          execute: async (options) => {
+            requestedDisplay = options?.display;
+            return { observation: settled, settled: true, polls: 2 };
+          },
+        },
+      });
+
+      expect(result.observation).toBe(action);
+      expect(requestedDisplay).toBe("external-key");
+    },
+  );
+
+  test("a single-display action without a selector retains default polling and adopts its newer capture", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.display = { ...action.display };
+    let requestedDisplay: string | undefined = "unexpected";
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: {
+        execute: async (options) => {
+          requestedDisplay = options?.display;
+          return { observation: settled, settled: true, polls: 2 };
+        },
+      },
+    });
+
+    expect(requestedDisplay).toBeUndefined();
+    expect(result.observation).toEqual(settled);
+    expect(result.settled).toBe(true);
+  });
+
+  test("default polling also refuses to replace an observation with another panel", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.display = { key: "external-key", role: "external", posture: "unknown", generation: 2 };
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.display = { key: "internal-key", role: "inner", posture: "unknown", generation: 2 };
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: { execute: async () => ({ observation: settled, settled: true, polls: 2 }) },
+    });
+
+    expect(result.observation).toBe(action);
+  });
+});
+
 describe("session-pinned embedded observation", () => {
   test("settle polls retain the pinned panel and additive selection marker", async () => {
     const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);

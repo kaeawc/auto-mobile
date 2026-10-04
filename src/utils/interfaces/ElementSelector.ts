@@ -1,7 +1,7 @@
 import type { Element } from "../../models/Element";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
-import type { ResolutionAction } from "../../features/utility/ElementResolver";
+import type { ResolutionAction } from "../../models/ResolutionAction";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";

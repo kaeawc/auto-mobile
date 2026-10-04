@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "safeAreaPadding": {
+        "edges": [],
+        "types": ["ime"]
+      }
+    }
+  },
+  "expectedPath": "root.safeAreaPadding.edges"
+}

@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "ok",
+      "onTap": [
+        {
+          "type": "dismiss",
+          "extra": true
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].extra"
+}

@@ -1,7 +1,7 @@
 import { drainUntil, drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { afterEach, describe, expect, test, beforeEach } from "bun:test";
+import { afterEach, describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import {
@@ -42,6 +42,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeEmulatorConsoleBusyRegistry } from "../fakes/FakeEmulatorConsoleBusyRegistry";
+import { logger } from "../../src/utils/logger";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -2979,6 +2980,31 @@ describe("DevicePool", () => {
       );
 
       test.each(branches)(
+        "retains old-device work and warns when the recovery execution is unknown during %s",
+        async (branch) => {
+          const oldDeviceWork = tracker.startExecution("observe");
+          const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
+          tracker.bindDeviceExecution(oldDeviceWork.id, device.deviceId);
+          tracker.bindDeviceExecution(recovery.id, device.deviceId);
+          const warn = spyOn(logger, "warn").mockImplementation(() => {});
+          try {
+            await replaceDevice(branch, undefined);
+
+            expect(oldDeviceWork.abortController.signal.aborted).toBe(false);
+            expect(recovery.abortController.signal.aborted).toBe(false);
+            const replacementWarnings = warn.mock.calls
+              .map(([message]) => message)
+              .filter((message) => message.startsWith("[DevicePool] Left old-device work running"));
+            expect(replacementWarnings).toEqual([
+              `[DevicePool] Left old-device work running for ${device.deviceId} because the System UI ANR recovery execution is unknown`,
+            ]);
+          } finally {
+            warn.mockRestore();
+          }
+        },
+      );
+
+      test.each(branches)(
         "preserves session-only and other-device work during %s",
         async (branch) => {
           const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
@@ -4738,6 +4764,201 @@ describe("DevicePool", () => {
         status: "busy",
       });
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-new");
+    });
+
+    describe("autolock rebind release", () => {
+      let originalAutolock: string | undefined;
+
+      beforeEach(async () => {
+        originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+        await initializeLiveDevices([
+          createBootedDevice("emulator-old"),
+          createBootedDevice("emulator-new"),
+        ]);
+      });
+
+      afterEach(() => {
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      });
+
+      const rebind = (sessionId: string) =>
+        devicePool.bindOrReuseDeviceSession(
+          sessionId,
+          "emulator-new",
+          "android",
+          undefined,
+          undefined,
+          undefined,
+          true,
+        );
+
+      test("allows another session to drive the old device after rebind", async () => {
+        const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
+        expect(sessionId).toBeDefined();
+
+        await rebind(sessionId!);
+        await devicePool.bindOrReuseDeviceSession("next-owner", "emulator-old", "android");
+
+        expect(() => devicePool.assertAutolockAccess("emulator-old", "next-owner")).not.toThrow();
+        expect(devicePool.getDevice("emulator-old")).toMatchObject({
+          sessionId: "next-owner",
+          autolockSessionId: undefined,
+        });
+        expect(devicePool.getDevice("emulator-new")?.autolockSessionId).toBe(sessionId);
+        expect(() => devicePool.assertAutolockAccess("emulator-new", "next-owner")).toThrow(
+          "locked to another session",
+        );
+      });
+
+      test("keeps the old device unlocked after releasing the rebound session", async () => {
+        const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
+        await rebind(sessionId!);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBe(sessionId);
+        await sessionManager.releaseSession(sessionId!);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBeUndefined();
+        expect(
+          devicePool.resolveAutolockSessionForMcpSession(
+            "mcp-1",
+            "android",
+            undefined,
+            "emulator-new",
+          ),
+        ).toBeUndefined();
+        await devicePool.releaseDevice("emulator-new", sessionId!);
+        await devicePool.bindOrReuseDeviceSession("next-owner", "emulator-old", "android");
+
+        expect(() => devicePool.assertAutolockAccess("emulator-old", "next-owner")).not.toThrow();
+        expect(devicePool.getDevice("emulator-old")?.autolockSessionId).toBeUndefined();
+        expect(devicePool.getDevice("emulator-new")).toMatchObject({
+          sessionId: null,
+          status: "idle",
+          autolockSessionId: undefined,
+        });
+      });
+
+      test("transfers the autolock before rebind publishes the replacement assignment", async () => {
+        const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
+        const publishedStates: Array<{
+          assignedDevice: string | undefined;
+          lock: string | undefined;
+          route: string | undefined;
+        }> = [];
+        sessionManager.onSessionDeviceUnbound(() => {
+          publishedStates.push({
+            assignedDevice: sessionManager.getSession(sessionId!)?.assignedDevice,
+            lock: devicePool.getDevice("emulator-new")?.autolockSessionId,
+            route: devicePool.resolveAutolockSessionForMcpSession("mcp-1"),
+          });
+        });
+
+        await rebind(sessionId!);
+
+        expect(publishedStates).toEqual([
+          { assignedDevice: "emulator-new", lock: sessionId, route: sessionId },
+        ]);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBe(sessionId);
+      });
+
+      test("clears only the old lock before pool release and reuses the MCP session after rebind", async () => {
+        const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
+        const events: string[] = [];
+        sessionManager.onSessionDeviceUnbound((_id, deviceId) => {
+          if (deviceId === "emulator-old") {
+            events.push("unbound");
+            expect(devicePool.getDevice(deviceId)?.autolockSessionId).toBe(sessionId);
+          }
+        });
+        const releaseDevice = devicePool.releaseDevice.bind(devicePool);
+        devicePool.releaseDevice = async (deviceId, expectedSessionId) => {
+          events.push("pool-release");
+          expect(devicePool.getDevice(deviceId)).toMatchObject({
+            sessionId,
+            status: "busy",
+            autolockSessionId: undefined,
+          });
+          expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBe(sessionId);
+          await releaseDevice(deviceId, expectedSessionId);
+        };
+
+        await rebind(sessionId!);
+
+        expect(events).toEqual(["unbound", "pool-release"]);
+        expect(devicePool.getDevice("emulator-new")?.autolockSessionId).toBe(sessionId);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBe(sessionId);
+        expect(
+          devicePool.resolveAutolockSessionForMcpSession(
+            "mcp-1",
+            "android",
+            undefined,
+            "emulator-new",
+          ),
+        ).toBe(sessionId);
+        expect(() => devicePool.assertAutolockAccess("emulator-new", sessionId!)).not.toThrow();
+        const assignmentCount = devicePool.getDevice("emulator-new")!.assignmentCount;
+        const reused = await devicePool.autolockDevice("emulator-new", "android", "mcp-1");
+        expect(reused).toBe(sessionId);
+        expect(devicePool.getDevice("emulator-new")!.assignmentCount).toBe(assignmentCount);
+      });
+
+      test.each([undefined, "target-lock"])(
+        "keeps both locks unchanged when rebind persistence fails (target lock: %s)",
+        async (targetLock) => {
+          sessionManager.stopCleanupTimer();
+          const persistence = new FakeDeviceSessionPersistence();
+          sessionManager = new SessionManager(fakeTimer, persistence);
+          devicePool = new DevicePool(
+            createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+              timer: fakeTimer,
+              installedAppsRepository: fakeAppsRepo,
+              deviceManager: fakeDeviceManager,
+              retryExecutor: new DefaultRetryExecutor(fakeTimer),
+            }),
+          );
+          await initializeLiveDevices(fakeDeviceManager.bootedDevices);
+          const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
+          devicePool.getDevice("emulator-new")!.autolockSessionId = targetLock;
+          const oldDevice = { ...devicePool.getDevice("emulator-old")! };
+          const newDevice = { ...devicePool.getDevice("emulator-new")! };
+          persistence.failure = "create";
+
+          await expect(rebind(sessionId!)).rejects.toThrow("persist create failed");
+
+          expect(devicePool.getDevice("emulator-old")).toEqual(oldDevice);
+          expect(devicePool.getDevice("emulator-new")).toEqual(newDevice);
+          expect(sessionManager.getSession(sessionId!)?.assignedDevice).toBe("emulator-old");
+          expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBe(sessionId);
+        },
+      );
+
+      test("ordinary release clears autolock state before returning the device to the pool", async () => {
+        const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
+        const releaseStates: Array<{ lock: string | undefined; owner: string | null | undefined }> =
+          [];
+        sessionManager.onSessionRelease(() => {
+          releaseStates.push({
+            lock: devicePool.getDevice("emulator-old")?.autolockSessionId,
+            owner: devicePool.getDevice("emulator-old")?.sessionId,
+          });
+        });
+
+        await sessionManager.releaseSession(sessionId!);
+
+        expect(releaseStates).toEqual([{ lock: undefined, owner: sessionId }]);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBeUndefined();
+        await devicePool.releaseDevice("emulator-old", sessionId!);
+        expect(devicePool.getDevice("emulator-old")).toMatchObject({
+          sessionId: null,
+          status: "idle",
+          autolockSessionId: undefined,
+        });
+        await devicePool.bindOrReuseDeviceSession("next-owner", "emulator-old", "android");
+        expect(() => devicePool.assertAutolockAccess("emulator-old", "next-owner")).not.toThrow();
+      });
     });
 
     test("binds a rediscovered same-serial emulator without requiring a retry", async () => {

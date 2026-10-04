@@ -37,7 +37,7 @@ import { SingleFlight } from "../utils/cache/SingleFlight";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
-import { type RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import { type RetryExecutor, DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
   DevicePoolRefresh,
@@ -832,7 +832,7 @@ export class DevicePool {
     deviceHealthRecoveryBackoff,
     installedAppsRepository,
     deviceManager = new MultiPlatformDeviceManager(),
-    retryExecutor = defaultRetryExecutor,
+    retryExecutor = new DefaultRetryExecutor(timer),
     deviceSessionRepository = new DeviceSessionRepository(),
     criteriaMatcher = new DeviceCriteriaMatcher(),
     releaseSessionForDisconnectedDevice,
@@ -2721,7 +2721,7 @@ export class DevicePool {
       );
       return false;
     }
-    const released = await this.retrySessionRelease(sessionId, () =>
+    const released = await this.retrySessionRelease(sessionId, device.id, () =>
       this.releaseSessionForDisconnectedDevice(
         sessionId,
         device.id,
@@ -3118,21 +3118,50 @@ export class DevicePool {
   ): Promise<void> {
     await this.retrySessionRelease(
       sessionId,
+      deviceId,
       attempt ??
         (async () =>
           await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason)),
     );
   }
 
-  private async retrySessionRelease<T>(sessionId: string, attempt: () => Promise<T>): Promise<T> {
-    return await this.retryExecutor.executeOrThrow(attempt, {
-      onRetry: (error, attemptNumber, delay) => {
-        logger.warn(
-          `[DevicePool] Retrying recovery release for session ${sessionId} after attempt ${attemptNumber} failed; delay=${delay}ms: ${error}`,
-          error,
-        );
-      },
-    });
+  private async retrySessionRelease<T>(
+    sessionId: string,
+    deviceId: string,
+    attempt: () => Promise<T>,
+  ): Promise<T> {
+    const device = this.devices.get(deviceId);
+    const assignmentCount = device?.assignmentCount;
+    try {
+      return await this.retryExecutor.executeOrThrow(attempt, {
+        onRetry: (error, attemptNumber, delay) => {
+          logger.warn(
+            `[DevicePool] Retrying recovery release for session ${sessionId} after attempt ${attemptNumber} failed; delay=${delay}ms: ${error}`,
+            error,
+          );
+        },
+      });
+    } catch (releaseError) {
+      // Retain ownership throughout backoff. Only the exhausted release may
+      // free a removed session's device, and never a newer assignment.
+      if (
+        !this.sessionManager.hasSession(sessionId) &&
+        device &&
+        this.devices.get(deviceId) === device &&
+        device.assignmentCount === assignmentCount &&
+        device.sessionId === sessionId
+      ) {
+        try {
+          await this.releaseDevice(deviceId, sessionId);
+        } catch (poolError) {
+          logger.warn(
+            `Failed to free device ${deviceId} after session ${sessionId} release retries`,
+            poolError,
+          );
+        }
+      }
+      throw releaseError;
+    }
   }
 
   private async rebootDisconnectedAndroidDevice(
@@ -4841,13 +4870,16 @@ export class DevicePool {
       preservedSession &&
       this.sessionManager.getSession(preservedSession.sessionId) === preservedSession
     ) {
-      await this.retrySessionRelease(preservedSession.sessionId, () =>
-        this.sessionManager.releaseSessionIfOwned(
-          preservedSession.sessionId,
-          preservedSession,
-          preservedSession.assignedDevice,
-          deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
-        ),
+      await this.retrySessionRelease(
+        preservedSession.sessionId,
+        preservedSession.assignedDevice,
+        () =>
+          this.sessionManager.releaseSessionIfOwned(
+            preservedSession.sessionId,
+            preservedSession,
+            preservedSession.assignedDevice,
+            deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
+          ),
       );
     }
   }

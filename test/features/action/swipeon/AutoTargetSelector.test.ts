@@ -128,6 +128,8 @@ describe("SwipeOn autoTarget", () => {
 
     expect(result.success).toBe(true);
     expect(result.targetType).toBe("screen");
-    expect(result.warning).toBeUndefined();
+    expect(result.effect?.screenChanged).toBe(false);
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("Auto-targeted");
   });
 });

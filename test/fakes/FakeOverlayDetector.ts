@@ -1,4 +1,4 @@
-import { Element, SwipeDirection, SwipeOnOptions, ViewHierarchyResult } from "../../src/models";
+import { Element, SwipeDirection, ViewHierarchyResult } from "../../src/models";
 import { OverlayAnalyzer, OverlayCandidate } from "../../src/features/action/swipeon/types";
 
 export class FakeOverlayDetector implements OverlayAnalyzer {
@@ -13,7 +13,6 @@ export class FakeOverlayDetector implements OverlayAnalyzer {
 
   collectOverlayCandidates(
     _viewHierarchy: ViewHierarchyResult,
-    _container: SwipeOnOptions["container"] | undefined,
     _containerElement: Element,
   ): OverlayCandidate[] {
     return this.candidates;

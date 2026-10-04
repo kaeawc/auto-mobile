@@ -20,19 +20,22 @@ import {
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ElementResolver } from "../utility/ElementResolver";
+import { isUsableScreenSize, screenSizeForOffscreenCheck } from "../utility/ElementGeometry";
 import {
   identifyObservedHierarchy,
   type HierarchyCapture,
   type HierarchySnapshot,
 } from "../observe/HierarchyCapture";
 import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
+import { getProjectedHierarchyScreenSize } from "../observe/HierarchyNormalization";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { boundsArea, boundsEqual, clamp, intersectBounds } from "../../utils/bounds";
+import { boundsArea, boundsEqual, clamp, intersectBounds, parseBounds } from "../../utils/bounds";
 import { buildContainerFromElement, isTruthyFlag } from "../utility/elementProperties";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../utils/screenBounds";
 import {
@@ -56,6 +59,8 @@ export const PINCH_MAX_DISTANCE_RATIO = 0.9;
 export const PINCH_MIN_VISIBLE_DIMENSION_PX = Math.ceil(
   PINCH_MIN_DISTANCE_PX / PINCH_MAX_DISTANCE_RATIO,
 );
+// Match hierarchyScreenSize's private one-point orientation rounding tolerance.
+const PINCH_ORIENTATION_TOLERANCE_POINTS = 1;
 
 type PinchTarget = {
   bounds: Element["bounds"];
@@ -436,7 +441,10 @@ export class PinchOn extends BaseVisualChange {
     signal?: AbortSignal,
     displayObservation?: ObserveResult,
   ): Promise<PinchTarget> {
-    const { observeResult, snapshot } = await this.pinchTargetHierarchy(signal, displayObservation);
+    const { observeResult, snapshot, originalObservation } = await this.pinchTargetHierarchy(
+      signal,
+      displayObservation,
+    );
 
     const screenBounds = this.getScreenBounds(observeResult, options.includeSystemInsets);
     let target: PinchTarget = {
@@ -469,7 +477,31 @@ export class PinchOn extends BaseVisualChange {
       }
     }
 
-    const visibleBounds = intersectBounds(target.bounds, screenBounds);
+    return this.clipTarget(target, options, snapshot, originalObservation);
+  }
+
+  private clipTarget(
+    target: PinchTarget,
+    options: PinchOnOptions,
+    snapshot: HierarchySnapshot,
+    originalObservation: ObserveResult,
+  ): PinchTarget {
+    const clipSize = this.trustedClipScreenSize(snapshot, originalObservation);
+    if (!clipSize) {
+      // Missing display geometry is expected; preserve main's unclipped best-effort gesture.
+      logger.debug("pinchOn clipping skipped: no trusted display size; using target bounds");
+      return target;
+    }
+    const sameObservationSize =
+      clipSize.width === originalObservation.screenSize?.width &&
+      clipSize.height === originalObservation.screenSize?.height;
+    const clipBounds = getScreenBoundsFromSize(
+      clipSize,
+      snapshot.hierarchy.systemInsets ??
+        (sameObservationSize ? originalObservation.systemInsets : undefined),
+      options.includeSystemInsets,
+    );
+    const visibleBounds = intersectBounds(target.bounds, clipBounds);
     const visibleWidth = visibleBounds ? visibleBounds.right - visibleBounds.left : 0;
     const visibleHeight = visibleBounds ? visibleBounds.bottom - visibleBounds.top : 0;
     if (
@@ -482,6 +514,84 @@ export class PinchOn extends BaseVisualChange {
       );
     }
     return { ...target, bounds: visibleBounds };
+  }
+
+  private trustedClipScreenSize(snapshot: HierarchySnapshot, observation: ObserveResult) {
+    const hierarchy = snapshot.hierarchy;
+    const options = {
+      platform: snapshot.platform,
+      observationScreenSize: this.rootContradictsObservationSize(hierarchy, observation)
+        ? undefined
+        : observation.screenSize,
+      display: observation.viewHierarchy,
+      iosMultiPanel: (this.device.displays?.panels.length ?? 0) > 1,
+    };
+    if (snapshot.platform === "ios") {
+      const size = screenSizeForOffscreenCheck(hierarchy, options);
+      // Runner pixels independently prove display extent/orientation, even when point metadata lags.
+      if (this.iosRunnerPixelsMatchScreen(hierarchy, size)) {
+        return size;
+      }
+    }
+    // Roots (including projection stamps inferred from roots) can describe a window,
+    // not the display. Exclude both without changing the capture used for selection.
+    const projected = getProjectedHierarchyScreenSize(hierarchy);
+    const size = screenSizeForOffscreenCheck(
+      {
+        ...hierarchy,
+        hierarchy: {},
+        // iOS projection also overwrites metadata with its inferred size.
+        ...(projected ? { screenWidth: undefined, screenHeight: undefined } : {}),
+      },
+      options,
+    );
+    // Contradictory runner pixels make even metadata unsafe for clipping.
+    return snapshot.platform === "ios" && this.iosRunnerPixelsMatchScreen(hierarchy, size) === false
+      ? undefined
+      : size;
+  }
+
+  private rootContradictsObservationSize(
+    hierarchy: HierarchySnapshot["hierarchy"],
+    observation: ObserveResult,
+  ): boolean {
+    const size = observation.screenSize;
+    if (!isUsableScreenSize(size)) {
+      return false;
+    }
+    // Use the root resolver's candidate order; a partial/windowed root alone
+    // cannot disprove the cached display size. Only its swapped full frame can.
+    const rootNode = hierarchy.hierarchy.node;
+    const root = [hierarchy.hierarchy.bounds, rootNode && nodeBounds(rootNode)]
+      .map(parseBounds)
+      .find((bounds) => bounds && bounds.right > bounds.left && bounds.bottom > bounds.top);
+    return (
+      !!root &&
+      root.left === 0 &&
+      root.top === 0 &&
+      Math.abs(size.width - size.height) > PINCH_ORIENTATION_TOLERANCE_POINTS &&
+      Math.abs(root.right - size.height) <= PINCH_ORIENTATION_TOLERANCE_POINTS &&
+      Math.abs(root.bottom - size.width) <= PINCH_ORIENTATION_TOLERANCE_POINTS
+    );
+  }
+
+  private iosRunnerPixelsMatchScreen(
+    hierarchy: HierarchySnapshot["hierarchy"],
+    size: ReturnType<typeof screenSizeForOffscreenCheck>,
+  ): boolean | undefined {
+    const scale = [hierarchy.nativeScale, hierarchy.screenScale].find(
+      (value) => value !== undefined && Number.isFinite(value) && value > 0,
+    );
+    const pixels = { width: hierarchy.pixelWidth ?? 0, height: hierarchy.pixelHeight ?? 0 };
+    if (!isUsableScreenSize(pixels) || scale === undefined) {
+      return undefined;
+    }
+    // Match the shared root resolver's one-point tolerance for runner pixel rounding.
+    return (
+      isUsableScreenSize(size) &&
+      Math.abs(pixels.width / scale - size.width) <= PINCH_ORIENTATION_TOLERANCE_POINTS &&
+      Math.abs(pixels.height / scale - size.height) <= PINCH_ORIENTATION_TOLERANCE_POINTS
+    );
   }
 
   private async pinchTargetHierarchy(signal?: AbortSignal, displayObservation?: ObserveResult) {
@@ -504,6 +614,7 @@ export class PinchOn extends BaseVisualChange {
           searchRaw: serverConfig.isRawElementSearchEnabled(),
           signal,
         });
+    const originalObservation = observeResult;
     if (!displayObservation) {
       observeResult = this.withCaptureGeometry(observeResult, snapshot);
     }
@@ -512,7 +623,7 @@ export class PinchOn extends BaseVisualChange {
       throw new ActionableError("Unable to resolve target without a view hierarchy");
     }
 
-    return { observeResult, snapshot };
+    return { observeResult, snapshot, originalObservation };
   }
 
   private withCaptureGeometry(

@@ -13,6 +13,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
+import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 
 // Measured bounds from #9186: element [0,-361,855,1456], screen 402x874.
 // Unclipped centerX 428 / distanceStart 513 did nothing; expected centre (201,437).
@@ -58,6 +59,7 @@ for (const platform of ["android", "ios"] as const) {
     let android: FakeCtrlProxy;
     let ios: FakeIOSCtrlProxy;
     let timer: FakeTimer;
+    let projectCapture: boolean;
     const restores: Array<() => void> = [];
 
     const setTarget = (
@@ -91,6 +93,7 @@ for (const platform of ["android", "ios"] as const) {
     };
 
     beforeEach(() => {
+      projectCapture = false;
       timer = new FakeTimer();
       timer.enableAutoAdvance();
       android = new FakeCtrlProxy(timer);
@@ -126,10 +129,12 @@ for (const platform of ["android", "ios"] as const) {
       pinch = new PinchOn(device, null, {
         timer,
         visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
-        capture: new FakeHierarchyCapture(
-          async () => (await observe.getMostRecentCachedObserveResult()).viewHierarchy!,
-          platform,
-        ),
+        capture: new FakeHierarchyCapture(async () => {
+          const hierarchy = (await observe.getMostRecentCachedObserveResult()).viewHierarchy!;
+          return projectCapture
+            ? identifyObservedHierarchy(platform, hierarchy, "fresh", timer).hierarchy
+            : hierarchy;
+        }, platform),
       });
       Object.assign(pinch, {
         observeScreen: observe,
@@ -149,6 +154,287 @@ for (const platform of ["android", "ios"] as const) {
     const history = () =>
       platform === "android" ? android.getPinchHistory() : ios.getPinchHistory();
     const rounded = (value: number) => (platform === "ios" ? Math.round(value) : value);
+
+    const setSingleRoot = (
+      bounds: ElementBounds,
+      trustedSource: "observation" | "capture" | "none",
+    ) => {
+      setTarget(bounds);
+      const screen = observe.getConfiguredObserveResult()!;
+      const hierarchy = screen.viewHierarchy!;
+      // The reviewer's single-object root is a window/container, not a display.
+      hierarchy.hierarchy.node = {
+        $: {
+          "resource-id": "container-id",
+          text: "Example Domain",
+          bounds,
+          class: "android.widget.FrameLayout",
+          scrollable: true,
+        },
+      };
+      if (trustedSource === "capture") {
+        hierarchy.screenWidth = 402;
+        hierarchy.screenHeight = 874;
+      }
+      if (trustedSource !== "observation") {
+        Object.assign(screen, { screenSize: undefined });
+      }
+    };
+
+    for (const explicit of [true, false]) {
+      test.each(["observation", "capture"] as const)(
+        `review a preserves single-object root ${explicit ? "explicit" : "auto"} with %s size`,
+        async (trustedSource) => {
+          // Review repro [100,400,300,700] on the issue's 402x874 display.
+          setSingleRoot({ left: 100, top: 400, right: 300, bottom: 700 }, trustedSource);
+          const result = await pinch.execute({
+            direction: "in",
+            container: explicit ? { elementId: "container-id" } : undefined,
+          });
+          expect(result.success).toBe(true);
+          // Main skips the offset root during auto-selection and uses the inferred
+          // 200x300 screen fallback; explicit selection uses the root's midpoint.
+          expect(result.targetType).toBe(explicit ? "container" : "screen");
+          expect(history()[0]).toMatchObject({
+            centerX: explicit ? 200 : 100,
+            centerY: explicit ? 550 : 150,
+            distanceStart: 120,
+            distanceEnd: 40,
+          });
+        },
+      );
+    }
+
+    test("review a preserves a child container inside the offset root", async () => {
+      setSingleRoot({ left: 100, top: 400, right: 300, bottom: 700 }, "observation");
+      const root = observe.getConfiguredObserveResult()!.viewHierarchy!.hierarchy.node!;
+      root.node = [
+        {
+          $: {
+            "resource-id": "child",
+            bounds: {
+              left: 120,
+              top: 420,
+              right: 280,
+              bottom: 680,
+            },
+          },
+        },
+      ];
+      const result = await pinch.execute({ direction: "in", container: { elementId: "child" } });
+      expect(result.success).toBe(true);
+      expect(history()[0]).toMatchObject({
+        centerX: 200,
+        centerY: 550,
+        distanceStart: 96,
+        distanceEnd: 32,
+      });
+    });
+
+    test("partial origin root does not contradict observation clipping", async () => {
+      // A 200x300 window differs from 402x874, but is not its swapped full frame.
+      setSingleRoot({ left: 0, top: 0, right: 200, bottom: 300 }, "observation");
+      const root = observe.getConfiguredObserveResult()!.viewHierarchy!.hierarchy.node!;
+      root.node = [{ $: { "resource-id": "child", bounds: measuredBounds } }];
+      const result = await pinch.execute({ direction: "in", container: { elementId: "child" } });
+      expect(result.success).toBe(true);
+      expect(history()[0]).toMatchObject({
+        centerX: 201,
+        centerY: 437,
+        distanceStart: rounded(241.2),
+        distanceEnd: rounded(80.4),
+      });
+      expectFingersInside(history()[0], screenBounds);
+    });
+
+    if (platform === "android") {
+      test.each([874, 875, 873])(
+        "stale portrait observation cannot clip a fresh landscape root (%s width)",
+        async (width) => {
+          setTarget(
+            { left: 500, top: 100, right: 800, bottom: 300 },
+            { top: 80, right: 0, bottom: 100, left: 0 },
+          );
+          const hierarchy = observe.getConfiguredObserveResult()!.viewHierarchy!;
+          const child = hierarchy.hierarchy.node;
+          Object.assign(pinch, {
+            capture: new FakeHierarchyCapture(() => ({
+              ...hierarchy,
+              hierarchy: {
+                node: { bounds: { left: 0, top: 0, right: width, bottom: 402 }, node: child },
+              },
+            })),
+          });
+          const result = await pinch.execute({
+            direction: "in",
+            container: { elementId: "container-id" },
+          });
+          expect(result.success).toBe(true);
+          expect(history()).toHaveLength(1);
+          expect(history()[0]).toMatchObject({
+            centerX: 650,
+            centerY: 200,
+            distanceStart: 120,
+            distanceEnd: 40,
+          });
+        },
+      );
+    }
+
+    test("review b preserves a bottom-half split-screen root", async () => {
+      // Review split-screen repro: [0,437,402,874] on a 402x874 display.
+      setSingleRoot({ left: 0, top: 437, right: 402, bottom: 874 }, "observation");
+      const result = await pinch.execute({
+        direction: "in",
+        container: { elementId: "container-id" },
+      });
+      expect(result.success).toBe(true);
+      expect(history()[0]).toMatchObject({
+        centerX: 201,
+        centerY: 656,
+        distanceStart: rounded(402 * 0.6),
+        distanceEnd: rounded(402 * 0.2),
+      });
+    });
+
+    test("review e falls back to unclipped bounds with only an inferred root size", async () => {
+      // No metadata or observation size: main can still infer 200x300 for selection.
+      setSingleRoot({ left: 100, top: 400, right: 300, bottom: 700 }, "none");
+      const result = await pinch.execute({
+        direction: "in",
+        container: { elementId: "container-id" },
+      });
+      expect(result.success).toBe(true);
+      expect(history()[0]).toMatchObject({
+        centerX: 200,
+        centerY: 550,
+        distanceStart: 120,
+        distanceEnd: 40,
+      });
+    });
+
+    test("review e retains main's failure when no size can be resolved at all", async () => {
+      setTarget(measuredBounds);
+      const screen = observe.getConfiguredObserveResult()!;
+      Object.assign(screen, { screenSize: undefined });
+      const result = await pinch.execute({ direction: "in" });
+      expect(result.success).toBe(false);
+      expect(history()).toEqual([]);
+    });
+
+    test("capture metadata wins over a stale observation size", async () => {
+      setTarget(measuredBounds, undefined, { width: 874, height: 402 });
+      const hierarchy = observe.getConfiguredObserveResult()!.viewHierarchy!;
+      hierarchy.screenWidth = 402;
+      hierarchy.screenHeight = 874;
+      const result = await pinch.execute({
+        direction: "in",
+        container: { elementId: "container-id" },
+      });
+      expect(result.success).toBe(true);
+      expect(history()[0]).toMatchObject({
+        centerX: 201,
+        centerY: 437,
+        distanceStart: rounded(241.2),
+        distanceEnd: rounded(80.4),
+      });
+    });
+
+    test("incompatible observation display identity cannot authorize clipping", async () => {
+      setSingleRoot({ left: 500, top: 400, right: 700, bottom: 700 }, "observation");
+      const hierarchy = observe.getConfiguredObserveResult()!.viewHierarchy!;
+      hierarchy.displayId = 0;
+      Object.assign(pinch, {
+        capture: new FakeHierarchyCapture(() => ({ ...hierarchy, displayId: 2 }), platform),
+      });
+      const result = await pinch.execute({
+        direction: "in",
+        container: { elementId: "container-id" },
+      });
+      expect(result.success).toBe(true);
+      expect(history()[0]).toMatchObject({
+        centerX: 600,
+        centerY: 550,
+        distanceStart: 120,
+        distanceEnd: 40,
+      });
+    });
+
+    if (platform === "ios") {
+      test("metadata contradicted by runner pixels cannot authorize clipping", async () => {
+        setSingleRoot(measuredBounds, "capture");
+        const hierarchy = observe.getConfiguredObserveResult()!.viewHierarchy!;
+        hierarchy.screenScale = 3;
+        hierarchy.pixelWidth = 874 * 3;
+        hierarchy.pixelHeight = 402 * 3;
+        const result = await pinch.execute({
+          direction: "in",
+          container: { elementId: "container-id" },
+        });
+        expect(result.success).toBe(true);
+        // Neither root nor stale portrait metadata describes the landscape display.
+        expect(history()[0]).toMatchObject({
+          centerX: 428,
+          centerY: 548,
+          distanceStart: 513,
+          distanceEnd: 171,
+        });
+      });
+
+      test.each(["observation", "none"] as const)(
+        "root-derived projection metadata is not independent screen evidence (%s)",
+        async (trustedSource) => {
+          setSingleRoot({ left: 100, top: 400, right: 300, bottom: 700 }, trustedSource);
+          projectCapture = true;
+          const result = await pinch.execute({
+            direction: "in",
+            container: { elementId: "container-id" },
+          });
+          expect(result.success).toBe(true);
+          expect(history()[0]).toMatchObject({
+            centerX: 200,
+            centerY: 550,
+            distanceStart: 120,
+            distanceEnd: 40,
+          });
+        },
+      );
+
+      test("runner pixels corroborate rotation despite stale root and point metadata", async () => {
+        setSingleRoot({ left: 0, top: 0, right: 402, bottom: 874 }, "capture");
+        const hierarchy = observe.getConfiguredObserveResult()!.viewHierarchy!;
+        hierarchy.screenScale = 3;
+        hierarchy.nativeScale = 3;
+        hierarchy.pixelWidth = 874 * 3;
+        hierarchy.pixelHeight = 402 * 3;
+        hierarchy.hierarchy.node!.node = [
+          {
+            $: {
+              "resource-id": "landscape",
+              bounds: {
+                left: 0,
+                top: -361,
+                right: 1456,
+                bottom: 855,
+              },
+            },
+          },
+        ];
+        projectCapture = true;
+        const result = await pinch.execute({
+          direction: "in",
+          container: { elementId: "landscape" },
+        });
+        expect(result.success).toBe(true);
+        expect(history()[0]).toMatchObject({
+          centerX: 437,
+          centerY: 201,
+          distanceStart: 241,
+          distanceEnd: 80,
+        });
+        expectFingersInside(history()[0], { left: 0, top: 0, right: 874, bottom: 402 });
+      });
+    }
 
     for (const explicit of [true, false]) {
       for (const direction of ["in", "out"] as const) {

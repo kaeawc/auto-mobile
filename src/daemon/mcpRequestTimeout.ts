@@ -367,8 +367,9 @@ function resolveDeviceResourceBudgetMs(args: Record<string, unknown>): number {
  *
  * So the floor is `effectivePressDuration + effectiveSearchWindow +
  * nonPressOverhead`. The result is clamped to `MAX_SETTIMEOUT_DELAY_MS`
- * because a large-enough `duration` (the schema permits an unbounded value)
- * would otherwise push this past `setTimeout`'s 32-bit ceiling, which Bun/Node
+ * because internal requests are budgeted before schema validation and
+ * a large-enough `duration` would otherwise push this past `setTimeout`'s
+ * 32-bit ceiling, which Bun/Node
  * silently normalize to 1ms rather than honoring -- timing the request out
  * almost immediately instead of running for the intended duration.
  */
@@ -382,14 +383,40 @@ function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefi
   }
   const duration =
     positiveFiniteNumber(argumentsRecord.duration) ?? TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS;
+  return resolveLongPressBudgetMs(
+    argumentsRecord,
+    duration,
+    TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+  );
+}
+
+/** Shared outer budget arithmetic; admission reserves only the smaller dispatch headroom. */
+function resolveLongPressBudgetMs(
+  args: Record<string, unknown>,
+  durationMs: number,
+  nonPressOverheadMs: number,
+): number {
   const searchUntilDuration =
-    positiveFiniteNumber(asRecord(argumentsRecord.searchUntil)?.duration) ??
-    TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
-  const budget =
-    Math.round(duration) +
-    Math.round(searchUntilDuration) +
-    TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS;
-  return Math.min(budget, MAX_SETTIMEOUT_DELAY_MS);
+    positiveFiniteNumber(asRecord(args.searchUntil)?.duration) ?? TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
+  return Math.min(
+    Math.round(durationMs) + Math.round(searchUntilDuration) + nonPressOverheadMs,
+    MAX_SETTIMEOUT_DELAY_MS,
+  );
+}
+
+/** tapOn extends its existing 30 s non-press allowance only for an explicit positive duration. */
+function resolveTapOnLongPressBudgetMs(request: DaemonRequest): number | undefined {
+  if (request.method !== "tools/call" || request.params?.name !== "tapOn") {
+    return undefined;
+  }
+  const args = asRecord(request.params?.arguments);
+  if (args?.action !== "longPress") {
+    return undefined;
+  }
+  const duration = positiveFiniteNumber(args.duration);
+  return duration === undefined
+    ? undefined
+    : resolveLongPressBudgetMs(args, duration, DEFAULT_MCP_REQUEST_TIMEOUT_MS);
 }
 
 /**
@@ -435,12 +462,14 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const floor =
     request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);
+  const tapOnLongPressBudget = resolveTapOnLongPressBudgetMs(request);
   const tapAnyLongPressBudget = resolveTapAnyLongPressBudgetMs(request);
   const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
   return Math.max(
     base,
     floor ?? 0,
     devicePreparationBudget ?? 0,
+    tapOnLongPressBudget ?? 0,
     tapAnyLongPressBudget ?? 0,
     tapAnyOrdinaryTapBudget ?? 0,
   );

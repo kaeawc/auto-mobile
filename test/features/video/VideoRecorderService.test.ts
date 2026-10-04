@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, test, mock } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -174,6 +174,26 @@ describe("VideoRecorderService", () => {
     expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
     await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
       "No active recording found",
+    );
+  });
+
+  test("warns for a missing recording file and preserves backend metadata", async () => {
+    const warn = mock(() => {});
+    const recorder = new VideoRecorderService({
+      backend,
+      archiveRoot,
+      securePermissions,
+      idGenerator: new CountingIdGenerator("missing"),
+      logger: { info() {}, debug() {}, error() {}, warn },
+    });
+    const recording = await recorder.startRecording();
+    const metadata = await recorder.stopRecording(recording.recordingId);
+    expect(metadata.filePath).toBe(recording.outputPath);
+    expect(metadata.sizeBytes).toBe(Buffer.byteLength("fake-video"));
+    expect(recorder.listActiveRecordingIds()).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Missing recording file"),
+      expect.any(Error),
     );
   });
 

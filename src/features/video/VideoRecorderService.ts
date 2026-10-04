@@ -14,6 +14,7 @@ import type {
 } from "../../models";
 import { toActionableError } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import {
   defaultSecurePermissions,
@@ -617,8 +618,11 @@ export class VideoRecorderService {
   private async safeStat(filePath: string): Promise<Stats | null> {
     try {
       return await fsPromises.stat(filePath);
-    } catch {
-      this.log.warn(`[VideoRecorderService] Missing recording file at ${filePath}`);
+    } catch (error) {
+      this.log.warn(
+        `[VideoRecorderService] Missing recording file at ${filePath}: ${errorMessage(error)}`,
+        error,
+      );
       return null;
     }
   }

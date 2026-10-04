@@ -1,4 +1,5 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { DefaultAndroidBuildToolsLocator } from "../../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { FakeSystemDetection } from "../../fakes/FakeSystemDetection";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
@@ -21,6 +22,29 @@ describe("DefaultAndroidBuildToolsLocator", () => {
     const tool = await locator.findAaptTool();
 
     expect(tool).toEqual({ tool: "aapt2", path: "/usr/local/bin/aapt2" });
+  });
+
+  test("warns on unreadable build-tools and still returns null", async () => {
+    systemDetection.setPlatform("darwin");
+    systemDetection.setEnvVar("ANDROID_HOME", "/sdk");
+    systemDetection.addExistingFile("/sdk");
+    fileSystem.setDirectory("/sdk/build-tools");
+    const failure = new Error("permission denied");
+    fileSystem.readdir = async () => {
+      throw failure;
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        await new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection).findAaptTool(),
+      ).toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        "Failed to read Android build-tools at /sdk/build-tools: permission denied",
+        failure,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("prefers aapt2 in build-tools over aapt", async () => {

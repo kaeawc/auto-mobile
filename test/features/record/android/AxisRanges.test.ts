@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { logger } from "../../../../src/utils/logger";
+import { describe, expect, test, spyOn } from "bun:test";
 import {
   buildScaler,
   queryDensity,
@@ -66,8 +67,15 @@ describe("queryRotation", () => {
 
   test("defaults to 0 when the dumpsys command fails", async () => {
     const adb = new FakeAdbClient();
-    adb.setCommandError("shell dumpsys window displays", new Error("device offline"));
-    expect(await queryRotation(adb)).toBe(0);
+    const failure = new Error("device offline");
+    adb.setCommandError("shell dumpsys window displays", failure);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await queryRotation(adb)).toBe(0);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Failed to query"), failure);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -92,7 +100,14 @@ describe("queryDensity", () => {
 
   test("falls back to 2.75 when the density command fails", async () => {
     const adb = new FakeAdbClient();
-    adb.setCommandError("shell wm density", new Error("device offline"));
-    expect(await queryDensity(adb)).toBe(2.75);
+    const failure = new Error("device offline");
+    adb.setCommandError("shell wm density", failure);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await queryDensity(adb)).toBe(2.75);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Failed to query"), failure);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

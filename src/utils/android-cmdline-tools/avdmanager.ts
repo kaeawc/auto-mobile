@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { defaultTimer } from "../SystemTimer";
 import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import {
   detectAndroidCommandLineTools,
@@ -67,7 +68,7 @@ export async function acceptLicenses(dependencies = createDefaultDependencies())
     return { success: false, message: `License acceptance failed: ${failureDiagnostics(result)}` };
   } catch (error) {
     const message = `Failed to accept licenses: ${(error as Error).message}`;
-    dependencies.logger.error(message);
+    dependencies.logger.warn(`Failed to accept licenses: ${errorMessage(error)}`, error);
     return { success: false, message };
   }
 }
@@ -126,7 +127,10 @@ export async function installSystemImage(
     return { success: false, message: `Installation failed: ${failureDiagnostics(result)}` };
   } catch (error) {
     const message = `Failed to install system image ${packageName}: ${(error as Error).message}`;
-    dependencies.logger.error(message);
+    dependencies.logger.warn(
+      `Failed to install system image ${packageName}: ${errorMessage(error)}`,
+      error,
+    );
     return { success: false, message };
   }
 }

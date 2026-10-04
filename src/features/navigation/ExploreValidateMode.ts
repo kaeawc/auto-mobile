@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import type { UIState } from "../../utils/interfaces/NavigationGraph";
 import type { Element } from "../../models";
-import type { NavigationEdge, NavigationGraphManager } from "./NavigationGraphManager";
+import type { NavigationEdge, NavigationGraphService } from "./NavigationGraphManager";
 import type { Timer } from "../../utils/SystemTimer";
 import type { EdgeValidationResult, GraphTraversalState } from "./ExploreTypes";
 import { logger } from "../../utils/logger";
@@ -11,7 +11,7 @@ import { scoreScrollPositionMatch, scoreSelectedElementMatch } from "./ExploreEl
  * Initialize graph traversal state for validate mode
  */
 export async function initializeGraphTraversal(
-  navigationManager: NavigationGraphManager,
+  navigationManager: Pick<NavigationGraphService, "exportGraph">,
 ): Promise<GraphTraversalState> {
   const graph = await navigationManager.exportGraph();
   const allEdges: NavigationEdge[] = [];
@@ -255,7 +255,7 @@ export function findElementMatchingEdge(
 export async function validateNavigation(
   expectedEdge: NavigationEdge,
   state: GraphTraversalState,
-  navigationManager: NavigationGraphManager,
+  navigationManager: Pick<NavigationGraphService, "getCurrentScreen">,
   timer: Timer,
   elementConfidence: number,
   setStopReason: (reason: string) => void,

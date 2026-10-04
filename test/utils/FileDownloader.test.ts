@@ -144,3 +144,49 @@ describe("DefaultFileDownloader atomic command downloads", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed to remove partial download"));
   });
 });
+
+describe("DefaultFileDownloader unavailable-command classification", () => {
+  test.each([
+    ["ENOENT", Object.assign(new Error("missing"), { code: "ENOENT" }), true],
+    ["numeric exit", { code: 127 }, true],
+    ["string exit", { code: "127" }, true],
+    ["shell message", new Error("COMMAND NOT FOUND"), true],
+    ["Windows message", { stderr: "not recognized as an internal or external command" }, true],
+    ["command prefix", new Error("curl: not found"), true],
+    ["command suffix", { stderr: "not found: curl" }, true],
+    ["transfer error", new Error("connection reset"), false],
+    ["other exit", { code: 22 }, false],
+    ["empty object", {}, false],
+    ["null", null, false],
+    ["primitive", "command not found", false],
+  ] as const)(
+    "classifies %s without changing fallback order",
+    async (_name, error, unavailable) => {
+      const fileSystem = new FakeDownloadFileSystem();
+      const execute = mock(async (command: string, args: string[]) => {
+        if (command === "curl") {
+          throw error;
+        }
+        fileSystem.files.set(tempPathFromArgs(command, args), Buffer.from("payload"));
+      });
+      const downloader = new DefaultFileDownloader(
+        new CountingIdGenerator("attempt"),
+        execute,
+        fileSystem,
+      );
+      if (unavailable) {
+        await downloader.download("https://example.com/archive.zip", "/cache/archive.zip");
+        expect(execute.mock.calls.map(([command]) => command)).toEqual(["curl", "wget"]);
+        expect(fileSystem.renameCalls).toEqual([
+          { from: "/cache/archive.zip.download-attempt-1.tmp", to: "/cache/archive.zip" },
+        ]);
+      } else {
+        await expect(
+          downloader.download("https://example.com/archive.zip", "/cache/archive.zip"),
+        ).rejects.toThrow("Download failed");
+        expect(execute.mock.calls.map(([command]) => command)).toEqual(["curl"]);
+        expect(fileSystem.renameCalls).toEqual([]);
+      }
+    },
+  );
+});

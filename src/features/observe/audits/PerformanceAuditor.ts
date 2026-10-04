@@ -312,8 +312,8 @@ const RELIABILITY_CHECKS: readonly ReliabilityCheck[] = [
       : null,
 
   // CtrlProxy stops emitting descendants once it hits a hard limit
-  // (`max_nodes`, `max_depth`) or is cancelled mid-walk - the resulting
-  // hierarchy is silently PARTIAL, not "no obstacles here". Certifying a
+  // (`max_nodes`, `max_depth`, `max_children`) or is cancelled mid-walk - the resulting
+  // hierarchy is PARTIAL, not "no obstacles here". Certifying a
   // point inert against an incomplete obstacle map risks tapping a real
   // control whose node was simply never emitted (issue #6167 follow-up).
   (_windowBounds, result) => {

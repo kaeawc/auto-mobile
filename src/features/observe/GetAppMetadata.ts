@@ -15,6 +15,8 @@ import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 
 export type { IosAppMetadataSource };
+import { IosAppMetadataReader } from "../../utils/IosAppMetadataReader";
+export { findAppByBundleId, iosRecordToMetadata } from "../../utils/IosAppMetadataReader";
 
 export class GetAppMetadata {
   private readonly device: BootedDevice;
@@ -78,19 +80,11 @@ export class GetAppMetadata {
   }
 
   private async getIosMetadata(bundleId: string): Promise<AppMetadataResult | null> {
-    if (!this.iosSource) {
-      logger.warn("[GetAppMetadata] No iOS metadata source configured");
-      return null;
-    }
-
-    const app = await this.iosAppInfoBackendResolver(this.device.deviceId, {
-      iosSource: this.iosSource,
-      findAppByBundleId,
-    }).getAppInfo(bundleId);
-    if (!app) {
-      return null;
-    }
-    return iosRecordToMetadata(bundleId, app);
+    return new IosAppMetadataReader(
+      this.device,
+      this.iosSource,
+      this.iosAppInfoBackendResolver,
+    ).execute(bundleId);
   }
 }
 
@@ -180,67 +174,4 @@ function extractTimestamp(text: string, pattern: RegExp): string | undefined {
   // Return raw device-local timestamp as-is — dumpsys emits without timezone
   // offset, so Date.parse would silently apply host timezone and skew the value.
   return raw;
-}
-
-function readStringField(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function readAppField(app: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = readStringField(app[key]);
-    if (value) {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-export function findAppByBundleId(
-  apps: Record<string, unknown>[],
-  bundleId: string,
-): Record<string, unknown> | null {
-  for (const app of apps) {
-    const id = readAppField(app, [
-      "bundleId",
-      "bundleIdentifier",
-      "bundleID",
-      "CFBundleIdentifier",
-    ]);
-    if (id === bundleId) {
-      return app;
-    }
-  }
-  return null;
-}
-
-export function iosRecordToMetadata(
-  bundleId: string,
-  app: Record<string, unknown>,
-): AppMetadataResult {
-  const versionName =
-    readAppField(app, [
-      "bundleShortVersionString",
-      "CFBundleShortVersionString",
-      "BundleShortVersionString",
-      "version",
-    ]) ?? "";
-
-  const buildNumber =
-    readAppField(app, ["bundleVersion", "CFBundleVersion", "BundleVersion"]) ?? "";
-
-  const installPath =
-    readAppField(app, ["bundlePath", "bundleURL", "bundleContainer", "path", "Path", "url"]) ?? "";
-
-  return {
-    appId: bundleId,
-    platform: "ios",
-    versionName,
-    buildNumber,
-    installPath,
-  };
 }

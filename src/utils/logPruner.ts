@@ -379,29 +379,41 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
 
   // (b) Sweep logs left by EXITED processes.
   for (const file of logFiles) {
-    if (isOwnedBy(file, opts.ownPrefix)) {
+    if (!shouldPruneExitedLog(file, opts.ownPrefix, isAlive, daemonLaunchLogProtection)) {
       continue;
-    }
-    const pid = ownerPid(file);
-    if (pid === undefined) {
-      continue;
-    }
-    if (isAlive(pid)) {
-      continue; // live peer — never touch its log, even if its mtime is old.
-    }
-    // A daemon-launch log's fd is held by the detached daemon, not the manager
-    // named in the filename. While a daemon is running it may still be writing
-    // to that inherited fd, so unlinking on the manager's exit + stale mtime
-    // would silently drop live daemon output (issue #6194). A matching live
-    // owner, incomplete discovery, or legacy record retains this log; only a
-    // matching dead owner or a complete set of explicit non-claims permits the
-    // ordinary abandoned-log cleanup.
-    if (isDaemonLaunchLog(file)) {
-      const protection = daemonLaunchLogProtection(file);
-      if (protection !== "dead") {
-        continue;
-      }
     }
     await pruneStaleLog(io, path.join(opts.dir, file), file, now, opts.abandonedMaxAgeMs);
   }
+}
+
+function shouldPruneExitedLog(
+  file: string,
+  ownPrefix: string,
+  isAlive: (pid: number) => boolean,
+  daemonLaunchLogProtection: (file: string) => "alive" | "dead" | "unknown",
+): boolean {
+  if (isOwnedBy(file, ownPrefix)) {
+    return false;
+  }
+  const pid = ownerPid(file);
+  if (pid === undefined) {
+    return false;
+  }
+  if (isAlive(pid)) {
+    return false; // live peer — never touch its log, even if its mtime is old.
+  }
+  // A daemon-launch log's fd is held by the detached daemon, not the manager
+  // named in the filename. While a daemon is running it may still be writing
+  // to that inherited fd, so unlinking on the manager's exit + stale mtime
+  // would silently drop live daemon output (issue #6194). A matching live
+  // owner, incomplete discovery, or legacy record retains this log; only a
+  // matching dead owner or a complete set of explicit non-claims permits the
+  // ordinary abandoned-log cleanup.
+  if (isDaemonLaunchLog(file)) {
+    const protection = daemonLaunchLogProtection(file);
+    if (protection !== "dead") {
+      return false;
+    }
+  }
+  return true;
 }

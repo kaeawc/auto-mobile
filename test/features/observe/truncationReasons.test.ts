@@ -3,15 +3,32 @@ import {
   WINDOW_TRUNCATION_REASON_MEANINGS,
   normalizeWindowTruncationReasons,
   collectWindowTruncations,
+  captureFidelityTruncationReasons,
+  isHostOutputTruncationReason,
 } from "../../../src/features/observe/truncationReasons";
 
 describe("window truncation vocabulary", () => {
-  test("windowTruncations vocabulary maps the three known capture codes to meanings", () => {
+  test("windowTruncations vocabulary maps the known capture codes to meanings", () => {
     expect(WINDOW_TRUNCATION_REASON_MEANINGS).toEqual({
       max_nodes: "This window's share of the node budget was exhausted.",
       max_depth: "The tree was deeper than the depth cap.",
+      max_children: "A node had more children than the device's per-node child cap.",
       cancelled: "The capture was cancelled mid-walk.",
     });
+  });
+
+  test("device child cap remains a capture-fidelity reason distinct from the host output cap", () => {
+    const reasons = ["max_children", "max_children[node kept 64 of 70]", "future_code"];
+    expect(isHostOutputTruncationReason("max_children")).toBe(false);
+    expect(isHostOutputTruncationReason(reasons[1])).toBe(true);
+    expect(captureFidelityTruncationReasons(reasons)).toEqual(["max_children", "future_code"]);
+    expect(normalizeWindowTruncationReasons([...reasons, "max_children"])).toEqual([
+      "max_children",
+      "future_code",
+    ]);
+    expect(collectWindowTruncations([{ id: 7, truncationReasons: reasons }])).toEqual([
+      { windowId: 7, reasons: ["max_children", "future_code"] },
+    ]);
   });
 
   test("windowTruncations normalization preserves unknown strings and order while discarding invalid entries", () => {

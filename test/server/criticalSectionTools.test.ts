@@ -1,3 +1,6 @@
+import { getStructuredPayload } from "../../src/utils/toolUtils";
+import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -5,7 +8,6 @@ import { registerCriticalSectionTools } from "../../src/server/criticalSectionTo
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import type { BootedDevice } from "../../src/models";
 import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
@@ -29,6 +31,139 @@ describe("criticalSection tool", () => {
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
   });
+
+  const envelopeCases: Array<{
+    name: string;
+    response: unknown;
+    success: boolean;
+    error?: string;
+  }> = [
+    {
+      name: "non JSON",
+      response: { content: [{ type: "text", text: "not json" }] },
+      success: false,
+      error: 'Tool "envelopeVerdictProbe" result could not be interpreted',
+    },
+    {
+      name: "truncated JSON",
+      response: { content: [{ type: "text", text: '{"success":tr' }] },
+      success: false,
+      error: 'Tool "envelopeVerdictProbe" result could not be interpreted',
+    },
+    {
+      name: "JSON success",
+      response: { content: [{ type: "text", text: '{"success":true}' }] },
+      success: true,
+    },
+    {
+      name: "JSON failure",
+      response: {
+        content: [{ type: "text", text: '{"success":false,"error":"original failure"}' }],
+      },
+      success: false,
+      error: "original failure",
+    },
+    {
+      name: "isError text",
+      response: { isError: true, content: [{ type: "text", text: "Error: original failure" }] },
+      success: false,
+      error: "Error: original failure",
+    },
+    {
+      name: "isError JSON without success",
+      response: {
+        isError: true,
+        content: [{ type: "text", text: '{"error":"original failure"}' }],
+      },
+      success: false,
+      error: "original failure",
+    },
+    {
+      name: "image only",
+      response: { content: [{ type: "image", data: "synthetic", mimeType: "image/png" }] },
+      success: true,
+    },
+    {
+      name: "JSON without success",
+      response: { content: [{ type: "text", text: '{"enabled":true}' }] },
+      success: true,
+    },
+    {
+      name: "structured without success",
+      response: {
+        structuredContent: { updatedAt: 0 },
+        content: [{ type: "text", text: "not json" }],
+      },
+      success: true,
+    },
+    {
+      name: "structured failure",
+      response: { structuredContent: { success: false, error: "original failure" } },
+      success: false,
+      error: "original failure",
+    },
+    {
+      name: "image before failure",
+      response: {
+        content: [
+          { type: "image", data: "synthetic", mimeType: "image/png" },
+          { type: "text", text: '{"success":false,"error":"original failure"}' },
+        ],
+      },
+      success: false,
+      error: "original failure",
+    },
+  ];
+
+  for (const fixture of envelopeCases) {
+    test(`plan and criticalSection agree on ${fixture.name}`, async () => {
+      const calls: string[] = [];
+      ToolRegistry.register(
+        "envelopeVerdictProbe",
+        "synthetic envelope",
+        z.object({}).passthrough(),
+        async () => {
+          calls.push("probe");
+          return fixture.response;
+        },
+      );
+      ToolRegistry.register(
+        "envelopeNextProbe",
+        "next step",
+        z.object({}).passthrough(),
+        async () => {
+          calls.push("next");
+          return { success: true };
+        },
+      );
+      const steps = [
+        { tool: "envelopeVerdictProbe", params: { device: "A" } },
+        { tool: "envelopeNextProbe", params: { device: "A" } },
+      ];
+      const plan = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+        { name: "envelope verdict", steps },
+        0,
+      );
+      const section = ToolRegistry.getToolForPlan("criticalSection")!;
+      const execution = section.deviceAwareHandler!(
+        { platform: "android", deviceId: "synthetic-device", name: "Synthetic" },
+        { lock: "envelope-verdict", deviceCount: 1, steps },
+      );
+      if (fixture.success) {
+        expect(getStructuredPayload(await execution)?.success).toBe(true);
+      } else {
+        await expect(execution).rejects.toThrow(fixture.error);
+      }
+      expect(plan.success).toBe(fixture.success);
+      expect(plan.debug?.steps[0].status).toBe(fixture.success ? "completed" : "failed");
+      if (fixture.error) {
+        expect(plan.failedStep?.error).toBe(fixture.error);
+      }
+      expect(calls).toEqual(
+        fixture.success ? ["probe", "next", "probe", "next"] : ["probe", "probe"],
+      );
+    });
+  }
 
   test("tool is registered with correct schema", () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");

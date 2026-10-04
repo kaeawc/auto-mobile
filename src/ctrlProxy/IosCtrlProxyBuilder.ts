@@ -641,6 +641,22 @@ export class IosCtrlProxyBuilder {
 
     const metadata = await this.readBundleMetadata();
     const expectedChecksum = this.getExpectedChecksum();
+    if (this.needsMetadataRefresh(metadata, expectedChecksum)) {
+      return true;
+    }
+
+    if (await this.needsAppHashRefresh(platform, metadata)) {
+      return true;
+    }
+
+    logger.info("[IOSCtrlProxyBuilder] CtrlProxy artifacts are up to date");
+    return false;
+  }
+
+  private needsMetadataRefresh(
+    metadata: IOSCtrlProxyBundleMetadata | null,
+    expectedChecksum: string,
+  ): boolean {
     if (expectedChecksum.length > 0) {
       if (!metadata || metadata.checksum?.toLowerCase() !== expectedChecksum.toLowerCase()) {
         logger.info("[IOSCtrlProxyBuilder] CtrlProxy checksum mismatch, need download");
@@ -651,6 +667,13 @@ export class IosCtrlProxyBuilder {
       return true;
     }
 
+    return false;
+  }
+
+  private async needsAppHashRefresh(
+    platform: IOSCtrlProxyPlatform | undefined,
+    metadata: IOSCtrlProxyBundleMetadata | null,
+  ): Promise<boolean> {
     if (platform) {
       const expectedAppHash = this.getExpectedAppHash(platform);
       if (expectedAppHash) {
@@ -668,7 +691,6 @@ export class IosCtrlProxyBuilder {
       }
     }
 
-    logger.info("[IOSCtrlProxyBuilder] CtrlProxy artifacts are up to date");
     return false;
   }
 
@@ -1104,38 +1126,40 @@ export class IosCtrlProxyBuilder {
         throw new Error(`CtrlProxy bundle override is not a file: ${overridePath}`);
       }
       await fs.copyFile(overridePath, bundlePath);
-    } else {
-      const expectedChecksum = this.getExpectedChecksum();
-      const bundleReady = await this.isBundleValid(bundlePath, expectedChecksum);
+      await this.verifyBundle(bundlePath);
+      return { bundlePath, usedCachedFallback: false, localOverridePath: overridePath };
+    }
 
-      if (!bundleReady) {
-        // When a version is pinned (AUTOMOBILE_VERSION), hermetic mode disables the
-        // silent cached-bundle fallback so a failed download fails hard (#2746).
-        // resolvePinnedVersion already normalizes the `latest` sentinel.
-        const isLatest = resolvePinnedVersion() === LATEST_RELEASE_VERSION;
-        const cachedBundleExists = await this.isBundleValid(bundlePath, "");
-        try {
-          logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
-            url: this.getBundleUrl(),
-            destination: bundlePath,
-            reason: "checksum-mismatch-or-missing",
-          });
-          await this.downloader.download(this.getBundleUrl(), bundlePath);
-        } catch (error) {
-          if (isLatest && cachedBundleExists) {
-            logger.warn(
-              `[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${errorMessage(error)}`,
-            );
-            // `cachedBundleExists` only proves the cached IPA is size-valid — NOT
-            // that its checksum matches. build() skips extractBundle+verifyBundle
-            // for the fallback path, so checksum-verify here before reuse instead
-            // of trusting a size-valid-but-unverified cached IPA (issue #4761).
-            // A mismatch throws and fails closed rather than reusing it silently.
-            await this.verifyBundle(bundlePath);
-            return { bundlePath, usedCachedFallback: true, localOverridePath: null };
-          }
-          throw error;
+    const expectedChecksum = this.getExpectedChecksum();
+    const bundleReady = await this.isBundleValid(bundlePath, expectedChecksum);
+
+    if (!bundleReady) {
+      // When a version is pinned (AUTOMOBILE_VERSION), hermetic mode disables the
+      // silent cached-bundle fallback so a failed download fails hard (#2746).
+      // resolvePinnedVersion already normalizes the `latest` sentinel.
+      const isLatest = resolvePinnedVersion() === LATEST_RELEASE_VERSION;
+      const cachedBundleExists = await this.isBundleValid(bundlePath, "");
+      try {
+        logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
+          url: this.getBundleUrl(),
+          destination: bundlePath,
+          reason: "checksum-mismatch-or-missing",
+        });
+        await this.downloader.download(this.getBundleUrl(), bundlePath);
+      } catch (error) {
+        if (isLatest && cachedBundleExists) {
+          logger.warn(
+            `[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${errorMessage(error)}`,
+          );
+          // `cachedBundleExists` only proves the cached IPA is size-valid — NOT
+          // that its checksum matches. build() skips extractBundle+verifyBundle
+          // for the fallback path, so checksum-verify here before reuse instead
+          // of trusting a size-valid-but-unverified cached IPA (issue #4761).
+          // A mismatch throws and fails closed rather than reusing it silently.
+          await this.verifyBundle(bundlePath);
+          return { bundlePath, usedCachedFallback: true, localOverridePath: null };
         }
+        throw error;
       }
     }
 

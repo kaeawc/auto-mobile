@@ -41,6 +41,7 @@ import { FakeLogger } from "../fakes/FakeLogger";
 import { createDoctorDeadline, DoctorDeadlineError } from "../../src/doctor/deadline";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { formatConsoleOutput } from "../../src/doctor/formatter";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -856,6 +857,21 @@ describe("iOS doctor checks", () => {
       expect(result.status).toBe("pass");
       expect(result.message).toContain("No simulators currently running");
       expect(result.value).toBe(0);
+      const output = formatConsoleOutput(
+        {
+          timestamp: "2025-01-01T00:00:00.000Z",
+          version: "1.0.0",
+          platform: "darwin",
+          arch: "arm64",
+          system: { checks: [] },
+          ios: { checks: [result] },
+          autoMobile: { checks: [] },
+          summary: { total: 1, passed: 1, warnings: 0, failed: 0, skipped: 0 },
+          recommendations: [],
+        },
+        false,
+      );
+      expect(output).toContain("[PASS] Booted Simulators: 0\n");
     });
 
     test("skips when not on darwin", async () => {
@@ -1045,7 +1061,24 @@ describe("iOS doctor checked simctl listings", () => {
     expect(result.status).toBe("skip");
     expect(result.message).toStartWith("Could not check simulators:");
     expect(result.message).toContain(message);
+    expect(result).not.toHaveProperty("value");
     expect(logger.at("warn").length).toBeGreaterThan(0);
+    const output = formatConsoleOutput(
+      {
+        timestamp: "2025-01-01T00:00:00.000Z",
+        version: "1.0.0",
+        platform: "darwin",
+        arch: "arm64",
+        system: { checks: [] },
+        ios: { checks: [result] },
+        autoMobile: { checks: [] },
+        summary: { total: 1, passed: 0, warnings: 0, failed: 0, skipped: 1 },
+        recommendations: [],
+      },
+      false,
+    );
+    expect(output).toContain("[SKIP] Booted Simulators: Could not check simulators:");
+    expect(output).not.toContain("Booted Simulators: 0");
   });
 
   test.each([

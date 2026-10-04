@@ -16,6 +16,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { WINDOW_MANAGER_ROTATION_TIMEOUT_MS } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -103,6 +104,64 @@ describe("Rotate", () => {
     (rotate as any).awaitIdle = fakeAwaitIdle;
     (rotate as any).observeScreen = fakeObserveScreen;
     (rotate as any).window = fakeWindow;
+  });
+
+  describe("live rotation request budget", () => {
+    for (const [remainingMs, expectedTimeoutMs] of [
+      [3000, 3000],
+      [200, 1000],
+      [-200, 1000],
+    ]) {
+      test(`uses timeout ${expectedTimeoutMs} with ${remainingMs} ms remaining`, async () => {
+        fakeTimer.advanceTime(7000);
+        const budgetedRotate = new Rotate(mockDevice, fakeAdb, fakeTimer, {
+          deadlineMs: fakeTimer.now() + remainingMs,
+        });
+        const signal = new AbortController().signal;
+        fakeAdb.setCommandResponse(
+          "shell dumpsys window displays",
+          createExecResult(mirrorPortrait),
+        );
+
+        expect(await budgetedRotate["readLiveRotation"](signal)).toBe(0);
+
+        const reads = fakeAdb.getCommandCalls();
+        expect(reads).toHaveLength(1);
+        expect(reads[0].command).toBe("shell dumpsys window displays");
+        expect(reads[0].timeoutMs).toBe(expectedTimeoutMs);
+        expect(reads[0].signal).toBe(signal);
+      });
+    }
+
+    test("recomputes remaining budget on every settle-wait attempt", async () => {
+      fakeTimer.advanceTime(7000);
+      const budgetedRotate = new Rotate(mockDevice, fakeAdb, fakeTimer, {
+        deadlineMs: fakeTimer.now() + 3000,
+      });
+      const signal = new AbortController().signal;
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult(mirrorLandscape),
+        createExecResult(mirrorPortrait),
+        createExecResult(mirrorPortrait),
+      ]);
+
+      expect(await budgetedRotate["readLiveRotationWithSettleWait"]("portrait", signal)).toBe(0);
+
+      const reads = fakeAdb.getCommandCalls();
+      expect(reads.map((read) => read.command)).toEqual([
+        "shell dumpsys window displays",
+        "shell dumpsys window displays",
+        "shell dumpsys window displays",
+      ]);
+      expect(reads.map((read) => read.timeoutMs)).toEqual([3000, 2850, 2700]);
+      expect(reads.every((read) => read.signal === signal)).toBe(true);
+    });
+
+    test("retains the reader default timeout without a deadline", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult(mirrorPortrait));
+      expect(await rotate["readLiveRotation"]()).toBe(0);
+      expect(fakeAdb.getCommandCalls()[0].timeoutMs).toBe(WINDOW_MANAGER_ROTATION_TIMEOUT_MS);
+    });
   });
 
   test("rotates to landscape successfully while the mirror is present", async () => {

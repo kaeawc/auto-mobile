@@ -1,3 +1,4 @@
+import type { RotateOptions } from "../../src/features/action/Rotate";
 import { warmedTests } from "../helpers/interactionCancellation";
 import { afterEach, describe, expect } from "bun:test";
 import {
@@ -228,6 +229,32 @@ describe("rotateHandler (registered handler wiring)", () => {
     orientation: "portrait",
     value: 0,
     ...overrides,
+  });
+
+  test("forwards the internal absolute deadline to the per-call factory", async () => {
+    let receivedOptions: RotateOptions | undefined;
+    setRotateFactory((_device, options) => {
+      receivedOptions = options;
+      return { execute: async () => fakeResult({ success: true }) };
+    });
+    const internalArgs = { ...args, __mcpRequestDeadlineMs: 12345 };
+
+    await rotateHandler(fakeDevice, internalArgs);
+
+    expect(receivedOptions?.deadlineMs).toBe(12345);
+  });
+
+  test("omits the deadline key when the request has no deadline", async () => {
+    let receivedOptions: RotateOptions | undefined;
+    setRotateFactory((_device, options) => {
+      receivedOptions = options;
+      return { execute: async () => fakeResult({ success: true }) };
+    });
+
+    await rotateHandler(fakeDevice, args);
+
+    expect(receivedOptions).toBeDefined();
+    expect("deadlineMs" in receivedOptions!).toBe(false);
   });
 
   test("a persistent-lock failure is an MCP error, not a successful rotation", async () => {

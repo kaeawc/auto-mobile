@@ -98,7 +98,7 @@ export class SocketServerRegistry {
    * Start all registered servers with autoStart=true (default).
    */
   async startAll(): Promise<void> {
-    const startPromises: Promise<void>[] = [];
+    const startPromises: Promise<void | BaseSocketServer>[] = [];
 
     for (const [name, config] of this.factories) {
       // Default autoStart to true if not specified

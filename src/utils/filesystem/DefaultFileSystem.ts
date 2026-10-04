@@ -116,8 +116,7 @@ export interface FileSystem {
  */
 export class DefaultFileSystem implements FileSystem {
   async readFile(filePath: string, encoding: BufferEncoding = "utf8"): Promise<string> {
-    const result = await readFileAsync(filePath, { encoding });
-    return typeof result === "string" ? result : result.toString(encoding);
+    return readFileAsync(filePath, { encoding });
   }
 
   async readFileBuffer(filePath: string): Promise<Buffer> {

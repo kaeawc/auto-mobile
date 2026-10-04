@@ -6,6 +6,7 @@ import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNav
 import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
 import { FocusElementMatcher } from "../../../src/features/talkback/FocusElementMatcher";
 import type { Element } from "../../../src/models/Element";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 describe("TalkBackTapStrategy", () => {
   let strategy: TalkBackTapStrategy;
@@ -37,6 +38,25 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executeTap", () => {
+    test("opt-in activation retains uncertainty after its ACTION_CLICK fallback", async () => {
+      const element = { "resource-id": "test:id/button" };
+      driver.setElements([element], 0);
+      spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
+      driver.setActionResult({
+        success: false,
+        action: "click",
+        totalTimeMs: 5000,
+        dispatched: true,
+        acknowledged: false,
+        error: "Action timeout after 5000ms",
+      });
+      await expect(strategy.executeTap("device-1", element, driver)).rejects.toThrow(
+        "outcome is indeterminate",
+      );
+      expect(driver.getActionCount()).toBe(1);
+      expect(driver.getTapCount()).toBe(0);
+    });
+
     test("returns error when element has no identifying information", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
@@ -366,6 +386,21 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executeLongPress", () => {
+    test("never falls back after an unacknowledged long click", async () => {
+      driver.setActionResult({
+        success: false,
+        action: "long_click",
+        totalTimeMs: 5000,
+        dispatched: true,
+        acknowledged: false,
+        error: "Action timeout after 5000ms",
+      });
+      await expect(
+        strategy.executeLongPress(50, 50, 800, { "resource-id": "test:id/button" }, driver),
+      ).rejects.toThrow("outcome is indeterminate");
+      expect(driver.getTapCount()).toBe(0);
+    });
+
     test("uses ACTION_LONG_CLICK when element has resource-id", async () => {
       const element = {
         "resource-id": "test:id/button",
@@ -544,6 +579,24 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executePreciseTap", () => {
+    test.each([new Error("Socket lost after send"), new ActionableError("Socket lost after send")])(
+      "a thrown error after coordinate dispatch is indeterminate: %j",
+      async (error) => {
+        const tap = spyOn(driver, "requestTapCoordinates").mockImplementation(
+          async (_x, _y, _duration, onDispatch) => {
+            onDispatch?.();
+            throw error;
+          },
+        );
+        await expect(strategy.executePreciseTap(80, 40, driver)).rejects.toThrow(
+          "outcome is indeterminate",
+        );
+        expect(tap).toHaveBeenCalledTimes(1);
+        expect(driver.getActionCount()).toBe(0);
+        tap.mockRestore();
+      },
+    );
+
     test("focuses the requested coordinate before the activation double-tap", async () => {
       const result = await strategy.executePreciseTap(80, 40, driver);
 
@@ -575,6 +628,28 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executeDirectActivation", () => {
+    test.each([false, true])(
+      "reports an unacknowledged click (node selector=%s)",
+      async (nodeSelector) => {
+        driver.setActionResult({
+          success: false,
+          action: "click",
+          totalTimeMs: 5000,
+          dispatched: true,
+          acknowledged: false,
+          error: "Action timeout after 5000ms",
+        });
+        await expect(
+          strategy.executeDirectActivation(
+            nodeSelector ? { "unique-id": "button" } : { "resource-id": "test:id/button" },
+            driver,
+          ),
+        ).rejects.toThrow("Tap outcome is indeterminate");
+        expect(driver.getTapCount()).toBe(0);
+        expect(driver.getActionCount()).toBe(1);
+      },
+    );
+
     test("activates via ACTION_CLICK when element has a resource-id", async () => {
       const element = {
         "resource-id": "test:id/button",

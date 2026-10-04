@@ -102,7 +102,9 @@ const createDefaultDependencies = (): XcodeSigningDependencies => ({
   readFile: async (path) => fs.readFile(path, "utf-8"),
   stat: async (path) => fs.stat(path),
   writeFile: async (path, data) => fs.writeFile(path, data, "utf-8"),
-  mkdir: async (path) => fs.mkdir(path, { recursive: true }),
+  mkdir: async (path) => {
+    await fs.mkdir(path, { recursive: true });
+  },
   homedir,
   now: () => Date.now(),
   timer: defaultTimer,

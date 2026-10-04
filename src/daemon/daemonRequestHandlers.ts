@@ -421,7 +421,7 @@ export async function handleDaemonRequest(
       }
       const manager = state.getSessionManager();
       const session = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
-      if (!session) {
+      if (!session && !manager.hasSession(sessionId)) {
         if (
           typeof sessionId === "string" &&
           state.getObserverSessionRegistry?.()?.release(sessionId)
@@ -445,8 +445,17 @@ export async function handleDaemonRequest(
         };
       }
       const pool = state.getDevicePool();
-      const deviceId = session.assignedDevice;
-      await releaseSessionAndDevice(manager, pool, deviceId, sessionId);
+      // A failed terminal write hides routing identity while retaining ownership.
+      let deviceId =
+        session?.assignedDevice ??
+        manager.getTerminalReleaseSnapshot?.(sessionId)?.deviceId ??
+        null;
+      await releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
+        release: async () => {
+          deviceId = await manager.releaseSession(sessionId);
+          return deviceId;
+        },
+      });
       return {
         success: true,
         result: {

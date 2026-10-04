@@ -35,6 +35,7 @@ import { logger, type Logger } from "../utils/logger";
 import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { createToolExecutionContext } from "./ToolExecutionContext";
+import { resolveTransportDeadlineMs } from "./formTools";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
@@ -813,6 +814,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         devicePool,
         {
           keepScreenAwake,
+          requestDeadlineMs: resolveTransportDeadlineMs(args),
           platform: platform === "android" || platform === "ios" ? platform : undefined,
           // #6227: the persisted/daemon-session path must honor a tool's declared
           // deviceReadiness the same way the legacy/no-session path below does

@@ -5779,15 +5779,19 @@ export class DevicePool {
     }
 
     return async () => {
-      const wasAutolocked = this.devices.get(previousDeviceId)?.autolockSessionId === sessionId;
-      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
-        stableDeviceId,
-      });
-      await this.releaseDevice(previousDeviceId, sessionId);
+      const previousDevice = this.devices.get(previousDeviceId);
+      const wasAutolocked = previousDevice?.autolockSessionId === sessionId;
       const replacement = this.devices.get(deviceId);
       if (wasAutolocked && replacement?.sessionId === sessionId) {
         replacement.autolockSessionId = sessionId;
       }
+      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
+        stableDeviceId,
+      });
+      if (previousDevice) {
+        this.autolockManager.clearRebindAutolockLock(sessionId, previousDeviceId, previousDevice);
+      }
+      await this.releaseDevice(previousDeviceId, sessionId);
       return session;
     };
   }

@@ -11,74 +11,126 @@ internal class GestureStreamRouter(
   private val runOnGestureThread: (() -> Unit) -> Boolean,
   private val newSession: ((Boolean, String?) -> Unit) -> GestureStreamSession<*>,
   private val onResult: (String?, Boolean, String?) -> Unit,
+  private val logWarning: (String) -> Unit = {},
 ) {
   private data class Outcome(val success: Boolean, val error: String?)
+
+  private data class PendingEnd(
+    val requestId: String,
+    val requester: WebSocketServer.ConnectedClient?,
+  )
+
+  private class Gesture(
+    val owner: WebSocketServer.ConnectedClient?,
+    val session: GestureStreamSession<*>,
+  ) {
+    var disconnected = false
+  }
 
   private companion object {
     const val MAX_TERMINAL_FAILURES = 16
   }
 
-  private val sessions = mutableMapOf<String, GestureStreamSession<*>>()
-  private val pendingEndRequestIds = mutableMapOf<String, MutableList<String>>()
+  private val sessions = mutableMapOf<String, Gesture>()
+  private val pendingEndRequests = mutableMapOf<String, MutableList<PendingEnd>>()
   private val terminalFailures = linkedMapOf<String, Outcome>()
   private var closed = false
 
-  fun start(requestId: String?, gestureId: String, x: Float, y: Float, displayId: Int? = null) =
-    runOnGestureThread {
-      if (closed) return@runOnGestureThread
-      if (sessions.containsKey(gestureId)) {
-        onResult(requestId, false, "Gesture $gestureId is already active")
-        return@runOnGestureThread
-      }
-      // A new stream with the same wire id supersedes an unclaimed old result.
-      terminalFailures.remove(gestureId)
-      val session = newSession { success, error -> finish(gestureId, success, error) }
-      sessions[gestureId] = session
-      session.start(x, y, displayId)
-      onResult(requestId, true, null)
+  fun start(
+    requestId: String?,
+    gestureId: String,
+    x: Float,
+    y: Float,
+    displayId: Int? = null,
+    owner: WebSocketServer.ConnectedClient? = null,
+  ) = runOnGestureThread {
+    // A command can post its start just after the disconnect hook posts cancellation.
+    if (closed || owner?.isConnected == false) return@runOnGestureThread
+    if (sessions.containsKey(gestureId)) {
+      onResult(requestId, false, "Gesture $gestureId is already active")
+      return@runOnGestureThread
     }
+    // A new stream with the same wire id supersedes an unclaimed old result.
+    terminalFailures.remove(gestureId)
+    lateinit var gesture: Gesture
+    val session = newSession { success, error -> finish(gestureId, gesture, success, error) }
+    gesture = Gesture(owner, session)
+    sessions[gestureId] = gesture
+    session.start(x, y, displayId)
+    onResult(requestId, true, null)
+  }
+
+  /** Fail other connected awaiters before cancelling on the existing gesture thread. */
+  fun cancelOwnedBy(owner: WebSocketServer.ConnectedClient) = runOnGestureThread {
+    val owned = sessions.filterValues { it.owner === owner }
+    owned.forEach { (gestureId, gesture) ->
+      gesture.disconnected = true
+      sessions.remove(gestureId)
+      pendingEndRequests.remove(gestureId)?.forEach { pending ->
+        // Unattributed ends retain the existing disconnect behavior: no reply.
+        val requester = pending.requester
+        if (requester != null && requester !== owner && requester.isConnected) {
+          onResult(pending.requestId, false, "Gesture owner disconnected")
+        }
+      }
+      terminalFailures.remove(gestureId)
+      gesture.session.cancel()
+    }
+  }
 
   fun move(requestId: String?, gestureId: String, x: Float, y: Float) = runOnGestureThread {
     if (closed) return@runOnGestureThread
     // A move after completion is a benign late frame.
-    sessions[gestureId]?.move(x, y)
+    sessions[gestureId]?.session?.move(x, y)
     onResult(requestId, true, null)
   }
 
-  fun end(requestId: String?, gestureId: String, x: Float, y: Float, cancel: Boolean) =
-    runOnGestureThread {
-      if (closed) return@runOnGestureThread
-      val session = sessions[gestureId]
-      if (session == null) {
-        // A failure can arrive before the end frame. Return its actual result to that awaiter.
-        val outcome = terminalFailures.remove(gestureId)
-        onResult(requestId, outcome?.success ?: true, outcome?.error)
-        return@runOnGestureThread
-      }
-      if (requestId != null) {
-        pendingEndRequestIds.getOrPut(gestureId) { mutableListOf() }.add(requestId)
-      }
-      session.end(x, y, cancel)
+  fun end(
+    requestId: String?,
+    gestureId: String,
+    x: Float,
+    y: Float,
+    cancel: Boolean,
+    requester: WebSocketServer.ConnectedClient? = null,
+  ) = runOnGestureThread {
+    if (closed) return@runOnGestureThread
+    val session = sessions[gestureId]?.session
+    if (session == null) {
+      // A failure can arrive before the end frame. Return its actual result to that awaiter.
+      val outcome = terminalFailures.remove(gestureId)
+      onResult(requestId, outcome?.success ?: true, outcome?.error)
+      return@runOnGestureThread
     }
+    if (requestId != null) {
+      pendingEndRequests
+        .getOrPut(gestureId) { mutableListOf() }
+        .add(PendingEnd(requestId, requester))
+    }
+    session.end(x, y, cancel)
+  }
 
-  private fun finish(gestureId: String, success: Boolean, error: String?) {
-    if (closed) return
+  private fun finish(gestureId: String, gesture: Gesture, success: Boolean, error: String?) {
+    if (gesture.disconnected) {
+      if (!success) logWarning("Failed to release disconnected gesture $gestureId: $error")
+      return
+    }
+    if (closed || sessions[gestureId] !== gesture) return
     sessions.remove(gestureId)
-    val requestIds = pendingEndRequestIds.remove(gestureId)
+    val requests = pendingEndRequests.remove(gestureId)
     if (!success) {
       terminalFailures[gestureId] = Outcome(success, error)
       if (terminalFailures.size > MAX_TERMINAL_FAILURES) {
         terminalFailures.remove(terminalFailures.keys.first())
       }
     }
-    requestIds?.forEach { onResult(it, success, error) }
+    requests?.forEach { onResult(it.requestId, success, error) }
   }
 
   /**
    * Observe pending acknowledgments on the gesture thread for diagnostics and deterministic tests.
    */
   internal fun pendingEndCount(onCount: (Int) -> Unit) = runOnGestureThread {
-    onCount(pendingEndRequestIds.values.sumOf { it.size })
+    onCount(pendingEndRequests.values.sumOf { it.size })
   }
 
   /** Observe retained failures on the gesture thread for deterministic tests. */
@@ -93,12 +145,12 @@ internal class GestureStreamRouter(
         if (!closed) {
           closed = true
           // Cancellation can synchronously finish a session; keep the snapshot stable.
-          sessions.values.toList().forEach { it.cancel() }
-          pendingEndRequestIds.values.flatten().forEach {
-            onResult(it, false, "Gesture stream closed")
+          sessions.values.toList().forEach { it.session.cancel() }
+          pendingEndRequests.values.flatten().forEach {
+            onResult(it.requestId, false, "Gesture stream closed")
           }
           sessions.clear()
-          pendingEndRequestIds.clear()
+          pendingEndRequests.clear()
           terminalFailures.clear()
         }
       } finally {

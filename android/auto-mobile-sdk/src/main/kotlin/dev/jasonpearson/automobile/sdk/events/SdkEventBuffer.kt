@@ -399,20 +399,24 @@ internal class SdkEventBuffer(
       onFlush(events)
     } catch (error: Exception) {
       logger.w("SdkEventBuffer", error) { "Could not flush event batch" }
+      val unsent =
+        if (error is UnsentEventBatchesException) error.batches else listOf(events to null)
       // A throwing custom EventPersistence.persist() must NOT escape this task: it
       // runs inside scheduleAtFixedRate and an uncaught exception would silently
       // cancel all future periodic flushes (#3605), so guard the persist too.
       persistInBackground(
         Runnable {
-          try {
-            persistence?.persist(events)
-          } catch (error: Exception) {
-            logger.w("SdkEventBuffer", error) { "Could not persist failed flush" }
-            // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
+          for ((chunk, id) in unsent) {
+            try {
+              persistence?.persist(chunk, id)
+            } catch (error: Exception) {
+              logger.w("SdkEventBuffer", error) { "Could not persist failed flush" }
+              // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
+            }
           }
         }
       )
-      repeat(events.size) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
+      repeat(unsent.sumOf { it.first.size }) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
     }
   }
 }

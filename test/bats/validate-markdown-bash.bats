@@ -276,3 +276,22 @@ P "x" file'
   run bash "$ABS" "$FIX"
   [ "$status" -eq 0 ]
 }
+
+@test "illustrative helper recognizes markers before a large Markdown block" {
+  awk '/^block_is_illustrative\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$ABS" > "$FIX/helper.sh"
+  cat > "$FIX/writer" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$1"
+awk 'BEGIN { for (i=0; i<20000; i++) print "Markdown block filler" }'
+STUB
+  chmod +x "$FIX/writer"
+  run bash -uo pipefail -c '
+    source "$1/helper.sh"
+    for marker in "<PR>" "…" "# md-bash-lint: skip"; do
+      content=$("$1/writer" "$marker")
+      block_is_illustrative "$content" || exit 1
+    done
+  ' _ "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

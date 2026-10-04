@@ -320,7 +320,7 @@ watch_loop() {
     local current_simulator
     if [[ -n "${SIMULATOR_ID_OVERRIDE:-}" ]]; then
       if xcrun simctl list devices booted -j 2>/dev/null | \
-        grep -q "\"${SIMULATOR_ID_OVERRIDE}\""; then
+        grep "\"${SIMULATOR_ID_OVERRIDE}\"" >/dev/null; then
         current_simulator="${SIMULATOR_ID_OVERRIDE}"
       else
         current_simulator=""

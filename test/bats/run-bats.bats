@@ -254,3 +254,19 @@ EOF
   PATH="$STUB_BIN:/usr/bin:/bin" run is_gnu_parallel
   [ "$status" -ne 0 ]
 }
+
+@test "is_gnu_parallel drains a large version banner and preserves writer failure" {
+  cat > "$STUB_BIN/parallel" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' 'GNU parallel 20230101'
+awk 'BEGIN { for (i=0; i<20000; i++) print "version banner filler" }'
+exit "${BANNER_STATUS:-0}"
+STUB
+  chmod +x "$STUB_BIN/parallel"
+  awk '/^is_gnu_parallel\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$SCRIPT" > "$FIXTURES/predicate.sh"
+  run env PATH="$STUB_BIN:$PATH" bash -euo pipefail -c 'source "$1"; is_gnu_parallel' _ "$FIXTURES/predicate.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run env PATH="$STUB_BIN:$PATH" BANNER_STATUS=7 bash -euo pipefail -c 'source "$1"; if is_gnu_parallel; then exit 0; else exit 7; fi' _ "$FIXTURES/predicate.sh"
+  [ "$status" -eq 7 ]
+}

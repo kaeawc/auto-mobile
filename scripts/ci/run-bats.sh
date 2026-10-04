@@ -38,7 +38,7 @@ log() { printf '%s\n' "$*" >&2; }
 # `parallel` and would satisfy it while breaking bats. Only GNU parallel prints
 # a "GNU parallel" banner from `--version`, so probe that capability.
 is_gnu_parallel() {
-  parallel --version 2> /dev/null | head -1 | grep -q "GNU parallel"
+  parallel --version 2> /dev/null | sed -n '1p' | grep "GNU parallel" >/dev/null
 }
 
 ensure_gnu_parallel() {

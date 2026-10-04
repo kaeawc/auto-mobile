@@ -607,7 +607,7 @@ setup_ios() {
 get_current_simulator() {
   if [[ -n "${SIMULATOR_ID_OVERRIDE:-}" ]]; then
     if xcrun simctl list devices booted -j 2>/dev/null | \
-      grep -q "\"${SIMULATOR_ID_OVERRIDE}\""; then
+      grep "\"${SIMULATOR_ID_OVERRIDE}\"" >/dev/null; then
       echo "${SIMULATOR_ID_OVERRIDE}"
     fi
   else

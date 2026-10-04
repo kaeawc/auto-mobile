@@ -10,6 +10,7 @@ import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SharedGestureDelegate } from "../shared/SharedGestureDelegate";
 import { sendCommand } from "../DeviceServiceUtils";
 import type { DelegateContext, A11ySwipeResult } from "./types";
+import { normalizeCtrlProxyMilliseconds } from "./ctrlProxyProtocol";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
@@ -25,6 +26,13 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   protected override gestureDisplayParams(displayId?: number): { displayId?: number } {
     // Preserve the requested target; sendCommand validates the current connection's capability.
     return displayId === undefined || displayId === 0 ? {} : { displayId };
+  }
+
+  protected override gestureParams(
+    type: string,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return normalizeCtrlProxyMilliseconds(type, params);
   }
 
   /**
@@ -55,7 +63,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       idPrefix: "two_finger_swipe",
       responseType: "swipe",
       messageType: "request_two_finger_swipe",
-      params: {
+      params: this.gestureParams("request_two_finger_swipe", {
         x1: this.coord(x1),
         y1: this.coord(y1),
         x2: this.coord(x2),
@@ -63,7 +71,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
         duration,
         offset,
         ...this.gestureDisplayParams(displayId),
-      },
+      }),
       timeoutMs,
       perf,
       errorLabel: "Two-finger swipe",

@@ -1,3 +1,4 @@
+import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
 import {
   withStaleDisplay,
@@ -637,7 +638,7 @@ export class SwipeOn extends BaseVisualChange {
     } else {
       await executeTouchscreenInput(
         this.adb,
-        `swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+        `swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
         target.displayId,
         signal,
         target.assertCurrent,

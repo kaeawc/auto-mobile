@@ -618,14 +618,15 @@ object AutoMobileSDK {
     buffer: SdkEventBuffer,
     replay: EventBatchReplay,
   ) {
-    replay.replay(persistence, buffer::execute) { events, complete ->
+    replay.replay(persistence, buffer::execute) { events, deliveryId, complete ->
       SdkEventBroadcaster.broadcastBatch(
         context,
         events,
-        onUndelivered = {},
+        onUndelivered = { _, _ -> },
         // Invalid payload is terminal: the broadcaster counts it, and replay removes its file.
         onFinished = complete,
         splitBatches = false,
+        batchId = deliveryId,
       )
     }
   }

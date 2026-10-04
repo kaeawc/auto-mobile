@@ -14,7 +14,7 @@ internal class EventBatchReplay {
   fun replay(
     persistence: EventPersistence,
     runInBackground: (Runnable) -> Unit,
-    deliver: (List<SdkEvent>, (BatchDeliveryOutcome) -> Unit) -> Unit,
+    deliver: (List<SdkEvent>, String?, (BatchDeliveryOutcome) -> Unit) -> Unit,
   ) {
     if (!running.compareAndSet(false, true)) return
     try {
@@ -33,9 +33,9 @@ internal class EventBatchReplay {
           outcome != BatchDeliveryOutcome.INVALID_PAYLOAD &&
             outcome != BatchDeliveryOutcome.LEGACY_UNDELIVERED
         },
-      ) { events, complete ->
+      ) { events, deliveryId, complete ->
         outcome = BatchDeliveryOutcome.UNDELIVERED
-        deliver(events) { result ->
+        deliver(events, deliveryId) { result ->
           outcome = result
           complete(result == BatchDeliveryOutcome.DELIVERED)
         }
@@ -60,7 +60,7 @@ internal fun replayEventBatches(
   discardOnFailure: () -> Boolean = { false },
   recordFailure: () -> Boolean = { true },
   stopOnFailure: () -> Boolean = { false },
-  deliver: (List<SdkEvent>, (Boolean) -> Unit) -> Unit,
+  deliver: (List<SdkEvent>, String?, (Boolean) -> Unit) -> Unit,
 ) {
   val logger = DefaultSdkLogger()
   val pending =
@@ -77,7 +77,7 @@ internal fun replayEventBatches(
       onComplete()
       return
     }
-    val (batchId, events) = pending[index]
+    val (batchId, events, deliveryId) = pending[index]
     val completed = AtomicBoolean(false)
     val complete: (Boolean) -> Unit = { delivered ->
       if (completed.compareAndSet(false, true)) {
@@ -103,7 +103,7 @@ internal fun replayEventBatches(
       }
     }
     try {
-      deliver(events, complete)
+      deliver(events, deliveryId, complete)
     } catch (error: Exception) {
       logger.w("EventBatchReplay", error) { "Could not submit pending batch $batchId" }
       complete(false)

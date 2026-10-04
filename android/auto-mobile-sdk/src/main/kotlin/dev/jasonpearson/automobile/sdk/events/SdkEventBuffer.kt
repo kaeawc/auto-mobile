@@ -333,11 +333,11 @@ internal class SdkEventBuffer(
   }
 
   /** Retry callbacks may arrive on the main looper; persist on our executor while active. */
-  internal fun persistUndelivered(events: List<SdkEvent>) {
+  internal fun persistUndelivered(events: List<SdkEvent>, deliveryId: String? = null) {
     val task = Runnable {
       val persisted =
         try {
-          persistence?.persist(events) != null
+          persistence?.persist(events, deliveryId) != null
         } catch (error: Exception) {
           logger.w("SdkEventBuffer", error) { "Could not persist undelivered batch" }
           // Persistence is best-effort; contain custom failures to protect the host and executor.

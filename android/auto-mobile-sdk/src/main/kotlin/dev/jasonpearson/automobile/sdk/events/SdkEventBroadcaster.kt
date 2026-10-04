@@ -12,6 +12,7 @@ import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.SdkConstants
 import dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -34,7 +35,13 @@ internal interface BatchDeliveryScheduler {
 
 /** Android bridge kept separate from the delivery state machine for deterministic JVM tests. */
 internal interface BatchBroadcastSender {
-  fun send(context: Context, batchJson: String, ordered: Boolean, onResult: (Int) -> Unit)
+  fun send(
+    context: Context,
+    batchJson: String,
+    batchId: String?,
+    ordered: Boolean,
+    onResult: (Int) -> Unit,
+  )
 }
 
 private class AndroidBatchBroadcastSender(private val resultHandler: Handler) :
@@ -42,12 +49,14 @@ private class AndroidBatchBroadcastSender(private val resultHandler: Handler) :
   override fun send(
     context: Context,
     batchJson: String,
+    batchId: String?,
     ordered: Boolean,
     onResult: (Int) -> Unit,
   ) {
     val intent =
       Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH).apply {
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, batchJson)
+        batchId?.let { putExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID, it) }
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.EVENT_BATCH)
         setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
       }
@@ -77,6 +86,7 @@ object SdkEventBroadcaster {
   const val MAX_BATCH_BYTES =
     100_000 // 100KB per Intent — lower to avoid TransactionTooLargeException
 
+  internal var batchIdProvider: () -> String = { UUID.randomUUID().toString() }
   internal var retryPolicy: RetryPolicy = RetryPolicy()
   internal var retryHandler: Handler = Handler(Looper.getMainLooper())
   internal var dropCounter: DropCounter? = null
@@ -91,6 +101,7 @@ object SdkEventBroadcaster {
   internal fun reset() {
     deliveryGeneration.incrementAndGet()
     retryHandler.removeCallbacksAndMessages(null)
+    batchIdProvider = { UUID.randomUUID().toString() }
     retryPolicy = RetryPolicy()
     retryHandler = Handler(Looper.getMainLooper())
     dropCounter = null
@@ -108,11 +119,13 @@ object SdkEventBroadcaster {
   internal fun broadcastBatch(
     context: Context,
     events: List<SdkEvent>,
-    onUndelivered: ((List<SdkEvent>) -> Unit)? = null,
+    onUndelivered: ((List<SdkEvent>, String?) -> Unit)? = null,
     onComplete: (Boolean) -> Unit = {},
     onAcknowledged: () -> Unit = {},
     onFinished: (BatchDeliveryOutcome) -> Unit = {},
     splitBatches: Boolean = true,
+    // A null replay id preserves old array-file behavior. New delivery chunks allocate once.
+    batchId: String? = null,
   ) {
     val generation = deliveryGeneration.get()
     val gate =
@@ -140,10 +153,17 @@ object SdkEventBroadcaster {
       }
       return
     }
-    for (chunk in chunks) {
+    for ((index, chunk) in chunks.withIndex()) {
+      val chunkId =
+        if (splitBatches) batchIdProvider()
+        else if (batchId == null || chunks.size == 1) batchId
+        // Legacy CtrlProxy may require splitting a stored unit. Derive stable child identities
+        // so returning to an ack-capable receiver cannot mistake one child for another.
+        else "$batchId:$index"
       sendBatchIntent(
         context,
         serializeChunk(chunk, context.packageName, MAX_BATCH_BYTES),
+        batchId = chunkId,
         generation = generation,
         requireAck = requireAck,
       ) { outcome ->
@@ -157,7 +177,7 @@ object SdkEventBroadcaster {
         } else if (!delivered) {
           // A supplied callback owns persistence and drop accounting: persisted events
           // are retained, not dropped. Replay supplies a no-op because it already has a file.
-          if (onUndelivered != null) onUndelivered(chunk)
+          if (onUndelivered != null) onUndelivered(chunk, chunkId)
           else dropCounter?.increment(DropReason.DELIVERY_FAILED, chunk.size)
         }
         synchronized(completionLock) {
@@ -246,6 +266,7 @@ object SdkEventBroadcaster {
   private fun sendBatchIntent(
     context: Context,
     batchJson: String,
+    batchId: String?,
     attempt: Int = 0,
     generation: Long,
     requireAck: Boolean,
@@ -279,7 +300,7 @@ object SdkEventBroadcaster {
         } else null
       cancelTimeout = timeoutCancellation
       val sender = broadcastSender ?: AndroidBatchBroadcastSender(retryHandler)
-      sender.send(context, batchJson, requireAck) { resultCode ->
+      sender.send(context, batchJson, batchId, requireAck) { resultCode ->
         // Claim the outcome on arrival, before the executor hop. A timeout cannot win later.
         val outcome =
           when (resultCode) {
@@ -310,7 +331,15 @@ object SdkEventBroadcaster {
         else BatchDeliveryOutcome.LEGACY_UNDELIVERED
       if (attempt < retryPolicy.maxRetries) {
         val retry = Runnable {
-          sendBatchIntent(context, batchJson, attempt + 1, generation, requireAck, onResult)
+          sendBatchIntent(
+            context,
+            batchJson,
+            batchId,
+            attempt + 1,
+            generation,
+            requireAck,
+            onResult,
+          )
         }
         if (!requireAck) {
           // Preserve the pre-ack path, including Handler's refused-post behavior.

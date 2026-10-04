@@ -23,17 +23,25 @@ import java.io.File
 import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
+
+/** Storage identity is separate from delivery identity: retry accounting renames the file. */
+internal data class PendingEventBatch(
+  val storageId: String,
+  val events: List<SdkEvent>,
+  val deliveryId: String? = null,
+)
 
 /**
  * Persistence layer for SDK events. Persists event batches to disk so they survive process death
  * and can be replayed on next launch.
  */
 internal interface EventPersistence {
-  /** Persist a batch of events to disk. Returns batch ID on success, null on failure. */
-  fun persist(events: List<SdkEvent>): String?
+  /** Persist events and their delivery id. Returns the storage id on success, null on failure. */
+  fun persist(events: List<SdkEvent>, deliveryId: String? = null): String?
 
   /** Load all pending batches from disk, ordered oldest-first (FIFO). */
-  fun loadPending(): List<Pair<String, List<SdkEvent>>>
+  fun loadPending(): List<PendingEventBatch>
 
   /** Remove a successfully delivered batch by ID. */
   fun removeBatch(batchId: String)
@@ -178,7 +186,7 @@ internal class FileEventPersistence(
   }
 
   @Synchronized
-  override fun persist(events: List<SdkEvent>): String? {
+  override fun persist(events: List<SdkEvent>, deliveryId: String?): String? {
     if (events.isEmpty()) return null
     var file: File? = null
     val batchId =
@@ -189,7 +197,7 @@ internal class FileEventPersistence(
         directory.mkdirs()
         val target = File(directory, "events_$id.json")
         file = target
-        val json = serializeEvents(events)
+        val json = serializePendingBatch(events, deliveryId)
         if (json.toByteArray(Charsets.UTF_8).size > maxPendingBytes) {
           logger.w("EventPersistence") {
             "Pending batch exceeds $maxPendingBytes bytes; not retained"
@@ -223,12 +231,12 @@ internal class FileEventPersistence(
   }
 
   @Synchronized
-  override fun loadPending(): List<Pair<String, List<SdkEvent>>> =
+  override fun loadPending(): List<PendingEventBatch> =
     try {
       initializeSequence()
       pendingFiles().mapNotNull { batch ->
         try {
-          batch.batchId to deserializeEvents(batch.file.readText())
+          deserializePendingBatch(batch.batchId, batch.file.readText())
         } catch (_: Exception) {
           // Corrupt files cannot replay; count only a file actually removed.
           deleteDropped(batch, DropReason.DELIVERY_FAILED)
@@ -294,6 +302,25 @@ internal class FileEventPersistence(
     }
     return true
   }
+
+  // Old array-only files have no delivery identity. Keep them replayable without rewriting disk.
+  private fun deserializePendingBatch(storageId: String, json: String): PendingEventBatch =
+    when (val value = JSONTokener(json).nextValue()) {
+      is JSONArray -> PendingEventBatch(storageId, deserializeEvents(value.toString()))
+      is JSONObject ->
+        PendingEventBatch(
+          storageId,
+          deserializeEvents(value.getJSONArray("events").toString()),
+          if (value.isNull("batchId")) null else value.getString("batchId"),
+        )
+      else -> error("Invalid persisted event batch")
+    }
+
+  internal fun serializePendingBatch(events: List<SdkEvent>, deliveryId: String?): String =
+    JSONObject()
+      .put("batchId", deliveryId ?: JSONObject.NULL)
+      .put("events", JSONArray(serializeEvents(events)))
+      .toString()
 
   internal fun serializeEvents(events: List<SdkEvent>): String {
     val array = JSONArray()

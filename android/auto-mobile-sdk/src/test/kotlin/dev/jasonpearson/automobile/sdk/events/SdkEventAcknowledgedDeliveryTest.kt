@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.sdk.persistence.EventBatchReplay
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.PendingEventBatch
 import java.util.concurrent.Delayed
 import java.util.concurrent.FutureTask
 import java.util.concurrent.RejectedExecutionException
@@ -68,23 +69,23 @@ class SdkEventAcknowledgedDeliveryTest {
   }
 
   private class FakeStore : EventPersistence {
-    val pending = mutableListOf<Pair<String, List<SdkEvent>>>()
+    val pending = mutableListOf<PendingEventBatch>()
     val removed = mutableListOf<String>()
     var writes = 0
     val failures = mutableListOf<String>()
     var refuseRemove = false
 
-    override fun persist(events: List<SdkEvent>): String {
+    override fun persist(events: List<SdkEvent>, deliveryId: String?): String {
       val id = "${++writes}"
-      pending.add(id to events)
+      pending.add(PendingEventBatch(id, events, deliveryId))
       return id
     }
 
-    override fun loadPending(): List<Pair<String, List<SdkEvent>>> = pending.toList()
+    override fun loadPending(): List<PendingEventBatch> = pending.toList()
 
     override fun removeBatch(batchId: String) {
       removed.add(batchId)
-      if (!refuseRemove) pending.removeAll { it.first == batchId }
+      if (!refuseRemove) pending.removeAll { it.storageId == batchId }
     }
 
     override fun recordReplayFailure(batchId: String): Boolean {
@@ -103,6 +104,7 @@ class SdkEventAcknowledgedDeliveryTest {
     var plainSends = 0
     val ordered = mutableListOf<String>()
     val results = mutableListOf<(Int) -> Unit>()
+    val batchIds = mutableListOf<String?>()
     var response: Int? = null
     var throwsRemaining = 0
     var attempts = 0
@@ -110,6 +112,7 @@ class SdkEventAcknowledgedDeliveryTest {
     override fun send(
       context: Context,
       batchJson: String,
+      batchId: String?,
       ordered: Boolean,
       onResult: (Int) -> Unit,
     ) {
@@ -119,6 +122,7 @@ class SdkEventAcknowledgedDeliveryTest {
         plainSends++
         return
       }
+      batchIds.add(batchId)
       this.ordered.add(batchJson)
       results.add(onResult)
       response?.let { respond(results.lastIndex, it) }
@@ -159,7 +163,7 @@ class SdkEventAcknowledgedDeliveryTest {
     SdkEventBroadcaster.broadcastBatch(
       context,
       listOf(event(name)),
-      onUndelivered = { store.persist(it) },
+      onUndelivered = { events, id -> store.persist(events, id) },
       onComplete = completions::add,
       onAcknowledged = onAcknowledged,
     )
@@ -203,7 +207,7 @@ class SdkEventAcknowledgedDeliveryTest {
     }
     assertEquals(
       listOf("0", "-1", "1001"),
-      store.pending.map { (it.second.single() as SdkLifecycleEvent).kind },
+      store.pending.map { (it.events.single() as SdkLifecycleEvent).kind },
     )
     assertTrue(drops.snapshot().isEmpty())
   }
@@ -239,18 +243,22 @@ class SdkEventAcknowledgedDeliveryTest {
     sender.response = 0
     send("oldest")
     send("second")
+    val originalIds = sender.batchIds.toList()
+    assertEquals(2, originalIds.toSet().size)
+    assertTrue(originalIds.all { it != null })
     val replay = EventBatchReplay()
     val replayed = mutableListOf<String>()
     sender.response = 1000
     send("flush") {
-      replay.replay(store, { it.run() }) { events, complete ->
+      replay.replay(store, { it.run() }) { events, deliveryId, complete ->
         replayed.add((events.single() as SdkLifecycleEvent).kind)
         SdkEventBroadcaster.broadcastBatch(
           context,
           events,
-          onUndelivered = {},
+          onUndelivered = { _, _ -> },
           onFinished = complete,
           splitBatches = false,
+          batchId = deliveryId,
         )
       }
     }
@@ -259,6 +267,7 @@ class SdkEventAcknowledgedDeliveryTest {
     assertEquals(2, store.writes)
     assertTrue(store.pending.isEmpty())
     assertEquals(5, sender.ordered.size)
+    assertEquals(originalIds, sender.batchIds.takeLast(2))
   }
 
   @Test
@@ -266,15 +275,17 @@ class SdkEventAcknowledgedDeliveryTest {
     store.persist(listOf(event("first")))
     store.persist(listOf(event("second")))
     val replay = EventBatchReplay()
-    val deliver: (List<SdkEvent>, (BatchDeliveryOutcome) -> Unit) -> Unit = { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(
-        context,
-        events,
-        onUndelivered = {},
-        onFinished = complete,
-        splitBatches = false,
-      )
-    }
+    val deliver: (List<SdkEvent>, String?, (BatchDeliveryOutcome) -> Unit) -> Unit =
+      { events, deliveryId, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          events,
+          onUndelivered = { _, _ -> },
+          onFinished = complete,
+          splitBatches = false,
+          batchId = deliveryId,
+        )
+      }
     replay.replay(store, { it.run() }, deliver)
     replay.replay(store, { it.run() }, deliver)
     assertEquals(1, sender.ordered.size)
@@ -303,15 +314,17 @@ class SdkEventAcknowledgedDeliveryTest {
     store.persist(listOf(event("later")))
     sender.response = 1002
     val replay = EventBatchReplay()
-    val deliver: (List<SdkEvent>, (BatchDeliveryOutcome) -> Unit) -> Unit = { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(
-        context,
-        events,
-        onUndelivered = {},
-        onFinished = complete,
-        splitBatches = false,
-      )
-    }
+    val deliver: (List<SdkEvent>, String?, (BatchDeliveryOutcome) -> Unit) -> Unit =
+      { events, deliveryId, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          events,
+          onUndelivered = { _, _ -> },
+          onFinished = complete,
+          splitBatches = false,
+          batchId = deliveryId,
+        )
+      }
     replay.replay(store, { it.run() }, deliver)
     assertTrue(store.pending.isEmpty())
     assertEquals(listOf("1", "2"), store.removed)
@@ -338,16 +351,18 @@ class SdkEventAcknowledgedDeliveryTest {
 
   @Test
   fun `empty stored batch completes replay and releases the guard`() {
-    store.pending.add("empty" to emptyList())
+    store.pending.add(PendingEventBatch("empty", emptyList()))
     val replay = EventBatchReplay()
-    val deliver: (List<SdkEvent>, (BatchDeliveryOutcome) -> Unit) -> Unit = { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(
-        context,
-        events,
-        onFinished = complete,
-        splitBatches = false,
-      )
-    }
+    val deliver: (List<SdkEvent>, String?, (BatchDeliveryOutcome) -> Unit) -> Unit =
+      { events, deliveryId, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          events,
+          onFinished = complete,
+          splitBatches = false,
+          batchId = deliveryId,
+        )
+      }
     replay.replay(store, { it.run() }, deliver)
     assertTrue(store.pending.isEmpty())
     store.persist(listOf(event("next")))
@@ -500,7 +515,7 @@ class SdkEventAcknowledgedDeliveryTest {
     SdkEventBroadcaster.broadcastBatch(
       context,
       events,
-      onUndelivered = { store.persist(it) },
+      onUndelivered = { events, id -> store.persist(events, id) },
       onComplete = completions::add,
     )
     assertEquals(3, sender.ordered.size)
@@ -510,7 +525,7 @@ class SdkEventAcknowledgedDeliveryTest {
     sender.respond(1, 0)
     timer.advance(SdkEventBroadcaster.ACK_TIMEOUT_MS)
     assertEquals(listOf(false), completions)
-    assertEquals(listOf(events[1]), store.pending.single().second)
+    assertEquals(listOf(events[1]), store.pending.single().events)
     assertEquals(1L, drops.snapshot()[DropReason.DELIVERY_FAILED])
   }
 
@@ -520,13 +535,14 @@ class SdkEventAcknowledgedDeliveryTest {
     for (response in listOf(0, -1, null)) {
       repeat(3) {
         sender.response = response
-        EventBatchReplay().replay(store, { it.run() }) { events, complete ->
+        EventBatchReplay().replay(store, { it.run() }) { events, deliveryId, complete ->
           SdkEventBroadcaster.broadcastBatch(
             context,
             events,
-            onUndelivered = {},
+            onUndelivered = { _, _ -> },
             onFinished = complete,
             splitBatches = false,
+            batchId = deliveryId,
           )
         }
         timer.advance(SdkEventBroadcaster.ACK_TIMEOUT_MS)
@@ -542,14 +558,15 @@ class SdkEventAcknowledgedDeliveryTest {
     store.persist(listOf(event("later")))
     store.refuseRemove = true
     val replay = EventBatchReplay()
-    replay.replay(store, { it.run() }) { events, complete ->
+    replay.replay(store, { it.run() }) { events, deliveryId, complete ->
       sender.response = if ((events.single() as SdkLifecycleEvent).kind == "invalid") 1002 else 1000
       SdkEventBroadcaster.broadcastBatch(
         context,
         events,
-        onUndelivered = {},
+        onUndelivered = { _, _ -> },
         onFinished = complete,
         splitBatches = false,
+        batchId = deliveryId,
       )
     }
     assertEquals(listOf("1", "2"), store.removed)

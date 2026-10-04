@@ -49,12 +49,17 @@ class SdkEventAckCapabilityTest {
   }
 
   @Test
-  fun `missing or invisible package is retried on next send`() {
+  fun `missing or invisible package is cached until TTL expires`() {
     val reader = FakeReader().apply { failure = PackageManager.NameNotFoundException("hidden") }
-    val gate = SdkEventAckCapability(reader, { 0 })
+    var now = 0L
+    val gate = SdkEventAckCapability(reader, { now }, 30)
     assertFalse(gate.isSupported())
     reader.failure = null
     reader.supported = true
+    now = 29
+    assertFalse(gate.isSupported())
+    assertEquals(1, reader.reads)
+    now = 30
     assertTrue(gate.isSupported())
     assertEquals(2, reader.reads)
   }

@@ -831,6 +831,8 @@ Compiled from "SdkEventBroadcaster.kt"
 public final class dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome extends java.lang.Enum<dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome> {
   public static final dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome DELIVERED;
   public static final dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome UNDELIVERED;
+  public static final dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome REJECTED;
+  public static final dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome LEGACY_UNDELIVERED;
   public static final dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome INVALID_PAYLOAD;
   public static dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome[] values();
   public static dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome valueOf(java.lang.String);
@@ -1461,8 +1463,8 @@ public final class dev.jasonpearson.automobile.sdk.persistence.EventBatchReplay 
 Compiled from "EventBatchReplay.kt"
 public final class dev.jasonpearson.automobile.sdk.persistence.EventBatchReplayKt {
   public static final int MAX_REPLAY_BATCHES_PER_LAUNCH = 20;
-  public static final void replayEventBatches(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, kotlin.jvm.functions.Function1<? super java.lang.Runnable, kotlin.Unit>, kotlin.jvm.functions.Function0<kotlin.Unit>, kotlin.jvm.functions.Function0<java.lang.Boolean>, kotlin.jvm.functions.Function2<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, ? super kotlin.jvm.functions.Function1<? super java.lang.Boolean, kotlin.Unit>, kotlin.Unit>);
-  public static void replayEventBatches$default(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function2, int, java.lang.Object);
+  public static final void replayEventBatches(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, kotlin.jvm.functions.Function1<? super java.lang.Runnable, kotlin.Unit>, kotlin.jvm.functions.Function0<kotlin.Unit>, kotlin.jvm.functions.Function0<java.lang.Boolean>, kotlin.jvm.functions.Function0<java.lang.Boolean>, kotlin.jvm.functions.Function0<java.lang.Boolean>, kotlin.jvm.functions.Function2<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, ? super kotlin.jvm.functions.Function1<? super java.lang.Boolean, kotlin.Unit>, kotlin.Unit>);
+  public static void replayEventBatches$default(dev.jasonpearson.automobile.sdk.persistence.EventPersistence, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function2, int, java.lang.Object);
 }
 Compiled from "EventPersistence.kt"
 public final class dev.jasonpearson.automobile.sdk.persistence.EventPersistence$DefaultImpls {

@@ -19,16 +19,25 @@ internal class EventBatchReplay {
     if (!running.compareAndSet(false, true)) return
     try {
       persistence.cleanup()
-      var discardCurrent = false
+      var outcome = BatchDeliveryOutcome.UNDELIVERED
       replayEventBatches(
         persistence,
         runInBackground,
         onComplete = { running.set(false) },
-        discardOnFailure = { discardCurrent },
+        discardOnFailure = { outcome == BatchDeliveryOutcome.INVALID_PAYLOAD },
+        recordFailure = {
+          outcome == BatchDeliveryOutcome.REJECTED ||
+            outcome == BatchDeliveryOutcome.LEGACY_UNDELIVERED
+        },
+        stopOnFailure = {
+          outcome != BatchDeliveryOutcome.INVALID_PAYLOAD &&
+            outcome != BatchDeliveryOutcome.LEGACY_UNDELIVERED
+        },
       ) { events, complete ->
-        deliver(events) { outcome ->
-          discardCurrent = outcome == BatchDeliveryOutcome.INVALID_PAYLOAD
-          complete(outcome == BatchDeliveryOutcome.DELIVERED)
+        outcome = BatchDeliveryOutcome.UNDELIVERED
+        deliver(events) { result ->
+          outcome = result
+          complete(result == BatchDeliveryOutcome.DELIVERED)
         }
       }
     } catch (error: Exception) {
@@ -40,13 +49,17 @@ internal class EventBatchReplay {
 
 /**
  * Start on a background executor, then chain FIFO replay through background completion hops. A
- * refused hop or the first undelivered batch leaves the remaining files for a later pass.
+ * refused hop leaves the remaining files for a later pass. Legacy failures continue; acknowledged
+ * replay stops when delivery is unavailable or explicitly rejected. Invalid files are skipped even
+ * when removal fails, and the fixed snapshot visits each file at most once per pass.
  */
 internal fun replayEventBatches(
   persistence: EventPersistence,
   runInBackground: (Runnable) -> Unit,
   onComplete: () -> Unit = {},
   discardOnFailure: () -> Boolean = { false },
+  recordFailure: () -> Boolean = { true },
+  stopOnFailure: () -> Boolean = { false },
   deliver: (List<SdkEvent>, (Boolean) -> Unit) -> Unit,
 ) {
   val logger = DefaultSdkLogger()
@@ -69,18 +82,18 @@ internal fun replayEventBatches(
     val complete: (Boolean) -> Unit = { delivered ->
       if (completed.compareAndSet(false, true)) {
         val discard = !delivered && discardOnFailure()
+        val record = !delivered && !discard && recordFailure()
+        val stop = !delivered && stopOnFailure()
         try {
           runInBackground(
             Runnable {
               try {
                 if (delivered || discard) persistence.removeBatch(batchId)
-                else persistence.recordReplayFailure(batchId)
+                else if (record) persistence.recordReplayFailure(batchId)
               } catch (error: Exception) {
                 logger.w("EventBatchReplay", error) { "Could not update pending batch $batchId" }
-                onComplete()
-                return@Runnable
               }
-              if (delivered) submit(index + 1) else onComplete()
+              if (stop) onComplete() else submit(index + 1)
             }
           )
         } catch (error: Exception) {

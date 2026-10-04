@@ -14,16 +14,20 @@ import dev.jasonpearson.automobile.sdk.SdkConstants
 import dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 internal enum class BatchDeliveryOutcome {
   DELIVERED,
   UNDELIVERED,
+  REJECTED,
+  LEGACY_UNDELIVERED,
   INVALID_PAYLOAD,
 }
 
 /** Timeout scheduling and completion dispatch share the SDK buffer executor in production. */
 internal interface BatchDeliveryScheduler {
-  fun schedule(task: Runnable, delayMs: Long): () -> Unit
+  /** Null means shutdown has begun: send once and resolve without waiting or retrying. */
+  fun schedule(task: Runnable, delayMs: Long): (() -> Unit)?
 
   fun execute(task: Runnable)
 }
@@ -122,11 +126,12 @@ object SdkEventBroadcaster {
     // Persisted files represent one delivery unit. Replay sends that exact unit so a mixed
     // split result cannot discard retryable events together with an invalid chunk.
     val chunks =
-      if (splitBatches) splitEventBatches(events, context.packageName, MAX_BATCH_BYTES)
+      if (splitBatches || !requireAck)
+        splitEventBatches(events, context.packageName, MAX_BATCH_BYTES)
       else if (events.isEmpty()) emptyList() else listOf(events)
     var remaining = chunks.size
     var allDelivered = true
-    var invalidPayload = false
+    var failedOutcome = BatchDeliveryOutcome.UNDELIVERED
     val completionLock = Any()
     if (chunks.isEmpty()) {
       if (generation == deliveryGeneration.get()) {
@@ -157,17 +162,17 @@ object SdkEventBroadcaster {
         }
         synchronized(completionLock) {
           allDelivered = allDelivered && delivered
-          invalidPayload = invalidPayload || outcome == BatchDeliveryOutcome.INVALID_PAYLOAD
+          if (
+            !delivered &&
+              (failedOutcome != BatchDeliveryOutcome.INVALID_PAYLOAD ||
+                outcome == BatchDeliveryOutcome.INVALID_PAYLOAD)
+          ) {
+            failedOutcome = outcome
+          }
           remaining--
           if (remaining == 0 && generation == deliveryGeneration.get()) {
             onComplete(allDelivered)
-            onFinished(
-              when {
-                allDelivered -> BatchDeliveryOutcome.DELIVERED
-                invalidPayload -> BatchDeliveryOutcome.INVALID_PAYLOAD
-                else -> BatchDeliveryOutcome.UNDELIVERED
-              }
-            )
+            onFinished(if (allDelivered) BatchDeliveryOutcome.DELIVERED else failedOutcome)
             if (allDelivered && requireAck) onAcknowledged()
           }
         }
@@ -235,6 +240,9 @@ object SdkEventBroadcaster {
         }
       }
 
+  // A null outcome marks an aborted attempt that owns a retry, not a completed delivery.
+  private class AttemptResolution(val outcome: BatchDeliveryOutcome?)
+
   private fun sendBatchIntent(
     context: Context,
     batchJson: String,
@@ -244,19 +252,30 @@ object SdkEventBroadcaster {
     onResult: (BatchDeliveryOutcome) -> Unit,
   ) {
     if (generation != deliveryGeneration.get()) return
-    val completed = AtomicBoolean(false)
-    val scheduler = scheduler()
+    val resolution = AtomicReference<AttemptResolution?>()
+    val dispatched = AtomicBoolean(false)
+    val scheduler = if (requireAck) scheduler() else null
     var cancelTimeout: (() -> Unit)? = null
-    fun finish(outcome: BatchDeliveryOutcome) {
-      if (completed.compareAndSet(false, true)) {
+    fun dispatchResult() {
+      val outcome = resolution.get()?.outcome ?: return
+      if (dispatched.compareAndSet(false, true)) {
         cancelTimeout?.invoke()
         if (generation == deliveryGeneration.get()) onResult(outcome)
       }
     }
+    fun finish(outcome: BatchDeliveryOutcome) {
+      resolution.compareAndSet(null, AttemptResolution(outcome))
+      // Shutdown also dispatches an already-arrived result whose executor hop is still pending.
+      dispatchResult()
+    }
     try {
       val timeoutCancellation =
         if (requireAck) {
-          scheduler.schedule(Runnable { finish(BatchDeliveryOutcome.UNDELIVERED) }, ACK_TIMEOUT_MS)
+          requireNotNull(scheduler) { "Acknowledged delivery requires a scheduler" }
+            .schedule(
+              Runnable { finish(BatchDeliveryOutcome.UNDELIVERED) },
+              ACK_TIMEOUT_MS,
+            )
         } else null
       cancelTimeout = timeoutCancellation
       val sender = broadcastSender ?: AndroidBatchBroadcastSender(retryHandler)
@@ -267,39 +286,51 @@ object SdkEventBroadcaster {
             SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED -> BatchDeliveryOutcome.DELIVERED
             SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_INVALID_PAYLOAD ->
               BatchDeliveryOutcome.INVALID_PAYLOAD
+            SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_QUEUE_FULL ->
+              BatchDeliveryOutcome.REJECTED
             else -> BatchDeliveryOutcome.UNDELIVERED
           }
-        if (completed.compareAndSet(false, true)) {
-          timeoutCancellation?.invoke()
-          scheduler.execute(
-            Runnable {
-              if (generation == deliveryGeneration.get()) onResult(outcome)
-            }
-          )
+        if (resolution.compareAndSet(null, AttemptResolution(outcome))) {
+          // Keep the timeout tracked until dispatch. Shutdown can resolve the batch in the
+          // gap between arrival and executor submission, without losing it or waiting for it.
+          requireNotNull(scheduler) { "Acknowledged delivery requires a scheduler" }
+            .execute(Runnable { dispatchResult() })
         }
       }
       if (!requireAck) finish(BatchDeliveryOutcome.DELIVERED)
+      else if (timeoutCancellation == null) finish(BatchDeliveryOutcome.UNDELIVERED)
     } catch (error: Exception) {
       logger.w("SdkEventBroadcaster", error) { "Could not send SDK event batch" }
       // A throw after a synchronous result cannot retry or report a second outcome.
-      if (!completed.compareAndSet(false, true)) return
+      if (!resolution.compareAndSet(null, AttemptResolution(null))) return
       cancelTimeout?.invoke()
       if (generation != deliveryGeneration.get()) return
+      val failedOutcome =
+        if (requireAck) BatchDeliveryOutcome.UNDELIVERED
+        else BatchDeliveryOutcome.LEGACY_UNDELIVERED
       if (attempt < retryPolicy.maxRetries) {
+        val retry = Runnable {
+          sendBatchIntent(context, batchJson, attempt + 1, generation, requireAck, onResult)
+        }
+        if (!requireAck) {
+          // Preserve the pre-ack path, including Handler's refused-post behavior.
+          retryHandler.postDelayed(retry, retryPolicy.delayForAttempt(attempt))
+          return
+        }
         try {
           cancelTimeout =
-            scheduler.schedule(
-              Runnable {
-                sendBatchIntent(context, batchJson, attempt + 1, generation, requireAck, onResult)
-              },
-              retryPolicy.delayForAttempt(attempt),
-            )
+            requireNotNull(scheduler) { "Acknowledged delivery requires a scheduler" }
+              .schedule(
+                retry,
+                retryPolicy.delayForAttempt(attempt),
+              )
+          if (cancelTimeout == null) onResult(failedOutcome)
         } catch (retryError: Exception) {
           logger.w("SdkEventBroadcaster", retryError) { "Could not schedule SDK event retry" }
-          onResult(BatchDeliveryOutcome.UNDELIVERED)
+          onResult(failedOutcome)
         }
       } else {
-        onResult(BatchDeliveryOutcome.UNDELIVERED)
+        onResult(failedOutcome)
       }
     }
   }

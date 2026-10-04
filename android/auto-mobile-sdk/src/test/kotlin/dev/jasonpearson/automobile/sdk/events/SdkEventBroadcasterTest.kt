@@ -275,6 +275,94 @@ class SdkEventBroadcasterTest {
     assertTrue(persistence.persisted.isEmpty())
   }
 
+  @Test
+  fun `gate off exception retries exclusively on retryHandler`() {
+    SdkEventBroadcaster.capabilityGate =
+      SdkEventAckCapability(AckPackageInfoReader { false }, { 0 })
+    SdkEventBroadcaster.deliveryScheduler =
+      object : BatchDeliveryScheduler {
+        override fun schedule(task: Runnable, delayMs: Long): () -> Unit =
+          error("Legacy retries must use retryHandler")
+
+        override fun execute(task: Runnable) = error("Legacy completion must stay inline")
+      }
+    var attempts = 0
+    val completions = mutableListOf<Boolean>()
+    val context = BroadcastContext {
+      if (attempts++ == 0) throw IllegalStateException("retry")
+    }
+    SdkEventBroadcaster.broadcastBatch(
+      context,
+      listOf(makeEvent("legacy")),
+      onComplete = completions::add,
+    )
+    assertEquals(1, attempts)
+    assertTrue(completions.isEmpty())
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+    assertEquals(2, attempts)
+    assertEquals(listOf(true), completions)
+  }
+
+  @Test
+  fun `gate off replay continues after exhausted broadcast retries`() {
+    SdkEventBroadcaster.capabilityGate =
+      SdkEventAckCapability(AckPackageInfoReader { false }, { 0 })
+    val removed = mutableListOf<String>()
+    val failures = mutableListOf<String>()
+    val persistence =
+      object : EventPersistence {
+        override fun persist(events: List<SdkEvent>): String? = error("No duplicate files")
+
+        override fun loadPending() =
+          listOf(
+            "failed" to listOf(makeEvent("failed")),
+            "later" to listOf(makeEvent("later")),
+          )
+
+        override fun removeBatch(batchId: String) {
+          removed.add(batchId)
+        }
+
+        override fun recordReplayFailure(batchId: String): Boolean {
+          failures.add(batchId)
+          return true
+        }
+
+        override fun cleanup(maxAgeDays: Int) {}
+      }
+    val context = BroadcastContext {
+      if (it.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)!!.contains("failed")) {
+        throw IllegalStateException("unavailable")
+      }
+    }
+    dev.jasonpearson.automobile.sdk.persistence.EventBatchReplay().replay(
+      persistence,
+      { it.run() },
+    ) { events, complete ->
+      SdkEventBroadcaster.broadcastBatch(
+        context,
+        events,
+        onUndelivered = {},
+        onFinished = complete,
+        splitBatches = false,
+      )
+    }
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+    assertEquals(listOf("failed"), failures)
+    assertEquals(listOf("later"), removed)
+  }
+
+  @Test
+  fun `gate off replay preserves legacy chunk splitting even for a stored delivery unit`() {
+    SdkEventBroadcaster.capabilityGate =
+      SdkEventAckCapability(AckPackageInfoReader { false }, { 0 })
+    val events = (1..3).map { makeEvent("chunk-$it-" + "x".repeat(60_000)) }
+    var sends = 0
+    val context = BroadcastContext { sends++ }
+    SdkEventBroadcaster.broadcastBatch(context, events, splitBatches = false)
+    assertEquals(3, sends)
+  }
+
   private fun makeEvent(name: String): SdkEvent =
     SdkLifecycleEvent(
       timestamp = 1000L,

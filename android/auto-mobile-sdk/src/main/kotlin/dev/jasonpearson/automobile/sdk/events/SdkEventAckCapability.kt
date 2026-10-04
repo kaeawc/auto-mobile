@@ -53,9 +53,9 @@ internal class SdkEventAckCapability(
       try {
         reader.supportsAcknowledgment().also { checkedAt = now }
       } catch (error: PackageManager.NameNotFoundException) {
-        // Missing or invisible packages are expected; retry on the next send after installation.
+        // Missing or invisible packages are expected; an installation is picked up after the TTL.
         logger.d("SdkEventAckCapability") { "CtrlProxy is not visible: ${error.message}" }
-        checkedAt = null
+        checkedAt = now
         false
       } catch (error: Exception) {
         logger.w("SdkEventAckCapability", error) { "Could not read CtrlProxy acknowledgment flag" }

@@ -16,6 +16,7 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome
 import dev.jasonpearson.automobile.sdk.events.DefaultDropCounter
 import dev.jasonpearson.automobile.sdk.events.DropReason
 import java.io.File
@@ -1014,5 +1015,40 @@ class EventPersistenceTest {
     assertNotNull(retained)
     assertNull(persistence.persist(listOf(makeLifecycleEvent("x".repeat(1000)))))
     assertEquals(listOf(retained), persistence.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `unavailable replay across launches preserves file identity and attempt count`() {
+    val persistence = createPersistence()
+    val id = persistence.persist(listOf(makeLifecycleEvent("retained")))!!
+    repeat(4) {
+      EventBatchReplay().replay(persistence, { it.run() }) { _, complete ->
+        complete(BatchDeliveryOutcome.UNDELIVERED)
+      }
+    }
+    assertEquals(listOf(id), persistence.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `failed invalid file removal does not starve later files or recount within pass`() {
+    val persistence =
+      FileEventPersistence(
+        directory = tempFolder.root,
+        clock = { 1000L },
+        fileOps = { false },
+      )
+    persistence.persist(listOf(makeLifecycleEvent("invalid")))
+    persistence.persist(listOf(makeLifecycleEvent("later")))
+    val delivered = mutableListOf<String>()
+    EventBatchReplay().replay(persistence, { it.run() }) { events, complete ->
+      val kind = (events.single() as SdkLifecycleEvent).kind
+      delivered.add(kind)
+      complete(
+        if (kind == "invalid") BatchDeliveryOutcome.INVALID_PAYLOAD
+        else BatchDeliveryOutcome.DELIVERED
+      )
+    }
+    assertEquals(listOf("invalid", "later"), delivered)
+    assertEquals(2, persistence.loadPending().size)
   }
 }

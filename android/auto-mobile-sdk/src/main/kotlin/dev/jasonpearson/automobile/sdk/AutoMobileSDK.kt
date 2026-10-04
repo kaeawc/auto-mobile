@@ -201,7 +201,7 @@ object AutoMobileSDK {
           )
         SdkEventBroadcaster.deliveryScheduler =
           object : BatchDeliveryScheduler {
-            override fun schedule(task: Runnable, delayMs: Long): () -> Unit =
+            override fun schedule(task: Runnable, delayMs: Long): (() -> Unit)? =
               buffer.scheduleDelivery(task, delayMs)
 
             override fun execute(task: Runnable) = buffer.executeDelivery(task)

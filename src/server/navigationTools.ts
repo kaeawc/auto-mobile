@@ -132,8 +132,12 @@ export const navigateToHandler = async (
   try {
     const navigateTo = navigateToFactory(device, args);
     const options: NavigateToOptions = {
-      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM],
-      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM],
+      ...(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
+        ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
+        : {}),
+      ...(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
+        ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
+        : {}),
       targetScreen: args.targetScreen,
       platform: args.platform || device.platform,
       sessionUuid: args.sessionUuid,

@@ -84,8 +84,12 @@ describe("NavigateTo", () => {
   });
 
   describe("execute", () => {
-    for (const hasBudget of [true, false]) {
-      test(`replays legacy edges with current request metadata (budget: ${hasBudget})`, async () => {
+    for (const [hasBudget, sessionUuid] of [
+      [true, "current-session"],
+      [false, "current-session"],
+      [false, undefined],
+    ] as const) {
+      test(`replays legacy edges with current request metadata (budget: ${hasBudget}, session: ${sessionUuid})`, async () => {
         const args = {
           text: "Settings",
           action: "tap",
@@ -119,7 +123,7 @@ describe("NavigateTo", () => {
           const result = await navigateTo.execute({
             targetScreen: "SettingsScreen",
             platform: "android",
-            sessionUuid: "current-session",
+            ...(sessionUuid ? { sessionUuid } : {}),
             ...(hasBudget ? { __mcpRequestTimeoutMs: 500, __mcpRequestDeadlineMs: 1500 } : {}),
           });
           expect(result.success).toBe(true);
@@ -128,9 +132,13 @@ describe("NavigateTo", () => {
             _foo: "keep",
             sessionUuidX: "keep",
             session: "keep",
-            sessionUuid: "current-session",
+            ...(sessionUuid ? { sessionUuid } : {}),
           });
+          expect(replay.sessionUuid).toBe(sessionUuid);
+          expect(Object.hasOwn(replay, "sessionUuid")).toBe(sessionUuid !== undefined);
           expect(replay.__futureInternal).toBeUndefined();
+          expect(Object.hasOwn(replay, "__mcpRequestTimeoutMs")).toBe(hasBudget);
+          expect(Object.hasOwn(replay, "__mcpRequestDeadlineMs")).toBe(hasBudget);
           expect(replay.__mcpRequestTimeoutMs).toBe(hasBudget ? 500 : undefined);
           expect(replay.__mcpRequestDeadlineMs).toBe(hasBudget ? 1500 : undefined);
           expect(JSON.stringify(result.path)).not.toContain("__");

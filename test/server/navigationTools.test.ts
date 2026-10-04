@@ -111,6 +111,31 @@ describe("navigation tool session graph selection", () => {
     }
   });
 
+  test("omits absent request budget keys from handler options", async () => {
+    setNavigateToFactory(() => ({
+      execute: async (options) => {
+        expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_TIMEOUT_PARAM)).toBe(false);
+        expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_DEADLINE_PARAM)).toBe(false);
+        return {
+          success: true,
+          targetScreen: options.targetScreen,
+          stepsExecuted: 0,
+          durationMs: 0,
+        };
+      },
+    }));
+    for (const budget of [
+      {},
+      {
+        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: undefined,
+        [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: undefined,
+      },
+    ]) {
+      const response = await navigateToHandler(device, { targetScreen: "Settings", ...budget });
+      expect(response.isError).toBeUndefined();
+    }
+  });
+
   test("omitted platform leaves iOS device resolution open for every navigation tool", async () => {
     const navigateArgs = navigateToSchema.parse({ targetScreen: "Settings" });
     expect(navigateArgs.platform).toBeUndefined();

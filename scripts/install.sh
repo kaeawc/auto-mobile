@@ -3816,6 +3816,12 @@ install_dev_tools() {
     fi
 }
 
+# Match a literal whole line without a pipe: grep -q can SIGPIPE its writer
+# after finding a match, making pipefail report an installed formula as missing.
+_brew_formula_listed() {
+    [[ $'\n'"${1}"$'\n' == *$'\n'"${2}"$'\n'* ]]
+}
+
 _install_dev_tools_brew() {
     if ! command_exists brew; then
         log_warn "Homebrew not found — skipping dev tool installation"
@@ -3844,7 +3850,8 @@ _install_dev_tools_brew() {
 
     local to_install=()
     for pkg in "${all_packages[@]}"; do
-        if ! echo "${installed_packages}" | grep -qx "${pkg}"; then
+        # shellcheck disable=SC2310 # Pure predicate; its match status is intentional.
+        if ! _brew_formula_listed "${installed_packages}" "${pkg}"; then
             to_install+=("${pkg}")
         fi
     done
@@ -3877,7 +3884,8 @@ _install_dev_tools_brew() {
     installed_after=$(brew list --formula -1 2>/dev/null || true)
     local missing_packages=()
     for pkg in "${to_install[@]}"; do
-        if ! printf '%s\n' "${installed_after}" | grep -qx "${pkg}"; then
+        # shellcheck disable=SC2310 # Pure predicate; its match status is intentional.
+        if ! _brew_formula_listed "${installed_after}" "${pkg}"; then
             missing_packages+=("${pkg}")
         fi
     done

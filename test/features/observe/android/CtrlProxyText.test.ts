@@ -4,6 +4,7 @@ import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android
 import {
   CtrlProxyText,
   imeCommitSegmentCount,
+  imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
   imeCommitTimeoutMs,
 } from "../../../../src/features/observe/android/CtrlProxyText";
@@ -54,6 +55,66 @@ async function waitForSent(sent: Record<string, unknown>[], count: number): Prom
 }
 
 describe("Android CtrlProxyText", () => {
+  test.each([
+    ["١٢٣", "123"],
+    ["१२३", "123"],
+    ["𝟙𝟚𝟛", "123"],
+    ["123", "١٢٣"],
+    ["STRASSE", "straße"],
+    ["e\u0301", "é"],
+    ["é", "e\u0301"],
+  ])("accepts normalized IME text: field=%s sent=%s", (field, sent) => {
+    expect(imeCommitSubsequenceMatches(field, sent)).toBe(true);
+  });
+
+  test.each([
+    ["7", "007"],
+    ["😀", ":)"],
+    ["İ", "i"],
+  ])("rejects rewritten IME content: field=%s sent=%s", (field, sent) => {
+    expect(imeCommitSubsequenceMatches(field, sent)).toBe(false);
+  });
+
+  test.each([
+    ["(555) 123-4567", "5551234567", true],
+    ["(555) 123-45", "5551234567", false],
+    ["5551234567", "5551234567", true],
+    ["555-0", "5550142", false],
+    ["555-0142", "5550142", true],
+    ["55-0142", "5550142", false],
+    ["ba", "ab", false],
+    ["anything", "", true],
+    ["", "", true],
+    ["", "5", false],
+    ["prefix 😀-𐐀 tail", "😀𐐀", true],
+    ["prefix 😀 tail", "😀𐐀", false],
+    ["\ud83d-\ude00", "😀", false],
+    ["e-\u0301", "e\u0301", true],
+    ["ABC", "abc", true],
+    ["5550142", "555-0142", true],
+    ["helo", "hello", false],
+    ["HELO", "HeLLo", false],
+    ["HEL O", "hello", false],
+    ["5551234567", "(555) 123-4567", true],
+    ["𐐨", "𐐀", true],
+    ["E\u0301", "e\u0301", true],
+    ["e", "e\u0301", false],
+    ["𐐀", "😀𐐀", true],
+    ["1٢Ⅲ", "1-٢ Ⅲ", true],
+    ["prefix !-!-! tail", "!!!", true],
+    ["", "!!!", false],
+    ["!!", "!!!", false],
+    ["", "---", false],
+    ["---", "---", true],
+    ["???", "!!!", false],
+    ["İ", "İ", true],
+    ["i\u0307", "İ", false],
+    ["i", "İ", false],
+    ["İ", "i\u0307", false],
+  ] as const)("checks IME subsequence: field=%s sent=%s", (fieldText, text, matches) => {
+    expect(imeCommitSubsequenceMatches(fieldText, text)).toBe(matches);
+  });
+
   test.each([
     ["prefix one *bold* two `code` tail", true],
     ["prefix one bold two code tail", true],

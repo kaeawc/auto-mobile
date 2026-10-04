@@ -3518,6 +3518,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private async executeOnDisplay(
     options: TapOnElementOptions,
     signal?: AbortSignal,
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<TapOnElementResult | undefined> {
     const display = options.display;
     if (display !== undefined) {
@@ -3557,11 +3558,28 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           return await this.observedAndroidDisplayInteraction(options, { target, signal });
         }
       } catch (error) {
+        this.rethrowKeyboardOcclusion(error, options.action, recovery);
         logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
         return withStaleDisplay(this.createErrorResult(options.action, errorMessage(error)), error);
       }
     }
     return undefined;
+  }
+
+  private rethrowKeyboardOcclusion(
+    error: unknown,
+    action: TapOnElementOptions["action"],
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
+  ): void {
+    if (
+      recovery?.throwOnKeyboardOcclusion &&
+      this.device.platform === "android" &&
+      action === "focus" &&
+      error instanceof KeyboardOcclusionError
+    ) {
+      logger.debug(`Tap on element awaits IME recovery: ${errorMessage(error)}`, error);
+      throw error;
+    }
   }
 
   /**
@@ -3578,7 +3596,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<TapOnElementResult> {
     if (options.display !== undefined) {
-      const result = await this.executeOnDisplay(options, signal);
+      const result = await this.executeOnDisplay(options, signal, recovery);
       if (result) {
         return result;
       }
@@ -4043,15 +4061,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       perf.end();
 
       // Only opted-in Android form orchestration receives the typed recovery signal.
-      if (
-        recovery?.throwOnKeyboardOcclusion &&
-        this.device.platform === "android" &&
-        requestedAction === "focus" &&
-        error instanceof KeyboardOcclusionError
-      ) {
-        logger.debug(`Tap on element awaits IME recovery: ${errorMessage(error)}`, error);
-        throw error;
-      }
+      this.rethrowKeyboardOcclusion(error, requestedAction, recovery);
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
       if (error instanceof StaleDisplayError) {
         return withStaleDisplay(this.createErrorResult(options.action, error.message), error);

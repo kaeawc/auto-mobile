@@ -7,6 +7,9 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import {
   imeOcclusionHierarchy,
   sharedBoundsImeHierarchy,
@@ -34,6 +37,7 @@ async function executeAt(
     elementId,
     action = "tap",
     throwOnKeyboardOcclusion = false,
+    display,
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -45,6 +49,7 @@ async function executeAt(
     elementId?: string;
     action?: "tap" | "focus";
     throwOnKeyboardOcclusion?: boolean;
+    display?: string;
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -84,15 +89,21 @@ async function executeAt(
     },
   }) as AdbExecutor;
   const selector = new FakeElementSelector(element);
+  const observeScreen = new FakeObserveScreen();
+  const transitions = new FakeDisplayTransitionReader();
   if (matchedBounds) {
     selector.nextMatchedElement = { ...element, bounds: matchedBounds };
   }
   const tap = new TapOnElement({ name: "test-device", platform, deviceId: "emulator-5554" }, adb, {
     timer,
+    hierarchyCapture: new FakeHierarchyCapture(() => hierarchy, platform),
+    displayTransitions: transitions,
+    lastRenderedObservation: () => observation,
     elementSelector: selector,
     tapStrategy: new FakeTapStrategy(),
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
+  tap.observeScreen = observeScreen;
   const observation: ObserveResult = {
     observationId: "ime-test",
     updatedAt: 1,
@@ -103,7 +114,10 @@ async function executeAt(
         : { width: 400, height: 240 }),
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: hierarchy,
+    display: { key: "0", role: "unknown", posture: "unknown", generation: transitions.generation },
+    displayRevision: transitions.fullRevision,
   };
+  observeScreen.setObserveResult(observation);
   const points: Array<{ x: number; y: number }> = [];
   let actionError: unknown;
   tap.observedInteraction = async (action) => {
@@ -128,7 +142,7 @@ async function executeAt(
   tap.recordDeferredPredictionOutcome = async () => {};
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute(
-    { ...(elementId ? { elementId } : { text: label }), action },
+    { ...(elementId ? { elementId } : { text: label }), action, display },
     undefined,
     undefined,
     throwOnKeyboardOcclusion ? { throwOnKeyboardOcclusion: true } : undefined,
@@ -186,6 +200,26 @@ describe("tapOn Android IME occlusion", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  test("Android display focus opt-in preserves the typed IME refusal", async () => {
+    await expect(
+      executeAt("Continue as Guest", {
+        action: "focus",
+        display: "0",
+        throwOnKeyboardOcclusion: true,
+      }),
+    ).rejects.toBeInstanceOf(KeyboardOcclusionError);
+  });
+
+  test("Android display focus without opt-in keeps its failure result", async () => {
+    const { result, points } = await executeAt("Continue as Guest", {
+      action: "focus",
+      display: "0",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("covered by the soft keyboard");
+    expect(points).toEqual([]);
   });
 
   test("uses the caller text selector when the matched element has no label", async () => {

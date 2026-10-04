@@ -1,4 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
+import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
+import type { SwipeOnOptions } from "../../models/SwipeOnOptions";
 import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
@@ -35,6 +37,8 @@ import {
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
+import { Keyboard } from "./Keyboard";
+import { SwipeOn } from "./swipeon/SwipeOn";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -238,6 +242,18 @@ export interface SendKeysTargetFocuser {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
+export interface SendKeysScrollSearcher {
+  execute(
+    options: SwipeOnOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string }>;
+}
+
+export interface SendKeysKeyboard {
+  execute(action: "close", signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
+}
+
 export interface SendKeysObserver {
   execute(options?: {
     display?: string;
@@ -256,6 +272,8 @@ export interface SendKeysDependencies {
   lastRenderedObservation?: RenderedObservationReader;
   executor?: SendKeysCommandExecutor;
   focuser?: SendKeysTargetFocuser;
+  swipeOn?: SendKeysScrollSearcher;
+  keyboard?: SendKeysKeyboard;
   observer?: SendKeysObserver;
   timestampProvider?: SendKeysTimestampProvider;
   timer?: Timer;
@@ -1862,6 +1880,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 export class SendKeys {
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
+  private readonly swipeOn?: SendKeysScrollSearcher;
+  private readonly keyboard?: SendKeysKeyboard;
   private readonly observer: SendKeysObserver;
   private readonly timestampProvider: SendKeysTimestampProvider;
   private readonly timer: Timer;
@@ -1874,6 +1894,8 @@ export class SendKeys {
     dependencies: SendKeysDependencies = {},
   ) {
     this.timer = dependencies.timer ?? defaultTimer;
+    this.swipeOn = dependencies.swipeOn;
+    this.keyboard = dependencies.keyboard;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.displayTransitionReader = dependencies.displayTransitions ?? displayTransitions;
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
@@ -1899,6 +1921,7 @@ export class SendKeys {
             { ...selector, ...options, action: "focus", display },
             undefined,
             signal,
+            { throwOnKeyboardOcclusion: true },
           );
           return { success: result.success, error: result.error };
         },
@@ -1949,17 +1972,7 @@ export class SendKeys {
         selector = target.selector;
         assertCurrent = target.assertCurrent;
       } catch (error) {
-        logger.warn(`sendKeys display routing failed: ${errorMessage(error)}`, error);
-        return withStaleDisplay(
-          {
-            success: false,
-            completedCommands: 0,
-            failedIndex: 0,
-            commands: [],
-            error: errorMessage(error),
-          },
-          error,
-        );
+        return this.displayRoutingFailure(error, signal);
       }
     }
     const semanticKey =
@@ -1996,6 +2009,21 @@ export class SendKeys {
     return undefined;
   }
 
+  private displayRoutingFailure(error: unknown, signal?: AbortSignal): SendKeysResult {
+    signal?.throwIfAborted();
+    logger.warn(`sendKeys display routing failed: ${errorMessage(error)}`, error);
+    return withStaleDisplay(
+      {
+        success: false,
+        completedCommands: 0,
+        failedIndex: 0,
+        commands: [],
+        error: errorMessage(error),
+      },
+      error,
+    );
+  }
+
   private async prepareExplicitDisplay(
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
@@ -2020,7 +2048,7 @@ export class SendKeys {
       await this.assertFocusedDisplay(target.observation, signal);
     }
     if (selector && this.device.platform === "android") {
-      const focused = await this.focuser.focus(selector, signal, display, options);
+      const focused = await this.focusSelector(selector, signal, display, options);
       if (!focused.success) {
         throw new Error(focused.error ?? "Unable to focus target field");
       }
@@ -2221,7 +2249,7 @@ export class SendKeys {
       return undefined;
     }
     signal?.throwIfAborted();
-    const result = await this.focuser.focus(selector, signal, routing.display, {
+    const result = await this.focusSelector(selector, signal, routing.display, {
       container: routing.container,
       selectionStrategy: routing.selectionStrategy,
     });
@@ -2231,6 +2259,134 @@ export class SendKeys {
           index: 0,
           error: result.error ?? "Failed to focus the target element before sending keys",
         };
+  }
+
+  private async focusSelector(
+    selector: SendKeysSelector,
+    signal?: AbortSignal,
+    display?: string,
+    options: SendKeysFocusOptions = {},
+  ): ReturnType<SendKeysTargetFocuser["focus"]> {
+    const original = await this.focusWithKeyboardRecovery(selector, signal, display, options);
+    signal?.throwIfAborted();
+    const lookFor = this.scrollTargetForFailure(selector, original);
+    if (!lookFor) {
+      return original;
+    }
+    try {
+      const search = await this.scrollToTarget(lookFor, signal, display, options);
+      signal?.throwIfAborted();
+      if (search.success) {
+        const retry = await this.focusWithKeyboardRecovery(selector, signal, display, options);
+        signal?.throwIfAborted();
+        if (retry.success || retry.occlusionError) {
+          return retry;
+        }
+      }
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`[SendKeys] Selector scroll recovery failed: ${errorMessage(error)}`, error);
+    }
+    return {
+      ...original,
+      error: `${original.error}. The field may be scrolled out of view; use swipeOn with lookFor to bring it into view.`,
+    };
+  }
+
+  private scrollTargetForFailure(
+    selector: SendKeysSelector,
+    result: Awaited<ReturnType<SendKeysTargetFocuser["focus"]>>,
+  ): SwipeOnOptions["lookFor"] {
+    // TapOnElement has no typed not-found result; keep this match restricted to
+    // its target-missing wording, excluding container/ambiguity/validation errors.
+    if (result.success || !result.error?.includes("Element not found with provided ")) {
+      return undefined;
+    }
+    if (selector.text) {
+      return { text: selector.text };
+    }
+    if (selector.elementId) {
+      return { elementId: selector.elementId };
+    }
+    return undefined;
+  }
+
+  private scrollToTarget(
+    lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
+    signal?: AbortSignal,
+    display?: string,
+    options: SendKeysFocusOptions = {},
+  ): ReturnType<SendKeysScrollSearcher["execute"]> {
+    const swipe =
+      this.swipeOn ??
+      new SwipeOn(this.device, null, {
+        timer: this.timer,
+        lastRenderedObservation: this.lastRenderedObservation,
+      });
+    return swipe.execute(
+      {
+        direction: "up",
+        display,
+        container: options.container,
+        lookFor: { ...lookFor, ...options },
+      },
+      undefined,
+      signal,
+    );
+  }
+
+  private async focusWithKeyboardRecovery(
+    selector: SendKeysSelector,
+    signal?: AbortSignal,
+    display?: string,
+    options?: SendKeysFocusOptions,
+  ): Promise<
+    Awaited<ReturnType<SendKeysTargetFocuser["focus"]>> & {
+      occlusionError?: KeyboardOcclusionError;
+    }
+  > {
+    signal?.throwIfAborted();
+    try {
+      return await this.focuser.focus(selector, signal, display, options);
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
+        throw error;
+      }
+      logger.warn("[SendKeys] Target is covered by the IME; closing the keyboard", error);
+      try {
+        const retry = await this.retryFocusAfterKeyboardClose(selector, signal, display, options);
+        signal?.throwIfAborted();
+        if (retry.success) {
+          return retry;
+        }
+      } catch (recoveryError) {
+        signal?.throwIfAborted();
+        logger.warn(
+          `[SendKeys] IME focus recovery failed: ${errorMessage(recoveryError)}`,
+          recoveryError,
+        );
+      }
+      // A failed IME retry terminates this call, so a later scroll attempt cannot
+      // dismiss again. Preserve the original refusal, as SetUIState does.
+      return { success: false, error: error.message, occlusionError: error };
+    }
+  }
+
+  private async retryFocusAfterKeyboardClose(
+    selector: SendKeysSelector,
+    signal?: AbortSignal,
+    display?: string,
+    options?: SendKeysFocusOptions,
+  ): ReturnType<SendKeysTargetFocuser["focus"]> {
+    const keyboard =
+      this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer);
+    const dismissal = await keyboard.execute("close", signal);
+    signal?.throwIfAborted();
+    if (!dismissal.success) {
+      return dismissal;
+    }
+    return this.focuser.focus(selector, signal, display, options);
   }
 
   private async executeCommands(

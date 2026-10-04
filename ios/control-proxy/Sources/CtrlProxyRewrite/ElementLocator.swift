@@ -1,5 +1,6 @@
 import Foundation
 #if canImport(XCTest) && os(iOS)
+    import os
     import UIKit
     import XCTest
 #endif
@@ -31,6 +32,8 @@ import Foundation
 @MainActor
 public final class ElementLocator: ElementLocating, HierarchyExtracting {
     #if canImport(XCTest) && os(iOS)
+        private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "ElementLocator")
+
         private struct ScreenMetrics {
             let scale: Float
             let nativeScale: Double
@@ -252,19 +255,30 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         // trip that re-serializes the app's accessibility tree (issue #5474).
                         let typedInputs = Self.collectTextInputSnapshots(from: snap)
 
-                        // Query keyboard focus via predicate — snapshot.hasFocus reflects
-                        // UIKit focus (tvOS/iPad), not keyboard input focus on iPhone.
-                        // The focus frame is only ever applied to text-input nodes, so skip
-                        // the live requery entirely when the snapshot exposes no text field
-                        // (no keyboard can be focused without one) (issue #5474).
+                        // Prefer focus from the captured tree; keep the predicate fallback
+                        // for fields whose snapshots do not report keyboard input focus.
                         let focusFrame: CGRect?
-                        if Self.shouldQueryKeyboardFocus(textInputSnapshotCount: typedInputs.count) {
-                            let focused = freshApp.descendants(matching: .any)
-                                .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                                .firstMatch
-                            focusFrame = focused.exists ? focused.frame : nil
-                        } else {
+                        switch Self.keyboardFocusDecision(
+                            textInputCandidates: typedInputs.map { (frame: $0.frame, hasFocus: $0.hasFocus) }
+                        ) {
+                        case .skip:
                             focusFrame = nil
+                        case let .useSnapshotFrame(frame):
+                            focusFrame = frame
+                        case .liveQuery:
+                            do {
+                                focusFrame = try catchingObjCException {
+                                    let focused = freshApp.descendants(matching: .any)
+                                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                                        .firstMatch
+                                    // Resolve once: separate exists/frame reads race app backgrounding.
+                                    return try focused.snapshot().frame
+                                }
+                            } catch {
+                                // Missing focus safely falls back to snapshot.hasFocus when building the hierarchy.
+                                logger.debug("Keyboard focus snapshot unavailable: \(error)")
+                                focusFrame = nil
+                            }
                         }
                         return (snap, typedInputs, focusFrame, UIScreen.main.bounds)
                     }

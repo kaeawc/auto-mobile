@@ -600,6 +600,114 @@ describe("DefaultIosSdkEventIngestor", () => {
     });
   });
 
+  test.each(["none", "capture", "update", "lookup"] as const)(
+    "navigation keeps awaited side-effect order when %s fails",
+    async (failure) => {
+      const calls: string[] = [];
+      const graphWrite = Promise.withResolvers<void>();
+      const screenshotManagerSpy = spyOn(
+        NavigationScreenshotManager,
+        "getInstance",
+      ).mockReturnValue({
+        storeScreenshot: async () => {
+          calls.push("store");
+          return "/screens/com.app/Home.webp";
+        },
+      } as unknown as NavigationScreenshotManager);
+      const subject = new DefaultIosSdkEventIngestor({
+        deviceId: DEVICE_ID,
+        timer: new FakeTimer(),
+        telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
+        failureRecorder,
+        getNavigationGraphManager: () => {
+          calls.push("graph");
+          return {
+            recordNavigationEvent: () => {
+              calls.push("write");
+              return graphWrite.promise;
+            },
+            updateNodeScreenshot: async () => {
+              calls.push("update");
+              if (failure === "update") {
+                throw new Error("update failed");
+              }
+            },
+          };
+        },
+        navigationScreenshotsEnabled: () => {
+          calls.push("enabled");
+          return true;
+        },
+        captureScreenshot: async () => {
+          calls.push("capture");
+          if (failure === "capture") {
+            throw new Error("capture failed");
+          }
+          return { success: true, data: "AAAA", format: "png" };
+        },
+        findNavigationNodeId: async () => {
+          calls.push("lookup");
+          if (failure === "lookup") {
+            throw new Error("lookup failed");
+          }
+          return 0;
+        },
+      });
+      const recordNavigation = recorder.recordNavigationEvent.bind(recorder);
+      recorder.recordNavigationEvent = async (value) => {
+        calls.push("telemetry");
+        await recordNavigation(value);
+      };
+      try {
+        const pending = subject.recordSdkEvent(
+          event("navigation", { destination: "Home" }),
+          "com.app",
+        );
+        expect(calls).toEqual(["graph", "write"]);
+        expect(recorder.getContext()).toEqual({ deviceId: DEVICE_ID, sessionId: null });
+        graphWrite.resolve();
+        await pending;
+        const expected = ["graph", "write", "enabled", "capture"];
+        if (failure !== "capture") {
+          expected.push("store", "graph", "update");
+        }
+        if (failure === "none" || failure === "lookup") {
+          expected.push("lookup");
+        }
+        expected.push("telemetry");
+        expect(calls).toEqual(expected);
+        expect(recorder.navigation[0].event.screenshotUri).toBe(
+          failure === "none" ? "automobile:navigation/nodes/0/screenshot?appId=com.app" : null,
+        );
+        expect(recorder.getContext()).toEqual({
+          deviceId: "prev-device",
+          sessionId: "prev-session",
+        });
+      } finally {
+        screenshotManagerSpy.mockRestore();
+      }
+    },
+  );
+
+  test("empty navigation destination skips graph and screenshot configuration", async () => {
+    const withScreenshots = buildIngestor({
+      navigationScreenshotsEnabled: () => {
+        throw new Error("must not inspect screenshots");
+      },
+    });
+    await withScreenshots.recordSdkEvent(event("navigation", { destination: "" }), "com.app");
+    expect(navSink.recorded).toEqual([]);
+    expect(recorder.navigation[0].event).toEqual({
+      timestamp: 1000,
+      applicationId: "com.app",
+      destination: "",
+      source: null,
+      arguments: null,
+      metadata: null,
+      screenshotUri: null,
+    });
+  });
+
   test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#3506)", async () => {
     resetDbWriteBarrier();
     const barrier = getDbWriteBarrier();

@@ -15,6 +15,7 @@ import {
 } from "../../../src/features/navigation/ExploreElementExtraction";
 import type { ElementSelector } from "../../../src/utils/interfaces/ElementSelector";
 import type { TrackedElement } from "../../../src/features/navigation/ExploreTypes";
+import { isLoginScreen } from "../../../src/features/navigation/ExploreBlockerDetection";
 
 describe("ExploreElementExtraction", () => {
   let elementParser: ElementParser;
@@ -258,6 +259,59 @@ describe("ExploreElementExtraction", () => {
   });
 
   describe("enrichElementWithChildProperties", () => {
+    test.each([
+      { text: 42 },
+      { "content-desc": true },
+      { className: { name: "android.widget.Button" } },
+    ])("should drop non-string child attributes before login matching: %j", (child) => {
+      const element = createMockElement({
+        text: undefined,
+        class: undefined,
+        "content-desc": undefined,
+      });
+      element.node = [child];
+
+      const enriched = enrichElementWithChildProperties(element);
+
+      expect(() => isLoginScreen([enriched])).not.toThrow();
+      expect(enriched.text).toBeUndefined();
+      expect(enriched.class).toBeUndefined();
+      expect(enriched["content-desc"]).toBeUndefined();
+    });
+
+    test("should use later string child attributes after non-string and empty values", () => {
+      const element = createMockElement({ text: undefined, class: undefined });
+      element.node = [
+        { text: 42, "content-desc": true, className: { name: "invalid" } },
+        { text: "", "content-desc": "", className: "" },
+        { text: "Sign in", "content-desc": "Email", className: "android.widget.EditText" },
+        { text: "Later", "content-desc": "Later", className: "android.widget.Button" },
+      ];
+
+      const enriched = enrichElementWithChildProperties(element);
+
+      expect(enriched.text).toBe("Sign in");
+      expect(enriched.class).toBe("android.widget.EditText");
+      expect(enriched["content-desc"]).toBe("Email");
+      expect(isLoginScreen([enriched])).toBe(true);
+    });
+
+    test("should preserve ordinary string attributes from a single child", () => {
+      const element = createMockElement({ text: undefined, class: undefined });
+      element.node = {
+        text: "Sign in",
+        className: "android.widget.EditText",
+        "content-desc": "Email",
+      };
+
+      const enriched = enrichElementWithChildProperties(element);
+
+      expect(enriched.text).toBe("Sign in");
+      expect(enriched.class).toBe("android.widget.EditText");
+      expect(enriched["content-desc"]).toBe("Email");
+      expect(isLoginScreen([enriched])).toBe(true);
+    });
+
     test("should copy text from child node if parent has none", () => {
       const element = createMockElement({ text: undefined });
       element.node = [{ text: "Child Text" }];

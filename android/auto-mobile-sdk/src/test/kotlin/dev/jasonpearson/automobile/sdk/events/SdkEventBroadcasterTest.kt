@@ -4,9 +4,11 @@ import android.content.ContextWrapper
 import android.content.Intent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
+import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.PendingEventBatch
 import dev.jasonpearson.automobile.sdk.persistence.replayEventBatches
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -41,6 +43,22 @@ class SdkEventBroadcasterTest {
   }
 
   @Test
+  fun `batch id extra is stable across retries and distinct for split chunks`() {
+    var nextId = 0
+    SdkEventBroadcaster.batchIdProvider = { "batch-${++nextId}" }
+    val sentIds = mutableListOf<String?>()
+    val context = BroadcastContext {
+      sentIds.add(it.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID))
+      if (sentIds.size == 1) throw IllegalStateException("retry")
+    }
+    val events = (1..2).map { makeEvent("event-$it-" + "x".repeat(60_000)) }
+    SdkEventBroadcaster.broadcastBatch(context, events)
+    ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+    assertEquals(listOf<String?>("batch-1", "batch-2", "batch-1"), sentIds)
+    assertEquals(2, nextId)
+  }
+
+  @Test
   fun `exhausted retries report each exact chunk once in order`() {
     val events = (1..3).map { makeEvent("event-$it-" + "x".repeat(60_000)) }
     val failed = mutableListOf<List<SdkEvent>>()
@@ -50,7 +68,12 @@ class SdkEventBroadcasterTest {
       throw IllegalStateException("unavailable")
     }
     val completions = mutableListOf<Boolean>()
-    SdkEventBroadcaster.broadcastBatch(context, events, failed::add, completions::add)
+    SdkEventBroadcaster.broadcastBatch(
+      context,
+      events,
+      { events, _ -> failed.add(events) },
+      completions::add,
+    )
     assertTrue(failed.isEmpty())
     assertTrue(completions.isEmpty())
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
@@ -71,7 +94,12 @@ class SdkEventBroadcasterTest {
           as SdkEventBatch
       sent.add((batch.events.single() as SdkLifecycleEvent).kind)
     }
-    SdkEventBroadcaster.broadcastBatch(context, events, failed::add, completions::add)
+    SdkEventBroadcaster.broadcastBatch(
+      context,
+      events,
+      { events, _ -> failed.add(events) },
+      completions::add,
+    )
     assertEquals(events.map { (it as SdkLifecycleEvent).kind }, sent)
     assertTrue(failed.isEmpty())
     assertEquals(listOf(true), completions)
@@ -87,7 +115,12 @@ class SdkEventBroadcasterTest {
         throw IllegalStateException("unavailable")
       }
     }
-    SdkEventBroadcaster.broadcastBatch(context, events, failed::add, completions::add)
+    SdkEventBroadcaster.broadcastBatch(
+      context,
+      events,
+      { events, _ -> failed.add(events) },
+      completions::add,
+    )
     assertTrue(completions.isEmpty())
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     assertEquals(listOf(listOf(events[1])), failed)
@@ -105,7 +138,7 @@ class SdkEventBroadcasterTest {
     SdkEventBroadcaster.broadcastBatch(
       context,
       listOf(makeEvent("one")),
-      failed::add,
+      { events, _ -> failed.add(events) },
       completions::add,
     )
     assertTrue(completions.isEmpty())
@@ -124,7 +157,7 @@ class SdkEventBroadcasterTest {
     SdkEventBroadcaster.broadcastBatch(
       context,
       listOf(makeEvent("one")),
-      failed::add,
+      { events, _ -> failed.add(events) },
       completions::add,
     )
     SdkEventBroadcaster.reset()
@@ -167,13 +200,15 @@ class SdkEventBroadcasterTest {
     val persisted = mutableListOf<List<SdkEvent>>()
     val removed = mutableListOf<String>()
 
-    override fun persist(events: List<SdkEvent>): String {
+    override fun persist(events: List<SdkEvent>, deliveryId: String?): String {
       persisted.add(events)
       return "id"
     }
 
-    override fun loadPending(): List<Pair<String, List<SdkEvent>>> =
-      listOf("original" to listOf(SdkLifecycleEvent(timestamp = 1L, kind = "replay")))
+    override fun loadPending(): List<PendingEventBatch> =
+      listOf(
+        PendingEventBatch("original", listOf(SdkLifecycleEvent(timestamp = 1L, kind = "replay")))
+      )
 
     override fun removeBatch(batchId: String) {
       removed.add(batchId)
@@ -238,8 +273,15 @@ class SdkEventBroadcasterTest {
     val context = BroadcastContext {
       if (attempts++ == 0) throw IllegalStateException("retry")
     }
-    replayEventBatches(persistence, { it.run() }) { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
+    replayEventBatches(persistence, { it.run() }) { events, deliveryId, complete ->
+      SdkEventBroadcaster.broadcastBatch(
+        context,
+        events,
+        onUndelivered = { _, _ -> },
+        onComplete = complete,
+        splitBatches = false,
+        batchId = deliveryId,
+      )
     }
     assertTrue(persistence.removed.isEmpty())
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
@@ -253,8 +295,15 @@ class SdkEventBroadcasterTest {
     val counter = DefaultDropCounter()
     SdkEventBroadcaster.dropCounter = counter
     val context = BroadcastContext { throw IllegalStateException("unavailable") }
-    replayEventBatches(persistence, { it.run() }) { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
+    replayEventBatches(persistence, { it.run() }) { events, deliveryId, complete ->
+      SdkEventBroadcaster.broadcastBatch(
+        context,
+        events,
+        onUndelivered = { _, _ -> },
+        onComplete = complete,
+        splitBatches = false,
+        batchId = deliveryId,
+      )
     }
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     assertTrue(persistence.removed.isEmpty())
@@ -266,8 +315,15 @@ class SdkEventBroadcasterTest {
   fun `reset during replay retains original without repersisting`() {
     val persistence = RecordingPersistence()
     val context = BroadcastContext { throw IllegalStateException("unavailable") }
-    replayEventBatches(persistence, { it.run() }) { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
+    replayEventBatches(persistence, { it.run() }) { events, deliveryId, complete ->
+      SdkEventBroadcaster.broadcastBatch(
+        context,
+        events,
+        onUndelivered = { _, _ -> },
+        onComplete = complete,
+        splitBatches = false,
+        batchId = deliveryId,
+      )
     }
     SdkEventBroadcaster.reset()
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
@@ -311,12 +367,13 @@ class SdkEventBroadcasterTest {
     val failures = mutableListOf<String>()
     val persistence =
       object : EventPersistence {
-        override fun persist(events: List<SdkEvent>): String? = error("No duplicate files")
+        override fun persist(events: List<SdkEvent>, deliveryId: String?): String? =
+          error("No duplicate files")
 
         override fun loadPending() =
           listOf(
-            "failed" to listOf(makeEvent("failed")),
-            "later" to listOf(makeEvent("later")),
+            PendingEventBatch("failed", listOf(makeEvent("failed"))),
+            PendingEventBatch("later", listOf(makeEvent("later"))),
           )
 
         override fun removeBatch(batchId: String) {
@@ -338,13 +395,14 @@ class SdkEventBroadcasterTest {
     dev.jasonpearson.automobile.sdk.persistence.EventBatchReplay().replay(
       persistence,
       { it.run() },
-    ) { events, complete ->
+    ) { events, deliveryId, complete ->
       SdkEventBroadcaster.broadcastBatch(
         context,
         events,
-        onUndelivered = {},
+        onUndelivered = { _, _ -> },
         onFinished = complete,
         splitBatches = false,
+        batchId = deliveryId,
       )
     }
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
@@ -357,10 +415,17 @@ class SdkEventBroadcasterTest {
     SdkEventBroadcaster.capabilityGate =
       SdkEventAckCapability(AckPackageInfoReader { false }, { 0 })
     val events = (1..3).map { makeEvent("chunk-$it-" + "x".repeat(60_000)) }
-    var sends = 0
-    val context = BroadcastContext { sends++ }
+    val ids = mutableListOf<String?>()
+    val context = BroadcastContext {
+      ids.add(it.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID))
+    }
     SdkEventBroadcaster.broadcastBatch(context, events, splitBatches = false)
-    assertEquals(3, sends)
+    assertEquals(List<String?>(3) { null }, ids)
+    ids.clear()
+    repeat(2) {
+      SdkEventBroadcaster.broadcastBatch(context, events, splitBatches = false, batchId = "stored")
+    }
+    assertEquals(List(2) { listOf<String?>("stored:0", "stored:1", "stored:2") }.flatten(), ids)
   }
 
   private fun makeEvent(name: String): SdkEvent =

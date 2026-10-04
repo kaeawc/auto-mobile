@@ -8,7 +8,16 @@ import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 internal class SdkEventBatchBroadcastHandler(
   private val enqueue: (SdkEventBatch) -> Boolean,
   private val log: LogSink,
+  private val recentBatchCapacity: Int = 256,
 ) {
+  // Insertion order bounds memory and preserves the oldest-accepted eviction policy. 256 covers
+  // the SDK's default 100-file backlog plus the processor's 64 queued batches with headroom.
+  private val acceptedBatchIds = LinkedHashSet<String>()
+
+  init {
+    require(recentBatchCapacity > 0)
+  }
+
   interface LogSink {
     fun debug(message: String)
 
@@ -21,7 +30,7 @@ internal class SdkEventBatchBroadcastHandler(
     fun setResultCode(code: Int)
   }
 
-  fun handle(eventJson: String?, result: ResultSink) {
+  fun handle(eventJson: String?, result: ResultSink, batchId: String? = null) {
     val batch = eventJson?.let(SdkEventSerializer::eventBatchFromJson)
     if (batch == null) {
       acknowledge(result, SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_INVALID_PAYLOAD)
@@ -30,7 +39,27 @@ internal class SdkEventBatchBroadcastHandler(
 
     log.debug("Received event batch with ${batch.events.size} events")
 
-    if (enqueue(batch)) {
+    val accepted =
+      synchronized(acceptedBatchIds) {
+        if (batchId != null && batchId in acceptedBatchIds) {
+          true
+        } else if (enqueue(batch)) {
+          // Record only a successful synchronous queue handoff, while still holding the lock.
+          // Queue-full retries remain eligible; overlapping receivers cannot enqueue the same id.
+          if (batchId != null) {
+            acceptedBatchIds.add(batchId)
+            if (acceptedBatchIds.size > recentBatchCapacity) {
+              val oldest = acceptedBatchIds.iterator()
+              oldest.next()
+              oldest.remove()
+            }
+          }
+          true
+        } else {
+          false
+        }
+      }
+    if (accepted) {
       acknowledge(result, SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
     } else {
       log.warn(

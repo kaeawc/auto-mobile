@@ -1,0 +1,84 @@
+{
+  "id": "variants",
+  "window": {
+    "placement": {
+      "type": "fullscreen",
+      "scrim": "#80000000"
+    },
+    "opacity": 80
+  },
+  "state": {
+    "query": "",
+    "open": false
+  },
+  "root": {
+    "type": "column",
+    "safeAreaPadding": {
+      "edges": ["top", "bottom"],
+      "types": ["systemBars", "cutout", "ime"]
+    },
+    "children": [
+      {
+        "type": "tabBar",
+        "pager": "pages",
+        "items": [
+          {
+            "label": "Original",
+            "icon": "home"
+          },
+          {
+            "label": "Edited",
+            "image": "variant-b"
+          }
+        ]
+      },
+      {
+        "type": "pager",
+        "id": "pages",
+        "children": [
+          {
+            "type": "scroll",
+            "axis": "vertical",
+            "child": {
+              "type": "text",
+              "text": "Page {page} of {pageCount}"
+            }
+          },
+          {
+            "type": "image",
+            "asset": "variant-b",
+            "contentScale": "fit"
+          }
+        ]
+      },
+      {
+        "type": "textField",
+        "stateKey": "query",
+        "placeholder": "Feedback"
+      },
+      {
+        "type": "text",
+        "text": "Next",
+        "onTap": [
+          {
+            "type": "setPage",
+            "pager": "pages",
+            "page": "next"
+          }
+        ]
+      },
+      {
+        "type": "bottomSheet",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "detents": ["half", "full"],
+        "child": {
+          "type": "text",
+          "text": "Details"
+        }
+      }
+    ]
+  }
+}

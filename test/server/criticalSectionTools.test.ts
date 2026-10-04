@@ -4,15 +4,15 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import type { BootedDevice } from "../../src/models";
+import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { throwIfAborted } from "../../src/utils/toolUtils";
-import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
 
@@ -562,6 +562,66 @@ describe("criticalSection tool", () => {
     warnSpy.mockRestore();
   });
 
+  test("preserves device loss from a sub-step after cleanup and lock release", async () => {
+    const coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+    const restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const cleanup = spyOn(coordinator, "forceCleanup");
+    const enter = coordinator.enterCriticalSection.bind(coordinator);
+    const release = mock(() => {});
+    const enterSpy = spyOn(coordinator, "enterCriticalSection").mockImplementation(
+      async (...args) => {
+        const releaseLock = await enter(...args);
+        return () => {
+          release();
+          releaseLock();
+        };
+      },
+    );
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "emulator-5554",
+      name: "Test Device",
+    };
+    const loss = new DeviceLostError(device.deviceId, "device-disconnected:emulator-5554");
+    const signal = new AbortController().signal;
+    const step = mock(async (_params: unknown, _progress: unknown, passedSignal?: AbortSignal) => {
+      expect(passedSignal).toBe(signal);
+      expect(passedSignal?.aborted).toBe(false);
+      throw loss;
+    });
+    ToolRegistry.register("mockDeviceLoss", "Device loss", z.object({ device: z.string() }), step);
+
+    try {
+      const tool = ToolRegistry.getToolForPlan("criticalSection")!;
+      const error = await tool.deviceAwareHandler!(
+        device,
+        {
+          lock: "loss-lock",
+          __lockNamespace: "loss-session",
+          deviceCount: 1,
+          steps: [{ tool: "mockDeviceLoss", params: { device: "A" } }],
+        },
+        undefined,
+        signal,
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(step).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledWith("loss-lock", "loss-session");
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(error).toBe(loss);
+      expect(isDeviceLostError(error)).toBe(true);
+    } finally {
+      enterSpy.mockRestore();
+      cleanup.mockRestore();
+      coordinator.reset();
+      restoreCoordinator();
+    }
+  });
+
   test("fails fast when a step fails", async () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
@@ -811,11 +871,12 @@ describe("criticalSection tool", () => {
       ToolRegistry.register("mockOptionalStep", "lost device", z.object({}), async () => {
         throw deviceLoss;
       });
-      await expect(runSteps(optional)).rejects.toThrow(
-        optional
-          ? 'Critical section "optional-lock" failed for device optional-device: device disconnected'
-          : 'Critical section "optional-lock" failed for device optional-device: Failed at step 1/2 (mockOptionalStep): device disconnected',
+      const error = await runSteps(optional).then(
+        () => undefined,
+        (error: unknown) => error,
       );
+      expect(error).toBe(deviceLoss);
+      expect(isDeviceLostError(error)).toBe(true);
       expect(nextStep).not.toHaveBeenCalled();
     });
 

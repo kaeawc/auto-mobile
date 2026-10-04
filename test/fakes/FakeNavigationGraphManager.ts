@@ -236,14 +236,18 @@ export class FakeNavigationGraphManager
     this.trackCall("recordBackStack", [backStack]);
   }
 
-  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): void {
+  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): () => void {
     this.trackCall("recordToolCall", [toolName, args, uiState]);
-    this.toolCallHistory.push({
+    const interaction: ToolCallInteraction = {
       toolName,
       args,
       timestamp: Date.now(),
       uiState,
-    });
+    };
+    this.toolCallHistory.push(interaction);
+    return () => {
+      this.toolCallHistory = this.toolCallHistory.filter((tc) => tc !== interaction);
+    };
   }
 
   getCurrentScreen(): string | null {

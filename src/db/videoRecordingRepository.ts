@@ -46,6 +46,7 @@ export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
   platform?: "android" | "ios";
   limit?: number;
   orderByLastAccessed?: "asc" | "desc";
+  orderByStartedAt?: "asc" | "desc";
 }
 
 function parseConfig(configJson: string): VideoRecordingConfig {
@@ -314,6 +315,11 @@ export class VideoRecordingRepository {
     if (query.orderByLastAccessed) {
       builder = builder.orderBy("last_accessed_at", query.orderByLastAccessed);
     }
+    if (query.orderByStartedAt) {
+      builder = builder
+        .orderBy("started_at", query.orderByStartedAt)
+        .orderBy("recording_id", query.orderByStartedAt);
+    }
     if (query.limit && query.limit > 0) {
       builder = builder.limit(query.limit);
     }
@@ -325,7 +331,7 @@ export class VideoRecordingRepository {
   async getLatestRecording(): Promise<VideoRecordingRecord | null> {
     const rows = await this.listRecordings({
       status: ["completed", "interrupted"],
-      orderByLastAccessed: "desc",
+      orderByStartedAt: "desc",
       limit: 1,
     });
     return rows[0] ?? null;

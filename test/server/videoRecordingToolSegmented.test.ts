@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
@@ -22,6 +23,7 @@ import {
 } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
+  startVideoRecording,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
@@ -137,6 +139,7 @@ describe("videoRecording tool segmentation branch", () => {
 
     const service = new VideoRecorderService({
       backend: fakeBackend,
+      idGenerator: new FakeIdGenerator(),
       archiveRoot,
       now: () => new Date(fakeTimer.now()),
     });
@@ -166,6 +169,77 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
+
+  test("all-device start preserves partial failures and bare-stop discovery order", async () => {
+    const second: BootedDevice = { ...androidDevice, deviceId: "second" };
+    const third: BootedDevice = { ...androidDevice, deviceId: "third" };
+    fakeDeviceSessionManager.setConnectedDevices([androidDevice, second, third]);
+    const calls: string[] = [];
+    const originalStart = fakeBackend.start.bind(fakeBackend);
+    fakeBackend.start = async (config) => {
+      calls.push(config.device?.deviceId ?? "missing");
+      if (config.device?.deviceId === second.deviceId) {
+        throw new Error("second unavailable");
+      }
+      return originalStart(config);
+    };
+    const start = parse(await handler()(androidDevice, { action: "start" }));
+    expect(calls).toEqual([androidDevice.deviceId, second.deviceId, third.deviceId]);
+    expect(start.count).toBe(2);
+    expect(start.failures).toEqual([
+      { deviceId: "second", platform: "android", error: "Error: second unavailable" },
+    ]);
+    expect(
+      (start.recordings as Array<{ deviceId: string }>).map((recording) => recording.deviceId),
+    ).toEqual([androidDevice.deviceId, third.deviceId]);
+    const stop = parse(await handler()(androidDevice, { action: "stop" }));
+    expect(stop.count).toBe(2);
+    expect(stop.failures).toEqual([
+      {
+        deviceId: "second",
+        platform: "android",
+        error: "No active video recording found for device.",
+      },
+    ]);
+    expect(fakeBackend.stopCalls.map((recording) => recording.recordingId)).toEqual(
+      (start.recordings as Array<{ recordingId: string }>).map(
+        (recording) => recording.recordingId,
+      ),
+    );
+  });
+
+  test("start and stop failures preserve aggregate error wording", async () => {
+    fakeBackend.start = async () => {
+      throw new Error("capture unavailable");
+    };
+    await expect(
+      handler()(androidDevice, { action: "start", deviceId: androidDevice.deviceId }),
+    ).rejects.toThrow("Failed to start video recordings: Error: capture unavailable");
+    await expect(
+      handler()(androidDevice, { action: "stop", deviceId: androidDevice.deviceId }),
+    ).rejects.toThrow(
+      "Failed to stop video recordings: No active video recording found for device.",
+    );
+  });
+
+  test("stop response never returns a recording it evicted", async () => {
+    const active = await startVideoRecording({ device: iosDevice });
+    await fsPromises.writeFile(active.outputPath, "video-bytes");
+    fakeBackend.setStopResultOverrides({ sizeBytes: 101 * 1024 * 1024 });
+    fakeDeviceSessionManager.setConnectedDevices([iosDevice]);
+    const response = parse(await handler()(iosDevice, { action: "stop", platform: "ios" }));
+    const recordings = response.recordings as Array<{
+      recordingId: string;
+      filePath: string;
+      warnings?: string[];
+    }>;
+    const evicted = (response.evictedRecordingIds ?? []) as string[];
+    expect(recordings).toHaveLength(1);
+    expect(recordings[0].recordingId).toBe(active.recordingId);
+    expect(recordings.some((recording) => evicted.includes(recording.recordingId))).toBe(false);
+    expect(recordings[0].warnings?.join(" ")).toContain("exceeds limit");
+    expect(await fsPromises.readFile(recordings[0].filePath, "utf8")).toBe("video-bytes");
+  });
 
   test("request abort rolls back every device that already started during fanout", async () => {
     const secondDevice: BootedDevice = {

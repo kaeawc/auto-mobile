@@ -5355,13 +5355,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.resolvePendingResponse(message, (message): TraversalOrderResult => {
         const result = message.result;
         if (result && result.elements) {
-          const elements = result.elements.map((node: AccessibilityNode) =>
+          const converted = result.elements.map((node: AccessibilityNode) =>
             this.focus.convertAccessibilityNodeToElement(node),
           );
+          const elements = converted.filter((element) => element !== null);
+          const dropped = converted.length - elements.length;
+          if (dropped > 0) {
+            logger.debug(`[CTRL_PROXY] Dropped ${dropped} traversal nodes that failed conversion`);
+          }
+          const focusedElement =
+            result.focusedIndex === null ? null : converted[result.focusedIndex];
           return {
             elements,
-            focusedIndex: result.focusedIndex,
-            totalCount: result.totalCount,
+            focusedIndex: focusedElement ? elements.indexOf(focusedElement) : null,
+            totalCount: dropped > 0 ? elements.length : result.totalCount,
             totalTimeMs: message.totalTimeMs,
             requestId: message.requestId,
             error: message.error,

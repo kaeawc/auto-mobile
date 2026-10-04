@@ -50,8 +50,8 @@ import {
 } from "./launchObservationPackages";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import {
-  parseFallbackMainActivities,
   parseLauncherActivities,
+  parseLauncherActivitiesFromPackageDump,
   resolveComponentActivity,
 } from "./launcherActivityParsing";
 
@@ -203,11 +203,13 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Extract launcher activities using targeted adb command
    * @param packageName - Package name we're trying to launch
+   * @param userId - Android user the launcher query targets
    * @param perf - Optional performance tracker
    * @returns Array of launcher activity names
    */
   private async extractLauncherActivities(
     packageName: string,
+    userId: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<string[]> {
@@ -221,7 +223,7 @@ export class LaunchApp extends BaseVisualChange {
 
     try {
       logger.info(`[LaunchApp] Extracting launcher activities for ${packageName}`);
-      const approaches = this.buildActivityApproachCommands(packageName);
+      const approaches = this.buildActivityApproachCommands(packageName, userId);
       for (let i = 0; i < approaches.length; i++) {
         this.assertLaunchNotAborted(signal);
         activities.push(
@@ -272,14 +274,10 @@ export class LaunchApp extends BaseVisualChange {
     return undefined;
   }
 
-  private buildActivityApproachCommands(packageName: string): string[] {
+  private buildActivityApproachCommands(packageName: string, userId: number): string[] {
     return [
-      // Approach 1: Direct pm dump with specific grep
-      `shell pm dump ${shellQuote(packageName)} | grep -A 5 -B 5 "android.intent.action.MAIN"`,
-      // Approach 2: Query resolver activities
-      `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
-      // Approach 3: Direct pm list activities
-      `shell pm list packages -f ${shellQuote(packageName)} && pm dump ${shellQuote(packageName)} | grep -A 10 "Activity filter"`,
+      // Ask PackageManager for MAIN/LAUNCHER activities before parsing a full dump.
+      `shell cmd package query-activities --brief --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
     ];
   }
 
@@ -339,7 +337,7 @@ export class LaunchApp extends BaseVisualChange {
             signal,
           );
       this.assertLaunchNotAborted(signal);
-      const activities = parseFallbackMainActivities(simpleResult.stdout, packageName);
+      const activities = parseLauncherActivitiesFromPackageDump(simpleResult.stdout, packageName);
       for (const activity of activities) {
         logger.info(`[LaunchApp] Added fallback activity: ${activity}`);
       }
@@ -1870,41 +1868,47 @@ export class LaunchApp extends BaseVisualChange {
 
     // Try monkey launch as fallback (fast but less reliable)
     if (!targetActivity) {
-      const monkeyResult = await perf.track("monkeyLaunch", async () => {
-        logger.info(`[LaunchApp] Trying monkey launch (fallback approach) for user ${userId}`);
-        try {
-          const monkeyCmd = `shell monkey -p ${shellQuote(packageName)} --user ${userId} 1`;
-          logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
-          const result = await this.adb.executeCommand(monkeyCmd);
-          this.assertLaunchNotAborted(signal);
-          if (
-            /No activities found to run|[Mm]onkey aborted/.test(
-              `${result.stdout}\n${result.stderr}`,
-            )
-          ) {
-            logger.info(`[LaunchApp] Monkey launch reported no activity`);
+      if (userId !== 0) {
+        logger.info(
+          `[LaunchApp] Skipping monkey for user ${userId}: monkey cannot target a user; continuing to activity discovery`,
+        );
+      } else {
+        const monkeyResult = await perf.track("monkeyLaunch", async () => {
+          logger.info(`[LaunchApp] Trying monkey launch (fallback approach) for user ${userId}`);
+          try {
+            const monkeyCmd = `shell monkey -p ${shellQuote(packageName)} -c android.intent.category.LAUNCHER 1`;
+            logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
+            const result = await this.adb.executeCommand(monkeyCmd);
+            this.assertLaunchNotAborted(signal);
+            if (
+              /No activities found to run|[Mm]onkey aborted/.test(
+                `${result.stdout}\n${result.stderr}`,
+              )
+            ) {
+              logger.info(`[LaunchApp] Monkey launch reported no activity`);
+              return { success: false };
+            }
+            logger.info(`[LaunchApp] Monkey launch completed successfully`);
+            return { success: true };
+          } catch (error) {
+            this.assertLaunchNotAborted(signal);
+            logger.info(
+              `[LaunchApp] Monkey launch failed: ${error}, falling back to activity discovery`,
+            );
             return { success: false };
           }
-          logger.info(`[LaunchApp] Monkey launch completed successfully`);
-          return { success: true };
-        } catch (error) {
-          this.assertLaunchNotAborted(signal);
-          logger.info(
-            `[LaunchApp] Monkey launch failed: ${error}, falling back to activity discovery`,
-          );
-          return { success: false };
-        }
-      });
-      this.assertLaunchNotAborted(signal);
+        });
+        this.assertLaunchNotAborted(signal);
 
-      if (monkeyResult.success) {
-        perf.end();
-        return {
-          success: true,
-          packageName,
-          activityName: "monkey_launch",
-          userId,
-        };
+        if (monkeyResult.success) {
+          perf.end();
+          return {
+            success: true,
+            packageName,
+            activityName: "monkey_launch",
+            userId,
+          };
+        }
       }
     }
 
@@ -1912,7 +1916,7 @@ export class LaunchApp extends BaseVisualChange {
     if (!targetActivity) {
       const launcherActivities = await perf.track("extractLauncherActivities", async () => {
         logger.info(`[LaunchApp] No activity specified, extracting launcher activities`);
-        return this.extractLauncherActivities(packageName, perf, signal);
+        return this.extractLauncherActivities(packageName, userId, perf, signal);
       });
       this.assertLaunchNotAborted(signal);
 

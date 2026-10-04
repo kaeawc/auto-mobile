@@ -1,3 +1,4 @@
+import { classifyToolResult } from "../utils/toolEnvelopePayload";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -63,30 +64,15 @@ const criticalSectionSchema = addDeviceTargetingToSchema(
 
 type CriticalSectionParams = z.infer<typeof criticalSectionSchema>;
 
-function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> | undefined {
-  if (!result || typeof result !== "object") {
-    return undefined;
+function unwrapCriticalSectionResult(
+  response: unknown,
+  toolName: string,
+): Record<string, unknown> | undefined {
+  const result = classifyToolResult(response, toolName);
+  if ("failure" in result) {
+    return result.failure;
   }
-  const directResult = result as Record<string, unknown>;
-  if ("success" in directResult) {
-    return directResult;
-  }
-  const content = directResult.content;
-  const firstContent = Array.isArray(content) ? content[0] : undefined;
-  if (!firstContent || typeof firstContent !== "object") {
-    return undefined;
-  }
-  const text = (firstContent as { text?: unknown }).text;
-  if (typeof text !== "string") {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
-  } catch (error) {
-    logger.debug(`Failed to parse nested critical-section tool response: ${error}`);
-    return undefined;
-  }
+  return result.kind === "payload" ? result.payload : undefined;
 }
 
 /**
@@ -210,7 +196,7 @@ const criticalSectionHandler = async (
 
         // Internal tool calls can return an MCP envelope whose JSON payload
         // contains the actual success/error fields.
-        const toolResult = unwrapCriticalSectionResult(result);
+        const toolResult = unwrapCriticalSectionResult(result, step.tool);
         if (toolResult?.success === false) {
           const errorMsg = formatCriticalSectionError(toolResult, step.tool);
           throw new ActionableError(errorMsg);

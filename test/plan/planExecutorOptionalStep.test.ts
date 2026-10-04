@@ -96,8 +96,39 @@ describe("PlanExecutor — optional steps", () => {
       "optionalStepOk",
       "optionalStepStrict",
       "optionalStepTimedFail",
+      "optionalEnvelopeProbe",
     );
   });
+
+  for (const text of ["not json", '{"success":tr']) {
+    for (const optional of [false, true]) {
+      test(`malformed envelope ${text} is ${optional ? "skipped" : "failed"}`, async () => {
+        ToolRegistry.register(
+          "optionalEnvelopeProbe",
+          "synthetic envelope",
+          z.object({}),
+          async () => ({
+            content: [{ type: "text", text }],
+          }),
+        );
+        const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+          {
+            name: "malformed envelope",
+            steps: [
+              { tool: "optionalEnvelopeProbe", params: {}, optional },
+              { tool: "optionalStepOk", params: {} },
+            ],
+          },
+          0,
+        );
+        expect(result.success).toBe(optional);
+        expect(result.debug?.steps[0].status).toBe(optional ? "skipped" : "failed");
+        expect(result.debug?.steps[0].details.error).toContain("optionalEnvelopeProbe");
+        expect(result.debug?.steps[0].details.error).toContain("could not be interpreted");
+        expect(result.debug?.steps).toHaveLength(optional ? 2 : 1);
+      });
+    }
+  }
 
   test("continues past a failed optional step and still succeeds", async () => {
     const plan: Plan = {

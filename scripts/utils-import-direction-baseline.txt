@@ -7,7 +7,6 @@ src/utils/appearance/applyAppearanceOnConnect.ts -> src/server/appearanceManager
 src/utils/configuredDeviceInventory.ts -> src/server/deviceDescription
 src/utils/interfaces/ElementSelector.ts -> src/features/utility/ElementResolver
 src/utils/interfaces/PlatformClient.ts -> src/features/observe/interfaces/CtrlProxyClient
-src/utils/logger.ts -> src/daemon/daemonFiles
 src/utils/plan/PlanExecutor.ts -> src/daemon/daemonState
 src/utils/plan/PlanExecutor.ts -> src/server/deviceLossOutcome
 src/utils/plan/PlanExecutor.ts -> src/server/toolParamError

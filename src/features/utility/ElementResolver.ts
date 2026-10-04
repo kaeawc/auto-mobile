@@ -910,7 +910,46 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
-    return this.matchText(nodes, selector, intent, textQuery, snapshot, scope);
+    const primary = this.matchText(nodes, selector, intent, textQuery, snapshot, { scope });
+    // Preserve every existing text match (including substrings) before considering
+    // Android placeholders. Mixing the tiers would change targets and uniqueness.
+    // Reuse the same exact/contains/regex rules within the hint-only tier.
+    if (
+      selector.contentDescription === undefined &&
+      primary.matches.length === 0 &&
+      !primary.error
+    ) {
+      return this.matchText(nodes, selector, intent, textQuery, snapshot, {
+        scope,
+        hintFallback: true,
+      });
+    }
+    return primary;
+  }
+
+  private matchableTextFields(
+    node: SearchableEntry,
+    selector: ResolverSelector,
+    hintFallback: boolean | undefined,
+  ): readonly string[] {
+    if (hintFallback) {
+      const hint = node.properties["hint-text"];
+      const android =
+        node.className?.startsWith("android.") ||
+        node.className?.startsWith("androidx.") ||
+        typeof node.properties["input-type"] === "string";
+      return android &&
+        isEditableElementProperties(node.properties) &&
+        typeof hint === "string" &&
+        hint.trim() !== ""
+        ? [hint]
+        : [];
+    }
+    return selector.contentDescription !== undefined
+      ? [node.textSources["content-desc"], node.accessibleLabel].filter(
+          (value): value is string => value !== undefined,
+        )
+      : node.textFields;
   }
 
   private matchText(
@@ -919,14 +958,11 @@ export class ElementResolver {
     intent: ResolutionIntent,
     textQuery: string,
     snapshot: ResolverSnapshot,
-    scope?: SearchableEntry,
+    options: { scope?: SearchableEntry; hintFallback?: boolean },
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
-    const fields = (node: SearchableEntry): readonly string[] =>
-      selector.contentDescription !== undefined
-        ? [node.textSources["content-desc"], node.accessibleLabel].filter(
-            (value): value is string => value !== undefined,
-          )
-        : node.textFields;
+    const { scope, hintFallback } = options;
+    const fields = (node: SearchableEntry) =>
+      this.matchableTextFields(node, selector, hintFallback);
     const query = normalize(textQuery, selector.caseSensitive);
     if (!query) {
       return { matches: [], matchMode: "exact", error: "Text selector must not be blank" };

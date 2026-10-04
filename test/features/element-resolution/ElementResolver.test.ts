@@ -23,6 +23,191 @@ const snapshot = (nodes: unknown[], id = "capture-1", windows?: any[]) => ({
 const resolver = new ElementResolver(() => 0.9);
 const tap = { action: "tap" as const };
 
+describe("Android editable hint fallback", () => {
+  const field = (id: string, text: string, hint?: string, extra = {}) =>
+    node(id, text, {
+      class: "android.widget.EditText",
+      focusable: true,
+      "hint-text": hint,
+      ...extra,
+    });
+
+  test("resolves a filled field by hint while retaining entered text as its label", () => {
+    const result = resolver.resolve(
+      snapshot([field("phone", "5551234", "Phone")]),
+      { text: "Phone" },
+      { action: "input" },
+    );
+    expect(result.chosen?.nativeId).toBe("phone");
+    expect(result.chosen?.label).toBe("5551234");
+    expect(result.matchMode).toBe("exact");
+  });
+
+  for (const property of ["text", "content-desc"] as const) {
+    for (const visible of ["Phone", "Phone number"]) {
+      test(`${property} ${visible} keeps its existing target ahead of an exact hint`, () => {
+        const primary = node("visible", "", { [property]: visible });
+        const before = resolver.resolve(snapshot([primary]), { text: "Phone" }, tap);
+        const after = resolver.resolve(
+          snapshot([
+            field("hint", "5551234", "Phone", {
+              bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            }),
+            primary,
+          ]),
+          { text: "Phone", selectionStrategy: "unique" },
+          tap,
+        );
+        expect(after.chosen?.nativeId).toBe(before.chosen?.nativeId);
+        expect(after.candidates.map((candidate) => candidate.nativeId)).toEqual(["visible"]);
+        expect(after.matchMode).toBe(before.matchMode);
+        expect(after.error).toBeUndefined();
+      });
+    }
+  }
+
+  test("hint exact matches precede hint substrings even when the substring is smaller", () => {
+    const result = resolver.resolve(
+      snapshot([
+        field("substring", "123", "Phone number", {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        }),
+        field("exact", "456", "Phone"),
+      ]),
+      { text: "Phone", selectionStrategy: "unique" },
+      tap,
+    );
+    expect(result.chosen?.nativeId).toBe("exact");
+    expect(result.matchMode).toBe("exact");
+    expect(result.candidates).toHaveLength(1);
+  });
+
+  test("Android input-type metadata supports app-defined editable classes", () => {
+    const result = resolver.resolve(
+      snapshot([
+        field("phone", "5551234", "Phone", {
+          class: "dev.example.PhoneField",
+          "input-type": "phone",
+          actions: ["set_text"],
+        }),
+      ]),
+      { text: "Phone" },
+      { action: "input" },
+    );
+    expect(result.chosen?.nativeId).toBe("phone");
+  });
+
+  test("hint substring fallback uses the existing normalization", () => {
+    const result = resolver.resolve(
+      snapshot([field("phone", "5551234", "  Mobile   Phone  ")]),
+      { text: "mobile phone" },
+      tap,
+    );
+    expect(result.chosen?.nativeId).toBe("phone");
+    expect(result.matchMode).toBe("exact");
+    expect(
+      resolver.resolve(
+        snapshot([field("phone", "5551234", "Mobile Phone")]),
+        { text: "phone" },
+        tap,
+      ).matchMode,
+    ).toBe("contains");
+  });
+
+  test("hints do not make a previously unique entered-text match ambiguous", () => {
+    const result = resolver.resolve(
+      snapshot([field("entered", "Phone", "Phone"), field("other", "5551234", "Phone")]),
+      { text: "Phone", selectionStrategy: "unique" },
+      { action: "input" },
+    );
+    expect(result.chosen?.nativeId).toBe("entered");
+    expect(result.candidates).toHaveLength(1);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("hint-only matches retain smallest-area and topmost-window ordering", () => {
+    const fields = [
+      field("large", "123", "Phone"),
+      field("small", "456", "Phone", { bounds: { left: 0, top: 0, right: 10, bottom: 10 } }),
+    ];
+    expect(resolver.resolve(snapshot(fields), { text: "Phone" }, tap).chosen?.nativeId).toBe(
+      "small",
+    );
+    expect(
+      resolver.resolve(
+        snapshot(fields, "capture", [
+          { windowLayer: 10, hierarchy: { node: field("top", "789", "Phone") } },
+        ]),
+        { text: "Phone" },
+        tap,
+      ).chosen?.nativeId,
+    ).toBe("top");
+  });
+
+  test("explicit match modes and case sensitivity apply to hints", () => {
+    const capture = snapshot([field("phone", "5551234", "Mobile Phone")]);
+    expect(resolver.resolve(capture, { text: "phone", match: "exact" }, tap).chosen).toBeNull();
+    expect(
+      resolver.resolve(capture, { text: "phone", caseSensitive: true }, tap).chosen,
+    ).toBeNull();
+    expect(
+      resolver.resolve(capture, { text: "phone", match: "contains" }, tap).chosen?.nativeId,
+    ).toBe("phone");
+    expect(
+      resolver.resolve(capture, { text: "^mobile.*phone$", match: "regex" }, tap).chosen?.nativeId,
+    ).toBe("phone");
+  });
+
+  test("hints do not satisfy content-description selectors or non-editable nodes", () => {
+    const capture = snapshot([field("phone", "5551234", "Phone")]);
+    expect(resolver.resolve(capture, { contentDescription: "Phone" }, tap).chosen).toBeNull();
+    expect(
+      resolver.resolve(
+        snapshot([
+          node("button", "Submit", { class: "android.widget.Button", "hint-text": "Phone" }),
+        ]),
+        { text: "Phone" },
+        tap,
+      ).chosen,
+    ).toBeNull();
+  });
+
+  test("fields without hints keep their existing text resolution", () => {
+    const capture = snapshot([field("phone", "5551234")]);
+    expect(resolver.resolve(capture, { text: "5551234" }, tap).chosen?.nativeId).toBe("phone");
+    expect(resolver.resolve(capture, { text: "Phone" }, tap).chosen).toBeNull();
+  });
+
+  test("empty and whitespace hints stay absent even for regex selectors", () => {
+    for (const hint of ["", " \t "]) {
+      expect(
+        resolver.resolve(
+          snapshot([field("phone", "5551234", hint)]),
+          { text: "^\\s*$", match: "regex" },
+          tap,
+        ).chosen,
+      ).toBeNull();
+    }
+  });
+
+  test("filled iOS hints keep their existing searchable-text ranking and value label", () => {
+    const capture = snapshot([
+      node("ios", "", {
+        class: "UITextField",
+        value: "5551234",
+        "hint-text": "Phone",
+        actions: ["set_text"],
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      }),
+      node("visible", "Phone"),
+    ]);
+    const result = resolver.resolve(capture, { text: "Phone" }, tap);
+    expect(result.chosen?.nativeId).toBe("ios");
+    expect(result.chosen?.label).toBe("5551234");
+    expect(result.candidates).toHaveLength(2);
+  });
+});
+
 describe("pure element resolver", () => {
   test("full IDs are exact and bare IDs use namespace matching, never substrings", () => {
     const capture = snapshot([node("app:id/btn_login_help"), node("app:id/btn_login")]);

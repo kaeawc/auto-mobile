@@ -262,7 +262,7 @@ read_required_compile_sdk() {
 
     local version
     version=$(grep -E '^[[:space:]]*build-android-compileSdk[[:space:]]*=' "${toml_file}" 2>/dev/null \
-        | head -1 \
+        | sed -n '1p' \
         | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
 
     [[ -n "${version}" ]] || return 1
@@ -346,7 +346,7 @@ version_gte() {
     local v1="$1"
     local v2="$2"
     local sorted
-    sorted=$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | head -n1)
+    sorted=$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | sed -n '1p')
     [[ "$sorted" == "$v2" ]]
 }
 
@@ -447,7 +447,9 @@ is_claude_marketplace_installed() {
         return 1
     fi
     # Check if auto-mobile marketplace is in the list
-    claude plugin marketplace list 2>/dev/null | grep -q "auto-mobile" 2>/dev/null
+    local marketplace_output
+    marketplace_output=$(claude plugin marketplace list 2>/dev/null) || return 1
+    [[ "${marketplace_output}" == *"auto-mobile"* ]]
 }
 
 # Perform early detection of installed components (fast checks only, before gum)
@@ -827,7 +829,7 @@ offer_android_home_shell_setup() {
 
         # Extract ANDROID_HOME value from the file (don't source - may have shell-specific syntax)
         local extracted_value
-        extracted_value=$(grep -E '^\s*(export\s+)?ANDROID_HOME=' "${configured_in}" 2>/dev/null | head -1 | sed -E 's/.*ANDROID_HOME=["'\'']?([^"'\'']+)["'\'']?.*/\1/')
+        extracted_value=$(grep -E '^\s*(export\s+)?ANDROID_HOME=' "${configured_in}" 2>/dev/null | sed -n '1p' | sed -E 's/.*ANDROID_HOME=["'\'']?([^"'\'']+)["'\'']?.*/\1/')
 
         # Expand $HOME if present in the value
         extracted_value="${extracted_value/\$HOME/${HOME}}"
@@ -1005,11 +1007,11 @@ fetch_gum_version() {
     if command_exists curl; then
         version=$(curl -s "https://api.github.com/repos/charmbracelet/gum/releases/latest" \
             | sed -nE 's/.*"tag_name": "v?([^"]+)".*/\1/p' \
-            | head -n 1)
+            | sed -n '1p')
     elif command_exists wget; then
         version=$(wget -qO- "https://api.github.com/repos/charmbracelet/gum/releases/latest" \
             | sed -nE 's/.*"tag_name": "v?([^"]+)".*/\1/p' \
-            | head -n 1)
+            | sed -n '1p')
     fi
 
     if [[ -z "${version}" ]]; then
@@ -2579,7 +2581,7 @@ update_mcp_client_config() {
     fi
 
     # Detect npx → bunx migration and show clear messaging
-    if echo "${existing_content}" | grep -qE '"npx"|command = "npx"|cmd: npx'; then
+    if grep -qE '"npx"|command = "npx"|cmd: npx' <<<"${existing_content}"; then
         echo ""
         printf '%b[MIGRATION]%b %s config uses npx — updating to bunx.\n' "${BOLD}" "${RESET}" "${client_name}"
         printf '  AutoMobile now runs exclusively on Bun for a single, consistent runtime.\n'
@@ -3010,7 +3012,7 @@ for asset in release.get("assets", []):
 
     if command_exists jq; then
         printf '%s' "${release_json}" | jq -r --arg suffix "${suffix}" \
-            '.assets[] | select(.name | endswith($suffix)) | .browser_download_url' | head -n 1
+            '.assets[] | select(.name | endswith($suffix)) | .browser_download_url' | sed -n '1p'
         return 0
     fi
 
@@ -3387,7 +3389,7 @@ migrate_npm_global_auto_mobile() {
     local npm_list_output
     npm_list_output=$(npm list -g @kaeawc/auto-mobile 2>/dev/null) || return 0
 
-    if ! echo "${npm_list_output}" | grep -q "@kaeawc/auto-mobile"; then
+    if [[ "${npm_list_output}" != *"@kaeawc/auto-mobile"* ]]; then
         return 0
     fi
 
@@ -3662,10 +3664,10 @@ start_mcp_daemon() {
 
     if [[ ${daemon_status} -ne 0 ]]; then
         # Check for corrupted migrations error
-        if echo "${daemon_output}" | grep -q "corrupted migrations"; then
+        if [[ "${daemon_output}" == *"corrupted migrations"* ]]; then
             # Extract just the migration error message (from the "error:" line, not source code)
             local migration_error
-            migration_error=$(echo "${daemon_output}" | grep "^error: corrupted migrations:" | sed 's/^error: //' | head -1)
+            migration_error=$(sed -n 's/^error: \(corrupted migrations:.*\)/\1/p' <<<"${daemon_output}" | sed -n '1p')
             if [[ -z "${migration_error}" ]]; then
                 # Fallback if format is different
                 migration_error="corrupted migrations (version mismatch)"
@@ -4637,7 +4639,8 @@ install_bun_curl() {
 
 install_bun_homebrew() {
     # Add the oven-sh/bun tap if not already added
-    if ! brew tap 2>/dev/null | grep -q "oven-sh/bun"; then
+    local tap_output
+    if ! tap_output=$(brew tap 2>/dev/null) || [[ "${tap_output}" != *"oven-sh/bun"* ]]; then
         if ! run_bounded_install "Adding Homebrew tap oven-sh/bun" brew tap oven-sh/bun; then
             log_error "Failed to add Homebrew tap."
             return 1
@@ -4870,7 +4873,7 @@ select_preset() {
         if [[ "${MCP_CONFIG_SCOPE}" != "project" && "${CLAUDE_CLI_INSTALLED}" == "true" ]]; then
             choice="Claude Marketplace"
         else
-            choice=$(printf '%s\n' "${available_clients}" | head -1)
+            choice="${available_clients%%$'\n'*}"
         fi
     else
         choice=$(printf '%s\n' ${options[@]+"${options[@]}"} | gum filter --header "Select installation preset:" --placeholder "Type to filter...") || true
@@ -5108,7 +5111,7 @@ main() {
     # Check Claude CLI and marketplace
     if [[ "${CLAUDE_CLI_INSTALLED}" == "true" ]]; then
         # Check marketplace plugin (deferred from early detection because it's a slow network call)
-        if spin_check "Checking Claude marketplace plugin" "claude plugin marketplace list 2>/dev/null | grep -q 'auto-mobile' 2>/dev/null"; then
+        if spin_check "Checking Claude marketplace plugin" "marketplace_output=\$(claude plugin marketplace list 2>/dev/null) || exit 1; [[ \"\${marketplace_output}\" == *'auto-mobile'* ]]"; then
             CLAUDE_MARKETPLACE_INSTALLED=true
             log_info "Claude CLI: installed (marketplace plugin installed)"
         else

@@ -351,13 +351,20 @@ final class CrashesTests: XCTestCase {
                 // Reset has already published uninitialized state but has not
                 // restored H0 yet. Wait for the worker's actual lock attempt;
                 // it cannot capture A until reset finishes restoring H0.
-                lifecycleLock.didAttemptLockWhileHeld.wait()
+                guard lifecycleLock.didAttemptLockWhileHeld.wait(timeout: .now() + 5) == .success else {
+                    XCTFail("re-initialize worker never attempted the lifecycle lock while it was held")
+                    return current
+                }
             }
             return current
         }
 
         handlers.crashes.reset()
-        finished.wait() // Join only AFTER reset releases the lifecycle lock.
+        // Join only AFTER reset releases the lifecycle lock, including on timeout above.
+        guard finished.wait(timeout: .now() + 5) == .success else {
+            XCTFail("re-initialize worker did not finish")
+            return
+        }
 
         XCTAssertTrue(handlers.crashes.isInitialized)
         XCTAssertEqual(handlers.captureCalls, 3)
@@ -385,13 +392,20 @@ final class CrashesTests: XCTestCase {
                 }
                 // Initialization has published active state but has not installed
                 // A yet. Reset must wait until the entire transaction completes.
-                lifecycleLock.didAttemptLockWhileHeld.wait()
+                guard lifecycleLock.didAttemptLockWhileHeld.wait(timeout: .now() + 5) == .success else {
+                    XCTFail("reset worker never attempted the lifecycle lock while it was held")
+                    return
+                }
             }
             handlers.current = handler
         }
 
         handlers.crashes.initialize(bundleId: "com.example", buffer: makeBuffer())
-        finished.wait() // The worker can finish once initialize releases its lock.
+        // The worker can finish once initialize releases its lock, including on timeout above.
+        guard finished.wait(timeout: .now() + 5) == .success else {
+            XCTFail("reset worker did not finish")
+            return
+        }
 
         XCTAssertFalse(handlers.crashes.isInitialized)
         XCTAssertEqual(handlers.captureCalls, 2)

@@ -46,29 +46,37 @@ const plistParser = new Parser({
   explicitRoot: false,
 });
 
+const dictNodeToValue = (node: PlistNode): Map<string, PlistValue> => {
+  const result = new Map<string, PlistValue>();
+  const children = node.$$ ?? [];
+  for (let i = 0; i < children.length; i += 2) {
+    const keyNode = children[i];
+    const valueNode = children[i + 1];
+    if (!keyNode || keyNode["#name"] !== "key") {
+      continue;
+    }
+    result.set(keyNode._ ?? "", nodeToValue(valueNode));
+  }
+  return result;
+};
+
 const nodeToValue = (node: PlistNode | undefined): PlistValue => {
   if (!node) {
     return "";
   }
 
   switch (node["#name"]) {
-    case "dict": {
-      const result = new Map<string, PlistValue>();
-      const children = node.$$ ?? [];
-      for (let i = 0; i < children.length; i += 2) {
-        const keyNode = children[i];
-        const valueNode = children[i + 1];
-        if (!keyNode || keyNode["#name"] !== "key") {
-          continue;
-        }
-        result.set(keyNode._ ?? "", nodeToValue(valueNode));
-      }
-      return result;
-    }
+    case "dict":
+      return dictNodeToValue(node);
     case "array":
       return (node.$$ ?? []).map((child) => nodeToValue(child));
-    case "string":
-      return node._ ?? "";
+    default:
+      return scalarNodeToValue(node);
+  }
+};
+
+const scalarNodeToValue = (node: PlistNode): PlistValue => {
+  switch (node["#name"]) {
     case "data":
       return node._ ? Buffer.from(node._, "base64") : Buffer.alloc(0);
     case "date":
@@ -101,32 +109,42 @@ export const escapeXml = (value: string): string =>
 
 const indent = (depth: number): string => "\t".repeat(depth);
 
+const dictValueToXml = (value: Map<string, PlistValue>, depth: number): string => {
+  const pad = indent(depth);
+  if (value.size === 0) {
+    return `${pad}<dict/>`;
+  }
+  const lines: string[] = [`${pad}<dict>`];
+  for (const [key, child] of value.entries()) {
+    lines.push(`${indent(depth + 1)}<key>${escapeXml(key)}</key>`);
+    lines.push(valueToXml(child, depth + 1));
+  }
+  lines.push(`${pad}</dict>`);
+  return lines.join("\n");
+};
+
+const arrayValueToXml = (value: PlistValue[], depth: number): string => {
+  const pad = indent(depth);
+  if (value.length === 0) {
+    return `${pad}<array/>`;
+  }
+  const lines: string[] = [`${pad}<array>`];
+  for (const child of value) {
+    lines.push(valueToXml(child, depth + 1));
+  }
+  lines.push(`${pad}</array>`);
+  return lines.join("\n");
+};
+
 const valueToXml = (value: PlistValue, depth: number): string => {
   const pad = indent(depth);
 
   if (value instanceof Map) {
-    if (value.size === 0) {
-      return `${pad}<dict/>`;
-    }
-    const lines: string[] = [`${pad}<dict>`];
-    for (const [key, child] of value.entries()) {
-      lines.push(`${indent(depth + 1)}<key>${escapeXml(key)}</key>`);
-      lines.push(valueToXml(child, depth + 1));
-    }
-    lines.push(`${pad}</dict>`);
-    return lines.join("\n");
+    return dictValueToXml(value, depth);
   }
 
   if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return `${pad}<array/>`;
-    }
-    const lines: string[] = [`${pad}<array>`];
-    for (const child of value) {
-      lines.push(valueToXml(child, depth + 1));
-    }
-    lines.push(`${pad}</array>`);
-    return lines.join("\n");
+    return arrayValueToXml(value, depth);
   }
 
   if (typeof value === "boolean") {

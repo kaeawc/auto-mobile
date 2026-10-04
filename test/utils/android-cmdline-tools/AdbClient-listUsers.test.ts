@@ -188,6 +188,32 @@ Users:
 ];
 
 describe("AdbClient.listUsers", () => {
+  test("stops state lookup at the next UserInfo even when its flags are malformed", async () => {
+    const captured = String(cases[1].outcomes[0]);
+    const output = captured
+      .replace("    State: RUNNING_UNLOCKED", "")
+      .replace("Work profile:30", "Work profile:invalid");
+    const commands: string[] = [];
+    const client = new AdbClient(null, async (command) => {
+      commands.push(command);
+      return execResult(output);
+    });
+    expect(await client.listUsers()).toEqual([{ ...owner, running: false }]);
+    expect(commands).toHaveLength(1);
+  });
+
+  test.each([8, 9])("searches only the next nine lines for State (padding %s)", async (padding) => {
+    const captured = String(cases[3].outcomes[0]);
+    const output = captured.replace(
+      "    State: RUNNING_LOCKED",
+      `${"\n".repeat(padding)}    State: RUNNING_LOCKED`,
+    );
+    const client = new AdbClient(null, async () => execResult(output));
+    expect(await client.listUsers()).toEqual([
+      padding === 8 ? { ...owner, startState: "RUNNING_LOCKED" } : { ...owner, running: false },
+    ]);
+  });
+
   test.each(cases)("$name", async ({ outcomes, expectedUsers, expectedCommandFragments }) => {
     const commands: string[] = [];
     let outcomeIndex = 0;

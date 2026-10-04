@@ -245,6 +245,33 @@ describe("IOSCtrlProxyManager", function () {
     return IOSCtrlProxyManager.createForTestingWithDeps(testDevice, fakeTimer, undefined, executor);
   }
 
+  test("setup warns with the underlying failure while returning a retryable status", async function () {
+    const manager = createManagerWithFakeHealthClient();
+    const uninstall = spyOn(
+      manager as unknown as { uninstallLegacyAppIfPresent(): Promise<void> },
+      "uninstallLegacyAppIfPresent",
+    ).mockResolvedValue();
+    const checkRunning = spyOn(manager, "isRunning").mockRejectedValue(
+      new Error("health probe unavailable"),
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await manager.setup();
+      expect(result).toMatchObject({
+        success: false,
+        message: "Failed to setup CtrlProxy",
+        error: "health probe unavailable",
+      });
+      expect(warn).toHaveBeenCalledWith("[IOSCtrlProxy] Setup failed: health probe unavailable");
+      checkRunning.mockResolvedValue(true);
+      expect((await manager.setup()).success).toBe(true);
+    } finally {
+      uninstall.mockRestore();
+      checkRunning.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
   describe("setup fail-closed on unverifiable pin", function () {
     test("returns failure for an unknown pin before any reuse short-circuit (#2746)", async function () {
       const prev = process.env.AUTOMOBILE_VERSION;

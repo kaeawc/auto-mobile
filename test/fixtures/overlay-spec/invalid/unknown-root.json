@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "hello"
+    },
+    "surprise": 1
+  },
+  "expectedPath": "surprise"
+}

@@ -763,6 +763,163 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(firstSwipe.x1).toBe(50);
   });
 
+  test("indeterminate Android swipe stops before retry or reverse recovery", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const error =
+      "Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (timeout). Do not retry automatically.";
+    const failure = { success: false, outcomeIndeterminate: true, error };
+    talkBackExecutor.setFailureResult(failure);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      onInteraction: () => talkBackExecutor.setFailureResult(failure),
+    });
+
+    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
+      `${error} The scroll may have happened. Observe before retrying.`,
+    );
+    expect(talkBackExecutor.getDirections()).toEqual(["up"]);
+  });
+
+  test("two consecutive definite Android swipe failures report the swipe error without reversing", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const failure = { success: false, error: "adb: device offline" };
+    talkBackExecutor.setFailureResult(failure);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      onInteraction: () => talkBackExecutor.setFailureResult(failure),
+    });
+
+    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
+      "Scroll swipe failed: adb: device offline",
+    );
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
+  });
+
+  test("one definite Android failure with an unchanged hierarchy does not trigger reverse recovery", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    let findCount = 0;
+    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
+    const sameObs = makeObserveResult();
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [sameObs, sameObs, makeObserveResult(1)],
+      talkBackExecutor,
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result.success).toBe(true);
+    expect(result.found).toBe(true);
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
+  });
+
+  test("a successful Android swipe resets the consecutive failure allowance", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    let findCount = 0;
+    finder.findElementByText = () => (++findCount >= 5 ? TARGET_ELEMENT : null);
+    const failure = { success: false, error: "gesture rejected" };
+    talkBackExecutor.setFailureResult(failure);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [0, 1, 2, 3, 4].map(makeObserveResult),
+      talkBackExecutor,
+      onInteraction: () => {
+        if (talkBackExecutor.getCallCount() === 2) {
+          talkBackExecutor.setFailureResult(failure);
+        }
+      },
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result.success).toBe(true);
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up", "up", "up"]);
+  });
+
+  test("timeout after a tolerated Android failure retains the swipe error", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    talkBackExecutor.setFailureResult({ success: false, error: "adb: device offline" });
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      onInteraction: () => timer.advanceTime(10),
+    });
+
+    await expect(
+      suv.execute({ ...BASE_OPTIONS, lookFor: { text: "Skills", maxTime: 10 } }),
+    ).rejects.toThrow("Scroll swipe failed: adb: device offline");
+    expect(talkBackExecutor.getDirections()).toEqual(["up"]);
+  });
+
+  test("successful unchanged swipes preserve the end-of-container message", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+    });
+
+    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
+      'Scroll reached end of container (no change after 1 scrolls). text "Skills" not found after 2 iterations (0ms).',
+    );
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "down"]);
+  });
+
+  test("failed iOS swipe still returns the original failure after one swipe", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
+    const observation = makeObserveResult();
+    const terminalEvidence: ObserveResult[] = [];
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [observation],
+      talkBackExecutor,
+      device: { ...DEVICE, platform: "ios" },
+      terminalEvidence,
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "gesture rejected",
+      targetType: "screen",
+      found: false,
+      scrollIterations: 1,
+      elapsedMs: 0,
+      observation,
+    });
+    expect(talkBackExecutor.getDirections()).toEqual(["up"]);
+    expect(terminalEvidence).toEqual([observation]);
+  });
+
   test("scroll proceeds past a failed swipe if observation is still returned", async () => {
     finder.nextScrollableContainer = CONTAINER_ELEMENT;
 
@@ -788,7 +945,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const result = await suv.execute(BASE_OPTIONS);
 
     expect(result.success).toBe(true);
-    expect(talkBackExecutor.getCallCount()).toBeGreaterThanOrEqual(2);
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
   });
 });
 

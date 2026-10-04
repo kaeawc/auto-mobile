@@ -1,3 +1,4 @@
+import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   AppLifecycleMonitor,
@@ -241,11 +242,14 @@ describe("AppLifecycleMonitor", () => {
 
         expect(monitor.getRunningPackages()).toEqual(["com.example.app"]);
         expect(terminateEvents).toEqual([]);
-        expect(warnSpy).toHaveBeenCalledTimes(1);
-        expect(warnSpy.mock.calls[0]?.[0]).toContain(
-          "Failed to check whether com.example.app is running",
+        const warnings = loggerCallsWithPrefix(
+          warnSpy.mock.calls,
+          "Failed to check whether ",
+          "App lifecycle listener failed:",
         );
-        expect(warnSpy.mock.calls[0]?.[1]).toBe(probeError);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]?.[0]).toContain("Failed to check whether com.example.app is running");
+        expect(warnings[0]?.[1]).toBe(probeError);
       } finally {
         warnSpy.mockRestore();
       }

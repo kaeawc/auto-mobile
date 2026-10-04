@@ -197,7 +197,7 @@ export class AvdManagerClient {
         throw error;
       }
       const message = `Failed to create AVD ${params.name}: ${(error as Error).message}`;
-      this.dependencies.logger.error(message);
+      this.dependencies.logger.warn(message, error);
       return { success: false, message };
     }
   }
@@ -228,7 +228,7 @@ export class AvdManagerClient {
         throw error;
       }
       const message = `Failed to delete AVD ${name}: ${(error as Error).message}`;
-      this.dependencies.logger.error(message);
+      this.dependencies.logger.warn(message, error);
       return { success: false, message };
     }
   }

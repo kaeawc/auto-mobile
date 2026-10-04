@@ -1,7 +1,7 @@
 import { drainUntil, drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { afterEach, describe, expect, test, beforeEach } from "bun:test";
+import { afterEach, describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import {
@@ -42,6 +42,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeEmulatorConsoleBusyRegistry } from "../fakes/FakeEmulatorConsoleBusyRegistry";
+import { logger } from "../../src/utils/logger";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -2975,6 +2976,31 @@ describe("DevicePool", () => {
           expect(sessionManager.getSession("owner-session")?.assignedDevice).toBe(
             replacement.deviceId,
           );
+        },
+      );
+
+      test.each(branches)(
+        "retains old-device work and warns when the recovery execution is unknown during %s",
+        async (branch) => {
+          const oldDeviceWork = tracker.startExecution("observe");
+          const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
+          tracker.bindDeviceExecution(oldDeviceWork.id, device.deviceId);
+          tracker.bindDeviceExecution(recovery.id, device.deviceId);
+          const warn = spyOn(logger, "warn").mockImplementation(() => {});
+          try {
+            await replaceDevice(branch, undefined);
+
+            expect(oldDeviceWork.abortController.signal.aborted).toBe(false);
+            expect(recovery.abortController.signal.aborted).toBe(false);
+            const replacementWarnings = warn.mock.calls
+              .map(([message]) => message)
+              .filter((message) => message.startsWith("[DevicePool] Left old-device work running"));
+            expect(replacementWarnings).toEqual([
+              `[DevicePool] Left old-device work running for ${device.deviceId} because the System UI ANR recovery execution is unknown`,
+            ]);
+          } finally {
+            warn.mockRestore();
+          }
         },
       );
 

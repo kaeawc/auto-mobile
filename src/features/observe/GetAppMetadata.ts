@@ -11,6 +11,8 @@ import { resolveIosAppInfoBackend } from "../../utils/ios-cmdline-tools/IosDevic
 import { shellQuote } from "../../utils/shellQuote";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { toActionableError } from "../../models/ActionableError";
+import { errorMessage } from "../../utils/describeUnknownError";
 
 export type { IosAppMetadataSource };
 
@@ -127,9 +129,14 @@ async function getAndroidAppMetadataFromAdb(
       options.signal,
     );
   } catch (error) {
-    const log = options.optional ? logger.debug : logger.warn;
-    log(`[GetAppMetadata] Failed to run dumpsys package for ${packageName}: ${error}`);
-    return null;
+    if (options.optional) {
+      // Optional version enrichment may be unavailable without failing the resource read.
+      logger.debug(
+        `[GetAppMetadata] Failed to run dumpsys package for ${packageName}: ${errorMessage(error)}`,
+      );
+      return null;
+    }
+    throw toActionableError(error, `Failed to run dumpsys package for ${packageName}`);
   }
 
   const output = result.stdout;

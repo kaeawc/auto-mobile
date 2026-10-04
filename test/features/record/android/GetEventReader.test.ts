@@ -154,6 +154,7 @@ describe("GetEventReader", () => {
     await Promise.resolve();
     const kill = spyOn(proc, "kill").mockImplementation(() => {
       proc.emit("exit", null, "SIGTERM");
+      proc.emit("error", new Error("caller shutdown"));
       return true;
     });
     reader.stop();
@@ -232,13 +233,56 @@ describe("GetEventReader", () => {
     },
   );
 
-  test("clean exit clears the handle without reporting a failure", async () => {
+  test.each([
+    [1, null],
+    [null, "SIGPIPE"],
+  ] as const)(
+    "exit reports code/signal and a bounded stderr tail (%s, %s)",
+    async (code, signal) => {
+      const { reader, proc, onGesture, onError } = setup();
+      reader.start(onGesture, onError);
+      await Promise.resolve();
+      proc.stderr.emit("data", Buffer.from("discarded-prefix" + "x".repeat(4096)));
+      proc.stderr.emit("data", Buffer.from("permission denied\n"));
+      proc.emit("exit", code, signal);
+      const message = onError.mock.calls[0][0].message;
+      expect(message).toContain(signal ? `signal ${signal}` : `code ${code}`);
+      expect(message).toContain("permission denied");
+      expect(message).not.toContain("discarded-prefix");
+      expect(message.length).toBeLessThan(4200);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expectCleaned(proc);
+    },
+  );
+
+  test("process error includes the stderr tail when available", async () => {
+    const { reader, proc, onGesture, onError } = setup();
+    reader.start(onGesture, onError);
+    await Promise.resolve();
+    proc.stderr.emit("data", Buffer.from("adb disconnected"));
+    proc.emit("error", new Error("read failed"));
+    expect(onError.mock.calls[0][0].message).toContain("read failed");
+    expect(onError.mock.calls[0][0].message).toContain("adb disconnected");
+  });
+
+  test("spawn rejection after caller stop is not reported", async () => {
+    const { adb, reader, onGesture, onError } = setup();
+    const pending = Promise.withResolvers<AdbProcess>();
+    adb.spawn.mockReturnValue(pending.promise);
+    reader.start(onGesture, onError);
+    reader.stop();
+    pending.reject(new Error("spawn cancelled"));
+    await Promise.resolve();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  test("code-zero exit before stop is unexpected", async () => {
     const { adb, reader, proc, onGesture, onError } = setup();
     reader.start(onGesture, onError);
     await Promise.resolve();
     proc.emit("exit", 0, null);
     expectCleaned(proc);
-    expect(onError).not.toHaveBeenCalled();
+    expect(onError.mock.calls[0][0].message).toContain("code 0");
     adb.spawn.mockResolvedValue(new FakeAdbProcess());
     reader.start(onGesture, onError);
     await Promise.resolve();
@@ -281,7 +325,7 @@ describe("GetEventReader", () => {
     const error = new Error("old spawn failed");
     old.reject(error);
     await Promise.resolve();
-    expect(onError).toHaveBeenCalledWith(error);
+    expect(onError).not.toHaveBeenCalled();
     reader.start(onGesture, onError);
     expect(adb.spawn).toHaveBeenCalledTimes(2);
     next.resolve(proc);

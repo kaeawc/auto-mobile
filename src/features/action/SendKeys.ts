@@ -26,7 +26,12 @@ import {
   imeCommitUnitFields,
 } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
+import {
+  clearTextWithKeyEvents,
+  getFocusedTextField,
+  getFocusedTextLength,
+  hasFocusedTextInput,
+} from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
@@ -44,6 +49,9 @@ import {
 
 export const SEND_KEYS_MAX_COMMANDS = 100;
 export const SEND_KEYS_MAX_MODIFIERS = 4;
+
+// Give posted formatters/recomposition a bounded chance to finish after a mismatch.
+export const IME_COMMIT_READ_BACK_SETTLE_MS = 150;
 
 class ImeRestorationError extends Error {}
 import {
@@ -208,7 +216,11 @@ interface SendKeysFailure {
 
 export interface SendKeysCommandExecutor {
   resetCaretState?(): void;
-  type(command: SendKeysTypeCommand, signal?: AbortSignal): Promise<SendKeysCommandResult>;
+  type(
+    command: SendKeysTypeCommand,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<SendKeysCommandResult>;
   key(
     command: SendKeysKeyCommand,
     signal?: AbortSignal,
@@ -321,7 +333,13 @@ export interface SendKeysInputKey {
   ): Promise<{ success: boolean; error?: string; verified?: boolean; warning?: string }>;
 }
 
+interface ImeCommitRouting {
+  signal?: AbortSignal;
+  display?: string;
+}
+
 export interface SendKeysPlatformDependencies {
+  timer?: Timer;
   textClient?: SendKeysTextClient;
   inputKey?: SendKeysInputKey;
 }
@@ -331,6 +349,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly textClient: SendKeysTextClient;
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
+  private readonly timer: Timer;
   private androidKeyCombinationSupported: boolean | undefined;
   private androidCaretUnsafe = false;
 
@@ -345,11 +364,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   ) {
     this.adb = adbFactory.create(device);
     this.observer = observer;
+    this.timer = dependencies.timer ?? defaultTimer;
     this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
   }
 
-  async type(command: SendKeysTypeCommand, signal?: AbortSignal): Promise<SendKeysCommandResult> {
+  async type(
+    command: SendKeysTypeCommand,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<SendKeysCommandResult> {
     signal?.throwIfAborted();
     const operation = command.operation ?? "insert";
     const requestedMode = command.mode ?? "auto";
@@ -372,7 +396,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           error: validationError,
         };
       }
-      resolvedMode = await this.resolveAutoPasswordMode(requestedMode, operation, signal);
+      resolvedMode = await this.resolveAutoPasswordMode(requestedMode, operation, signal, display);
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
       const autoImeFallback = getAutoImeFallback(
         operation,
@@ -389,7 +413,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
               resolvedMode,
               command.keyboardProfile,
               autoImeFallback,
-              signal,
+              { signal, display },
               this.isAutoPasswordInsert(requestedMode, resolvedMode),
             );
       this.recordCaretState(result);
@@ -407,7 +431,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     } catch (error) {
       // A restore failure still needs its recovery instruction after cancellation.
       if (!this.isImeRestorationFailure(error)) {
-        signal?.throwIfAborted();
+        this.checkAbort(signal, error);
       }
       logger.warn("[SendKeys] Text command failed", error);
       return {
@@ -567,19 +591,27 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<AndroidSendKeysTypingMode> {
     if (this.device.platform !== "android" || requestedMode !== "auto") {
       return this.resolveMode(requestedMode);
     }
-    return (await this.isFocusedAndroidPasswordField(signal))
+    return (await this.isFocusedAndroidPasswordField(signal, display))
       ? operation === "insert"
         ? "eventAll"
         : "a11y"
       : "ime";
   }
 
-  private async isFocusedAndroidPasswordField(signal?: AbortSignal): Promise<boolean> {
-    const observation = await this.observer.execute({ signal, freshness: "fresh" });
+  private async isFocusedAndroidPasswordField(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<boolean> {
+    const observation = await this.observer.execute({
+      signal,
+      freshness: "fresh",
+      ...(display === undefined ? {} : { display }),
+    });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return false;
@@ -637,9 +669,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     mode: AndroidSendKeysTypingMode,
     keyboardProfile: KeyboardProfileId | undefined,
     autoImeFallback?: AndroidSendKeysTypingMode,
-    signal?: AbortSignal,
+    routing: ImeCommitRouting = {},
     focusedInputVerified = false,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    const { signal } = routing;
     if (operation === "replace") {
       this.resetCaretState();
     }
@@ -658,14 +691,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           operation,
           keyboardProfile,
           autoImeFallback,
-          signal,
+          routing,
         );
       case "imeKeyEvents":
         return this.executeAndroidImeCommit(
           text,
           operation,
           keyboardProfile,
-          signal,
+          routing,
           "imeKeyEvents",
         );
     }
@@ -676,13 +709,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
     autoImeFallback: AndroidSendKeysTypingMode | undefined,
-    signal?: AbortSignal,
+    routing: ImeCommitRouting = {},
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    const { signal } = routing;
     if (!autoImeFallback) {
-      return this.executeAndroidImeCommit(text, operation, keyboardProfile, signal);
+      return this.executeAndroidImeCommit(text, operation, keyboardProfile, routing);
     }
     if (await this.textClient.supportsImeCommit()) {
-      const result = await this.executeAndroidImeCommit(text, operation, keyboardProfile, signal);
+      const result = await this.executeAndroidImeCommit(text, operation, keyboardProfile, routing);
       if (!result.imeActivationFailed) {
         return result;
       }
@@ -694,7 +728,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         autoImeFallback,
         keyboardProfile,
         undefined,
-        signal,
+        routing,
       );
       return { ...fallback, resolvedMode: fallback.resolvedMode ?? autoImeFallback };
     } catch (error) {
@@ -708,17 +742,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
-    signal?: AbortSignal,
+    routing: ImeCommitRouting = {},
     mode: "ime" | "imeKeyEvents" = "ime",
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
+    const { signal } = routing;
     signal?.throwIfAborted();
     // Serialize the whole capture→activate→commit→restore section per device so a
     // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
     return withAndroidImeLock(
       this.device.deviceId,
-      () => this.runAndroidImeCommit(text, operation, keyboardProfile, signal, mode),
+      () => this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode),
       signal,
     );
   }
@@ -727,11 +762,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
-    signal?: AbortSignal,
+    routing: ImeCommitRouting = {},
     mode: "ime" | "imeKeyEvents" = "ime",
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
+    const { signal } = routing;
     this.checkAbort(signal);
     if (!(await this.textClient.supportsImeCommit())) {
       this.checkAbort(signal);
@@ -785,7 +821,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       prior,
       wasEnabled,
       priorSubtype,
-      signal,
+      routing,
       mode,
     );
   }
@@ -797,11 +833,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     prior: string | null,
     wasEnabled: boolean,
     priorSubtype: ImeSubtypeSnapshot,
-    signal?: AbortSignal,
+    routing: ImeCommitRouting = {},
     mode: "ime" | "imeKeyEvents" = "ime",
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
+    const { signal } = routing;
     this.checkAbort(signal);
     const profileResult = await this.setRequestedKeyboardProfile(keyboardProfile);
     if (!profileResult.success) {
@@ -834,7 +871,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       text,
       operation,
       prior,
-      signal,
+      routing,
       mode,
     );
     if (safeToRestore) {
@@ -851,13 +888,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     prior: string | null,
-    signal: AbortSignal | undefined,
+    routing: ImeCommitRouting,
     mode: "ime" | "imeKeyEvents",
   ): Promise<{
     outcome?: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode };
     failure?: unknown;
     safeToRestore: boolean;
   }> {
+    const { signal } = routing;
     let safeToRestore = true;
     try {
       this.checkAbort(signal);
@@ -877,7 +915,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       safeToRestore = this.canRestoreAfterImeCommit(result);
       if (result.success && mode === "ime" && text.length > 0) {
-        const error = await this.verifyImeCommit(text, signal);
+        const error = await this.verifyImeCommit(text, routing);
         if (error !== undefined) {
           return {
             outcome: {
@@ -907,25 +945,48 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  private async verifyImeCommit(text: string, signal?: AbortSignal): Promise<string | undefined> {
-    const observation = await this.observer.execute({ signal, freshness: "fresh" });
-    const committedText = this.readFocusedText(observation);
-    if (committedText === undefined) {
-      return undefined;
+  private async verifyImeCommit(
+    text: string,
+    routing: ImeCommitRouting,
+  ): Promise<string | undefined> {
+    const { signal, display } = routing;
+    const multiSegment = imeCommitSegmentCount(text) > 1;
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        this.checkAbort(signal);
+        if (attempt > 0) {
+          await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
+          this.checkAbort(signal);
+        }
+        const observation = await this.observer.execute({
+          signal,
+          freshness: "fresh",
+          ...(display === undefined ? {} : { display }),
+        });
+        this.checkAbort(signal);
+        const committedText = this.readFocusedText(observation);
+        if (committedText === undefined) {
+          return undefined;
+        }
+        const suffixMatches = imeCommitSuffixMatches(committedText, text);
+        // Marker-only text and unreadable fields cannot verify a successful commit.
+        // Pre-existing insert content can satisfy the whole-field subsequence check;
+        // detecting that requires a pre-commit read. Replace clears the field first.
+        if (
+          suffixMatches === undefined ||
+          (multiSegment ? suffixMatches : imeCommitSubsequenceMatches(committedText, text))
+        ) {
+          return undefined;
+        }
+        if (attempt === 2) {
+          return `IME partial commit: sent ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(committedText)}`;
+        }
+      }
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] IME read-back unavailable: ${errorMessage(error)}`, error);
     }
-    const suffixMatches = imeCommitSuffixMatches(committedText, text);
-    if (imeCommitSegmentCount(text) > 1) {
-      return suffixMatches === false
-        ? "IME partial commit: the focused field does not end with the requested text"
-        : undefined;
-    }
-    // Preserve the existing unverifiable marker-only case.
-    // For insert, pre-existing content can satisfy the whole-field subsequence check;
-    // detecting that requires a pre-commit read. Replace clears the field first.
-    if (suffixMatches === undefined || imeCommitSubsequenceMatches(committedText, text)) {
-      return undefined;
-    }
-    return `IME partial commit: sent ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(committedText)}`;
+    return undefined;
   }
 
   private describeImeCommitFailure(result: TextActionResult): TextActionResult {
@@ -941,10 +1002,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readFocusedText(observation: ObserveResult): string | undefined {
     const detector = new FieldTypeDetector();
     const focused = observation.focusedElement;
-    if (
-      (focused?.focused === true || focused?.focused === "true") &&
-      detector.detect(focused) === "text"
-    ) {
+    if (focused && String(focused.focused) === "true" && detector.detect(focused) === "text") {
       if (detector.isPasswordField(focused)) {
         return undefined;
       }
@@ -952,6 +1010,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     if (!observation.viewHierarchy || !hasFocusedTextInput(observation.viewHierarchy)) {
       return undefined;
+    }
+    // ClearText already selects focused editable controls, including custom editors
+    // with set_text actions, and preserves password metadata for unreadable values.
+    const editable = getFocusedTextField(observation.viewHierarchy);
+    if (editable !== undefined) {
+      return editable.secure ? undefined : editable.value;
     }
     const parser = new DefaultElementParser();
     for (const root of parser.extractRootNodes(observation.viewHierarchy)) {
@@ -1014,8 +1078,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return outcome!;
   }
 
-  private checkAbort(signal?: AbortSignal): void {
+  private checkAbort(signal?: AbortSignal, error?: unknown): void {
     signal?.throwIfAborted();
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
   }
 
   private canRestoreAfterImeCommit(result: TextActionResult): boolean {
@@ -1817,7 +1884,7 @@ export class SendKeys {
         : { now: async () => defaultTimer.now() });
     this.executor =
       dependencies.executor ??
-      new DefaultSendKeysCommandExecutor(device, adbFactory, this.observer);
+      new DefaultSendKeysCommandExecutor(device, adbFactory, this.observer, { timer: this.timer });
     this.focuser =
       dependencies.focuser ??
       ({
@@ -2183,7 +2250,13 @@ export class SendKeys {
       let result: SendKeysCommandResult;
       try {
         routing.assertCurrent?.();
-        result = await this.executeCommand(command, signal, routing.onDispatch, routing.displayId);
+        result = await this.executeCommand(
+          command,
+          signal,
+          routing.onDispatch,
+          routing.displayId,
+          routing.display,
+        );
       } catch (error) {
         signal?.throwIfAborted();
         logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
@@ -2247,10 +2320,11 @@ export class SendKeys {
     signal?: AbortSignal,
     onDispatch?: () => void,
     displayId?: number,
+    display?: string,
   ): Promise<SendKeysCommandResult> {
     switch (command.action) {
       case "type":
-        return this.executor.type(command, signal);
+        return this.executor.type(command, signal, display);
       case "key":
         if (displayId !== undefined && !isSemanticKey(command.key)) {
           this.executor.resetCaretState?.();

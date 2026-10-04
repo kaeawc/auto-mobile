@@ -69,25 +69,49 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
 }
 
 /**
- * Match sent code points in order after locale-independent per-code-point lowercasing.
- * Each folded string remains one token (İ -> i + combining dot stays atomic); this
- * does not equate composed/decomposed spellings or perform Unicode normalization.
- * If the full match fails, require only sent Unicode letters, numbers and marks
- * in order, allowing removal/replacement of whitespace, punctuation and symbols.
- * With no letters/numbers/marks, retain the full match so dropped symbols fail.
+ * Accept canonical spellings, decimal digit values, and locale-independent case
+ * filters. Lowercase expansions stay atomic (İ is not i + a separate dot), while
+ * uppercase expansions allow input filters such as straße -> STRASSE.
+ * Formatting may remove punctuation/symbols only when sent content remains.
  */
 export function imeCommitSubsequenceMatches(committedText: string, text: string): boolean {
-  const sent = Array.from(text, (codePoint) => codePoint.toLowerCase());
-  const field = Array.from(committedText, (codePoint) => codePoint.toLowerCase());
-  if (imeCodePointSubsequenceMatches(field, sent)) {
+  const field = committedText.normalize("NFC");
+  const sent = text.normalize("NFC");
+  if (imeCaseSubsequenceMatches(field, sent)) {
     return true;
   }
-  const isLetterNumberOrMark = (codePoint: string): boolean => /[\p{L}\p{N}\p{M}]/u.test(codePoint);
-  const sentContent = sent.filter(isLetterNumberOrMark);
+  const formatting = /[^\p{L}\p{N}\p{M}]/gu;
+  // Recompose after stripping formatting so e-◌́ still matches canonical é.
+  const sentContent = sent.replace(formatting, "").normalize("NFC");
   return (
     sentContent.length > 0 &&
-    imeCodePointSubsequenceMatches(field.filter(isLetterNumberOrMark), sentContent)
+    imeCaseSubsequenceMatches(field.replace(formatting, "").normalize("NFC"), sentContent)
   );
+}
+
+function imeCaseSubsequenceMatches(field: string, sent: string): boolean {
+  const lowerTokens = (value: string): string[] =>
+    Array.from(value, (codePoint) => imeDecimalDigit(codePoint).toLowerCase());
+  const upperTokens = (value: string): string[] =>
+    Array.from(value, imeDecimalDigit).flatMap((codePoint) => Array.from(codePoint.toUpperCase()));
+  return (
+    imeCodePointSubsequenceMatches(lowerTokens(field), lowerTokens(sent)) ||
+    imeCodePointSubsequenceMatches(upperTokens(field), upperTokens(sent))
+  );
+}
+
+function imeDecimalDigit(codePoint: string): string {
+  if (!/\p{Nd}/u.test(codePoint)) {
+    return codePoint;
+  }
+  const value = codePoint.codePointAt(0)!;
+  let start = value;
+  // Unicode decimal digits are ordered runs of ten; adjacent sets (e.g. math
+  // styles) form longer runs. Modulo ten preserves the value in every set.
+  while (start > 0 && /\p{Nd}/u.test(String.fromCodePoint(start - 1))) {
+    start--;
+  }
+  return String((value - start) % 10);
 }
 
 function imeCodePointSubsequenceMatches(

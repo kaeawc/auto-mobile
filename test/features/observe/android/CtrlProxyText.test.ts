@@ -56,6 +56,26 @@ async function waitForSent(sent: Record<string, unknown>[], count: number): Prom
 
 describe("Android CtrlProxyText", () => {
   test.each([
+    ["١٢٣", "123"],
+    ["१२३", "123"],
+    ["𝟙𝟚𝟛", "123"],
+    ["123", "١٢٣"],
+    ["STRASSE", "straße"],
+    ["e\u0301", "é"],
+    ["é", "e\u0301"],
+  ])("accepts normalized IME text: field=%s sent=%s", (field, sent) => {
+    expect(imeCommitSubsequenceMatches(field, sent)).toBe(true);
+  });
+
+  test.each([
+    ["7", "007"],
+    ["😀", ":)"],
+    ["İ", "i"],
+  ])("rejects rewritten IME content: field=%s sent=%s", (field, sent) => {
+    expect(imeCommitSubsequenceMatches(field, sent)).toBe(false);
+  });
+
+  test.each([
     ["(555) 123-4567", "5551234567", true],
     ["(555) 123-45", "5551234567", false],
     ["5551234567", "5551234567", true],

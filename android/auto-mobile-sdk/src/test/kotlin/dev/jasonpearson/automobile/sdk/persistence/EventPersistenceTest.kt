@@ -16,6 +16,7 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome
 import dev.jasonpearson.automobile.sdk.events.DefaultDropCounter
 import dev.jasonpearson.automobile.sdk.events.DropReason
 import java.io.File
@@ -987,5 +988,67 @@ class EventPersistenceTest {
     assertNotNull(id)
     assertTrue(id.startsWith("s00000000000000000002_"))
     assertEquals(listOf(id), persistence.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `byte cap evicts oldest and counts dropped events`() {
+    val events = List(2) { makeLifecycleEvent("same") }
+    val oneBatchBytes =
+      createPersistence().serializeEvents(events).toByteArray(Charsets.UTF_8).size.toLong()
+    val counter = DefaultDropCounter()
+    val persistence =
+      FileEventPersistence(tempFolder.root, dropCounter = counter, maxPendingBytes = oneBatchBytes)
+    persistence.persist(events)
+    val newest = persistence.persist(events)
+    assertNotNull(newest)
+    assertEquals(listOf(newest), persistence.loadPending().map { it.first })
+    assertEquals(2L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
+    assertTrue(tempFolder.root.listFiles()!!.sumOf { it.length() } <= oneBatchBytes)
+  }
+
+  @Test
+  fun `oversized batch is refused for buffer to count without evicting retained batch`() {
+    val small = listOf(makeLifecycleEvent("small"))
+    val bytes = createPersistence().serializeEvents(small).toByteArray(Charsets.UTF_8).size.toLong()
+    val persistence = FileEventPersistence(tempFolder.root, maxPendingBytes = bytes)
+    val retained = persistence.persist(small)
+    assertNotNull(retained)
+    assertNull(persistence.persist(listOf(makeLifecycleEvent("x".repeat(1000)))))
+    assertEquals(listOf(retained), persistence.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `unavailable replay across launches preserves file identity and attempt count`() {
+    val persistence = createPersistence()
+    val id = persistence.persist(listOf(makeLifecycleEvent("retained")))!!
+    repeat(4) {
+      EventBatchReplay().replay(persistence, { it.run() }) { _, complete ->
+        complete(BatchDeliveryOutcome.UNDELIVERED)
+      }
+    }
+    assertEquals(listOf(id), persistence.loadPending().map { it.first })
+  }
+
+  @Test
+  fun `failed invalid file removal does not starve later files or recount within pass`() {
+    val persistence =
+      FileEventPersistence(
+        directory = tempFolder.root,
+        clock = { 1000L },
+        fileOps = { false },
+      )
+    persistence.persist(listOf(makeLifecycleEvent("invalid")))
+    persistence.persist(listOf(makeLifecycleEvent("later")))
+    val delivered = mutableListOf<String>()
+    EventBatchReplay().replay(persistence, { it.run() }) { events, complete ->
+      val kind = (events.single() as SdkLifecycleEvent).kind
+      delivered.add(kind)
+      complete(
+        if (kind == "invalid") BatchDeliveryOutcome.INVALID_PAYLOAD
+        else BatchDeliveryOutcome.DELIVERED
+      )
+    }
+    assertEquals(listOf("invalid", "later"), delivered)
+    assertEquals(2, persistence.loadPending().size)
   }
 }

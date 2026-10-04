@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.events
 
 import dev.jasonpearson.automobile.protocol.SdkEvent
+import dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -81,6 +82,15 @@ internal class SdkEventBuffer(
         Thread(runnable, "SdkEventPersistence").apply { isDaemon = true }
       }
   }
+  private val logger = DefaultSdkLogger()
+
+  private class DeliveryTask(val runnable: Runnable) {
+    var future: ScheduledFuture<*>? = null
+  }
+
+  private val deliveryTasks = mutableSetOf<DeliveryTask>()
+  // Only tasks already running on our executor may persist inline while shutdown drains.
+  private val deliveryWorker = ThreadLocal<Boolean>()
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
   private val pendingBatches = ArrayDeque<MutableList<SdkEvent>>()
@@ -98,7 +108,12 @@ internal class SdkEventBuffer(
             // Backstop: any exception escaping the periodic task cancels all future
             // runs (the scheduleAtFixedRate contract). Per-batch errors are already
             // accounted inside deliverBatch; swallow here so the timer survives (#3605).
-            { runCatching { enqueueFlush() } },
+            {
+              runCatching { enqueueFlush() }
+                .onFailure { error ->
+                  logger.w("SdkEventBuffer", error) { "Could not enqueue periodic flush" }
+                }
+            },
             flushIntervalMs,
             flushIntervalMs,
             TimeUnit.MILLISECONDS,
@@ -127,7 +142,8 @@ internal class SdkEventBuffer(
               dropCounter?.increment(DropReason.FILTERED)
               return
             }
-      } catch (_: Exception) {
+      } catch (error: Exception) {
+        logger.w("SdkEventBuffer", error) { "Event processor failed" }
         dropCounter?.increment(DropReason.PROCESSOR_ERROR)
         return
       }
@@ -180,10 +196,39 @@ internal class SdkEventBuffer(
       if (isShutdown) return
       try {
         executor.execute(task)
-      } catch (_: RejectedExecutionException) {
+      } catch (error: RejectedExecutionException) {
+        // Shutdown can refuse optional replay work; its file remains on disk.
+        logger.d("SdkEventBuffer") { "Replay submission refused: ${error.message}" }
         // Refused work is simply not run; replay leaves its file on disk for the next launch.
       }
     }
+  }
+
+  /** Share the existing scheduler with delivery timeouts; no extra worker is created. */
+  internal fun scheduleDelivery(task: Runnable, delayMs: Long): (() -> Unit)? = lock.withLock {
+    if (isShutdown || executor.isShutdown) return null
+    val delivery = DeliveryTask(task)
+    delivery.future =
+      executor.schedule(
+        {
+          lock.withLock { deliveryTasks.remove(delivery) }
+          runOnDeliveryWorker(task)
+        },
+        delayMs,
+        TimeUnit.MILLISECONDS,
+      )
+    deliveryTasks.add(delivery)
+    return {
+      lock.withLock {
+        deliveryTasks.remove(delivery)
+        delivery.future?.cancel(false)
+      }
+    }
+  }
+
+  /** Dispatch result processing with the same late-completion fallback as persistence. */
+  internal fun executeDelivery(task: Runnable) {
+    persistInBackground(Runnable { runOnDeliveryWorker(task) })
   }
 
   /** Shutdown the buffer, flushing remaining events. */
@@ -192,6 +237,25 @@ internal class SdkEventBuffer(
       if (isShutdown) return
       isShutdown = true
       flushTask?.cancel(false)
+      val deliveries = deliveryTasks.toList()
+      deliveryTasks.clear()
+      deliveries.forEach { it.future?.cancel(false) }
+      if (deliveries.isNotEmpty()) {
+        // Resolve existing timeouts/retries on the same worker, before shutdown can terminate.
+        executor.execute {
+          runOnDeliveryWorker(
+            Runnable {
+              deliveries.forEach {
+                try {
+                  it.runnable.run()
+                } catch (error: Exception) {
+                  logger.w("SdkEventBuffer", error) { "Could not resolve shutdown delivery" }
+                }
+              }
+            }
+          )
+        }
+      }
       if (buffer.isNotEmpty()) {
         val snapshot = ArrayList(buffer)
         buffer.clear()
@@ -217,7 +281,7 @@ internal class SdkEventBuffer(
     pendingBatches.addLast(events)
     if (!isDeliveryScheduled) {
       isDeliveryScheduled = true
-      executor.execute { drainDeliveries() }
+      executor.execute { runOnDeliveryWorker(Runnable { drainDeliveries() }) }
     }
   }
 
@@ -257,7 +321,9 @@ internal class SdkEventBuffer(
     while (true) {
       try {
         if (executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) break
-      } catch (_: InterruptedException) {
+      } catch (error: InterruptedException) {
+        // Preserve the established drain-and-restore-interrupt shutdown contract.
+        logger.d("SdkEventBuffer") { "Interrupted while draining shutdown: ${error.message}" }
         wasInterrupted = true
       }
     }
@@ -272,7 +338,8 @@ internal class SdkEventBuffer(
       val persisted =
         try {
           persistence?.persist(events) != null
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+          logger.w("SdkEventBuffer", error) { "Could not persist undelivered batch" }
           // Persistence is best-effort; contain custom failures to protect the host and executor.
           false
         }
@@ -282,20 +349,36 @@ internal class SdkEventBuffer(
     persistInBackground(task) { countDeliveryFailure(events.size) }
   }
 
-  /** Submission and disk work must never run under [lock] or inline after shutdown. */
+  private fun runOnDeliveryWorker(task: Runnable) {
+    val previous = deliveryWorker.get()
+    deliveryWorker.set(true)
+    try {
+      task.run()
+    } finally {
+      if (previous == null) deliveryWorker.remove() else deliveryWorker.set(previous)
+    }
+  }
+
+  /** Shutdown may persist inline only on our existing worker, never the host caller. */
   private fun persistInBackground(task: Runnable, onRejected: () -> Unit = {}) {
+    if (isShutdown && deliveryWorker.get() == true) {
+      task.run()
+      return
+    }
     val accepting = lock.withLock { !isShutdown && !executor.isShutdown }
     if (accepting) {
       try {
         executor.execute(task)
         return
-      } catch (_: Exception) {
+      } catch (error: Exception) {
+        logger.w("SdkEventBuffer", error) { "Could not submit background persistence" }
         // Shutdown may race submission; the fallback also drains late retry callbacks.
       }
     }
     try {
       fallbackPersistenceExecutor.execute(task)
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+      logger.w("SdkEventBuffer", error) { "Could not submit fallback persistence" }
       // Refused work cannot be retained; never fall back to caller-thread disk I/O.
       onRejected()
     }
@@ -304,7 +387,8 @@ internal class SdkEventBuffer(
   private fun countDeliveryFailure(count: Int) {
     try {
       dropCounter?.increment(DropReason.DELIVERY_FAILED, count)
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+      logger.w("SdkEventBuffer", error) { "Could not count delivery failure" }
       // Custom counters must not crash a host retry callback.
     }
   }
@@ -313,7 +397,8 @@ internal class SdkEventBuffer(
     if (events.isEmpty()) return
     try {
       onFlush(events)
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+      logger.w("SdkEventBuffer", error) { "Could not flush event batch" }
       // A throwing custom EventPersistence.persist() must NOT escape this task: it
       // runs inside scheduleAtFixedRate and an uncaught exception would silently
       // cancel all future periodic flushes (#3605), so guard the persist too.
@@ -321,7 +406,8 @@ internal class SdkEventBuffer(
         Runnable {
           try {
             persistence?.persist(events)
-          } catch (_: Exception) {
+          } catch (error: Exception) {
+            logger.w("SdkEventBuffer", error) { "Could not persist failed flush" }
             // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
           }
         }

@@ -29,6 +29,7 @@ interface SelectionOptions {
   strategy?: ElementSelectionStrategy;
   index?: number;
   selectionIntent?: TextSelectionIntent;
+  allowHintFallback?: boolean;
   intentAction?: ResolutionAction;
   scrollableContainer?: boolean;
   screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
@@ -184,6 +185,7 @@ export class ResolverElementSelector implements ElementSelector {
         action:
           options.intentAction ??
           (options.selectionIntent === "focus-input" ? "focus-input" : "tap"),
+        allowHintFallback: options.allowHintFallback,
         preferToggle: options.selectionIntent === "toggle",
         preferTap:
           options.intentAction === "inspect" &&

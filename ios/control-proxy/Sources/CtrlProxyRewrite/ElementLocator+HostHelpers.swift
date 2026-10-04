@@ -222,6 +222,23 @@ extension ElementLocator {
         return textInputSnapshotCount > 0
     }
 
+    /// Detect a usable keyboard by reading the captured nodes directly, without copying the tree.
+    nonisolated static func keyboardVisibleInSnapshot<Node>(
+        _ snapshot: Node,
+        isKeyboard: (Node) -> Bool,
+        frame: (Node) -> CGRect,
+        children: (Node) -> [Node]
+    )
+        -> Bool
+    {
+        if isKeyboard(snapshot), !frame(snapshot).isEmpty {
+            return true
+        }
+        return children(snapshot).contains {
+            keyboardVisibleInSnapshot($0, isKeyboard: isKeyboard, frame: frame, children: children)
+        }
+    }
+
     /// Skip when no usable input exists, reuse the first non-empty focused snapshot
     /// frame without IPC, or query live only when the captured keyboard is visible
     /// and no usable input reports focus. Otherwise rely on snapshot.hasFocus.
@@ -229,9 +246,10 @@ extension ElementLocator {
     /// keyboard-focus predicate. Reusing captured focus avoids another remote
     /// resolution that can block when the app backgrounds (issue #9082). Live lookup
     /// is gated on foreground state and a no-wait existence check before snapshotting.
+    /// Evaluate captured keyboard visibility only when usable inputs lack captured focus.
     nonisolated static func keyboardFocusDecision(
         textInputCandidates: [(frame: CGRect, hasFocus: Bool)],
-        keyboardVisibleInSnapshot: Bool = false
+        keyboardVisibleInSnapshot: @autoclosure () -> Bool
     )
         -> KeyboardFocusDecision
     {
@@ -242,7 +260,7 @@ extension ElementLocator {
         if let focused = usableInputs.first(where: { $0.hasFocus }) {
             return .useSnapshotFrame(focused.frame)
         }
-        return keyboardVisibleInSnapshot ? .liveQuery : .skip
+        return keyboardVisibleInSnapshot() ? .liveQuery : .skip
     }
 
     /// Live focus overrides captured focus for usable frames. Snapshot-derived focus

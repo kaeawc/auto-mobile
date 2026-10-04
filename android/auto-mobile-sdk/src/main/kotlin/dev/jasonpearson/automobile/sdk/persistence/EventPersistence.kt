@@ -62,6 +62,7 @@ internal class FileEventPersistence(
   private val dropCounter: DropCounter? = null,
   private val maxReplayAttempts: Int = 3,
   private val fileOps: (File) -> Boolean = File::delete,
+  private val maxPendingBytes: Long = 10_000_000,
 ) : EventPersistence {
 
   // Preserve the published three-argument JVM descriptor. Different parameter names avoid
@@ -83,6 +84,7 @@ internal class FileEventPersistence(
   init {
     require(maxPendingBatches > 0)
     require(maxReplayAttempts > 0)
+    require(maxPendingBytes > 0)
   }
 
   private data class BatchFile(
@@ -165,6 +167,7 @@ internal class FileEventPersistence(
     val count = eventCount(batch)
     if (fileOps(batch.file)) {
       dropCounter?.increment(reason, count)
+      logger.w("EventPersistence") { "Dropped $count pending events: $reason" }
       return true
     }
     if (!batch.file.exists()) return true
@@ -186,7 +189,14 @@ internal class FileEventPersistence(
         directory.mkdirs()
         val target = File(directory, "events_$id.json")
         file = target
-        target.writeText(serializeEvents(events))
+        val json = serializeEvents(events)
+        if (json.toByteArray(Charsets.UTF_8).size > maxPendingBytes) {
+          logger.w("EventPersistence") {
+            "Pending batch exceeds $maxPendingBytes bytes; not retained"
+          }
+          return null // The buffer owns failure accounting when persistence returns null.
+        }
+        target.writeText(json)
         id
       } catch (_: Exception) {
         // A partial write is not a retained batch; report the failure to the buffer.
@@ -196,11 +206,14 @@ internal class FileEventPersistence(
     try {
       val files = pendingFiles()
       var excess = files.size - maxPendingBatches
+      var bytes = files.sumOf { it.file.length() }
       for (victim in files) {
-        if (excess <= 0) break
+        if (excess <= 0 && bytes <= maxPendingBytes) break
         if (victim.batchId == batchId) continue
+        val victimBytes = victim.file.length()
         if (!deleteDropped(victim, DropReason.BUFFER_OVERFLOW)) break
         excess--
+        bytes -= victimBytes
       }
     } catch (error: Exception) {
       // Eviction failure must never destroy the newly written batch.

@@ -18,9 +18,11 @@ import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
+import { logger } from "../../src/utils/logger";
 
 interface DaemonStartupInternals {
   devicePool: DevicePool;
+  initializeDevicePool(): Promise<void>;
   initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void>;
   initializeIosServices(): Promise<void>;
 }
@@ -76,6 +78,73 @@ describe("Daemon startup device discovery", () => {
       DaemonState.getInstance().reset();
     }
   });
+
+  test("failed startup refresh reports its reason once without claiming no devices were detected", async () => {
+    const daemon = buildDaemon(new FakeTimer());
+    const internals = daemon as unknown as DaemonStartupInternals;
+    const manager = new FakeDeviceManager();
+    Object.assign(internals.devicePool, { deviceManager: manager });
+    const discovery = spyOn(manager, "getBootedDevicesDetailed").mockRejectedValue(
+      new Error("startup discovery failed"),
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await internals.initializeDevicePoolWithTimeout(5_000);
+      expect(
+        warn.mock.calls.filter(([message]) => String(message).includes("startup discovery failed")),
+      ).toHaveLength(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("startup discovery failed"),
+        expect.any(Error),
+      );
+      expect(warn).not.toHaveBeenCalledWith(
+        "No devices detected during daemon startup. Device pool is empty.",
+      );
+      // The timeout wrapper still reports the actual final pool status.
+      expect(warn).toHaveBeenCalledWith("Device pool is empty after initialization.");
+    } finally {
+      warn.mockRestore();
+      discovery.mockRestore();
+      daemon.getSessionManager().stopCleanupTimer();
+    }
+  });
+
+  test.each([false, true])(
+    "successful startup refresh preserves empty/non-empty reporting: populated=%s",
+    async (populated) => {
+      const daemon = buildDaemon(new FakeTimer());
+      const internals = daemon as unknown as DaemonStartupInternals;
+      const manager = new FakeDeviceManager();
+      manager.bootedDevices = populated
+        ? [{ deviceId: "startup-device", name: "Physical Android", platform: "android" }]
+        : [];
+      Object.assign(internals.devicePool, { deviceManager: manager });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        await internals.initializeDevicePoolWithTimeout(5_000);
+        if (populated) {
+          expect(warn).not.toHaveBeenCalled();
+          expect(info).toHaveBeenCalledWith(
+            "Device pool initialized with 1 devices: startup-device",
+          );
+          expect(info).toHaveBeenCalledWith("Device pool ready with 1 device(s)");
+          expect(internals.devicePool.getDevice("startup-device")).toMatchObject({
+            sessionId: null,
+            status: "idle",
+          });
+        } else {
+          expect(warn).toHaveBeenCalledWith(
+            "No devices detected during daemon startup. Device pool is empty.",
+          );
+        }
+      } finally {
+        info.mockRestore();
+        warn.mockRestore();
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    },
+  );
 
   test("an Android session syncs its device, and the iOS startup secret does not change that", async () => {
     const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
@@ -208,11 +277,10 @@ describe("Daemon startup device discovery", () => {
       internals.devicePool as unknown as { deviceManager: DeferredDiscoveryDeviceManager }
     ).deviceManager = manager;
     const refreshCompleted = Promise.withResolvers<void>();
-    const originalRefresh = internals.devicePool.refreshDevices.bind(internals.devicePool);
-    internals.devicePool.refreshDevices = async () => {
-      const added = await originalRefresh();
+    const originalInitialize = internals.initializeDevicePool.bind(internals);
+    internals.initializeDevicePool = async () => {
+      await originalInitialize();
       refreshCompleted.resolve();
-      return added;
     };
 
     const startup = internals.initializeDevicePoolWithTimeout(5_000);

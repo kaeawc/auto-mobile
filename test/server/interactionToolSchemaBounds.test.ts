@@ -29,6 +29,8 @@ import {
 } from "../../src/features/action/DragAndDrop";
 import {
   SWIPE_APEX_PAUSE_MIN_MS,
+  SWIPE_APEX_PAUSE_MAX_MS,
+  SWIPE_RETURN_SPEED_MAX,
   SWIPE_RETURN_SPEED_EXCLUSIVE_MIN,
   validateSwipeTimingOptions,
 } from "../../src/features/action/swipeon/swipeTiming";
@@ -75,14 +77,14 @@ test("schema bounds follow the implementation constants", () => {
       field: "apexPause",
       schema: swipeOnSchema.shape.apexPause,
       min: SWIPE_APEX_PAUSE_MIN_MS,
-      max: undefined,
+      max: SWIPE_APEX_PAUSE_MAX_MS,
       exclusive: false,
     },
     {
       field: "returnSpeed",
       schema: swipeOnSchema.shape.returnSpeed,
       min: SWIPE_RETURN_SPEED_EXCLUSIVE_MIN,
-      max: undefined,
+      max: SWIPE_RETURN_SPEED_MAX,
       exclusive: true,
     },
     {
@@ -215,7 +217,7 @@ test("implementation-supported drag duration reaches the fake action unchanged",
   expect((await dragAndDropHandler(device, parsedDrag)).isError).toBeUndefined();
 });
 
-test.each([{ apexPause: 3001 }, { returnSpeed: 0.05 }, { returnSpeed: 4 }])(
+test.each([{ apexPause: 3000 }, { returnSpeed: 0.1 }, { returnSpeed: 4 }])(
   "implementation-supported swipe timing reaches the fake action: %j",
   async (timing) => {
     const parsedSwipe = swipeOnSchema.parse({ direction: "up", boomerang: true, ...timing });
@@ -270,4 +272,36 @@ test("tapAny describes the action longPress maximum", () => {
   expect(tapAnySchema.shape.duration.description).toContain(
     `${TAP_ANY_LONG_PRESS_MAX_DURATION_MS}`,
   );
+});
+
+test("boomerang schema rejects unsafe timing before dispatch", () => {
+  for (const timing of [
+    { apexPause: SWIPE_APEX_PAUSE_MAX_MS + 1 },
+    { apexPause: Infinity },
+    { apexPause: NaN },
+    { returnSpeed: 1e-320 },
+    { returnSpeed: 0.02 },
+    { returnSpeed: SWIPE_RETURN_SPEED_MAX + 1 },
+    { returnSpeed: Infinity },
+    { returnSpeed: NaN },
+    { speed: "slow", returnSpeed: 0.1, apexPause: 0 },
+    { apexPause: SWIPE_APEX_PAUSE_MAX_MS, returnSpeed: 0.1 },
+    { boomerang: false, apexPause: 100 },
+    { boomerang: false, returnSpeed: 1 },
+  ]) {
+    const result = swipeOnSchema.safeParse({ direction: "up", boomerang: true, ...timing });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message.length).toBeGreaterThan(10);
+    }
+  }
+  for (const timing of [
+    { apexPause: SWIPE_APEX_PAUSE_MAX_MS },
+    { returnSpeed: SWIPE_RETURN_SPEED_MAX },
+    { apexPause: 0, returnSpeed: 0.1 },
+  ]) {
+    expect(swipeOnSchema.safeParse({ direction: "up", boomerang: true, ...timing }).success).toBe(
+      true,
+    );
+  }
 });

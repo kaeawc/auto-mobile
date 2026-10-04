@@ -5,7 +5,11 @@ import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
-import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
+import {
+  AndroidDisplayReadError,
+  ObservedAndroidDisplayCache,
+} from "../../../src/features/observe/ObservationDisplay";
+import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice, ObservationInsets, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -51,6 +55,87 @@ describe("display read routing", () => {
     skipRecompositionTracking: true,
     skipAccessibilityAudit: true,
   };
+
+  test.each(["options", "constructor", "observer"] as const)(
+    "explicit Android display from %s rejects an unreadable list with retry guidance",
+    async (mode) => {
+      const target = { ...device, deviceId: `unreadable-explicit-display-${mode}` };
+      ObservedAndroidDisplayCache.release(target.deviceId);
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError("cmd display get-displays", new Error("display source timeout"));
+      const capture = new FakeHierarchyCapture(() => ({ hierarchy: {}, displayId: 2 }));
+      const screen = new RealObserveScreen(
+        target,
+        new FakeAdbClientFactory(adb),
+        {
+          display: mode === "options" ? undefined : "external",
+          hierarchyCapture: capture,
+          cacheStore: new FakeObserveCacheStore(timer),
+        },
+        timer,
+      );
+      try {
+        const read =
+          mode === "observer"
+            ? screen.executeDeviceRead(undefined, "none")
+            : screen.execute({
+                ...readOptions,
+                ...(mode === "options" ? { display: "external" } : {}),
+              });
+        await expect(read).rejects.toBeInstanceOf(ActionableError);
+        await expect(read).rejects.toBeInstanceOf(AndroidDisplayReadError);
+        await expect(read).rejects.toThrow(
+          'Android display list could not be read while selecting panel "external": display source timeout. Retry the request.',
+        );
+        expect(capture.requests).toEqual([]);
+      } finally {
+        ObservedAndroidDisplayCache.release(target.deviceId);
+        displayTransitions.reset(target.deviceId);
+        resetObserveCacheStore();
+      }
+    },
+  );
+
+  test("a screenshot's selected-display re-read preserves the retryable error", async () => {
+    const target = { ...device, deviceId: "unreadable-screenshot-display" };
+    ObservedAndroidDisplayCache.release(target.deviceId);
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: logicalDisplays, stderr: "" });
+    const capture = new FakeHierarchyCapture(() => {
+      adb.setCommandError("cmd display get-displays", new Error("display source timeout"));
+      return { hierarchy: {}, displayId: 2, screenWidth: 200, screenHeight: 200 };
+    });
+    let screenshots = 0;
+    const screen = new RealObserveScreen(
+      target,
+      new FakeAdbClientFactory(adb),
+      {
+        display: "external",
+        hierarchyCapture: capture,
+        cacheStore: new FakeObserveCacheStore(timer),
+        screenshot: {
+          execute: async () => {
+            screenshots++;
+            return { success: false, error: "must not capture an unrouted screenshot" };
+          },
+          generateScreenshotPath: () => "/fake/selected.png",
+          getActivityHash: async () => "",
+        },
+      },
+      timer,
+    );
+    try {
+      await expect(screen.executeDeviceRead()).rejects.toBeInstanceOf(AndroidDisplayReadError);
+      expect(capture.requests).toHaveLength(1);
+      expect(screenshots).toBe(0);
+    } finally {
+      ObservedAndroidDisplayCache.release(target.deviceId);
+      displayTransitions.reset(target.deviceId);
+      resetObserveCacheStore();
+    }
+  });
 
   test.each([
     ["absent", undefined],
@@ -854,6 +939,7 @@ describe("display read routing", () => {
 describe("all-display captures", () => {
   afterEach(() => {
     displayTransitions.reset(device.deviceId);
+    ObservedAndroidDisplayCache.release(device.deviceId);
     resetObserveCacheStore();
   });
 
@@ -991,6 +1077,25 @@ describe("all-display captures", () => {
       });
     },
   );
+
+  test("an unreadable display list keeps aggregate secondary panels unavailable", async () => {
+    ObservedAndroidDisplayCache.release(device.deviceId);
+    const h = harness();
+    h.adb.setCommandError("cmd display get-displays", new Error("display source timeout"));
+    const result = await h.screen.execute(options);
+    const secondary = result.displays?.find((entry) => entry.display.key === "external");
+    expect(secondary?.freshness).toEqual(
+      expect.objectContaining({
+        category: "unavailable",
+        unavailableReason: "unknown",
+        unavailableDetail: expect.stringContaining(
+          'Android display list could not be read while selecting panel "external"',
+        ),
+      }),
+    );
+    expect(secondary?.freshness.unavailableDetail).toContain("Retry the request.");
+    expect(h.capture.requests).toEqual([]);
+  });
 
   test("default critical failure preserves the HEAD fallback without freshness", async () => {
     const h = harness();

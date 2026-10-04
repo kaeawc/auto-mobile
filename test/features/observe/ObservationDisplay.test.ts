@@ -1,5 +1,6 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  AndroidDisplayReadError,
   ObservedAndroidDisplayCache,
   observedAndroidDisplay,
   observedIosDisplay,
@@ -149,6 +150,125 @@ describe("Android display-list read failures", () => {
   };
   const coverDisplay =
     'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}';
+  const innerDisplay =
+    'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}';
+
+  beforeEach(() => ObservedAndroidDisplayCache.release(device.deviceId));
+  afterEach(() => ObservedAndroidDisplayCache.release(device.deviceId));
+
+  test("a failed first read is retried immediately instead of caching the fallback", async () => {
+    const timer = new FakeTimer();
+    const cache = new ObservedAndroidDisplayCache(timer);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    const read = spyOn(adb, "executeCommand").mockImplementationOnce(() => {
+      throw new Error("first read failed synchronously");
+    });
+    try {
+      expect((await cache.resolve(device, adb)).display).toMatchObject({
+        key: "0",
+        role: "unknown",
+      });
+      expect((await cache.resolve(device, adb)).display).toMatchObject({
+        key: "cover",
+        role: "cover",
+      });
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("a failed first read does not become the last-known display", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("cmd display get-displays", new Error("timeout"));
+    expect((await cache.resolve(device, adb)).display.key).toBe("0");
+    // clear() preserves last-known state, so a changed inventory exposes a stored fallback.
+    ObservedAndroidDisplayCache.clear(device.deviceId);
+    const singlePanel = {
+      ...device,
+      displays: { ...device.displays!, panels: [device.displays!.panels[1]] },
+    };
+    expect((await cache.resolve(singlePanel, adb)).display.key).toBe("cover");
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+  });
+
+  test.each(["expired", "forced"] as const)(
+    "a failed %s read retains the previous value but the next call retries immediately",
+    async (mode) => {
+      const timer = new FakeTimer();
+      const cache = new ObservedAndroidDisplayCache(timer);
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+      const previous = await cache.resolve(device, adb);
+      timer.advanceTime(mode === "expired" ? 5_000 : 1_000);
+      const read = spyOn(adb, "executeCommand").mockRejectedValueOnce(new Error("timeout"));
+      try {
+        const failed = await cache.resolve(device, adb, undefined, mode === "forced");
+        expect(failed).toEqual(previous);
+        expect(failed).not.toBe(previous);
+        expect(failed.display).not.toBe(previous.display);
+        adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+        expect((await cache.resolve(device, adb)).display.key).toBe("inner");
+        expect(read).toHaveBeenCalledTimes(2);
+      } finally {
+        read.mockRestore();
+      }
+    },
+  );
+
+  test("a successful display read is cached until exactly five seconds", async () => {
+    const timer = new FakeTimer();
+    const cache = new ObservedAndroidDisplayCache(timer);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    expect((await cache.resolve(device, adb)).display.key).toBe("cover");
+    adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+    timer.advanceTime(4_999);
+    expect((await cache.resolve(device, adb)).display.key).toBe("cover");
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+    timer.advanceTime(1);
+    expect((await cache.resolve(device, adb)).display.key).toBe("inner");
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+  });
+
+  test("a read-only failed probe preserves the owner's cache and its expiry", async () => {
+    const timer = new FakeTimer();
+    const owner = new ObservedAndroidDisplayCache(timer);
+    const observer = new ObservedAndroidDisplayCache(timer, true);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: coverDisplay, stderr: "" });
+    const previous = await owner.resolve(device, adb);
+    timer.advanceTime(1_000);
+    const read = spyOn(adb, "executeCommand").mockRejectedValueOnce(new Error("timeout"));
+    try {
+      expect(await observer.resolve(device, adb, undefined, true)).toEqual(previous);
+      adb.setCommandResponse("cmd display get-displays", { stdout: innerDisplay, stderr: "" });
+      expect(await owner.resolve(device, adb)).toEqual(previous);
+      expect(read).toHaveBeenCalledTimes(1);
+      timer.advanceTime(4_000);
+      expect((await owner.resolve(device, adb)).display.key).toBe("inner");
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("no-panel discovery keeps its default display without a shell read", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    const adb = new FakeAdbExecutor();
+    adb.setDefaultError(new Error("must not probe"));
+    const singleScreen = { ...device, displays: undefined };
+    const first = await cache.resolve(singleScreen, adb);
+    expect(first).toEqual({
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      logicalId: 0,
+    });
+    expect(await cache.resolve(singleScreen, adb)).toEqual(first);
+    expect(await cache.resolve(singleScreen, adb, undefined, true)).toEqual(first);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
 
   test("a failed read rejects panel selection with a retryable ActionableError", async () => {
     const adb = new FakeAdbExecutor();
@@ -160,6 +280,7 @@ describe("Android display-list read failures", () => {
         .logicalIdForPanel(device, adb, "inner")
         .catch((error: unknown) => error);
       expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toBeInstanceOf(AndroidDisplayReadError);
       expect(error).not.toBeInstanceOf(DisplaySelectionError);
       expect(error).toHaveProperty(
         "message",

@@ -1,6 +1,8 @@
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/constants";
+import { INTERNAL_NO_DIFF_PARAM } from "../../server/internalToolCall";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
-import { INTERNAL_NO_DIFF_PARAM } from "../../server/internalToolCall";
+import { isInternalStepParam } from "../../constants/internalStepParams";
 
 /**
  * Set of MCP tool names that are relevant for test plan recording.
@@ -38,9 +40,7 @@ export const INTERNAL_PARAMS = new Set([
   "device",
   "devices",
   "keepScreenAwake",
-  "__mcpSessionId",
-  "__executionId",
-  "__executionStartTime",
+  ...INTERNAL_TOOL_PARAM_NAMES,
   "__lockNamespace",
   INTERNAL_NO_DIFF_PARAM,
 ]);
@@ -48,7 +48,7 @@ export const INTERNAL_PARAMS = new Set([
 export function stripInternalParams(args: Record<string, unknown>): Record<string, unknown> {
   const clean: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
-    if (!INTERNAL_PARAMS.has(key)) {
+    if (!INTERNAL_PARAMS.has(key) && !isInternalStepParam(key)) {
       clean[key] = value;
     }
   }

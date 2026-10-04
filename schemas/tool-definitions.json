@@ -3033,15 +3033,6 @@
           "type": "string",
           "enum": ["absolute", "normalized", "percent"]
         },
-        "raw": {
-          "description": "Return the raw view hierarchy instead of the compact skeleton",
-          "type": "boolean"
-        },
-        "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
-          "type": "string",
-          "enum": ["full", "skeleton"]
-        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -24335,15 +24326,6 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
-        "raw": {
-          "description": "Return the raw view hierarchy instead of the compact skeleton",
-          "type": "boolean"
-        },
-        "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
-          "type": "string",
-          "enum": ["full", "skeleton"]
-        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -25387,14 +25369,16 @@
           "type": "boolean"
         },
         "apexPause": {
-          "description": "Pause duration at swipe apex in ms (>= 0)",
+          "description": "Pause duration at swipe apex in ms (0-3000; default: 100)",
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 3000
         },
         "returnSpeed": {
-          "description": "Speed multiplier for return swipe (> 0)",
+          "description": "Speed multiplier for return swipe (> 0, <= 3000; default: 1); return duration <= 3000 ms and total boomerang <= 5000 ms",
           "type": "number",
-          "exclusiveMinimum": 0
+          "exclusiveMinimum": 0,
+          "maximum": 3000
         },
         "speed": {
           "description": "Swipe speed preset",

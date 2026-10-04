@@ -1282,6 +1282,102 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertTrue(ElementLocator.shouldQueryKeyboardFocus(textInputSnapshotCount: 5))
     }
 
+    private struct KeyboardSnapshotNode {
+        var isKeyboard = false
+        var frame: CGRect = .zero
+        var children: [KeyboardSnapshotNode] = []
+    }
+
+    func testKeyboardVisibleInSnapshot_keyboardWithNonEmptyFrame() {
+        let keyboard = KeyboardSnapshotNode(
+            isKeyboard: true,
+            frame: CGRect(x: 0, y: 500, width: 375, height: 312)
+        )
+        XCTAssertTrue(ElementLocator.keyboardVisibleInSnapshot(
+            keyboard,
+            isKeyboard: { $0.isKeyboard },
+            frame: { $0.frame },
+            children: { $0.children }
+        ))
+    }
+
+    func testKeyboardVisibleInSnapshot_keyboardWithEmptyFrame() {
+        for frame in [.zero, CGRect(x: 0, y: 500, width: 375, height: 0)] {
+            let keyboard = KeyboardSnapshotNode(isKeyboard: true, frame: frame)
+            XCTAssertFalse(ElementLocator.keyboardVisibleInSnapshot(
+                keyboard,
+                isKeyboard: { $0.isKeyboard },
+                frame: { $0.frame },
+                children: { $0.children }
+            ))
+        }
+    }
+
+    func testKeyboardVisibleInSnapshot_keyboardNestedInChildren() {
+        let keyboard = KeyboardSnapshotNode(
+            isKeyboard: true,
+            frame: CGRect(x: 0, y: 500, width: 375, height: 312)
+        )
+        let root = KeyboardSnapshotNode(children: [
+            KeyboardSnapshotNode(),
+            KeyboardSnapshotNode(children: [keyboard]),
+        ])
+        XCTAssertTrue(ElementLocator.keyboardVisibleInSnapshot(
+            root,
+            isKeyboard: { $0.isKeyboard },
+            frame: { $0.frame },
+            children: { $0.children }
+        ))
+    }
+
+    func testKeyboardVisibleInSnapshot_keyboardAbsent() {
+        let root = KeyboardSnapshotNode(children: [
+            KeyboardSnapshotNode(frame: CGRect(x: 0, y: 500, width: 375, height: 312)),
+            KeyboardSnapshotNode(children: [KeyboardSnapshotNode()]),
+        ])
+        XCTAssertFalse(ElementLocator.keyboardVisibleInSnapshot(
+            root,
+            isKeyboard: { $0.isKeyboard },
+            frame: { $0.frame },
+            children: { $0.children }
+        ))
+    }
+
+    func testKeyboardFocusDecision_evaluatesKeyboardWalkOnlyWhenNeeded() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        for keyboardVisible in [false, true] {
+            let cases: [(inputs: [(frame: CGRect, hasFocus: Bool)], expected: KeyboardFocusDecision, walks: Int)] = [
+                ([], .skip, 0),
+                ([(frame, false), (frame, true)], .useSnapshotFrame(frame), 0),
+                ([(.zero, true), (CGRect(x: 10, y: 20, width: 0, height: 40), false)], .skip, 0),
+                ([(frame, false)], keyboardVisible ? .liveQuery : .skip, 1),
+            ]
+            let root = KeyboardSnapshotNode(children: [
+                KeyboardSnapshotNode(isKeyboard: true, frame: keyboardVisible ? frame : .zero),
+            ])
+            for testCase in cases {
+                var walkCount = 0
+                func walk() -> Bool {
+                    walkCount += 1
+                    return ElementLocator.keyboardVisibleInSnapshot(
+                        root,
+                        isKeyboard: { $0.isKeyboard },
+                        frame: { $0.frame },
+                        children: { $0.children }
+                    )
+                }
+                XCTAssertEqual(
+                    ElementLocator.keyboardFocusDecision(
+                        textInputCandidates: testCase.inputs,
+                        keyboardVisibleInSnapshot: walk()
+                    ),
+                    testCase.expected
+                )
+                XCTAssertEqual(walkCount, testCase.walks)
+            }
+        }
+    }
+
     func testKeyboardFocusDecision_skipsWhenNoInputsPresent() {
         for keyboardVisible in [false, true] {
             XCTAssertEqual(
@@ -1352,10 +1448,13 @@ final class ElementLocatorTests: XCTestCase {
     func testKeyboardFocusDecision_usesFirstOfMultipleFocusedInputs() {
         let firstFrame = CGRect(x: 10, y: 20, width: 100, height: 40)
         XCTAssertEqual(
-            ElementLocator.keyboardFocusDecision(textInputCandidates: [
-                (frame: firstFrame, hasFocus: true),
-                (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: true),
-            ]),
+            ElementLocator.keyboardFocusDecision(
+                textInputCandidates: [
+                    (frame: firstFrame, hasFocus: true),
+                    (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: true),
+                ],
+                keyboardVisibleInSnapshot: false
+            ),
             .useSnapshotFrame(firstFrame)
         )
     }
@@ -1378,10 +1477,13 @@ final class ElementLocatorTests: XCTestCase {
     func testKeyboardFocusDecision_usesUsableFocusAfterEmptyFocusedFrame() {
         let focusedFrame = CGRect(x: 10, y: 20, width: 100, height: 40)
         XCTAssertEqual(
-            ElementLocator.keyboardFocusDecision(textInputCandidates: [
-                (frame: .zero, hasFocus: true),
-                (frame: focusedFrame, hasFocus: true),
-            ]),
+            ElementLocator.keyboardFocusDecision(
+                textInputCandidates: [
+                    (frame: .zero, hasFocus: true),
+                    (frame: focusedFrame, hasFocus: true),
+                ],
+                keyboardVisibleInSnapshot: false
+            ),
             .useSnapshotFrame(focusedFrame)
         )
     }

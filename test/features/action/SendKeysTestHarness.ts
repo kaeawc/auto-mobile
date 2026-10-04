@@ -1,11 +1,19 @@
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
   DefaultSendKeysCommandExecutor,
+  SendKeys,
+  type SendKeysTargetFocuser,
+  type SendKeysFocusOptions,
+  type SendKeysSelector,
+  type SendKeysDependencies,
   type SendKeysObserver,
   type SendKeysTextClient,
 } from "../../../src/features/action/SendKeys";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 export const android: BootedDevice = {
   deviceId: "emulator-5554",
@@ -135,5 +143,83 @@ export function createSendKeysHarness(device: BootedDevice) {
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },
     }),
+  };
+}
+
+export function createSendKeysFocusHarness(device: BootedDevice = android) {
+  const h = createSendKeysHarness(device);
+  const calls: string[] = [];
+  const focusCalls: Array<{
+    selector: SendKeysSelector;
+    signal?: AbortSignal;
+    display?: string;
+    options?: SendKeysFocusOptions;
+  }> = [];
+  const signals: Array<AbortSignal | undefined> = [];
+  const replies: Array<Awaited<ReturnType<SendKeysTargetFocuser["focus"]>> | Error> = [];
+  const recovery = {
+    close: async () => ({ success: true }),
+  };
+  const transitions = new FakeDisplayTransitionReader();
+  const observation: ObserveResult = {
+    ...focused,
+    display: { key: "0", role: "unknown", posture: "unknown", generation: transitions.generation },
+    displayRevision: transitions.fullRevision,
+    viewHierarchy: { ...focused.viewHierarchy!, displayId: 0 },
+  };
+  const insert = h.client.insert;
+  h.client.insert = async (...args) => {
+    calls.push("type");
+    return insert(...args);
+  };
+  const dependencies: SendKeysDependencies = {
+    timer: new FakeTimer(),
+    executor: h.executor,
+    observer: {
+      execute: async (options) => {
+        if (options?.freshness === "fresh" && options.minTimestamp === 0) {
+          calls.push("refresh");
+        }
+        return observation;
+      },
+    },
+    displayTransitions: transitions,
+    lastRenderedObservation: () => observation,
+    timestampProvider: { now: async () => 1 },
+    focuser: {
+      focus: async (
+        selector: SendKeysSelector,
+        signal?: AbortSignal,
+        display?: string,
+        options?: SendKeysFocusOptions,
+      ) => {
+        calls.push("focus");
+        focusCalls.push({ selector, signal, display, options });
+        const reply = replies.shift() ?? { success: true, focusVerified: true };
+        if (reply instanceof Error) {
+          throw reply;
+        }
+        return reply;
+      },
+    },
+    keyboard: {
+      execute: async (_action: "close", signal?: AbortSignal) => {
+        calls.push("close");
+        signals.push(signal);
+        return recovery.close();
+      },
+    },
+  };
+  const action = new SendKeys(device, new FakeAdbClientFactory(h.adb), dependencies);
+  return {
+    ...h,
+    action,
+    calls,
+    focusCalls,
+    signals,
+    replies,
+    recovery,
+    observation,
+    transitions,
   };
 }

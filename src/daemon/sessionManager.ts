@@ -10,7 +10,7 @@ import {
 } from "../features/utility/DeviceClock";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
-import { getAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
@@ -433,6 +433,19 @@ interface PendingSessionRebind {
   promise: Promise<Session>;
 }
 
+interface RecoveryAssignmentWait {
+  responseMarginMs: number;
+  restartDeadlineMs?: number;
+  timeoutError: () => ActionableError;
+}
+
+interface SharedSessionAssignment {
+  controller: AbortController;
+  /** Each deadline removes only its caller; an unbounded caller keeps recovery alive. */
+  waiters: number;
+  recoveryWait: PromiseWithResolvers<RecoveryAssignmentWait | undefined>;
+}
+
 interface TerminalReleaseReservation {
   session: Session;
   deviceId: string;
@@ -465,8 +478,8 @@ export interface SessionRecoveryTarget {
   androidEmulator?: boolean;
   /** Only device-restart releases may wait, bounded by session expiry and restart grace. */
   restartRecoveryDeadlineMs?: number;
-  /** Current assignment call's deadline only; never persisted or reused for another call. */
-  requestDeadlineMs?: number;
+  /** Shared acquisitions bound their callers separately using the pool's recovery error. */
+  onRecoveryWait?: (wait: RecoveryAssignmentWait) => void;
   /** Liveness contract recorded before the daemon restart. */
   liveness?: SessionRecoveryLiveness;
   /** A startup rehydration reserves the device until its prior owner reconnects. */
@@ -796,6 +809,7 @@ export class SessionManager {
   private acceptingSessionCreations = true;
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
+  private readonly sharedSessionAssignments = new Map<string, SharedSessionAssignment>();
   /** Persisted recovery state consumed by createSession before it publishes an assigned session. */
   private readonly pendingPersistedRecoveries: Map<string, DeviceSession> = new Map();
   /** Releases received before an assignment has published its session. */
@@ -1630,7 +1644,23 @@ export class SessionManager {
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
-      const joined = await pendingAssignment;
+      const shared = this.sharedSessionAssignments.get(sessionId);
+      if (shared?.controller.signal.aborted) {
+        await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs);
+        return await this.getOrCreateSession(
+          sessionId,
+          devicePool,
+          platform,
+          undefined,
+          requireIssuedSession,
+          { access, requestDeadlineMs },
+        );
+      }
+      const joined = await this.waitForSharedAssignment(
+        sessionId,
+        pendingAssignment,
+        requestDeadlineMs,
+      );
       // An acquiring client that joined a startup rehydration is the owner returning.
       if (access === "acquire" && joined.ownership === "awaiting-owner") {
         joined.ownership = "owned";
@@ -1644,19 +1674,114 @@ export class SessionManager {
       return await pendingCreation.promise;
     }
 
+    const shared = this.newSharedAssignment(sessionId);
     const assignment = this.createUnseenSession(
       sessionId,
       devicePool,
       platform,
       requireIssuedSession,
-      requestDeadlineMs,
+      shared,
     ).finally(() => {
+      shared.recoveryWait.resolve(undefined);
       if (this.pendingSessionAssignments.get(sessionId) === assignment) {
         this.pendingSessionAssignments.delete(sessionId);
+        this.sharedSessionAssignments.delete(sessionId);
       }
     });
     this.pendingSessionAssignments.set(sessionId, assignment);
-    return await assignment;
+    return await this.waitForSharedAssignment(sessionId, assignment, requestDeadlineMs);
+  }
+
+  private newSharedAssignment(sessionId: string): SharedSessionAssignment {
+    const shared: SharedSessionAssignment = {
+      controller: new AbortController(),
+      waiters: 0,
+      recoveryWait: Promise.withResolvers<RecoveryAssignmentWait | undefined>(),
+    };
+    this.sharedSessionAssignments.set(sessionId, shared);
+    return shared;
+  }
+
+  /** Drain the old attempt before its successor can publish or clean up shared state. */
+  private async waitForAbortedAssignment(
+    assignment: Promise<Session>,
+    shared: SharedSessionAssignment,
+    requestDeadlineMs?: number,
+  ): Promise<void> {
+    const settled = assignment.then(
+      () => {},
+      (error: unknown) => {
+        // No callers remain on this cancelled attempt; its rejection is internal.
+        logger.debug("[SessionManager] Aborted session assignment settled", error);
+      },
+    );
+    // A restart waiter learns this configuration before it can abort the assignment.
+    const wait = await shared.recoveryWait.promise;
+    await raceWithDeadline(settled, {
+      timer: this.timer,
+      timeoutMs:
+        requestDeadlineMs !== undefined && Number.isFinite(requestDeadlineMs)
+          ? Math.max(0, requestDeadlineMs - (wait?.responseMarginMs ?? 0) - this.timer.now())
+          : undefined,
+      signal: getAbortSignal(),
+      label: "Session restart recovery",
+      timeoutError: wait?.timeoutError,
+    });
+  }
+
+  private async waitForSharedAssignment(
+    sessionId: string,
+    assignment: Promise<Session>,
+    requestDeadlineMs?: number,
+  ): Promise<Session> {
+    const shared = this.sharedSessionAssignments.get(sessionId);
+    if (!shared) {
+      return await assignment;
+    }
+    shared.waiters++;
+    const signal = getAbortSignal();
+    let waiting = true;
+    const leave = () => {
+      if (!waiting) {
+        return;
+      }
+      waiting = false;
+      shared.waiters--;
+      if (shared.waiters === 0) {
+        shared.controller.abort(new ActionableError("Session recovery has no remaining callers"));
+      }
+    };
+    try {
+      // Keep ordinary unbounded acquisition on its original scheduling path.
+      if ((requestDeadlineMs === undefined || !Number.isFinite(requestDeadlineMs)) && !signal) {
+        return await assignment;
+      }
+      const wait = await raceWithDeadline(
+        [shared.recoveryWait.promise, assignment.then(() => undefined)],
+        { timer: this.timer, label: "Session recovery wait configuration" },
+      );
+      if (!wait) {
+        return await assignment;
+      }
+      const deadline =
+        requestDeadlineMs !== undefined && Number.isFinite(requestDeadlineMs)
+          ? requestDeadlineMs - wait.responseMarginMs
+          : undefined;
+      return await raceWithDeadline(assignment, {
+        timer: this.timer,
+        timeoutMs:
+          deadline !== undefined && deadline < (wait.restartDeadlineMs ?? Infinity)
+            ? Math.max(0, deadline - this.timer.now())
+            : undefined,
+        signal,
+        label: "Session restart recovery",
+        timeoutError: wait.timeoutError,
+        // Fence claims in the timeout's own turn, before promise rejection cleanup.
+        onTimeout: leave,
+      });
+    } finally {
+      leave();
+    }
   }
 
   /** Admit an identity already issued by this daemon, including a nonterminal persisted one. */
@@ -1712,8 +1837,8 @@ export class SessionManager {
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
-    requireIssuedSession = false,
-    requestDeadlineMs?: number,
+    requireIssuedSession: boolean,
+    shared: SharedSessionAssignment,
   ): Promise<Session> {
     const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
     const persistedTerminalRelease = persisted
@@ -1755,7 +1880,7 @@ export class SessionManager {
       platform,
       persisted,
       "owned",
-      requestDeadlineMs,
+      shared,
     );
   }
 
@@ -1765,8 +1890,8 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
     persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner" = "owned",
-    requestDeadlineMs?: number,
+    initialOwnership: "owned" | "awaiting-owner",
+    shared: SharedSessionAssignment,
   ): Promise<Session> {
     const recoveryTarget = await this.recoveryTargetFromPersisted(sessionId, persisted, platform);
     if (recoveryTarget && initialOwnership === "awaiting-owner") {
@@ -1779,13 +1904,24 @@ export class SessionManager {
       this.pendingPersistedRecoveries.set(sessionId, persisted);
     }
     try {
-      await this.assignUnseenSessionToDevicePool(
-        sessionId,
-        devicePool,
-        platform,
-        recoveryTarget ? { ...recoveryTarget, requestDeadlineMs } : undefined,
-        persisted,
-      );
+      const assign = () =>
+        this.assignUnseenSessionToDevicePool(
+          sessionId,
+          devicePool,
+          platform,
+          recoveryTarget,
+          persisted,
+        );
+      if (
+        recoveryTarget?.restartRecoveryDeadlineMs !== undefined &&
+        this.timer.now() < recoveryTarget.restartRecoveryDeadlineMs
+      ) {
+        recoveryTarget.onRecoveryWait = (wait) => shared.recoveryWait.resolve(wait);
+        await runWithAbortSignal(shared.controller.signal, assign);
+      } else {
+        shared.recoveryWait.resolve(undefined);
+        await assign();
+      }
     } finally {
       if (this.pendingPersistedRecoveries.get(sessionId) === persisted) {
         this.pendingPersistedRecoveries.delete(sessionId);
@@ -1816,19 +1952,23 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner,
     persisted: DeviceSession,
   ): Promise<Session> {
+    const shared = this.newSharedAssignment(sessionId);
     const recoveryPromise = this.recoverPersistedSession(
       sessionId,
       devicePool,
       persisted.platform,
       persisted,
       "awaiting-owner",
+      shared,
     ).finally(() => {
+      shared.recoveryWait.resolve(undefined);
       if (this.pendingSessionAssignments.get(sessionId) === recoveryPromise) {
         this.pendingSessionAssignments.delete(sessionId);
+        this.sharedSessionAssignments.delete(sessionId);
       }
     });
     this.pendingSessionAssignments.set(sessionId, recoveryPromise);
-    return recoveryPromise;
+    return this.waitForSharedAssignment(sessionId, recoveryPromise);
   }
 
   async rehydratePersistedSessions(

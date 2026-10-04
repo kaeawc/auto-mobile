@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk.persistence
 
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryOutcome
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
@@ -108,7 +109,7 @@ class EventBatchReplayTest {
   }
 
   @Test
-  fun `failed completion records attempt off callback thread before continuing`() {
+  fun `legacy failed completion records attempt off callback thread and continues`() {
     val persistence = FakePersistence(2)
     val background = QueuedBackground()
     val completions = mutableListOf<(Boolean) -> Unit>()
@@ -123,6 +124,7 @@ class EventBatchReplayTest {
     assertEquals(listOf("batch-1"), persistence.failures)
     assertNotEquals(callbackThread, persistence.operationThreads.single())
     assertEquals(2, completions.size)
+    assertEquals(2, persistence.pending.size)
     assertTrue(persistence.removed.isEmpty())
   }
 
@@ -167,7 +169,7 @@ class EventBatchReplayTest {
   }
 
   @Test
-  fun `throwing delivery records failure and chain continues`() {
+  fun `legacy throwing delivery records failure and continues chain`() {
     val persistence = FakePersistence(2)
     val background = QueuedBackground()
     val delivered = mutableListOf<Long>()
@@ -212,7 +214,7 @@ class EventBatchReplayTest {
   }
 
   @Test
-  fun `persistence completion errors are contained and allow next delivery`() {
+  fun `legacy persistence completion errors are contained and continue replay`() {
     for (success in listOf(true, false)) {
       val persistence = FakePersistence(2)
       persistence.throwOnRemove = true
@@ -227,5 +229,20 @@ class EventBatchReplayTest {
       assertEquals(2, deliveries)
       assertEquals(2, persistence.pending.size)
     }
+  }
+
+  @Test
+  fun `explicit rejection consumes one attempt and stops FIFO replay`() {
+    val persistence = FakePersistence(2)
+    val background = QueuedBackground()
+    var deliveries = 0
+    EventBatchReplay().replay(persistence, background::execute) { _, complete ->
+      deliveries++
+      complete(BatchDeliveryOutcome.REJECTED)
+    }
+    background.drain()
+    assertEquals(1, deliveries)
+    assertEquals(listOf("batch-1"), persistence.failures)
+    assertEquals(2, persistence.pending.size)
   }
 }

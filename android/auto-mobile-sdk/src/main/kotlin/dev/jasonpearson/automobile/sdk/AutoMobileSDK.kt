@@ -25,6 +25,7 @@ import dev.jasonpearson.automobile.sdk.context.SdkContext
 import dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
 import dev.jasonpearson.automobile.sdk.events.DefaultDropCounter
 import dev.jasonpearson.automobile.sdk.events.DropCounter
 import dev.jasonpearson.automobile.sdk.events.DropReason
@@ -40,9 +41,9 @@ import dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor
 import dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents
+import dev.jasonpearson.automobile.sdk.persistence.EventBatchReplay
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
-import dev.jasonpearson.automobile.sdk.persistence.replayEventBatches
 import dev.jasonpearson.automobile.sdk.session.SessionTracker
 import dev.jasonpearson.automobile.sdk.storage.DataStoreInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
@@ -175,6 +176,7 @@ object AutoMobileSDK {
 
         // Create shared event buffer with broadcast flush callback and disk persistence
         lateinit var buffer: SdkEventBuffer
+        val replay = EventBatchReplay()
         buffer =
           SdkEventBuffer(
             maxBufferSize = configuration.bufferSize,
@@ -184,6 +186,11 @@ object AutoMobileSDK {
                 appContext,
                 events,
                 onUndelivered = buffer::persistUndelivered,
+                onAcknowledged = {
+                  buffer.execute {
+                    replayPendingBatches(appContext, eventPersistence, buffer, replay)
+                  }
+                },
               )
             },
             persistence = eventPersistence,
@@ -192,6 +199,13 @@ object AutoMobileSDK {
             maxPendingEvents = configuration.maxPendingEvents,
             backPressureStrategy = configuration.backPressureStrategy,
           )
+        SdkEventBroadcaster.deliveryScheduler =
+          object : BatchDeliveryScheduler {
+            override fun schedule(task: Runnable, delayMs: Long): (() -> Unit)? =
+              buffer.scheduleDelivery(task, delayMs)
+
+            override fun execute(task: Runnable) = buffer.executeDelivery(task)
+          }
         buffer.isEnabled = _isEnabled
         buffer.start()
         eventBuffer = buffer
@@ -208,8 +222,7 @@ object AutoMobileSDK {
         // Replay pending batches and clean up old ones on the buffer's executor
         // to avoid blocking the calling thread with disk I/O.
         buffer.execute {
-          eventPersistence.cleanup()
-          replayPendingBatches(appContext, eventPersistence, buffer)
+          replayPendingBatches(appContext, eventPersistence, buffer, replay)
         }
 
         // Thread-safe subsystems — can initialize from any thread
@@ -603,9 +616,17 @@ object AutoMobileSDK {
     context: Context,
     persistence: EventPersistence,
     buffer: SdkEventBuffer,
+    replay: EventBatchReplay,
   ) {
-    replayEventBatches(persistence, buffer::execute) { events, complete ->
-      SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
+    replay.replay(persistence, buffer::execute) { events, complete ->
+      SdkEventBroadcaster.broadcastBatch(
+        context,
+        events,
+        onUndelivered = {},
+        // Invalid payload is terminal: the broadcaster counts it, and replay removes its file.
+        onFinished = complete,
+        splitBatches = false,
+      )
     }
   }
 

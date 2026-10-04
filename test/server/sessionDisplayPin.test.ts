@@ -113,7 +113,7 @@ async function select(display?: unknown) {
 }
 
 test.each(["missing-device", device.deviceId])(
-  "setActiveDevice reports a failed refresh for %s even after partial pool updates",
+  "setActiveDevice rechecks %s after a failed refresh partially updates the pool",
   async (deviceId) => {
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [device]);
@@ -132,11 +132,49 @@ test.each(["missing-device", device.deviceId])(
     );
     DaemonState.getInstance().initialize(sessions, pool);
     const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
-    await expect(handler({ deviceId, sessionUuid: "one" })).rejects.toThrow(
-      "Could not refresh device list: tracking persistence unavailable",
-    );
+    if (deviceId === device.deviceId) {
+      expect(getStructuredPayload(await handler({ deviceId, sessionUuid: "one" }))).toMatchObject({
+        deviceId,
+        sessionUuid: "one",
+      });
+      expect(pool.getDevice(deviceId)).toBeDefined();
+    } else {
+      await expect(handler({ deviceId, sessionUuid: "one" })).rejects.toThrow(
+        "Could not refresh device list: tracking persistence unavailable",
+      );
+    }
   },
 );
+
+test("setActiveDevice caps a multi-line refresh failure at its first line", async () => {
+  const failure = `${"x".repeat(300)}\nsecond line must stay in logs`;
+  const refresh = spyOn(pool, "refreshDevicesWithOutcome").mockResolvedValue({
+    addedCount: 0,
+    failure,
+  });
+  try {
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    await expect(handler({ deviceId: "missing-device", sessionUuid: "one" })).rejects.toMatchObject(
+      {
+        message: `Could not refresh device list: ${"x".repeat(256)}. Resolve the cause and retry.`,
+      },
+    );
+  } finally {
+    refresh.mockRestore();
+  }
+});
+
+// Passes on main too; guards the existing pooled-device fast path.
+test("pin: setActiveDevice does not refresh when the requested device is already pooled", async () => {
+  const refresh = spyOn(pool, "refreshDevicesWithOutcome");
+  try {
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    await handler({ deviceId: device.deviceId, sessionUuid: "one" });
+    expect(refresh).not.toHaveBeenCalled();
+  } finally {
+    refresh.mockRestore();
+  }
+});
 
 test("setActiveDevice reports device not found after a successful empty refresh", async () => {
   const utils = new FakeDeviceUtils();

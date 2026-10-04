@@ -65,6 +65,27 @@ describe("recordSteps connection scope and direct transport teardown", () => {
     expect(getStructuredField(endA, "planContent")).toContain("Only A");
   });
 
+  test("recordSteps end exports launchApp without transport metadata", async () => {
+    serverConfig.setMcpRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordSteps")!;
+    await tool.handler({ action: "begin", __mcpSessionId: "clean-export" });
+    getMcpRecorder({ connectionId: "clean-export" })!.record("launchApp", {
+      appId: "com.android.settings",
+      sessionUuid: "session",
+      __mcpRequestTimeoutMs: 120000,
+      __mcpRequestDeadlineMs: 1790948577851,
+      __foo: "reserved",
+    });
+    const result = await tool.handler({
+      action: "end",
+      planName: "clean-launch",
+      __mcpSessionId: "clean-export",
+    });
+    expect(getStructuredField(result, "success")).toBe(true);
+    expect(getStructuredField(result, "planContent")).toContain("appId: com.android.settings");
+    expect(getStructuredField(result, "planContent")).not.toContain("__");
+  });
+
   test("direct onclose discards its recording and preserves other connections", () => {
     const timer = new FakeTimer();
     startMcpRecording({ connectionId: "direct-A", timer });

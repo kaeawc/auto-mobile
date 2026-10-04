@@ -4,6 +4,7 @@ import { logger } from "../../../src/utils/logger";
 import { SetUIState } from "../../../src/features/action/SetUIState";
 import type { Keyboard } from "../../../src/features/action/Keyboard";
 import { KeyboardOcclusionError } from "../../../src/models/KeyboardOcclusionError";
+import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { getHierarchyNodeSource } from "../../../src/features/observe/output/elementProvenance";
@@ -96,6 +97,38 @@ describe("SetUIState", () => {
   });
 
   describe("text field handling", () => {
+    test("Android setUIState opts into hint fallback when primary field text misses", async () => {
+      const hierarchy = createHierarchyWithElement({
+        "resource-id": "phone",
+        text: "5551234",
+        "hint-text": "Phone",
+        class: "android.widget.EditText",
+        clickable: true,
+        focusable: true,
+      });
+      fakeObserve.setResult(createObserveResult(hierarchy));
+      fakeFieldTypeDetector.setFieldType("phone", "text");
+      fakeFieldTypeDetector.setTextValue("phone", "5551234");
+      const resolve = spyOn(ElementResolver.prototype, "resolve");
+      try {
+        const result = await createSetUIState().execute({
+          fields: [{ selector: { text: "Phone" }, value: "5551234" }],
+        });
+        expect(result.success).toBe(true);
+        expect(result.fields[0].fieldType).toBe("text");
+        expect(
+          resolve.mock.calls.some(
+            ([, selector, intent]) =>
+              selector.text === "Phone" &&
+              intent.action === "focus-input" &&
+              intent.allowHintFallback === true,
+          ),
+        ).toBe(true);
+      } finally {
+        resolve.mockRestore();
+      }
+    });
+
     const keyboardRecoveryScenario = ({
       platform = device.platform,
       initiallyOpen = false,

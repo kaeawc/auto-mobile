@@ -23,6 +23,315 @@ const snapshot = (nodes: unknown[], id = "capture-1", windows?: any[]) => ({
 const resolver = new ElementResolver(() => 0.9);
 const tap = { action: "tap" as const };
 
+describe("Android editable hint fallback", () => {
+  const tap = { action: "tap" as const, allowHintFallback: true };
+  const field = (id: string, text: string, hint?: string, extra = {}) =>
+    node(id, text, {
+      class: "android.widget.EditText",
+      focusable: true,
+      "hint-text": hint,
+      ...extra,
+    });
+
+  test("hint fallback is off by default, including lookFor inspect and scroll intents", () => {
+    const capture = snapshot([field("phone", "5551234", "Phone")]);
+    for (const action of ["inspect", "scroll", "tap", "focus-input"] as const) {
+      const result = resolver.resolve(capture, { text: "Phone" }, { action });
+      expect(result.chosen).toBeNull();
+      expect(result.matches).toHaveLength(0);
+    }
+  });
+
+  test("negative intent suppresses even an explicitly opted-in hint fallback", () => {
+    const result = resolver.resolve(
+      snapshot([field("phone", "5551234", "Phone")]),
+      { text: "Phone" },
+      { ...tap, negative: true },
+    );
+    expect(result.matches).toHaveLength(0);
+  });
+
+  test("sibling row walk climbs past a hint-only row to a higher primary match", () => {
+    const capture = snapshot([
+      node("outer", "", {
+        clickable: false,
+        node: [
+          node("inner", "", {
+            clickable: false,
+            node: [
+              node("anchor", "Account", { clickable: false }),
+              field("hint", "5551234", "Phone"),
+            ],
+          }),
+          node("primary", "Phone"),
+        ],
+      }),
+    ]);
+    const result = resolver.resolve(capture, { text: "Phone", sibling: { text: "Account" } }, tap);
+    expect(result.chosen?.nativeId).toBe("primary");
+    expect(result.matches.map(({ node }) => node.nativeId)).toEqual(["primary"]);
+  });
+
+  test("sibling fallback runs after a primary-only walk when no row has primary text", () => {
+    const capture = snapshot([
+      node("row", "", {
+        clickable: false,
+        node: [node("anchor", "Account", { clickable: false }), field("hint", "5551234", "Phone")],
+      }),
+    ]);
+    expect(
+      resolver.resolve(capture, { text: "Phone", sibling: { text: "Account" } }, tap).chosen
+        ?.nativeId,
+    ).toBe("hint");
+  });
+
+  test("multiple sibling anchors share one primary tier for selection and reported matches", () => {
+    const capture = snapshot([
+      node("first-row", "", {
+        clickable: false,
+        node: [node("a1", "Account", { clickable: false }), field("hint", "123", "Phone")],
+      }),
+      node("second-row", "", {
+        clickable: false,
+        node: [node("a2", "Account", { clickable: false }), node("primary", "Phone")],
+      }),
+    ]);
+    const result = resolver.resolve(capture, { text: "Phone", sibling: { text: "Account" } }, tap);
+    expect(result.chosen).toBeNull();
+    expect(result.matches.map(({ node }) => node.nativeId)).toEqual(["primary"]);
+    expect(result.candidates.map((node) => node.nativeId)).toEqual(["primary"]);
+  });
+
+  test("multiple anchors preserve existing primary substring selection before another anchor's exact match", () => {
+    const capture = snapshot([
+      node("first-row", "", {
+        clickable: false,
+        node: [node("a1", "Account", { clickable: false }), node("substring", "Phone number")],
+      }),
+      node("second-row", "", {
+        clickable: false,
+        node: [node("a2", "Account", { clickable: false }), node("exact", "Phone")],
+      }),
+    ]);
+    const selector = { text: "Phone", sibling: { text: "Account" } };
+    const before = resolver.resolve(capture, selector, { action: "tap" });
+    const after = resolver.resolve(capture, selector, tap);
+    expect(before.chosen?.nativeId).toBe("substring");
+    expect(after.chosen?.nativeId).toBe(before.chosen?.nativeId);
+    expect(after.matches).toEqual(before.matches);
+    expect(after.matchMode).toBe(before.matchMode);
+  });
+
+  test("opted-in container fallback and indices stay within the selected scope", () => {
+    const capture = snapshot([
+      node("outside", "Phone"),
+      node("form", "", {
+        clickable: false,
+        node: [field("first", "123", "Phone"), field("second", "456", "Phone")],
+      }),
+    ]);
+    const selector = { text: "Phone", container: { elementId: "form" } };
+    const result = resolver.resolve(capture, { ...selector, index: 1 }, tap);
+    expect(result.chosen?.nativeId).toBe("second");
+    expect(result.matches.map(({ node }) => node.nativeId)).toEqual(["first", "second"]);
+    expect(resolver.resolve(capture, { ...selector, index: 2 }, tap).chosen).toBeNull();
+    expect(
+      resolver.resolve(capture, { ...selector, selectionStrategy: "unique" }, tap).error,
+    ).toContain("ambiguous");
+    expect(resolver.resolve(capture, selector, { action: "tap" }).matches).toHaveLength(0);
+  });
+
+  test("empty input-type does not classify a custom editable node as Android", () => {
+    const result = resolver.resolve(
+      snapshot([
+        field("custom", "123", "Phone", {
+          class: "custom.Editor",
+          "input-type": "",
+          actions: ["set_text"],
+        }),
+      ]),
+      { text: "Phone" },
+      tap,
+    );
+    expect(result.matches).toHaveLength(0);
+  });
+
+  test("resolves a filled field by hint while retaining entered text as its label", () => {
+    const result = resolver.resolve(
+      snapshot([field("phone", "5551234", "Phone")]),
+      { text: "Phone" },
+      { action: "input", allowHintFallback: true },
+    );
+    expect(result.chosen?.nativeId).toBe("phone");
+    expect(result.chosen?.label).toBe("5551234");
+    expect(result.matchMode).toBe("exact");
+  });
+
+  for (const property of ["text", "content-desc"] as const) {
+    for (const visible of ["Phone", "Phone number"]) {
+      test(`${property} ${visible} keeps its existing target ahead of an exact hint`, () => {
+        const primary = node("visible", "", { [property]: visible });
+        const before = resolver.resolve(snapshot([primary]), { text: "Phone" }, tap);
+        const after = resolver.resolve(
+          snapshot([
+            field("hint", "5551234", "Phone", {
+              bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            }),
+            primary,
+          ]),
+          { text: "Phone", selectionStrategy: "unique" },
+          tap,
+        );
+        expect(after.chosen?.nativeId).toBe(before.chosen?.nativeId);
+        expect(after.candidates.map((candidate) => candidate.nativeId)).toEqual(["visible"]);
+        expect(after.matchMode).toBe(before.matchMode);
+        expect(after.error).toBeUndefined();
+      });
+    }
+  }
+
+  test("hint exact matches precede hint substrings even when the substring is smaller", () => {
+    const result = resolver.resolve(
+      snapshot([
+        field("substring", "123", "Phone number", {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        }),
+        field("exact", "456", "Phone"),
+      ]),
+      { text: "Phone", selectionStrategy: "unique" },
+      tap,
+    );
+    expect(result.chosen?.nativeId).toBe("exact");
+    expect(result.matchMode).toBe("exact");
+    expect(result.candidates).toHaveLength(1);
+  });
+
+  test("Android input-type metadata supports app-defined editable classes", () => {
+    const result = resolver.resolve(
+      snapshot([
+        field("phone", "5551234", "Phone", {
+          class: "dev.example.PhoneField",
+          "input-type": "phone",
+          actions: ["set_text"],
+        }),
+      ]),
+      { text: "Phone" },
+      { action: "input", allowHintFallback: true },
+    );
+    expect(result.chosen?.nativeId).toBe("phone");
+  });
+
+  test("hint substring fallback uses the existing normalization", () => {
+    const result = resolver.resolve(
+      snapshot([field("phone", "5551234", "  Mobile   Phone  ")]),
+      { text: "mobile phone" },
+      tap,
+    );
+    expect(result.chosen?.nativeId).toBe("phone");
+    expect(result.matchMode).toBe("exact");
+    expect(
+      resolver.resolve(
+        snapshot([field("phone", "5551234", "Mobile Phone")]),
+        { text: "phone" },
+        tap,
+      ).matchMode,
+    ).toBe("contains");
+  });
+
+  test("hints do not make a previously unique entered-text match ambiguous", () => {
+    const result = resolver.resolve(
+      snapshot([field("entered", "Phone", "Phone"), field("other", "5551234", "Phone")]),
+      { text: "Phone", selectionStrategy: "unique" },
+      { action: "input", allowHintFallback: true },
+    );
+    expect(result.chosen?.nativeId).toBe("entered");
+    expect(result.candidates).toHaveLength(1);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("hint-only matches retain smallest-area and topmost-window ordering", () => {
+    const fields = [
+      field("large", "123", "Phone"),
+      field("small", "456", "Phone", { bounds: { left: 0, top: 0, right: 10, bottom: 10 } }),
+    ];
+    expect(resolver.resolve(snapshot(fields), { text: "Phone" }, tap).chosen?.nativeId).toBe(
+      "small",
+    );
+    expect(
+      resolver.resolve(
+        snapshot(fields, "capture", [
+          { windowLayer: 10, hierarchy: { node: field("top", "789", "Phone") } },
+        ]),
+        { text: "Phone" },
+        tap,
+      ).chosen?.nativeId,
+    ).toBe("top");
+  });
+
+  test("explicit match modes and case sensitivity apply to hints", () => {
+    const capture = snapshot([field("phone", "5551234", "Mobile Phone")]);
+    expect(resolver.resolve(capture, { text: "phone", match: "exact" }, tap).chosen).toBeNull();
+    expect(
+      resolver.resolve(capture, { text: "phone", caseSensitive: true }, tap).chosen,
+    ).toBeNull();
+    expect(
+      resolver.resolve(capture, { text: "phone", match: "contains" }, tap).chosen?.nativeId,
+    ).toBe("phone");
+    expect(
+      resolver.resolve(capture, { text: "^mobile.*phone$", match: "regex" }, tap).chosen?.nativeId,
+    ).toBe("phone");
+  });
+
+  test("hints do not satisfy content-description selectors or non-editable nodes", () => {
+    const capture = snapshot([field("phone", "5551234", "Phone")]);
+    expect(resolver.resolve(capture, { contentDescription: "Phone" }, tap).chosen).toBeNull();
+    expect(
+      resolver.resolve(
+        snapshot([
+          node("button", "Submit", { class: "android.widget.Button", "hint-text": "Phone" }),
+        ]),
+        { text: "Phone" },
+        tap,
+      ).chosen,
+    ).toBeNull();
+  });
+
+  test("fields without hints keep their existing text resolution", () => {
+    const capture = snapshot([field("phone", "5551234")]);
+    expect(resolver.resolve(capture, { text: "5551234" }, tap).chosen?.nativeId).toBe("phone");
+    expect(resolver.resolve(capture, { text: "Phone" }, tap).chosen).toBeNull();
+  });
+
+  test("empty and whitespace hints stay absent even for regex selectors", () => {
+    for (const hint of ["", " \t "]) {
+      expect(
+        resolver.resolve(
+          snapshot([field("phone", "5551234", hint)]),
+          { text: "^\\s*$", match: "regex" },
+          tap,
+        ).chosen,
+      ).toBeNull();
+    }
+  });
+
+  test("filled iOS hints keep their existing searchable-text ranking and value label", () => {
+    const capture = snapshot([
+      node("ios", "", {
+        class: "UITextField",
+        value: "5551234",
+        "hint-text": "Phone",
+        actions: ["set_text"],
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      }),
+      node("visible", "Phone"),
+    ]);
+    const result = resolver.resolve(capture, { text: "Phone" }, tap);
+    expect(result.chosen?.nativeId).toBe("ios");
+    expect(result.chosen?.label).toBe("5551234");
+    expect(result.candidates).toHaveLength(2);
+  });
+});
+
 describe("pure element resolver", () => {
   test("full IDs are exact and bare IDs use namespace matching, never substrings", () => {
     const capture = snapshot([node("app:id/btn_login_help"), node("app:id/btn_login")]);

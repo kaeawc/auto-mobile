@@ -21,6 +21,90 @@ function setup() {
 }
 
 describe("DaemonClient tool cancellation", () => {
+  test("readResource abort sends one mapped cancel frame and preserves a no-signal sibling", async () => {
+    const { client, socket, timer, respond } = setup();
+    const controller = new AbortController();
+    const remove = spyOn(controller.signal, "removeEventListener");
+    const cancelled = client
+      .readResource(
+        "automobile:devices/booted",
+        { sessionUuid: "session-a" },
+        { signal: controller.signal },
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    const sibling = client.readResource("automobile:devices/booted");
+    const [first, second] = socket.getWrittenMessages<DaemonRequest>();
+    try {
+      expect(first).toMatchObject({
+        method: "resources/read",
+        params: { uri: "automobile:devices/booted", sessionUuid: "session-a" },
+      });
+      controller.abort(new Error("cancel daemon resource read"));
+      expect(client.hasPendingRequestForTesting(first.id)).toBe(false);
+      expect(await cancelled).toBe(controller.signal.reason);
+      const frames = socket.getWrittenMessages<DaemonRequest>();
+      expect(frames).toHaveLength(3);
+      expect(frames[2]).toMatchObject({
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: first.id },
+      });
+      expect(socket.destroyed).toBe(false);
+      expect(client.hasPendingRequestForTesting(second.id)).toBe(true);
+      respond(first.id);
+      respond(frames[2].id);
+      respond(second.id);
+      expect(await sibling).toEqual({ ok: true });
+      timer.advanceTime(120_000);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(socket.getWrittenMessages()).toHaveLength(3);
+      expect(remove).toHaveBeenCalled();
+    } finally {
+      respond(first.id);
+      respond(second.id);
+      await cancelled;
+      await sibling;
+      remove.mockRestore();
+      await client.close();
+    }
+  });
+
+  test("an already aborted resource read does not connect or write", async () => {
+    const { client, socket, timer } = setup();
+    const controller = new AbortController();
+    controller.abort(new Error("resource already cancelled"));
+    try {
+      await expect(
+        client.readResource("automobile:devices/booted", {}, { signal: controller.signal }),
+      ).rejects.toThrow("resource already cancelled");
+      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("a completed resource read sends no cancel frame when aborted", async () => {
+    const { client, socket, timer, respond } = setup();
+    const controller = new AbortController();
+    const result = client.readResource(
+      "automobile:devices/booted",
+      {},
+      { signal: controller.signal },
+    );
+    try {
+      respond(socket.getWrittenMessages<DaemonRequest>()[0].id);
+      controller.abort();
+      expect(await result).toEqual({ ok: true });
+      expect(socket.getWrittenMessages()).toHaveLength(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      await client.close();
+    }
+  });
+
   test("aborts only the mapped request, sends one frame, and ignores late answers", async () => {
     const { client, socket, timer, respond } = setup();
     const controller = new AbortController();

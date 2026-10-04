@@ -1067,8 +1067,12 @@ export class DaemonClient {
   /**
    * Read a resource from the daemon
    */
-  async readResource(uri: string, params: Record<string, any> = {}): Promise<any> {
-    return this.sendRequest("resources/read", { uri, ...params });
+  async readResource(
+    uri: string,
+    params: Record<string, any> = {},
+    { signal }: { signal?: AbortSignal } = {},
+  ): Promise<any> {
+    return this.sendRequest("resources/read", { uri, ...params }, undefined, undefined, signal);
   }
 
   private async sendRequest(
@@ -1357,7 +1361,11 @@ export interface DaemonClientLike {
     onRequestId?: (requestId: string) => void,
     signal?: AbortSignal,
   ): Promise<any>;
-  readResource(uri: string, params?: Record<string, any>): Promise<any>;
+  readResource(
+    uri: string,
+    params?: Record<string, any>,
+    options?: { signal?: AbortSignal },
+  ): Promise<any>;
   callDaemonMethod(
     method: string,
     params: Record<string, any>,

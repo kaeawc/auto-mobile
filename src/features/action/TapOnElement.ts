@@ -1533,7 +1533,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         : options.action === "focus"
           ? "focus-input"
           : "inspect";
-    const selectionIntent = TEXT_SELECTION_INTENT_BY_ACTION[options.action];
+    const selectionIntent = this.selectionIntentFor(options);
 
     const text = options.text;
     if (text) {
@@ -1547,6 +1547,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               caseSensitive: false,
               strategy: options.selectionStrategy,
               intentAction,
+              selectionIntent,
               index: options.index,
             }),
           ),
@@ -1583,6 +1584,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 caseSensitive: false,
                 strategy: options.selectionStrategy,
                 intentAction,
+                selectionIntent,
                 index: options.index,
               }),
             )
@@ -1662,10 +1664,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         screenSizeOptions: options.screenSizeOptions,
         strategy: options.selectionStrategy,
         intentAction: lookupAction,
+        selectionIntent,
         index: options.index,
       }),
       containerFound,
     };
+  }
+
+  private selectionIntentFor(options: TapOnElementOptions): TextSelectionIntent {
+    return options.ensureChecked !== undefined && options.index === undefined && !options.elementId
+      ? "toggle"
+      : TEXT_SELECTION_INTENT_BY_ACTION[options.action];
   }
 
   private isSameFocusTarget(

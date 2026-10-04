@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
@@ -22,11 +23,13 @@ function toggle(checked: boolean | string): Element {
 function createTap(
   initial: Element,
   afterTap = initial,
+  capture = hierarchy,
 ): {
   tap: TapOnElement;
   calls: () => number;
   setNextElement: (element: Element) => void;
   timer: FakeTimer;
+  selector: FakeElementSelector;
 } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -47,7 +50,7 @@ function createTap(
     selector.setNextElement(afterTap);
   };
   (tap as any).prepareSelectionCapture = async () => null;
-  (tap as any).refreshViewHierarchy = async () => hierarchy;
+  (tap as any).refreshViewHierarchy = async () => capture;
   (tap as any).captureTerminalObservationScreenshot = async () => {};
   (tap as any).recordDeferredPredictionOutcome = async () => {};
   (tap as any).selectionStateTracker.finalize = async () => [];
@@ -59,7 +62,7 @@ function createTap(
     observation: current,
   });
   (tap as any).observedInteraction = async (block: (result: ObserveResult) => Promise<unknown>) => {
-    const result = await block(observation);
+    const result = await block({ viewHierarchy: capture } as ObserveResult);
     return { ...(result as object), observation };
   };
   return {
@@ -67,10 +70,61 @@ function createTap(
     calls: () => tapCalls,
     setNextElement: (element) => selector.setNextElement(element),
     timer,
+    selector,
   };
 }
 
 describe("tapOn ensureChecked", () => {
+  for (const label of ["Wi-Fi", ""]) {
+    test(`real selector reads the ${label ? "same-label" : "unlabelled descendant"} switch state`, async () => {
+      const switchElement = { ...toggle(true), text: label };
+      const capture: ViewHierarchyResult = {
+        hierarchy: {
+          node: {
+            text: "Wi-Fi",
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+            node: [switchElement],
+          },
+        },
+      };
+      const { tap, calls } = createTap(switchElement, switchElement, capture);
+      Object.assign(tap, { elementSelector: new ResolverElementSelector() });
+      const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
+      expect(result).toMatchObject({ success: true, skipped: "already-checked" });
+      expect(calls()).toBe(0);
+    });
+  }
+
+  test("real selector names the exact row in the non-toggle error despite a substring switch", async () => {
+    const row: Element = {
+      text: "Wi-Fi",
+      clickable: true,
+      bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+    };
+    const backupSwitch = { ...toggle(true), text: "Wi-Fi backup" };
+    const capture: ViewHierarchyResult = { hierarchy: { node: [row, backupSwitch] } };
+    const { tap, calls } = createTap(row, row, capture);
+    Object.assign(tap, { elementSelector: new ResolverElementSelector() });
+    const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      "tapOn ensureChecked requires a toggle element; Wi-Fi has affordances:",
+    );
+    expect(result.error).not.toContain("Wi-Fi backup");
+    expect(calls()).toBe(0);
+  });
+
+  test("requests toggle selection only for implicit ensureChecked targets", async () => {
+    const { tap, selector } = createTap(toggle(true));
+    await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
+    expect(selector.lastTextSelectionIntent).toBe("toggle");
+    await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true, index: 0 });
+    expect(selector.lastTextSelectionIntent).toBe("tap");
+    await tap.execute({ text: "Wi-Fi", action: "tap" });
+    expect(selector.lastTextSelectionIntent).toBe("tap");
+  });
+
   test("skips an already-checked toggle without tapping", async () => {
     const { tap, calls } = createTap(toggle("true"));
 

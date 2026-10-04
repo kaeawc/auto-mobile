@@ -25,6 +25,12 @@ internal enum class BatchDeliveryOutcome {
   INVALID_PAYLOAD,
 }
 
+/** The failed chunk and unsent suffix need the buffer's flush-exception fallback. */
+internal class UnsentEventBatchesException(
+  val batches: List<Pair<List<SdkEvent>, String?>>,
+  cause: Exception,
+) : RuntimeException("Could not deliver SDK event chunk", cause)
+
 /** Timeout scheduling and completion dispatch share the SDK buffer executor in production. */
 internal interface BatchDeliveryScheduler {
   /** Null means shutdown has begun: send once and resolve without waiting or retrying. */
@@ -153,49 +159,67 @@ object SdkEventBroadcaster {
       }
       return
     }
-    for ((index, chunk) in chunks.withIndex()) {
-      val chunkId =
+    // Allocate every identity before sending: a failing provider cannot strand a sent prefix.
+    val chunkIds =
+      chunks.indices.map { index ->
         if (splitBatches) batchIdProvider()
         else if (batchId == null || chunks.size == 1) batchId
         // Legacy CtrlProxy may require splitting a stored unit. Derive stable child identities
         // so returning to an ack-capable receiver cannot mistake one child for another.
         else "$batchId:$index"
-      sendBatchIntent(
-        context,
-        serializeChunk(chunk, context.packageName, MAX_BATCH_BYTES),
-        batchId = chunkId,
-        generation = generation,
-        requireAck = requireAck,
-      ) { outcome ->
-        val delivered = outcome == BatchDeliveryOutcome.DELIVERED
-        if (generation != deliveryGeneration.get()) return@sendBatchIntent
-        if (outcome == BatchDeliveryOutcome.INVALID_PAYLOAD) {
-          dropCounter?.increment(DropReason.DELIVERY_FAILED, chunk.size)
-          logger.w("SdkEventBroadcaster") {
-            "Dropping ${chunk.size} events: CtrlProxy rejected invalid payload"
-          }
-        } else if (!delivered) {
-          // A supplied callback owns persistence and drop accounting: persisted events
-          // are retained, not dropped. Replay supplies a no-op because it already has a file.
-          if (onUndelivered != null) onUndelivered(chunk, chunkId)
-          else dropCounter?.increment(DropReason.DELIVERY_FAILED, chunk.size)
+      }
+    for ((index, chunk) in chunks.withIndex()) {
+      val chunkId = chunkIds[index]
+      val json =
+        try {
+          serializeChunk(chunk, context.packageName, MAX_BATCH_BYTES)
+        } catch (error: Exception) {
+          // Earlier sends own their outcomes; retain only this chunk and the unsent suffix.
+          throw UnsentEventBatchesException(chunks.drop(index).zip(chunkIds.drop(index)), error)
         }
-        synchronized(completionLock) {
-          allDelivered = allDelivered && delivered
-          if (
-            !delivered &&
-              (failedOutcome != BatchDeliveryOutcome.INVALID_PAYLOAD ||
-                outcome == BatchDeliveryOutcome.INVALID_PAYLOAD)
-          ) {
-            failedOutcome = outcome
+      try {
+        sendBatchIntent(
+          context,
+          json,
+          batchId = chunkId,
+          generation = generation,
+          requireAck = requireAck,
+        ) { outcome ->
+          val delivered = outcome == BatchDeliveryOutcome.DELIVERED
+          if (generation != deliveryGeneration.get()) return@sendBatchIntent
+          if (outcome == BatchDeliveryOutcome.INVALID_PAYLOAD) {
+            dropCounter?.increment(DropReason.DELIVERY_FAILED, chunk.size)
+            logger.w("SdkEventBroadcaster") {
+              "Dropping ${chunk.size} events: CtrlProxy rejected invalid payload"
+            }
+          } else if (!delivered) {
+            // A supplied callback owns persistence and drop accounting: persisted events
+            // are retained, not dropped. Replay supplies a no-op because it already has a file.
+            if (onUndelivered != null) onUndelivered(chunk, chunkId)
+            else dropCounter?.increment(DropReason.DELIVERY_FAILED, chunk.size)
           }
-          remaining--
-          if (remaining == 0 && generation == deliveryGeneration.get()) {
-            onComplete(allDelivered)
-            onFinished(if (allDelivered) BatchDeliveryOutcome.DELIVERED else failedOutcome)
-            if (allDelivered && requireAck) onAcknowledged()
+          synchronized(completionLock) {
+            allDelivered = allDelivered && delivered
+            if (
+              !delivered &&
+                (failedOutcome != BatchDeliveryOutcome.INVALID_PAYLOAD ||
+                  outcome == BatchDeliveryOutcome.INVALID_PAYLOAD)
+            ) {
+              failedOutcome = outcome
+            }
+            remaining--
+            if (remaining == 0 && generation == deliveryGeneration.get()) {
+              onComplete(allDelivered)
+              onFinished(if (allDelivered) BatchDeliveryOutcome.DELIVERED else failedOutcome)
+              if (allDelivered && requireAck) onAcknowledged()
+            }
           }
         }
+      } catch (error: Exception) {
+        // Preserve legacy and first-chunk fallbacks; earlier ack sends still own their outcomes.
+        if (!requireAck || index == 0) throw error
+        // This send's outcome is unknown; its existing id absorbs any duplicate on replay.
+        throw UnsentEventBatchesException(chunks.drop(index).zip(chunkIds.drop(index)), error)
       }
     }
   }

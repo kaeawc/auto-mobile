@@ -6,6 +6,7 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { boundsEqual } from "../../utils/bounds";
+import { asString } from "../../utils/ios-cmdline-tools/devicectlFailureEnvelope";
 
 /**
  * Extract elements likely to be navigation controls
@@ -51,17 +52,17 @@ export function enrichElementWithChildProperties(element: Element): Element {
     for (const child of children) {
       // Extract text from first child with text
       if (!enriched.text && child.text) {
-        enriched.text = child.text;
+        enriched.text = asString(child.text);
       }
 
       // Extract className from first child with className
       if (!enriched["class"] && child.className) {
-        enriched["class"] = child.className;
+        enriched["class"] = asString(child.className);
       }
 
       // Extract content-desc from first child with content-desc
       if (!enriched["content-desc"] && child["content-desc"]) {
-        enriched["content-desc"] = child["content-desc"];
+        enriched["content-desc"] = asString(child["content-desc"]);
       }
     }
   }

@@ -2,9 +2,15 @@
 // Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
 
 @testable import AutoMobileSDK
+import os
 import XCTest
 
 /// A stable C-convention handler used as a stand-in "previous" handler.
+private let previousHandlerCalls = OSAllocatedUnfairLock(initialState: 0)
+private let countingPreviousHandler: @convention(c) (NSException) -> Void = { _ in
+    previousHandlerCalls.withLock { $0 += 1 }
+}
+
 private let knownPreviousHandler: @convention(c) (NSException) -> Void = { _ in }
 
 private func rawPointer(_ handler: (@convention(c) (NSException) -> Void)?) -> UnsafeRawPointer? {
@@ -43,7 +49,7 @@ final class CrashesTests: XCTestCase {
         crashes.installUncaughtHandler = { _ in }
         let buffer = makeBuffer()
 
-        DispatchQueue.concurrentPerform(iterations: 1_000) { _ in
+        DispatchQueue.concurrentPerform(iterations: 1000) { _ in
             crashes.initialize(bundleId: "com.example", buffer: buffer)
             _ = crashes.isInitialized
         }
@@ -57,7 +63,7 @@ final class CrashesTests: XCTestCase {
     /// threads (#3632) — now serialized by the class lock, snapshotted before use.
     func testCurrentScreenProviderConcurrentAccessDoesNotCrash() {
         let crashes = AutoMobileCrashes.makeTestInstance()
-        DispatchQueue.concurrentPerform(iterations: 2_000) { i in
+        DispatchQueue.concurrentPerform(iterations: 2000) { i in
             crashes.currentScreenProvider = { "screen-\(i % 100)" }
             _ = crashes.currentScreenProvider
             _ = crashes.currentScreenProvider?()
@@ -79,6 +85,7 @@ final class CrashesTests: XCTestCase {
                 self.crashes = crashes
                 self.onDeinit = onDeinit
             }
+
             deinit {
                 // Re-enter the lock via the getter as the closure is released.
                 _ = crashes.currentScreenProvider
@@ -100,5 +107,39 @@ final class CrashesTests: XCTestCase {
 
         XCTAssertTrue(deinitRan, "the replaced closure's captured object was released")
         XCTAssertEqual(crashes.currentScreenProvider?(), "b")
+    }
+
+    @MainActor
+    func testCrashPathNeverHopsAndFlushesBeforeChainingWithCacheHitOrMiss() {
+        let failures = AutoMobileFailures.shared
+        failures.reset()
+        defer { failures.reset() }
+        let executor = FakeMainThreadExecutor()
+        failures.cacheDeviceInfo(executor: executor) {
+            SdkDeviceInfo(model: "cached crash device", osVersion: "17", systemName: "iOS")
+        }
+        let crashes = AutoMobileCrashes.makeTestInstance()
+        crashes.captureUncaughtHandler = { countingPreviousHandler }
+        crashes.installUncaughtHandler = { _ in }
+        previousHandlerCalls.withLock { $0 = 0 }
+        let events = OSAllocatedUnfairLock(initialState: [SdkCrashEvent]())
+        let chainedAtFlush = OSAllocatedUnfairLock(initialState: [Int]())
+        let buffer = SdkEventBuffer(timerFactory: { FakeTimer() }, onFlush: { batch in
+            events.withLock { $0 += batch.compactMap { $0 as? SdkCrashEvent } }
+            chainedAtFlush.withLock { $0.append(previousHandlerCalls.withLock { $0 }) }
+        })
+        crashes.initialize(bundleId: "crash.test", buffer: buffer)
+        defer { crashes.reset() }
+        let exception = NSException(name: .genericException, reason: "fixture", userInfo: nil)
+        crashes.handleException(exception)
+        XCTAssertEqual(events.withLock { $0.first?.deviceInfo.model }, AutoMobileFailures.fallbackDeviceInfo().model)
+        XCTAssertEqual(executor.pendingCount, 1, "crash must not schedule or execute main work")
+        executor.runAll()
+        crashes.handleException(exception)
+        XCTAssertEqual(events.withLock { $0.last?.deviceInfo.model }, "cached crash device")
+        XCTAssertEqual(executor.pendingCount, 0)
+        XCTAssertEqual(events.withLock { $0.count }, 2)
+        XCTAssertEqual(chainedAtFlush.withLock { $0 }, [0, 1])
+        XCTAssertEqual(previousHandlerCalls.withLock { $0 }, 2)
     }
 }

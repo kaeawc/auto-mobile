@@ -113,6 +113,18 @@ export function checkCtrlProxyVersion(): CheckResult {
   };
 }
 
+function usesSharpImageBackend(platform: NodeJS.Platform): boolean {
+  return platform === "darwin" || platform === "linux";
+}
+
+function shouldSkipSharpProbe(
+  dependencies: ImageBackendDoctorDependencies,
+  platform: NodeJS.Platform,
+  hostPlatform: NodeJS.Platform,
+): boolean {
+  return !dependencies.sharpLoader && platform !== hostPlatform;
+}
+
 /**
  * Report the active image backend and the platform-specific provisioning that
  * makes it usable without doing real image work.
@@ -149,8 +161,8 @@ export async function checkImageBackend(
     }
   }
 
-  if (platform === "darwin" || platform === "linux") {
-    if (!dependencies.sharpLoader && platform !== hostPlatform) {
+  if (usesSharpImageBackend(platform)) {
+    if (shouldSkipSharpProbe(dependencies, platform, hostPlatform)) {
       return {
         name: "Image Backend",
         status: "skip",
@@ -391,6 +403,29 @@ async function checkDeviceCtrlProxy(
   deviceProbe.signal?.throwIfAborted();
   const version = await manager.inspectCompatibility(deviceProbe.signal);
   deviceProbe.signal?.throwIfAborted();
+  return describeDeviceCtrlProxy(device, installed, enabled, version);
+}
+
+type CtrlProxyCompatibility = Awaited<ReturnType<AndroidCtrlProxyManager["inspectCompatibility"]>>;
+
+function ctrlProxyDoctorStatus(
+  installed: boolean,
+  enabled: boolean,
+  version: CtrlProxyCompatibility,
+) {
+  return version.knownPinMismatch
+    ? "fail"
+    : installed && enabled && (version.status === "compatible" || version.status === "skipped")
+      ? "pass"
+      : "warn";
+}
+
+function describeDeviceCtrlProxy(
+  device: BootedDevice,
+  installed: boolean,
+  enabled: boolean,
+  version: CtrlProxyCompatibility,
+): CheckResult {
   const diagnostics = [
     `platform=${device.platform}`,
     `device=${device.deviceId}`,
@@ -411,11 +446,7 @@ async function checkDeviceCtrlProxy(
     );
     diagnostics.push(`AUTOMOBILE_VERSION=${resolvePinnedVersion()}`);
   }
-  const status = version.knownPinMismatch
-    ? "fail"
-    : installed && enabled && (version.status === "compatible" || version.status === "skipped")
-      ? "pass"
-      : "warn";
+  const status = ctrlProxyDoctorStatus(installed, enabled, version);
   return {
     name: "CtrlProxy",
     status,

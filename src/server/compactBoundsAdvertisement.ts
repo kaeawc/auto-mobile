@@ -40,6 +40,8 @@ export function advertiseBoundsForCompact(schema: unknown, compactEnabled: boole
   return collapseBoundsUnions(schema);
 }
 
+function collapseBoundsUnions(node: Record<string, unknown>): Record<string, unknown>;
+function collapseBoundsUnions(node: unknown): unknown;
 function collapseBoundsUnions(node: unknown): unknown {
   if (Array.isArray(node)) {
     return node.map(collapseBoundsUnions);

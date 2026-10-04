@@ -52,11 +52,10 @@ export const DRAG_DURATION_MAX_MS = 2000;
 export const HOLD_DURATION_MIN_MS = 100;
 export const HOLD_DURATION_MAX_MS = 3000;
 const DROP_DURATION_MS = 100;
-const DRAG_TIMEOUT_BUFFER_MS = 500;
 export const IOS_DRAG_TIMEOUT_OVERHEAD_MS = LONG_PRESS_TIMEOUT_HEADROOM_MS;
 export const IOS_DRAG_TIMEOUT_DURATION_RATIO = 0.5;
 
-/** Match sibling gestures' 5s floor and 2s headroom, with room for longer XCUITest calls. */
+/** Shared drag budget: sibling gestures' 5s floor, headroom and longer-plan scaling. */
 export function getIosDragTimeoutMs(
   pressDurationMs: number,
   dragDurationMs: number,
@@ -70,6 +69,13 @@ export function getIosDragTimeoutMs(
       plannedDurationMs * IOS_DRAG_TIMEOUT_DURATION_RATIO,
   );
 }
+function indeterminateResult(reason: string) {
+  return {
+    success: false,
+    error: `Drag outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The gesture may have run. Do not retry automatically. Verify state first with observe.`,
+  };
+}
+
 const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
 // XCUITest hierarchy extraction is slow (can take 5-15s), so the iOS refresh uses the same
 // 15s budget as CtrlProxyHierarchy.getAccessibilityHierarchy rather than the 5s Android value.
@@ -143,23 +149,47 @@ export class DragAndDrop extends BaseVisualChange {
     if (useCtrlProxy) {
       const pressDurationMs = this.getPressDurationMs(options);
       const holdDurationMs = this.getHoldDurationMs(options);
-      const result = await this.accessibilityService.requestDrag(
-        start.x,
-        start.y,
-        end.x,
-        end.y,
-        pressDurationMs,
-        duration,
-        holdDurationMs,
-        this.getDragTimeoutMs(pressDurationMs, duration, holdDurationMs),
-        undefined,
-        signal,
-        target.displayId === 0 ? undefined : target.displayId,
-        target.assertCurrent,
-      );
-      throwIfAborted(signal);
+      let dispatched = false;
+      let result;
+      try {
+        // Attach the cancellation waiter before the client can abort synchronously.
+        result = await awaitWhileRequestIsLive(
+          Promise.resolve().then(() => {
+            throwIfAborted(signal);
+            return this.accessibilityService.requestDrag(
+              start.x,
+              start.y,
+              end.x,
+              end.y,
+              pressDurationMs,
+              duration,
+              holdDurationMs,
+              getIosDragTimeoutMs(pressDurationMs, duration, holdDurationMs),
+              undefined,
+              signal,
+              target.displayId === 0 ? undefined : target.displayId,
+              target.assertCurrent,
+              () => {
+                dispatched = true;
+              },
+            );
+          }),
+          signal,
+        );
+        throwIfAborted(signal);
+      } catch (error) {
+        throwIfAborted(signal);
+        if (!dispatched) {
+          throw error;
+        }
+        throw new ActionableError(indeterminateResult(errorMessage(error)).error);
+      }
       if (!result.success) {
-        throw new ActionableError(result.error ?? "Android drag failed");
+        throw new ActionableError(
+          dispatched
+            ? indeterminateResult(result.error ?? "unknown error").error
+            : (result.error ?? "Android drag failed"),
+        );
       }
     } else {
       if (options.pressDurationMs !== undefined || options.holdDurationMs !== undefined) {
@@ -562,16 +592,6 @@ export class DragAndDrop extends BaseVisualChange {
     return value >= min && value <= max;
   }
 
-  private getDragTimeoutMs(
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-  ): number {
-    return (
-      pressDurationMs + dragDurationMs + holdDurationMs + DROP_DURATION_MS + DRAG_TIMEOUT_BUFFER_MS
-    );
-  }
-
   private async executeDrag(
     startX: number,
     startY: number,
@@ -589,62 +609,59 @@ export class DragAndDrop extends BaseVisualChange {
   }> {
     throwIfAborted(signal);
 
-    const timeoutMs =
-      this.device.platform === "ios"
-        ? getIosDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs)
-        : this.getDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);
-
-    // iOS routes through the XCUITest CtrlProxy runner (XCUICoordinate.press/thenDragTo/thenHold);
-    // Android through the accessibility service. iOS preserves exact (non-rounded) coordinates.
+    const timeoutMs = getIosDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);
+    let dispatched = false;
+    const onDispatch = () => {
+      dispatched = true;
+    };
     let result;
-    if (this.device.platform === "ios") {
-      let dispatched = false;
-      const indeterminateResult = (reason: string) => ({
-        success: false,
-        error: `Drag outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The gesture may have run. Do not retry automatically. Verify state first with observe.`,
+    try {
+      // Attach cancellation before calling the client, which can abort synchronously.
+      // iOS preserves exact coordinates; Android rounds in its shared gesture delegate.
+      const request = Promise.resolve().then(() => {
+        throwIfAborted(signal);
+        return this.device.platform === "ios"
+          ? IOSCtrlProxyClient.getInstance(this.device).requestDrag(
+              startX,
+              startY,
+              endX,
+              endY,
+              pressDurationMs,
+              dragDurationMs,
+              holdDurationMs,
+              timeoutMs,
+              undefined,
+              signal,
+              onDispatch,
+            )
+          : this.accessibilityService.requestDrag(
+              startX,
+              startY,
+              endX,
+              endY,
+              pressDurationMs,
+              dragDurationMs,
+              holdDurationMs,
+              timeoutMs,
+              undefined,
+              signal,
+              undefined,
+              undefined,
+              onDispatch,
+            );
       });
-      try {
-        result = await awaitWhileRequestIsLive(
-          IOSCtrlProxyClient.getInstance(this.device).requestDrag(
-            startX,
-            startY,
-            endX,
-            endY,
-            pressDurationMs,
-            dragDurationMs,
-            holdDurationMs,
-            timeoutMs,
-            undefined,
-            signal,
-            () => {
-              dispatched = true;
-            },
-          ),
-          signal,
-        );
-        throwIfAborted(signal);
-        if (!result.success && dispatched) {
-          return indeterminateResult(result.error ?? "unknown error");
-        }
-      } catch (error) {
-        throwIfAborted(signal);
-        if (!dispatched) {
-          throw error;
-        }
-        logger.warn(`Drag outcome indeterminate: ${errorMessage(error)}`, error);
-        return indeterminateResult(errorMessage(error));
+      result = await awaitWhileRequestIsLive(request, signal);
+      throwIfAborted(signal);
+      if (!result.success && dispatched) {
+        return indeterminateResult(result.error ?? "unknown error");
       }
-    } else {
-      result = await this.accessibilityService.requestDrag(
-        startX,
-        startY,
-        endX,
-        endY,
-        pressDurationMs,
-        dragDurationMs,
-        holdDurationMs,
-        timeoutMs,
-      );
+    } catch (error) {
+      throwIfAborted(signal);
+      if (!dispatched) {
+        throw error;
+      }
+      logger.warn(`Drag outcome indeterminate: ${errorMessage(error)}`, error);
+      return indeterminateResult(errorMessage(error));
     }
 
     if (result.success) {

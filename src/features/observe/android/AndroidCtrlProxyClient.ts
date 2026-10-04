@@ -1071,6 +1071,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     signal?: AbortSignal,
     displayId?: number,
     beforeSend?: () => void,
+    onDispatch?: () => void,
   ): Promise<A11yDragResult>;
 
   requestPinch(
@@ -3123,6 +3124,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     signal?: AbortSignal,
     displayId?: number,
     beforeSend?: () => void,
+    onDispatch?: () => void,
   ): Promise<A11yDragResult> {
     return this.gestures.requestDrag(
       x1,
@@ -3137,6 +3139,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       signal,
       displayId,
       beforeSend,
+      onDispatch,
     );
   }
 

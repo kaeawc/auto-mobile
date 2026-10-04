@@ -665,3 +665,51 @@ it("tap cancellation inside the pre-send guard prevents dispatch and cleans regi
   expect(requestManager.getPendingCount()).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
+
+describe("Android client drag dispatch hook", () => {
+  it("fires onDispatch after send and forwards signal, display and beforeSend", async () => {
+    const { context, sent, requestManager, timer } = createFakeContext({
+      isCommandSupported: () => true,
+    });
+    const client = AndroidCtrlProxyClient.createForTesting(
+      { deviceId: "client-drag-dispatch", platform: "android", name: "Fake" },
+      new FakeAdbExecutor(),
+      undefined,
+      timer,
+    );
+    client["_gestures"] = new CtrlProxyGestures(context);
+    const controller = new AbortController();
+    const phases: string[] = [];
+    const pending = client.requestDrag(
+      1,
+      2,
+      3,
+      4,
+      600,
+      300,
+      100,
+      5000,
+      undefined,
+      controller.signal,
+      2,
+      () => {
+        expect(sent).toHaveLength(0);
+        phases.push("beforeSend");
+      },
+      () => {
+        expect(sent).toHaveLength(1);
+        phases.push("dispatched");
+      },
+    );
+    await flush();
+    const message = JSON.parse(sent[0]) as { type: string; displayId: number };
+    expect(message.type).toBe("request_drag");
+    expect(message.displayId).toBe(2);
+    controller.abort(new Error("drag caller cancelled"));
+    await expect(pending).rejects.toThrow("drag caller cancelled");
+    expect(phases).toEqual(["beforeSend", "dispatched"]);
+    expect(sent).toHaveLength(1);
+    expect(requestManager.getPendingCount()).toBe(0);
+    expect(timer.now()).toBe(0);
+  });
+});

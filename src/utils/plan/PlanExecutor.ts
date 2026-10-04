@@ -686,7 +686,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
     executionOptions?: PlanExecutionOptions,
   ): Promise<PlanExecutionResult> {
     let executedSteps = 0;
-    const debugMode = isDebugModeEnabled();
     const startTime = this.timer.now();
     // Always capture step data for test recording, not just in debug mode
     const debugSteps: ExecutePlanStepDebugInfo[] = [];
@@ -725,7 +724,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           });
         }
         const step = plan.steps[i];
-        const stepStartTime = debugMode ? this.timer.now() : 0;
+        const stepStartTime = this.timer.now();
         const stepLabel =
           step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);
         logger.info(
@@ -845,22 +844,41 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
   }
 
-  /**
-   * Execute a multi-device plan with parallel device tracks.
-   */
-  private async executeParallel(
+  private validateParallelStartStep(
     plan: Plan,
-    partitionedPlan: ReturnType<typeof PlanPartitioner.partition> & { devices: string[] },
     startStep: number,
-    platform?: string,
-    deviceId?: string,
-    sessionUuid?: string,
-    signal?: AbortSignal,
-    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
-    executionOptions?: PlanExecutionOptions,
-  ): Promise<PlanExecutionResult> {
-    const debugMode = isDebugModeEnabled();
+  ): PlanExecutionResult | undefined {
+    // Resume indices refer to plan.steps, not an individual device track.
+    // Negative indices already include every step; preserve that behavior.
+    if (plan.steps.length > 0 && startStep >= plan.steps.length) {
+      const error = new ActionableError(
+        `Start step index ${startStep} is out of bounds. Parallel plan has ${plan.steps.length} steps (plan-wide step index, valid range: 0-${plan.steps.length - 1})`,
+      );
+      logger.error(`Plan execution failed: ${error}`);
+      // Match executeSequential's caught validation error at the public boundary.
+      return {
+        success: false,
+        executedSteps: 0,
+        totalSteps: plan.steps.length,
+        failedStep: { stepIndex: -1, tool: "unknown", error: `${error}` },
+        debug: {
+          executionTimeMs: 0,
+          steps: [
+            {
+              step: "Plan execution error",
+              status: "failed",
+              durationMs: 0,
+              details: { error: `${error}` },
+            },
+          ],
+        },
+      };
+    }
 
+    return undefined;
+  }
+
+  private computeParallelResumeStep(plan: Plan, startStep: number): number {
     // AI recovery resumes a failed plan at its failed global step index, and each
     // device track skips lower-indexed steps independently. If that resume index
     // falls in the middle of a barrier/criticalSection generation, some devices'
@@ -876,7 +894,31 @@ export class DefaultPlanExecutor implements PlanExecutor {
           "resuming inside a barrier generation (issue #6234)",
       );
     }
-    startStep = effectiveStartStep;
+    return effectiveStartStep;
+  }
+
+  /**
+   * Execute a multi-device plan with parallel device tracks.
+   */
+  private async executeParallel(
+    plan: Plan,
+    partitionedPlan: ReturnType<typeof PlanPartitioner.partition> & { devices: string[] },
+    startStep: number,
+    platform?: string,
+    deviceId?: string,
+    sessionUuid?: string,
+    signal?: AbortSignal,
+    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
+    executionOptions?: PlanExecutionOptions,
+  ): Promise<PlanExecutionResult> {
+    const outOfBounds = this.validateParallelStartStep(plan, startStep);
+    if (outOfBounds) {
+      return outOfBounds;
+    }
+
+    const debugMode = isDebugModeEnabled();
+
+    startStep = this.computeParallelResumeStep(plan, startStep);
 
     logger.info(
       `[PARALLEL_EXEC] Starting parallel execution for ${partitionedPlan.devices.length} devices`,

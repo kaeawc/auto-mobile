@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../../helpers/cliDataDirIsolation";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   Window,
   parseActiveWindowModern,
@@ -15,10 +16,14 @@ import path from "path";
 
 describe("Window", () => {
   let window: Window;
+  let dataDir: IsolatedCliDataDir;
   let fakeAdb: FakeAdbExecutor;
   let mockDevice: BootedDevice;
 
+  afterEach(() => dataDir.restore());
+
   beforeEach(async () => {
+    dataDir = isolateCliDataDir("automobile-window-test-");
     mockDevice = {
       deviceId: "test-device",
       name: "Test Device",

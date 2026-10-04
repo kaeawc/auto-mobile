@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 /// Unhandled crash detection.
@@ -56,7 +56,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         NSGetUncaughtExceptionHandler()
     }
 
-    var installUncaughtHandler: (( @convention(c) (NSException) -> Void)?) -> Void = {
+    var installUncaughtHandler: ((@convention(c) (NSException) -> Void)?) -> Void = {
         NSSetUncaughtExceptionHandler($0)
     }
 
@@ -133,12 +133,13 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
     // MARK: - Exception Handler
 
-    private func handleException(_ exception: NSException) {
+    func handleException(_ exception: NSException) {
         // Still chain to previous handler even when disabled, but skip telemetry
         let enabled = AutoMobileSDK.shared.isEnabled
 
         lock.lock()
         let currentBuffer = buffer
+        let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
         let previousHandler = previousExceptionHandler
         // Snapshot the provider under the lock; invoke it below, outside the lock,
         // so the (host-supplied) closure can never re-enter the non-recursive lock.
@@ -146,7 +147,6 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         lock.unlock()
 
         if enabled {
-            let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
             let currentScreen = screenProvider?()
             let stackTrace = exception.callStackSymbols.joined(separator: "\n")
 
@@ -170,7 +170,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
     // MARK: - Testing Support
 
-    internal func reset() {
+    func reset() {
         lock.lock()
         // If we were never initialized (e.g. host opted out via
         // enableCrashReporting: false, or shutdown() is called a second time),
@@ -238,7 +238,8 @@ private func signalHandler(sig: Int32) {
 extension AutoMobileCrashes {
     /// Set up the file path for signal crash persistence.
     func setupSignalCrashFile() {
-        let cacheDir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
+        let cacheDir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true)
+            .first ?? NSTemporaryDirectory()
         let filePath = (cacheDir as NSString).appendingPathComponent("automobile_last_signal_crash")
         signalCrashFilePath = strdup(filePath)
     }

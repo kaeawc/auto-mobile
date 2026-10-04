@@ -1,7 +1,7 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { logger } from "../../utils/logger";
-import { withAndroidImeLock } from "./androidImeLock";
+import { clearAndroidImeQuarantine, withAndroidImeLock } from "./androidImeLock";
 
 /** `ime set` normally completes well under 1s; bound the post-dispatch
  * window while the per-device IME lock is held. */
@@ -215,7 +215,17 @@ export class AndroidImeCatalog {
   }
 
   async select(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {
-    return withAndroidImeLock(this.deviceId, () => this.selectWithinLock(id, signal), signal);
+    return withAndroidImeLock(
+      this.deviceId,
+      async () => {
+        const state = await this.selectWithinLock(id, signal);
+        // Explicit recovery clears quarantine only after active-IME readback, under the lock.
+        clearAndroidImeQuarantine(this.deviceId);
+        return state;
+      },
+      signal,
+      { allowQuarantined: true },
+    );
   }
 
   /** For a scoped session that already holds the device IME lock. */

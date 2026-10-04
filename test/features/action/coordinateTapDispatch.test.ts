@@ -16,6 +16,105 @@ import { observation } from "../../helpers/tapAtCoordinate";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 describe("dispatchAndroidCoordinateTap", () => {
+  test.each([false, true])(
+    "reports runner delivery before propagating cancellation (success %s)",
+    async (success) => {
+      const controller = new AbortController();
+      const adb = new FakeAdbExecutor();
+      const onTapDelivered = mock(() => {});
+      const client: CoordinateTapClient<() => void> = {
+        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+          onDispatch?.();
+          controller.abort();
+          return { success, error: success ? undefined : "Tap timed out after 5000ms" };
+        },
+      };
+
+      const pending = dispatchAndroidCoordinateTap(
+        client,
+        adb,
+        10,
+        20,
+        10,
+        undefined,
+        controller.signal,
+        undefined,
+        onTapDelivered,
+      );
+
+      await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
+      expect(onTapDelivered).toHaveBeenCalledTimes(success ? 1 : 0);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test("reports successful ADB fallback delivery before propagating cancellation", async () => {
+    const controller = new AbortController();
+    const adb = new FakeAdbExecutor();
+    const onTapDelivered = mock(() => {});
+    adb.abortAfterCommand("input touchscreen tap 10 20", controller);
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
+    };
+
+    const pending = dispatchAndroidCoordinateTap(
+      client,
+      adb,
+      10,
+      20,
+      10,
+      undefined,
+      controller.signal,
+      () => {},
+      onTapDelivered,
+    );
+
+    await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
+    expect(onTapDelivered).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toEqual(["shell input touchscreen tap 10 20"]);
+  });
+
+  test.each(["runner", "ADB", "failed ADB"])(
+    "reports delivery exactly once for %s",
+    async (route) => {
+      const adb = new FakeAdbExecutor();
+      const onTapDelivered = mock(() => {});
+      if (route === "failed ADB") {
+        adb.setCommandError("input touchscreen tap", new Error("Synthetic fallback failure"));
+      }
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async () => ({
+          success: route === "runner",
+          error: "Not connected",
+        }),
+      };
+
+      const pending = dispatchAndroidCoordinateTap(
+        client,
+        adb,
+        10,
+        20,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        onTapDelivered,
+      );
+
+      if (route === "failed ADB") {
+        await expect(pending).rejects.toThrow("Synthetic fallback failure");
+      } else {
+        await pending;
+      }
+      expect(onTapDelivered).toHaveBeenCalledTimes(route === "failed ADB" ? 0 : 1);
+      expect(adb.getExecutedCommands()).toEqual(
+        route === "runner" ? [] : ["shell input touchscreen tap 10 20"],
+      );
+    },
+  );
+
   test.each([undefined, "frame-123"])(
     "does not replay a dispatched tap when its response is lost (frame %s)",
     async (frameContext) => {

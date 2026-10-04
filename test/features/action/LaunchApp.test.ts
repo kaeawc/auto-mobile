@@ -124,6 +124,37 @@ describe("LaunchApp", () => {
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  test("install-aware targeting launches a personal-only app with a running work profile", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+    fakeAdb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x13, running: true },
+      { userId: 10, name: "Work", flags: 0x30, running: true },
+    ]);
+    fakeAdb.setCommandResponse("shell pm list packages --user 10", {
+      stdout: "package:com.example.other",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell am start --user 0", {
+      stdout: "Starting: Intent",
+      stderr: "",
+    });
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
+    });
+    const detectorSpy = spyOn(launchApp["targetUserDetector"], "detectTargetUserId");
+    const result = await launchApp.execute(packageName, false, false);
+    expect(result).toMatchObject({ success: true, userId: 0 });
+    expect(
+      fakeAdb.wasCommandExecuted(
+        `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER '${packageName}'`,
+      ),
+    ).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("shell am start --user 10")).toBe(false);
+    expect(detectorSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("returns observation when app is already in foreground", async () => {
     const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });

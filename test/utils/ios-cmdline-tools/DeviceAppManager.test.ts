@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   DeviceAppManager,
+  findBundleEntry,
   findProcessIdentifier,
   findRunningProcessPid,
   extractInstalledAppEntries,
@@ -1967,5 +1968,40 @@ describe("DeviceAppManager.listInstalledApps", () => {
     await expect(manager.listInstalledApps("00008130-001C2D3E1234567A")).rejects.toBeInstanceOf(
       ActionableError,
     );
+  });
+});
+
+describe("findBundleEntry", () => {
+  test.each([
+    "bundleIdentifier",
+    "bundleID",
+    "bundleId",
+    "CFBundleIdentifier",
+    "BUNDLE_IDENTIFIER",
+  ])("finds %s in nested arrays and objects", (key) => {
+    const match = { [key]: bundleId, name: "match" };
+    expect(
+      findBundleEntry(
+        { result: [null, 4, {}, { apps: [{ bundleId: "other" }, match] }] },
+        bundleId,
+      ),
+    ).toBe(match);
+  });
+  test.each([null, undefined, 0, "text", [], {}, [{ bundleId: "other" }]].map((input) => [input]))(
+    "returns null for unmatched input %j",
+    (input) => {
+      expect(findBundleEntry(input, bundleId)).toBeNull();
+    },
+  );
+  test("preserves alias precedence and first depth-first match", () => {
+    const shadowed = { bundleIdentifier: "other", bundleID: bundleId };
+    const nonString = { bundleIdentifier: 42, bundleID: bundleId };
+    const first = { bundleIdentifier: null, bundleID: bundleId };
+    const second = { bundleId };
+    expect(findBundleEntry({ shadowed, nonString, nested: [first, second] }, bundleId)).toBe(first);
+    expect(findBundleEntry({ bundleId, nested: second }, bundleId)).toEqual({
+      bundleId,
+      nested: second,
+    });
   });
 });

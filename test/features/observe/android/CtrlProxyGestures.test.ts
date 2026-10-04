@@ -63,6 +63,92 @@ async function flush(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+describe("Android gesture duration wire", () => {
+  it.each([
+    [250.5, 251, 251],
+    [250, 250, 250],
+    [0.1, 1, 1],
+    [0, 1, 0],
+  ] as const)(
+    "normalizes %s to %s for strokes and %s for drag through the actual shared send path",
+    async (duration, strokeExpected, dragExpected) => {
+      const { context, sent, requestManager } = createFakeContext();
+      const gestures = new CtrlProxyGestures(context);
+      const requests = [
+        () => gestures.requestTapCoordinates(10, 20, duration),
+        () => gestures.requestSwipe(10, 20, 30, 40, duration),
+        () => gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration),
+        () => gestures.requestDrag(10, 20, 30, 40, duration, duration, duration, 5000),
+        () => gestures.requestPinch(10, 20, 30, 40, 15.5, duration),
+      ];
+      for (const send of requests) {
+        const promise = send();
+        await flush();
+        const message = JSON.parse(sent[sent.length - 1]!);
+        const fields =
+          message.type === "request_drag"
+            ? ["pressDurationMs", "dragDurationMs", "holdDurationMs"]
+            : ["duration"];
+        requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
+        await promise;
+        for (const field of fields) {
+          expect(message[field]).toBe(
+            message.type === "request_drag" ? dragExpected : strokeExpected,
+          );
+        }
+        if (message.type === "request_pinch") {
+          expect(message.rotationDegrees).toBe(15.5);
+        }
+        expect(message).not.toHaveProperty("timeoutMs");
+      }
+    },
+  );
+
+  it.each([
+    [0, 1],
+    [250, 250],
+  ] as const)(
+    "ExecuteGesture a11y swipe sends duration %s as %s ms",
+    async (duration, expected) => {
+      const { context, sent, timer, requestManager } = createFakeContext();
+      const device = {
+        deviceId: "swipe-duration-wire",
+        platform: "android",
+        name: "Fake",
+      } as const;
+      const adb = new FakeAdbExecutor();
+      const client = AndroidCtrlProxyClient.createForTesting(device, adb, undefined, timer);
+      client["_gestures"] = new CtrlProxyGestures(context);
+      const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+      try {
+        const pending = new ExecuteGesture(device, adb, timer).swipe(10, 20, 30, 40, {
+          scrollMode: "a11y",
+          duration,
+        });
+        await flush();
+        expect(sent).toHaveLength(1);
+        const message = JSON.parse(sent[0]!) as {
+          type: string;
+          requestId: string;
+          duration: number;
+        };
+        requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
+        expect((await pending).success).toBe(true);
+        expect(message.type).toBe("request_swipe");
+        expect(message.duration).toBe(expected);
+        expect(Number.isInteger(message.duration)).toBe(true);
+        expect(message.duration).toBeGreaterThan(0);
+        expect(adb.getExecutedCommands()).toEqual([]);
+        expect(timer.now()).toBe(0);
+        expect(requestManager.getPendingCount()).toBe(0);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        getInstance.mockRestore();
+      }
+    },
+  );
+});
+
 describe("Android swipe request duration bounds", () => {
   it("the longest public boomerang keeps each request pending through its planned end", async () => {
     const { context, sent, timer, requestManager } = createFakeContext();

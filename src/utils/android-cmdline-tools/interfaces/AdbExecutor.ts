@@ -155,7 +155,7 @@ export interface AdbExecutor {
    * Get the device wakefulness state
    * @returns Promise with wakefulness state: "Awake", "Asleep", "Dozing", or null if unknown
    */
-  getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null>;
+  getWakefulness(signal?: AbortSignal): Promise<"Awake" | "Asleep" | "Dozing" | null>;
 
   /**
    * Get the device lock state (keyguard showing / secure vs swipe).

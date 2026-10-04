@@ -1,7 +1,8 @@
 import type { Platform } from "../models";
 import type { TestRecordingStatus } from "../server/testRecordingManager";
+import type { SocketRequest } from "./socketServer/SocketServerTypes";
 
-export interface TestRecordingCommand {
+export interface TestRecordingCommand extends SocketRequest {
   command: "start" | "stop" | "status";
   deviceId?: string;
   platform?: Platform;

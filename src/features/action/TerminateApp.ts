@@ -129,6 +129,7 @@ export class TerminateApp extends BaseVisualChange {
             await new AndroidUserTargetResolver(this.adb).resolve({
               packageName,
               explicitUserId: options?.userId,
+              installedOnly: true,
               signal,
             })
           ).userId;

@@ -656,6 +656,17 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
     expect(decision.skipTouchLatency).toBe(true);
   });
 
+  test("skips touch-latency for a device child cap truncation reason", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {}, truncationReasons: ["max_children"] },
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+
   test("skips touch-latency for a cancelled truncation reason", () => {
     const result = makeResult({
       viewHierarchy: { hierarchy: {} as any, truncationReasons: ["cancelled"] } as any,
@@ -695,7 +706,7 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
  * `prepareHierarchyForResponse` attaches the uncapped raw hierarchy, and
  * `collectInteractiveObstacles` traverses that raw carrier — so the obstacle map
  * is complete and touch-latency must still be measured. Only device-side reasons
- * (`max_nodes`, `max_depth`, `cancelled`) mean the capture itself is partial.
+ * (`max_nodes`, `max_depth`, `max_children`, `cancelled`) mean the capture itself is partial.
  */
 describe("deriveTouchLatencyPoint host output caps vs capture fidelity (#6601 review)", () => {
   const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };

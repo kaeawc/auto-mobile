@@ -1,0 +1,1309 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`PlanMigrator complete step migration results preserves the full result for missing tool 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "label": "legacy",
+        "params": null,
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Removed deprecated command field.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Mapped step description to label.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated step description field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for command alias 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "label": "legacy",
+        "optional": true,
+        "params": {
+          "action": "tap",
+          "selector": {
+            "text": "override",
+          },
+        },
+        "tool": "tapOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed command to tool.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Mapped step description to label.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated step description field.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Renamed tapOnText to tapOn.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Defaulted tapOn.action to tap.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Wrapped legacy tapOn { elementId|text|textAny } under { selector: { ... } } for v0.0.30+ schema.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for existing fields 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "label": "kept",
+        "params": {},
+        "tool": "observe",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Removed deprecated command field.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated step description field.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated observe.withViewHierarchy field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for non-string description 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {},
+        "tool": "observe",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Removed deprecated step description field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for swipe alias defaults 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "autoTarget": false,
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed swipeOnScreen to swipeOn.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Defaulted autoTarget=false for swipeOnScreen migration.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for swipe alias explicit 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "autoTarget": true,
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed swipeOnScreen to swipeOn.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for scroll defaults 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "gestureType": "scrollTowardsDirection",
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed scroll to swipeOn.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Defaulted gestureType=scrollTowardsDirection for scroll migration.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for scroll explicit 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "gestureType": "custom",
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed scroll to swipeOn.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for input all fields 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "commands": [
+            {
+              "action": "type",
+              "mode": "eventAll",
+              "operation": "insert",
+              "text": "hello",
+            },
+            {
+              "action": "key",
+              "key": "done",
+            },
+          ],
+          "platform": "ios",
+        },
+        "tool": "sendKeys",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed inputText.value to text.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Dropped inputText.dismissKeyboard during sendKeys migration; use the keyboard tool to dismiss it explicitly.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Renamed inputText to sendKeys.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for input text wins 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "commands": [
+            {
+              "action": "type",
+              "operation": "replace",
+              "text": "new",
+            },
+          ],
+        },
+        "tool": "sendKeys",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed inputText.value to text.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Renamed inputText to sendKeys.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for input missing text 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "commands": [
+            {
+              "action": "type",
+              "operation": "replace",
+              "text": undefined,
+            },
+          ],
+        },
+        "tool": "sendKeys",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed inputText to sendKeys.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for clear 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "commands": [
+            {
+              "action": "clear",
+            },
+          ],
+        },
+        "tool": "sendKeys",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed clearText to sendKeys.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for IME 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "commands": [
+            {
+              "action": "key",
+              "key": "search",
+            },
+          ],
+        },
+        "tool": "sendKeys",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed imeAction to sendKeys.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for package wins 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "appId": "package",
+          "bundleId": "bundle",
+        },
+        "tool": "launchApp",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed packageName to appId.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for bundle fallback 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "appId": "bundle",
+          "packageName": 2,
+        },
+        "tool": "terminateApp",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed bundleId to appId.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for existing app ID 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "appId": "kept",
+          "bundleId": "bundle",
+          "packageName": "package",
+        },
+        "tool": "stopApp",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for missing app ID 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {},
+        "tool": "crashApp",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for tap selector fields 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "action": "tap",
+          "selector": {
+            "elementId": "button",
+            "text": "text",
+            "textAny": [
+              "one",
+              "two",
+            ],
+          },
+        },
+        "tool": "tapOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Defaulted tapOn.action to tap.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Renamed id to elementId for tapOn.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Wrapped legacy tapOn { elementId|text|textAny } under { selector: { ... } } for v0.0.30+ schema.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for tap existing selector 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "action": "longPress",
+          "elementId": "kept",
+          "id": "old",
+          "selector": {},
+          "text": "text",
+        },
+        "tool": "tapOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for tap invalid selector 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "action": "tap",
+          "elementId": 4,
+          "selector": [],
+          "text": 2,
+          "textAny": "bad",
+        },
+        "tool": "tapOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Defaulted tapOn.action to tap.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for link rename 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "url": "https://example.com",
+        },
+        "tool": "openLink",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed openLink.link to url.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for existing URL 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "link": "ignored",
+          "url": "kept",
+        },
+        "tool": "openLink",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for non-string link 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "link": 4,
+        },
+        "tool": "openLink",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for swipe container 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "container": {
+            "elementId": "list",
+            "text": "text",
+          },
+          "speed": "slow",
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Renamed containerElementId to container.elementId.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Renamed containerText to container.text.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Mapped swipe duration to speed.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated swipe duration field.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated scrollMode field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for swipe fast 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "speed": "fast",
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Mapped swipe duration to speed.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated swipe duration field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for swipe normal 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "speed": "normal",
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Mapped swipe duration to speed.",
+        "stepIndex": 0,
+      },
+      {
+        "message": "Removed deprecated swipe duration field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for swipe existing fields 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "container": {
+            "elementId": "kept",
+            "text": "kept",
+          },
+          "containerElementId": "ignored",
+          "containerText": "ignored",
+          "speed": "custom",
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Removed deprecated swipe duration field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for swipe invalid duration 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "container": [],
+          "containerElementId": 4,
+          "containerText": 2,
+        },
+        "tool": "swipeOn",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Removed deprecated swipe duration field.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for notification timeout 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "awaitTimeout": 25,
+          "notification": {
+            "title": "title",
+          },
+        },
+        "tool": "systemTray",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [
+      "step-fields",
+    ],
+    "migrated": true,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [
+      {
+        "message": "Moved notification.timeout to awaitTimeout.",
+        "stepIndex": 0,
+      },
+    ],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for notification explicit 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "awaitTimeout": 10,
+          "notification": {
+            "timeout": 25,
+          },
+        },
+        "tool": "systemTray",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for notification invalid 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {
+          "notification": {
+            "timeout": "bad",
+          },
+        },
+        "tool": "systemTray",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for notification absent 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {},
+        "tool": "systemTray",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for observe absent 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {},
+        "tool": "observe",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;
+
+exports[`PlanMigrator complete step migration results preserves the full result for unrecognized tool 1`] = `
+{
+  "plan": {
+    "mcpVersion": "99.99.99",
+    "metadata": {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "version": "1.0.0",
+    },
+    "name": "Characterization",
+    "steps": [
+      {
+        "params": {},
+        "tool": "custom",
+      },
+    ],
+  },
+  "report": {
+    "appliedMigrations": [],
+    "migrated": false,
+    "originalVersion": "99.99.99",
+    "outdated": false,
+    "targetVersion": "<current-mcp-version>",
+    "warnings": [],
+  },
+}
+`;

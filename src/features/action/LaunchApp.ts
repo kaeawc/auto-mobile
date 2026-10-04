@@ -743,6 +743,7 @@ export class LaunchApp extends BaseVisualChange {
     const target = await new AndroidUserTargetResolver(this.adb).resolve({
       packageName,
       explicitUserId: userId,
+      installedOnly: true,
       signal,
     });
     logger.info(`[LaunchApp] Using ${target.source}: user ${target.userId}`);

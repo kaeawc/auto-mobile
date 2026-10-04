@@ -3673,7 +3673,7 @@ export class DevicePool {
       async (attempt) => {
         // Ordinary allocation must capture candidates before yielding to release/readiness.
         if (recoveryTarget) {
-          lossIncident = await this.checkRecoveryAssignmentLoss(sessionId, recoveryTarget);
+          lossIncident = await this.settledRecoveryLossIncident(sessionId, recoveryTarget);
         }
         // Try to assign device (mutex ensures atomic assignment)
         const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
@@ -3692,6 +3692,9 @@ export class DevicePool {
         }
 
         if (recoveryTarget) {
+          // The shared allocation refresh must look for a returned target before
+          // a settled loss can report that same-session recovery is still pending.
+          this.checkRecoveryAssignmentLoss(sessionId, recoveryTarget, lossIncident);
           const recoveryFailure = this.recoveryFailure(
             sessionId,
             recoveryTarget,
@@ -3814,27 +3817,21 @@ export class DevicePool {
     );
   }
 
-  private async checkRecoveryAssignmentLoss(
+  private checkRecoveryAssignmentLoss(
     sessionId: string,
     target: SessionRecoveryTarget,
-  ): Promise<EmulatorLossIncident | undefined> {
-    if (
-      target.restartRecoveryDeadlineMs === undefined ||
-      this.timer.now() >= target.restartRecoveryDeadlineMs
-    ) {
-      return undefined;
-    }
-    const incident = await this.settledRecoveryLossIncident(sessionId, target);
-    // Reading diagnostics can cross the restart deadline. Only the existing
+    incident?: EmulatorLossIncident,
+  ): void {
+    // Reading diagnostics or discovery can cross the restart deadline. Only the existing
     // recoveryFailure path may decide identity loss once that window closes.
     if (
       incident &&
+      target.restartRecoveryDeadlineMs !== undefined &&
       this.timer.now() < target.restartRecoveryDeadlineMs &&
       this.getDevicesMatchingRecoveryTarget(target).length === 0
     ) {
       throw this.recoveryAssignmentError(sessionId, target, incident);
     }
-    return incident;
   }
 
   private recoveryAssignmentError(
@@ -3882,7 +3879,11 @@ export class DevicePool {
     sessionId: string,
     target: SessionRecoveryTarget,
   ): Promise<EmulatorLossIncident | undefined> {
-    if (target.platform !== "android" || target.restartRecoveryDeadlineMs === undefined) {
+    if (
+      target.platform !== "android" ||
+      target.restartRecoveryDeadlineMs === undefined ||
+      this.timer.now() >= target.restartRecoveryDeadlineMs
+    ) {
       return undefined;
     }
     try {

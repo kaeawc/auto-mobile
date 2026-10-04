@@ -1,8 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ObserveResult } from "../../../src/models";
 import type { SwipeOnOptions } from "../../../src/models";
 import { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+
+import { FakeElementParser } from "../../fakes/FakeElementParser";
 
 describe("UIStateExtractor (iOS hierarchy)", () => {
   test("extracts selected elements from $ attributes", () => {
@@ -173,5 +175,66 @@ describe("UIStateExtractor.createScrollPosition", () => {
     expect(result?.targetElement).toEqual({ text: undefined, resourceId: undefined });
     expect(result?.speed).toBeUndefined();
     expect(result?.container).toBeUndefined();
+  });
+});
+
+// Synthetic hierarchy nodes exercise the child-text contract; these are not device captures.
+describe("UIStateExtractor child-text characterization", () => {
+  function textFinder(parser: FakeElementParser) {
+    return new UIStateExtractor(parser) as unknown as {
+      findTextInChildren: (
+        node: Record<string, unknown> | Record<string, unknown>[],
+      ) => string | undefined;
+    };
+  }
+
+  test("searches depth first, skips empty descendants and stops before later siblings", () => {
+    const parser = new FakeElementParser();
+    const extract = spyOn(parser, "extractNodeProperties");
+    const empty = { $: { text: "" }, node: [{ $: {} }] };
+    const deep = { $: {}, node: [{ $: { text: "First deep text" } }] };
+    const later = { $: { text: "Later sibling" } };
+    expect(textFinder(parser).findTextInChildren([empty, deep, later])).toBe("First deep text");
+    expect(extract.mock.calls.map(([node]) => node)).toEqual([
+      empty,
+      empty.node[0],
+      deep,
+      deep.node[0],
+    ]);
+  });
+
+  test("object nodes prefer their own text before recursing and accept object-shaped children", () => {
+    const finder = textFinder(new FakeElementParser());
+    expect(
+      finder.findTextInChildren({ $: { text: "Parent" }, node: { $: { text: "Child" } } }),
+    ).toBe("Parent");
+    expect(finder.findTextInChildren({ $: {}, node: { $: { text: "Child" } } })).toBe("Child");
+    expect(finder.findTextInChildren({ $: {}, node: { $: {} } })).toBeUndefined();
+    expect(finder.findTextInChildren([])).toBeUndefined();
+  });
+
+  test("selected parents inherit child text but keep an explicit parent label", () => {
+    const state = new UIStateExtractor(new FakeElementParser()).extract({
+      hierarchy: {
+        node: {
+          $: {},
+          node: [
+            {
+              $: { selected: "true", "resource-id": "inherited" },
+              node: [{ $: {}, node: [{ $: { text: "Nested label" } }] }],
+            },
+            {
+              $: { selected: "true", text: "Explicit label" },
+              node: [{ $: { text: "Ignored child" } }],
+            },
+            { $: { selected: "true" }, node: [{ $: {} }] },
+          ],
+        },
+      },
+    });
+    expect(state?.selectedElements).toEqual([
+      { resourceId: "inherited", text: "Nested label" },
+      { text: "Explicit label" },
+    ]);
   });
 });

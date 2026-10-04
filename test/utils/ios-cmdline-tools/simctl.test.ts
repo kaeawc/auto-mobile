@@ -1701,6 +1701,51 @@ describe("Simctl", function () {
       expect(captured?.aborted).toBe(true);
     });
 
+    test.each(["getBootedSimulators", "getDeviceInfo"] as const)(
+      "%s propagates ambient cancellation during discovery",
+      async function (method) {
+        Simctl.invalidateDeviceListCache();
+        let recordInvocation!: () => void;
+        const invoked = new Promise<void>((resolve) => {
+          recordInvocation = resolve;
+        });
+        mockExecAsync = async (file, args) => {
+          if (file !== "xcrun" || args.join(" ") !== "simctl list devices --json") {
+            throw new Error(`Unexpected command: ${file} ${args.join(" ")}`);
+          }
+          recordInvocation();
+          return new Promise<ExecResult>(() => {});
+        };
+        simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+        const controller = new AbortController();
+        const reason = new Error(`${method} request cancelled`);
+
+        try {
+          const result = runWithAbortSignal(controller.signal, () =>
+            method === "getBootedSimulators"
+              ? simctl.getBootedSimulators()
+              : simctl.getDeviceInfo("some-udid"),
+          );
+          await invoked;
+          controller.abort(reason);
+          await expect(result).rejects.toBe(reason);
+        } finally {
+          Simctl.invalidateDeviceListCache();
+        }
+      },
+    );
+
+    test("discovery wrappers preserve empty results for non-abort failures", async function () {
+      Simctl.invalidateDeviceListCache();
+      mockExecAsync = async () => {
+        throw new Error("simctl discovery failed");
+      };
+      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+
+      await expect(simctl.getBootedSimulators()).resolves.toEqual([]);
+      await expect(simctl.getDeviceInfo("some-udid")).resolves.toBeNull();
+    });
+
     test("getBootedSimulatorsChecked throws on an already-aborted signal even on a fresh cache hit", async function () {
       const payload = bootedListPayload("test-ios-device-id");
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {

@@ -2329,7 +2329,7 @@ export class Daemon {
     session: Session | null,
     forceGeneration: number | undefined,
   ): Promise<{ incidentId: string | undefined; handled: boolean }> {
-    if (await this.devicePool.isShutdownReserved(deviceId)) {
+    if (await this.devicePool.isShutdownReservationHeld(deviceId)) {
       // killDevice owns intentional disappearance. Leave misses at the threshold
       // so the next poll rechecks the fence if shutdown fails and releases it.
       // Pool cleanup defers reserved/assigned devices and consumes idle markers.

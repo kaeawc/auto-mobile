@@ -139,4 +139,45 @@ describe("DeviceShutdownReservations", () => {
     expect(h.reservations.isReservedForShutdown(h.devices.get(deviceId)!)).toBe(false);
     expect(h.calls).toEqual(["capture", "release session", "release lease", "release session"]);
   });
+
+  test("reservation-only reads ignore marks, gate replacements, and wait for the assignment mutex", async () => {
+    const h = harness();
+    const first = pooled();
+    h.devices.set(deviceId, first);
+    h.intentional.set(deviceId, first.incarnation);
+    expect(h.reservations.isDeviceUnderShutdownReservation(deviceId)).toBe(false);
+    expect(await h.reservations.isShutdownReservationHeld(deviceId)).toBe(false);
+    expect(await h.reservations.isShutdownReserved(deviceId)).toBe(true);
+    const reservation = await h.reservations.reserveDeviceForShutdown(deviceId);
+    expect(reservation).toBeDefined();
+    try {
+      expect(await h.reservations.isShutdownReservationHeld(deviceId)).toBe(true);
+      h.devices.delete(deviceId);
+      expect(await h.reservations.isShutdownReservationHeld(deviceId)).toBe(true);
+      h.devices.set(deviceId, pooled(deviceId, 2));
+      expect(await h.reservations.isShutdownReservationHeld(deviceId)).toBe(false);
+      expect(await h.reservations.isShutdownReserved(deviceId)).toBe(false);
+
+      const unlock = await h.mutex.acquire();
+      let settled = false;
+      const read = h.reservations.isShutdownReservationHeld(deviceId).then((held) => {
+        settled = true;
+        return held;
+      });
+      try {
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        h.devices.set(deviceId, first);
+      } finally {
+        unlock();
+      }
+      expect(await read).toBe(true);
+    } finally {
+      await reservation?.release();
+      reservation?.releaseRecoveryRouteLease();
+    }
+    expect(await h.reservations.isShutdownReservationHeld(deviceId)).toBe(false);
+    expect(await h.reservations.isShutdownReserved(deviceId)).toBe(true);
+    expect(h.intentional.get(deviceId)).toBe(first.incarnation);
+  });
 });

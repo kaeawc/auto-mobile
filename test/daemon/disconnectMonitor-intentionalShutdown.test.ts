@@ -7,6 +7,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
+import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -34,18 +35,21 @@ class MissingDeviceManager extends FakeDeviceManager {
 async function withMonitor(
   platform: "android" | "ios",
   action: (h: Awaited<ReturnType<typeof monitorHarness>>) => Promise<void>,
+  initiatingSessionId = "kill-session",
 ) {
-  const h = await monitorHarness(platform);
+  const h = await monitorHarness(platform, initiatingSessionId);
   try {
     await action(h);
   } finally {
     await h.daemon.deviceDisconnectMonitor.stop();
     h.tracker.endExecution(h.execution.id);
+    h.tracker.endExecution(h.killExecution.id);
     h.cancel.mockRestore();
+    h.warn.mockRestore();
   }
 }
 
-async function monitorHarness(platform: "android" | "ios") {
+async function monitorHarness(platform: "android" | "ios", initiatingSessionId: string) {
   const timer = new FakeTimer();
   const ids = new FakeIdGenerator();
   const incidents = new InMemoryEmulatorLossIncidentStore(timer, ids);
@@ -99,10 +103,19 @@ async function monitorHarness(platform: "android" | "ios") {
     deferredSessionRecoverySweeps: new Set(),
   }) as DisconnectMonitorSurface;
   const tracker = new ExecutionTracker(timer, ids);
-  const execution = tracker.startExecution("killDevice", undefined, "kill-session");
+  const execution = tracker.startExecution(
+    initiatingSessionId === "kill-session" ? "killDevice" : "inputText",
+    undefined,
+    "kill-session",
+  );
+  const killExecution =
+    initiatingSessionId === "kill-session"
+      ? execution
+      : tracker.startExecution("killDevice", undefined, initiatingSessionId);
   const cancel = spyOn(executionTracker, "cancelSessionUuidExecutions").mockImplementation(
     (sessionId, reason) => tracker.cancelSessionUuidExecutions(sessionId, reason),
   );
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
   daemon.startDeviceDisconnectMonitor(manager, async () => []);
   const tick = async () => {
     // The kill's owner remains connected while its device disappears.
@@ -125,7 +138,9 @@ async function monitorHarness(platform: "android" | "ios") {
     incidents,
     tracker,
     execution,
+    killExecution,
     cancel,
+    warn,
     tick,
     reachThreshold,
   };
@@ -134,11 +149,17 @@ async function monitorHarness(platform: "android" | "ios") {
 async function expectDeferred(h: Awaited<ReturnType<typeof monitorHarness>>) {
   expect(h.execution.abortController.signal.aborted).toBe(false);
   expect(h.cancel).not.toHaveBeenCalled();
+  expect(h.killExecution.abortController.signal.aborted).toBe(false);
   expect(await h.incidents.list()).toEqual([]);
   expect(h.sessions.getSession("kill-session")).not.toBeNull();
   expect(h.pool.getDevice(h.device.id)).toBe(h.device);
   expect(h.daemon.confirmedDisconnectedDeviceIds.has(h.device.id)).toBe(false);
   expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(MISSING_DEVICE_MISS_THRESHOLD);
+  expect(
+    h.warn.mock.calls.filter(([message]) =>
+      message.includes("Retaining intentionally stopped device"),
+    ),
+  ).toHaveLength(0);
 }
 
 async function expectCleanedUp(h: Awaited<ReturnType<typeof monitorHarness>>) {
@@ -152,6 +173,15 @@ async function expectCleanedUp(h: Awaited<ReturnType<typeof monitorHarness>>) {
   if (h.device.platform === "android") {
     expect(incidents).toHaveLength(1);
     expect(incidents[0].recovery.outcome).toBe("not-attempted");
+    expect(incidents[0].detectionPath).toBe("device-discovery-miss");
+    const reason = `device-disconnected:${h.device.id};incident=${incidents[0].id}`;
+    expect(h.cancel).toHaveBeenCalledWith("kill-session", reason);
+    expect(h.execution.cancelReason).toMatchObject({
+      code: "device_lost",
+      deviceId: h.device.id,
+      incidentId: incidents[0].id,
+      message: reason,
+    });
   }
 }
 
@@ -173,24 +203,76 @@ for (const platform of ["ios", "android"] as const) {
   });
 }
 
-test("current Android intentional-shutdown marker protects the kill without a reservation", async () => {
+test("an Android mark without a reservation cancels and releases the ghost session without repeated warnings", async () => {
   await withMonitor("android", async (h) => {
+    const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+    expect(reservation).toBeDefined();
     h.pool.markIntentionalShutdown(h.device.id);
-    await h.reachThreshold();
-    await expectDeferred(h);
-    await h.tick();
-    await expectDeferred(h);
+    await reservation?.release();
+    reservation?.releaseRecoveryRouteLease();
     expect(await h.pool.isShutdownReserved(h.device.id)).toBe(true);
-    // Once the owner releases, existing marked-device cleanup still consumes
-    // the marker and removes the absent device, without a loss incident.
-    h.tracker.endExecution(h.execution.id);
-    await h.sessions.releaseSession("kill-session", "device-killed");
-    await h.pool.releaseDevice(h.device.id, "kill-session");
+    expect(await h.pool.isShutdownReservationHeld(h.device.id)).toBe(false);
     await h.tick();
-    expect(h.pool.getDevice(h.device.id)).toBeNull();
-    expect(await h.pool.isShutdownReserved(h.device.id)).toBe(false);
+    await h.tick();
+    expect(h.cancel).not.toHaveBeenCalled();
     expect(await h.incidents.list()).toEqual([]);
+    await h.tick();
+    await expectCleanedUp(h);
+    for (let poll = 0; poll < 20; poll++) {
+      await h.tick();
+    }
+    expect(h.cancel).toHaveBeenCalledTimes(1);
+    expect(h.sessions.getSession("kill-session")).toBeNull();
+    expect(h.pool.getDevice(h.device.id)).toBeNull();
+    expect(await h.incidents.list()).toHaveLength(1);
+    expect(
+      h.warn.mock.calls.filter(([message]) =>
+        message.includes("Retaining intentionally stopped device"),
+      ).length,
+    ).toBeLessThanOrEqual(1);
+    expect(await h.pool.isShutdownReserved(h.device.id)).toBe(false);
   });
+});
+
+test("an Android reservation with an intentional-shutdown mark protects the in-flight kill", async () => {
+  await withMonitor("android", async (h) => {
+    const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+    expect(reservation).toBeDefined();
+    h.pool.markIntentionalShutdown(h.device.id);
+    try {
+      await h.reachThreshold();
+      await expectDeferred(h);
+      for (let poll = 0; poll < 20; poll++) {
+        await h.tick();
+      }
+      await expectDeferred(h);
+    } finally {
+      await reservation?.release();
+      reservation?.releaseRecoveryRouteLease();
+    }
+  });
+});
+
+test("a different session's reserved kill does not cancel the device owner's executions", async () => {
+  await withMonitor(
+    "android",
+    async (h) => {
+      expect(h.device.sessionId).toBe("kill-session");
+      expect(h.killExecution.sessionUuid).toBe("other-session");
+      const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+      expect(reservation?.session).toBe(h.sessions.getSession("kill-session")!);
+      try {
+        await h.reachThreshold();
+        await expectDeferred(h);
+        await h.tick();
+        await expectDeferred(h);
+      } finally {
+        await reservation?.release();
+        reservation?.releaseRecoveryRouteLease();
+      }
+    },
+    "other-session",
+  );
 });
 
 test("an absent device with neither shutdown signal is cancelled and cleaned up", async () => {

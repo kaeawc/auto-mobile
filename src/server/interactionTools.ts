@@ -648,7 +648,9 @@ export const tapAtSchema = withJsonSchemaOverride(
 
 /** The preview retains the bare coordinate target without dispatching input. */
 export const hitTestSchema = withJsonSchemaOverride(
-  coordinatePointInputSchema().superRefine(validateCoordinateRange),
+  coordinatePointInputSchema()
+    .omit({ raw: true, project: true })
+    .superRefine(validateCoordinateRange),
   (js) => {
     js.description =
       "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.";
@@ -1420,7 +1422,6 @@ export const setPostureSchema = addDeviceTargetingToSchema(
         ),
       displayPreset: z.enum(["phone", "unfolded", "tablet"]).optional(),
       platform: platformSchema.optional(),
-      ...responseShapeControlFields,
     })
     .strict(),
 ).superRefine((args, context) => {
@@ -2148,7 +2149,7 @@ export async function tapAtHandler(
   return result.success ? response : { ...response, isError: true as const };
 }
 
-export async function hitTestHandler(device: BootedDevice, args: TapAtArgs) {
+export async function hitTestHandler(device: BootedDevice, args: z.infer<typeof hitTestSchema>) {
   const observation = await hitTestObservationFactory(device).execute({
     display: args.display,
     freshness: "cached-ok",

@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../src/features/utility/ElementParser";
@@ -534,6 +535,34 @@ describe("hitTestHandler", () => {
       "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.",
     );
     expect(description).not.toContain("Tap one absolute point");
+  });
+
+  test("registered hitTest schema rejects obsolete observation controls", () => {
+    registerInteractionTools();
+    const schema: typeof hitTestSchema = ToolRegistry.getTool("hitTest")!.schema;
+    const validInput = {
+      x: 0.5,
+      y: 1,
+      coordinateSpace: "normalized",
+      display: "active",
+      snapshotId: "ref-1",
+    };
+    expect(schema.parse(validInput)).toMatchObject(validInput);
+    const json = z.toJSONSchema(hitTestSchema);
+    expect(json.properties).not.toHaveProperty("raw");
+    expect(json.properties).not.toHaveProperty("project");
+    const parsed = schema.safeParse({ ...validInput, raw: true, project: "full" });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toMatchObject([
+        {
+          code: "unrecognized_keys",
+          keys: ["raw", "project"],
+          message: 'Unrecognized keys: "raw", "project"',
+        },
+      ]);
+    }
+    expect(tapAtSchema.safeParse({ ...validInput, raw: true, project: "full" }).success).toBe(true);
   });
 
   test("observes without screenshot or input and returns an estimate", async () => {

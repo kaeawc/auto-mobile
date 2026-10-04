@@ -977,22 +977,22 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   child.exitCode = 1;
   child.emit("exit", 1, null);
   await incidents.writeStarted.promise;
-  let failure: unknown;
-  try {
-    await pool.bindOrReuseDeviceSession(
-      "new-session",
-      original.deviceId,
-      "android",
-      image,
-      child,
-      original,
+  const binding = pool
+    .bindOrReuseDeviceSession("new-session", original.deviceId, "android", image, child, original)
+    .then(
+      () => undefined,
+      (error: unknown) => error,
     );
-  } catch (error) {
-    failure = error;
+  try {
+    await drainUntil(() => child.listenerCount("exit") === 1, {
+      description: "bind installed its completed-exit track during the incident write",
+    });
   } finally {
+    // Both tracks may share this pending write; release it before awaiting bind.
     incidents.releaseWrite.resolve();
     await drainUntilQuiescent(timer);
   }
+  const failure = await binding;
   expect(failure).toBeInstanceOf(Error);
   expect(String(failure)).toContain("exited before process tracking completed");
   expect(pool.getDevice(original.deviceId)).toBeNull();

@@ -112,6 +112,10 @@ export class EmulatorProcessOutputTail {
 
 /** Tracks started emulator processes and responds to their exits against live pool state. */
 export class EmulatorProcessLifecycle {
+  // Keep settled results too: a later bind must observe the same exit incident.
+  // Weak keys retire the record with the child, without retaining old processes.
+  private readonly processExitIncidents = new WeakMap<ChildProcess, Promise<string | undefined>>();
+
   constructor(private readonly pool: EmulatorProcessLifecyclePoolPort) {}
 
   async stopTrackedEmulatorProcess(
@@ -216,7 +220,12 @@ export class EmulatorProcessLifecycle {
       if (this.pool.getStartedDeviceProcesses().get(device.deviceId) !== childProcess) {
         return;
       }
-      void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal).catch((error) => {
+      void this.evictStartedDeviceAfterProcessExit(
+        device.deviceId,
+        code,
+        signal,
+        childProcess,
+      ).catch((error) => {
         logger.warn(
           `[DevicePool] Failed to evict ${device.deviceId} after emulator process exit: ${error}`,
           error,
@@ -229,7 +238,12 @@ export class EmulatorProcessLifecycle {
       exitHandled = true;
       const pooledDeviceAtExit = this.pool.getDevices().get(device.deviceId);
       if (
-        await this.handleCompletedProcessExit(device.deviceId, completedExit, pooledDeviceAtExit)
+        await this.handleCompletedProcessExit(
+          device.deviceId,
+          completedExit,
+          pooledDeviceAtExit,
+          childProcess,
+        )
       ) {
         return;
       }
@@ -266,8 +280,9 @@ export class EmulatorProcessLifecycle {
     deviceId: string,
     exit: { code: number | null; signal: NodeJS.Signals | null },
     pooledDeviceAtExit: PooledDevice | undefined,
+    childProcess: ChildProcess,
   ): Promise<boolean> {
-    await this.evictStartedDeviceAfterProcessExit(deviceId, exit.code, exit.signal);
+    await this.evictStartedDeviceAfterProcessExit(deviceId, exit.code, exit.signal, childProcess);
     const replacement = this.pool.getDevices().get(deviceId);
     return Boolean(replacement && replacement !== pooledDeviceAtExit);
   }
@@ -276,6 +291,7 @@ export class EmulatorProcessLifecycle {
     deviceId: string,
     code: number | null,
     signal: NodeJS.Signals | null,
+    childProcess?: ChildProcess,
   ): Promise<void> {
     const device = this.pool.getDevices().get(deviceId);
     if (!device) {
@@ -295,14 +311,7 @@ export class EmulatorProcessLifecycle {
       : null;
     const preparation = this.pool.prepareSessionPreservingRecovery(deviceId, device);
     try {
-      const incidentId = await this.pool.recordEmulatorLossIncident(
-        deviceId,
-        "watched-process-exit",
-        {
-          code,
-          signal,
-        },
-      );
+      const incidentId = await this.recordProcessExitIncident(deviceId, code, signal, childProcess);
       if (
         this.pool.getDevices().get(deviceId) !== device ||
         device.assignmentCount !== assignmentCountAtExit ||
@@ -329,6 +338,34 @@ export class EmulatorProcessLifecycle {
     } finally {
       this.pool.finishSessionPreservingRecoveryPreparation(preparation);
     }
+  }
+
+  private recordProcessExitIncident(
+    deviceId: string,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    childProcess = this.pool.getStartedDeviceProcesses().get(deviceId),
+  ): Promise<string | undefined> {
+    const existing = childProcess && this.processExitIncidents.get(childProcess);
+    if (existing) {
+      return existing;
+    }
+    // Publish before invoking the store, including synchronous/reentrant fakes.
+    // The first recorder owns the session snapshot; later handlers only reuse it.
+    const incident = Promise.resolve()
+      .then(() =>
+        this.pool.recordEmulatorLossIncident(deviceId, "watched-process-exit", { code, signal }),
+      )
+      .catch((error: unknown) => {
+        logger.warn(`[DevicePool] Failed to record emulator-loss incident for ${deviceId}`, error);
+        // Persistence is best effort. Keep the typed failure so every handler
+        // cleans up without retrying a write that may already have committed.
+        return undefined;
+      });
+    if (childProcess) {
+      this.processExitIncidents.set(childProcess, incident);
+    }
+    return incident;
   }
 
   private async finishFailedEvictionIncident(incidentId: string | undefined): Promise<void> {

@@ -5,7 +5,7 @@ extension CommandHandler {
 
     private func readAppAxis() async -> AppAxis? {
         // Hierarchy errors are safe: app axis is optional and XCUIDevice is the fallback.
-        guard let hierarchy = try? await elementLocator.getViewHierarchy(disableAllFiltering: false) else {
+        guard let hierarchy = try? await captureHierarchy() else {
             return nil
         }
         if let width = hierarchy.screenWidth, let height = hierarchy.screenHeight {

@@ -3,6 +3,16 @@ import Foundation
 extension CommandHandler {
     // MARK: - View Hierarchy
 
+    /// Record only the raw filtered capture: SDK refreshes enrich it at publication time.
+    /// The actor hop is non-throwing and changes no polling or broadcast state.
+    func captureHierarchy(disableAllFiltering: Bool = false) async throws -> ViewHierarchy {
+        let hierarchy = try await elementLocator.getViewHierarchy(disableAllFiltering: disableAllFiltering)
+        if !disableAllFiltering {
+            await hierarchyDebouncer?.recordCommandCapture(hierarchy)
+        }
+        return hierarchy
+    }
+
     func handleSetHierarchyPollInterval(
         _ request: RequestSetHierarchyPollInterval,
         startTime: Date
@@ -33,7 +43,7 @@ extension CommandHandler {
         let hierarchy: ViewHierarchy
         do {
             hierarchy = try await trackedAsync("extraction") {
-                try await self.elementLocator.getViewHierarchy(disableAllFiltering: disableAllFiltering)
+                try await self.captureHierarchy(disableAllFiltering: disableAllFiltering)
             }
         } catch {
             print("[CommandHandler] Hierarchy extraction failed: \(error)")
@@ -186,7 +196,7 @@ extension CommandHandler {
     }
 
     private func currentFrameContext() async -> String? {
-        guard let hierarchy = try? await elementLocator.getViewHierarchy(disableAllFiltering: false) else {
+        guard let hierarchy = try? await captureHierarchy() else {
             return nil
         }
         return frameContext.context(for: enrichWithCachedSdkHierarchy(hierarchy))

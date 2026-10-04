@@ -200,9 +200,21 @@ public final class CtrlProxy {
     /// structural hash does not include in-process SDK metadata, so chrome-only changes need
     /// this explicit path to refresh normal observations (the reference `SdkHierarchyRefreshPublisher`).
     private func publishSdkHierarchyRefresh() {
-        guard let hierarchy = hierarchyDebouncer.getLastHierarchy() else { return }
-        let enriched = commandHandler.enrichWithCachedSdkHierarchy(hierarchy)
+        guard let enriched = Self.sdkHierarchyRefresh(
+            hierarchyDebouncer: hierarchyDebouncer, commandHandler: commandHandler
+        ) else { return }
         server.broadcastHierarchyUpdate(enriched)
+    }
+
+    /// Internal selection seam for SDK-event refresh tests without a live server or device.
+    static func sdkHierarchyRefresh(
+        hierarchyDebouncer: HierarchyDebouncer,
+        commandHandler: CommandHandler
+    )
+        -> ViewHierarchy?
+    {
+        guard let hierarchy = hierarchyDebouncer.getLastHierarchy() else { return nil }
+        return commandHandler.enrichWithCachedSdkHierarchy(hierarchy)
     }
 
     /// Reconcile against current server state when the actor hop executes. Queued callbacks

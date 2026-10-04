@@ -234,6 +234,105 @@ final class HierarchyDebouncerTests: XCTestCase {
         XCTAssertTrue(harness.transitions.isEmpty)
     }
 
+    func testCommandCaptureUpdatesLatestWithoutChangingPollState() throws {
+        let initial = hierarchy("initial", updatedAt: 10)
+        let command = hierarchy("command", updatedAt: 20)
+        // The poll sees the same structure as the command but still must report the change
+        // from its own last broadcast, not from the recorded command capture.
+        let polled = hierarchy("command", updatedAt: 30)
+        let harness = DebouncerHarness(steps: [.hierarchy(initial), .hierarchy(polled)])
+        harness.debouncer.start()
+
+        harness.debouncer.recordCommandCapture(command)
+        harness.debouncer.recordCommandCapture(hierarchy("late command", updatedAt: 15))
+
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 20)
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.hierarchy?.text, "command")
+        XCTAssertEqual(harness.results.count, 1)
+        XCTAssertTrue(harness.transitions.isEmpty)
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000])
+        XCTAssertEqual(harness.timer.pendingCallbackCount, 1)
+        XCTAssertEqual(harness.extractor.callCount, 1)
+
+        harness.timer.advance(by: 1000)
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 30)
+        XCTAssertEqual(harness.results.count, 2)
+        try assertChanged(harness.results.last, hierarchy: polled)
+        XCTAssertEqual(harness.transitions.map(\.updatedAt), [30])
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000, 1000])
+
+        harness.debouncer.recordCommandCapture(command)
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 30)
+        XCTAssertEqual(harness.results.count, 2)
+        XCTAssertEqual(harness.transitions.count, 1)
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000, 1000])
+    }
+
+    func testCommandCaptureAcceptsEqualTimestamp() {
+        let harness = DebouncerHarness(steps: [.hierarchy(hierarchy("initial", updatedAt: 20))])
+        harness.debouncer.start()
+        harness.debouncer.recordCommandCapture(hierarchy("command", updatedAt: 20))
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.hierarchy?.text, "command")
+        XCTAssertEqual(harness.results.count, 1)
+        XCTAssertTrue(harness.transitions.isEmpty)
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000])
+    }
+
+    func testOlderPollsCannotReplaceCommandCapture() throws {
+        let initial = hierarchy("initial", updatedAt: 10)
+        let olderChanged = hierarchy("older change", updatedAt: 16)
+        let harness = DebouncerHarness(steps: [
+            .hierarchy(initial), .hierarchy(hierarchy("initial", updatedAt: 15)), .hierarchy(olderChanged),
+        ])
+        harness.debouncer.start()
+        harness.debouncer.recordCommandCapture(hierarchy("command", updatedAt: 20))
+
+        // Exercise both the unchanged and changed poll writes. Poll callbacks retain their
+        // existing behavior; only the hierarchy used by SDK refreshes is timestamp-guarded.
+        harness.timer.advance(by: 1000)
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 20)
+        XCTAssertEqual(harness.results.count, 1)
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000, 2000])
+        harness.timer.advance(by: 2000)
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 20)
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.hierarchy?.text, "command")
+        XCTAssertEqual(harness.results.count, 2)
+        try assertChanged(harness.results.last, hierarchy: olderChanged)
+        XCTAssertEqual(harness.transitions.map(\.updatedAt), [16])
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000, 2000, 1000])
+    }
+
+    func testInitialPollCannotReplaceNewerCommandCapture() {
+        let harness = DebouncerHarness(steps: [.hierarchy(hierarchy("initial", updatedAt: 10))])
+        harness.debouncer.recordCommandCapture(hierarchy("command", updatedAt: 20))
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 20)
+        XCTAssertTrue(harness.results.isEmpty)
+        XCTAssertTrue(harness.transitions.isEmpty)
+        XCTAssertTrue(harness.timer.scheduledDelays.isEmpty)
+
+        harness.debouncer.start()
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 20)
+        XCTAssertEqual(harness.results.count, 1)
+        XCTAssertEqual(harness.timer.scheduledDelays, [1000])
+    }
+
+    func testCommandCapturePreservesAnimationSkipAndBackoff() {
+        let initial = hierarchy("idle", updatedAt: 10)
+        let harness = DebouncerHarness(steps: [.hierarchy(initial)], pollIntervalMs: 10)
+        harness.debouncer.start()
+        harness.timer.advance(by: 10)
+        XCTAssertEqual(harness.timer.scheduledDelays, [10, 20])
+
+        harness.debouncer.recordCommandCapture(hierarchy("command", updatedAt: 20))
+        XCTAssertEqual(harness.results.count, 1)
+        XCTAssertTrue(harness.transitions.isEmpty)
+        XCTAssertEqual(harness.timer.scheduledDelays, [10, 20])
+        harness.timer.advance(by: 20)
+        XCTAssertEqual(harness.extractor.callCount, 2, "Recording must not exit the animation skip window")
+        XCTAssertEqual(harness.timer.scheduledDelays, [10, 20, 20])
+        XCTAssertEqual(harness.debouncer.getLastHierarchy()?.updatedAt, 20)
+    }
+
     private func hierarchy(_ label: String, updatedAt: Int64 = 1) -> ViewHierarchy {
         ViewHierarchy(updatedAt: updatedAt, packageName: "test.app", hierarchy: UIElementInfo(text: label))
     }

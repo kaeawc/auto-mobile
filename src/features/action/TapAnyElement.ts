@@ -1,4 +1,4 @@
-import { LONG_PRESS_MAX_MS } from "./tapAtGesture";
+import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import {
   prepareTargetDisplayAction,
   refreshTargetDisplayHierarchy,
@@ -14,6 +14,7 @@ import {
 } from "./BaseVisualChange";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../observe/shared/SharedGestureDelegate";
 import {
+  assertLongPressFitsRequestBudget,
   LONG_PRESS_TIMEOUT_HEADROOM_MS,
   ORDINARY_TAP_DURATION_MS,
   resolveGestureCtrlProxyTimeoutMs as resolveTapAnyCtrlProxyTimeoutMs,
@@ -347,8 +348,8 @@ export const TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS =
   LONG_PRESS_TIMEOUT_HEADROOM_MS +
   TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS;
 
-/** Public long-press ceiling shared with tapOn/tapAt; budget derivation stays unchanged. */
-export const TAP_ANY_LONG_PRESS_MAX_DURATION_MS = LONG_PRESS_MAX_MS;
+/** Public long-press ceiling shared with tapOn; tapAt retains its own 10 s limit. */
+export const TAP_ANY_LONG_PRESS_MAX_DURATION_MS = LONG_PRESS_HARD_MAX_MS;
 
 export class TapAnyElement extends BaseVisualChange {
   private readonly iosMultiPanel =
@@ -977,15 +978,22 @@ export class TapAnyElement extends BaseVisualChange {
     }
   }
 
-  private getLongPressDuration(options: TapAnyElementOptions): number {
+  private getLongPressDuration(
+    options: TapAnyElementOptions,
+    request?: { requestDeadlineMs?: number },
+  ): number {
     if (options.action !== "longPress") {
       return 0;
     }
-    if (options.duration !== undefined && options.duration > LONG_PRESS_MAX_MS) {
+    if (options.duration !== undefined && options.duration > LONG_PRESS_HARD_MAX_MS) {
       throw new ActionableError(
-        `longPress duration too large; maximum is ${LONG_PRESS_MAX_MS} ms; requested ${options.duration} ms`,
+        `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${options.duration} ms`,
       );
     }
+    let durationMs =
+      this.device.platform === "ios"
+        ? TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS
+        : TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID;
     if (options.duration && options.duration > 0) {
       // Normalize to an integer: the public schema accepts a fractional
       // duration, but CtrlProxy's `RequestTapCoordinates.duration` (iOS
@@ -998,12 +1006,15 @@ export class TapAnyElement extends BaseVisualChange {
       // as a plain tap, silently downgrading a requested long press into a
       // tap that reports success (issue #6248 review, P2). Floor at 1ms so
       // any positive `duration` stays a genuine long press.
-      const normalized = Math.max(1, Math.round(options.duration));
-      return normalized;
+      durationMs = Math.max(1, Math.round(options.duration));
     }
-    return this.device.platform === "ios"
-      ? TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS
-      : TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID;
+    assertLongPressFitsRequestBudget(
+      durationMs,
+      request?.requestDeadlineMs === undefined
+        ? undefined
+        : request.requestDeadlineMs - this.timer.now(),
+    );
+    return durationMs;
   }
 
   /**
@@ -1287,6 +1298,8 @@ export class TapAnyElement extends BaseVisualChange {
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    // Internal transport context; never part of public options or tool schemas.
+    request?: { requestDeadlineMs?: number },
   ): Promise<TapAnyElementResult> {
     if (!options.action) {
       return this.createErrorResult(options.action, "tap action is required");
@@ -1302,7 +1315,7 @@ export class TapAnyElement extends BaseVisualChange {
 
     try {
       // Reject before display resolution/observation can issue device commands.
-      this.getLongPressDuration(options);
+      this.getLongPressDuration(options, request);
       throwIfAborted(signal);
 
       const targetDisplay =

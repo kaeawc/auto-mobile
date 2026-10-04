@@ -590,3 +590,50 @@ describe("hitTestHandler", () => {
     });
   });
 });
+
+describe("tapOn handler transport deadline", () => {
+  afterEach(resetTapOnElementFactory);
+  test("over-budget longPress propagates the real tapOn ActionableError before device work", async () => {
+    const device: BootedDevice = { name: "Test", deviceId: "budget-tap-on", platform: "android" };
+    const timer = new FakeTimer();
+    timer.advanceTime(1000);
+    const adb = new FakeAdbExecutor();
+    const action = new TapOnElement(device, adb, { timer });
+    setTapOnElementFactory(() => action);
+
+    const call = tapOnHandler(device, {
+      selector: { text: "Target" },
+      action: "longPress",
+      duration: 20000,
+      __mcpRequestDeadlineMs: timer.now() + 5000,
+    });
+    await expect(call).rejects.toBeInstanceOf(ActionableError);
+    await expect(call).rejects.toThrow(
+      "longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started.",
+    );
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test.each([undefined, 123456])(
+    "forwards transport deadline %s through internal context",
+    async (deadline) => {
+      let received: { requestDeadlineMs?: number } | undefined;
+      let recoveryPolicy: { throwOnKeyboardOcclusion?: boolean } | undefined;
+      setTapOnElementFactory(() => ({
+        execute: async (_options, _progress, _signal, recovery, request) => {
+          received = request;
+          recoveryPolicy = recovery;
+          return { success: true, action: "longPress", element: { text: "Target" } };
+        },
+      }));
+      const args = {
+        selector: { text: "Target" },
+        action: "longPress" as const,
+        __mcpRequestDeadlineMs: deadline,
+      };
+      await tapOnHandler({ deviceId: "handler-deadline", name: "Test", platform: "android" }, args);
+      expect(received).toEqual({ requestDeadlineMs: deadline });
+      expect(recoveryPolicy).toBeUndefined();
+    },
+  );
+});

@@ -1,7 +1,10 @@
-import { LONG_PRESS_MAX_MS } from "./tapAtGesture";
+import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
-import { resolveVoiceOverActivateCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
+import {
+  assertLongPressFitsRequestBudget,
+  resolveVoiceOverActivateCtrlProxyTimeoutMs,
+} from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
@@ -3578,10 +3581,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal,
     // Internal orchestration policy; never part of TapOnElementOptions or tool schemas.
     recovery?: { throwOnKeyboardOcclusion?: boolean },
+    request?: { requestDeadlineMs?: number },
   ): Promise<TapOnElementResult> {
     // Validate before display resolution/observation can issue any device command.
     if (options.action === "longPress") {
-      this.getLongPressDuration(options);
+      assertLongPressFitsRequestBudget(
+        this.getLongPressDuration(options),
+        request?.requestDeadlineMs === undefined
+          ? undefined
+          : request.requestDeadlineMs - this.timer.now(),
+      );
     }
     if (options.display !== undefined) {
       const result = await this.executeOnDisplay(options, signal);
@@ -4781,9 +4790,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private getLongPressDuration(options: TapOnElementOptions): number {
-    if (options.duration !== undefined && options.duration > LONG_PRESS_MAX_MS) {
+    if (options.duration !== undefined && options.duration > LONG_PRESS_HARD_MAX_MS) {
       throw new ActionableError(
-        `longPress duration too large; maximum is ${LONG_PRESS_MAX_MS} ms; requested ${options.duration} ms`,
+        `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${options.duration} ms`,
       );
     }
     if (typeof options.duration === "number" && options.duration > 0) {

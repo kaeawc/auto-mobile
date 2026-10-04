@@ -1,5 +1,5 @@
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
-import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn, mock } from "bun:test";
 import {
   TapAnyElement,
   TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
@@ -62,6 +62,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   let fakeWindow: FakeWindow;
   let fakeTimer: FakeTimer;
   let tapAny: TapAnyElement;
+  let displayLookup: ReturnType<typeof mock<() => undefined>>;
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   beforeEach(async () => {
@@ -82,10 +83,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       fakeIosClient as any,
     );
 
+    displayLookup = mock(() => undefined);
     tapAny = new TapAnyElement(IOS_DEVICE, new FakeAdbClient() as any, {
       timer: fakeTimer,
       elementSelector: fakeElementSelector,
       iosVoiceOverDetector: fakeVoiceOverDetector,
+      lastRenderedObservation: displayLookup,
     });
     (tapAny as any).observeScreen = fakeObserveScreen;
     (tapAny as any).awaitIdle = fakeAwaitIdle;
@@ -96,6 +99,74 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
   });
+
+  test.each([false, true])(
+    "budget admission dispatches 17000 ms on iOS (VoiceOver=%s)",
+    async (voiceOver) => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(voiceOver);
+      const tap = spyOn(fakeIosClient, "requestTapCoordinates");
+      const activate = spyOn(fakeIosClient, "requestVoiceOverActivate");
+      const result = await tapAny.execute(
+        { action: "longPress", duration: 17000 },
+        undefined,
+        undefined,
+        { requestDeadlineMs: fakeTimer.now() + 120000 },
+      );
+      expect(result.success).toBe(true);
+      if (voiceOver) {
+        expect(activate).toHaveBeenCalledWith("Target Button", "long_press", 19000, undefined, {
+          bounds: makeClickableElement().bounds,
+          duration: 17000,
+        });
+        expect(tap).not.toHaveBeenCalled();
+      } else {
+        expect(tap).toHaveBeenCalledWith(42, 84, 17000, 19000, undefined, undefined, undefined);
+        expect(activate).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test.each([
+    [false, 61000, 5000],
+    [false, 60000.5, 5000],
+    [false, Infinity, 5000],
+    [false, 20000, 5000],
+    [false, 20000, 21999],
+    [true, 61000, 5000],
+    [true, 60000.5, 5000],
+    [true, Infinity, 5000],
+    [true, 20000, 5000],
+    [true, 20000, 21999],
+  ] as const)(
+    "budget admission returns failure without iOS observation or dispatch (VoiceOver=%s, duration=%s, remaining=%s)",
+    async (voiceOver, duration, remaining) => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(voiceOver);
+      const tap = spyOn(fakeIosClient, "requestTapCoordinates");
+      const activate = spyOn(fakeIosClient, "requestVoiceOverActivate");
+      const observe = spyOn(fakeObserveScreen, "execute");
+      const interaction = spyOn(tapAny, "observedInteraction");
+      const result = await tapAny.execute(
+        { action: "longPress", duration, display: "1" },
+        undefined,
+        undefined,
+        { requestDeadlineMs: fakeTimer.now() + remaining },
+      );
+      expect(result.success).toBe(false);
+      expect(result.action).toBe("longPress");
+      expect(result.element.bounds).toEqual({ left: 0, top: 0, right: 0, bottom: 0 });
+      expect(result.error).toStartWith("Failed to tap clickable element: ");
+      expect(result.error).toContain(
+        duration === 20000
+          ? `longPress duration 20000 ms does not fit the remaining request budget (${remaining} ms; needs 22000 ms including dispatch headroom); the press was not started.`
+          : `maximum is 60000 ms; requested ${duration} ms`,
+      );
+      expect(tap).not.toHaveBeenCalled();
+      expect(activate).not.toHaveBeenCalled();
+      expect(observe).not.toHaveBeenCalled();
+      expect(interaction).not.toHaveBeenCalled();
+      expect(displayLookup).not.toHaveBeenCalled();
+    },
+  );
 
   test("tap dispatches a single requestTapCoordinates call at the element's center", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
@@ -456,7 +527,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   // round merely CLAMPED the inner/outer timers while still forwarding the
   // full absurd `duration` to XCTest -- a clamp-vs-duration mismatch that
   // asked the on-device press to run far longer than the request would wait.
-  // `getLongPressDuration` now rejects above the shared 10000ms ceiling,
+  // `getLongPressDuration` now rejects above the shared 60000ms ceiling,
   // before the native press is dispatched, instead of clamping its timeout.
   test("longPress duration just over TAP_ANY_LONG_PRESS_MAX_DURATION_MS is REJECTED, not clamped-and-sent", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
@@ -464,7 +535,6 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const duration = TAP_ANY_LONG_PRESS_MAX_DURATION_MS + 1;
 
     const result = await tapAny.execute({ action: "longPress", duration });
-
     expect(result.success).toBe(false);
     expect(result.error).toContain("longPress duration too large");
     expect(tapSpy).not.toHaveBeenCalled();
@@ -495,7 +565,6 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const duration = TAP_ANY_LONG_PRESS_MAX_DURATION_MS + 1;
 
     const result = await tapAny.execute({ action: "longPress", duration });
-
     expect(result.success).toBe(false);
     expect(result.error).toContain("longPress duration too large");
     expect(activateSpy).not.toHaveBeenCalled();

@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { LONG_PRESS_MAX_MS } from "../../../src/features/action/tapAtGesture";
+import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
@@ -45,20 +45,27 @@ function harness() {
     callback({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } });
   return {
     adb,
+    timer,
     action,
-    execute: (duration?: number, signal?: AbortSignal) =>
-      action.execute({ text: "ListItem", action: "longPress", duration }, undefined, signal),
+    execute: (duration?: number, signal?: AbortSignal, remainingMs?: number) =>
+      action.execute(
+        { text: "ListItem", action: "longPress", duration },
+        undefined,
+        signal,
+        undefined,
+        { requestDeadlineMs: remainingMs === undefined ? undefined : timer.now() + remainingMs },
+      ),
   };
 }
 
 describe("tapOn long press safety", () => {
-  test.each([LONG_PRESS_MAX_MS + 1, LONG_PRESS_MAX_MS + 0.1, Infinity])(
+  test.each([LONG_PRESS_HARD_MAX_MS + 1, LONG_PRESS_HARD_MAX_MS + 0.5, Infinity])(
     "rejects duration %s with an actionable error before any adb command",
     async (duration) => {
       const h = harness();
       await expect(h.execute(duration)).rejects.toBeInstanceOf(ActionableError);
       await expect(h.execute(duration)).rejects.toThrow(
-        `maximum is ${LONG_PRESS_MAX_MS} ms; requested ${duration} ms`,
+        `maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${duration} ms`,
       );
       expect(h.adb.getExecutedCommands()).toEqual([]);
     },
@@ -66,8 +73,9 @@ describe("tapOn long press safety", () => {
 
   test.each([
     [1500, 1500],
-    [LONG_PRESS_MAX_MS, LONG_PRESS_MAX_MS],
+    [LONG_PRESS_HARD_MAX_MS, LONG_PRESS_HARD_MAX_MS],
     [1, 1],
+    [200, 200],
     [0, 500],
     [undefined, 500],
   ])("duration %s retains the command and timeout", async (duration, effective) => {
@@ -80,6 +88,43 @@ describe("tapOn long press safety", () => {
       }),
     ]);
   });
+
+  test.each([
+    [17000, 120000],
+    [30000, undefined],
+    [20000, 22000],
+    [undefined, 120000],
+  ])("budget admission accepts duration %s with remaining %s", async (duration, remaining) => {
+    const h = harness();
+    expect((await h.execute(duration, undefined, remaining)).success).toBe(true);
+    expect(h.adb.getCommandCalls()).toEqual([
+      expect.objectContaining({
+        command: `shell input touchscreen swipe 60 45 60 45 ${duration ?? 500}`,
+        timeoutMs: (duration ?? 500) + 2000,
+      }),
+    ]);
+  });
+
+  test.each([5000, 21999])(
+    "budget admission rejects before display/observation with %s ms",
+    async (remaining) => {
+      const h = harness();
+      const observe = spyOn(h.action, "observedInteraction");
+      const call = h.action.execute(
+        { text: "ListItem", action: "longPress", duration: 20000, display: 1 },
+        undefined,
+        undefined,
+        undefined,
+        { requestDeadlineMs: h.timer.now() + remaining },
+      );
+      await expect(call).rejects.toBeInstanceOf(ActionableError);
+      await expect(call).rejects.toThrow(
+        `longPress duration 20000 ms does not fit the remaining request budget (${remaining} ms; needs 22000 ms including dispatch headroom); the press was not started.`,
+      );
+      expect(observe).not.toHaveBeenCalled();
+      expect(h.adb.getExecutedCommands()).toEqual([]);
+    },
+  );
 
   test.each(["touchscreen", "fallback"])(
     "abort during %s hold reports the remaining risk without another dispatch",

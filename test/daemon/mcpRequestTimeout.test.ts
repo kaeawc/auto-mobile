@@ -1187,3 +1187,33 @@ describe("ProgressExtendableDeadline", () => {
     expect(seen).toEqual([59_000]);
   });
 });
+
+describe("tapOn long press outer budget", () => {
+  test.each([
+    ["longPress", 17000, undefined, undefined, 48500],
+    ["longPress", 17000, 4000, undefined, 51000],
+    ["longPress", 17000.6, 4000.6, undefined, 51002],
+    ["longPress", 17000, 0, undefined, 48500],
+    ["longPress", 17000, undefined, 120000, 120000],
+    ["longPress", MAX_SETTIMEOUT_DELAY_MS, undefined, undefined, MAX_SETTIMEOUT_DELAY_MS],
+    ["longPress", undefined, undefined, undefined, 30000],
+    ["longPress", 0, undefined, undefined, 30000],
+    ["longPress", Infinity, undefined, undefined, 30000],
+    ["tap", 17000, undefined, undefined, 30000],
+  ])(
+    "action %s duration %s search %s caller %s resolves %s",
+    (action, duration, searchDuration, timeoutMs, expected) => {
+      const request: DaemonRequest = {
+        id: "tap-on-budget",
+        type: "mcp_request",
+        method: "tools/call",
+        timeoutMs,
+        params: {
+          name: "tapOn",
+          arguments: { action, duration, searchUntil: { duration: searchDuration } },
+        },
+      };
+      expect(resolveMcpRequestTimeoutMs(request)).toBe(expected!);
+    },
+  );
+});

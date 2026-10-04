@@ -1,3 +1,4 @@
+import { resolveTransportDeadlineMs } from "./formTools";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { toActionableError } from "../models/ActionableError";
@@ -8,6 +9,7 @@ import { TapOnElement } from "../features/action/TapOnElement";
 import {
   LONG_PRESS_MIN_MS,
   LONG_PRESS_MAX_MS,
+  LONG_PRESS_HARD_MAX_MS,
   LONG_PRESS_DEFAULT_MS,
 } from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
@@ -414,10 +416,10 @@ export const tapOnSchema = withJsonSchemaOverride(
         duration: z
           .number()
           .min(0, "must be >= 0")
-          .max(LONG_PRESS_MAX_MS, `longPress duration must be <= ${LONG_PRESS_MAX_MS} ms`)
+          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
           .optional()
           .describe(
-            `Long press duration (ms; maximum ${LONG_PRESS_MAX_MS}; 0 or omitted uses the platform default)`,
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
           ),
         subtext: z
           .object({
@@ -687,10 +689,10 @@ export const tapAnySchema = withJsonSchemaOverride(
         duration: z
           .number()
           .min(0, "must be >= 0")
-          .max(LONG_PRESS_MAX_MS, `longPress duration must be <= ${LONG_PRESS_MAX_MS} ms`)
+          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
           .optional()
           .describe(
-            `Long press duration (ms; maximum ${LONG_PRESS_MAX_MS}; 0 or omitted uses the platform default)`,
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
           ),
         searchUntil: z
           .object({
@@ -2100,6 +2102,8 @@ export async function tapOnHandler(
     },
     progress,
     signal,
+    undefined,
+    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -2225,6 +2229,7 @@ export async function tapAnyHandler(
     },
     progress,
     signal,
+    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapAnySearchSummary(result);

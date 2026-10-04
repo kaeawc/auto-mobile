@@ -25,6 +25,12 @@ internal enum class BatchDeliveryOutcome {
   INVALID_PAYLOAD,
 }
 
+/** Only chunks not yet submitted need the buffer's flush-exception fallback. */
+internal class UnsentEventBatchesException(
+  val batches: List<Pair<List<SdkEvent>, String?>>,
+  cause: Exception,
+) : RuntimeException("Could not prepare SDK event chunk", cause)
+
 /** Timeout scheduling and completion dispatch share the SDK buffer executor in production. */
 internal interface BatchDeliveryScheduler {
   /** Null means shutdown has begun: send once and resolve without waiting or retrying. */
@@ -153,16 +159,27 @@ object SdkEventBroadcaster {
       }
       return
     }
-    for ((index, chunk) in chunks.withIndex()) {
-      val chunkId =
+    // Allocate every identity before sending: a failing provider cannot strand a sent prefix.
+    val chunkIds =
+      chunks.indices.map { index ->
         if (splitBatches) batchIdProvider()
         else if (batchId == null || chunks.size == 1) batchId
         // Legacy CtrlProxy may require splitting a stored unit. Derive stable child identities
         // so returning to an ack-capable receiver cannot mistake one child for another.
         else "$batchId:$index"
+      }
+    for ((index, chunk) in chunks.withIndex()) {
+      val chunkId = chunkIds[index]
+      val json =
+        try {
+          serializeChunk(chunk, context.packageName, MAX_BATCH_BYTES)
+        } catch (error: Exception) {
+          // Earlier sends own their outcomes; retain only this chunk and the unsent suffix.
+          throw UnsentEventBatchesException(chunks.drop(index).zip(chunkIds.drop(index)), error)
+        }
       sendBatchIntent(
         context,
-        serializeChunk(chunk, context.packageName, MAX_BATCH_BYTES),
+        json,
         batchId = chunkId,
         generation = generation,
         requireAck = requireAck,

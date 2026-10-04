@@ -105,6 +105,8 @@ class SdkEventAcknowledgedDeliveryTest {
     val ordered = mutableListOf<String>()
     val results = mutableListOf<(Int) -> Unit>()
     val batchIds = mutableListOf<String?>()
+    val plainBatchIds = mutableListOf<String?>()
+    var afterSend: () -> Unit = {}
     var response: Int? = null
     var throwsRemaining = 0
     var attempts = 0
@@ -120,12 +122,15 @@ class SdkEventAcknowledgedDeliveryTest {
       if (throwsRemaining-- > 0) throw IllegalStateException("broadcast failed")
       if (!ordered) {
         plainSends++
+        plainBatchIds.add(batchId)
+        afterSend()
         return
       }
       batchIds.add(batchId)
       this.ordered.add(batchJson)
       results.add(onResult)
       response?.let { respond(results.lastIndex, it) }
+      afterSend()
     }
 
     fun respond(index: Int, code: Int) = results[index](code)
@@ -432,6 +437,7 @@ class SdkEventAcknowledgedDeliveryTest {
         onFlush = { SdkEventBroadcaster.broadcastBatch(context, it, buffer::persistUndelivered) },
         persistence = store,
         executor = executor,
+        dropCounter = drops,
         // Shutdown work must drain on the existing buffer worker, never spawn a fallback worker.
         persistenceExecutor = java.util.concurrent.Executor { error("Unexpected fallback") },
       )
@@ -443,6 +449,153 @@ class SdkEventAcknowledgedDeliveryTest {
         override fun execute(task: Runnable) = buffer.executeDelivery(task)
       }
     return buffer
+  }
+
+  @Test
+  fun `flush id allocation failure happens before any chunk is sent`() {
+    val executor = FakeBufferExecutor()
+    val buffer = realBuffer(executor)
+    val events = (1..2).map { event("chunk-$it-" + "x".repeat(60_000)) }
+    var allocations = 0
+    SdkEventBroadcaster.batchIdProvider = {
+      check(++allocations != 2) { "id allocation failed" }
+      "id-$allocations"
+    }
+    try {
+      events.forEach(buffer::add)
+      buffer.flush()
+      assertTrue(sender.ordered.isEmpty(), "A preparation failure must not send a prefix")
+      assertEquals(0, store.writes, "Persistence must stay queued off the flush caller")
+      executor.drain()
+      assertEquals(events, store.pending.single().events)
+      assertEquals(null, store.pending.single().deliveryId)
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `flush serialization failure persists only unsent chunks with their allocated ids`() {
+    val executor = FakeBufferExecutor()
+    val buffer = realBuffer(executor)
+    var failSerialization = false
+    val values = mapOf("key" to "value")
+    val details =
+      object : Map<String, String> by values {
+        override val entries: Set<Map.Entry<String, String>>
+          get() {
+            check(!failSerialization) { "serialization failed" }
+            return values.entries
+          }
+      }
+    val events =
+      (1..3).map {
+        SdkLifecycleEvent(
+          timestamp = 1,
+          kind = "chunk-$it-" + "x".repeat(60_000),
+          details = if (it == 2) details else null,
+        )
+      }
+    var allocations = 0
+    SdkEventBroadcaster.batchIdProvider = { "id-${++allocations}" }
+    sender.response = 1000
+    sender.afterSend = { failSerialization = true }
+    try {
+      events.forEach(buffer::add)
+      buffer.flush()
+      assertEquals(listOf<String?>("id-1"), sender.batchIds)
+      assertEquals(0, store.writes, "Persistence must stay queued off the flush caller")
+      executor.drain()
+      assertEquals(listOf(listOf(events[1]), listOf(events[2])), store.pending.map { it.events })
+      assertEquals(listOf<String?>("id-2", "id-3"), store.pending.map { it.deliveryId })
+      assertEquals(2L, drops.snapshot()[DropReason.FLUSH_ERROR])
+      failSerialization = false
+      sender.afterSend = {}
+      EventBatchReplay().replay(store, { it.run() }) { replayEvents, id, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          replayEvents,
+          onUndelivered = { _, _ -> },
+          onFinished = complete,
+          splitBatches = false,
+          batchId = id,
+        )
+      }
+      executor.drain()
+      assertEquals(listOf<String?>("id-1", "id-2", "id-3"), sender.batchIds)
+      assertTrue(store.pending.isEmpty())
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `replay gate changes preserve stored identity and legacy child ids`() {
+    val events = (1..2).map { event("chunk-$it-" + "x".repeat(60_000)) }
+    store.persist(events, "stored")
+    store.refuseRemove = true
+    var supported = false
+    var now = 0L
+    SdkEventBroadcaster.capabilityGate =
+      SdkEventAckCapability(AckPackageInfoReader { supported }, { now }, refreshIntervalMs = 1)
+    sender.response = 1000
+    val replay = EventBatchReplay()
+    for (acknowledged in listOf(false, true, false, true)) {
+      supported = acknowledged
+      now++
+      replay.replay(store, { it.run() }) { replayEvents, id, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          replayEvents,
+          onUndelivered = { _, _ -> },
+          onFinished = complete,
+          splitBatches = false,
+          batchId = id,
+        )
+      }
+    }
+    assertEquals(
+      List(2) { listOf<String?>("stored:0", "stored:1") }.flatten(),
+      sender.plainBatchIds,
+    )
+    assertEquals(listOf<String?>("stored", "stored"), sender.batchIds)
+    assertEquals(List(4) { "1" }, store.removed)
+    assertEquals("stored", store.pending.single().deliveryId)
+    assertEquals(1, store.writes)
+    assertTrue(store.failures.isEmpty())
+  }
+
+  @Test
+  fun `gate refresh between files in one replay respects each delivery outcome`() {
+    sender.response = 1000
+    for (initialSupport in listOf(false, true)) {
+      store.persist(listOf(event("first")), "first-id")
+      store.persist(listOf(event("second")), "second-id")
+      var supported = initialSupport
+      var now = 0L
+      SdkEventBroadcaster.capabilityGate =
+        SdkEventAckCapability(AckPackageInfoReader { supported }, { now }, refreshIntervalMs = 1)
+      EventBatchReplay().replay(store, { it.run() }) { events, id, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          events,
+          onUndelivered = { _, _ -> },
+          onFinished = { outcome ->
+            supported = !supported
+            now++
+            complete(outcome)
+          },
+          splitBatches = false,
+          batchId = id,
+        )
+      }
+      assertTrue(store.pending.isEmpty())
+    }
+    assertEquals(listOf<String?>("first-id", "second-id"), sender.plainBatchIds)
+    assertEquals(listOf<String?>("second-id", "first-id"), sender.batchIds)
+    assertEquals(listOf("1", "2", "3", "4"), store.removed)
+    assertEquals(4, store.writes)
+    assertTrue(store.failures.isEmpty())
   }
 
   @Test

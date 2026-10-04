@@ -234,6 +234,37 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
 
+  test.each(["abort", "timeout"])(
+    "a dispatched iOS long press reports the held-pointer risk on %s",
+    async (failure) => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+      const controller = new AbortController();
+      const request = spyOn(fakeIosClient, "requestTapCoordinates").mockImplementation(
+        async (_x, _y, duration, _timeout, _perf, _frame, signal) => {
+          expect(duration).toBe(1500);
+          expect(signal).toBe(controller.signal);
+          if (failure === "abort") {
+            controller.abort();
+            throw new DOMException("Operation aborted", "AbortError");
+          }
+          return { success: false, totalTimeMs: 3500, error: "Tap timed out after 3500ms" };
+        },
+      );
+      try {
+        const result = await tapAny.execute(
+          { action: "longPress", duration: 1500 },
+          undefined,
+          controller.signal,
+        );
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("press may still be held on the device for up to 1500 ms");
+        expect(request).toHaveBeenCalledTimes(1);
+      } finally {
+        request.mockRestore();
+      }
+    },
+  );
+
   // Thread PRRT_kwDOP-GF5M6ftbHR: CtrlProxy blocks its reply until the on-device
   // press completes, so a >5s long press must size the request timeout from the
   // press duration — requestTapCoordinates otherwise defaults to a fixed 5s
@@ -425,9 +456,8 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   // round merely CLAMPED the inner/outer timers while still forwarding the
   // full absurd `duration` to XCTest -- a clamp-vs-duration mismatch that
   // asked the on-device press to run far longer than the request would wait.
-  // `getLongPressDuration` now REJECTS a duration whose derived request
-  // deadline would exceed `MAX_SETTIMEOUT_DELAY_MS` outright, closing the
-  // whole absurd-duration edge class at the source instead of clamping.
+  // `getLongPressDuration` now rejects above the shared 10000ms ceiling,
+  // before the native press is dispatched, instead of clamping its timeout.
   test("longPress duration just over TAP_ANY_LONG_PRESS_MAX_DURATION_MS is REJECTED, not clamped-and-sent", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");

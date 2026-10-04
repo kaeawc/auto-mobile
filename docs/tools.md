@@ -215,10 +215,11 @@ supplied; nonpositive values are rejected before gesture dispatch. Its optional
 300 ms. This is a deliberate input tightening: zero, negative, fractional, and
 over-10000 ms durations are rejected by both the schema and action.
 
-For `tapAny` with `action: "longPress"`, the effective maximum duration is
-2147323897 ms after rounding. The action derives this limit from the timer
-ceiling minus non-press overhead and the maximum search window; the schema
-advertises it without an upper-bound constraint.
+For `tapOn` and `tapAny` with `action: "longPress"`, `duration` accepts values
+from 0 to 10000 ms; zero or omission keeps the platform default. Both the schema
+and action reject durations above 10000 ms. If an Android adb long press is
+interrupted, its error warns that the press may still be held on the device for
+up to the requested duration; wait that duration before retrying touch input.
 
 ### Screen-coordinate contract
 

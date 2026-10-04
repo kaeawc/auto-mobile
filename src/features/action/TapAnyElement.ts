@@ -1,3 +1,4 @@
+import { LONG_PRESS_MAX_MS } from "./tapAtGesture";
 import {
   prepareTargetDisplayAction,
   refreshTargetDisplayHierarchy,
@@ -19,7 +20,7 @@ import {
 } from "./gestureTransportTimeout";
 export { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "./gestureTransportTimeout";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import {
   DefaultHierarchyCapture,
   getHierarchySnapshot,
@@ -44,7 +45,7 @@ import {
   TapOnElementResult,
   ViewHierarchyResult,
 } from "../../models";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { AdbClient, AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import {
   DefaultElementGeometry,
@@ -59,7 +60,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
+import { type Timer } from "../../utils/SystemTimer";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
@@ -346,33 +347,8 @@ export const TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS =
   LONG_PRESS_TIMEOUT_HEADROOM_MS +
   TAP_ANY_LONG_PRESS_OVERHEAD_HEADROOM_MS;
 
-/**
- * Maximum `duration` (ms) a `tapAny` longPress may request. `setTimeout`
- * (Node/Bun) silently normalizes any delay >= `MAX_SETTIMEOUT_DELAY_MS`
- * (2^31 - 1) to 1ms rather than honoring it, so a large-enough `duration`
- * would otherwise push the derived request deadline (press + pre-gesture
- * search window + non-press overhead, computed by both the inner CtrlProxy
- * timeout here and the outer daemon deadline in `mcpRequestTimeout.ts`) past
- * that ceiling -- timing the request out almost immediately instead of
- * running for anywhere near the intended duration (issue #6248 review, P2,
- * fuZRt). Rather than merely clamping the derived timers (which leaves
- * CtrlProxy asked to run the gesture itself for far longer than the request
- * will wait -- a clamp-vs-duration mismatch), `getLongPressDuration` REJECTS
- * any duration above this bound outright, closing the whole absurd-duration
- * edge class at the source.
- *
- * maxDuration = MAX_SETTIMEOUT_DELAY_MS - (nonPressOverhead + maxSearchWindow)
- *   MAX_SETTIMEOUT_DELAY_MS       = 2147483647ms
- *   nonPressOverhead              = TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS
- *   maxSearchWindow               = TAP_ANY_SEARCH_UNTIL_MAX_MS = 12000ms
- *
- * A duration at or below this bound can never overflow `setTimeout` on either
- * timer once combined with the largest possible `searchUntil.duration` and
- * the full non-press overhead.
- */
-export const TAP_ANY_LONG_PRESS_MAX_DURATION_MS =
-  MAX_SETTIMEOUT_DELAY_MS -
-  (TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS + TAP_ANY_SEARCH_UNTIL_MAX_MS);
+/** Public long-press ceiling shared with tapOn/tapAt; budget derivation stays unchanged. */
+export const TAP_ANY_LONG_PRESS_MAX_DURATION_MS = LONG_PRESS_MAX_MS;
 
 export class TapAnyElement extends BaseVisualChange {
   private readonly iosMultiPanel =
@@ -530,40 +506,7 @@ export class TapAnyElement extends BaseVisualChange {
       if (await this.trySemanticAndroidLongPress(element, { signal, scoped: target.scoped })) {
         return;
       }
-      // Match tapOn's touchscreen source and retain the generic input fallback.
-      try {
-        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-        fence.assertCurrent();
-        const command = `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-        const result = await this.adb.executeCommand(
-          command,
-          resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-          undefined,
-          undefined,
-          signal,
-        );
-        assertTouchscreenInputSucceeded(command, result);
-        return;
-      } catch (error) {
-        if (error instanceof StaleDisplayError) {
-          throw error;
-        }
-        throwIfAborted(signal);
-        logger.warn(
-          `[TapAnyElement] touch input swipe failed, falling back to input swipe: ${error}`,
-        );
-      }
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence.assertCurrent();
-      const command = `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-      const result = await this.adb.executeCommand(
-        command,
-        resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-        undefined,
-        undefined,
-        signal,
-      );
-      assertTouchscreenInputSucceeded(command, result);
+      await this.executeAndroidLongPress(x, y, durationMs, signal, { displayFence: fence });
       return;
     }
 
@@ -590,6 +533,78 @@ export class TapAnyElement extends BaseVisualChange {
         10,
         undefined,
         signal,
+      );
+    }
+  }
+
+  private async executeAndroidLongPress(
+    x: number,
+    y: number,
+    durationMs: number,
+    signal?: AbortSignal,
+    fenceOptions: DisplayFenceOption = {},
+  ): Promise<void> {
+    const fence = resolveDisplayFence(fenceOptions);
+    throwIfAborted(signal);
+    try {
+      // Match tapOn's touchscreen source and retain the generic input fallback.
+      try {
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence.assertCurrent();
+        const command = `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`;
+        const result = await this.adb.executeCommand(
+          command,
+          resolveTapAnyCtrlProxyTimeoutMs(durationMs),
+          undefined,
+          undefined,
+          signal,
+        );
+        assertTouchscreenInputSucceeded(command, result);
+        return;
+      } catch (error) {
+        logger.warn(`[TapAnyElement] touch input swipe failed: ${errorMessage(error)}`, error);
+        this.throwIfLongPressInterrupted(error, durationMs, signal);
+        if (error instanceof StaleDisplayError) {
+          throw error;
+        }
+        throwIfAborted(signal);
+      }
+      // Only a non-cancellation failure may use the legacy input source.
+      fence.assertCurrent();
+      const command = `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`;
+      const result = await this.adb.executeCommand(
+        command,
+        resolveTapAnyCtrlProxyTimeoutMs(durationMs),
+        undefined,
+        undefined,
+        signal,
+      );
+      assertTouchscreenInputSucceeded(command, result);
+      return;
+    } catch (error) {
+      logger.warn(`[TapAnyElement] Android long press failed: ${errorMessage(error)}`, error);
+      this.throwIfLongPressInterrupted(error, durationMs, signal);
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
+      throw toActionableError(error, "Android long press failed");
+    }
+  }
+
+  private throwIfLongPressInterrupted(
+    error: unknown,
+    durationMs: number,
+    signal?: AbortSignal,
+  ): void {
+    if (
+      signal?.aborted ||
+      error instanceof AdbCommandTimeoutError ||
+      (error instanceof Error && error.name === "AbortError")
+    ) {
+      // Killing host adb cannot cancel input's system_server injection.
+      throw new ActionableError(
+        `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
+        { cause: error },
       );
     }
   }
@@ -966,6 +981,11 @@ export class TapAnyElement extends BaseVisualChange {
     if (options.action !== "longPress") {
       return 0;
     }
+    if (options.duration !== undefined && options.duration > LONG_PRESS_MAX_MS) {
+      throw new ActionableError(
+        `longPress duration too large; maximum is ${LONG_PRESS_MAX_MS} ms; requested ${options.duration} ms`,
+      );
+    }
     if (options.duration && options.duration > 0) {
       // Normalize to an integer: the public schema accepts a fractional
       // duration, but CtrlProxy's `RequestTapCoordinates.duration` (iOS
@@ -979,18 +999,6 @@ export class TapAnyElement extends BaseVisualChange {
       // tap that reports success (issue #6248 review, P2). Floor at 1ms so
       // any positive `duration` stays a genuine long press.
       const normalized = Math.max(1, Math.round(options.duration));
-      // REJECT (rather than clamp) a duration whose derived request deadline
-      // would exceed `MAX_SETTIMEOUT_DELAY_MS` -- clamping only the timers
-      // while forwarding the full absurd duration to XCTest asks the
-      // on-device press to run far longer than the request will wait, a
-      // clamp-vs-duration mismatch (issue #6248 review, P2, fuZRt). See
-      // `TAP_ANY_LONG_PRESS_MAX_DURATION_MS`'s doc for the bound's
-      // derivation.
-      if (normalized > TAP_ANY_LONG_PRESS_MAX_DURATION_MS) {
-        throw new ActionableError(
-          `longPress duration too large; maximum is ${TAP_ANY_LONG_PRESS_MAX_DURATION_MS} ms`,
-        );
-      }
       return normalized;
     }
     return this.device.platform === "ios"
@@ -1072,7 +1080,7 @@ export class TapAnyElement extends BaseVisualChange {
     signal?: AbortSignal,
     fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
+    const fence = resolveDisplayFence(fenceOptions);
     // Short fixed duration for tap/doubleTap, caller-supplied duration for longPress.
     const tapDuration =
       action === "longPress" ? longPressDuration : TAP_ANY_ORDINARY_TAP_DURATION_MS;
@@ -1089,7 +1097,7 @@ export class TapAnyElement extends BaseVisualChange {
     // review, P1/P2).
     if (action === "doubleTap") {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
+      fence.assertCurrent();
       const firstResult = await xcTestClient.requestTapCoordinates(
         x,
         y,
@@ -1104,7 +1112,7 @@ export class TapAnyElement extends BaseVisualChange {
       }
       await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
+      fence.assertCurrent();
       const secondResult = await xcTestClient.requestTapCoordinates(
         x,
         y,
@@ -1121,18 +1129,31 @@ export class TapAnyElement extends BaseVisualChange {
     }
 
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    fence?.assertCurrent();
-    const result = await xcTestClient.requestTapCoordinates(
-      x,
-      y,
-      tapDuration,
-      timeoutMs,
-      undefined,
-      undefined,
-      signal,
-    );
-    if (!result.success) {
-      throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
+    fence.assertCurrent();
+    throwIfAborted(signal);
+    try {
+      const result = await xcTestClient.requestTapCoordinates(
+        x,
+        y,
+        tapDuration,
+        timeoutMs,
+        undefined,
+        undefined,
+        signal,
+      );
+      if (!result.success) {
+        throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
+      }
+    } catch (error) {
+      logger.warn(`[TapAnyElement] CtrlProxy iOS tap failed: ${errorMessage(error)}`, error);
+      if (action === "longPress") {
+        // The client cannot confirm native cancellation or whether dispatch occurred.
+        throw new ActionableError(
+          `iOS long press failed: ${errorMessage(error)}; press may still be held on the device for up to ${tapDuration} ms. Wait ${tapDuration} ms before retrying touch input.`,
+          { cause: error },
+        );
+      }
+      throw toActionableError(error, "CtrlProxy iOS tap failed");
     }
   }
 
@@ -1280,6 +1301,8 @@ export class TapAnyElement extends BaseVisualChange {
     perf.serial("tapAnyElement");
 
     try {
+      // Reject before display resolution/observation can issue device commands.
+      this.getLongPressDuration(options);
       throwIfAborted(signal);
 
       const targetDisplay =

@@ -654,7 +654,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
   });
 
   test("tapAny longPress with a duration near the setTimeout ceiling is clamped to MAX_SETTIMEOUT_DELAY_MS", () => {
-    // The public schema accepts an unbounded `duration`. Without a clamp, a
+    // Internal requests are budgeted before schema validation. Without a clamp, a
     // duration near/above 2^31-1 pushes the derived deadline past
     // setTimeout's 32-bit range, which Bun/Node silently normalize to 1ms --
     // timing the daemon request out almost immediately instead of honoring

@@ -1,4 +1,4 @@
-import { TAP_ANY_LONG_PRESS_MAX_DURATION_MS } from "../../src/features/action/TapAnyElement";
+import { LONG_PRESS_MAX_MS } from "../../src/features/action/tapAtGesture";
 import {
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
@@ -14,6 +14,7 @@ import {
   pinchOnSchema,
   sendKeysSchema,
   tapAnySchema,
+  tapOnSchema,
   swipeOnHandler,
   setSwipeOnFactory,
   resetSwipeOnFactory,
@@ -267,7 +268,27 @@ test("sendKeys schema caps raw arrays", () => {
 });
 
 test("tapAny describes the action longPress maximum", () => {
-  expect(tapAnySchema.shape.duration.description).toContain(
-    `${TAP_ANY_LONG_PRESS_MAX_DURATION_MS}`,
-  );
+  expect(tapAnySchema.shape.duration.description).toContain(`${LONG_PRESS_MAX_MS}`);
 });
+
+for (const [name, schema, input] of [
+  ["tapOn", tapOnSchema, { selector: { text: "ListItem" } }],
+  ["tapAny", tapAnySchema, {}],
+] as const) {
+  test(`${name} bounds long press duration before dispatch`, () => {
+    for (const duration of [LONG_PRESS_MAX_MS + 1, LONG_PRESS_MAX_MS + 0.1]) {
+      const result = schema.safeParse({ ...input, action: "longPress", duration });
+      expect(result.success).toBe(false);
+      if (result.success) {
+        throw new Error("Expected duration bound error");
+      }
+      expect(result.error.issues[0].path).toEqual(["duration"]);
+      expect(result.error.issues[0].message).toContain(`${LONG_PRESS_MAX_MS}`);
+    }
+    for (const duration of [undefined, 0, 1, 1500, LONG_PRESS_MAX_MS]) {
+      expect(schema.safeParse({ ...input, action: "longPress", duration }).success).toBe(true);
+    }
+    expect(z.toJSONSchema(schema.shape.duration).maximum).toBe(LONG_PRESS_MAX_MS);
+    expect(schema.shape.duration.description).toContain(`${LONG_PRESS_MAX_MS}`);
+  });
+}

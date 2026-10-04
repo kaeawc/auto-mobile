@@ -1,4 +1,9 @@
 import { describe, expect, test, spyOn } from "bun:test";
+import { LONG_PRESS_MAX_MS } from "../../../src/features/action/tapAtGesture";
+import {
+  AdbClient,
+  AdbCommandTimeoutError,
+} from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -43,7 +48,7 @@ const makeElement = () =>
   }) as any;
 
 describe("TapAnyElement", () => {
-  test("budgets an Android long press beyond the default ADB timeout", async () => {
+  test("budgets the maximum Android long press beyond the default ADB timeout", async () => {
     const adb = new FakeAdbClient();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -59,11 +64,11 @@ describe("TapAnyElement", () => {
         screenSize: { width: 500, height: 500 },
       });
 
-    await tapAny.execute({ action: "longPress", duration: 20_000 });
+    await tapAny.execute({ action: "longPress", duration: LONG_PRESS_MAX_MS });
     const swipe = adb
       .getCommandCalls()
       .find((call) => call.command.startsWith("shell input touchscreen swipe"));
-    expect(swipe?.timeoutMs).toBe(22_000);
+    expect(swipe?.timeoutMs).toBe(LONG_PRESS_MAX_MS + 2000);
   });
 
   describe("validateOptions", () => {
@@ -647,6 +652,89 @@ describe("TapAnyElement node long press fallbacks", () => {
         expect(adb.getAllCommands()).toEqual(["shell input touchscreen swipe 60 45 60 45 1200"]);
       } finally {
         warning.mockRestore();
+      }
+    },
+  );
+});
+
+describe("tapAny long press safety", () => {
+  function setup() {
+    const adb = new FakeAdbClient();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const element: Element = {
+      text: "ListItem",
+      clickable: true,
+      "hierarchy-source": "uiautomator",
+      bounds: { left: 10, top: 20, right: 110, bottom: 70 },
+    };
+    const action = new TapAnyElement(
+      { name: "test-device", platform: "android", deviceId: "tap-any-long-press-bound" },
+      adb as unknown as AdbClient,
+      {
+        timer,
+        elementSelector: new FakeElementSelector(element),
+        accessibilityDetector: new FakeAccessibilityDetector(),
+      },
+    );
+    action.observedInteraction = (callback) =>
+      callback({
+        viewHierarchy: { hierarchy: { node: element } },
+        screenSize: { width: 500, height: 500 },
+      });
+    action.setRefreshViewHierarchyForTesting(async () => null);
+    return { adb, action };
+  }
+
+  test.each([LONG_PRESS_MAX_MS + 1, LONG_PRESS_MAX_MS + 0.1, Infinity])(
+    "rejects duration %s before any adb command",
+    async (duration) => {
+      const h = setup();
+      const result = await h.action.execute({ action: "longPress", duration });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        `maximum is ${LONG_PRESS_MAX_MS} ms; requested ${duration} ms`,
+      );
+      expect(h.adb.getAllCommands()).toEqual([]);
+    },
+  );
+
+  test.each(["touchscreen", "fallback", "timeout"])(
+    "%s hold failure reports the risk without retrying cancellation",
+    async (path) => {
+      const h = setup();
+      const controller = new AbortController();
+      const executeCommand = h.adb.executeCommand.bind(h.adb);
+      const dispatch = spyOn(h.adb, "executeCommand").mockImplementation(async (...args) => {
+        await executeCommand(...args);
+        if (path === "fallback" && args[0].includes("touchscreen")) {
+          throw new Error("touchscreen source unavailable");
+        }
+        if (path === "timeout") {
+          throw new AdbCommandTimeoutError("Command timed out");
+        }
+        expect(args[4]).toBe(controller.signal);
+        controller.abort();
+        throw new DOMException("Operation aborted", "AbortError");
+      });
+      try {
+        const result = await h.action.execute(
+          { action: "longPress", duration: 1500 },
+          undefined,
+          controller.signal,
+        );
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("press may still be held on the device for up to 1500 ms");
+        expect(h.adb.getAllCommands()).toEqual(
+          path === "fallback"
+            ? [
+                "shell input touchscreen swipe 60 45 60 45 1500",
+                "shell input swipe 60 45 60 45 1500",
+              ]
+            : ["shell input touchscreen swipe 60 45 60 45 1500"],
+        );
+      } finally {
+        dispatch.mockRestore();
       }
     },
   );

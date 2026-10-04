@@ -25640,9 +25640,10 @@
           "enum": ["tap", "doubleTap", "longPress"]
         },
         "duration": {
-          "description": "Long press duration (ms; maximum for action 'longPress': 2147323897 ms after rounding)",
+          "description": "Long press duration (ms; maximum 10000; 0 or omitted uses the platform default)",
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 10000
         },
         "searchUntil": {
           "description": "Poll for clickable element before tapping",
@@ -26166,9 +26167,10 @@
           "maximum": 9007199254740991
         },
         "duration": {
-          "description": "Long press duration (ms)",
+          "description": "Long press duration (ms; maximum 10000; 0 or omitted uses the platform default)",
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 10000
         },
         "subtext": {
           "description": "Semantic link inside the selected element; fails if the platform does not expose that link",

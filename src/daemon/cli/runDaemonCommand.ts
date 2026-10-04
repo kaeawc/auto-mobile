@@ -407,11 +407,38 @@ export async function runDaemonCommand(
         } else {
           // Running from CLI - query daemon via socket
           const client = manager.createClient();
+          const isReleaseResult = (
+            result: unknown,
+          ): result is {
+            message: string;
+            alreadyReleased: boolean;
+            device?: string;
+          } =>
+            result !== null &&
+            typeof result === "object" &&
+            "message" in result &&
+            typeof result.message === "string" &&
+            "alreadyReleased" in result &&
+            typeof result.alreadyReleased === "boolean" &&
+            (!("device" in result) ||
+              result.device === undefined ||
+              typeof result.device === "string");
           try {
             await client.connect();
-            await client.callDaemonMethod("daemon/releaseSession", { sessionId });
-            console.log(`Session ${sessionId} released`);
-            await client.close();
+            await client
+              .callDaemonMethod("daemon/releaseSession", { sessionId })
+              .then(async (result: unknown) => {
+                await client.close();
+                if (!isReleaseResult(result)) {
+                  throw new ActionableError("Invalid daemon release-session result");
+                }
+                console.log(
+                  result.alreadyReleased ? result.message : `Session ${sessionId} released`,
+                );
+                if (!result.alreadyReleased && result.device !== undefined) {
+                  console.log(`Device ${result.device} is now available`);
+                }
+              });
           } catch (error) {
             throw new ActionableError(`Failed to release session: ${errorMessage(error)}`);
           }

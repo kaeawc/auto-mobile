@@ -1,4 +1,5 @@
 import { parseArgs as parseNodeArgs } from "node:util";
+import { parsePort, parsePositiveNumber, type ParseLogger } from "./numericValidators";
 import type { VideoRecordingConfigInput } from "../models";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
@@ -17,9 +18,7 @@ import {
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
 
-export interface ParseLogger {
-  warn(message: string): void;
-}
+export type { ParseLogger } from "./numericValidators";
 
 type CliVideoRecordingNumericKey =
   | "targetBitrateKbps"
@@ -200,21 +199,6 @@ export function parseArgs(
   let planExecutionLockScopeExplicit = false;
   const videoRecordingDefaults: CliVideoRecordingDefaults = {};
 
-  const parsePositiveNumber = (
-    value: string | undefined,
-    label: string,
-    allowFloat: boolean,
-  ): number | undefined => {
-    if (!value) {
-      return undefined;
-    }
-    const parsed = allowFloat ? Number(value) : parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      log.warn(`Invalid ${label}: ${value}`);
-      return undefined;
-    }
-    return allowFloat ? parsed : Math.round(parsed);
-  };
   const applyQualityPreset = (value: string | undefined, source: string) => {
     if (!value) {
       return;
@@ -269,7 +253,7 @@ export function parseArgs(
     ],
   ];
   for (const [value, label, allowFloat, key] of envNumbers) {
-    const parsed = parsePositiveNumber(value, label, allowFloat);
+    const parsed = parsePositiveNumber(value, label, allowFloat, log);
     if (parsed !== undefined) {
       videoRecordingDefaults[key] = parsed;
     }
@@ -285,12 +269,10 @@ export function parseArgs(
     }
     if (arg === "--port") {
       const nextArg = args[i + 1];
-      const port = parseInt(nextArg, 10);
-      if (!isNaN(port) && port > 0 && port < 65536) {
+      const port = parsePort(nextArg, log);
+      if (port !== undefined) {
         daemonPort = port;
         i++;
-      } else {
-        log.warn(`Invalid port: ${nextArg}`);
       }
     } else if (arg === "--host") {
       const host = args[i + 1];
@@ -340,24 +322,24 @@ export function parseArgs(
     } else if (arg === "--video-quality" || arg === "--video-quality-preset") {
       applyQualityPreset(args[++i], "cli");
     } else if (arg === "--video-target-bitrate-kbps") {
-      const value = parsePositiveNumber(args[++i], "video target bitrate", false);
+      const value = parsePositiveNumber(args[++i], "video target bitrate", false, log);
       if (value !== undefined) {
         videoRecordingDefaults.targetBitrateKbps = value;
       }
     } else if (arg === "--video-max-throughput-mbps") {
-      const value = parsePositiveNumber(args[++i], "video max throughput", true);
+      const value = parsePositiveNumber(args[++i], "video max throughput", true, log);
       if (value !== undefined) {
         videoRecordingDefaults.maxThroughputMbps = value;
       }
     } else if (arg === "--video-fps") {
-      const value = parsePositiveNumber(args[++i], "video fps", false);
+      const value = parsePositiveNumber(args[++i], "video fps", false, log);
       if (value !== undefined) {
         videoRecordingDefaults.fps = value;
       }
     } else if (arg === "--video-format") {
       applyFormat(args[++i], "cli");
     } else if (arg === "--video-archive-size-mb") {
-      const value = parsePositiveNumber(args[++i], "video max archive size", true);
+      const value = parsePositiveNumber(args[++i], "video max archive size", true, log);
       if (value !== undefined) {
         videoRecordingDefaults.maxArchiveSizeMb = value;
       }

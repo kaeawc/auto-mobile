@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import {
   buildAndroidAvdCapabilityInventory,
   type VirtualDeviceCapabilityInventory,
-} from "../../features/device-control/virtualDeviceCapabilities";
+} from "../../models/virtualDeviceCapabilities";
 
 /** Minimum guest memory required by modern Play Store system images. */
 export const MIN_AVD_RAM_MB = 2048;

@@ -315,9 +315,48 @@ describe("FocusNavigationExecutor", () => {
 
     expect(thrownError).not.toBeNull();
     expect(thrownError).not.toBeInstanceOf(ReferenceError);
-    expect(thrownError!.message).toContain("Target not found");
+    expect(thrownError!.message).toBe(
+      'Target not found (resourceId="does-not-exist"). Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.',
+    );
     expect(driver.getSwipeCount()).toBe(0);
   });
+
+  test.each([0, 1])(
+    "reports child-cap truncation for a missing target after %i swipes",
+    async (swipeCount) => {
+      const timer = new FakeTimer();
+      const driver = new FakeFocusNavigationDriver();
+      const elements = [makeElement("a", 0), makeElement("b", 1)];
+      driver.setElements(elements, 0);
+      driver.queueTraversalResult({
+        elements,
+        focusedIndex: 0,
+        totalCount: elements.length,
+        totalTimeMs: 1,
+        truncationReasons: ["max_children"],
+      });
+      const executor = new FocusNavigationExecutor({
+        timer,
+        driverFactory: { createDriver: () => driver },
+      });
+
+      await expect(
+        executor.navigateToElement(
+          "device-1",
+          { resourceId: "missing" },
+          {
+            currentFocusIndex: 0,
+            targetFocusIndex: swipeCount,
+            swipeCount,
+            direction: "forward",
+          },
+          { verificationInterval: 1, swipeDelay: 0 },
+        ),
+      ).rejects.toThrow(
+        "the accessibility traversal was truncated (max_children); the target may be beyond the cap",
+      );
+    },
+  );
 
   test("self-corrects when the supplied path points the wrong direction (#3917)", async () => {
     const timer = new FakeTimer();

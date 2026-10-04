@@ -1,3 +1,4 @@
+import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
 import {
   withStaleDisplay,
@@ -81,6 +82,7 @@ import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../tou
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayContext";
 
 const DISPLAY_SWIPE_OPTIONS = [
   "lookFor",
@@ -637,7 +639,7 @@ export class SwipeOn extends BaseVisualChange {
     } else {
       await executeTouchscreenInput(
         this.adb,
-        `swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+        `swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
         target.displayId,
         signal,
         target.assertCurrent,
@@ -678,7 +680,7 @@ export class SwipeOn extends BaseVisualChange {
           platform: this.device.platform,
         });
         if (unsupported) {
-          throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
+          throw new ActionableError(unsupportedDisplayOptionMessage(unsupported));
         }
         const validationError = validateSwipeTimingOptions(options, this.getDuration(options));
         if (validationError) {

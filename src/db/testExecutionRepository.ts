@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import type { Kysely, SelectQueryBuilder } from "kysely";
 import { sql } from "kysely";
 import { getDatabase } from "./database";
 import type {
@@ -176,16 +176,22 @@ export class TestExecutionRepository {
     return executionId;
   }
 
-  private async recordExecutionWithin(
-    db: Kysely<Database>,
+  private buildExecutionEnvironment(
     record: TestExecutionRecord,
-  ): Promise<number> {
-    const entry: NewTestExecution = {
-      test_class: record.testClass,
-      test_method: record.testMethod,
-      duration_ms: Math.max(0, Math.round(record.durationMs)),
-      status: record.status,
-      timestamp: record.timestamp,
+  ): Pick<
+    NewTestExecution,
+    | "device_id"
+    | "device_name"
+    | "device_platform"
+    | "device_type"
+    | "app_version"
+    | "git_commit"
+    | "target_sdk"
+    | "jdk_version"
+    | "jvm_target"
+    | "gradle_version"
+  > {
+    return {
       device_id: record.deviceId ?? null,
       device_name: record.deviceName ?? null,
       device_platform: record.devicePlatform ?? null,
@@ -196,12 +202,30 @@ export class TestExecutionRepository {
       jdk_version: record.jdkVersion ?? null,
       jvm_target: record.jvmTarget ?? null,
       gradle_version: record.gradleVersion ?? null,
+    };
+  }
+
+  private buildExecutionEntry(record: TestExecutionRecord): NewTestExecution {
+    return {
+      test_class: record.testClass,
+      test_method: record.testMethod,
+      duration_ms: Math.max(0, Math.round(record.durationMs)),
+      status: record.status,
+      timestamp: record.timestamp,
+      ...this.buildExecutionEnvironment(record),
       is_ci: record.isCi === null || record.isCi === undefined ? null : record.isCi ? 1 : 0,
       session_uuid: record.sessionUuid ?? null,
       error_message: record.errorMessage ?? null,
       video_path: record.videoPath ?? null,
       snapshot_path: record.snapshotPath ?? null,
     };
+  }
+
+  private async recordExecutionWithin(
+    db: Kysely<Database>,
+    record: TestExecutionRecord,
+  ): Promise<number> {
+    const entry = this.buildExecutionEntry(record);
 
     const result = await db.insertInto("test_executions").values(entry).executeTakeFirst();
     const executionId = Number(result.insertId);
@@ -241,6 +265,30 @@ export class TestExecutionRepository {
     return executionId;
   }
 
+  private applyExecutionFilters<O>(
+    query: SelectQueryBuilder<Database, "test_executions", O>,
+    options: TestRunQueryOptions,
+  ): SelectQueryBuilder<Database, "test_executions", O> {
+    if (options.lookbackDays && options.lookbackDays > 0) {
+      const cutoff = this.timer.now() - options.lookbackDays * MS_PER_DAY;
+      query = query.where("timestamp", ">=", cutoff);
+    }
+
+    if (options.testClass) {
+      query = query.where("test_class", "=", options.testClass);
+    }
+
+    if (options.testMethod) {
+      query = query.where("test_method", "=", options.testMethod);
+    }
+
+    if (options.deviceId) {
+      query = query.where("device_id", "=", options.deviceId);
+    }
+
+    return query;
+  }
+
   async getTestRuns(options: TestRunQueryOptions = {}): Promise<TestRun[]> {
     const db = this.getDb();
 
@@ -261,22 +309,7 @@ export class TestExecutionRepository {
         "snapshot_path as snapshotPath",
       ]);
 
-    if (options.lookbackDays && options.lookbackDays > 0) {
-      const cutoff = this.timer.now() - options.lookbackDays * MS_PER_DAY;
-      query = query.where("timestamp", ">=", cutoff);
-    }
-
-    if (options.testClass) {
-      query = query.where("test_class", "=", options.testClass);
-    }
-
-    if (options.testMethod) {
-      query = query.where("test_method", "=", options.testMethod);
-    }
-
-    if (options.deviceId) {
-      query = query.where("device_id", "=", options.deviceId);
-    }
+    query = this.applyExecutionFilters(query, options);
 
     const orderDirection = options.orderDirection ?? "desc";
     query = query.orderBy("timestamp", orderDirection);
@@ -406,53 +439,10 @@ export class TestExecutionRepository {
     }
   }
 
-  async getTimingStats(options: TestTimingQueryOptions): Promise<TestTimingStats[]> {
-    const db = this.getDb();
-
-    let query = db
-      .selectFrom("test_executions")
-      .select([
-        "test_class as testClass",
-        "test_method as testMethod",
-        db.fn.avg<number>("duration_ms").as("avgDurationMs"),
-        db.fn.avg<number>(sql`duration_ms * duration_ms`).as("avgDurationMsSquared"),
-        db.fn.countAll<number>().as("sampleSize"),
-        db.fn.max<number>("timestamp").as("lastRunTimestampMs"),
-        db.fn.sum<number>(sql`case when status = 'passed' then 1 else 0 end`).as("passedCount"),
-        db.fn.sum<number>(sql`case when status = 'failed' then 1 else 0 end`).as("failedCount"),
-        db.fn.sum<number>(sql`case when status = 'skipped' then 1 else 0 end`).as("skippedCount"),
-      ])
-      .groupBy(["test_class", "test_method"]);
-
-    if (options.lookbackDays && options.lookbackDays > 0) {
-      const cutoff = this.timer.now() - options.lookbackDays * MS_PER_DAY;
-      query = query.where("timestamp", ">=", cutoff);
-    }
-
-    if (options.testClass) {
-      query = query.where("test_class", "=", options.testClass);
-    }
-
-    if (options.testMethod) {
-      query = query.where("test_method", "=", options.testMethod);
-    }
-
-    if (options.deviceId) {
-      query = query.where("device_id", "=", options.deviceId);
-    }
-
-    if (options.deviceName) {
-      query = query.where("device_name", "=", options.deviceName);
-    }
-
-    if (options.devicePlatform) {
-      query = query.where("device_platform", "=", options.devicePlatform);
-    }
-
-    if (options.deviceType) {
-      query = query.where("device_type", "=", options.deviceType);
-    }
-
+  private applyTimingEnvironmentFilters<O>(
+    query: SelectQueryBuilder<Database, "test_executions", O>,
+    options: TestTimingQueryOptions,
+  ): SelectQueryBuilder<Database, "test_executions", O> {
     if (options.appVersion) {
       query = query.where("app_version", "=", options.appVersion);
     }
@@ -477,6 +467,27 @@ export class TestExecutionRepository {
       query = query.where("gradle_version", "=", options.gradleVersion);
     }
 
+    return query;
+  }
+
+  private applyTimingFilters<O>(
+    query: SelectQueryBuilder<Database, "test_executions", O>,
+    options: TestTimingQueryOptions,
+  ): SelectQueryBuilder<Database, "test_executions", O> {
+    query = this.applyExecutionFilters(query, options);
+    if (options.deviceName) {
+      query = query.where("device_name", "=", options.deviceName);
+    }
+
+    if (options.devicePlatform) {
+      query = query.where("device_platform", "=", options.devicePlatform);
+    }
+
+    if (options.deviceType) {
+      query = query.where("device_type", "=", options.deviceType);
+    }
+
+    query = this.applyTimingEnvironmentFilters(query, options);
     if (options.sessionUuid) {
       query = query.where("session_uuid", "=", options.sessionUuid);
     }
@@ -484,6 +495,29 @@ export class TestExecutionRepository {
     if (typeof options.isCi === "boolean") {
       query = query.where("is_ci", "=", options.isCi ? 1 : 0);
     }
+
+    return query;
+  }
+
+  async getTimingStats(options: TestTimingQueryOptions): Promise<TestTimingStats[]> {
+    const db = this.getDb();
+
+    let query = db
+      .selectFrom("test_executions")
+      .select([
+        "test_class as testClass",
+        "test_method as testMethod",
+        db.fn.avg<number>("duration_ms").as("avgDurationMs"),
+        db.fn.avg<number>(sql`duration_ms * duration_ms`).as("avgDurationMsSquared"),
+        db.fn.countAll<number>().as("sampleSize"),
+        db.fn.max<number>("timestamp").as("lastRunTimestampMs"),
+        db.fn.sum<number>(sql`case when status = 'passed' then 1 else 0 end`).as("passedCount"),
+        db.fn.sum<number>(sql`case when status = 'failed' then 1 else 0 end`).as("failedCount"),
+        db.fn.sum<number>(sql`case when status = 'skipped' then 1 else 0 end`).as("skippedCount"),
+      ])
+      .groupBy(["test_class", "test_method"]);
+
+    query = this.applyTimingFilters(query, options);
 
     if (options.minSamples && options.minSamples > 1) {
       query = query.having(db.fn.countAll(), ">=", options.minSamples);

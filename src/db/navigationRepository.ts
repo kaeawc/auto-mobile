@@ -447,6 +447,44 @@ export class NavigationRepository {
       .execute((trx) => this.getOrCreateUIElementWithin(trx, appId, element, timestamp));
   }
 
+  private buildUIElementBounds(element: {
+    bounds?: { left: number; top: number; right: number; bottom: number };
+  }): Pick<NewUIElement, "bounds_left" | "bounds_top" | "bounds_right" | "bounds_bottom"> {
+    return {
+      bounds_left: element.bounds?.left ?? null,
+      bounds_top: element.bounds?.top ?? null,
+      bounds_right: element.bounds?.right ?? null,
+      bounds_bottom: element.bounds?.bottom ?? null,
+    };
+  }
+
+  private buildUIElement(
+    appId: string,
+    element: {
+      text?: string;
+      resourceId?: string;
+      contentDescription?: string;
+      className?: string;
+      bounds?: { left: number; top: number; right: number; bottom: number };
+      clickable?: boolean;
+      scrollable?: boolean;
+    },
+    timestamp: number,
+  ): NewUIElement {
+    return {
+      app_id: appId,
+      text: element.text ?? null,
+      resource_id: element.resourceId ?? null,
+      content_description: element.contentDescription ?? null,
+      class_name: element.className ?? null,
+      ...this.buildUIElementBounds(element),
+      clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
+      scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
+      first_seen_at: timestamp,
+      last_seen_at: timestamp,
+    };
+  }
+
   private async getOrCreateUIElementWithin(
     trx: Kysely<Database>,
     appId: string,
@@ -501,21 +539,7 @@ export class NavigationRepository {
     }
 
     // Create new UI element
-    const newElement: NewUIElement = {
-      app_id: appId,
-      text: element.text ?? null,
-      resource_id: element.resourceId ?? null,
-      content_description: element.contentDescription ?? null,
-      class_name: element.className ?? null,
-      bounds_left: element.bounds?.left ?? null,
-      bounds_top: element.bounds?.top ?? null,
-      bounds_right: element.bounds?.right ?? null,
-      bounds_bottom: element.bounds?.bottom ?? null,
-      clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
-      scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
-      first_seen_at: timestamp,
-      last_seen_at: timestamp,
-    };
+    const newElement = this.buildUIElement(appId, element, timestamp);
 
     const result = await trx
       .insertInto("ui_elements")

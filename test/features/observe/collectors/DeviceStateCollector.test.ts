@@ -109,6 +109,17 @@ describe("DeviceStateCollector", () => {
   });
 
   describe("collectWakefulness", () => {
+    test("forwards the observation signal to adb", async () => {
+      const signal = new AbortController().signal;
+      const wakefulness = spyOn(fakeAdb, "getWakefulness");
+      try {
+        await collector.collectWakefulness(makeResult(), signal);
+        expect(wakefulness).toHaveBeenCalledWith(signal);
+      } finally {
+        wakefulness.mockRestore();
+      }
+    });
+
     test("populates wakefulness on success", async () => {
       fakeAdb.setScreenState(true, "Awake");
       const result = makeResult();

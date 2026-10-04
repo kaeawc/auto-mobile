@@ -169,6 +169,323 @@ const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning
   return changed;
 };
 
+const migrateInputTextParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+  planPlatform: unknown,
+  planDevices: unknown,
+): void => {
+  if (mergedParams.value !== undefined) {
+    if (mergedParams.text === undefined) {
+      mergedParams.text = mergedParams.value;
+    }
+    delete mergedParams.value;
+    recordWarning(warnings, "Renamed inputText.value to text.", stepIndex);
+  }
+
+  const typeCommand: Record<string, unknown> = {
+    action: "type",
+    text: mergedParams.text,
+    operation:
+      resolveStepPlatform(mergedParams, planPlatform, planDevices) === "ios" ? "insert" : "replace",
+  };
+  delete mergedParams.text;
+  if (mergedParams.mode !== undefined) {
+    typeCommand.mode = mergedParams.mode;
+    delete mergedParams.mode;
+  }
+
+  const commands: Array<Record<string, unknown>> = [typeCommand];
+  if (mergedParams.imeAction !== undefined) {
+    commands.push({ action: "key", key: mergedParams.imeAction });
+    delete mergedParams.imeAction;
+  }
+  if (mergedParams.dismissKeyboard !== undefined) {
+    delete mergedParams.dismissKeyboard;
+    recordWarning(
+      warnings,
+      "Dropped inputText.dismissKeyboard during sendKeys migration; use the keyboard tool to dismiss it explicitly.",
+      stepIndex,
+    );
+  }
+
+  mergedParams.commands = commands;
+  recordWarning(warnings, "Renamed inputText to sendKeys.", stepIndex);
+};
+
+const migrateToolName = (
+  toolName: string,
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+  planPlatform: unknown,
+  planDevices: unknown,
+): { normalizedTool: string; changed: boolean } => {
+  let changed = false;
+  let normalizedTool = toolName;
+  if (toolName === "tapOnText") {
+    normalizedTool = "tapOn";
+    recordWarning(warnings, "Renamed tapOnText to tapOn.", stepIndex);
+    changed = true;
+  }
+  if (toolName === "swipeOnScreen") {
+    normalizedTool = "swipeOn";
+    recordWarning(warnings, "Renamed swipeOnScreen to swipeOn.", stepIndex);
+    if (mergedParams.autoTarget === undefined) {
+      mergedParams.autoTarget = false;
+      recordWarning(warnings, "Defaulted autoTarget=false for swipeOnScreen migration.", stepIndex);
+    }
+    changed = true;
+  }
+  if (toolName === "scroll") {
+    normalizedTool = "swipeOn";
+    recordWarning(warnings, "Renamed scroll to swipeOn.", stepIndex);
+    if (!mergedParams.gestureType) {
+      mergedParams.gestureType = "scrollTowardsDirection";
+      recordWarning(
+        warnings,
+        "Defaulted gestureType=scrollTowardsDirection for scroll migration.",
+        stepIndex,
+      );
+    }
+    changed = true;
+  }
+  if (toolName === "inputText") {
+    migrateInputTextParams(mergedParams, stepIndex, warnings, planPlatform, planDevices);
+    normalizedTool = "sendKeys";
+    changed = true;
+  }
+  if (toolName === "clearText") {
+    normalizedTool = "sendKeys";
+    mergedParams.commands = [{ action: "clear" }];
+    recordWarning(warnings, "Renamed clearText to sendKeys.", stepIndex);
+    changed = true;
+  }
+  if (toolName === "imeAction") {
+    normalizedTool = "sendKeys";
+    mergedParams.commands = [{ action: "key", key: mergedParams.action }];
+    delete mergedParams.action;
+    recordWarning(warnings, "Renamed imeAction to sendKeys.", stepIndex);
+    changed = true;
+  }
+
+  return { normalizedTool, changed };
+};
+
+const migrateAppParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
+
+  if (mergedParams.appId === undefined && typeof mergedParams.packageName === "string") {
+    mergedParams.appId = mergedParams.packageName;
+    delete mergedParams.packageName;
+    recordWarning(warnings, "Renamed packageName to appId.", stepIndex);
+    changed = true;
+  }
+  if (mergedParams.appId === undefined && typeof mergedParams.bundleId === "string") {
+    mergedParams.appId = mergedParams.bundleId;
+    delete mergedParams.bundleId;
+    recordWarning(warnings, "Renamed bundleId to appId.", stepIndex);
+    changed = true;
+  }
+
+  return changed;
+};
+
+const migrateTapParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
+
+  if (!mergedParams.action) {
+    mergedParams.action = "tap";
+    recordWarning(warnings, "Defaulted tapOn.action to tap.", stepIndex);
+    changed = true;
+  }
+  if (mergedParams.elementId === undefined && typeof mergedParams.id === "string") {
+    mergedParams.elementId = mergedParams.id;
+    delete mergedParams.id;
+    recordWarning(warnings, "Renamed id to elementId for tapOn.", stepIndex);
+    changed = true;
+  }
+  // Back-compat: tapOn's top-level { elementId } / { text } moved under `selector`
+  // in v0.0.30 (see PR #2255 split of tapOn/tapAny). Wrap the legacy shape so plans
+  // authored against 0.0.28-style schemas still validate.
+  const selectorIsRecord = isRecord(mergedParams.selector);
+  if (!selectorIsRecord) {
+    const selector: Record<string, unknown> = {};
+    if (typeof mergedParams.elementId === "string") {
+      selector.elementId = mergedParams.elementId;
+      delete mergedParams.elementId;
+    }
+    if (typeof mergedParams.text === "string") {
+      selector.text = mergedParams.text;
+      delete mergedParams.text;
+    }
+    if (Array.isArray(mergedParams.textAny)) {
+      selector.textAny = mergedParams.textAny;
+      delete mergedParams.textAny;
+    }
+    if (Object.keys(selector).length > 0) {
+      mergedParams.selector = selector;
+      recordWarning(
+        warnings,
+        "Wrapped legacy tapOn { elementId|text|textAny } under { selector: { ... } } for v0.0.30+ schema.",
+        stepIndex,
+      );
+      changed = true;
+    }
+  }
+
+  return changed;
+};
+
+const migrateLinkParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
+
+  if (mergedParams.url === undefined && typeof mergedParams.link === "string") {
+    mergedParams.url = mergedParams.link;
+    delete mergedParams.link;
+    recordWarning(warnings, "Renamed openLink.link to url.", stepIndex);
+    changed = true;
+  }
+
+  return changed;
+};
+
+const migrateSwipeParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
+
+  const container = isRecord(mergedParams.container) ? { ...mergedParams.container } : {};
+  if (typeof mergedParams.containerElementId === "string" && !container.elementId) {
+    container.elementId = mergedParams.containerElementId;
+    delete mergedParams.containerElementId;
+    recordWarning(warnings, "Renamed containerElementId to container.elementId.", stepIndex);
+    changed = true;
+  }
+  if (typeof mergedParams.containerText === "string" && !container.text) {
+    container.text = mergedParams.containerText;
+    delete mergedParams.containerText;
+    recordWarning(warnings, "Renamed containerText to container.text.", stepIndex);
+    changed = true;
+  }
+  if (Object.keys(container).length > 0) {
+    mergedParams.container = container;
+  }
+  changed = migrateSwipeDuration(mergedParams, stepIndex, warnings) || changed;
+  if (mergedParams.scrollMode !== undefined) {
+    delete mergedParams.scrollMode;
+    recordWarning(warnings, "Removed deprecated scrollMode field.", stepIndex);
+    changed = true;
+  }
+
+  return changed;
+};
+
+const migrateSystemTrayParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
+
+  const notification = isRecord(mergedParams.notification) ? mergedParams.notification : undefined;
+  if (
+    notification &&
+    typeof notification.timeout === "number" &&
+    mergedParams.awaitTimeout === undefined
+  ) {
+    mergedParams.awaitTimeout = notification.timeout;
+    delete notification.timeout;
+    recordWarning(warnings, "Moved notification.timeout to awaitTimeout.", stepIndex);
+    changed = true;
+  }
+
+  return changed;
+};
+
+const migrateObserveParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
+
+  if (mergedParams.withViewHierarchy !== undefined) {
+    delete mergedParams.withViewHierarchy;
+    recordWarning(warnings, "Removed deprecated observe.withViewHierarchy field.", stepIndex);
+    changed = true;
+  }
+
+  return changed;
+};
+
+const migrateSwipeDuration = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
+  if (mergedParams.duration !== undefined) {
+    if (!mergedParams.speed && typeof mergedParams.duration === "number") {
+      mergedParams.speed =
+        mergedParams.duration >= 800 ? "slow" : mergedParams.duration <= 250 ? "fast" : "normal";
+      recordWarning(warnings, "Mapped swipe duration to speed.", stepIndex);
+    }
+    delete mergedParams.duration;
+    recordWarning(warnings, "Removed deprecated swipe duration field.", stepIndex);
+    changed = true;
+  }
+  return changed;
+};
+
+const migrateToolParams = (
+  normalizedTool: string,
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  if (["launchApp", "terminateApp", "crashApp", "stopApp"].includes(normalizedTool)) {
+    return migrateAppParams(mergedParams, stepIndex, warnings);
+  }
+
+  if (normalizedTool === "tapOn") {
+    return migrateTapParams(mergedParams, stepIndex, warnings);
+  }
+
+  if (normalizedTool === "openLink") {
+    return migrateLinkParams(mergedParams, stepIndex, warnings);
+  }
+
+  if (normalizedTool === "swipeOn") {
+    return migrateSwipeParams(mergedParams, stepIndex, warnings);
+  }
+
+  if (normalizedTool === "systemTray") {
+    return migrateSystemTrayParams(mergedParams, stepIndex, warnings);
+  }
+
+  if (normalizedTool === "observe") {
+    return migrateObserveParams(mergedParams, stepIndex, warnings);
+  }
+
+  return false;
+};
+
 const migrateStepFields = (
   step: Record<string, any>,
   stepIndex: number,
@@ -221,215 +538,20 @@ const migrateStepFields = (
   }
   const mergedParams = { ...inlineParams, ...paramsFromStep };
 
-  let normalizedTool = toolName;
-  if (toolName === "tapOnText") {
-    normalizedTool = "tapOn";
-    recordWarning(warnings, "Renamed tapOnText to tapOn.", stepIndex);
-    changed = true;
-  }
-  if (toolName === "swipeOnScreen") {
-    normalizedTool = "swipeOn";
-    recordWarning(warnings, "Renamed swipeOnScreen to swipeOn.", stepIndex);
-    if (mergedParams.autoTarget === undefined) {
-      mergedParams.autoTarget = false;
-      recordWarning(warnings, "Defaulted autoTarget=false for swipeOnScreen migration.", stepIndex);
-    }
-    changed = true;
-  }
-  if (toolName === "scroll") {
-    normalizedTool = "swipeOn";
-    recordWarning(warnings, "Renamed scroll to swipeOn.", stepIndex);
-    if (!mergedParams.gestureType) {
-      mergedParams.gestureType = "scrollTowardsDirection";
-      recordWarning(
-        warnings,
-        "Defaulted gestureType=scrollTowardsDirection for scroll migration.",
-        stepIndex,
-      );
-    }
-    changed = true;
-  }
-  if (toolName === "inputText") {
-    if (mergedParams.value !== undefined) {
-      if (mergedParams.text === undefined) {
-        mergedParams.text = mergedParams.value;
-      }
-      delete mergedParams.value;
-      recordWarning(warnings, "Renamed inputText.value to text.", stepIndex);
-    }
-
-    const typeCommand: Record<string, unknown> = {
-      action: "type",
-      text: mergedParams.text,
-      operation:
-        resolveStepPlatform(mergedParams, planPlatform, planDevices) === "ios"
-          ? "insert"
-          : "replace",
-    };
-    delete mergedParams.text;
-    if (mergedParams.mode !== undefined) {
-      typeCommand.mode = mergedParams.mode;
-      delete mergedParams.mode;
-    }
-
-    const commands: Array<Record<string, unknown>> = [typeCommand];
-    if (mergedParams.imeAction !== undefined) {
-      commands.push({ action: "key", key: mergedParams.imeAction });
-      delete mergedParams.imeAction;
-    }
-    if (mergedParams.dismissKeyboard !== undefined) {
-      delete mergedParams.dismissKeyboard;
-      recordWarning(
-        warnings,
-        "Dropped inputText.dismissKeyboard during sendKeys migration; use the keyboard tool to dismiss it explicitly.",
-        stepIndex,
-      );
-    }
-
-    mergedParams.commands = commands;
-    normalizedTool = "sendKeys";
-    recordWarning(warnings, "Renamed inputText to sendKeys.", stepIndex);
-    changed = true;
-  }
-  if (toolName === "clearText") {
-    normalizedTool = "sendKeys";
-    mergedParams.commands = [{ action: "clear" }];
-    recordWarning(warnings, "Renamed clearText to sendKeys.", stepIndex);
-    changed = true;
-  }
-  if (toolName === "imeAction") {
-    normalizedTool = "sendKeys";
-    mergedParams.commands = [{ action: "key", key: mergedParams.action }];
-    delete mergedParams.action;
-    recordWarning(warnings, "Renamed imeAction to sendKeys.", stepIndex);
-    changed = true;
-  }
+  const migratedTool = migrateToolName(
+    toolName,
+    mergedParams,
+    stepIndex,
+    warnings,
+    planPlatform,
+    planDevices,
+  );
+  const normalizedTool = migratedTool.normalizedTool;
+  changed = migratedTool.changed || changed;
 
   step.tool = normalizedTool;
 
-  if (["launchApp", "terminateApp", "crashApp", "stopApp"].includes(normalizedTool)) {
-    if (mergedParams.appId === undefined && typeof mergedParams.packageName === "string") {
-      mergedParams.appId = mergedParams.packageName;
-      delete mergedParams.packageName;
-      recordWarning(warnings, "Renamed packageName to appId.", stepIndex);
-      changed = true;
-    }
-    if (mergedParams.appId === undefined && typeof mergedParams.bundleId === "string") {
-      mergedParams.appId = mergedParams.bundleId;
-      delete mergedParams.bundleId;
-      recordWarning(warnings, "Renamed bundleId to appId.", stepIndex);
-      changed = true;
-    }
-  }
-
-  if (normalizedTool === "tapOn") {
-    if (!mergedParams.action) {
-      mergedParams.action = "tap";
-      recordWarning(warnings, "Defaulted tapOn.action to tap.", stepIndex);
-      changed = true;
-    }
-    if (mergedParams.elementId === undefined && typeof mergedParams.id === "string") {
-      mergedParams.elementId = mergedParams.id;
-      delete mergedParams.id;
-      recordWarning(warnings, "Renamed id to elementId for tapOn.", stepIndex);
-      changed = true;
-    }
-    // Back-compat: tapOn's top-level { elementId } / { text } moved under `selector`
-    // in v0.0.30 (see PR #2255 split of tapOn/tapAny). Wrap the legacy shape so plans
-    // authored against 0.0.28-style schemas still validate.
-    const selectorIsRecord = isRecord(mergedParams.selector);
-    if (!selectorIsRecord) {
-      const selector: Record<string, unknown> = {};
-      if (typeof mergedParams.elementId === "string") {
-        selector.elementId = mergedParams.elementId;
-        delete mergedParams.elementId;
-      }
-      if (typeof mergedParams.text === "string") {
-        selector.text = mergedParams.text;
-        delete mergedParams.text;
-      }
-      if (Array.isArray(mergedParams.textAny)) {
-        selector.textAny = mergedParams.textAny;
-        delete mergedParams.textAny;
-      }
-      if (Object.keys(selector).length > 0) {
-        mergedParams.selector = selector;
-        recordWarning(
-          warnings,
-          "Wrapped legacy tapOn { elementId|text|textAny } under { selector: { ... } } for v0.0.30+ schema.",
-          stepIndex,
-        );
-        changed = true;
-      }
-    }
-  }
-
-  if (normalizedTool === "openLink") {
-    if (mergedParams.url === undefined && typeof mergedParams.link === "string") {
-      mergedParams.url = mergedParams.link;
-      delete mergedParams.link;
-      recordWarning(warnings, "Renamed openLink.link to url.", stepIndex);
-      changed = true;
-    }
-  }
-
-  if (normalizedTool === "swipeOn") {
-    const container = isRecord(mergedParams.container) ? { ...mergedParams.container } : {};
-    if (typeof mergedParams.containerElementId === "string" && !container.elementId) {
-      container.elementId = mergedParams.containerElementId;
-      delete mergedParams.containerElementId;
-      recordWarning(warnings, "Renamed containerElementId to container.elementId.", stepIndex);
-      changed = true;
-    }
-    if (typeof mergedParams.containerText === "string" && !container.text) {
-      container.text = mergedParams.containerText;
-      delete mergedParams.containerText;
-      recordWarning(warnings, "Renamed containerText to container.text.", stepIndex);
-      changed = true;
-    }
-    if (Object.keys(container).length > 0) {
-      mergedParams.container = container;
-    }
-    if (mergedParams.duration !== undefined) {
-      if (!mergedParams.speed && typeof mergedParams.duration === "number") {
-        mergedParams.speed =
-          mergedParams.duration >= 800 ? "slow" : mergedParams.duration <= 250 ? "fast" : "normal";
-        recordWarning(warnings, "Mapped swipe duration to speed.", stepIndex);
-      }
-      delete mergedParams.duration;
-      recordWarning(warnings, "Removed deprecated swipe duration field.", stepIndex);
-      changed = true;
-    }
-    if (mergedParams.scrollMode !== undefined) {
-      delete mergedParams.scrollMode;
-      recordWarning(warnings, "Removed deprecated scrollMode field.", stepIndex);
-      changed = true;
-    }
-  }
-
-  if (normalizedTool === "systemTray") {
-    const notification = isRecord(mergedParams.notification)
-      ? mergedParams.notification
-      : undefined;
-    if (
-      notification &&
-      typeof notification.timeout === "number" &&
-      mergedParams.awaitTimeout === undefined
-    ) {
-      mergedParams.awaitTimeout = notification.timeout;
-      delete notification.timeout;
-      recordWarning(warnings, "Moved notification.timeout to awaitTimeout.", stepIndex);
-      changed = true;
-    }
-  }
-
-  if (normalizedTool === "observe") {
-    if (mergedParams.withViewHierarchy !== undefined) {
-      delete mergedParams.withViewHierarchy;
-      recordWarning(warnings, "Removed deprecated observe.withViewHierarchy field.", stepIndex);
-      changed = true;
-    }
-  }
+  changed = migrateToolParams(normalizedTool, mergedParams, stepIndex, warnings) || changed;
 
   step.params = mergedParams;
 

@@ -81,6 +81,28 @@ describe("TerminateApp (Android install listing)", () => {
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
+  test("install-aware targeting force-stops a personal-only background app", async () => {
+    adb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    adb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x13, running: true },
+      { userId: 10, name: "Work", flags: 0x30, running: true },
+    ]);
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    adb.setCommandResult("shell pm list packages --user 10", "package:com.android.settings");
+    adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    const usersSpy = spyOn(adb, "listUsers");
+    const result = await app.execute("com.example.app", { skipObservation: true });
+    expect(result).toMatchObject({
+      success: true,
+      wasInstalled: true,
+      wasRunning: true,
+      userId: 0,
+    });
+    expect(adb.wasCommandExecuted("shell am force-stop --user 0 'com.example.app'")).toBe(true);
+    expect(adb.wasCommandExecuted("shell am force-stop --user 10")).toBe(false);
+    expect(usersSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("force-stops an installed running package", async () => {
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");

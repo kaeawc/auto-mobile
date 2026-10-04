@@ -803,3 +803,134 @@ describe("PlanMigrator", () => {
     });
   });
 });
+
+describe("PlanMigrator complete step migration results", () => {
+  test.each([
+    ["missing tool", { command: 2, description: "legacy", params: null }],
+    [
+      "command alias",
+      {
+        command: "tapOnText",
+        description: "legacy",
+        optional: true,
+        text: "inline",
+        params: { text: "override" },
+      },
+    ],
+    [
+      "existing fields",
+      {
+        tool: "observe",
+        command: "ignored",
+        label: "kept",
+        description: "ignored",
+        params: { withViewHierarchy: false },
+      },
+    ],
+    ["non-string description", { tool: "observe", description: 4 }],
+    ["swipe alias defaults", { tool: "swipeOnScreen" }],
+    ["swipe alias explicit", { tool: "swipeOnScreen", params: { autoTarget: true } }],
+    ["scroll defaults", { tool: "scroll" }],
+    ["scroll explicit", { tool: "scroll", params: { gestureType: "custom" } }],
+    [
+      "input all fields",
+      {
+        tool: "inputText",
+        params: {
+          value: "hello",
+          mode: "eventAll",
+          imeAction: "done",
+          dismissKeyboard: false,
+          platform: "ios",
+        },
+      },
+    ],
+    ["input text wins", { tool: "inputText", params: { value: "old", text: "new" } }],
+    ["input missing text", { tool: "inputText", params: {} }],
+    ["clear", { tool: "clearText", params: { commands: ["old"] } }],
+    ["IME", { tool: "imeAction", params: { action: "search" } }],
+    ["package wins", { tool: "launchApp", params: { packageName: "package", bundleId: "bundle" } }],
+    ["bundle fallback", { tool: "terminateApp", params: { packageName: 2, bundleId: "bundle" } }],
+    [
+      "existing app ID",
+      { tool: "stopApp", params: { appId: "kept", packageName: "package", bundleId: "bundle" } },
+    ],
+    ["missing app ID", { tool: "crashApp", params: {} }],
+    [
+      "tap selector fields",
+      { tool: "tapOn", params: { id: "button", text: "text", textAny: ["one", "two"] } },
+    ],
+    [
+      "tap existing selector",
+      {
+        tool: "tapOn",
+        params: { action: "longPress", id: "old", elementId: "kept", text: "text", selector: {} },
+      },
+    ],
+    [
+      "tap invalid selector",
+      { tool: "tapOn", params: { selector: [], elementId: 4, text: 2, textAny: "bad" } },
+    ],
+    ["link rename", { tool: "openLink", params: { link: "https://example.com" } }],
+    ["existing URL", { tool: "openLink", params: { url: "kept", link: "ignored" } }],
+    ["non-string link", { tool: "openLink", params: { link: 4 } }],
+    [
+      "swipe container",
+      {
+        tool: "swipeOn",
+        params: {
+          containerElementId: "list",
+          containerText: "text",
+          duration: 800,
+          scrollMode: "old",
+        },
+      },
+    ],
+    ["swipe fast", { tool: "swipeOn", params: { duration: 250 } }],
+    ["swipe normal", { tool: "swipeOn", params: { duration: 500 } }],
+    [
+      "swipe existing fields",
+      {
+        tool: "swipeOn",
+        params: {
+          container: { elementId: "kept", text: "kept" },
+          containerElementId: "ignored",
+          containerText: "ignored",
+          duration: 1000,
+          speed: "custom",
+        },
+      },
+    ],
+    [
+      "swipe invalid duration",
+      {
+        tool: "swipeOn",
+        params: { container: [], containerElementId: 4, containerText: 2, duration: "slow" },
+      },
+    ],
+    [
+      "notification timeout",
+      { tool: "systemTray", params: { notification: { title: "title", timeout: 25 } } },
+    ],
+    [
+      "notification explicit",
+      { tool: "systemTray", params: { notification: { timeout: 25 }, awaitTimeout: 10 } },
+    ],
+    ["notification invalid", { tool: "systemTray", params: { notification: { timeout: "bad" } } }],
+    ["notification absent", { tool: "systemTray", params: {} }],
+    ["observe absent", { tool: "observe", params: {} }],
+    ["unrecognized tool", { tool: "custom", params: {} }],
+  ])("preserves the full result for %s", (_name, step) => {
+    const result = migratePlan({
+      name: "Characterization",
+      mcpVersion: "99.99.99",
+      metadata: { createdAt: "2024-01-01T00:00:00.000Z", version: "1.0.0" },
+      steps: [structuredClone(step)],
+    });
+    expect(result.report.targetVersion).toBe(getMcpServerVersion());
+    expect({
+      ...result,
+      report: { ...result.report, targetVersion: "<current-mcp-version>" },
+    }).toMatchSnapshot();
+  });
+});

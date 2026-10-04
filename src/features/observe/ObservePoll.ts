@@ -43,6 +43,13 @@ export interface ObservePollOptions {
    */
   initialMinTimestampMs?: number;
   /**
+   * Opt out of waiting for a hierarchy push when a cache misses the floor.
+   * The embedded settle gate uses the existing sync re-extraction path on a
+   * still screen; the strict device-timestamp floor remains unchanged.
+   * Default false preserves standalone settle and waitFor push-wait behaviour.
+   */
+  skipWaitForFresh?: boolean;
+  /**
    * Skip the performance audit on every poll (issue #6890 review).
    *
    * Polls already skip the screenshot and the accessibility audit because they
@@ -367,7 +374,7 @@ async function capturePoll(
     freshness: options.display === undefined ? undefined : "fresh",
     minTimestamp,
     timeoutMs,
-    skipWaitForFresh: false,
+    skipWaitForFresh: options.skipWaitForFresh ?? false,
     signal: options.signal,
     // Polls defer evidence and persistence until the selected terminal capture.
     skipScreenshot: true,

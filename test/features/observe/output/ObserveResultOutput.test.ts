@@ -1044,16 +1044,19 @@ describe("sanitizeObserveResult", () => {
       expect(out.truncationReasons).toEqual(["max_nodes"]);
     });
 
-    test("windowTruncations attributes only the truncated captured window and preserves flat reasons", () => {
-      const { observe } = loadAndroidHomeObserve();
-      const windows = observe.viewHierarchy!.windows!;
-      windows[0].truncationReasons = ["max_nodes"];
-      observe.viewHierarchy!.truncationReasons = ["max_nodes", "cancelled"];
-      const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
-      expect(out.windowTruncations).toEqual([{ windowId: windows[0].id, reasons: ["max_nodes"] }]);
-      expect(out.truncationReasons).toEqual(["max_nodes", "cancelled"]);
-      expect(windows[1].truncationReasons).toBeUndefined();
-    });
+    test.each(["max_nodes", "max_children"])(
+      "windowTruncations attributes %s only to the truncated captured window and preserves flat reasons",
+      (reason) => {
+        const { observe } = loadAndroidHomeObserve();
+        const windows = observe.viewHierarchy!.windows!;
+        windows[0].truncationReasons = [reason];
+        observe.viewHierarchy!.truncationReasons = [reason, "cancelled"];
+        const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
+        expect(out.windowTruncations).toEqual([{ windowId: windows[0].id, reasons: [reason] }]);
+        expect(out.truncationReasons).toEqual([reason, "cancelled"]);
+        expect(windows[1].truncationReasons).toBeUndefined();
+      },
+    );
 
     test("windowTruncations normalizes unknown, duplicate, and host-output codes without reordering", () => {
       const { observe } = loadAndroidHomeObserve();

@@ -88,6 +88,113 @@ export function parseArgs(
   // `=== true` intentionally retains the prior exact-flag behavior for
   // `--flag=value` while delegating ordinary flag tokenization to Node/Bun.
   const hasFlag = (name: string) => values[name] === true;
+  const { enabledTools, disabledTools } = parseToolDefaults(values, environment);
+  const cliMode = hasFlag("cli");
+  const daemonMode = hasFlag("daemon-mode");
+  const noProxy = hasFlag("no-proxy") || hasFlag("direct");
+  const noDaemon = hasFlag("no-daemon");
+  const daemonCommandIndex = args.indexOf("--daemon");
+  const daemonCommand = daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] : undefined;
+  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
+  const debugPerf =
+    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
+  const debug = hasFlag("debug") || process.env.AUTOMOBILE_DEBUG === "1";
+  const strictPort = hasFlag("strict-port");
+  const uiPerfMode = !hasFlag("no-ui-perf-mode");
+  const memPerfAuditMode = hasFlag("mem-perf-audit");
+  const a11yAuditMode = hasFlag("accessibility-audit");
+  const predictiveUi = hasFlag("predictive") || hasFlag("predictive-ui");
+  const rawElementSearch = hasFlag("raw-element-search");
+  const skipCtrlProxyDownload = shouldSkipCtrlProxyDownload(args);
+  const embeddedSdk = hasFlag("embedded-sdk");
+  const networkMockable = hasFlag("network-mockable");
+  const dismissKeyboardAfterInput = hasFlag("dismiss-keyboard-after-input");
+  const eventAllMarkers = parseEventAllMarkersConfig(args, process.env);
+  const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
+  const mcpRecording = hasFlag("mcp-recording");
+  const navigationScreenshots = !hasFlag("no-navigation-screenshots");
+  const noWaitForPollingOverhead = hasFlag("no-waitfor-polling-overhead");
+  const noA11yIncludeNotImportantViews = hasFlag("no-include-not-important-views");
+  const noA11yReportViewIds = hasFlag("no-report-view-ids");
+  const noA11yRetrieveInteractiveWindows = hasFlag("no-retrieve-interactive-windows");
+  const noOcclusion = hasFlag("no-occlusion");
+  const outputReduction = parseOutputReductionFlags(args, process.env);
+  const toolOutputsDir = parseToolOutputsDirConfig(
+    args,
+    process.env,
+    resolveDaemonLaunchWorkingDirectory(),
+  );
+  const runnerReadinessEnv =
+    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
+    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
+  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
+  // Undefined means this client has no opinion about a running daemon's
+  // readiness budget. The daemon's ServerConfig owns the product default.
+  const runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
+  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
+    log.warn(
+      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
+        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
+    );
+  }
+  const video = createVideoRecordingDefaults(log);
+  const { videoRecordingDefaults } = video;
+
+  const cliIndex = args.indexOf("--cli");
+  const cliArgs = cliMode ? args.slice(cliIndex + 1) : [];
+  const scalarOptions = parseValueOptions(args, log, video, runnerReadinessTimeoutMs);
+
+  return {
+    cliMode,
+    cliArgs,
+    daemonPort: scalarOptions.daemonPort,
+    daemonHost: scalarOptions.daemonHost,
+    initialSessionUuid: scalarOptions.initialSessionUuid,
+    debugPerf,
+    debug,
+    strictPort,
+    uiPerfMode,
+    memPerfAuditMode,
+    a11yAuditMode,
+    a11yLevel: scalarOptions.a11yLevel,
+    a11yFailureMode: scalarOptions.a11yFailureMode,
+    a11yMinSeverity: scalarOptions.a11yMinSeverity,
+    a11yUseBaseline: scalarOptions.a11yUseBaseline,
+    predictiveUi,
+    rawElementSearch,
+    planExecutionLockScope: scalarOptions.planExecutionLockScope,
+    planExecutionLockScopeExplicit: scalarOptions.planExecutionLockScopeExplicit,
+    videoRecordingDefaults,
+    runnerReadinessTimeoutMs: scalarOptions.runnerReadinessTimeoutMs,
+    daemonMode,
+    daemonCommand,
+    daemonArgs,
+    skipCtrlProxyDownload,
+    embeddedSdk,
+    networkMockable,
+    dismissKeyboardAfterInput,
+    eventAllMarkers,
+    eventAllMarkersCliOverride,
+    mcpRecording,
+    navigationScreenshots,
+    noWaitForPollingOverhead,
+    noProxy,
+    noDaemon,
+    noA11yIncludeNotImportantViews,
+    noA11yReportViewIds,
+    noA11yRetrieveInteractiveWindows,
+    noOcclusion,
+    outputReduction,
+    toolOutputsDir,
+    enabledTools,
+    disabledTools,
+  };
+}
+
+function parseToolDefaults(
+  values: ReturnType<typeof parseNodeArgs>["values"],
+  environment: NodeJS.ProcessEnv,
+): { enabledTools: string[]; disabledTools: string[] } {
   const retiredToolsetVariable = Object.keys(environment).find((name) =>
     name.startsWith("AUTOMOBILE_TOOLSET_"),
   );
@@ -140,63 +247,11 @@ export function parseArgs(
   const disabledTools = Array.from(effectiveToolDefaults)
     .filter(([, enabled]) => !enabled)
     .map(([toolName]) => toolName);
-  let daemonPort: number | undefined;
-  let daemonHost: string | undefined;
-  let initialSessionUuid: string | undefined;
-  const cliMode = hasFlag("cli");
-  const daemonMode = hasFlag("daemon-mode");
-  const noProxy = hasFlag("no-proxy") || hasFlag("direct");
-  const noDaemon = hasFlag("no-daemon");
-  const daemonCommandIndex = args.indexOf("--daemon");
-  const daemonCommand = daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] : undefined;
-  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
-  const debugPerf =
-    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
-  const debug = hasFlag("debug") || process.env.AUTOMOBILE_DEBUG === "1";
-  const strictPort = hasFlag("strict-port");
-  const uiPerfMode = !hasFlag("no-ui-perf-mode");
-  const memPerfAuditMode = hasFlag("mem-perf-audit");
-  const a11yAuditMode = hasFlag("accessibility-audit");
-  let a11yLevel: string | undefined;
-  let a11yFailureMode: string | undefined;
-  let a11yMinSeverity: string | undefined;
-  let a11yUseBaseline = false;
-  const predictiveUi = hasFlag("predictive") || hasFlag("predictive-ui");
-  const rawElementSearch = hasFlag("raw-element-search");
-  const skipCtrlProxyDownload = shouldSkipCtrlProxyDownload(args);
-  const embeddedSdk = hasFlag("embedded-sdk");
-  const networkMockable = hasFlag("network-mockable");
-  const dismissKeyboardAfterInput = hasFlag("dismiss-keyboard-after-input");
-  const eventAllMarkers = parseEventAllMarkersConfig(args, process.env);
-  const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
-  const mcpRecording = hasFlag("mcp-recording");
-  const navigationScreenshots = !hasFlag("no-navigation-screenshots");
-  const noWaitForPollingOverhead = hasFlag("no-waitfor-polling-overhead");
-  const noA11yIncludeNotImportantViews = hasFlag("no-include-not-important-views");
-  const noA11yReportViewIds = hasFlag("no-report-view-ids");
-  const noA11yRetrieveInteractiveWindows = hasFlag("no-retrieve-interactive-windows");
-  const noOcclusion = hasFlag("no-occlusion");
-  const outputReduction = parseOutputReductionFlags(args, process.env);
-  const toolOutputsDir = parseToolOutputsDirConfig(
-    args,
-    process.env,
-    resolveDaemonLaunchWorkingDirectory(),
-  );
-  const runnerReadinessEnv =
-    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
-    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
-  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
-  // Undefined means this client has no opinion about a running daemon's
-  // readiness budget. The daemon's ServerConfig owns the product default.
-  let runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
-  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
-    log.warn(
-      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
-        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
-    );
-  }
-  let planExecutionLockScope: PlanExecutionLockScope = "session";
-  let planExecutionLockScopeExplicit = false;
+
+  return { enabledTools, disabledTools };
+}
+
+function createVideoRecordingDefaults(log: ParseLogger) {
   const videoRecordingDefaults: CliVideoRecordingDefaults = {};
 
   const applyQualityPreset = (value: string | undefined, source: string) => {
@@ -260,134 +315,209 @@ export function parseArgs(
   }
   applyFormat(process.env.AUTOMOBILE_VIDEO_FORMAT ?? process.env.AUTO_MOBILE_VIDEO_FORMAT, "env");
 
-  const cliIndex = args.indexOf("--cli");
-  const cliArgs = cliMode ? args.slice(cliIndex + 1) : [];
+  return { videoRecordingDefaults, applyQualityPreset, applyFormat };
+}
+
+interface ScalarOptions {
+  daemonPort?: number;
+  daemonHost?: string;
+  initialSessionUuid?: string;
+  a11yLevel?: string;
+  a11yFailureMode?: string;
+  a11yMinSeverity?: string;
+  a11yUseBaseline: boolean;
+  planExecutionLockScope: PlanExecutionLockScope;
+  planExecutionLockScopeExplicit: boolean;
+  runnerReadinessTimeoutMs?: number;
+}
+
+function parseValueOptions(
+  args: string[],
+  log: ParseLogger,
+  video: ReturnType<typeof createVideoRecordingDefaults>,
+  runnerReadinessTimeoutMs: number | undefined,
+): ScalarOptions {
+  const options: ScalarOptions = {
+    a11yUseBaseline: false,
+    planExecutionLockScope: "session",
+    planExecutionLockScopeExplicit: false,
+    runnerReadinessTimeoutMs,
+  };
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--cli") {
+    if (args[i] === "--cli") {
       break;
     }
-    if (arg === "--port") {
-      const nextArg = args[i + 1];
-      const port = parsePort(nextArg, log);
-      if (port !== undefined) {
-        daemonPort = port;
-        i++;
-      }
-    } else if (arg === "--host") {
-      const host = args[i + 1];
-      if (host && !host.startsWith("--")) {
-        daemonHost = host;
-        i++;
-      } else {
-        log.warn(`Invalid host: ${host}`);
-      }
-    } else if (arg === "--initial-session-uuid") {
-      const sessionUuid = args[i + 1];
-      if (sessionUuid && !sessionUuid.startsWith("--")) {
-        initialSessionUuid = sessionUuid;
-        i++;
-      } else {
-        log.warn(`Invalid initial session UUID: ${sessionUuid}`);
-      }
-    } else if (arg === "--a11y-level") {
-      a11yLevel = args[++i];
-    } else if (arg === "--a11y-failure-mode") {
-      a11yFailureMode = args[++i];
-    } else if (arg === "--a11y-min-severity") {
-      a11yMinSeverity = args[++i];
-    } else if (arg === "--a11y-use-baseline") {
-      a11yUseBaseline = true;
-    } else if (arg === "--plan-execution-lock-scope") {
-      const scope = args[++i];
-      if (scope === "global" || scope === "session") {
-        planExecutionLockScope = scope;
-        planExecutionLockScopeExplicit = true;
-      } else {
-        log.warn(
-          `Invalid plan execution lock scope: ${scope}. Using default: ${planExecutionLockScope}`,
-        );
-      }
-    } else if (arg === RUNNER_READINESS_TIMEOUT_FLAG) {
-      const raw = args[++i];
-      const parsed = parseRunnerReadinessTimeout(raw);
-      if (parsed !== undefined) {
-        runnerReadinessTimeoutMs = parsed;
-      } else {
-        log.warn(
-          `Invalid runner readiness timeout: ${raw}; expected an integer from ` +
-            `${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
-        );
-      }
-    } else if (arg === "--video-quality" || arg === "--video-quality-preset") {
-      applyQualityPreset(args[++i], "cli");
-    } else if (arg === "--video-target-bitrate-kbps") {
-      const value = parsePositiveNumber(args[++i], "video target bitrate", false, log);
-      if (value !== undefined) {
-        videoRecordingDefaults.targetBitrateKbps = value;
-      }
-    } else if (arg === "--video-max-throughput-mbps") {
-      const value = parsePositiveNumber(args[++i], "video max throughput", true, log);
-      if (value !== undefined) {
-        videoRecordingDefaults.maxThroughputMbps = value;
-      }
-    } else if (arg === "--video-fps") {
-      const value = parsePositiveNumber(args[++i], "video fps", false, log);
-      if (value !== undefined) {
-        videoRecordingDefaults.fps = value;
-      }
-    } else if (arg === "--video-format") {
-      applyFormat(args[++i], "cli");
-    } else if (arg === "--video-archive-size-mb") {
-      const value = parsePositiveNumber(args[++i], "video max archive size", true, log);
-      if (value !== undefined) {
-        videoRecordingDefaults.maxArchiveSizeMb = value;
-      }
+    const connection = parseConnectionOption(args, i, log, options);
+    if (connection !== undefined) {
+      i = connection;
+      continue;
+    }
+    const accessibility = parseAccessibilityOption(args, i, log, options);
+    if (accessibility !== undefined) {
+      i = accessibility;
+      continue;
+    }
+    const readiness = parseReadinessOption(args, i, log, options);
+    if (readiness !== undefined) {
+      i = readiness;
+      continue;
+    }
+    const recording = parseVideoOption(args, i, log, video);
+    if (recording !== undefined) {
+      i = recording;
     }
   }
-  return {
-    cliMode,
-    cliArgs,
-    daemonPort,
-    daemonHost,
-    initialSessionUuid,
-    debugPerf,
-    debug,
-    strictPort,
-    uiPerfMode,
-    memPerfAuditMode,
-    a11yAuditMode,
-    a11yLevel,
-    a11yFailureMode,
-    a11yMinSeverity,
-    a11yUseBaseline,
-    predictiveUi,
-    rawElementSearch,
-    planExecutionLockScope,
-    planExecutionLockScopeExplicit,
-    videoRecordingDefaults,
-    runnerReadinessTimeoutMs,
-    daemonMode,
-    daemonCommand,
-    daemonArgs,
-    skipCtrlProxyDownload,
-    embeddedSdk,
-    networkMockable,
-    dismissKeyboardAfterInput,
-    eventAllMarkers,
-    eventAllMarkersCliOverride,
-    mcpRecording,
-    navigationScreenshots,
-    noWaitForPollingOverhead,
-    noProxy,
-    noDaemon,
-    noA11yIncludeNotImportantViews,
-    noA11yReportViewIds,
-    noA11yRetrieveInteractiveWindows,
-    noOcclusion,
-    outputReduction,
-    toolOutputsDir,
-    enabledTools,
-    disabledTools,
-  };
+  return options;
+}
+
+function parseConnectionOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  options: ScalarOptions,
+): number | undefined {
+  const arg = args[i];
+  if (arg === "--port") {
+    const nextArg = args[i + 1];
+    const port = parsePort(nextArg, log);
+    if (port !== undefined) {
+      options.daemonPort = port;
+      i++;
+    }
+  } else if (arg === "--host") {
+    const host = args[i + 1];
+    if (host && !host.startsWith("--")) {
+      options.daemonHost = host;
+      i++;
+    } else {
+      log.warn(`Invalid host: ${host}`);
+    }
+  } else if (arg === "--initial-session-uuid") {
+    const sessionUuid = args[i + 1];
+    if (sessionUuid && !sessionUuid.startsWith("--")) {
+      options.initialSessionUuid = sessionUuid;
+      i++;
+    } else {
+      log.warn(`Invalid initial session UUID: ${sessionUuid}`);
+    }
+  } else {
+    return undefined;
+  }
+  return i;
+}
+
+function parseAccessibilityOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  options: ScalarOptions,
+): number | undefined {
+  const arg = args[i];
+  if (arg === "--a11y-level") {
+    options.a11yLevel = args[++i];
+  } else if (arg === "--a11y-failure-mode") {
+    options.a11yFailureMode = args[++i];
+  } else if (arg === "--a11y-min-severity") {
+    options.a11yMinSeverity = args[++i];
+  } else if (arg === "--a11y-use-baseline") {
+    options.a11yUseBaseline = true;
+  } else {
+    return undefined;
+  }
+  return i;
+}
+
+function parseReadinessOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  options: ScalarOptions,
+): number | undefined {
+  const arg = args[i];
+  if (arg === "--plan-execution-lock-scope") {
+    const scope = args[++i];
+    if (scope === "global" || scope === "session") {
+      options.planExecutionLockScope = scope;
+      options.planExecutionLockScopeExplicit = true;
+    } else {
+      log.warn(
+        `Invalid plan execution lock scope: ${scope}. Using default: ${options.planExecutionLockScope}`,
+      );
+    }
+  } else if (arg === RUNNER_READINESS_TIMEOUT_FLAG) {
+    const raw = args[++i];
+    const parsed = parseRunnerReadinessTimeout(raw);
+    if (parsed !== undefined) {
+      options.runnerReadinessTimeoutMs = parsed;
+    } else {
+      log.warn(
+        `Invalid runner readiness timeout: ${raw}; expected an integer from ` +
+          `${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
+      );
+    }
+  } else {
+    return undefined;
+  }
+  return i;
+}
+
+function parseVideoOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  video: ReturnType<typeof createVideoRecordingDefaults>,
+): number | undefined {
+  const arg = args[i];
+  const { videoRecordingDefaults, applyQualityPreset, applyFormat } = video;
+  if (arg === "--video-quality" || arg === "--video-quality-preset") {
+    applyQualityPreset(args[++i], "cli");
+  } else if (arg === "--video-target-bitrate-kbps") {
+    applyVideoNumber(
+      videoRecordingDefaults,
+      args[++i],
+      "video target bitrate",
+      false,
+      "targetBitrateKbps",
+      log,
+    );
+  } else if (arg === "--video-max-throughput-mbps") {
+    applyVideoNumber(
+      videoRecordingDefaults,
+      args[++i],
+      "video max throughput",
+      true,
+      "maxThroughputMbps",
+      log,
+    );
+  } else if (arg === "--video-fps") {
+    applyVideoNumber(videoRecordingDefaults, args[++i], "video fps", false, "fps", log);
+  } else if (arg === "--video-format") {
+    applyFormat(args[++i], "cli");
+  } else if (arg === "--video-archive-size-mb") {
+    applyVideoNumber(
+      videoRecordingDefaults,
+      args[++i],
+      "video max archive size",
+      true,
+      "maxArchiveSizeMb",
+      log,
+    );
+  } else {
+    return undefined;
+  }
+  return i;
+}
+
+function applyVideoNumber(
+  defaults: CliVideoRecordingDefaults,
+  raw: string | undefined,
+  label: string,
+  allowFloat: boolean,
+  key: CliVideoRecordingNumericKey,
+  log: ParseLogger,
+): void {
+  const value = parsePositiveNumber(raw, label, allowFloat, log);
+  if (value !== undefined) {
+    defaults[key] = value;
+  }
 }

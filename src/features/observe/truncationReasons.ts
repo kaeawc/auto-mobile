@@ -7,12 +7,13 @@ import { nodeAttributes, type ViewHierarchyWindowInfo } from "../../models/ViewH
  *
  * Two different things travel on `viewHierarchy.truncationReasons`:
  *
- * - CAPTURE-FIDELITY reasons (`max_nodes`, `max_depth`, `cancelled`): the device
- *   stopped emitting nodes mid-walk, so the tree itself is PARTIAL and anything
+ * - CAPTURE-FIDELITY reasons (`max_nodes`, `max_depth`, `max_children`, `cancelled`):
+ *   the device dropped nodes during the walk, so the tree itself is PARTIAL and anything
  *   derived from it may be missing a real element.
- * - HOST OUTPUT caps (`max_children[...]`, issue #6601): the device emitted
- *   everything and the uncapped tree is still attached as the raw carrier
- *   (`attachRawViewHierarchy`); only the RENDERED payload was trimmed.
+ * - HOST OUTPUT caps (`max_children[...]`, issue #6601): only the RENDERED payload
+ *   was trimmed; the tree before host trimming is still attached as the raw carrier
+ *   (`attachRawViewHierarchy`). This reason alone does not imply device capture loss;
+ *   a coexisting capture-fidelity reason can still mark that raw tree as PARTIAL.
  *
  * Both belong on the channel — an agent reading the rendered rows must know they
  * were cut either way — but only the first kind means the capture is unreliable.
@@ -32,6 +33,7 @@ export const HOST_OUTPUT_CHILD_CAP_REASON_PREFIX = "max_children[";
 export const WINDOW_TRUNCATION_REASON_MEANINGS = {
   max_nodes: "This window's share of the node budget was exhausted.",
   max_depth: "The tree was deeper than the depth cap.",
+  max_children: "A node had more children than the device's per-node child cap.",
   cancelled: "The capture was cancelled mid-walk.",
 } as const;
 

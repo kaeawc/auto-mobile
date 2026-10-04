@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
@@ -10,6 +11,23 @@ class WebSocketResponseTest {
   private val json = Json {
     classDiscriminator = "type"
     encodeDefaults = true
+  }
+
+  @Test
+  fun `traversal truncation metadata is optional and omitted when null`() {
+    val complete = TraversalOrderData(elements = emptyList(), focusedIndex = null, totalCount = 0)
+    val encoded = json.encodeToString(TraversalOrderData.serializer(), complete)
+    assertFalse(encoded.contains("truncationReasons"))
+    assertNull(json.decodeFromString(TraversalOrderData.serializer(), encoded).truncationReasons)
+
+    val truncated = complete.copy(truncationReasons = listOf("max_children"))
+    assertEquals(
+      truncated,
+      json.decodeFromString(
+        TraversalOrderData.serializer(),
+        json.encodeToString(TraversalOrderData.serializer(), truncated),
+      ),
+    )
   }
 
   @Test

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   AndroidUserTargetResolver,
   type ResolvedUserTarget,
@@ -88,6 +89,104 @@ const cases: ResolveCase[] = [
 ];
 
 describe("AndroidUserTargetResolver.resolve", () => {
+  test.each([
+    { name: "personal-only", personal: true, managed: false, userId: 0, source: "installedUser" },
+    { name: "work-only", personal: false, managed: true, userId: 10, source: "installedUser" },
+    { name: "both", personal: true, managed: true, userId: 10, source: "managedProfile" },
+    { name: "none", personal: false, managed: false, userId: 10, source: "managedProfile" },
+  ])("installedOnly selects $name", async ({ personal, managed, userId, source }) => {
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([owner, { ...work, userId: 10 }, pausedWork]);
+    adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+    adb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: personal ? "package:com.example.app" : "package:com.example.other",
+      stderr: "",
+    });
+    adb.setCommandResponse("shell pm list packages --user 10", {
+      stdout: managed ? "package:com.example.app" : "package:com.example.other",
+      stderr: "",
+    });
+    const log = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      await expect(
+        new AndroidUserTargetResolver(adb).resolve({
+          packageName: "com.example.app",
+          installedOnly: true,
+        }),
+      ).resolves.toEqual({ userId, source });
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell pm list packages --user 0",
+        "shell pm list packages --user 10",
+      ]);
+      if (!personal && !managed) {
+        expect(log).toHaveBeenCalledWith(
+          "Android app com.example.app is not installed for any running user; checked users: 0, 10",
+        );
+      }
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  test.each([
+    {
+      name: "one running user",
+      request: { installedOnly: true as const },
+      users: [owner, pausedWork],
+      foreground: null,
+      expected: { userId: 0, source: "primary" },
+    },
+    {
+      name: "explicit user",
+      request: { installedOnly: true as const, explicitUserId: 0 },
+      users: [owner, work],
+      foreground: null,
+      expected: { userId: 0, source: "explicit" },
+    },
+    {
+      name: "foreground package",
+      request: { installedOnly: true as const },
+      users: [owner, work],
+      foreground: { packageName: "com.example.app", userId: 0 },
+      expected: { userId: 0, source: "foregroundPackage" },
+    },
+    {
+      name: "opt-in off for install-style callers",
+      request: {},
+      users: [owner, work],
+      foreground: null,
+      expected: { userId: 12, source: "managedProfile" },
+    },
+    {
+      name: "currentUser fallback",
+      request: { installedOnly: true as const, currentUser: true },
+      users: [owner, work],
+      foreground: null,
+      expected: { userId: 12, source: "managedProfile" },
+    },
+  ])(
+    "installedOnly preserves $name without package listings",
+    async ({ request, users, foreground, expected }) => {
+      const adb = new FakeAdbExecutor();
+      adb.setUsers(users);
+      adb.setForegroundApp(foreground);
+      const usersSpy = spyOn(adb, "listUsers");
+      const foregroundSpy = spyOn(adb, "getForegroundApp");
+      await expect(
+        new AndroidUserTargetResolver(adb).resolve({ packageName: "com.example.app", ...request }),
+      ).resolves.toEqual(expected);
+      expect(adb.wasCommandExecuted("pm list packages")).toBe(false);
+      if (expected.source === "explicit") {
+        expect(usersSpy).not.toHaveBeenCalled();
+        expect(foregroundSpy).not.toHaveBeenCalled();
+        expect(adb.getExecutedCommands()).toEqual([]);
+      } else if (expected.source === "foregroundPackage") {
+        expect(usersSpy).not.toHaveBeenCalled();
+        expect(adb.getExecutedCommands()).toEqual([]);
+      }
+    },
+  );
+
   test("uses Android's current user before managed-profile fallback when requested", async () => {
     const adb = new FakeAdbExecutor();
     adb.setUsers([

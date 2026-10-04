@@ -1,5 +1,5 @@
 import type { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../models";
-import { DefaultElementParser } from "../features/utility/ElementParser";
+import { ViewHierarchyParser } from "./ViewHierarchyParser";
 import { nodeBounds } from "../models/ViewHierarchyResult";
 
 const SYSTEM_UI_PACKAGE = "com.android.systemui";
@@ -21,7 +21,7 @@ export interface SystemUiAnrDialog {
 }
 
 type AnrDialogParser = Pick<
-  DefaultElementParser,
+  ViewHierarchyParser,
   | "extractNodeProperties"
   | "extractWindowRootGroups"
   | "extractRootNodes"
@@ -46,7 +46,7 @@ interface SystemUiAnrSignals {
  */
 export function findSystemUiAnrDialog(
   viewHierarchy: ViewHierarchyResult,
-  parser: AnrDialogParser = new DefaultElementParser(),
+  parser: AnrDialogParser = new ViewHierarchyParser(),
 ): SystemUiAnrDialog | undefined {
   const topmostWindow =
     parser.extractWindowRootGroups(viewHierarchy, "topmost-first")[0] ??

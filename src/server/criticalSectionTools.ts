@@ -9,6 +9,8 @@ import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
+import { isDeviceLostError } from "./deviceLossOutcome";
+import type { PlanStep } from "../models/Plan";
 
 // Schema for steps inside critical section.
 // Every sub-step MUST declare a target `device` — there is no routing
@@ -120,6 +122,67 @@ function formatCriticalSectionError(result: Record<string, unknown>, tool: strin
   );
 }
 
+async function executeCriticalSectionSteps(
+  device: BootedDevice,
+  normalizedSteps: PlanStep[],
+  lock: string,
+  totalSteps: number,
+  signal?: AbortSignal,
+): Promise<{ executedSteps: Array<{ tool: string; success: boolean }>; warnings: string[] }> {
+  const executedSteps: Array<{ tool: string; success: boolean }> = [];
+  const warnings: string[] = [];
+
+  for (let i = 0; i < normalizedSteps.length; i++) {
+    const step = normalizedSteps[i];
+    throwIfAborted(signal);
+
+    logger.debug(
+      `Device ${device.deviceId} executing step ${i + 1}/${normalizedSteps.length}: ${step.tool}`,
+    );
+
+    try {
+      // Critical-section steps are plan steps, so use the same lookup rules
+      // as executePlan for tools hidden from MCP discovery.
+      const tool = ToolRegistry.getToolForPlan(step.tool);
+      if (!tool) {
+        throw new ActionableError(`Tool "${step.tool}" not found in registry`);
+      }
+
+      const result = await ToolRegistry.callInternal(tool, step.params, undefined, signal, {
+        forPlan: true,
+        targetDevice: device,
+      });
+
+      // Internal tool calls can return an MCP envelope whose JSON payload
+      // contains the actual success/error fields.
+      const toolResult = unwrapCriticalSectionResult(result, step.tool);
+      if (toolResult?.success === false) {
+        const errorMsg = formatCriticalSectionError(toolResult, step.tool);
+        throw new ActionableError(errorMsg);
+      }
+
+      warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
+      executedSteps.push({ tool: step.tool, success: true });
+    } catch (error) {
+      executedSteps.push({ tool: step.tool, success: false });
+
+      const errorMsg = errorMessage(error);
+      logger.error(
+        `Device ${device.deviceId} failed at step ${i + 1}/${totalSteps} in critical section "${lock}": ${errorMsg}`,
+      );
+
+      if (isDeviceLostError(error)) {
+        throw error;
+      }
+      throw new ActionableError(
+        `Failed at step ${i + 1}/${totalSteps} (${step.tool}): ${errorMsg}`,
+      );
+    }
+  }
+
+  return { executedSteps, warnings };
+}
+
 /**
  * Critical section tool handler.
  * Coordinates multiple devices to execute steps serially at a synchronization point.
@@ -170,53 +233,13 @@ const criticalSectionHandler = async (
     );
 
     // Execute steps serially
-    const executedSteps: Array<{ tool: string; success: boolean }> = [];
-    const warnings: string[] = [];
-
-    for (let i = 0; i < normalizedSteps.length; i++) {
-      const step = normalizedSteps[i];
-      throwIfAborted(signal);
-
-      logger.debug(
-        `Device ${device.deviceId} executing step ${i + 1}/${normalizedSteps.length}: ${step.tool}`,
-      );
-
-      try {
-        // Critical-section steps are plan steps, so use the same lookup rules
-        // as executePlan for tools hidden from MCP discovery.
-        const tool = ToolRegistry.getToolForPlan(step.tool);
-        if (!tool) {
-          throw new ActionableError(`Tool "${step.tool}" not found in registry`);
-        }
-
-        const result = await ToolRegistry.callInternal(tool, step.params, undefined, signal, {
-          forPlan: true,
-          targetDevice: device,
-        });
-
-        // Internal tool calls can return an MCP envelope whose JSON payload
-        // contains the actual success/error fields.
-        const toolResult = unwrapCriticalSectionResult(result, step.tool);
-        if (toolResult?.success === false) {
-          const errorMsg = formatCriticalSectionError(toolResult, step.tool);
-          throw new ActionableError(errorMsg);
-        }
-
-        warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
-        executedSteps.push({ tool: step.tool, success: true });
-      } catch (error) {
-        executedSteps.push({ tool: step.tool, success: false });
-
-        const errorMsg = errorMessage(error);
-        logger.error(
-          `Device ${device.deviceId} failed at step ${i + 1}/${steps.length} in critical section "${lock}": ${errorMsg}`,
-        );
-
-        throw new ActionableError(
-          `Failed at step ${i + 1}/${steps.length} (${step.tool}): ${errorMsg}`,
-        );
-      }
-    }
+    const { executedSteps, warnings } = await executeCriticalSectionSteps(
+      device,
+      normalizedSteps,
+      lock,
+      steps.length,
+      signal,
+    );
 
     logger.info(`Device ${device.deviceId} completed all steps in critical section "${lock}"`);
 
@@ -234,6 +257,9 @@ const criticalSectionHandler = async (
     const errorMsg = errorMessage(error);
     logger.error(`Device ${device.deviceId} error in critical section "${lock}": ${errorMsg}`);
 
+    if (isDeviceLostError(error)) {
+      throw error;
+    }
     throw new ActionableError(
       `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`,
     );

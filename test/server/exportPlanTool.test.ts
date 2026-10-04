@@ -74,6 +74,41 @@ describe("exportPlan tool", () => {
     expect(payload.durationMs).toBe(60000);
   });
 
+  test("partial-plan warning survives the existing export output schema", async () => {
+    const error =
+      "Warning: Touch track (getevent) stopped 1250 ms after recording start: code 1. Later taps may be missing.";
+    const partialResult = { ...(await mockStopTestRecording()), error };
+    mock.module("../../src/server/testRecordingManager", () => ({
+      stopTestRecording: mock(() => Promise.resolve(partialResult)),
+      getTestRecordingStatus: mockGetTestRecordingStatus,
+    }));
+    const tool = ToolRegistry.getTool("exportPlan")!;
+    const response = await tool.handler({});
+    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    expect(payload.success).toBe(true);
+    expect(payload.error).toBe(error);
+    expect(payload.planContent).toBe(partialResult.planContent);
+    expect(tool.outputSchema.parse(payload)).toEqual(payload);
+    expect(tool.outputSchema.shape.warnings).toBeUndefined();
+  });
+
+  test("getevent failure uses the existing export error field", async () => {
+    mock.module("../../src/server/testRecordingManager", () => ({
+      stopTestRecording: mock(() =>
+        Promise.reject(
+          new Error("Failed to stop test recording: Touch track (getevent) spawn failed"),
+        ),
+      ),
+      getTestRecordingStatus: mockGetTestRecordingStatus,
+    }));
+    const tool = ToolRegistry.getTool("exportPlan")!;
+    const response = await tool.handler({});
+    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("Touch track (getevent) spawn failed");
+    expect(tool.outputSchema.parse(payload)).toEqual(payload);
+  });
+
   test("returns error when no active recording", async () => {
     mock.module("../../src/server/testRecordingManager", () => ({
       stopTestRecording: mockStopTestRecording,

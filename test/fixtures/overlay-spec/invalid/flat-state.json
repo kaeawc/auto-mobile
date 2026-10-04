@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "hello"
+    },
+    "state": {
+      "nested": {
+        "x": 1
+      }
+    }
+  },
+  "expectedPath": "state.nested"
+}

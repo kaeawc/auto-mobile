@@ -14,6 +14,7 @@ import {
   SwipeDirection,
   SwipeOnOptions,
   SwipeOnResult,
+  SwipeResult,
   ViewHierarchyResult,
 } from "../../../models";
 import { logger } from "../../../utils/logger";
@@ -360,6 +361,7 @@ export class ScrollUntilVisible {
     }
 
     let swipeWarning: string | undefined;
+    let lastAndroidSwipeError: string | undefined;
 
     // Overshoot recovery state
     let reverseMode = false;
@@ -412,7 +414,7 @@ export class ScrollUntilVisible {
 
       // Execute swipe with observedInteraction
       let iosDispatchTimestamp: number | undefined;
-      const swipeResult = strategy
+      const swipeResult: SwipeResult = strategy
         ? await strategy.swipe({
             x1: Math.floor(startX),
             y1: Math.floor(startY),
@@ -493,6 +495,26 @@ export class ScrollUntilVisible {
         };
       }
 
+      const failedAndroidSwipe = this.deps.device.platform === "android" && !swipeResult.success;
+      if (failedAndroidSwipe) {
+        const swipeError = swipeResult.error ?? "Android scroll swipe failed";
+        if (swipeResult.outcomeIndeterminate) {
+          perf.end();
+          throw new ActionableError(
+            `${swipeError} The scroll may have happened. Observe before retrying.`,
+          );
+        }
+        if (lastAndroidSwipeError !== undefined || !swipeResult.observation?.viewHierarchy) {
+          perf.end();
+          throw new ActionableError(`Scroll swipe failed: ${swipeError}`);
+        }
+        // Preserve one transient rejection's observation/search, without treating it as scroll-end evidence.
+        lastAndroidSwipeError = swipeError;
+        logger.warn(`[SwipeOn] Scroll swipe failed; tolerating one rejection: ${swipeError}`);
+      } else {
+        lastAndroidSwipeError = undefined;
+      }
+
       // Update observation
       if (!swipeResult.observation?.viewHierarchy) {
         throw new Error("Lost observation after swipe during scroll until visible.");
@@ -559,7 +581,11 @@ export class ScrollUntilVisible {
       }
 
       // A second stale unchanged capture is still not end-of-list evidence.
-      if (!fingerprintChanged && lastObservation.freshness?.isFresh !== false) {
+      if (
+        !failedAndroidSwipe &&
+        !fingerprintChanged &&
+        lastObservation.freshness?.isFresh !== false
+      ) {
         unchangedScrollCount++;
         logger.info(
           `[SwipeOn] Iteration ${scrollIteration}: unchanged count now ${unchangedScrollCount}/${maxUnchangedScrolls}`,
@@ -621,6 +647,9 @@ export class ScrollUntilVisible {
       throwIfAborted(signal);
       perf.end();
       const elapsed = this.deps.timer.now() - startTime;
+      if (lastAndroidSwipeError !== undefined) {
+        throw new ActionableError(`Scroll swipe failed: ${lastAndroidSwipeError}`);
+      }
       throw new ActionableError(
         `${target} not found${scopeDescription} after scrolling for ${elapsed}ms (${scrollIteration} iterations, timeout=${maxTime}ms).`,
       );

@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "row",
+      "children": [
+        {
+          "type": "pager",
+          "id": "p",
+          "children": [
+            {
+              "type": "spacer"
+            }
+          ]
+        },
+        {
+          "type": "pager",
+          "id": "p",
+          "children": [
+            {
+              "type": "spacer"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].id"
+}

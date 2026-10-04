@@ -28,7 +28,11 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
-import { isDeviceLostError } from "../../models/DeviceLostError";
+import {
+  type DeviceLostError,
+  isDeviceLostError,
+  rememberDeviceLossAbort,
+} from "../../models/DeviceLostError";
 import { formatToolParamError } from "../toolParamError";
 import { stripUndeclaredSessionUuid } from "../toolParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
@@ -94,6 +98,39 @@ interface StepExecutionResult {
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
+}
+
+interface ParallelTrackFailure {
+  failedStep: NonNullable<PlanExecutionResult["failedStep"]>;
+  deviceOrder: number;
+  abortConsequence: boolean;
+}
+
+/** Choose a stable failure after all tracks settle, preserving the abort's cause. */
+export function selectParallelFailure(
+  failures: readonly ParallelTrackFailure[],
+): PlanExecutionResult["failedStep"] {
+  let selected: ParallelTrackFailure | undefined;
+  for (const candidate of failures) {
+    if (!selected || (selected.abortConsequence && !candidate.abortConsequence)) {
+      selected = candidate;
+      continue;
+    }
+    if (candidate.abortConsequence !== selected.abortConsequence) {
+      continue;
+    }
+    const candidateIndex =
+      candidate.failedStep.stepIndex === -1 ? Infinity : candidate.failedStep.stepIndex;
+    const selectedIndex =
+      selected.failedStep.stepIndex === -1 ? Infinity : selected.failedStep.stepIndex;
+    if (
+      candidateIndex < selectedIndex ||
+      (candidateIndex === selectedIndex && candidate.deviceOrder < selected.deviceOrder)
+    ) {
+      selected = candidate;
+    }
+  }
+  return selected?.failedStep;
 }
 
 /**
@@ -718,10 +755,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
       for (let i = startStep; i < plan.steps.length; i++) {
         throwIfAborted(signal);
         if (executionOptions?.onBeforePlanStep) {
-          await executionOptions.onBeforePlanStep({
+          const beforeStep = executionOptions.onBeforePlanStep({
             stepIndex: i,
             totalSteps: plan.steps.length,
+            ...(signal ? { signal } : {}),
           });
+          await beforeStep.finally(() => throwIfAborted(signal));
         }
         const step = plan.steps[i];
         const stepStartTime = this.timer.now();
@@ -929,21 +968,14 @@ export class DefaultPlanExecutor implements PlanExecutor {
     const combinedSignal = signal
       ? AbortSignal.any([signal, internalAbortController.signal])
       : internalAbortController.signal;
+    let firstDeviceLoss: DeviceLostError | undefined;
 
     // Track per-device results
     const perDeviceResults = new Map<string, DeviceExecutionResult>();
-    let firstFailure:
-      | {
-          device: string;
-          stepIndex: number;
-          tool: string;
-          error: string;
-          failureObservation?: FailureObservationSummary;
-        }
-      | undefined;
+    const failures: ParallelTrackFailure[] = [];
 
     // Execute each device track in parallel
-    const devicePromises = partitionedPlan.devices.map(async (device) => {
+    const devicePromises = partitionedPlan.devices.map(async (device, deviceOrder) => {
       const deviceStartTime = debugMode ? this.timer.now() : 0;
       const track = partitionedPlan.deviceTracks.get(device)!;
 
@@ -960,6 +992,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           combinedSignal,
           executionOptions,
         );
+        // An ordinary failing callback aborts synchronously below. Failures
+        // observed after that abort may be cancelled siblings, even at a lower
+        // real plan index. Keep them in perDeviceResults but prefer the cause.
+        const abortConsequence = internalAbortController.signal.aborted;
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -986,15 +1022,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
             `[PARALLEL_EXEC][${device}] Device track failed at step ${result.failedStep?.stepIndex}`,
           );
 
-          // Record first failure
-          if (!firstFailure && result.failedStep) {
-            firstFailure = {
-              device,
-              stepIndex: result.failedStep.stepIndex,
-              tool: result.failedStep.tool,
-              error: result.failedStep.error,
-              failureObservation: result.failedStep.failureObservation,
-            };
+          if (result.failedStep) {
+            failures.push({
+              failedStep: {
+                device,
+                stepIndex: result.failedStep.stepIndex,
+                tool: result.failedStep.tool,
+                error: result.failedStep.error,
+                failureObservation: result.failedStep.failureObservation,
+              },
+              deviceOrder,
+              abortConsequence,
+            });
           }
 
           // Trigger abort based on strategy
@@ -1010,8 +1049,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
         return result;
       } catch (error) {
         if (isDeviceLostError(error)) {
+          // Device loss overrides ordinary-failure abort strategies. Remember the
+          // originating error before abort listeners can reject sibling tracks.
+          firstDeviceLoss ??= error;
+          rememberDeviceLossAbort(internalAbortController.signal, firstDeviceLoss);
+          rememberDeviceLossAbort(combinedSignal, firstDeviceLoss);
+          internalAbortController.abort(firstDeviceLoss);
           throw error;
         }
+        const abortConsequence = internalAbortController.signal.aborted;
         const errorMsg = errorMessage(error);
         logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMsg}`);
 
@@ -1031,14 +1077,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
         perDeviceResults.set(device, deviceResult);
 
-        if (!firstFailure) {
-          firstFailure = {
+        failures.push({
+          failedStep: {
             device,
             stepIndex: -1,
             tool: "unknown",
             error: errorMsg,
-          };
-        }
+          },
+          deviceOrder,
+          abortConsequence,
+        });
 
         if (abortStrategy === "immediate") {
           internalAbortController.abort();
@@ -1060,8 +1108,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
     });
 
-    // Wait for all devices to complete
-    const results = await Promise.all(devicePromises);
+    // Keep plan ownership until every track, including in-flight tools, settles.
+    const results = await this.settleDeviceTracks(devicePromises, () => firstDeviceLoss);
 
     // Calculate total executed steps across all devices
     const totalExecutedSteps = results.reduce((sum, r) => sum + r.executedSteps, 0);
@@ -1099,18 +1147,27 @@ export class DefaultPlanExecutor implements PlanExecutor {
       success: allSucceeded,
       executedSteps: totalExecutedSteps,
       totalSteps,
-      failedStep: firstFailure
-        ? {
-            stepIndex: firstFailure.stepIndex,
-            tool: firstFailure.tool,
-            error: firstFailure.error,
-            device: firstFailure.device,
-            failureObservation: firstFailure.failureObservation,
-          }
-        : undefined,
+      failedStep: selectParallelFailure(failures),
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
     };
+  }
+
+  private async settleDeviceTracks<T>(
+    devicePromises: Promise<T>[],
+    getDeviceLoss: () => DeviceLostError | undefined,
+  ): Promise<T[]> {
+    const settled = await Promise.allSettled(devicePromises);
+    const deviceLoss = getDeviceLoss();
+    if (deviceLoss) {
+      throw deviceLoss;
+    }
+    return settled.map((result) => {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+      return result.value;
+    });
   }
 
   /**

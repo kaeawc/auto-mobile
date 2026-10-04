@@ -1324,7 +1324,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             this.sharedStart = null;
           }
         })
-        .catch(() => {});
+        .catch((error) => {
+          // Startup callers own the failure; this observer drains the cleanup continuation.
+          logger.debug(`[IOSCtrlProxy] Startup cleanup rejection observed: ${errorMessage(error)}`);
+        });
       sharedStart = createdStart;
     }
 
@@ -1941,6 +1944,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     } catch (error) {
       this.attemptedSetup = false; // Allow retry on next call
       const errorMsg = errorMessage(error);
+      logger.warn(`[IOSCtrlProxy] Setup failed: ${errorMessage(error)}`);
       perf.end();
       return {
         success: false,
@@ -2457,7 +2461,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           this.forceRestartHealthPollDurationsMs.clear();
         }
       })
-      .catch(() => {});
+      .catch((error) => {
+        // forceRestart awaits the original promise; this observer drains its finalizer copy.
+        logger.debug(`[IOSCtrlProxy] Restart cleanup rejection observed: ${errorMessage(error)}`);
+      });
     await restart;
   }
 
@@ -3850,8 +3857,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     } else if (this.iproxyProcessId) {
       try {
         process.kill(this.iproxyProcessId);
-      } catch {
-        // Ignore errors if already exited
+      } catch (error) {
+        // iproxy may have exited before cleanup; forgetting its retired PID remains safe.
+        logger.debug(`[IOSCtrlProxy] iproxy cleanup found no live process: ${errorMessage(error)}`);
       }
     }
 

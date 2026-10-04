@@ -7,6 +7,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import type { BootedDevice } from "../../src/models";
+import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
@@ -693,6 +694,66 @@ describe("criticalSection tool", () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("embedded SDK mode is disabled"));
 
     warnSpy.mockRestore();
+  });
+
+  test("preserves device loss from a sub-step after cleanup and lock release", async () => {
+    const coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+    const restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const cleanup = spyOn(coordinator, "forceCleanup");
+    const enter = coordinator.enterCriticalSection.bind(coordinator);
+    const release = mock(() => {});
+    const enterSpy = spyOn(coordinator, "enterCriticalSection").mockImplementation(
+      async (...args) => {
+        const releaseLock = await enter(...args);
+        return () => {
+          release();
+          releaseLock();
+        };
+      },
+    );
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "emulator-5554",
+      name: "Test Device",
+    };
+    const loss = new DeviceLostError(device.deviceId, "device-disconnected:emulator-5554");
+    const signal = new AbortController().signal;
+    const step = mock(async (_params: unknown, _progress: unknown, passedSignal?: AbortSignal) => {
+      expect(passedSignal).toBe(signal);
+      expect(passedSignal?.aborted).toBe(false);
+      throw loss;
+    });
+    ToolRegistry.register("mockDeviceLoss", "Device loss", z.object({ device: z.string() }), step);
+
+    try {
+      const tool = ToolRegistry.getToolForPlan("criticalSection")!;
+      const error = await tool.deviceAwareHandler!(
+        device,
+        {
+          lock: "loss-lock",
+          __lockNamespace: "loss-session",
+          deviceCount: 1,
+          steps: [{ tool: "mockDeviceLoss", params: { device: "A" } }],
+        },
+        undefined,
+        signal,
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(step).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledWith("loss-lock", "loss-session");
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(error).toBe(loss);
+      expect(isDeviceLostError(error)).toBe(true);
+    } finally {
+      enterSpy.mockRestore();
+      cleanup.mockRestore();
+      coordinator.reset();
+      restoreCoordinator();
+    }
   });
 
   test("fails fast when a step fails", async () => {

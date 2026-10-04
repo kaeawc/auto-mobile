@@ -11,6 +11,7 @@ export type CaptureObserveStepMode = "summary" | "full";
 export interface PlanStepLifecycleContext {
   stepIndex: number;
   totalSteps: number;
+  signal?: AbortSignal;
 }
 
 export interface PlanExecutionOptions {

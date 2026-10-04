@@ -130,6 +130,7 @@ nav:
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
+      - "Android overlay specification": design-docs/plat/android/overlay-ux.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md

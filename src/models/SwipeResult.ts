@@ -15,4 +15,6 @@ export interface SwipeResult extends BaseActionResult {
   a11yTotalTimeMs?: number; // Total time on device for swipe (including gesture dispatch)
   a11yGestureTimeMs?: number; // Actual gesture execution time on device
   fallbackReason?: string; // If a11y failed and fell back to ADB, this explains why
+  /** The swipe was dispatched but its outcome is unknown; observe before retrying. */
+  outcomeIndeterminate?: boolean;
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Idle, ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
+import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, TouchIdleResult } from "../../../src/models";
@@ -12,6 +13,17 @@ import {
 } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import { readFileSync } from "fs";
 import { join } from "path";
+
+const validGfxinfoOutput = `
+        50th percentile: 8.5ms
+        90th percentile: 12.3ms
+        95th percentile: 15.7ms
+        99th percentile: 22.1ms
+        Total frames rendered: 120
+        Number Missed Vsync: 5
+        Number Slow UI thread: 3
+        Number Frame deadline missed: 2
+      `;
 
 describe("Idle - Unit Tests", function () {
   let idle: Idle;
@@ -158,18 +170,7 @@ describe("Idle - Unit Tests", function () {
 
   describe("parseMetrics", function () {
     test("should parse all metrics from valid gfxinfo output", function () {
-      const stdout = `
-        50th percentile: 8.5ms
-        90th percentile: 12.3ms
-        95th percentile: 15.7ms
-        99th percentile: 22.1ms
-        Total frames rendered: 120
-        Number Missed Vsync: 5
-        Number Slow UI thread: 3
-        Number Frame deadline missed: 2
-      `;
-
-      const result = idle.parseMetrics(stdout);
+      const result = idle.parseMetrics(validGfxinfoOutput);
 
       expect(result.percentile50th).toBe(8.5);
       expect(result.percentile90th).toBe(12.3);
@@ -509,6 +510,24 @@ describe("Idle - Unit Tests", function () {
   });
 
   describe("getUiStabilitySnapshot", function () {
+    test("returns explicit null frame history when snapshot measurement fails", async function () {
+      const timer = new FakeTimer();
+      const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+      const fakeAdb = new FakeAdbExecutor();
+      fakeAdb.setDefaultError(new Error("gfxinfo reset failed"));
+      const snapshotIdle = new Idle(device, new FakeAdbClientFactory(fakeAdb), timer);
+
+      expect(await snapshotIdle.getUiStabilitySnapshot("com.example.app")).toStrictEqual({
+        isStable: false,
+        shouldUpdateLastNonIdleTime: true,
+        updatedPrevMissedVsync: null,
+        updatedPrevSlowUiThread: null,
+        updatedPrevFrameDeadlineMissed: null,
+        updatedPrevTotalFrames: null,
+        updatedFirstGfxInfoLog: false,
+      });
+    });
+
     // The measurement delay must sleep on the injected timer, not defaultTimer,
     // so the method is testable without real wall-clock (issue #4172). We assert
     // the pending sleep is registered on the FakeTimer and that the method
@@ -528,6 +547,46 @@ describe("Idle - Unit Tests", function () {
       // the source reverted to defaultTimer this history would be empty (and the
       // test would hang on a real sleep without auto-advance).
       expect(timer.getSleepHistory()).toContain(200);
+    });
+  });
+
+  describe("getUiStability polling", function () {
+    test("computes the frame delta from the last good count after a failed measurement", async function () {
+      const timer = new FakeTimer();
+      const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+      const fakeAdb = new FakeAdbExecutor();
+      fakeAdb.setDefaultResponse({ stdout: validGfxinfoOutput, stderr: "" });
+      const awaitIdle = new AwaitIdle(device, new FakeAdbClientFactory(fakeAdb), timer);
+      const executeSpy = spyOn(fakeAdb, "executeCommand");
+      const stabilitySpy = spyOn(Idle.prototype, "checkStabilityCriteria");
+      try {
+        const initial = await awaitIdle.initializeUiStabilityTracking("com.example.app", 1000);
+        const good = await awaitIdle.processSingleUiStabilityCheck("com.example.app", initial);
+        expect(good.updatedState.prevTotalFrames).toBe(120);
+
+        executeSpy.mockRejectedValueOnce(new Error("gfxinfo read failed"));
+        const failed = await awaitIdle.processSingleUiStabilityCheck(
+          "com.example.app",
+          good.updatedState,
+        );
+        expect(failed.shouldUpdateLastNonIdleTime).toBe(true);
+        expect(failed.updatedState.prevTotalFrames).toBe(120);
+
+        const recovered = await awaitIdle.processSingleUiStabilityCheck(
+          "com.example.app",
+          failed.updatedState,
+        );
+        expect(stabilitySpy).toHaveBeenLastCalledWith(
+          expect.objectContaining({ totalFramesDelta: 0 }),
+          expect.anything(),
+          120,
+        );
+        expect(recovered.updatedState.prevTotalFrames).toBe(120);
+        expect(recovered.shouldUpdateLastNonIdleTime).toBe(false);
+      } finally {
+        executeSpy.mockRestore();
+        stabilitySpy.mockRestore();
+      }
     });
   });
 

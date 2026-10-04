@@ -821,6 +821,7 @@ describe("CtrlProxyGestures atomic double tap", () => {
     const result = await new CtrlProxyGestures(context).requestDoubleTapCoordinates(10, 20);
     expect(result.success).toBe(false);
     expect(result.error).toContain("tap_double_v1");
+    expect(result.unsupportedCapability).toBe("tap_double_v1");
     expect(sent).toEqual([]);
     expect(requestManager.getPendingCount()).toBe(0);
   });

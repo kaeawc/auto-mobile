@@ -346,6 +346,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
     expect(result.success).toBe(true);
     expect(strategy.directActivationCalls).toHaveLength(1);
     expect(calls).toHaveLength(0);
+    expect(result.warnings).toBeUndefined();
     expect(
       adb.getCommandCalls().some((call) => call.command.includes("input touchscreen tap")),
     ).toBe(false);
@@ -358,14 +359,50 @@ describe("TapAnyElement Android gesture dispatch", () => {
       method: "accessibility-action",
       error: "missing node",
     });
+    const warning = "TalkBack activation is unconfirmed: coordinate gesture acknowledged";
+    strategy.setPreciseTapResult({
+      success: true,
+      method: "coordinate-fallback",
+      warnings: [warning],
+    });
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([warning]);
     expect(strategy.directActivationCalls).toHaveLength(1);
     expect(strategy.preciseTapCalls).toHaveLength(1);
     expect(strategy.fallbackCalls).toHaveLength(0);
     expect(
       adb.getCommandCalls().some((call) => call.command.includes("input touchscreen tap")),
     ).toBe(false);
+  });
+
+  test("TalkBack double tap preserves coordinate fallback warnings", async () => {
+    const { tapAny, strategy } = setup({ success: true }, true);
+    const warning = "TalkBack activation is unconfirmed: double-tap gesture acknowledged";
+    strategy.setFallbackResult({
+      success: true,
+      method: "coordinate-fallback",
+      warnings: [warning],
+    });
+    const result = await tapAny.execute({ action: "doubleTap" });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([warning]);
+  });
+
+  test("TalkBack retry preserves warnings without duplicates", async () => {
+    const { tapAny, strategy } = setup({ success: true }, true);
+    strategy.setDirectActivationResult({ success: false, method: "accessibility-action" });
+    const warning = "TalkBack activation is unconfirmed: coordinate gesture acknowledged";
+    strategy.setPreciseTapResult({
+      success: true,
+      method: "coordinate-fallback",
+      warnings: [warning],
+    });
+    tapAny.setRefreshViewHierarchyForTesting(async () => hierarchy);
+    const result = await tapAny.execute({ action: "tap" });
+    expect(result.success).toBe(true);
+    expect(strategy.preciseTapCalls).toHaveLength(2);
+    expect(result.warnings).toEqual([warning]);
   });
 
   test("unchanged hierarchy retries exactly once", async () => {

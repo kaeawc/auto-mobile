@@ -17,6 +17,7 @@ export class FakeTalkBackNavigationDriver
   tapResult: A11yTapCoordinatesResult = { success: true, totalTimeMs: 1 };
   actionResult: A11yActionResult = { success: true, action: "click", totalTimeMs: 1 };
   nodeActionSelectorsSupported = true;
+  doubleTapCapabilitySupported = true;
 
   tapHistory: Array<{ x: number; y: number; durationMs: number }> = [];
   doubleTapHistory: Array<{ x: number; y: number }> = [];
@@ -79,6 +80,14 @@ export class FakeTalkBackNavigationDriver
     y: number,
     onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult> {
+    if (!this.doubleTapCapabilitySupported) {
+      return {
+        success: false,
+        totalTimeMs: 0,
+        error: "tap_double_v1 is not confirmed by the connected device service",
+        unsupportedCapability: "tap_double_v1",
+      };
+    }
     this.doubleTapHistory.push({ x, y });
     const result = this.tapOverrides.shift() ?? this.tapResult;
     if (result.success || this.tapDispatched) {

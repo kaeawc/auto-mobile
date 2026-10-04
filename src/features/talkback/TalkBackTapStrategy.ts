@@ -24,6 +24,8 @@ export interface TalkBackTapResult {
    */
   method: "focus-navigation" | "accessibility-action" | "coordinate-fallback";
   error?: string;
+  /** Required capability was not advertised; no activation gesture was dispatched. */
+  unsupportedCapability?: A11yTapCoordinatesResult["unsupportedCapability"];
   /** Acknowledged coordinate gestures do not confirm semantic activation. */
   warnings?: string[];
   /** A stable selector and advertised action rejected the semantic request. */
@@ -404,6 +406,7 @@ export class TalkBackTapStrategy {
           success: false,
           method: "coordinate-fallback",
           error: `Double tap failed: ${result.error}`,
+          unsupportedCapability: result.unsupportedCapability,
           completedTaps: 0,
         };
       }

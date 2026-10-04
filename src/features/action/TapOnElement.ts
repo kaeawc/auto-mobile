@@ -4353,10 +4353,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               driver,
               { displayFence: fence },
             );
-      this.reportTalkBackActivationWarning(result, context, action);
       if (result.success) {
+        this.reportTalkBackActivationWarning(result, context, action);
         return;
       }
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
+        displayFence: fence,
+      });
+      this.reportTalkBackActivationWarning(result, context, action);
+      return;
     }
     await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
       displayFence: fence,
@@ -4679,16 +4684,23 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
   }
 
-  /** Gesture acknowledgement cannot distinguish activation from a TalkBack focus move. */
+  /** Report acknowledgement or a completed fallback without claiming semantic activation. */
   private reportTalkBackActivationWarning(
     result: TalkBackTapResult,
     context?: { onActivationWarning?: (warning: string) => void },
     action = "tap",
   ): void {
-    if (action === "longPress") {
+    if (action === "longPress" || result.method === "accessibility-action") {
       return;
     }
-    for (const warning of result.warnings ?? [TALKBACK_ACTIVATION_WARNING]) {
+    const warnings = result.success
+      ? (result.warnings ?? [TALKBACK_ACTIVATION_WARNING])
+      : [
+          result.unsupportedCapability === "tap_double_v1"
+            ? "TalkBack activation is unconfirmed: the connected device service does not support the single-gesture double tap (tap_double_v1). Update CtrlProxy. The plain coordinate tap path was used instead. Observe the result before retrying."
+            : "TalkBack activation is unconfirmed: the TalkBack gesture failed, so the plain coordinate tap path was used instead. Observe the result before retrying.",
+        ];
+    for (const warning of warnings) {
       context?.onActivationWarning?.(warning);
     }
   }
@@ -4808,7 +4820,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             { displayFence: fence },
           );
 
-    this.reportTalkBackActivationWarning(fallbackResult, options);
     if (!fallbackResult.success) {
       logger.warn(
         `[TapOnElement] Accessibility coordinate tap failed (${fallbackResult.error}), ` +
@@ -4825,6 +4836,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         { displayFence: fence },
       );
     }
+    this.reportTalkBackActivationWarning(fallbackResult, options, action);
     return screenReaderNavigation;
   }
 

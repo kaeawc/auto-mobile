@@ -480,7 +480,9 @@ export class TapAnyElement extends BaseVisualChange {
     durationMs: number,
     target: CapturedTapTarget,
     signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: DisplayFenceOption & {
+      onActivationWarnings?: (warnings?: string[]) => void;
+    } = {},
   ): Promise<void> {
     const fence = resolveDisplayFence(fenceOptions);
     const { element, capture } = target;
@@ -498,6 +500,7 @@ export class TapAnyElement extends BaseVisualChange {
       (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
         displayFence: fence,
         scoped: target.scoped,
+        onActivationWarnings: fenceOptions.onActivationWarnings,
       }))
     ) {
       return;
@@ -653,7 +656,10 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    fenceOptions: DisplayFenceOption & { scoped?: boolean } = {},
+    fenceOptions: DisplayFenceOption & {
+      scoped?: boolean;
+      onActivationWarnings?: (warnings?: string[]) => void;
+    } = {},
   ): Promise<boolean> {
     const fence = fenceOptions.displayFence;
     const driver = this.talkBackDriverFactory.createDriver(this.device);
@@ -688,6 +694,7 @@ export class TapAnyElement extends BaseVisualChange {
         : await this.talkBackStrategy.executeCoordinateFallback(x, y, action, durationMs, driver, {
             displayFence: fence,
           });
+    fenceOptions.onActivationWarnings?.(fallback.warnings);
     return fallback.success;
   }
 
@@ -703,6 +710,7 @@ export class TapAnyElement extends BaseVisualChange {
       selectionOptions?: TapAnyElementOptions;
       refresh?: RefreshViewHierarchy;
       dispatch?: (point: { x: number; y: number }) => Promise<void>;
+      onActivationWarnings?: (warnings?: string[]) => void;
     } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
@@ -759,6 +767,7 @@ export class TapAnyElement extends BaseVisualChange {
     }
     await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, signal, {
       displayFence: fence,
+      onActivationWarnings: fenceOptions.onActivationWarnings,
     });
   }
 
@@ -1345,6 +1354,12 @@ export class TapAnyElement extends BaseVisualChange {
                 refreshSignal,
               )
           : this.refreshViewHierarchy.bind(this);
+      const warnings = new Set<string>();
+      const onActivationWarnings = (messages: string[] = []) => {
+        for (const warning of messages) {
+          warnings.add(warning);
+        }
+      };
       const result = await this.observedInteraction(
         async (observeResult: ObserveResult, fence) => {
           throwIfAborted(signal);
@@ -1449,6 +1464,7 @@ export class TapAnyElement extends BaseVisualChange {
           };
           const action = options.action;
           const longPressDuration = this.getLongPressDuration(options);
+          const tapContext = { displayFence: fence, onActivationWarnings };
 
           logger.info(
             `[TapAnyElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on clickable element: ` +
@@ -1478,7 +1494,7 @@ export class TapAnyElement extends BaseVisualChange {
                   longPressDuration,
                   target,
                   signal,
-                  { displayFence: fence },
+                  tapContext,
                 );
               }
               await this.retryAndroidTapIfNoChange(
@@ -1488,7 +1504,7 @@ export class TapAnyElement extends BaseVisualChange {
                 longPressDuration,
                 observeResult.screenSize,
                 signal,
-                { displayFence: fence, selectionOptions: options, refresh, dispatch },
+                { ...tapContext, selectionOptions: options, refresh, dispatch },
               );
               break;
             }
@@ -1535,7 +1551,7 @@ export class TapAnyElement extends BaseVisualChange {
       );
 
       targetDisplay?.assertCurrent();
-      return result;
+      return { ...result, ...(warnings.size > 0 ? { warnings: [...warnings] } : {}) };
     } catch (error) {
       perf.end();
       const errorMsg = errorMessage(error);

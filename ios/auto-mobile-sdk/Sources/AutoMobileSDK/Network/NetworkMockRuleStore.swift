@@ -408,8 +408,10 @@
             if let host = rule.host, !Self.matches(host, request.host ?? "") { return false }
             if let path = rule.path, !Self.matches(path, request.path ?? "") { return false }
             return rule.headers.allSatisfy { key, value in
-                let headerValue = request.headers.first { $0.key.caseInsensitiveCompare(key) == .orderedSame }?.value
-                return headerValue?.caseInsensitiveCompare(value) == .orderedSame
+                request.headers.contains {
+                    $0.key.caseInsensitiveCompare(key) == .orderedSame &&
+                        $0.value.caseInsensitiveCompare(value) == .orderedSame
+                }
             }
         }
 

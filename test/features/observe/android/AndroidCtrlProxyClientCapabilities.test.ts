@@ -38,6 +38,94 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  test("requestAction reports no dispatch when connection is unavailable", async () => {
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => new FakeWebSocket(url, "none", 0, fakeTimer),
+      fakeTimer,
+    );
+    const connect = spyOn(client, "connectWebSocket").mockResolvedValue(false);
+    try {
+      expect(await client.requestAction("click", "test:id/button")).toMatchObject({
+        success: false,
+        dispatched: false,
+        acknowledged: false,
+      });
+    } finally {
+      connect.mockRestore();
+      await client.close();
+    }
+  });
+
+  test.each(["timeout", "socket error", "send failure", "refusal", "protocol refusal", "success"])(
+    "requestAction preserves dispatch evidence after %s",
+    async (mode) => {
+      let socket!: FakeWebSocket;
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+        fakeTimer,
+      );
+      await client.ensureConnected();
+      let sent!: () => void;
+      const dispatched = new Promise<void>((resolve) => {
+        sent = resolve;
+      });
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        const message = JSON.parse(String(data));
+        if (mode === "send failure") {
+          sent();
+          throw new Error("WebSocket not connected before send");
+        }
+        if (mode === "refusal" || mode === "success") {
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "action_result",
+              requestId: message.requestId,
+              action: "click",
+              success: mode === "success",
+              totalTimeMs: 1,
+              error: "node not found",
+            }),
+          );
+        } else if (mode === "protocol refusal") {
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "error",
+              requestId: message.requestId,
+              error: "Unknown command type: request_action",
+            }),
+          );
+        }
+        sent();
+      });
+      try {
+        const pending = client.requestNodeAction("click", { uniqueId: "button" }, 5000);
+        await dispatched;
+        if (mode === "timeout") {
+          fakeTimer.advanceTime(5000);
+        }
+        if (mode === "socket error") {
+          // Isolate the transport cancellation from reconnect telemetry and DB work.
+          const closed = spyOn(client, "onConnectionClosed").mockImplementation(() => {});
+          socket.emit("error", new Error("socket lost after send"));
+          socket.emit("close");
+          closed.mockRestore();
+        }
+        const result = await pending;
+        expect(result.dispatched).toBe(mode !== "send failure");
+        expect(result.acknowledged).toBe(["refusal", "protocol refusal", "success"].includes(mode));
+        expect(result.success).toBe(mode === "success");
+        expect(client["requestManager"].getPendingCount()).toBe(0);
+      } finally {
+        send.mockRestore();
+        await client.close();
+      }
+    },
+  );
+
   test("waits for the connected handshake before reading node selector support", async function () {
     let socket: FakeWebSocket | null = null;
     const client = AndroidCtrlProxyClient.createForTesting(

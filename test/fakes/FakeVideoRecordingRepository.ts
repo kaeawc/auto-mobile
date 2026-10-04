@@ -83,14 +83,23 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     if (query.platform) {
       results = results.filter((record) => record.platform === query.platform);
     }
-    if (query.orderByLastAccessed) {
-      results.sort((left, right) => {
-        const leftTime = Date.parse(left.lastAccessedAt);
-        const rightTime = Date.parse(right.lastAccessedAt);
-        const delta = leftTime - rightTime;
-        return query.orderByLastAccessed === "asc" ? delta : -delta;
-      });
-    }
+    results.sort((left, right) => {
+      const orderings = [
+        ["lastAccessedAt", query.orderByLastAccessed],
+        ["startedAt", query.orderByStartedAt],
+        ["recordingId", query.orderByStartedAt],
+      ] as const;
+      for (const [key, direction] of orderings) {
+        if (!direction) {
+          continue;
+        }
+        const delta = left[key] < right[key] ? -1 : left[key] > right[key] ? 1 : 0;
+        if (delta !== 0) {
+          return direction === "asc" ? delta : -delta;
+        }
+      }
+      return 0;
+    });
     if (query.limit && query.limit > 0) {
       results = results.slice(0, query.limit);
     }
@@ -101,7 +110,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
   async getLatestRecording(): Promise<VideoRecordingRecord | null> {
     const results = await this.listRecordings({
       status: ["completed", "interrupted"],
-      orderByLastAccessed: "desc",
+      orderByStartedAt: "desc",
       limit: 1,
     });
     return results[0] ?? null;

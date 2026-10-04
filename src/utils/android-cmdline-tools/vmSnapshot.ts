@@ -36,6 +36,16 @@ export function buildVmSnapshotCommand(action: VmSnapshotAction, snapshotName: s
 /** Marker appended by {@link buildVmSnapshotErrorMessage} for an absent snapshot. */
 const MISSING_SNAPSHOT_MARKER = "snapshot not found";
 
+const VM_SNAPSHOT_ERROR_CATEGORIES = [
+  { keywords: ["timed out", "timeout"], message: "command timed out" },
+  { keywords: ["device offline", "offline"], message: "emulator is offline or not responding" },
+  { keywords: ["device not found", "no devices", "no emulators"], message: "emulator not found" },
+  {
+    keywords: ["unknown command", "not supported", "unknown avd"],
+    message: "emulator does not support snapshot commands",
+  },
+];
+
 /**
  * True when a failed `delete` means the in-AVD snapshot was already gone.
  * Reclaim treats that as success: the bytes the caller wanted freed are freed
@@ -87,34 +97,23 @@ function buildVmSnapshotErrorMessage(
     return `${base}: no response from emulator`;
   }
 
-  if (lower.includes("timed out") || lower.includes("timeout")) {
-    return `${base}: command timed out (${cleaned})`;
-  }
-  if (lower.includes("device offline") || lower.includes("offline")) {
-    return `${base}: emulator is offline or not responding (${cleaned})`;
-  }
-  if (
-    lower.includes("device not found") ||
-    lower.includes("no devices") ||
-    lower.includes("no emulators")
-  ) {
-    return `${base}: emulator not found (${cleaned})`;
-  }
-  if (
-    lower.includes("unknown command") ||
-    lower.includes("not supported") ||
-    lower.includes("unknown avd")
-  ) {
-    return `${base}: emulator does not support snapshot commands (${cleaned})`;
+  const category = classifyVmSnapshotError(lower);
+  return category ? `${base}: ${category} (${cleaned})` : `${base}: ${cleaned}`;
+}
+
+function classifyVmSnapshotError(lower: string): string | undefined {
+  for (const { keywords, message } of VM_SNAPSHOT_ERROR_CATEGORIES) {
+    if (keywords.some((keyword) => lower.includes(keyword))) {
+      return message;
+    }
   }
   if (
     lower.includes("snapshot") &&
     (lower.includes("not found") || lower.includes("does not exist"))
   ) {
-    return `${base}: ${MISSING_SNAPSHOT_MARKER} (${cleaned})`;
+    return MISSING_SNAPSHOT_MARKER;
   }
-
-  return `${base}: ${cleaned}`;
+  return undefined;
 }
 
 function combineVmSnapshotOutput(stdout: string, stderr: string): string {

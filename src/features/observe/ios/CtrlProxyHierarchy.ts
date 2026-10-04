@@ -651,6 +651,7 @@ export class CtrlProxyHierarchy {
       rotation: hierarchy.rotation,
       systemInsets: hierarchy.systemInsets,
       insets: hierarchy.insets,
+      ...(hierarchy.truncationReasons && { truncationReasons: hierarchy.truncationReasons }),
     };
   }
 

@@ -131,6 +131,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "getWebSocket",
         "isCommandSupported",
         "requestManager",
+        "serializeRequest",
         "timer",
         "unsupportedCommandError",
       ]);
@@ -168,6 +169,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "isCommandSupported",
         "markObserverHierarchyRequest",
         "requestManager",
+        "serializeRequest",
         "setCachedHierarchy",
         "suppressHierarchyObservationStreamPush",
         "timer",

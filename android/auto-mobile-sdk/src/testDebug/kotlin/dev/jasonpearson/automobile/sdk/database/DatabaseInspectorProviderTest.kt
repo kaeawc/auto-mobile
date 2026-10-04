@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import java.io.File
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -285,7 +286,6 @@ class DatabaseInspectorProviderTest {
         "PRAGMA table_info =",
         "PRAGMA table_info = notes extra",
         "PRAGMA table_info(notes) extra",
-        "PRAGMA table_info = notes; SELECT 1",
         "PRAGMA quick_check(1e)",
         "PRAGMA quick_check(.)",
       )
@@ -423,6 +423,68 @@ class DatabaseInspectorProviderTest {
 
     assertEquals("mutation", response.getString("type"))
     assertEquals(1, response.getInt("rowsAffected"))
+  }
+
+  @Test
+  fun `multiple statements take precedence over mutation policy on both provider paths`() {
+    driver.executeSQL(databasePath, "CREATE TABLE backup AS SELECT * FROM notes")
+    listOf(true, false).forEach { allowMutations ->
+      listOf(
+          "DELETE FROM notes; DELETE FROM backup",
+          "SELECT 1; DELETE FROM notes",
+          "PRAGMA table_info = notes; SELECT 1",
+        )
+        .forEach { query ->
+          val error = runCatching {
+            provider.handleExecuteSQL(
+              driver,
+              executeSqlExtras(query),
+              mutationCapabilities(allowMutations),
+            )
+          }
+            .exceptionOrNull()
+          assertTrue("Expected SqlError for $query, got $error", error is DatabaseError.SqlError)
+          assertEquals("SQL error: Multiple SQL statements are not supported", error?.message)
+        }
+    }
+    assertEquals(1, driver.getTableData(databasePath, "notes", 10, 0).total)
+    assertEquals(1, driver.getTableData(databasePath, "backup", 10, 0).total)
+  }
+
+  @Test
+  fun `multiple statements return the diagnostic code in the provider error envelope`() {
+    DatabaseInspector.initialize(context)
+    DatabaseInspector.setEnabled(true)
+    driver.executeSQL(databasePath, "CREATE TABLE backup AS SELECT * FROM notes")
+
+    listOf(true, false).forEach { allowMutations ->
+      val result =
+        provider.callWithCapabilities(
+          "executeSQL",
+          executeSqlExtras("DELETE FROM notes; DELETE FROM backup"),
+          mutationCapabilities(allowMutations),
+        )
+
+      assertTrue(!result.getBoolean("success"))
+      val error = JSONObject(result.getString("result") ?: throw AssertionError("no result JSON"))
+      assertEquals("multiple_statements_not_supported", error.getString("errorType"))
+      assertEquals("Multiple SQL statements are not supported", error.getString("error"))
+    }
+    assertEquals(1, driver.getTableData(databasePath, "notes", 10, 0).total)
+    assertEquals(1, driver.getTableData(databasePath, "backup", 10, 0).total)
+  }
+
+  @Test
+  fun `ordinary sql errors retain their existing provider error type`() {
+    DatabaseInspector.initialize(context)
+    DatabaseInspector.setEnabled(true)
+
+    val result = provider.call("executeSQL", null, executeSqlExtras("SELECT * FROM missing_table"))
+
+    assertTrue(!result.getBoolean("success"))
+    val error = JSONObject(result.getString("result") ?: throw AssertionError("no result JSON"))
+    assertEquals("SqlError", error.getString("errorType"))
+    assertTrue(error.getString("error").startsWith("SQL error:"))
   }
 
   private fun mutationCapabilities(allowMutations: Boolean) =

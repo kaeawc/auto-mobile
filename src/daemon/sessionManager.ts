@@ -1,3 +1,4 @@
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { Rotate, type RotationRestoreState } from "../features/action/Rotate";
@@ -987,7 +988,9 @@ export class SessionManager {
     // Seam for keep-awake restore (issue #2973): defaults to the real manager;
     // tests inject a fake to assert the typed slot's payload reaches `restore`.
     keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer = (device) =>
-      new KeepScreenAwakeManager(device),
+      new KeepScreenAwakeManager(device, defaultAdbClientFactory, (device) =>
+        AndroidCtrlProxyClient.getInstance(device),
+      ),
     // Simulator enrollment is session-scoped state. Keep this seam parallel to
     // keep-awake so lifecycle tests never invoke simctl.
     biometricEnrollmentRestorerFactory: (device: BootedDevice) => BiometricEnrollmentRestorer = (
@@ -1518,15 +1521,17 @@ export class SessionManager {
    */
   private async reclaimAndRefreshExistingSession(existing: Session): Promise<void> {
     const now = this.timer.now();
-    if (existing.ownership === "awaiting-owner") {
-      existing.ownership = "owned";
-      existing.awaitingOwnerSince = undefined;
-    }
     const previousActivity = {
       lastUsedAt: existing.lastUsedAt,
       lastHeartbeat: existing.lastHeartbeat,
       expiresAt: existing.expiresAt,
+      ownership: existing.ownership,
+      awaitingOwnerSince: existing.awaitingOwnerSince,
     };
+    if (existing.ownership === "awaiting-owner") {
+      existing.ownership = "owned";
+      existing.awaitingOwnerSince = undefined;
+    }
     existing.lastUsedAt = now;
     existing.lastHeartbeat = now;
     existing.expiresAt = now + existing.sessionTimeoutMs;
@@ -1538,7 +1543,9 @@ export class SessionManager {
       // An awaited activity refresh cannot advertise fresh in-memory liveness
       // after its durable write failed; callers receive the typed failure.
       // Only the latest refresh may roll back, so an older failure cannot clobber newer liveness.
-      rollbackSessionActivityIfCurrent(existing, previousActivity, capturedGeneration);
+      if (existing.activityGeneration === capturedGeneration) {
+        Object.assign(existing, previousActivity);
+      }
       throw error;
     }
   }
@@ -2276,13 +2283,9 @@ export class SessionManager {
         this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
       );
     });
-    try {
-      await this.restoreKeepScreenAwake(existing);
-    } catch (error) {
-      logger.warn(
-        `Failed to restore keep-awake state for rebound session ${existing.sessionId}: ${error}`,
-      );
-    }
+    const pendingKeepScreenAwakeRestoration = (
+      await this.restoreKeepScreenAwakeBestEffort(existing)
+    ).pending;
     // Same contract as release: a failed restore must not hand the old
     // simulator back to the pool clean. Any outstanding retry is registered
     // against that device below, so DevicePool.releaseDevice defers idling it.
@@ -2304,6 +2307,7 @@ export class SessionManager {
       : null;
     const previousDevice = existing.assignedDevice;
     const pendingRebindCleanup = [
+      pendingKeepScreenAwakeRestoration,
       pendingBiometricRestoration,
       pendingNetworkRestoration,
       pendingClockRestoration,
@@ -4768,6 +4772,9 @@ export class SessionManager {
       lastUsedAt: session.lastUsedAt,
       lastHeartbeat: session.lastHeartbeat,
       expiresAt: session.expiresAt,
+      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      ownership: session.ownership,
+      awaitingOwnerSince: session.awaitingOwnerSince,
     };
     session.lastHeartbeat = now;
     session.lastUsedAt = now;
@@ -4782,8 +4789,13 @@ export class SessionManager {
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch((error) => {
-        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
+        if (session.activityGeneration === capturedGeneration) {
+          Object.assign(session, previousActivity);
+        }
+        logger.warn(
+          `[SessionManager] Failed to record session activity: ${errorMessage(error)}`,
+          error,
+        );
       });
   }
 

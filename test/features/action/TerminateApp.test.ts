@@ -25,7 +25,124 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { setDebugPerfEnabled } from "../../../src/utils/PerformanceTracker";
 import type { TimingData, TimingEntry } from "../../../src/utils/PerformanceTracker";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import {
+  getObserveCacheStore,
+  setObserveCacheStore,
+} from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
+
+describe("TerminateApp (Android install listing)", () => {
+  const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
+  let adb: FakeAdbClient;
+  let app: TerminateApp;
+  let ctrlProxySpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+
+  beforeEach(() => {
+    adb = new FakeAdbClient();
+    adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    app = new TerminateApp(device, adb as unknown as AdbClient, { timer });
+    ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable");
+    });
+  });
+
+  afterEach(() => ctrlProxySpy.mockRestore());
+
+  test("rejects a failed listing with the adb reason and no force-stop", async () => {
+    const offline = new Error("device offline");
+    adb.setCommandError("shell pm list packages --user 0", offline);
+    const outcome = app.execute("com.example.app", { skipObservation: true });
+    await expect(outcome).rejects.toBeInstanceOf(ActionableError);
+    await expect(outcome).rejects.toThrow("device offline");
+    await expect(outcome).rejects.toMatchObject({ cause: offline });
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("preserves the exact not-installed result after a successful listing", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.other");
+    expect(await app.execute("com.example.app", { skipObservation: true })).toEqual({
+      success: true,
+      packageName: "com.example.app",
+      wasInstalled: false,
+      wasRunning: false,
+      wasForeground: false,
+      userId: 0,
+    });
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("force-stops an installed running package", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    const result = await app.execute("com.example.app", { skipObservation: true });
+    expect(result).toMatchObject({ success: true, wasInstalled: true, wasRunning: true });
+    expect(adb.wasCommandExecuted("shell am force-stop --user 0 'com.example.app'")).toBe(true);
+  });
+
+  test("propagates an aborted request as cancellation", async () => {
+    const signal = AbortSignal.abort();
+    await expect(
+      runWithAbortSignal(signal, () => app.execute("com.example.app", { skipObservation: true })),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("cancellation during CtrlProxy lookup prevents the shell fallback", async () => {
+    const controller = new AbortController();
+    ctrlProxySpy.mockImplementation(() => {
+      controller.abort();
+      throw new Error("CtrlProxy lookup interrupted");
+    });
+    await expect(
+      app.execute("com.example.app", { skipObservation: true }, controller.signal),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(adb.wasCommandExecuted("shell pm list packages")).toBe(false);
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("passes the signal to the shell listing and preserves cancellation during it", async () => {
+    const controller = new AbortController();
+    const executeCommand = adb.executeCommand.bind(adb);
+    const commandSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+      const result = await executeCommand(...args);
+      if (args[0] === "shell pm list packages --user 0") {
+        expect(args[4]).toBe(controller.signal);
+        controller.abort();
+        throw new Error("listing interrupted");
+      }
+      return result;
+    });
+    try {
+      await expect(
+        app.execute("com.example.app", { skipObservation: true }, controller.signal),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    } finally {
+      commandSpy.mockRestore();
+    }
+  });
+
+  test.each([new DOMException("Aborted", "AbortError"), new Error(OPERATION_CANCELLED_MESSAGE)])(
+    "propagates shell cancellation without wrapping it: %s",
+    async (cancelled) => {
+      adb.setCommandError("shell pm list packages --user 0", cancelled);
+      await expect(app.execute("com.example.app", { skipObservation: true })).rejects.toBe(
+        cancelled,
+      );
+      expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    },
+  );
+});
 
 describe("TerminateApp (iOS)", () => {
   // Simulator UDIDs are 8-4-4-4-12 UUIDs; isIosSimulatorUdid keys the simctl vs
@@ -88,6 +205,109 @@ describe("TerminateApp (iOS)", () => {
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(true);
   });
 
+  test.each([true, false])(
+    "discards the terminated app's hierarchy and observe cache (skipObservation=%s)",
+    async (skipObservation) => {
+      // The shared fake tracks cache presence, but retains its configured wire
+      // response. Model the real client's clearCache(), which also nulls the tree.
+      class CachedIOSCtrlProxy extends FakeIOSCtrlProxy {
+        readonly clearedSdkApplications: string[] = [];
+
+        override clearCache(): void {
+          super.clearCache();
+          this.setHierarchyData(null);
+        }
+
+        clearSdkScreenIdentity(bundleId: string): void {
+          this.clearedSdkApplications.push(bundleId);
+        }
+      }
+
+      const client = new CachedIOSCtrlProxy(fakeTimer);
+      client.setHierarchyData({
+        packageName: "com.example.app",
+        updatedAt: fakeTimer.now(),
+        hierarchy: { text: "pre-terminate screen" },
+      });
+      client.setCachedHierarchy(true);
+      const cacheStore = new FakeObserveCacheStore(fakeTimer);
+      const previousStore = getObserveCacheStore();
+      setObserveCacheStore(cacheStore);
+      const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
+        client as unknown as IOSCtrlProxyClient,
+      );
+
+      try {
+        const stale: ObserveResult = {
+          display: { key: "primary", role: "inner", posture: "opened", generation: 0 },
+          observationId: "pre-terminate",
+          updatedAt: fakeTimer.now(),
+          screenSize: { width: 1170, height: 2532 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: {
+            packageName: "com.example.app",
+            updatedAt: fakeTimer.now(),
+            hierarchy: { node: { text: "pre-terminate screen" } },
+          },
+        };
+        await cacheStore.put(iosDevice.deviceId, stale);
+        await cacheStore.put("other-device", stale);
+        expect((await client.getLatestHierarchy()).hierarchy?.packageName).toBe("com.example.app");
+        expect(RealObserveScreen.getRecentCachedResultForDevice(iosDevice.deviceId)).toBe(stale);
+        fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+
+        const terminateApp = new TerminateApp(iosDevice, null, {
+          simctl: fakeSimctl,
+          timer: fakeTimer,
+        });
+        const observeScreen = new FakeObserveScreen();
+        const postActionCacheStates: Array<{ hierarchyCached: boolean; observeCached: boolean }> =
+          [];
+        observeScreen.setObserveResult(() => {
+          const cached = RealObserveScreen.getRecentCachedResultForDevice(iosDevice.deviceId);
+          if (fakeSimctl.wasMethodCalled("terminateApp")) {
+            postActionCacheStates.push({
+              hierarchyCached: client.hasCachedHierarchy(),
+              observeCached: cached !== undefined,
+            });
+          }
+          return (
+            cached ?? {
+              ...stale,
+              observationId: "post-terminate",
+              viewHierarchy: {
+                updatedAt: fakeTimer.now(),
+                packageName: "com.apple.springboard",
+                hierarchy: { node: { text: "Home screen" } },
+              },
+            }
+          );
+        });
+        terminateApp.observeScreen = observeScreen;
+        terminateApp.window = new FakeWindow();
+        terminateApp.awaitIdle = new FakeAwaitIdle();
+
+        const result = await terminateApp.execute("com.example.app", { skipObservation });
+
+        expect(result.success).toBe(true);
+        expect({
+          hierarchy: (await client.getLatestHierarchy()).hierarchy,
+          observation: RealObserveScreen.getRecentCachedResultForDevice(iosDevice.deviceId),
+        }).toEqual({ hierarchy: null, observation: undefined });
+        expect(client.clearCacheCallCount).toBe(1);
+        expect(client.clearedSdkApplications).toEqual(["com.example.app"]);
+        expect(RealObserveScreen.getRecentCachedResultForDevice("other-device")).toBe(stale);
+        if (!skipObservation) {
+          expect(postActionCacheStates).toEqual([{ hierarchyCached: false, observeCached: false }]);
+          expect(result.observation?.viewHierarchy?.packageName).toBe("com.apple.springboard");
+        }
+      } finally {
+        existingClientSpy.mockRestore();
+        setObserveCacheStore(previousStore);
+      }
+    },
+  );
+
   test("marks app as not running when simctl reports no process", async () => {
     class NoProcessSimctl extends FakeSimctl {
       override async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
@@ -98,16 +318,23 @@ describe("TerminateApp (iOS)", () => {
 
     const noProcessSimctl = new NoProcessSimctl();
     noProcessSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
     const terminateApp = new TerminateApp(iosDevice, null, {
       simctl: noProcessSimctl,
       timer: fakeTimer,
+      cacheInvalidator,
     });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
-    expect(result.success).toBe(true);
-    expect(result.wasInstalled).toBe(true);
-    expect(result.wasRunning).toBe(false);
+    expect(result).toEqual({
+      success: true,
+      packageName: "com.example.app",
+      wasInstalled: true,
+      wasRunning: false,
+      wasForeground: false,
+    });
+    expect(cacheInvalidator.calls).toEqual([iosDevice]);
   });
 
   test("marks app as not running when simctl reports a process-scoped 'not running' (shared matcher)", async () => {
@@ -142,10 +369,12 @@ describe("TerminateApp (iOS)", () => {
 
     const deviceDownSimctl = new DeviceDownSimctl();
     deviceDownSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
     const terminateApp = new TerminateApp(iosDevice, null, {
       simctl: deviceDownSimctl,
       timer: fakeTimer,
+      cacheInvalidator,
     });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
@@ -153,14 +382,17 @@ describe("TerminateApp (iOS)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/device is not running/i);
     expect(result.wasRunning).toBe(true);
+    expect(cacheInvalidator.calls).toEqual([]);
   });
 
   test("returns not installed when bundle id is missing", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.other" }]);
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
     const terminateApp = new TerminateApp(iosDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
+      cacheInvalidator,
     });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
@@ -168,6 +400,7 @@ describe("TerminateApp (iOS)", () => {
     expect(result.wasInstalled).toBe(false);
     expect(result.wasRunning).toBe(false);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
+    expect(cacheInvalidator.calls).toEqual([]);
   });
 
   test("reports a failure instead of a no-op when the installed-app listing fails", async () => {
@@ -226,11 +459,13 @@ describe("TerminateApp (iOS physical device)", () => {
     const terminator = new FakeDeviceAppTerminator({
       result: { wasInstalled: true, wasRunning: true },
     });
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
     const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      cacheInvalidator,
     });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
@@ -245,17 +480,20 @@ describe("TerminateApp (iOS physical device)", () => {
       { deviceUdid: "00008110-001A2B3C4D5E6F70", bundleId: "com.example.app" },
     ]);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
+    expect(cacheInvalidator.calls).toEqual([iosPhysicalDevice]);
   });
 
   test("reports wasRunning:false when the app is installed but not running", async () => {
     const terminator = new FakeDeviceAppTerminator({
       result: { wasInstalled: true, wasRunning: false },
     });
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
     const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      cacheInvalidator,
     });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
@@ -263,17 +501,20 @@ describe("TerminateApp (iOS physical device)", () => {
     expect(result.wasInstalled).toBe(true);
     expect(result.wasRunning).toBe(false);
     expect(terminator.terminateCalls).toHaveLength(1);
+    expect(cacheInvalidator.calls).toEqual([iosPhysicalDevice]);
   });
 
   test("reports wasInstalled:false when the app is not installed", async () => {
     const terminator = new FakeDeviceAppTerminator({
       result: { wasInstalled: false, wasRunning: false },
     });
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
     const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      cacheInvalidator,
     });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
@@ -281,16 +522,19 @@ describe("TerminateApp (iOS physical device)", () => {
     expect(result.wasInstalled).toBe(false);
     expect(result.wasRunning).toBe(false);
     expect(terminator.terminateCalls).toHaveLength(1);
+    expect(cacheInvalidator.calls).toEqual([]);
   });
 
   test("surfaces a clear error when devicectl termination is unsupported (iOS<=16 / non-macOS)", async () => {
     const terminator = new FakeDeviceAppTerminator();
     terminator.setError(new Error("Physical iOS device app termination requires macOS"));
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
     const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      cacheInvalidator,
     });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
@@ -302,6 +546,7 @@ describe("TerminateApp (iOS physical device)", () => {
     expect(result.wasRunning).toBeUndefined();
     // A failure must not crash and must not fall back to simctl.
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
+    expect(cacheInvalidator.calls).toEqual([]);
   });
 
   test("simulator path never invokes the devicectl terminator", async () => {
@@ -549,23 +794,18 @@ describe("TerminateApp (Android)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
-  test("treats package-list query failure as not installed", async () => {
+  test("surfaces package-list query failure", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
-    // Query failures follow the existing safe not-installed fallback.
     fakeAdb.setCommandError(
       "shell pm list packages --user 0",
       new Error("Command failed with exit code 1"),
     );
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
-    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
-
-    expect(result.success).toBe(true);
-    expect(result.wasInstalled).toBe(false);
-    expect(result.wasRunning).toBe(false);
-    expect(result.wasForeground).toBe(false);
-    expect(result.userId).toBe(0);
+    await expect(
+      terminateApp.execute("com.example.app", { skipObservation: true }),
+    ).rejects.toThrow("Command failed with exit code 1");
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
 });

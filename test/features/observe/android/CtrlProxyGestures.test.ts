@@ -8,6 +8,15 @@ import type { DelegateContext } from "../../../../src/features/observe/shared/ty
 import type { A11ySwipeResult } from "../../../../src/features/observe/android/types";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { RequestManager } from "../../../../src/utils/RequestManager";
+import { ExecuteGesture } from "../../../../src/features/action/ExecuteGesture";
+import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
+import {
+  getReturnDuration,
+  validateSwipeTimingOptions,
+  SWIPE_BOOMERANG_MAX_MS,
+  SWIPE_RETURN_DURATION_MAX_MS,
+} from "../../../../src/features/action/swipeon/swipeTiming";
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../../src/features/observe/shared/SharedGestureDelegate";
 
 /**
  * Tests for the Android two-finger swipe result correlation (#2988).
@@ -53,6 +62,120 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
 async function flush(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
+
+describe("Android swipe request duration bounds", () => {
+  it("the longest public boomerang keeps each request pending through its planned end", async () => {
+    const { context, sent, timer, requestManager } = createFakeContext();
+    const client = AndroidCtrlProxyClient.createForTesting(
+      { deviceId: "maximum-swipe", platform: "android", name: "Fake" },
+      new FakeAdbExecutor(),
+      undefined,
+      timer,
+    );
+    client["_gestures"] = new CtrlProxyGestures(context);
+    const forwardDuration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
+    const options = { boomerang: true, apexPause: 1400, returnSpeed: 0.2 };
+    expect(validateSwipeTimingOptions(options, forwardDuration)).toBeNull();
+    const returnDuration = getReturnDuration({ forwardDuration, returnSpeed: options.returnSpeed });
+    expect(forwardDuration).toBe(600);
+    expect(returnDuration).toBe(SWIPE_RETURN_DURATION_MAX_MS);
+    expect(forwardDuration + options.apexPause + returnDuration).toBe(SWIPE_BOOMERANG_MAX_MS);
+    expect(validateSwipeTimingOptions({ ...options, apexPause: 1401 }, forwardDuration)).toContain(
+      "boomerang duration must be <= 5000ms",
+    );
+
+    for (const duration of [forwardDuration, returnDuration]) {
+      const pending = client.requestSwipe(10, 20, 30, 40, duration);
+      await flush();
+      expect(timer.getPendingTimeouts()).toEqual([DEFAULT_GESTURE_REQUEST_TIMEOUT_MS]);
+      const message = JSON.parse(sent.at(-1)!) as { requestId: string; duration: number };
+      expect(message.duration).toBe(duration);
+      timer.advanceTime(duration);
+      await flush();
+      expect(requestManager.getPendingCount()).toBe(1);
+      // Completion is driven by the reply, not by the planned duration. Model a late reply.
+      timer.advanceTime(1);
+      expect(
+        requestManager.resolve(message.requestId, { success: true, totalTimeMs: duration + 1 }),
+      ).toBe(true);
+      expect((await pending).success).toBe(true);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      if (duration === forwardDuration) {
+        timer.advanceTime(options.apexPause);
+      }
+    }
+    expect(timer.now()).toBe(SWIPE_BOOMERANG_MAX_MS + 2);
+    expect(sent).toHaveLength(2);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+
+  it("the longest public two-finger swipe has simultaneous fingers and a 5s timeout", async () => {
+    const { context, sent, timer, requestManager } = createFakeContext();
+    const gestures = new CtrlProxyGestures(context);
+    const duration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
+    const pending = gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration);
+    await flush();
+    expect(timer.getPendingTimeouts()).toEqual([5000]);
+    timer.advanceTime(duration + 1);
+    expect(requestManager.getPendingCount()).toBe(1);
+    const message = JSON.parse(sent[0]) as { requestId: string; duration: number; offset: number };
+    expect(message.duration).toBe(600);
+    expect(message.offset).toBe(100);
+    requestManager.resolve(message.requestId, { success: true, totalTimeMs: duration + 1 });
+    expect((await pending).success).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  it("an ordinary swipe preserves its wire duration and exact 5s timeout", async () => {
+    const { context, sent, timer, requestManager } = createFakeContext();
+    const pending = new CtrlProxyGestures(context).requestSwipe(10, 20, 30, 40);
+    await flush();
+    expect(JSON.parse(sent[0])).toMatchObject({ type: "request_swipe", duration: 300 });
+    expect(timer.getPendingTimeouts()).toEqual([5000]);
+    timer.advanceTime(4999);
+    expect(requestManager.getPendingCount()).toBe(1);
+    timer.advanceTime(1);
+    expect(await pending).toMatchObject({
+      success: false,
+      totalTimeMs: 5000,
+      error: "Swipe timed out after 5000ms",
+    });
+    expect(sent).toHaveLength(1);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+
+  it("a timeout after dispatch is indeterminate and never falls back to a second swipe", async () => {
+    const { context, sent, timer, requestManager } = createFakeContext();
+    const device = {
+      deviceId: "dispatched-swipe-timeout",
+      platform: "android",
+      name: "Fake",
+    } as const;
+    const adb = new FakeAdbExecutor();
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, undefined, timer);
+    client["_gestures"] = new CtrlProxyGestures(context);
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    try {
+      const pending = new ExecuteGesture(device, adb, timer).swipe(10, 20, 30, 40, {
+        scrollMode: "a11y",
+        duration: SWIPE_RETURN_DURATION_MAX_MS,
+      });
+      await flush();
+      expect(sent).toHaveLength(1);
+      timer.advanceTime(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+      expect(await pending).toMatchObject({
+        success: false,
+        error: expect.stringContaining("Swipe outcome is indeterminate"),
+      });
+      expect(adb.getExecutedCommands()).toEqual([]);
+      expect(sent).toHaveLength(1);
+      expect(requestManager.getPendingCount()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      getInstance.mockRestore();
+    }
+  });
+});
 
 describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
   it("resolves from a swipe_result frame before the timeout fires (success)", async () => {
@@ -664,4 +787,52 @@ it("tap cancellation inside the pre-send guard prevents dispatch and cleans regi
   expect(outcome.error).toBe(reason);
   expect(requestManager.getPendingCount()).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+describe("Android client drag dispatch hook", () => {
+  it("fires onDispatch after send and forwards signal, display and beforeSend", async () => {
+    const { context, sent, requestManager, timer } = createFakeContext({
+      isCommandSupported: () => true,
+    });
+    const client = AndroidCtrlProxyClient.createForTesting(
+      { deviceId: "client-drag-dispatch", platform: "android", name: "Fake" },
+      new FakeAdbExecutor(),
+      undefined,
+      timer,
+    );
+    client["_gestures"] = new CtrlProxyGestures(context);
+    const controller = new AbortController();
+    const phases: string[] = [];
+    const pending = client.requestDrag(
+      1,
+      2,
+      3,
+      4,
+      600,
+      300,
+      100,
+      5000,
+      undefined,
+      controller.signal,
+      2,
+      () => {
+        expect(sent).toHaveLength(0);
+        phases.push("beforeSend");
+      },
+      () => {
+        expect(sent).toHaveLength(1);
+        phases.push("dispatched");
+      },
+    );
+    await flush();
+    const message = JSON.parse(sent[0]) as { type: string; displayId: number };
+    expect(message.type).toBe("request_drag");
+    expect(message.displayId).toBe(2);
+    controller.abort(new Error("drag caller cancelled"));
+    await expect(pending).rejects.toThrow("drag caller cancelled");
+    expect(phases).toEqual(["beforeSend", "dispatched"]);
+    expect(sent).toHaveLength(1);
+    expect(requestManager.getPendingCount()).toBe(0);
+    expect(timer.now()).toBe(0);
+  });
 });

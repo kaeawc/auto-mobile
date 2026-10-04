@@ -6,6 +6,13 @@ import {
   stopTestRecording,
 } from "../../src/server/testRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { DualTrackRecorder } from "../../src/features/record/android/DualTrackRecorder";
+import type {
+  A11ySource,
+  GestureEmitter,
+  GestureEvent,
+  ReceivedInteraction,
+} from "../../src/features/record/android/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 class Deferred<T> {
@@ -272,6 +279,117 @@ describe("testRecordingManager stopping reservation", () => {
     expect(nextStarted.recordingId).not.toBe(started.recordingId);
     await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
+    );
+  });
+});
+
+class RecordingGestures implements GestureEmitter {
+  onGesture?: (event: GestureEvent) => void;
+  onError?: (error: Error) => void;
+  start(onGesture: (event: GestureEvent) => void, onError?: (error: Error) => void): void {
+    this.onGesture = onGesture;
+    this.onError = onError;
+  }
+  stop(): void {
+    this.onError?.(new Error("getevent shutdown"));
+  }
+}
+
+class RecordingA11y implements A11ySource {
+  listener?: (event: ReceivedInteraction) => void;
+  async ensureConnected(): Promise<boolean> {
+    return true;
+  }
+  async getSupportedCommands(): Promise<string[] | null> {
+    return [];
+  }
+  onInteraction(listener: (event: ReceivedInteraction) => void): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+}
+
+async function startDualTrack() {
+  const timer = new FakeTimer();
+  timer.advanceTime(10_000);
+  const gestures = new RecordingGestures();
+  const a11y = new RecordingA11y();
+  await startTestRecording(
+    device,
+    timer,
+    new CountingIdGenerator("touch-health"),
+    () => new DualTrackRecorder(device, gestures, a11y, timer),
+  );
+  return { timer, gestures, a11y };
+}
+
+describe("testRecordingManager touch-track health", () => {
+  test("spawn failure with zero steps rejects with actionable getevent cause", async () => {
+    const { timer, gestures } = await startDualTrack();
+    gestures.onError?.(new Error("spawn adb ENOENT"));
+    const outcome = await stopTestRecording(undefined, "failed-touch", timer).catch(
+      (error: unknown) => error,
+    );
+    expect(outcome).toBeInstanceOf(ActionableError);
+    expect(outcome).toHaveProperty(
+      "message",
+      "Failed to stop test recording: Touch track (getevent) stopped 0 ms after recording start: spawn adb ENOENT. Later taps may be missing.",
+    );
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
+  test.each(["code 1", "signal SIGTERM"])(
+    "partial touch plan warns at the first failure (%s)",
+    async (cause) => {
+      const { timer, gestures } = await startDualTrack();
+      gestures.onGesture?.({ type: "tap", arrivedAt: timer.now(), screenX: 10, screenY: 20 });
+      timer.advanceTime(1250);
+      gestures.onError?.(new Error(`getevent exited with ${cause}`));
+      timer.advanceTime(500);
+      gestures.onError?.(new Error("later error"));
+      const result = await stopTestRecording(undefined, "partial-touch", timer);
+      expect(result.stepCount).toBe(1);
+      expect(result.planContent).toContain("tapAt");
+      expect(result.error).toBe(
+        `Warning: Touch track (getevent) stopped 1250 ms after recording start: getevent exited with ${cause}. Later taps may be missing.`,
+      );
+      expect(result.durationMs).toBe(1750);
+    },
+  );
+
+  test("inputText-only partial plan survives with a warning after touch failure", async () => {
+    const { timer, gestures, a11y } = await startDualTrack();
+    gestures.onError?.(new Error("getevent permission denied"));
+    a11y.listener?.({ type: "tap", timestamp: 0 });
+    a11y.listener?.({ type: "inputText", text: "hello", timestamp: 0 });
+    a11y.listener?.({ type: "tap", timestamp: 0 });
+    const result = await stopTestRecording(undefined, "text-only", timer);
+    expect(result.stepCount).toBe(1);
+    expect(result.planContent).toContain("sendKeys");
+    expect(result.planContent).toContain("hello");
+    expect(result.error).toContain("getevent permission denied");
+    expect(result.error).toContain("Later taps may be missing");
+  });
+
+  test("healthy stop has no warning even when the emitter reports its own shutdown", async () => {
+    const { timer, gestures } = await startDualTrack();
+    gestures.onGesture?.({ type: "tap", arrivedAt: timer.now(), screenX: 10, screenY: 20 });
+    const result = await stopTestRecording(undefined, "healthy-touch", timer);
+    expect(result.stepCount).toBe(1);
+    expect(Object.keys(result).sort()).toEqual(
+      [
+        "recordingId",
+        "startedAt",
+        "stoppedAt",
+        "durationMs",
+        "planName",
+        "planContent",
+        "stepCount",
+        "deviceId",
+        "platform",
+      ].sort(),
     );
   });
 });

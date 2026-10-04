@@ -102,6 +102,7 @@ import {
 } from "../ScreenshotMetadata";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
+import { serializeIosRequest } from "./serializeIosRequest";
 import { iosMutationTokens } from "../../storage/IosMutationTokens";
 
 /** Pending requests lose their transport when the service endpoint changes. */
@@ -283,7 +284,11 @@ import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
-import { gesturePhaseSummary, decodeCtrlProxyMessage } from "./decodeCtrlProxyMessage";
+import {
+  gesturePhaseSummary,
+  decodeCtrlProxyMessage,
+  type DecodedCtrlProxyMessage,
+} from "./decodeCtrlProxyMessage";
 import { DefaultIosSdkEventIngestor, type IosSdkEventIngestor } from "./IosSdkEventIngestor";
 import { deriveIosSdkScreenIdentity } from "./IosSdkScreenIdentity";
 
@@ -1753,6 +1758,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
+      serializeRequest: serializeIosRequest,
       getReconnectStatus: () => this.getReconnectStatus(),
       isCommandSupported: (messageType) => this.isCommandSupported(messageType),
       getSupportedCommands: () => this.getSupportedCommands(),
@@ -2622,19 +2628,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const currentEpoch = this.sdkScreenIdentitySessionEpochsByApplicationId.get(applicationId);
     const currentSessionId = this.sdkScreenIdentitySessionsByApplicationId.get(applicationId);
     if (
-      sessionEpoch !== undefined &&
-      currentEpoch !== undefined &&
-      (sessionEpoch < currentEpoch ||
-        (sessionEpoch === currentEpoch && currentSessionId && currentSessionId !== sessionId))
+      this.isOlderSdkScreenIdentitySession(sessionId, sessionEpoch, currentEpoch, currentSessionId)
     ) {
       return false;
     }
     const startedSessionId =
       this.sdkScreenIdentityStartedSessionsByApplicationId.get(applicationId);
     if (
-      startedSessionId &&
-      startedSessionId !== sessionId &&
-      (sessionEpoch === undefined || currentEpoch === undefined || sessionEpoch <= currentEpoch)
+      this.isConflictingStartedSdkSession(startedSessionId, sessionId, sessionEpoch, currentEpoch)
     ) {
       return false;
     }
@@ -2651,6 +2652,33 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.sdkScreenIdentitySessionEpochsByApplicationId.set(applicationId, sessionEpoch);
     }
     return true;
+  }
+
+  private isOlderSdkScreenIdentitySession(
+    sessionId: string,
+    sessionEpoch: number | undefined,
+    currentEpoch: number | undefined,
+    currentSessionId: string | undefined,
+  ): boolean {
+    return Boolean(
+      sessionEpoch !== undefined &&
+      currentEpoch !== undefined &&
+      (sessionEpoch < currentEpoch ||
+        (sessionEpoch === currentEpoch && currentSessionId && currentSessionId !== sessionId)),
+    );
+  }
+
+  private isConflictingStartedSdkSession(
+    startedSessionId: string | undefined,
+    sessionId: string,
+    sessionEpoch: number | undefined,
+    currentEpoch: number | undefined,
+  ): boolean {
+    return Boolean(
+      startedSessionId &&
+      startedSessionId !== sessionId &&
+      (sessionEpoch === undefined || currentEpoch === undefined || sessionEpoch <= currentEpoch),
+    );
   }
 
   private startSdkScreenIdentitySession(
@@ -3049,30 +3077,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Handle push messages (no requestId)
     if (type === "connected") {
-      if (this.transientObserver) {
-        return;
-      }
-      this.rejectedCommands.clear();
-      this.supportedCommands = Array.isArray(message.supportedCommands)
-        ? new Set(message.supportedCommands)
-        : null;
-      this.supportedFeatures = Array.isArray(message.supportedFeatures)
-        ? new Set(message.supportedFeatures)
-        : null;
-      try {
-        this.syncHierarchyCadenceToDevice();
-      } catch (error) {
-        logger.warn(
-          `[IOSCtrlProxyClient] Hierarchy cadence sync failed: ${errorMessage(error)}`,
-          error,
-        );
-      }
-      this.invalidateSdkCapabilities();
-      void this.refreshSdkCapabilitiesAndSync().catch((error) => {
-        // SDK absence/version skew is expected; this trace is diagnostic only.
-        logger.debug(`[IOSCtrlProxyClient] SDK capability refresh failed: ${error}`);
-      });
-      logger.info(`[IOSCtrlProxyClient] Received connected message`);
+      this.processConnectedMessage(message);
       return;
     }
 
@@ -3081,125 +3086,23 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     if (type === "hierarchy_update" && message.data) {
-      if (
-        this.transientObserver &&
-        (!requestId || !this.observerHierarchyRequestIds.has(requestId))
-      ) {
+      if (!this.prepareHierarchyMessage(message, requestId)) {
         return;
-      }
-      // Reject out-of-order pushes before they can affect cache or observation state.
-      if (this.ignoreOlderHierarchyPush(message)) {
-        return;
-      }
-      // Retain the additive #4548 scale metadata on RECEIPT — the moment the hierarchy first
-      // arrives — independent of whether it is later pushed to the observation stream. The push
-      // is skipped entirely when there is no device-data server, and suppressed for explicit
-      // initial-frame requests, so retaining inside pushHierarchyToObservationStream would leave
-      // getScreenScaleMetadata() null on exactly the paths #4549 must still be able to read.
-      const observerResponse = requestId
-        ? this.observerHierarchyRequestIds.delete(requestId)
-        : false;
-      if (!observerResponse) {
-        this.retainScaleMetadataFrom(message.data as XCTestHierarchy);
-        this.handleHierarchyUpdateForNavigation(message.data, message.perfTiming);
-      }
-      // Record layout telemetry event using converted hierarchy (same format as observation stream)
-      const converted = this.convertToViewHierarchyResult(message.data);
-      if (!observerResponse) {
-        this.sdkEventIngestor.recordLayoutTelemetryEvent(converted);
-      }
-      // Only push to observation stream for request-response updates (with requestId).
-      // Push messages (no requestId) are handled in the dedicated push-message branch below
-      // to avoid duplicate hierarchy events.
-      if (requestId) {
-        const suppressObservationStreamPush =
-          this.consumeHierarchyObservationStreamSuppression(requestId);
-        if (!suppressObservationStreamPush && !observerResponse) {
-          this.pushHierarchyToObservationStream(
-            converted,
-            message.data as XCTestHierarchy,
-            message.frameContext,
-          );
-        } else {
-          logger.debug(
-            "[IOSCtrlProxyClient] Suppressed hierarchy observation stream push for explicit initial-frame request",
-          );
-        }
       }
     }
 
     // Handle request/response messages (with requestId) first
-    if (requestId) {
-      const phases = gesturePhaseSummary(message.perfTiming);
-      if (phases) {
-        const line = `[IOSCtrlProxyClient] type=${type} requestId=${requestId} ${phases}`;
-        if (!this.requestManager.isPending(requestId)) {
-          logger.warn(`${line} lateResponse=true`);
-        } else {
-          logger.debug(line);
-        }
-      }
-      const decoded = decodeCtrlProxyMessage(message);
-      this.logTapDiagnostics(message, decoded?.result !== undefined);
-      if (decoded) {
-        if (decoded.runnerBusy && decoded.errorMessage !== undefined) {
-          this.requestManager.reject(decoded.requestId, new ActionableError(decoded.errorMessage));
-          return;
-        }
-        if (decoded.errorMessage !== undefined) {
-          this.rememberRejectedCommand(message.error);
-          this.requestManager.resolveError(
-            decoded.requestId,
-            decoded.errorMessage,
-            decoded.totalTimeMs ?? 0,
-            decoded.perfTiming ? { perfTiming: decoded.perfTiming } : undefined,
-          );
-          return;
-        }
-        this.requestManager.resolve(decoded.requestId, decoded.result);
-        return;
-      }
+    if (requestId && this.resolveMessageResponse(message, type, requestId)) {
+      return;
     }
 
+    this.processPushMessage(type, message);
+  }
+
+  private processPushMessage(type: string, message: WebSocketMessage): void {
     // Handle push messages (no requestId)
     if (type === "hierarchy_update" && message.data) {
-      // Push update from server
-      const now = this.timer.now();
-      const previous = this.cachedHierarchy;
-      this.cachedHierarchy = {
-        hierarchy: message.data,
-        receivedAt: now,
-        captureReceivedAt:
-          previous !== null && previous.hierarchy.updatedAt === message.data.updatedAt
-            ? (previous.captureReceivedAt ?? previous.receivedAt)
-            : now,
-        fresh: true,
-        perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
-        frameContext: message.frameContext,
-      };
-      this.resetOlderHierarchyPushRun();
-      this.cachedHierarchyDisplayRevision =
-        previous?.hierarchy.updatedAt === message.data.updatedAt
-          ? this.cachedHierarchyDisplayRevision
-          : displayTransitions.revision(this.device.deviceId);
-      logger.info(`[IOSCtrlProxyClient] Received hierarchy push update - UI changed`);
-
-      // Convert and push to observation stream for IDE plugins
-      const viewHierarchyResult = this.convertToViewHierarchyResult(message.data);
-      this.pushHierarchyToObservationStream(
-        viewHierarchyResult,
-        message.data as XCTestHierarchy,
-        message.frameContext,
-      );
-
-      // Start screenshot backoff sequence for real-time screenshot streaming
-      this.startScreenshotBackoff();
-
-      // Performance monitoring is handled in handleHierarchyUpdateForNavigation
-      // which runs for ALL hierarchy_update messages (both push and request-response)
-
-      // Notify listeners (e.g., ObserveScreen to clear its cache)
-      this.notifyPushUpdateListeners(message.data);
+      this.processHierarchyPush(message);
       return;
     }
 
@@ -3214,6 +3117,178 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       }
       return;
     }
+  }
+
+  private processConnectedMessage(message: WebSocketMessage): void {
+    if (this.transientObserver) {
+      return;
+    }
+    this.rejectedCommands.clear();
+    this.supportedCommands = Array.isArray(message.supportedCommands)
+      ? new Set(message.supportedCommands)
+      : null;
+    this.supportedFeatures = Array.isArray(message.supportedFeatures)
+      ? new Set(message.supportedFeatures)
+      : null;
+    try {
+      this.syncHierarchyCadenceToDevice();
+    } catch (error) {
+      logger.warn(
+        `[IOSCtrlProxyClient] Hierarchy cadence sync failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    this.invalidateSdkCapabilities();
+    void this.refreshSdkCapabilitiesAndSync().catch((error) => {
+      // SDK absence/version skew is expected; this trace is diagnostic only.
+      logger.debug(`[IOSCtrlProxyClient] SDK capability refresh failed: ${error}`);
+    });
+    logger.info(`[IOSCtrlProxyClient] Received connected message`);
+    return;
+  }
+
+  private prepareHierarchyMessage(
+    message: WebSocketMessage,
+    requestId: string | undefined,
+  ): boolean {
+    if (
+      this.transientObserver &&
+      (!requestId || !this.observerHierarchyRequestIds.has(requestId))
+    ) {
+      return false;
+    }
+    // Reject out-of-order pushes before they can affect cache or observation state.
+    if (this.ignoreOlderHierarchyPush(message)) {
+      return false;
+    }
+    // Retain the additive #4548 scale metadata on RECEIPT — the moment the hierarchy first
+    // arrives — independent of whether it is later pushed to the observation stream. The push
+    // is skipped entirely when there is no device-data server, and suppressed for explicit
+    // initial-frame requests, so retaining inside pushHierarchyToObservationStream would leave
+    // getScreenScaleMetadata() null on exactly the paths #4549 must still be able to read.
+    const observerResponse = requestId ? this.observerHierarchyRequestIds.delete(requestId) : false;
+    if (!observerResponse) {
+      this.retainScaleMetadataFrom(message.data! as XCTestHierarchy);
+      this.handleHierarchyUpdateForNavigation(message.data!, message.perfTiming);
+    }
+    // Record layout telemetry event using converted hierarchy (same format as observation stream)
+    const converted = this.convertToViewHierarchyResult(message.data!);
+    if (!observerResponse) {
+      this.sdkEventIngestor.recordLayoutTelemetryEvent(converted);
+    }
+    // Only push to observation stream for request-response updates (with requestId).
+    // Push messages (no requestId) are handled in the dedicated push-message branch below
+    // to avoid duplicate hierarchy events.
+    this.publishHierarchyResponse(message, requestId, converted, observerResponse);
+    return true;
+  }
+
+  private publishHierarchyResponse(
+    message: WebSocketMessage,
+    requestId: string | undefined,
+    converted: ViewHierarchyResult,
+    observerResponse: boolean,
+  ): void {
+    if (requestId) {
+      const suppressObservationStreamPush =
+        this.consumeHierarchyObservationStreamSuppression(requestId);
+      if (!suppressObservationStreamPush && !observerResponse) {
+        this.pushHierarchyToObservationStream(
+          converted,
+          message.data as XCTestHierarchy,
+          message.frameContext,
+        );
+      } else {
+        logger.debug(
+          "[IOSCtrlProxyClient] Suppressed hierarchy observation stream push for explicit initial-frame request",
+        );
+      }
+    }
+  }
+
+  private resolveMessageResponse(
+    message: WebSocketMessage,
+    type: string,
+    requestId: string,
+  ): boolean {
+    const phases = gesturePhaseSummary(message.perfTiming);
+    if (phases) {
+      const line = `[IOSCtrlProxyClient] type=${type} requestId=${requestId} ${phases}`;
+      if (!this.requestManager.isPending(requestId)) {
+        logger.warn(`${line} lateResponse=true`);
+      } else {
+        logger.debug(line);
+      }
+    }
+    const decoded = decodeCtrlProxyMessage(message);
+    this.logTapDiagnostics(message, decoded?.result !== undefined);
+    return this.resolveDecodedMessage(message, decoded);
+  }
+
+  private resolveDecodedMessage(
+    message: WebSocketMessage,
+    decoded: DecodedCtrlProxyMessage | null,
+  ): boolean {
+    if (decoded) {
+      if (decoded.runnerBusy && decoded.errorMessage !== undefined) {
+        this.requestManager.reject(decoded.requestId, new ActionableError(decoded.errorMessage));
+        return true;
+      }
+      if (decoded.errorMessage !== undefined) {
+        this.rememberRejectedCommand(message.error);
+        this.requestManager.resolveError(
+          decoded.requestId,
+          decoded.errorMessage,
+          decoded.totalTimeMs ?? 0,
+          decoded.perfTiming ? { perfTiming: decoded.perfTiming } : undefined,
+        );
+        return true;
+      }
+      this.requestManager.resolve(decoded.requestId, decoded.result);
+      return true;
+    }
+    return false;
+  }
+
+  private processHierarchyPush(message: WebSocketMessage): void {
+    // Push update from server
+    const now = this.timer.now();
+    const previous = this.cachedHierarchy;
+    this.cachedHierarchy = {
+      hierarchy: message.data!,
+      receivedAt: now,
+      captureReceivedAt:
+        previous !== null && previous.hierarchy.updatedAt === message.data!.updatedAt
+          ? (previous.captureReceivedAt ?? previous.receivedAt)
+          : now,
+      fresh: true,
+      perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
+      frameContext: message.frameContext,
+    };
+    this.resetOlderHierarchyPushRun();
+    this.cachedHierarchyDisplayRevision =
+      previous?.hierarchy.updatedAt === message.data!.updatedAt
+        ? this.cachedHierarchyDisplayRevision
+        : displayTransitions.revision(this.device.deviceId);
+    logger.info(`[IOSCtrlProxyClient] Received hierarchy push update - UI changed`);
+
+    // Convert and push to observation stream for IDE plugins
+    const viewHierarchyResult = this.convertToViewHierarchyResult(message.data!);
+    this.pushHierarchyToObservationStream(
+      viewHierarchyResult,
+      message.data! as XCTestHierarchy,
+      message.frameContext,
+    );
+
+    // Start screenshot backoff sequence for real-time screenshot streaming
+    this.startScreenshotBackoff();
+
+    // Performance monitoring is handled in handleHierarchyUpdateForNavigation
+    // which runs for ALL hierarchy_update messages (both push and request-response)
+
+    // Notify listeners (e.g., ObserveScreen to clear its cache)
+    this.notifyPushUpdateListeners(message.data!);
+    return;
   }
 
   private isCommandSupported(messageType: string): boolean {
@@ -4488,7 +4563,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     this.sendMessage(
-      JSON.stringify({
+      serializeIosRequest({
         type: "set_hierarchy_poll_interval",
         intervalMs,
       }),

@@ -1,5 +1,10 @@
+import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
-import { resolveVoiceOverActivateCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
+import {
+  assertLongPressFitsRequestBudget,
+  resolveVoiceOverActivateCtrlProxyTimeoutMs,
+} from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
@@ -7,7 +12,7 @@ import {
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import {
   ElementResolver,
@@ -3725,7 +3730,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal,
     // Internal orchestration policy; never part of TapOnElementOptions or tool schemas.
     recovery?: { throwOnKeyboardOcclusion?: boolean },
+    request?: { requestDeadlineMs?: number },
   ): Promise<TapOnFocusResult> {
+    // Validate before display resolution/observation can issue any device command.
+    if (options.action === "longPress") {
+      assertLongPressFitsRequestBudget(
+        this.getLongPressDuration(options),
+        request?.requestDeadlineMs === undefined
+          ? undefined
+          : request.requestDeadlineMs - this.timer.now(),
+      );
+    }
     if (options.display !== undefined) {
       const result = await this.executeOnDisplay(options, signal, recovery);
       if (result) {
@@ -4924,6 +4939,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private getLongPressDuration(options: TapOnElementOptions): number {
+    if (options.duration !== undefined && options.duration > LONG_PRESS_HARD_MAX_MS) {
+      throw new ActionableError(
+        `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${options.duration} ms`,
+      );
+    }
     if (typeof options.duration === "number" && options.duration > 0) {
       return options.duration;
     }
@@ -4951,28 +4971,57 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     const longPressTimeoutMs = Math.min(durationMs + 2_000, MAX_SETTIMEOUT_DELAY_MS);
     try {
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      await this.adb.executeCommand(
-        `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-        longPressTimeoutMs,
-        undefined,
-        undefined,
-        signal,
-      );
+      try {
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence?.assertCurrent();
+        await this.adb.executeCommand(
+          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          longPressTimeoutMs,
+          undefined,
+          undefined,
+          signal,
+        );
+      } catch (error) {
+        logger.warn(`[TapOnElement] touch input swipe failed: ${errorMessage(error)}`, error);
+        this.throwIfLongPressInterrupted(error, durationMs, signal);
+        if (error instanceof StaleDisplayError) {
+          throw error;
+        }
+        throwIfAborted(signal);
+        // Only a non-cancellation failure may use the legacy input source.
+        fence?.assertCurrent();
+        await this.adb.executeCommand(
+          `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          longPressTimeoutMs,
+          undefined,
+          undefined,
+          signal,
+        );
+      }
     } catch (error) {
+      logger.warn(`[TapOnElement] Android long press failed: ${errorMessage(error)}`, error);
+      this.throwIfLongPressInterrupted(error, durationMs, signal);
       if (error instanceof StaleDisplayError) {
         throw error;
       }
-      logger.warn(`[TapOnElement] touch input swipe failed, falling back to input swipe: ${error}`);
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      await this.adb.executeCommand(
-        `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-        longPressTimeoutMs,
-        undefined,
-        undefined,
-        signal,
+      throw toActionableError(error, "Android long press failed");
+    }
+  }
+
+  private throwIfLongPressInterrupted(
+    error: unknown,
+    durationMs: number,
+    signal?: AbortSignal,
+  ): void {
+    if (
+      signal?.aborted ||
+      error instanceof AdbCommandTimeoutError ||
+      (error instanceof Error && error.name === "AbortError")
+    ) {
+      // Killing host adb cannot cancel input's system_server injection.
+      throw new ActionableError(
+        `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
+        { cause: error },
       );
     }
   }

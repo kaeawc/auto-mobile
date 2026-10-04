@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { KeepScreenAwakeManager } from "../../src/utils/KeepScreenAwakeManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { describe, expect, spyOn, test } from "bun:test";
+import {
+  KeepScreenAwakeManager,
+  type KeepScreenAwakeSettingsClient,
+} from "../../src/utils/KeepScreenAwakeManager";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../src/models";
@@ -70,24 +72,19 @@ const physicalDevice: BootedDevice = {
   name: "Pixel 8",
 };
 
+const failingSettingsClient: KeepScreenAwakeSettingsClient = {
+  requestSettingsGet: async () => ({ success: false, found: false }),
+  requestSettingsPut: async () => ({ success: false }),
+};
+
 describe("KeepScreenAwakeManager", () => {
-  let a11ySpy: ReturnType<typeof spyOn>;
-
-  beforeEach(() => {
-    // Force all settings get/put through adb by making the a11y proxy report failure.
-    a11ySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestSettingsGet: async () => ({ success: false }),
-      requestSettingsPut: async () => ({ success: false }),
-    } as unknown as AndroidCtrlProxyClient);
-  });
-
-  afterEach(() => {
-    a11ySpy.mockRestore();
-  });
-
   test("apply(false) is a no-op with skipReason 'disabled' and touches no adb", async () => {
     const adb = new FakeAdb();
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     const state = await mgr.apply(false);
 
@@ -98,7 +95,11 @@ describe("KeepScreenAwakeManager", () => {
   test("skips non-android devices with skipReason 'unsupported'", async () => {
     const adb = new FakeAdb();
     const iosDevice: BootedDevice = { platform: "ios", deviceId: "sim-1", name: "iPhone" };
-    const mgr = new KeepScreenAwakeManager(iosDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      iosDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     const state = await mgr.apply(true);
 
@@ -109,7 +110,7 @@ describe("KeepScreenAwakeManager", () => {
   test("skips emulator devices (by deviceId prefix) with skipReason 'emulator'", async () => {
     const adb = new FakeAdb();
     const emulator: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "AVD" };
-    const mgr = new KeepScreenAwakeManager(emulator, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(emulator, makeFactory(adb), () => failingSettingsClient);
 
     const state = await mgr.apply(true);
 
@@ -121,7 +122,11 @@ describe("KeepScreenAwakeManager", () => {
     const adb = new FakeAdb({
       responses: [{ match: "getprop ro.kernel.qemu", stdout: "garbage" }],
     });
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     const state = await mgr.apply(true);
 
@@ -137,7 +142,11 @@ describe("KeepScreenAwakeManager", () => {
       ],
       // svc power stayon true resolves (not in reject list)
     });
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     const state = await mgr.apply(true);
 
@@ -159,7 +168,11 @@ describe("KeepScreenAwakeManager", () => {
         { match: "settings get system screen_off_timeout", stdout: "120000" },
       ],
     });
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     const state = await mgr.apply(true);
 
@@ -180,7 +193,11 @@ describe("KeepScreenAwakeManager", () => {
       ],
       rejectAt: [{ match: "settings get global stay_on_while_plugged_in", occurrence: 2 }],
     });
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     const state = await mgr.apply(true);
 
@@ -200,7 +217,11 @@ describe("KeepScreenAwakeManager", () => {
       ],
       reject: ["svc power stayon true"],
     });
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     const state = await mgr.apply(true);
 
@@ -214,7 +235,11 @@ describe("KeepScreenAwakeManager", () => {
 
   test("restore() reverts the settings method to the captured original values", async () => {
     const adb = new FakeAdb();
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     await mgr.restore({
       applied: true,
@@ -230,10 +255,90 @@ describe("KeepScreenAwakeManager", () => {
 
   test("restore() is a no-op when nothing was applied", async () => {
     const adb = new FakeAdb();
-    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
 
     await mgr.restore({ applied: false, skipReason: "disabled" });
 
     expect(adb.calls.length).toBe(0);
+  });
+  test("a two-method settings client supports apply, restore, and throwing fallback paths", async () => {
+    for (const mode of ["success", "method throws", "provider throws"]) {
+      const getCalls: Parameters<KeepScreenAwakeSettingsClient["requestSettingsGet"]>[] = [];
+      const putCalls: Parameters<KeepScreenAwakeSettingsClient["requestSettingsPut"]>[] = [];
+      const providerCalls: BootedDevice[] = [];
+      const client: KeepScreenAwakeSettingsClient = {
+        requestSettingsGet: async (...args) => {
+          getCalls.push(args);
+          if (mode === "method throws") {
+            throw new Error("settings get failed");
+          }
+          return { success: true, found: args[0] === "system", value: "60000" };
+        },
+        requestSettingsPut: async (...args) => {
+          putCalls.push(args);
+          if (mode === "method throws") {
+            throw new Error("settings put failed");
+          }
+          return { success: true };
+        },
+      };
+      const adb = new FakeAdb({
+        responses: [
+          { match: "getprop ro.kernel.qemu", stdout: "0" },
+          { match: "settings get global stay_on_while_plugged_in", stdout: "null" },
+          { match: "settings get system screen_off_timeout", stdout: "60000" },
+        ],
+        reject: ["svc power stayon true"],
+      });
+      const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb), (device) => {
+        providerCalls.push(device);
+        if (mode === "provider throws") {
+          throw new Error("settings provider failed");
+        }
+        return client;
+      });
+
+      const state = await mgr.apply(true);
+      expect(state.applied).toBe(true);
+      expect(state.method).toBe("settings");
+      expect(state.originalStayOnWhilePluggedIn).toBeNull();
+      expect(state.originalScreenOffTimeout).toBe("60000");
+      await mgr.restore(state);
+
+      expect(providerCalls).toEqual(Array(7).fill(physicalDevice));
+      expect(getCalls).toEqual(
+        mode === "provider throws"
+          ? []
+          : [
+              ["global", "stay_on_while_plugged_in"],
+              ["global", "stay_on_while_plugged_in"],
+              ["system", "screen_off_timeout"],
+            ],
+      );
+      expect(putCalls).toEqual(
+        mode === "provider throws"
+          ? []
+          : [
+              ["global", "stay_on_while_plugged_in", "7", "int"],
+              ["system", "screen_off_timeout", "2147483647", "long"],
+              ["global", "stay_on_while_plugged_in", null],
+              ["system", "screen_off_timeout", "60000", "long"],
+            ],
+      );
+      if (mode === "success") {
+        expect(adb.calls.filter((call) => call.includes("shell settings"))).toEqual([]);
+      } else {
+        expect(adb.called("settings get global stay_on_while_plugged_in")).toBe(true);
+        expect(adb.called("settings get system screen_off_timeout")).toBe(true);
+        expect(adb.called("settings put global stay_on_while_plugged_in 7")).toBe(true);
+        expect(adb.called("settings put system screen_off_timeout 2147483647")).toBe(true);
+        expect(adb.called("settings delete global stay_on_while_plugged_in")).toBe(true);
+        expect(adb.called("settings put system screen_off_timeout 60000")).toBe(true);
+      }
+    }
   });
 });

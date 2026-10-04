@@ -277,31 +277,40 @@ export function createIosCtrlProxyRunnerInspector(
         const selectedProbe = selectIosRunnerProbe(existing, running, () =>
           hooks.createClient(device, runnerPort ?? manager.getServicePort()),
         );
-        if (selectedProbe !== null) {
-          // Don't disturb a client someone else owns (e.g. the daemon's live
-          // session): if one already exists, read through it and leave its
-          // lifecycle alone. Otherwise open a throwaway probe client and close it
-          // afterwards so doctor leaves no persistent runner connection or SDK
-          // polling timer behind (especially for the one-shot CLI invocation).
-          try {
-            const identity = await awaitDoctorProbe(currentProbe, () =>
-              selectedProbe.client.getRunnerIdentityForDiagnostics(currentProbe.signal),
-            );
-            const { commands, features } = identity ?? { commands: null, features: null };
-            supportedCommands = commands;
-            supportedFeatures = commands === null ? null : features;
-            running = running || supportedCommands !== null;
-          } catch (error) {
-            // Treated as an unreachable runner (versionStatus=unknown), not a hard
-            // failure: doctor still reports installed/running for the simulator.
-            log.warn(
-              `iOS CtrlProxy runner identity probe failed for ${simulator.deviceId}: ${errorMessage(error)}`,
-              error,
-            );
-          } finally {
-            if (selectedProbe.closeAfterUse) {
-              await selectedProbe.client.close();
-            }
+        if (selectedProbe === null) {
+          inspections.push({
+            deviceId: simulator.deviceId,
+            name: simulator.name,
+            installed,
+            running,
+            supportedCommands,
+            supportedFeatures,
+          });
+          continue;
+        }
+        // Don't disturb a client someone else owns (e.g. the daemon's live
+        // session): if one already exists, read through it and leave its
+        // lifecycle alone. Otherwise open a throwaway probe client and close it
+        // afterwards so doctor leaves no persistent runner connection or SDK
+        // polling timer behind (especially for the one-shot CLI invocation).
+        try {
+          const identity = await awaitDoctorProbe(currentProbe, () =>
+            selectedProbe.client.getRunnerIdentityForDiagnostics(currentProbe.signal),
+          );
+          const { commands, features } = identity ?? { commands: null, features: null };
+          supportedCommands = commands;
+          supportedFeatures = commands === null ? null : features;
+          running = running || supportedCommands !== null;
+        } catch (error) {
+          // Treated as an unreachable runner (versionStatus=unknown), not a hard
+          // failure: doctor still reports installed/running for the simulator.
+          log.warn(
+            `iOS CtrlProxy runner identity probe failed for ${simulator.deviceId}: ${errorMessage(error)}`,
+            error,
+          );
+        } finally {
+          if (selectedProbe.closeAfterUse) {
+            await selectedProbe.client.close();
           }
         }
 
@@ -317,6 +326,31 @@ export function createIosCtrlProxyRunnerInspector(
       return inspections;
     },
   };
+}
+
+function iosObserveClientPort(
+  existing: IosObserveRoundTripClient | null,
+  servicePort: number,
+): number {
+  return existing?.getConnectionPortForDiagnostics() ?? servicePort;
+}
+
+function iosObserveRunnerPort(discoveredRunnerPort: number | null, clientPort: number): number {
+  return discoveredRunnerPort ?? clientPort;
+}
+
+function iosObserveUnavailableReason(
+  installed: boolean,
+  discoveredRunnerPort: number | null,
+  existing: IosObserveRoundTripClient | null,
+): string | null {
+  if (!installed) {
+    return "iOS CtrlProxy runner is not installed";
+  }
+  if (discoveredRunnerPort === null && existing === null) {
+    return "iOS CtrlProxy runner is not running";
+  }
+  return null;
 }
 
 /**
@@ -366,71 +400,42 @@ export function createIosObserveRoundTripInspector(
         const manager = hooks.getManager(device);
         const servicePort = manager.getServicePort();
         const existing = hooks.getExistingClient(device.deviceId);
-        let clientPort = existing?.getConnectionPortForDiagnostics() ?? servicePort;
+        let clientPort = iosObserveClientPort(existing, servicePort);
         const discoveredRunnerPort = await awaitDoctorProbe(currentProbe, () =>
           manager.discoverRunnerPort(currentProbe),
         );
-        let runnerPort = discoveredRunnerPort ?? clientPort;
+        let runnerPort = iosObserveRunnerPort(discoveredRunnerPort, clientPort);
         let connected = false;
         let screenSize = { width: 0, height: 0 };
         let hierarchyError: string | null = null;
         let elementCount = 0;
 
-        try {
-          const installed = await manager.isInstalled();
-          const running = installed && discoveredRunnerPort !== null;
-          if (!installed) {
-            hierarchyError = "iOS CtrlProxy runner is not installed";
-          } else if (!running && existing === null) {
-            hierarchyError = "iOS CtrlProxy runner is not running";
+        const readHierarchy = (
+          response: { hierarchy: CtrlProxyHierarchy } | null,
+          client: IosObserveRoundTripClient,
+        ): void => {
+          if (!response?.hierarchy) {
+            hierarchyError = "iOS CtrlProxy runner is not running or unreachable";
+          } else if (response.hierarchy.error) {
+            hierarchyError = response.hierarchy.error;
           } else {
-            const client = existing ?? hooks.createClient(device, runnerPort);
-            try {
-              clientPort = client.getConnectionPortForDiagnostics();
-              const response = await client.requestHierarchySyncForDiagnostics(
-                undefined,
-                false,
-                currentProbe.signal,
-                currentProbe.timeoutMs,
-              );
-              currentProbe.signal?.throwIfAborted();
-              clientPort = client.getConnectionPortForDiagnostics();
-              runnerPort = discoveredRunnerPort ?? clientPort;
-              connected = response !== null;
-              if (!response?.hierarchy) {
-                hierarchyError = "iOS CtrlProxy runner is not running or unreachable";
-              } else if (response.hierarchy.error) {
-                hierarchyError = response.hierarchy.error;
-              } else {
-                const viewHierarchy = client.convertToViewHierarchyResult(response.hierarchy);
-                hierarchyError = viewHierarchy.hierarchy.error ?? null;
-                screenSize = {
-                  width: viewHierarchy.screenWidth ?? response.hierarchy.screenWidth ?? 0,
-                  height: viewHierarchy.screenHeight ?? response.hierarchy.screenHeight ?? 0,
-                };
-                const elements = hooks.elementsBuilder.build(viewHierarchy, "ios");
-                elementCount = elements
-                  ? elements.clickable.length +
-                    elements.scrollable.length +
-                    elements.text.length +
-                    elements.media.length
-                  : 0;
-              }
-            } finally {
-              if (existing === null) {
-                await client.close();
-              }
-            }
+            const viewHierarchy = client.convertToViewHierarchyResult(response.hierarchy);
+            hierarchyError = viewHierarchy.hierarchy.error ?? null;
+            screenSize = {
+              width: viewHierarchy.screenWidth ?? response.hierarchy.screenWidth ?? 0,
+              height: viewHierarchy.screenHeight ?? response.hierarchy.screenHeight ?? 0,
+            };
+            const elements = hooks.elementsBuilder.build(viewHierarchy, "ios");
+            elementCount = elements
+              ? elements.clickable.length +
+                elements.scrollable.length +
+                elements.text.length +
+                elements.media.length
+              : 0;
           }
-        } catch (error) {
-          hierarchyError = errorMessage(error);
-          log.warn(
-            `iOS observe round-trip failed for ${simulator.deviceId}: ${hierarchyError}`,
-            error,
-          );
-        }
+        };
 
-        inspections.push({
+        const inspection = (): IosObserveRoundTripInspection => ({
           deviceId: simulator.deviceId,
           name: simulator.name,
           runnerPort,
@@ -440,6 +445,49 @@ export function createIosObserveRoundTripInspector(
           hierarchyError,
           elementCount,
         });
+        try {
+          const installed = await manager.isInstalled();
+          hierarchyError = iosObserveUnavailableReason(installed, discoveredRunnerPort, existing);
+        } catch (error) {
+          hierarchyError = errorMessage(error);
+          log.warn(
+            `iOS observe round-trip failed for ${simulator.deviceId}: ${hierarchyError}`,
+            error,
+          );
+        }
+
+        if (hierarchyError !== null) {
+          inspections.push(inspection());
+          continue;
+        }
+
+        try {
+          const client = existing ?? hooks.createClient(device, runnerPort);
+          try {
+            clientPort = client.getConnectionPortForDiagnostics();
+            const response = await client.requestHierarchySyncForDiagnostics(
+              undefined,
+              false,
+              currentProbe.signal,
+              currentProbe.timeoutMs,
+            );
+            currentProbe.signal?.throwIfAborted();
+            clientPort = client.getConnectionPortForDiagnostics();
+            runnerPort = iosObserveRunnerPort(discoveredRunnerPort, clientPort);
+            connected = response !== null;
+            readHierarchy(response, client);
+          } finally {
+            existing === null && (await client.close());
+          }
+        } catch (error) {
+          hierarchyError = errorMessage(error);
+          log.warn(
+            `iOS observe round-trip failed for ${simulator.deviceId}: ${hierarchyError}`,
+            error,
+          );
+        }
+
+        inspections.push(inspection());
       }
 
       return inspections;
@@ -896,8 +944,10 @@ export async function checkSimulatorRuntimes(
   }
 
   try {
-    const runtimes = await simctl.getRuntimes(currentProbe.timeoutMs, currentProbe.signal);
-    const iosRuntimes = runtimes.filter((runtime) => runtime.name.startsWith("iOS"));
+    const runtimes = await simctl.getRuntimesChecked(currentProbe.timeoutMs, currentProbe.signal);
+    const iosRuntimes = runtimes
+      .filter((runtime) => runtime.isAvailable)
+      .filter((runtime) => runtime.name.startsWith("iOS"));
 
     if (iosRuntimes.length === 0) {
       return {
@@ -916,6 +966,7 @@ export async function checkSimulatorRuntimes(
       value: iosRuntimes.length,
     };
   } catch (error) {
+    remainingDoctorProbe(probe);
     dependencies.logger.warn(`Simulator runtimes check failed: ${errorMessage(error)}`, error);
     return {
       name,
@@ -1149,7 +1200,7 @@ export async function checkBootedSimulators(
       };
     }
 
-    const simulators = await simctl.getBootedSimulators(
+    const simulators = await simctl.getBootedSimulatorsChecked(
       currentProbe.timeoutMs,
       currentProbe.signal,
     );
@@ -1171,6 +1222,7 @@ export async function checkBootedSimulators(
       value: simulators.length,
     };
   } catch (error) {
+    remainingDoctorProbe(probe);
     dependencies.logger.warn(`Booted simulators check failed: ${errorMessage(error)}`, error);
     return {
       name: "Booted Simulators",

@@ -3781,7 +3781,7 @@ describe("IOSCtrlProxyClient", function () {
   describe("caching", function () {
     test("ignores an older hierarchy push without replacing or restamping the cache", () => {
       const current: CtrlProxyHierarchy = {
-        updatedAt: 2_000,
+        updatedAt: 6_000,
         packageName: "com.test.app",
         hierarchy: { text: "current" },
       };
@@ -3797,11 +3797,263 @@ describe("IOSCtrlProxyClient", function () {
         });
 
         expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
-        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(2_000);
+        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(6_000);
         expect(ctrlProxyClient["cachedHierarchy"]?.captureReceivedAt).toBe(captureReceivedAt);
-        expect(debug).toHaveBeenCalledWith(expect.stringContaining("pushed=1000 cached=2000"));
+        expect(debug).toHaveBeenCalledWith(expect.stringContaining("pushed=1000 cached=6000"));
       } finally {
         debug.mockRestore();
+      }
+    });
+
+    test("drops eight same-tree rebroadcasts despite solicited cache refreshes (#9259)", async () => {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      const current: CtrlProxyHierarchy = {
+        updatedAt: 20_000,
+        packageName: "com.test.app",
+        hierarchy: { text: "current" },
+      };
+      const stale = { ...current, updatedAt: 15_000, hierarchy: { text: "stale" } };
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await client.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        client["processMessage"]({ type: "hierarchy_update", data: current });
+        for (let i = 0; i < 8; i++) {
+          // A navigation invalidates the cache; its solicited response refreshes it.
+          client.invalidateCache();
+          const sentBefore = socket.sentMessages.length;
+          const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
+          await waitForSentMessages(socket, sentBefore + 1);
+          const request = JSON.parse(socket.sentMessages.at(-1)!) as { requestId: string };
+          const refreshed = { ...current, updatedAt: current.updatedAt + i };
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              requestId: request.requestId,
+              data: refreshed,
+            }),
+          );
+          await pending;
+          const cached = client["cachedHierarchy"];
+          expect(cached?.hierarchy.updatedAt).toBe(refreshed.updatedAt);
+          client["processMessage"]({ type: "hierarchy_update", data: stale });
+          expect(client["cachedHierarchy"]).toBe(cached);
+        }
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+        await client.close();
+      }
+    });
+
+    test("accepts a ten-minute backward clock step and evaluates later pushes against it", () => {
+      const current: CtrlProxyHierarchy = {
+        updatedAt: 1_000_000,
+        packageName: "com.test.app",
+        hierarchy: { text: "current" },
+      };
+      const push = (data: CtrlProxyHierarchy) =>
+        ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data });
+      push(current);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const stream = spyOn(ctrlProxyClient, "pushHierarchyToObservationStream");
+      const backoff = spyOn(ctrlProxyClient, "startScreenshotBackoff");
+      const listeners = spyOn(ctrlProxyClient, "notifyPushUpdateListeners");
+      try {
+        const stepped = { ...current, updatedAt: 400_000 };
+        push(stepped);
+        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(stepped);
+        expect(stream).toHaveBeenCalledTimes(1);
+        expect(backoff).toHaveBeenCalledTimes(1);
+        expect(listeners).toHaveBeenCalledWith(stepped);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("pushed=400000 cached=1000000"));
+
+        const newer = { ...stepped, updatedAt: 401_000 };
+        push(newer);
+        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(newer);
+        const equal = { ...newer, hierarchy: { text: "equal" } };
+        push(equal);
+        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(equal);
+        const cached = ctrlProxyClient["cachedHierarchy"];
+        push({ ...equal, updatedAt: 400_000 });
+        expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+        stream.mockRestore();
+        backoff.mockRestore();
+        listeners.mockRestore();
+      }
+    });
+
+    test("accepts the fifth advancing older push and resets the run on equal/newer acceptance", () => {
+      const current: CtrlProxyHierarchy = {
+        updatedAt: 20_000,
+        packageName: "com.test.app",
+        hierarchy: { text: "current" },
+      };
+      const push = (data: CtrlProxyHierarchy) =>
+        ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data });
+      push(current);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        // Each accepted equal/newer push must break the run of four drops.
+        let baseline = current.updatedAt;
+        for (const updatedAt of [20_000, 21_000]) {
+          for (let i = 0; i < 4; i++) {
+            push({ ...current, updatedAt: 15_000 + i });
+            expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(baseline);
+          }
+          push({ ...current, updatedAt });
+          baseline = updatedAt;
+        }
+        const older = { ...current, updatedAt: 16_004 };
+        for (let i = 0; i < 4; i++) {
+          push({ ...older, updatedAt: 16_000 + i });
+          expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(21_000);
+        }
+        expect(warn).not.toHaveBeenCalled();
+        push(older);
+        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy).toBe(older);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("pushed=16004 cached=21000"));
+        const cached = ctrlProxyClient["cachedHierarchy"];
+        for (let i = 0; i < 4; i++) {
+          push({ ...older, updatedAt: 15_000 + i });
+          expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+        }
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test.each([12_000, 11_000])(
+      "restarts an advancing older run at a non-advancing timestamp %i",
+      (interruption) => {
+        const current: CtrlProxyHierarchy = {
+          updatedAt: 20_000,
+          packageName: "com.test.app",
+          hierarchy: { text: "current" },
+        };
+        const push = (updatedAt: number) =>
+          ctrlProxyClient["processMessage"]({
+            type: "hierarchy_update",
+            data: { ...current, updatedAt },
+          });
+        push(current.updatedAt);
+        const cached = ctrlProxyClient["cachedHierarchy"];
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          for (const updatedAt of [10_000, 11_000, 12_000, interruption]) {
+            push(updatedAt);
+            expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+          }
+          // The interruption is value one of the new run; four advances are needed.
+          for (let i = 1; i < 4; i++) {
+            push(interruption + i);
+            expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+          }
+          expect(warn).not.toHaveBeenCalled();
+          push(interruption + 4);
+          expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(interruption + 4);
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining(`pushed=${interruption + 4} cached=20000`),
+          );
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test("a solicited cache replacement resets an advancing older run", async () => {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      const current: CtrlProxyHierarchy = {
+        updatedAt: 20_000,
+        packageName: "com.test.app",
+        hierarchy: { text: "current" },
+      };
+      const push = (updatedAt: number) =>
+        client["processMessage"]({
+          type: "hierarchy_update",
+          data: { ...current, updatedAt },
+        });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await client.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        push(current.updatedAt);
+        for (const updatedAt of [10_000, 11_000, 12_000, 13_000]) {
+          push(updatedAt);
+        }
+        client.invalidateCache();
+        const sentBefore = socket.sentMessages.length;
+        const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
+        await waitForSentMessages(socket, sentBefore + 1);
+        const request = JSON.parse(socket.sentMessages.at(-1)!) as { requestId: string };
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            requestId: request.requestId,
+            data: current,
+          }),
+        );
+        await pending;
+        const cached = client["cachedHierarchy"];
+        for (const updatedAt of [14_000, 15_000, 16_000, 17_000]) {
+          push(updatedAt);
+          expect(client["cachedHierarchy"]).toBe(cached);
+        }
+        expect(warn).not.toHaveBeenCalled();
+        push(18_000);
+        expect(client["cachedHierarchy"]?.hierarchy.updatedAt).toBe(18_000);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("pushed=18000 cached=20000"));
+      } finally {
+        warn.mockRestore();
+        await client.close();
+      }
+    });
+
+    test("drops a push exactly thirty seconds older but accepts one just beyond the gap", () => {
+      const current: CtrlProxyHierarchy = {
+        updatedAt: 100_000,
+        packageName: "com.test.app",
+        hierarchy: {},
+      };
+      ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data: current });
+      const cached = ctrlProxyClient["cachedHierarchy"];
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        ctrlProxyClient["processMessage"]({
+          type: "hierarchy_update",
+          data: { ...current, updatedAt: 70_000 },
+        });
+        expect(ctrlProxyClient["cachedHierarchy"]).toBe(cached);
+        ctrlProxyClient["processMessage"]({
+          type: "hierarchy_update",
+          data: { ...current, updatedAt: 69_999 },
+        });
+        expect(ctrlProxyClient["cachedHierarchy"]?.hierarchy.updatedAt).toBe(69_999);
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
       }
     });
 

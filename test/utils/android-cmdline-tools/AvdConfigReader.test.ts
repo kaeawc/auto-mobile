@@ -559,3 +559,91 @@ describe("FileAvdConfigReader", () => {
     expect(readPaths).toEqual([registryPath, configPath]);
   });
 });
+
+describe("FileAvdConfigReader constructor precedence", () => {
+  const keys = [
+    "HOME",
+    "USERPROFILE",
+    "ANDROID_USER_HOME",
+    "ANDROID_AVD_HOME",
+    "ANDROID_SDK_HOME",
+    "ANDROID_EMULATOR_HOME",
+  ] as const;
+  it.each([
+    [{ HOME: "/home" }, undefined, "/home/.android/avd", "/home/.android"],
+    [{ USERPROFILE: "/profile" }, undefined, "/profile/.android/avd", "/profile/.android"],
+    [
+      { HOME: "", USERPROFILE: "/profile" },
+      undefined,
+      "/profile/.android/avd",
+      "/profile/.android",
+    ],
+    [{}, undefined, "avd", ""],
+    [{ ANDROID_SDK_HOME: "/sdk" }, undefined, "/sdk/.android/avd", "/sdk/.android"],
+    [{ ANDROID_USER_HOME: "/user", ANDROID_SDK_HOME: "/sdk" }, undefined, "/user/avd", "/user"],
+    [
+      { ANDROID_EMULATOR_HOME: "/emulator", ANDROID_USER_HOME: "/user" },
+      undefined,
+      "/emulator/avd",
+      "/emulator",
+    ],
+    [{ ANDROID_AVD_HOME: "/custom/avd" }, undefined, "/custom/avd", "/custom"],
+    [
+      { ANDROID_AVD_HOME: "/custom/avd", ANDROID_USER_HOME: "/user" },
+      undefined,
+      "/custom/avd",
+      "/user",
+    ],
+    [
+      { ANDROID_AVD_HOME: "/custom/avd", ANDROID_SDK_HOME: "/sdk" },
+      undefined,
+      "/custom/avd",
+      "/sdk/.android",
+    ],
+    [
+      { ANDROID_AVD_HOME: "/custom/avd", ANDROID_EMULATOR_HOME: "/emulator" },
+      "/explicit/avd",
+      "/explicit/avd",
+      "/explicit",
+    ],
+    [
+      {
+        HOME: "/home",
+        ANDROID_USER_HOME: "",
+        ANDROID_EMULATOR_HOME: "",
+        ANDROID_AVD_HOME: "",
+        ANDROID_SDK_HOME: "",
+      },
+      undefined,
+      "/home/.android/avd",
+      "/home/.android",
+    ],
+    [{ ANDROID_AVD_HOME: "/custom/avd" }, "", "", "."],
+  ] as const)(
+    "preserves environment %j and override %s",
+    (environment, override, avdHome, configHome) => {
+      const previous = keys.map((key) => process.env[key]);
+      try {
+        for (const key of keys) {
+          delete process.env[key];
+        }
+        Object.assign(process.env, environment);
+        const reader = new FileAvdConfigReader(
+          async () => "",
+          () => false,
+          override,
+        );
+        expect(reader.getAvdHome()).toBe(avdHome);
+        expect(Reflect.get(reader, "configHome")).toBe(configHome);
+      } finally {
+        keys.forEach((key, index) => {
+          if (previous[index] === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = previous[index];
+          }
+        });
+      }
+    },
+  );
+});

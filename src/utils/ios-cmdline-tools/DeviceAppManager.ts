@@ -95,6 +95,16 @@ const parseJsonOutputPath = (command: string): string | null => {
   return null;
 };
 
+const bundleIdentifier = (record: Record<string, unknown>): unknown => {
+  return (
+    record.bundleIdentifier ??
+    record.bundleID ??
+    record.bundleId ??
+    record.CFBundleIdentifier ??
+    record.BUNDLE_IDENTIFIER
+  );
+};
+
 export const findBundleEntry = (
   data: unknown,
   bundleId: string,
@@ -113,12 +123,7 @@ export const findBundleEntry = (
   }
 
   const record = data as Record<string, unknown>;
-  const idValue =
-    record.bundleIdentifier ??
-    record.bundleID ??
-    record.bundleId ??
-    record.CFBundleIdentifier ??
-    record.BUNDLE_IDENTIFIER;
+  const idValue = bundleIdentifier(record);
   if (typeof idValue === "string" && idValue === bundleId) {
     return record;
   }

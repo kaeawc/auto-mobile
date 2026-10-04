@@ -299,28 +299,7 @@ export class PlanSchemaValidator {
       // Replace /steps/0 with steps[0]
       field = field.replace(/\/(\d+)/g, "[$1]").replace(/\//g, ".");
 
-      let message = err.message || "Validation error";
-
-      // Enhanced error messages
-      if (err.keyword === "additionalProperties") {
-        const prop = (err.params as any).additionalProperty;
-        message = `Unknown property '${prop}'. This might be a legacy field - check the migration guide.`;
-      } else if (err.keyword === "required") {
-        const missing = (err.params as any).missingProperty;
-        message = `Missing required property '${missing}'`;
-      } else if (err.keyword === "enum") {
-        const allowed = (err.params as any).allowedValues;
-        message = `Must be one of: ${allowed.join(", ")}`;
-      } else if (err.keyword === "type") {
-        const expectedType = (err.params as any).type;
-        message = `Must be of type '${expectedType}', but got ${typeof err.data}`;
-      } else if (err.keyword === "minItems") {
-        const limit = (err.params as any).limit;
-        message = `Must have at least ${limit} item${limit !== 1 ? "s" : ""}`;
-      } else if (err.keyword === "minLength") {
-        const limit = (err.params as any).limit;
-        message = `Must be at least ${limit} character${limit !== 1 ? "s" : ""} long`;
-      }
+      const message = this.formatErrorMessage(err);
 
       // Try to find line number for the field in YAML
       const lineInfo = this.findLineNumber(yamlContent, field);
@@ -332,6 +311,33 @@ export class PlanSchemaValidator {
         column: lineInfo?.column,
       };
     });
+  }
+
+  private formatErrorMessage(err: ErrorObject): string {
+    let message = err.message || "Validation error";
+
+    // Enhanced error messages
+    if (err.keyword === "additionalProperties") {
+      const prop = (err.params as any).additionalProperty;
+      message = `Unknown property '${prop}'. This might be a legacy field - check the migration guide.`;
+    } else if (err.keyword === "required") {
+      const missing = (err.params as any).missingProperty;
+      message = `Missing required property '${missing}'`;
+    } else if (err.keyword === "enum") {
+      const allowed = (err.params as any).allowedValues;
+      message = `Must be one of: ${allowed.join(", ")}`;
+    } else if (err.keyword === "type") {
+      const expectedType = (err.params as any).type;
+      message = `Must be of type '${expectedType}', but got ${typeof err.data}`;
+    } else if (err.keyword === "minItems") {
+      const limit = (err.params as any).limit;
+      message = `Must have at least ${limit} item${limit !== 1 ? "s" : ""}`;
+    } else if (err.keyword === "minLength") {
+      const limit = (err.params as any).limit;
+      message = `Must be at least ${limit} character${limit !== 1 ? "s" : ""} long`;
+    }
+
+    return message;
   }
 
   /**

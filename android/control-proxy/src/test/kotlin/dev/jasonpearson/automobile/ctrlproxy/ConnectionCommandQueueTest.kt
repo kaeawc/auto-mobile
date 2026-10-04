@@ -10,23 +10,28 @@ import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.websocket.CloseReason
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -167,6 +172,62 @@ class ConnectionCommandQueueTest {
     runCurrent()
     assertEquals(listOf(first.client, second.client, second.client, first.client), clients)
     assertNull(CommandOriginContext.currentClient())
+  }
+
+  @Test
+  fun `queued origin follows a real dispatcher hop and restores both threads`() = runBlocking {
+    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { commandDispatcher ->
+      Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { otherDispatcher ->
+        val service = Job()
+        val lifetime = Job()
+        val client = client()
+        val finished = CompletableDeferred<Unit>()
+        val queue =
+          ConnectionCommandQueue(
+            scope =
+              CoroutineScope(
+                service +
+                  commandDispatcher +
+                  CoroutineExceptionHandler { _, failure ->
+                    finished.completeExceptionally(failure)
+                  }
+              ),
+            dispatcher = commandDispatcher,
+            delegate =
+              FakeHandler {
+                assertSame(client, CommandOriginContext.currentClient())
+                val commandThread = Thread.currentThread()
+                withContext(otherDispatcher) {
+                  assertFalse(commandThread === Thread.currentThread())
+                  assertSame(client, CommandOriginContext.currentClient())
+                }
+                assertSame(commandThread, Thread.currentThread())
+                assertSame(client, CommandOriginContext.currentClient())
+                CorrelatedErrorReporter.frame(it.requestId, "done")
+              },
+            reply = { _, _, _ -> finished.complete(Unit) },
+            hasRequestOwner = { false },
+            logError = { _, error -> finished.completeExceptionally(error) },
+            logWarning = { finished.completeExceptionally(AssertionError(it)) },
+            logDebug = {},
+          )
+        try {
+          withTimeout(1_000) {
+            withContext(commandDispatcher) { assertNull(CommandOriginContext.currentClient()) }
+            withContext(otherDispatcher) { assertNull(CommandOriginContext.currentClient()) }
+            queue.enqueue(FakeOrigin(client, lifetime), RequestHierarchy(requestId = "hop"))
+            finished.await()
+            service.cancelAndJoin()
+            withContext(commandDispatcher) { assertNull(CommandOriginContext.currentClient()) }
+            withContext(otherDispatcher) { assertNull(CommandOriginContext.currentClient()) }
+            assertNull(CommandOriginContext.currentClient())
+          }
+        } finally {
+          lifetime.cancel()
+          withTimeout(1_000) { service.cancelAndJoin() }
+        }
+      }
+    }
   }
 
   @Test

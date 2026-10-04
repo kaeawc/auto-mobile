@@ -2175,7 +2175,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     cancel: Boolean,
   ) {
     rememberedInsert = null
-    gestureStreamRouter.end(requestId, gestureId, x.toFloat(), y.toFloat(), cancel)
+    gestureStreamRouter.end(
+      requestId,
+      gestureId,
+      x.toFloat(),
+      y.toFloat(),
+      cancel,
+      requester = CommandOriginContext.currentClient(),
+    )
   }
 
   /** Ack one streamed-gesture request, reusing the shared `swipe_result` frame. */

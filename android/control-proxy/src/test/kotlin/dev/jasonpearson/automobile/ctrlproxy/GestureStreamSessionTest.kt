@@ -233,9 +233,9 @@ class GestureStreamSessionTest {
     }
   }
 
-  private fun owner() =
+  private fun owner(id: Int = 1) =
     WebSocketServer.ConnectedClient(
-      1,
+      id,
       object : WebSocketServer.ClientTransport {
         override suspend fun send(message: String) = Unit
 
@@ -278,6 +278,151 @@ class GestureStreamSessionTest {
     h.drain()
     assertEquals(1, h.pendingEndCount())
     assertEquals(0, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `disconnect releases both gestures belonging to one owner`() {
+    val h = RouterHarness()
+    val client = owner()
+    h.router.start("start-first", "first", 1f, 2f, owner = client)
+    h.router.start("start-second", "second", 3f, 4f, owner = client)
+    h.drain()
+    h.dispatchers.forEach { it.completeLast() }
+
+    h.router.cancelOwnedBy(client)
+    h.router.cancelOwnedBy(client)
+    h.drain()
+    assertEquals(2, h.dispatchers.size)
+    h.dispatchers.forEach { dispatcher ->
+      assertEquals(2, dispatcher.dispatched.size)
+      assertEquals(1, dispatcher.dispatched.count { !it.willContinue })
+      assertSame(dispatcher.calls.first().stroke, dispatcher.calls.last().stroke.parent)
+      dispatcher.completeLast()
+    }
+    assertEquals(
+      listOf(Ack("start-first", true, null), Ack("start-second", true, null)),
+      h.acks,
+    )
+    assertEquals(0, h.pendingEndCount())
+    assertEquals(0, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `disconnect leaves an unowned gesture movable and endable`() {
+    val h = RouterHarness()
+    h.router.start("start", "g", 1f, 2f)
+    h.drain()
+    val dispatcher = h.dispatchers.single()
+    dispatcher.completeLast()
+
+    h.router.cancelOwnedBy(owner())
+    h.drain()
+    assertEquals(1, dispatcher.dispatched.size)
+    assertEquals(0, dispatcher.dispatched.count { !it.willContinue })
+    h.router.move("move", "g", 3f, 4f)
+    h.drain()
+    assertEquals(GesturePoint(3f, 4f), dispatcher.dispatched.last().to)
+    assertTrue(dispatcher.dispatched.last().willContinue)
+    dispatcher.completeLast()
+    h.router.end("end", "g", 5f, 6f, false)
+    h.drain()
+    dispatcher.completeLast()
+    assertEquals(1, dispatcher.dispatched.count { !it.willContinue })
+    assertEquals(
+      listOf(Ack("start", true, null), Ack("move", true, null), Ack("end", true, null)),
+      h.acks,
+    )
+    assertEquals(0, h.pendingEndCount())
+  }
+
+  @Test
+  fun `close after disconnect neither lifts again nor answers pending ends`() {
+    for (releaseFinished in listOf(false, true)) {
+      val h = RouterHarness()
+      val client = owner()
+      h.router.start("start", "g", 1f, 2f, owner = client)
+      h.drain()
+      val dispatcher = h.dispatchers.single()
+      dispatcher.completeLast()
+      h.router.end("end", "g", 3f, 4f, false, requester = client)
+      h.drain()
+      assertEquals(1, h.pendingEndCount())
+      h.router.cancelOwnedBy(client)
+      h.drain()
+      val lift = dispatcher.calls.last()
+      assertFalse(lift.stroke.segment.willContinue)
+      if (releaseFinished) dispatcher.completeLast()
+
+      var closedCount = 0
+      h.router.close { closedCount++ }
+      h.router.close { closedCount++ }
+      h.drain()
+      if (!releaseFinished) dispatcher.completeLast()
+      // Replay the recorded lift callback even when no stroke remains in flight.
+      lift.complete()
+      h.drain()
+      assertEquals(2, closedCount)
+      assertEquals(1, dispatcher.dispatched.count { !it.willContinue })
+      assertEquals(listOf(Ack("start", true, null)), h.acks)
+      assertEquals(0, h.pendingEndCount())
+      assertEquals(0, h.terminalFailureCount())
+    }
+  }
+
+  @Test
+  fun `owner disconnect fails another connected client's pending end exactly once`() {
+    val h = RouterHarness()
+    val client = owner()
+    val other = owner(2)
+    val disconnected = owner(3)
+    h.router.start("start", "g", 1f, 2f, owner = client)
+    h.drain()
+    val dispatcher = h.dispatchers.single()
+    dispatcher.completeLast()
+    h.router.end("other-end", "g", 3f, 4f, false, requester = other)
+    h.router.end("owner-end", "g", 3f, 4f, false, requester = client)
+    h.router.end("unattributed-end", "g", 3f, 4f, false)
+    h.router.end("disconnected-end", "g", 3f, 4f, false, requester = disconnected)
+    h.drain()
+    assertEquals(4, h.pendingEndCount())
+    client.isConnected = false
+    disconnected.isConnected = false
+
+    h.router.cancelOwnedBy(client)
+    h.router.cancelOwnedBy(client)
+    h.drain()
+    val expected =
+      listOf(Ack("start", true, null), Ack("other-end", false, "Gesture owner disconnected"))
+    assertEquals(expected, h.acks)
+    assertEquals(0, h.pendingEndCount())
+    // The already dispatched lift may still finish after disconnect and service teardown.
+    h.router.close()
+    h.drain()
+    dispatcher.completeLast()
+    dispatcher.calls.last().complete()
+    dispatcher.calls.last().fail("stale failure")
+    assertEquals(expected, h.acks)
+    assertEquals(1, dispatcher.dispatched.count { !it.willContinue })
+    assertEquals(0, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `another client's pending end receives the session result without disconnect`() {
+    for (success in listOf(true, false)) {
+      val h = RouterHarness()
+      h.router.start("start", "g", 1f, 2f, owner = owner())
+      h.drain()
+      val dispatcher = h.dispatchers.single()
+      dispatcher.completeLast()
+      h.router.end("other-end", "g", 3f, 4f, false, requester = owner(2))
+      h.drain()
+      assertEquals(1, h.pendingEndCount())
+      val failure = if (success) null else "lift failed"
+      if (success) dispatcher.completeLast() else dispatcher.failLast(requireNotNull(failure))
+      dispatcher.calls.last().complete()
+      assertEquals(listOf(Ack("start", true, null), Ack("other-end", success, failure)), h.acks)
+      assertEquals(0, h.pendingEndCount())
+    }
   }
 
   @Test

@@ -25369,14 +25369,16 @@
           "type": "boolean"
         },
         "apexPause": {
-          "description": "Pause duration at swipe apex in ms (>= 0)",
+          "description": "Pause duration at swipe apex in ms (0-3000; default: 100)",
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 3000
         },
         "returnSpeed": {
-          "description": "Speed multiplier for return swipe (> 0)",
+          "description": "Speed multiplier for return swipe (> 0, <= 3000; default: 1); return duration <= 3000 ms and total boomerang <= 5000 ms",
           "type": "number",
-          "exclusiveMinimum": 0
+          "exclusiveMinimum": 0,
+          "maximum": 3000
         },
         "speed": {
           "description": "Swipe speed preset",

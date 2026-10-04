@@ -247,6 +247,7 @@ export class SessionPreservingRecoveryRunner {
     incidentId: string | undefined,
   ): Promise<void> {
     const sessionId = session.sessionId;
+    const assignmentCount = device.assignmentCount;
     const releasedForDeviceRestart = this.pool.isPreservedSessionCurrent(session, device.id);
     if (releasedForDeviceRestart) {
       await this.pool.releaseDisconnectedRecoverySessionWithRetry(
@@ -259,7 +260,7 @@ export class SessionPreservingRecoveryRunner {
         deviceRestartReleaseReason(this.pool.stableDeviceIdFor(device) ?? device.id),
       );
     }
-    if (this.pool.getPooledDevice(device.id) === device) {
+    if (this.canRemoveReleasedDevice(device, sessionId, assignmentCount)) {
       device.sessionId = null;
       device.status = "idle";
       this.pool.suppressAutoStartForDevice(device);
@@ -277,6 +278,18 @@ export class SessionPreservingRecoveryRunner {
       );
     }
   }
+  private canRemoveReleasedDevice(
+    device: SessionContinuityDevice,
+    sessionId: string,
+    assignmentCount: number,
+  ): boolean {
+    return (
+      this.pool.getPooledDevice(device.id) === device &&
+      device.assignmentCount === assignmentCount &&
+      (device.sessionId === sessionId || device.sessionId === null)
+    );
+  }
+
   private async handleUnconfirmedSessionRecoveryShutdown(
     sessionId: string,
     device: PooledDevice,

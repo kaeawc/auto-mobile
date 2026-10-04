@@ -521,7 +521,7 @@ jobs:
           AUTO_CHORE: ${{ steps.check-auto-chore.outputs.auto_chore }}
         run: |
           mention=false
-          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | tr '[:upper:]' '[:lower:]' | grep -q 'webrtc'; then
+          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | tr '[:upper:]' '[:lower:]' | grep 'webrtc' >/dev/null; then
             mention=true
           fi
           if [[ ( "$PATH_MATCH" == "true" || "$HAS_LABEL" == "true" || "$mention" == "true" ) && "$SHA256_ONLY" != "true" && "$AUTO_CHORE" != "true" ]]; then

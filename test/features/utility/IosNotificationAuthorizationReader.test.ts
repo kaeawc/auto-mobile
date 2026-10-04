@@ -362,6 +362,27 @@ describe("resolveDeviceDataRoot", () => {
 });
 
 describe("BulletinBoardAuthorizationReader", () => {
+  test.each([5, 99, -1, 1.5])(
+    "unrecognized authorizationStatus %s returns unknown, not denied",
+    async (authorizationStatus) => {
+      const b64 = Buffer.from("bplist00-placeholder").toString("base64");
+      const { deps } = fakeDeps({
+        outer: outerXml({ "com.apple.MobileSMS": b64 }),
+        nested: nestedXml({ authorizationStatus }),
+      });
+      const reader = new BulletinBoardAuthorizationReader(deps);
+      const result = await reader.read(SIM_UDID, "com.apple.MobileSMS");
+
+      expect(result.supported).toBe(true);
+      expect(result.allowed).toBeNull();
+      expect(result.method).toBe("ios_bulletinboard_plist");
+      expect(result.authorizationStatus).toBeUndefined();
+      expect(result.warning).toContain("com.apple.MobileSMS");
+      expect(result.warning).not.toContain(b64);
+      expect(result.error).toBeUndefined();
+    },
+  );
+
   test("nested settings without authorizationStatus return unknown, not denied", async () => {
     const b64 = Buffer.from("bplist00-placeholder").toString("base64");
     const nested = nestedXml({

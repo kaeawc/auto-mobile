@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
+import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
@@ -33,8 +34,10 @@ import {
   hasFocusedTextInput,
 } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
+import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
 import type { KeyboardProfileId } from "./keyboardProfiles";
-import { TapOnElement } from "./TapOnElement";
+import { TapOnElement, tapFocusFailure, type TapOnFocusResult } from "./TapOnElement";
+import { Keyboard } from "./Keyboard";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -235,7 +238,13 @@ export interface SendKeysTargetFocuser {
     signal?: AbortSignal,
     display?: string,
     options?: SendKeysFocusOptions,
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<
+    Pick<TapOnFocusResult, "success" | "error" | "focusVerified" | typeof tapFocusFailure>
+  >;
+}
+
+export interface SendKeysKeyboard {
+  execute(action: "close", signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
 }
 
 export interface SendKeysObserver {
@@ -256,6 +265,7 @@ export interface SendKeysDependencies {
   lastRenderedObservation?: RenderedObservationReader;
   executor?: SendKeysCommandExecutor;
   focuser?: SendKeysTargetFocuser;
+  keyboard?: SendKeysKeyboard;
   observer?: SendKeysObserver;
   timestampProvider?: SendKeysTimestampProvider;
   timer?: Timer;
@@ -1862,6 +1872,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 export class SendKeys {
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
+  private readonly keyboard?: SendKeysKeyboard;
   private readonly observer: SendKeysObserver;
   private readonly timestampProvider: SendKeysTimestampProvider;
   private readonly timer: Timer;
@@ -1874,6 +1885,7 @@ export class SendKeys {
     dependencies: SendKeysDependencies = {},
   ) {
     this.timer = dependencies.timer ?? defaultTimer;
+    this.keyboard = dependencies.keyboard;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.displayTransitionReader = dependencies.displayTransitions ?? displayTransitions;
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
@@ -1889,18 +1901,22 @@ export class SendKeys {
       dependencies.focuser ??
       ({
         focus: async (selector, signal, display, options) => {
-          const tap = display
-            ? new TapOnElement(device, adbFactory.create(device), {
-                timer: this.timer,
-                lastRenderedObservation: this.lastRenderedObservation,
-              })
-            : new TapOnElement(device);
+          const tap = new TapOnElement(device, adbFactory.create(device), {
+            timer: this.timer,
+            lastRenderedObservation: this.lastRenderedObservation,
+          });
           const result = await tap.execute(
             { ...selector, ...options, action: "focus", display },
             undefined,
             signal,
+            { throwOnKeyboardOcclusion: true },
           );
-          return { success: result.success, error: result.error };
+          return {
+            success: result.success,
+            error: result.error,
+            focusVerified: result.focusVerified,
+            [tapFocusFailure]: result[tapFocusFailure],
+          };
         },
       } satisfies SendKeysTargetFocuser);
   }
@@ -1949,17 +1965,7 @@ export class SendKeys {
         selector = target.selector;
         assertCurrent = target.assertCurrent;
       } catch (error) {
-        logger.warn(`sendKeys display routing failed: ${errorMessage(error)}`, error);
-        return withStaleDisplay(
-          {
-            success: false,
-            completedCommands: 0,
-            failedIndex: 0,
-            commands: [],
-            error: errorMessage(error),
-          },
-          error,
-        );
+        return this.displayRoutingFailure(error, signal);
       }
     }
     const semanticKey =
@@ -1996,6 +2002,21 @@ export class SendKeys {
     return undefined;
   }
 
+  private displayRoutingFailure(error: unknown, signal?: AbortSignal): SendKeysResult {
+    signal?.throwIfAborted();
+    logger.warn(`sendKeys display routing failed: ${errorMessage(error)}`, error);
+    return withStaleDisplay(
+      {
+        success: false,
+        completedCommands: 0,
+        failedIndex: 0,
+        commands: [],
+        error: errorMessage(error),
+      },
+      error,
+    );
+  }
+
   private async prepareExplicitDisplay(
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
@@ -2020,7 +2041,7 @@ export class SendKeys {
       await this.assertFocusedDisplay(target.observation, signal);
     }
     if (selector && this.device.platform === "android") {
-      const focused = await this.focuser.focus(selector, signal, display, options);
+      const focused = await this.focusSelector(selector, signal, display, options);
       if (!focused.success) {
         throw new Error(focused.error ?? "Unable to focus target field");
       }
@@ -2221,7 +2242,7 @@ export class SendKeys {
       return undefined;
     }
     signal?.throwIfAborted();
-    const result = await this.focuser.focus(selector, signal, routing.display, {
+    const result = await this.focusSelector(selector, signal, routing.display, {
       container: routing.container,
       selectionStrategy: routing.selectionStrategy,
     });
@@ -2231,6 +2252,92 @@ export class SendKeys {
           index: 0,
           error: result.error ?? "Failed to focus the target element before sending keys",
         };
+  }
+
+  private async focusSelector(
+    selector: SendKeysSelector,
+    signal?: AbortSignal,
+    display?: string,
+    options: SendKeysFocusOptions = {},
+  ): ReturnType<SendKeysTargetFocuser["focus"]> {
+    const result = await this.focusWithKeyboardRecovery(selector, signal, display, options);
+    signal?.throwIfAborted();
+    if (!result.success && result[tapFocusFailure]) {
+      return {
+        ...result,
+        error: `${result.error} The field may be scrolled out of view; use swipeOn with lookFor to bring it into view, then retry.`,
+      };
+    }
+    return result;
+  }
+
+  private async focusWithKeyboardRecovery(
+    selector: SendKeysSelector,
+    signal?: AbortSignal,
+    display?: string,
+    options?: SendKeysFocusOptions,
+  ): ReturnType<SendKeysTargetFocuser["focus"]> {
+    signal?.throwIfAborted();
+    try {
+      return await this.focuser.focus(selector, signal, display, options);
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
+        throw error;
+      }
+      // Keyboard.close cannot target a display. Never dismiss on an ambient display
+      // when this action is explicitly routed (including display "0").
+      if (display !== undefined) {
+        logger.warn("[SendKeys] Display-routed target is covered by the IME", error);
+        return { success: false, error: error.message };
+      }
+      logger.warn("[SendKeys] Target is covered by the IME; closing the keyboard", error);
+      try {
+        return await this.retryFocusAfterKeyboardClose(selector, error, signal, options);
+      } catch (recoveryError) {
+        signal?.throwIfAborted();
+        logger.warn(
+          `[SendKeys] IME focus recovery failed: ${errorMessage(recoveryError)}`,
+          recoveryError,
+        );
+        return { success: false, error: errorMessage(recoveryError) };
+      }
+    }
+  }
+
+  private async retryFocusAfterKeyboardClose(
+    selector: SendKeysSelector,
+    occlusion: KeyboardOcclusionError,
+    signal?: AbortSignal,
+    options?: SendKeysFocusOptions,
+  ): ReturnType<SendKeysTargetFocuser["focus"]> {
+    const keyboard =
+      this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer);
+    let dismissal: Awaited<ReturnType<SendKeysKeyboard["execute"]>>;
+    try {
+      dismissal = await keyboard.execute("close", signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`[SendKeys] Keyboard close failed: ${errorMessage(error)}`, error);
+      return { success: false, error: occlusion.message };
+    }
+    signal?.throwIfAborted();
+    if (!dismissal.success) {
+      return { success: false, error: occlusion.message };
+    }
+    // Mirror SetUIState's fresh observation and verified-focus requirement. Each
+    // focus execution re-resolves the selector against the refreshed hierarchy.
+    await this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 });
+    signal?.throwIfAborted();
+    const retry = await this.focuser.focus(selector, signal, undefined, options);
+    signal?.throwIfAborted();
+    if (retry.success && retry.focusVerified !== true) {
+      return {
+        success: false,
+        error: "Failed to confirm focus on target field after closing the keyboard",
+      };
+    }
+    return retry;
   }
 
   private async executeCommands(
@@ -2271,6 +2378,7 @@ export class SendKeys {
         );
       }
       result.index = index;
+      this.addImeFailureGuidance(command, result, results);
       routing.onCommandResult?.(result);
       results.push(result);
       if (!result.success) {
@@ -2284,6 +2392,22 @@ export class SendKeys {
       }
     }
     return { results };
+  }
+
+  private addImeFailureGuidance(
+    command: SendKeysCommand,
+    result: SendKeysCommandResult,
+    completed: readonly SendKeysCommandResult[],
+  ): void {
+    if (
+      !result.success &&
+      command.action === "key" &&
+      isSemanticKey(command.key) &&
+      completed.some((previous) => previous.action === "type" && previous.success)
+    ) {
+      result.error = imeActionFailedAfterTextEntered(command.key, result.error || "unknown error");
+      logger.warn(`[SendKeys] ${result.error}`);
+    }
   }
 
   private buildResult(

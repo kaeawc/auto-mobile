@@ -221,7 +221,7 @@ else
   echo "warning: updated avdmanager list device -c failed (exit ${list_status})" >&2
 fi
 profile_found=false
-if [[ "${list_status}" -eq 0 ]] && printf '%s\n' "${devices_after}" | grep -Fxq -- "${profile}"; then
+if [[ "${list_status}" -eq 0 ]] && printf '%s\n' "${devices_after}" | grep -Fx -- "${profile}" >/dev/null; then
   profile_found=true
 fi
 {

@@ -69,6 +69,24 @@ describe("TalkBackSwipeExecutor", () => {
     );
   });
 
+  test("unsafe return duration rejects before either gesture", async () => {
+    for (const returnSpeed of [1e-320, 0.02, Infinity, NaN]) {
+      await expect(
+        executor.executeBoomerangGesture(
+          100,
+          500,
+          100,
+          200,
+          { duration: 300 },
+          { apexPauseMs: 100, returnSpeed },
+          perf,
+        ),
+      ).rejects.toThrow(/returnSpeed/);
+      expect(fakeGestureExecutor.getSwipeCalls()).toEqual([]);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+    }
+  });
+
   test("abort after the forward boomerang swipe prevents the return command", async () => {
     const controller = new AbortController();
     const originalSwipe = fakeGestureExecutor.swipe.bind(fakeGestureExecutor);

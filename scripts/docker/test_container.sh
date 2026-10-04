@@ -155,7 +155,7 @@ if [ "${STDIO_EXIT_CODE}" -ne 0 ]; then
     echo -e "${YELLOW}⚠ MCP stdio test exited with status ${STDIO_EXIT_CODE}${NC}"
   fi
 
-  if docker ps -a --format '{{.Names}}' | grep -q "^${STDIO_CONTAINER_NAME}$"; then
+  if docker ps -a --format '{{.Names}}' | grep "^${STDIO_CONTAINER_NAME}$" >/dev/null; then
     echo -e "${YELLOW}  Container ${STDIO_CONTAINER_NAME} is still present; recent logs:${NC}"
     docker logs --tail 50 "${STDIO_CONTAINER_NAME}" || true
   fi
@@ -182,7 +182,7 @@ SDK_COMPONENTS=("platform-tools" "build-tools;35.0.0" "platforms;android-36")
 ALL_COMPONENTS_OK=true
 SDK_LIST=$(docker exec "${CONTAINER_NAME}" sdkmanager --list_installed 2> /dev/null)
 for component in "${SDK_COMPONENTS[@]}"; do
-  if echo "${SDK_LIST}" | grep -q "${component}"; then
+  if echo "${SDK_LIST}" | grep "${component}" >/dev/null; then
     echo -e "${GREEN}  ✓ ${component} is installed${NC}"
   else
     echo -e "${RED}  ✗ ${component} not found${NC}"

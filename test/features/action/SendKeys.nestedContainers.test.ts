@@ -6,6 +6,7 @@ import {
   type SendKeysObserver,
 } from "../../../src/features/action/SendKeys";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ElementContainerSelector } from "../../../src/models/PinchOnOptions";
 import type {
@@ -327,4 +328,55 @@ test("default field focus and currently focused input remain unchanged", async (
   h.calls.length = 0;
   expect((await h.action.execute(commands)).success).toBe(true);
   expect(h.calls).toEqual(["type", "clear", "key:done"]);
+});
+
+test("sendKeys default focuser reaches the opted-in tapOn field resolution by hint", async () => {
+  const capture: ViewHierarchyResult = {
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        class: "android.widget.EditText",
+        "resource-id": "phone",
+        text: "5551234",
+        "hint-text": "Phone",
+        clickable: true,
+        focusable: true,
+      },
+    },
+  };
+  const fieldTap = realTap(capture);
+  const resolve = spyOn(ElementResolver.prototype, "resolve");
+  const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async (options) => {
+    expect(options.action).toBe("focus");
+    const result = fieldTap.findElementInHierarchy(options, capture);
+    expect(result.selection.element?.["resource-id"]).toBe("phone");
+    return { success: result.selection.element !== null };
+  });
+  const action = new SendKeys(
+    { deviceId: "fake-hint-focus", name: "Field", platform: "android" },
+    undefined,
+    {
+      timer: new FakeTimer(),
+      observer: { execute: async () => focused },
+      timestampProvider: { now: async () => 1 },
+      executor: {
+        type: async () => ({ index: -1, action: "type", success: true }),
+        key: async () => ({ index: -1, action: "key", success: true }),
+        clear: async () => ({ success: true }),
+      },
+    },
+  );
+  try {
+    expect((await action.execute([{ action: "type", text: "6" }], { text: "Phone" })).success).toBe(
+      true,
+    );
+    expect(
+      resolve.mock.calls.some(
+        ([, selector, intent]) => selector.text === "Phone" && intent.allowHintFallback === true,
+      ),
+    ).toBe(true);
+  } finally {
+    tap.mockRestore();
+    resolve.mockRestore();
+  }
 });

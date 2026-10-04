@@ -350,3 +350,21 @@ wiring_requires_yq() {
   [ "$(yq -r '.jobs.foldable-posture-tests.continue-on-error' "$NIGHTLY")" = true ]
   [ "$(yq -r '.jobs.foldable-posture-tests.steps[] | select(.uses == "./.github/actions/android-emulator") | .with.windowed' "$NIGHTLY")" = "\${{ matrix.profile == 'resizable' }}" ]
 }
+
+@test "profile predicate recognizes a foldable before a large device inventory" {
+  cat > "$BATS_TEST_TMPDIR/bin/inventory" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' pixel_10_pro_fold
+awk 'BEGIN { for (i=0; i<20000; i++) print "device-profile-filler-" i }'
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/bin/inventory"
+  local condition
+  condition=$(grep 'if .*devices_after.*grep' "$SCRIPT")
+  run bash -euo pipefail -c '
+    devices_after=$("$1")
+    list_status=0; profile=pixel_10_pro_fold
+    eval "$2 echo found; else exit 1; fi"
+  ' _ "$BATS_TEST_TMPDIR/bin/inventory" "$condition"
+  [ "$status" -eq 0 ]
+  [ "$output" = found ]
+}

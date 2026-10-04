@@ -32,6 +32,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecycleResult
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonNotificationClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
@@ -40,12 +41,15 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
 import dev.jasonpearson.automobile.desktop.core.daemon.McpTool
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 import dev.jasonpearson.automobile.desktop.core.mcp.FakeMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
@@ -59,6 +63,26 @@ data class TestResult(
   val error: String? = null,
   val timestamp: Long = System.currentTimeMillis(),
 )
+
+internal data class DaemonStatusState(
+  val status: DaemonStatusResponse? = null,
+  val error: Result.Error? = null,
+)
+
+internal suspend fun fetchDaemonStatus(
+  client: AutoMobileClient,
+  previous: DaemonStatusState = DaemonStatusState(),
+): DaemonStatusState =
+  withContext(Dispatchers.IO) {
+    try {
+      DaemonStatusState(status = client.getDaemonStatus())
+    } catch (e: Exception) {
+      if (e is CancellationException) throw e
+      val message = "Failed to fetch daemon status: ${e.message ?: e.javaClass.simpleName}"
+      LOG.warn("[AutoMobile IDE] $message", e)
+      previous.copy(error = Result.Error(e, message))
+    }
+  }
 
 @Composable
 internal fun McpProcessesPanel(
@@ -147,9 +171,7 @@ internal fun McpProcessesPanel(
   var killErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
   // State for daemon status
-  var daemonStatus by remember {
-    mutableStateOf<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse?>(null)
-  }
+  var daemonStatusState by remember { mutableStateOf(DaemonStatusState()) }
 
   // State for service updates
   var updatingServiceDeviceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -249,14 +271,9 @@ internal fun McpProcessesPanel(
 
         client.close()
 
-        // Fetch daemon status in background (best-effort)
-        try {
-          daemonStatus = graph.autoMobileClient.getDaemonStatus()
-          LOG.debug("[AutoMobile IDE] Fetched daemon status: version=${daemonStatus?.version}")
-        } catch (e: Exception) {
-          LOG.debug("[AutoMobile IDE] Failed to fetch daemon status: ${e.message}")
-        }
+        daemonStatusState = fetchDaemonStatus(graph.autoMobileClient, daemonStatusState)
       } catch (e: Exception) {
+        if (e is CancellationException) throw e
         val stackTrace = e.stackTraceToString()
         LOG.debug("[AutoMobile IDE] Exception fetching devices: ${e.javaClass.name}: ${e.message}")
         LOG.debug("[AutoMobile IDE] Stack trace:\n$stackTrace")
@@ -269,7 +286,7 @@ internal fun McpProcessesPanel(
       bootedDevices = emptyList()
       deviceImages = emptyList()
       devicesError = null
-      daemonStatus = null
+      daemonStatusState = DaemonStatusState()
     }
   }
 
@@ -692,7 +709,8 @@ internal fun McpProcessesPanel(
           killingDeviceIds = killingDeviceIds,
           bootErrors = bootErrors,
           killErrors = killErrors,
-          daemonStatus = daemonStatus,
+          daemonStatus = daemonStatusState.status,
+          daemonStatusError = daemonStatusState.error?.message,
           updatingServiceDeviceIds = updatingServiceDeviceIds,
           onSelectDevice = onSelectDeviceAction,
           onBootDevice = onBootDeviceAction,

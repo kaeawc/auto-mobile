@@ -1,3 +1,4 @@
+import { stripNavigationToolParams } from "../../daemon/constants";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../../utils/navigationResourceUri";
@@ -1548,7 +1549,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       if (dbEdge.tool_name) {
         edge.interaction = {
           toolName: dbEdge.tool_name,
-          args: dbEdge.tool_args ? JSON.parse(dbEdge.tool_args) : {},
+          args: stripNavigationToolParams(dbEdge.tool_args ? JSON.parse(dbEdge.tool_args) : {}),
           timestamp: dbEdge.timestamp,
         };
 

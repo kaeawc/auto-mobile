@@ -1,5 +1,6 @@
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
 import { BaseVisualChange } from "./BaseVisualChange";
 import {
   type AppendTextFailureSource,
@@ -1174,7 +1175,7 @@ export class InputText extends BaseVisualChange {
           success: false,
           text,
           method: "a11y",
-          error: `IME action '${imeAction}' failed after the text was entered: ${imeError}. Do not retype the text.`,
+          error: imeActionFailedAfterTextEntered(imeAction, imeError),
         };
       }
     }

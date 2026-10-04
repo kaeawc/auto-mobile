@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import path from "path";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 import {
+  bindFileBackedDbHarness,
   createFileBackedDbHarness,
   WINDOWS_FILE_DB_TEST_TIMEOUT_MS as HARNESS_TIMEOUT_REEXPORT,
 } from "./withFileBackedDb";
@@ -263,19 +264,12 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
  * untracked so a following `cleanup()` never double-removes it.
  */
 describe("openLifecycleTestDb against a real file-backed DB (issue #3046)", () => {
-  let harness = createFileBackedDbHarness();
-
-  beforeEach(() => {
-    harness = createFileBackedDbHarness();
-  });
-
-  afterEach(async () => {
-    await harness.cleanup();
-  });
+  const getHarness = bindFileBackedDbHarness();
 
   test(
     "opens + migrates a real temp DB, exposes a queryable migrated schema, and self-cleans on close",
     async () => {
+      const harness = getHarness();
       const opened = await harness.openLifecycleTestDb("am-harness-int-");
 
       // dbPath resolves inside the fresh temp dir the harness created.

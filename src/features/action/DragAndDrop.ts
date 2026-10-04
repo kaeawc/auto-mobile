@@ -76,6 +76,32 @@ function indeterminateResult(reason: string) {
   };
 }
 
+/**
+ * Android drag replies have no reason code or stroke index. Recognize only fixed runner
+ * messages proving no input occurred; all other replies can follow a partial gesture.
+ * In particular, first- and later-stroke rejection share the same message, so neither
+ * timings nor "Failed to dispatch streamed gesture stroke" can prove a no-op.
+ */
+export function isAndroidDragFailureIndeterminate(error: string | undefined): boolean {
+  if (error === undefined || error.trim() !== error) {
+    return true;
+  }
+  // GestureDisplayRouting, CtrlProxyMessageHandler, CtrlProxy and GestureDispatchLifecycle.
+  const noOpReplies = [
+    "Gesture display routing requires Android 11 (API 30)",
+    "Stale frame context for input/drag; observe a fresh frame before retrying",
+    "Stale frame context; observe a fresh frame before retrying",
+    "Failed to dispatch gesture",
+  ];
+  return !(
+    noOpReplies.includes(error) ||
+    /^displayId must be non-negative: -[1-9]\d*$/.test(error) ||
+    /^Non-finite gesture coordinate: (x1|y1|x2|y2)=(NaN|-?Infinity)\. Coordinates must be finite \(not NaN or Infinity\)\.$/.test(
+      error,
+    )
+  );
+}
+
 const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
 // XCUITest hierarchy extraction is slow (can take 5-15s), so the iOS refresh uses the same
 // 15s budget as CtrlProxyHierarchy.getAccessibilityHierarchy rather than the 5s Android value.
@@ -182,11 +208,12 @@ export class DragAndDrop extends BaseVisualChange {
         if (!dispatched) {
           throw error;
         }
+        logger.warn(`Drag outcome indeterminate: ${errorMessage(error)}`, error);
         throw new ActionableError(indeterminateResult(errorMessage(error)).error);
       }
       if (!result.success) {
         throw new ActionableError(
-          dispatched
+          dispatched && isAndroidDragFailureIndeterminate(result.error)
             ? indeterminateResult(result.error ?? "unknown error").error
             : (result.error ?? "Android drag failed"),
         );
@@ -652,7 +679,11 @@ export class DragAndDrop extends BaseVisualChange {
       });
       result = await awaitWhileRequestIsLive(request, signal);
       throwIfAborted(signal);
-      if (!result.success && dispatched) {
+      if (
+        !result.success &&
+        dispatched &&
+        (this.device.platform === "ios" || isAndroidDragFailureIndeterminate(result.error))
+      ) {
         return indeterminateResult(result.error ?? "unknown error");
       }
     } catch (error) {

@@ -96,6 +96,7 @@ describe("DragAndDrop", () => {
   });
 
   afterEach(() => {
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     getInstanceSpy?.mockRestore();
     managerSpy?.mockRestore();
   });

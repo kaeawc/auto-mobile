@@ -9,6 +9,7 @@ import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observ
 import { ActionableError } from "../../../src/models/ActionableError";
 import { prepareTargetDisplayAction } from "../../../src/features/action/TargetDisplayAction";
 import { throwIfAborted } from "../../../src/utils/toolUtils";
+import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -29,7 +30,7 @@ const device = {
   },
 } as BootedDevice;
 
-function fixture(options: { supportsDisplay: boolean; display?: string }) {
+function fixture(options: { supportsDisplay: boolean; display?: string; autoAdvance?: boolean }) {
   displayTransitions.reset(device.deviceId);
   const adb = new FakeAdbClient();
   adb.setCommandResult(
@@ -65,7 +66,9 @@ function fixture(options: { supportsDisplay: boolean; display?: string }) {
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   const timer = new FakeTimer();
-  timer.enableAutoAdvance();
+  if (options.autoAdvance !== false) {
+    timer.enableAutoAdvance();
+  }
   const action = new DragAndDrop(device, adb as unknown as AdbClient, timer, {
     lastRenderedObservation: () => observation,
     hierarchyCapture: new FakeHierarchyCapture(() => hierarchy),
@@ -346,6 +349,73 @@ describe("dragAndDrop display durations", () => {
 describe("Android drag dispatch outcomes", () => {
   for (const display of [undefined, "external"]) {
     const label = display ?? "default";
+    test.each([
+      "displayId must be non-negative: -1",
+      "Gesture display routing requires Android 11 (API 30)",
+      ...["x1", "y1", "x2", "y2"].flatMap((field) =>
+        ["NaN", "Infinity", "-Infinity"].map(
+          (value) =>
+            `Non-finite gesture coordinate: ${field}=${value}. Coordinates must be finite (not NaN or Infinity).`,
+        ),
+      ),
+      "Stale frame context for input/drag; observe a fresh frame before retrying",
+      "Stale frame context; observe a fresh frame before retrying",
+      "Failed to dispatch gesture",
+    ])(`${label}: dispatched no-op reply stays plain: %s`, async (error) => {
+      const { action, drag, adb } = fixture({ supportsDisplay: true, display });
+      drag.mockImplementation(async (...args) => {
+        args[12]?.();
+        return { success: false, totalTimeMs: 20, error };
+      });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(error);
+      expect(drag).toHaveBeenCalledTimes(1);
+      expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
+    });
+
+    test.each([
+      "Drag stroke timed out",
+      "Streamed gesture stroke was cancelled",
+      "Gesture was cancelled",
+      "Failed to dispatch streamed gesture stroke",
+      "Failed to build or dispatch drag stroke",
+      "Drag stroke timed out; pointer release failed: Failed to dispatch streamed gesture stroke",
+      "Streamed gesture stroke was cancelled; pointer release failed: Drag stroke timed out",
+      "Failed to dispatch streamed gesture stroke; pointer release failed: Drag stroke timed out",
+      "Unknown runner failure",
+      undefined,
+      "Failed to dispatch gesture; pointer release failed: Drag stroke timed out",
+      "Non-finite gesture coordinate: x1=NaN. Unexpected suffix",
+      "displayId must be non-negative: -1\n",
+      "Non-finite gesture coordinate: x1=NaN. Coordinates must be finite (not NaN or Infinity).\n",
+    ])(`${label}: partial or unknown reply stays indeterminate: %s`, async (error) => {
+      const { action, drag } = fixture({ supportsDisplay: true, display });
+      drag.mockImplementation(async (...args) => {
+        args[12]?.();
+        return { success: false, totalTimeMs: 20, error };
+      });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Drag outcome is indeterminate");
+      expect(result.error).toContain(error ?? "unknown error");
+      expect(drag).toHaveBeenCalledTimes(1);
+    });
+
+    test(`${label}: transport rejection logs the shared indeterminate warning`, async () => {
+      const { action, drag } = fixture({ supportsDisplay: true, display });
+      const error = new Error("Connection lost");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      restorers.push(() => warn.mockRestore());
+      drag.mockImplementation(async (...args) => {
+        args[12]?.();
+        throw error;
+      });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.error).toContain("Drag outcome is indeterminate");
+      expect(warn).toHaveBeenCalledWith("Drag outcome indeterminate: Connection lost", error);
+    });
+
     test(`${label}: accepts a reply beyond the old 600ms slack`, async () => {
       const { action, drag, timer } = fixture({ supportsDisplay: true, display });
       drag.mockImplementation(async (...args) => {
@@ -416,28 +486,41 @@ describe("Android drag dispatch outcomes", () => {
     test.each([false, true])(
       `${label}: abort stops waiting (dispatched=%s)`,
       async (dispatched) => {
-        const { action, drag, timer, observe } = fixture({ supportsDisplay: true, display });
+        const { action, drag, timer, observe } = fixture({
+          supportsDisplay: true,
+          display,
+          autoAdvance: false,
+        });
         const controller = new AbortController();
         let forwardedSignal: AbortSignal | undefined;
+        const ready = Promise.withResolvers<void>();
         drag.mockImplementation(async (...args) => {
           forwardedSignal = args[9];
           if (dispatched) {
             args[12]?.();
           }
           timer.setTimeout(() => controller.abort(), 25);
-          // Even a client stuck in ensureConnected must not hold up cancellation.
-          return raceWithDeadline(new Promise<never>(() => {}), {
-            timer,
-            timeoutMs: args[7],
-            signal: dispatched ? args[9] : undefined,
-            label: "Drag",
-          });
+          // sendCommand registers its reply timer only after ensureConnected returns.
+          const reply = new Promise<never>(() => {});
+          const pending = dispatched
+            ? raceWithDeadline(reply, {
+                timer,
+                timeoutMs: args[7],
+                signal: args[9],
+                label: "Drag",
+              })
+            : reply;
+          ready.resolve();
+          return pending;
         });
-        await expect(
-          action.execute({ ...endpoints, display }, undefined, controller.signal),
-        ).rejects.toThrow("Operation cancelled");
+        const pending = action.execute({ ...endpoints, display }, undefined, controller.signal);
+        await ready.promise;
+        expect(timer.getPendingTimeoutCount()).toBe(dispatched ? 2 : 1);
+        timer.advanceTime(25);
+        await expect(pending).rejects.toThrow("Operation cancelled");
         expect(forwardedSignal).toBe(controller.signal);
         expect(timer.now()).toBe(25);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
         expect(drag).toHaveBeenCalledTimes(1);
         expect(observe.getExecuteCallCount()).toBe(display ? 1 : 0);
       },

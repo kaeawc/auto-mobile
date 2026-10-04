@@ -5174,6 +5174,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  internal enum class ImeActionStep(val error: String? = null) {
+    NO_FOCUSED_EDITABLE("No focused editable node found for IME action"),
+    NEXT,
+    PREVIOUS,
+    IME_ENTER,
+    KEYCODE_ENTER,
+    UNSUPPORTED;
+
+    companion object {
+      fun select(action: String, hasFocusedEditable: Boolean, sdkInt: Int): ImeActionStep {
+        if (!hasFocusedEditable) {
+          return NO_FOCUSED_EDITABLE
+        }
+        return when (action) {
+          "next" -> NEXT
+          "previous" -> PREVIOUS
+          "done",
+          "go",
+          "send",
+          "search" -> if (sdkInt >= android.os.Build.VERSION_CODES.R) IME_ENTER else KEYCODE_ENTER
+          else -> UNSUPPORTED
+        }
+      }
+    }
+  }
+
   /**
    * Perform IME action using AccessibilityService. This properly handles focus movement
    * (next/previous) and keyboard actions (done/go/search/send).
@@ -5192,10 +5218,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       focusedNode = findFocusedEditableNode(root)
       perfProvider.endOperation("findFocusedNode")
 
-      if (focusedNode == null && action in listOf("next", "previous")) {
+      val step = ImeActionStep.select(action, focusedNode != null, android.os.Build.VERSION.SDK_INT)
+      val error = step.error
+      if (error != null) {
         perfProvider.end()
         val errorTime = System.currentTimeMillis()
-        val error = "No focused editable node found for IME action"
         Log.w(TAG, error)
         launchRequestScope(requestId) {
           broadcastImeActionResult(requestId, action, false, error, errorTime - startTime)
@@ -5205,8 +5232,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       perfProvider.startOperation("executeAction")
       val success =
-        when (action) {
-          "next" -> {
+        when (step) {
+          ImeActionStep.NEXT -> {
             // Find next focusable element and focus it
             val nextNode = findNextFocusableNode(root, focusedNode!!)
             if (nextNode != null) {
@@ -5221,7 +5248,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               false
             }
           }
-          "previous" -> {
+          ImeActionStep.PREVIOUS -> {
             // Find previous focusable element and focus it
             val prevNode = findPreviousFocusableNode(root, focusedNode!!)
             if (prevNode != null) {
@@ -5236,39 +5263,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               false
             }
           }
-          "done",
-          "go",
-          "send",
-          "search" -> {
-            // For these actions, trigger the IME's enter/submit action
-            // This properly submits forms, navigates URLs, performs searches, etc.
-            if (
-              focusedNode != null &&
-                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R
-            ) {
-              // API 30+: Use ACTION_IME_ENTER for proper IME action handling
-              @Suppress("NewApi")
-              val actionId =
-                android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
-                  .ACTION_IME_ENTER
-                  .id
-              val imeResult = focusedNode.performAction(actionId)
-              Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
-              imeResult
-            } else if (focusedNode != null) {
-              // Pre-API 30: Fall back to pressing Enter key via input shell command
-              // This is less reliable but works on older devices
-              Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
-              try {
-                Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
-              } catch (e: Exception) {
-                Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
-                false
-              }
-            } else {
-              // No focused node - fall back to global back action
-              Log.w(TAG, "No focused node for IME action, falling back to GLOBAL_ACTION_BACK")
-              performGlobalAction(GLOBAL_ACTION_BACK)
+          ImeActionStep.IME_ENTER -> {
+            // API 30+: Use ACTION_IME_ENTER for proper IME action handling
+            @Suppress("NewApi")
+            val actionId =
+              android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER
+                .id
+            val imeResult = focusedNode!!.performAction(actionId)
+            Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
+            imeResult
+          }
+          ImeActionStep.KEYCODE_ENTER -> {
+            // Pre-API 30: Fall back to pressing Enter key via input shell command
+            // This is less reliable but works on older devices
+            Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
+            try {
+              Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
+            } catch (e: Exception) {
+              Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
+              false
             }
           }
           else -> {
@@ -5351,10 +5364,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.startOperation("setSelection")
       // Get the text length to set selection from 0 to end
       val text = focusedNode.text
-      val textLength = text?.length ?: 0
+      val plan =
+        planSelectAll(
+          text?.length ?: 0,
+          focusedNode.isShowingHintText,
+          focusedNode.textSelectionStart,
+          focusedNode.textSelectionEnd,
+        )
+      val textLength = plan.textLength
 
-      val success =
-        if (textLength > 0) {
+      val outcome =
+        if (plan.shouldPerformAction) {
           // Use ACTION_SET_SELECTION with start=0 and end=textLength to select all
           val arguments =
             android.os.Bundle().apply {
@@ -5368,15 +5388,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 textLength,
               )
             }
-          focusedNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-            arguments,
+          val actionSucceeded =
+            focusedNode.performAction(
+              android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
+              arguments,
+            )
+          val selectionRefreshed = !actionSucceeded && focusedNode.refresh()
+          selectAllOutcome(
+            textLength,
+            actionSucceeded,
+            selectionRefreshed,
+            if (selectionRefreshed) focusedNode.textSelectionStart else -1,
+            if (selectionRefreshed) focusedNode.textSelectionEnd else -1,
           )
         } else {
-          // No text to select
-          Log.d(TAG, "No text in focused node to select")
-          true // Consider it a success - nothing to select
+          // No text to select, or all text is already selected
+          if (textLength == 0) Log.d(TAG, "No text in focused node to select")
+          SelectAllOutcome(true, null)
         }
+      val success = outcome.success
 
       focusedNode.recycle()
       perfProvider.endOperation("setSelection")
@@ -5391,7 +5421,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         broadcastSelectAllResult(
           requestId,
           success,
-          if (success) null else "performAction returned false",
+          outcome.error,
           totalTime,
         )
       }

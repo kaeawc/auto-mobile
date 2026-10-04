@@ -1,11 +1,13 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
+import { ActionableError } from "../../src/models/ActionableError";
+import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
@@ -131,9 +133,49 @@ describe("barrier tool", () => {
     timer.advanceTime(50);
     const error = await settleWithinMicrotasks(outcome, 'Barrier "lonely" rejection');
     expect(error).toBeInstanceOf(Error);
-    await expect(Promise.reject(error)).rejects.toThrow(
-      /Barrier "lonely" failed for device device-1/,
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error instanceof Error ? error.message : undefined).toBe(
+      'Barrier "lonely" failed for device device-1: Timeout waiting for critical section "lonely". ' +
+        "1/2 devices arrived after 50ms. Missing devices may have failed or not reached the critical section.",
     );
+  });
+
+  test("preserves device loss from awaitBarrier after clearing the scoped barrier", async () => {
+    const timer = injectFakeCoordinator();
+    const coordinator = CriticalSectionCoordinator.getInstance();
+    const loss = new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
+    const wait = spyOn(coordinator, "awaitBarrier").mockImplementation(
+      async (lock, _device, count, _timeout, namespace) => {
+        coordinator.registerExpectedDevices(lock, count, namespace);
+        throw loss;
+      },
+    );
+    const cleanup = spyOn(coordinator, "forceCleanup");
+    try {
+      const tool = ToolRegistry.getToolForPlan("barrier")!;
+      const error = await tool.deviceAwareHandler!(
+        makeDevice("emulator-5554"),
+        { lock: "loss-lock", deviceCount: 2, __lockNamespace: "loss-session" },
+        undefined,
+        new AbortController().signal,
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(wait).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledWith("loss-lock", "loss-session");
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      await expect(
+        coordinator.enterCriticalSection("loss-lock", "emulator-5554", 50, "loss-session"),
+      ).rejects.toThrow('No expected device count registered for lock "loss-lock"');
+      expect(error).toBe(loss);
+      expect(isDeviceLostError(error)).toBe(true);
+    } finally {
+      wait.mockRestore();
+      cleanup.mockRestore();
+    }
   });
 
   test("schema preserves the injected __lockNamespace (not stripped by parse)", () => {
@@ -144,6 +186,47 @@ describe("barrier tool", () => {
       __lockNamespace: "session-A",
     });
     expect(parsed.__lockNamespace).toBe("session-A");
+  });
+
+  test("executor rethrows barrier device loss instead of recording a step failure", async () => {
+    const timer = injectFakeCoordinator();
+    const coordinator = CriticalSectionCoordinator.getInstance();
+    const device = makeDevice("emulator-5554");
+    const loss = new DeviceLostError(device.deviceId, "device-disconnected:emulator-5554");
+    const wait = spyOn(coordinator, "awaitBarrier").mockRejectedValue(loss);
+    const tool = ToolRegistry.getToolForPlan("barrier")!;
+    // Pin the device through the registry's handler seam, avoiding real device
+    // resolution and the device-aware wrapper's file-backed call repository.
+    const handler = spyOn(tool, "handler").mockImplementation((params, progress, signal) =>
+      tool.deviceAwareHandler!(device, params, progress, signal),
+    );
+
+    try {
+      const plan: Plan = {
+        name: "barrier device loss",
+        steps: [{ tool: "barrier", params: { device: "A", lock: "loss-lock", deviceCount: 1 } }],
+      };
+      const error = await new DefaultPlanExecutor(timer)
+        .executePlan(
+          plan,
+          0,
+          "android",
+          device.deviceId,
+          "loss-session",
+          new AbortController().signal,
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(wait).toHaveBeenCalledTimes(1);
+      expect(error).toBe(loss);
+      expect(isDeviceLostError(error)).toBe(true);
+    } finally {
+      handler.mockRestore();
+      wait.mockRestore();
+    }
   });
 
   test("__lockNamespace scopes the barrier: same lock name, different plans do not cross-satisfy", async () => {

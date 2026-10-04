@@ -200,6 +200,157 @@ function isCompleteFreshCapture(observation: ObserveResult): boolean {
   );
 }
 
+interface PollFreshnessState {
+  enteringReference?: number;
+  // Monotonic device-clock-domain floor; `undefined` until the first capture.
+  deviceFloor?: number;
+  // Set once any capture is strictly newer than the entering reference — from
+  // then on the floor relaxes to inclusive so a static screen can settle.
+  hasPostInvocationEvidence: boolean;
+}
+
+function isExplicitlyStaleCapture(observation: ObserveResult): boolean {
+  // A timestamp alone cannot make a capture admissible. ObserveScreen marks
+  // wrong-window and incomplete hierarchies stale even when CtrlProxy was
+  // able to stamp them; those trees must neither satisfy a predicate nor
+  // advance stateful settle predicates.
+  // `isFresh` can be normalized back to true when a cached hierarchy happens
+  // to meet a requested timestamp floor. The delegate's `verified: false`
+  // still says that no synchronous device read confirmed this sample, so it
+  // cannot become polling evidence merely because its cached timestamp is
+  // recent enough.
+  return observation.freshness?.isFresh === false || observation.freshness?.verified === false;
+}
+
+function selectTimeoutCapture(last: PollCapture, newestTrustworthy?: PollCapture) {
+  return {
+    capture: newestTrustworthy ?? last,
+    canProcessRecomposition: newestTrustworthy !== undefined,
+  };
+}
+
+function isAdmissibleCapture(
+  observedMs: number | undefined,
+  deviceFloor: number | undefined,
+  isExplicitlyStale: boolean,
+): boolean {
+  // `Math.max` guarantees a stale/cached capture can never LOWER the floor.
+  const meetsPriorFloor =
+    observedMs !== undefined && (deviceFloor === undefined || observedMs >= deviceFloor);
+  return meetsPriorFloor && !isExplicitlyStale;
+}
+
+function recordPollFreshness(observation: ObserveResult, state: PollFreshnessState) {
+  const observedMs = deviceCaptureTimestamp(observation);
+  const isExplicitlyStale = isExplicitlyStaleCapture(observation);
+  // Unseeded: the first observation is a throwaway baseline. It establishes
+  // the entering reference (and the floor) but can never itself be terminal
+  // evidence — it may be the pre-call cache the loop must read past.
+  if (state.enteringReference === undefined && observedMs !== undefined) {
+    state.enteringReference = observedMs;
+  }
+  const isAdmissibleEvidence = isAdmissibleCapture(
+    observedMs,
+    state.deviceFloor,
+    isExplicitlyStale,
+  );
+  if (isAdmissibleEvidence && observedMs !== undefined) {
+    state.deviceFloor =
+      state.deviceFloor === undefined ? observedMs : Math.max(state.deviceFloor, observedMs);
+  }
+  // Strictly newer than the entering/baseline capture => a genuine
+  // post-invocation read the caller may act on.
+  const isPostInvocation =
+    observedMs !== undefined &&
+    state.enteringReference !== undefined &&
+    observedMs > state.enteringReference &&
+    isAdmissibleEvidence;
+  if (isPostInvocation) {
+    state.hasPostInvocationEvidence = true;
+  }
+  return { isAdmissibleEvidence, isPostInvocation };
+}
+
+function isTerminalScreenOff(
+  observation: ObserveResult,
+  isAdmissibleEvidence: boolean,
+  isPostInvocation: boolean,
+): boolean {
+  const isHierarchySourcedScreenOff =
+    isScreenOff(observation) && observation.wakefulnessSource === "hierarchy";
+  return (
+    isIndependentScreenOff(observation) ||
+    (isScreenOff(observation) &&
+      isAdmissibleEvidence &&
+      (!isHierarchySourcedScreenOff || isPostInvocation))
+  );
+}
+
+interface PollFinalizationContext {
+  observeScreen: PollingObserveScreen;
+  timer: Timer;
+  options: ObservePollOptions;
+  start: number;
+  onObservation: Parameters<typeof pollObserveUntil>[3];
+}
+
+function createPollFinalizer(context: PollFinalizationContext, freshnessState: PollFreshnessState) {
+  const { observeScreen, timer, options, start, onObservation } = context;
+  return async (
+    outcome: ObservePollOutcome,
+    canProcessRecomposition: boolean = true,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<ObservePollOutcome> => {
+    const refreshed = await reconcileTerminalCapture(
+      observeScreen,
+      timer,
+      options,
+      outcome.observation,
+      nextPollMinTimestamp(
+        freshnessState.hasPostInvocationEvidence,
+        freshnessState.deviceFloor,
+        freshnessState.enteringReference,
+      ),
+    );
+    if (refreshed) {
+      const original = outcome.observation;
+      outcome.observation = refreshed.observation;
+      outcome.polls++;
+      outcome.waitMs = timer.now() - start;
+      generation = refreshed.generation;
+      cachedAt = refreshed.cachedAt;
+      canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);
+      // Return the newest full-pipeline capture even when the stop predicate
+      // ceased to hold; the existing timeout outcome reports that uncertainty.
+      if (outcome.stopped && !onObservation(refreshed.observation, original, outcome.polls)) {
+        outcome.stopped = false;
+        outcome.terminalReason = "timeout";
+      }
+    }
+    throwIfAborted(options.signal);
+    if (
+      options.skipRecompositionTracking &&
+      canProcessRecomposition &&
+      observeScreen.processRecomposition
+    ) {
+      const workPromise = (async (): Promise<void> => {
+        await observeScreen.processRecomposition!(outcome.observation);
+        await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
+      })();
+      await awaitFinalizationWhilePollIsLive(
+        workPromise,
+        timer,
+        options.timeoutMs - (timer.now() - start),
+        options.signal,
+      );
+    } else {
+      await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
+    }
+    return outcome;
+  };
+}
+
 /** Bind deferred cache metadata to the capture that will actually be published. */
 async function capturePoll(
   observeScreen: PollingObserveScreen,
@@ -311,154 +462,69 @@ export async function pollObserveUntil(
 ): Promise<ObservePollOutcome> {
   const start = timer.now();
   let previous: ObserveResult | undefined;
-  let lastObservation: ObserveResult | undefined;
-  let lastGeneration: number | undefined;
-  let lastCachedAt: number | undefined;
+  let lastCapture: PollCapture | undefined;
   let polls = 0;
   // The device timestamp the loop must get STRICTLY past before an observation
   // can be terminal. `undefined` until seeded by the caller or by the first
   // (baseline) observation.
-  let enteringReference = options.initialMinTimestampMs;
-  // Monotonic device-clock-domain floor; `undefined` until the first capture.
-  let deviceFloor = options.initialMinTimestampMs;
-  // Set once any capture is strictly newer than the entering reference — from
-  // then on the floor relaxes to inclusive so a static screen can settle.
-  let hasPostInvocationEvidence = false;
+  const freshnessState: PollFreshnessState = {
+    enteringReference: options.initialMinTimestampMs,
+    deviceFloor: options.initialMinTimestampMs,
+    hasPostInvocationEvidence: false,
+  };
   // Preserve the newest complete, non-regressing device capture for timeout
   // results. A late stale fallback must not replace evidence that already met a
   // raised floor (e.g. 10 -> 30 -> 20).
-  let newestTrustworthyObservation: ObserveResult | undefined;
-  let newestTrustworthyGeneration: number | undefined;
-  let newestTrustworthyCachedAt: number | undefined;
-  const finalize = async (
-    outcome: ObservePollOutcome,
-    canProcessRecomposition: boolean = true,
-    generation?: number,
-    cachedAt?: number,
-  ): Promise<ObservePollOutcome> => {
-    const refreshed = await reconcileTerminalCapture(
-      observeScreen,
-      timer,
-      options,
-      outcome.observation,
-      nextPollMinTimestamp(hasPostInvocationEvidence, deviceFloor, enteringReference),
-    );
-    if (refreshed) {
-      const original = outcome.observation;
-      outcome.observation = refreshed.observation;
-      outcome.polls++;
-      outcome.waitMs = timer.now() - start;
-      generation = refreshed.generation;
-      cachedAt = refreshed.cachedAt;
-      canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);
-      // Return the newest full-pipeline capture even when the stop predicate
-      // ceased to hold; the existing timeout outcome reports that uncertainty.
-      if (outcome.stopped && !onObservation(refreshed.observation, original, outcome.polls)) {
-        outcome.stopped = false;
-        outcome.terminalReason = "timeout";
-      }
-    }
-    throwIfAborted(options.signal);
-    if (
-      options.skipRecompositionTracking &&
-      canProcessRecomposition &&
-      observeScreen.processRecomposition
-    ) {
-      const workPromise = (async (): Promise<void> => {
-        await observeScreen.processRecomposition!(outcome.observation);
-        await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
-      })();
-      await awaitFinalizationWhilePollIsLive(
-        workPromise,
-        timer,
-        options.timeoutMs - (timer.now() - start),
-        options.signal,
-      );
-    } else {
-      await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
-    }
-    return outcome;
-  };
+  let newestTrustworthyCapture: PollCapture | undefined;
+  const finalize = createPollFinalizer(
+    { observeScreen, timer, options, start, onObservation },
+    freshnessState,
+  );
 
   while (true) {
     throwIfAborted(options.signal);
-    if (lastObservation && timer.now() - start >= options.timeoutMs) {
+    if (lastCapture && timer.now() - start >= options.timeoutMs) {
+      const { capture, canProcessRecomposition } = selectTimeoutCapture(
+        lastCapture,
+        newestTrustworthyCapture,
+      );
       return finalize(
         {
-          observation: newestTrustworthyObservation ?? lastObservation,
+          observation: capture.observation,
           polls,
           waitMs: timer.now() - start,
           stopped: false,
           terminalReason: "timeout",
         },
-        newestTrustworthyObservation !== undefined,
-        newestTrustworthyObservation !== undefined ? newestTrustworthyGeneration : lastGeneration,
-        newestTrustworthyObservation !== undefined ? newestTrustworthyCachedAt : lastCachedAt,
+        canProcessRecomposition,
+        capture.generation,
+        capture.cachedAt,
       );
     }
 
     const minTimestamp = nextPollMinTimestamp(
-      hasPostInvocationEvidence,
-      deviceFloor,
-      enteringReference,
+      freshnessState.hasPostInvocationEvidence,
+      freshnessState.deviceFloor,
+      freshnessState.enteringReference,
     );
-    const {
-      observation,
-      generation: cacheGeneration,
-      cachedAt: cacheStartedAt,
-    } = await capturePoll(
+    const capture = await capturePoll(
       observeScreen,
       timer,
       options,
       minTimestamp,
       Math.max(1, options.timeoutMs - (timer.now() - start)),
     );
+    const { observation, generation: cacheGeneration, cachedAt: cacheStartedAt } = capture;
     polls++;
-    lastObservation = observation;
-    lastGeneration = cacheGeneration;
-    lastCachedAt = cacheStartedAt;
+    lastCapture = capture;
     throwIfAborted(options.signal);
 
-    const observedMs = deviceCaptureTimestamp(observation);
-    // A timestamp alone cannot make a capture admissible. ObserveScreen marks
-    // wrong-window and incomplete hierarchies stale even when CtrlProxy was
-    // able to stamp them; those trees must neither satisfy a predicate nor
-    // advance stateful settle predicates.
-    // `isFresh` can be normalized back to true when a cached hierarchy happens
-    // to meet a requested timestamp floor. The delegate's `verified: false`
-    // still says that no synchronous device read confirmed this sample, so it
-    // cannot become polling evidence merely because its cached timestamp is
-    // recent enough.
-    const isExplicitlyStale =
-      observation.freshness?.isFresh === false || observation.freshness?.verified === false;
-    // Unseeded: the first observation is a throwaway baseline. It establishes
-    // the entering reference (and the floor) but can never itself be terminal
-    // evidence — it may be the pre-call cache the loop must read past.
-    if (enteringReference === undefined && observedMs !== undefined) {
-      enteringReference = observedMs;
-    }
-    // `Math.max` guarantees a stale/cached capture can never LOWER the floor.
-    const meetsPriorFloor =
-      observedMs !== undefined && (deviceFloor === undefined || observedMs >= deviceFloor);
-    const isAdmissibleEvidence = meetsPriorFloor && !isExplicitlyStale;
-    if (isAdmissibleEvidence && observedMs !== undefined) {
-      deviceFloor = deviceFloor === undefined ? observedMs : Math.max(deviceFloor, observedMs);
-    }
-    // Strictly newer than the entering/baseline capture => a genuine
-    // post-invocation read the caller may act on.
-    const isPostInvocation =
-      observedMs !== undefined &&
-      enteringReference !== undefined &&
-      observedMs > enteringReference &&
-      isAdmissibleEvidence;
-    if (isPostInvocation) {
-      hasPostInvocationEvidence = true;
-    }
-
+    const { isAdmissibleEvidence, isPostInvocation } = recordPollFreshness(
+      observation,
+      freshnessState,
+    );
     if (isAdmissibleEvidence) {
-      newestTrustworthyObservation = observation;
-      newestTrustworthyGeneration = cacheGeneration;
-      newestTrustworthyCachedAt = cacheStartedAt;
+      newestTrustworthyCapture = capture;
     }
 
     // A screen-off terminal is only meaningful when the same observation passed
@@ -469,14 +535,7 @@ export async function pollObserveUntil(
     // needs the same strictly-post-invocation proof as an ordinary match. ADB
     // wakefulness is independently sampled on this poll and remains terminal
     // immediately, including when no hierarchy is available.
-    const isHierarchySourcedScreenOff =
-      isScreenOff(observation) && observation.wakefulnessSource === "hierarchy";
-    if (
-      isIndependentScreenOff(observation) ||
-      (isScreenOff(observation) &&
-        isAdmissibleEvidence &&
-        (!isHierarchySourcedScreenOff || isPostInvocation))
-    ) {
+    if (isTerminalScreenOff(observation, isAdmissibleEvidence, isPostInvocation)) {
       return finalize(
         {
           observation,
@@ -515,17 +574,21 @@ export async function pollObserveUntil(
     }
 
     if (timer.now() - start >= options.timeoutMs) {
+      const { capture: timeoutCapture, canProcessRecomposition } = selectTimeoutCapture(
+        capture,
+        newestTrustworthyCapture,
+      );
       return finalize(
         {
-          observation: newestTrustworthyObservation ?? observation,
+          observation: timeoutCapture.observation,
           polls,
           waitMs: timer.now() - start,
           stopped: false,
           terminalReason: "timeout",
         },
-        newestTrustworthyObservation !== undefined,
-        newestTrustworthyObservation !== undefined ? newestTrustworthyGeneration : cacheGeneration,
-        newestTrustworthyObservation !== undefined ? newestTrustworthyCachedAt : cacheStartedAt,
+        canProcessRecomposition,
+        timeoutCapture.generation,
+        timeoutCapture.cachedAt,
       );
     }
 

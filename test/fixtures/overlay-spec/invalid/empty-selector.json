@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "anchor": {
+        "type": "element",
+        "selector": {},
+        "alignment": "cover"
+      }
+    }
+  },
+  "expectedPath": "root.anchor.selector"
+}

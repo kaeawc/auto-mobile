@@ -1,0 +1,206 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen",
+      "scrim": "#80000000"
+    }
+  },
+  "state": {
+    "open": false,
+    "title": "Prototype",
+    "query": "",
+    "selected": 0
+  },
+  "root": {
+    "type": "column",
+    "id": "layout",
+    "testTag": "prototype",
+    "safeAreaPadding": {
+      "edges": ["top", "bottom", "start", "end"],
+      "types": ["systemBars", "cutout", "ime"]
+    },
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "padding": {
+        "top": 16,
+        "bottom": 12,
+        "start": 8,
+        "end": 8
+      },
+      "background": "#FF121212",
+      "cornerRadius": 8,
+      "border": {
+        "width": 1,
+        "color": "#112233"
+      },
+      "alpha": 0.8,
+      "alignment": "center",
+      "arrangement": "spaceBetween",
+      "spacing": 4,
+      "textSize": 16,
+      "fontWeight": 500,
+      "color": "#FFFFFF",
+      "textAlign": "center",
+      "maxLines": 4,
+      "fontFamily": "sansSerif"
+    },
+    "children": [
+      {
+        "type": "tabBar",
+        "items": [
+          {
+            "label": "First",
+            "icon": "home"
+          },
+          {
+            "label": "Second",
+            "image": "preview"
+          }
+        ],
+        "pager": "variants",
+        "scrollable": true
+      },
+      {
+        "type": "pager",
+        "id": "variants",
+        "children": [
+          {
+            "type": "box",
+            "anchor": {
+              "type": "bounds",
+              "bounds": {
+                "x": 0,
+                "y": 24,
+                "width": 300,
+                "height": 500
+              }
+            },
+            "children": [
+              {
+                "type": "scroll",
+                "axis": "vertical",
+                "child": {
+                  "type": "text",
+                  "text": "Page {page} / {pageCount}; {title}",
+                  "onTap": [
+                    {
+                      "type": "emit",
+                      "name": "choose",
+                      "payload": {
+                        "nested": [null, true, 4, "hello"]
+                      }
+                    },
+                    {
+                      "type": "setPage",
+                      "pager": "variants",
+                      "page": "next"
+                    },
+                    {
+                      "type": "setPage",
+                      "pager": "variants",
+                      "page": "prev"
+                    },
+                    {
+                      "type": "setPage",
+                      "pager": "variants",
+                      "page": 0
+                    },
+                    {
+                      "type": "setState",
+                      "key": "open",
+                      "value": true
+                    },
+                    {
+                      "type": "dismiss"
+                    }
+                  ],
+                  "visibleWhen": {
+                    "key": "open",
+                    "equals": true
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "scroll",
+            "axis": "horizontal",
+            "child": {
+              "type": "row",
+              "children": [
+                {
+                  "type": "image",
+                  "asset": "preview",
+                  "contentScale": "crop"
+                },
+                {
+                  "type": "icon",
+                  "name": "search"
+                },
+                {
+                  "type": "spacer",
+                  "style": {
+                    "width": {
+                      "dp": 12
+                    },
+                    "height": "wrap"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "textField",
+        "stateKey": "query",
+        "placeholder": "Search",
+        "safeAreaPadding": {
+          "edges": ["bottom"],
+          "types": ["ime"]
+        }
+      },
+      {
+        "type": "bottomNav",
+        "stateKey": "selected",
+        "items": [
+          {
+            "label": "Home",
+            "icon": "home"
+          },
+          {
+            "label": "Search",
+            "image": "preview"
+          }
+        ]
+      },
+      {
+        "type": "bottomSheet",
+        "child": {
+          "type": "text",
+          "text": "Confirm"
+        },
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "detents": [
+          {
+            "dp": 240
+          },
+          "half",
+          "full"
+        ],
+        "scrim": "#80000000",
+        "dragHandle": true,
+        "dismissOnSwipe": true,
+        "safeAreaPadding": {
+          "edges": ["bottom"],
+          "types": ["systemBars", "ime"]
+        }
+      }
+    ]
+  }
+}

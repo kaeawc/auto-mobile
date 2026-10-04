@@ -26,3 +26,5 @@ The main user-facing capabilities are:
 Start with [installation](../index.md#install), then see the
 [interaction loop](mcp/interaction-loop.md) for how AutoMobile observes,
 acts, and returns updated state.
+
+Android contract design: [agent-authored overlay specification](plat/android/overlay-ux.md).

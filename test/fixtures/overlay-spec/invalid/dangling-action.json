@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "ok",
+      "onTap": [
+        {
+          "type": "setPage",
+          "pager": "missing",
+          "page": "next"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].pager"
+}

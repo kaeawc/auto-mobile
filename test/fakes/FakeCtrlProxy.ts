@@ -637,6 +637,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     signal?: AbortSignal,
     displayId?: number,
     beforeSend?: () => void,
+    onDispatch?: () => void,
   ): Promise<A11yDragResult> {
     await this.applyDelay("drag");
     beforeSend?.();
@@ -654,6 +655,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       ...(signal ? { signal } : {}),
       ...(displayId === undefined ? {} : { displayId }),
     });
+
+    onDispatch?.();
 
     if (this.dragResult) {
       const perfTiming = this.dragResult.perfTiming ?? this.performanceTiming ?? undefined;

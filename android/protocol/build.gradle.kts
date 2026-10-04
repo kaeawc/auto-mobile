@@ -71,3 +71,9 @@ tasks.withType<KotlinCompile>().configureEach {
     )
   }
 }
+
+// One structural vocabulary is packaged with the JVM artifact and imported by TypeScript.
+sourceSets.main {
+  resources.srcDir(layout.projectDirectory.dir("../../schemas"))
+  resources.include("overlay-spec-contract.json")
+}

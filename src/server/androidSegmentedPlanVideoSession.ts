@@ -1,5 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
-import type { BootedDevice, DeviceInfo } from "../models";
+import type { BootedDevice, DeviceInfo, PlanStepLifecycleContext } from "../models";
 import {
   ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS,
   ANDROID_SCREENRECORD_MAX_SECONDS,
@@ -22,6 +22,11 @@ import type {
 import { combineAbortSignals } from "../utils/AbortContext";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import type { VideoRecordingPanel } from "../models";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+
+// Spend at most the existing headroom between rotation and screenrecord's hard cap.
+const ROTATION_STOP_TIMEOUT_MS =
+  ANDROID_SCREENRECORD_MAX_SECONDS * 1000 - ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
 
 interface SegmentedSessionResult {
   filePaths: string[];
@@ -346,7 +351,8 @@ export class AndroidSegmentedPlanVideoSession {
   /**
    * Pass to {@link PlanExecutionOptions.onBeforePlanStep} for Android segmented capture.
    */
-  onBeforePlanStep = async (): Promise<void> => {
+  onBeforePlanStep = async (context?: PlanStepLifecycleContext): Promise<void> => {
+    context?.signal?.throwIfAborted();
     if (!this.activeRecordingId) {
       return;
     }
@@ -356,9 +362,10 @@ export class AndroidSegmentedPlanVideoSession {
       return;
     }
 
-    const rotation = this.rotateToNextSegment();
+    const rotation = this.rotateToNextSegment(context?.signal);
     this.pendingRotation = rotation;
     await rotation;
+    context?.signal?.throwIfAborted();
   };
 
   private segmentOutputName(): string {
@@ -438,7 +445,55 @@ export class AndroidSegmentedPlanVideoSession {
     }
   }
 
-  private async rotateToNextSegment(): Promise<void> {
+  private async stopSegmentForRotation(
+    previousId: string,
+    rotationAbortController: AbortController,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    let timedOut = false;
+    try {
+      const stopped = await raceWithDeadline(() => this.stopVideoRecordingFn(previousId), {
+        timer: this.timer,
+        timeoutMs: ROTATION_STOP_TIMEOUT_MS,
+        signal,
+        label: `Segment ${previousId} stop on device ${this.deviceId}`,
+        onTimeout: () => {
+          timedOut = true;
+        },
+      });
+      // Only this rotation's winning stop may publish metadata; late losers stay inside the race.
+      if (this.rotationAbortController !== rotationAbortController) {
+        return false;
+      }
+      signal?.throwIfAborted();
+      this.recordStoppedSegment(previousId, stopped.metadata, this.segmentIndex - 1);
+      logger.info(
+        `[SegmentedPlanVideo] Stopped segment recordingId=${previousId} path=${stopped.metadata.filePath}`,
+      );
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[SegmentedPlanVideo] Failed to stop segment ${previousId} on device ${this.deviceId}: ${errorMessage(error)}`,
+      );
+      this.pendingRollbackRecordingIds.push(previousId);
+      this.pendingRollbackErrors.push(error);
+      if (!timedOut || signal?.aborted) {
+        this.timerDriven = false;
+        this.clearTimers();
+        return false;
+      }
+      return true;
+    } finally {
+      if (
+        this.rotationAbortController === rotationAbortController &&
+        this.activeRecordingId === previousId
+      ) {
+        this.activeRecordingId = undefined;
+      }
+    }
+  }
+
+  private async rotateToNextSegment(planSignal?: AbortSignal): Promise<void> {
     if (!this.activeRecordingId) {
       return;
     }
@@ -446,29 +501,16 @@ export class AndroidSegmentedPlanVideoSession {
     const previousId = this.activeRecordingId;
     const rotationAbortController = new AbortController();
     this.rotationAbortController = rotationAbortController;
+    const signal = combineAbortSignals(
+      planSignal,
+      rotationAbortController.signal,
+      this.sessionAbortController.signal,
+    );
     try {
-      const stopped = await this.stopVideoRecordingFn(previousId);
-      this.recordStoppedSegment(previousId, stopped.metadata, this.segmentIndex - 1);
-      logger.info(
-        `[SegmentedPlanVideo] Stopped segment recordingId=${previousId} path=${stopped.metadata.filePath}`,
-      );
-    } catch (error) {
-      logger.warn(
-        `[SegmentedPlanVideo] Failed to stop segment ${previousId}: ${errorMessage(error)}`,
-      );
-      this.pendingRollbackRecordingIds.push(previousId);
-      this.pendingRollbackErrors.push(error);
-      this.timerDriven = false;
-      this.clearTimers();
-      return;
-    } finally {
-      this.activeRecordingId = undefined;
-    }
-
-    try {
-      await this.startSegment(
-        combineAbortSignals(rotationAbortController.signal, this.sessionAbortController.signal),
-      );
+      if (!(await this.stopSegmentForRotation(previousId, rotationAbortController, signal))) {
+        return;
+      }
+      await this.startSegment(signal);
     } catch (error) {
       logger.warn(
         `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${errorMessage(error)}`,

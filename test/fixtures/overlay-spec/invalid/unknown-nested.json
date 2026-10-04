@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "children": [
+        {
+          "type": "text",
+          "text": "ok",
+          "colour": "red"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].colour"
+}

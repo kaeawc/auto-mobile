@@ -1,4 +1,9 @@
-import type { DeviceDisplays, DisplayPanel, Posture } from "../../models/DisplayPanel";
+import type {
+  DeviceDisplays,
+  DisplayPanel,
+  Posture,
+  DisconnectedPanelContext,
+} from "../../models/DisplayPanel";
 import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
 import { POSTURE_PANEL_ROLES, selectablePanels } from "../../models/DisplayPanel";
 import {
@@ -9,7 +14,16 @@ import {
 import { ActionableError } from "../../models/ActionableError";
 
 /** Selection errors are returned directly to the tool caller. */
-export class DisplaySelectionError extends ActionableError {}
+export class DisplaySelectionError extends ActionableError {
+  readonly disconnectedPanel?: DisconnectedPanelContext;
+  constructor(
+    message: string,
+    options?: ErrorOptions & { disconnectedPanel?: DisconnectedPanelContext },
+  ) {
+    super(message, options);
+    this.disconnectedPanel = options?.disconnectedPanel;
+  }
+}
 
 /** Validate the opt-in observe aggregate without enabling aggregate input routing. */
 export function assertAllDisplayObserveSupported(

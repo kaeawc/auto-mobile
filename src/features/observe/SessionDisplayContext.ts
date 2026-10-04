@@ -24,6 +24,9 @@ export function selectedDisplayPin(): string | undefined {
 export function displayPinFailure(error: unknown): unknown {
   const selected = selection.getStore();
   return selected && error instanceof DisplaySelectionError
-    ? new PinnedDisplayUnavailableError(selected.pin, selected.inventory, { cause: error })
+    ? new PinnedDisplayUnavailableError(selected.pin, selected.inventory, {
+        cause: error,
+        disconnectedPanel: error.disconnectedPanel,
+      })
     : error;
 }

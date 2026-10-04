@@ -68,6 +68,44 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
   return committedText.endsWith(text) || committedText.replace(markers, "").endsWith(projectedText);
 }
 
+/**
+ * Match sent code points in order after locale-independent per-code-point lowercasing.
+ * Each folded string remains one token (İ -> i + combining dot stays atomic); this
+ * does not equate composed/decomposed spellings or perform Unicode normalization.
+ * If the full match fails, require only sent Unicode letters, numbers and marks
+ * in order, allowing removal/replacement of whitespace, punctuation and symbols.
+ * With no letters/numbers/marks, retain the full match so dropped symbols fail.
+ */
+export function imeCommitSubsequenceMatches(committedText: string, text: string): boolean {
+  const sent = Array.from(text, (codePoint) => codePoint.toLowerCase());
+  const field = Array.from(committedText, (codePoint) => codePoint.toLowerCase());
+  if (imeCodePointSubsequenceMatches(field, sent)) {
+    return true;
+  }
+  const isLetterNumberOrMark = (codePoint: string): boolean => /[\p{L}\p{N}\p{M}]/u.test(codePoint);
+  const sentContent = sent.filter(isLetterNumberOrMark);
+  return (
+    sentContent.length > 0 &&
+    imeCodePointSubsequenceMatches(field.filter(isLetterNumberOrMark), sentContent)
+  );
+}
+
+function imeCodePointSubsequenceMatches(
+  field: readonly string[],
+  sent: readonly string[],
+): boolean {
+  let index = 0;
+  for (const codePoint of field) {
+    if (codePoint === sent[index]) {
+      index++;
+    }
+    if (index === sent.length) {
+      return true;
+    }
+  }
+  return index === sent.length;
+}
+
 export const IME_COMMIT_TIMEOUT = {
   baseMs: 10_000,
   perSegmentMs: 750,

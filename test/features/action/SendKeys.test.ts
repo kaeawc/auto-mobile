@@ -666,7 +666,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
         const executor = new DefaultSendKeysCommandExecutor(
           androidDevice,
           createAdbFactory(adb),
-          createObserver(focusedAndroidObservation()),
+          createObserver(focusedAndroidObservation(text)),
           { textClient: textClient.client },
         );
         expect(await executor.type({ action: "type", text, mode })).toMatchObject({
@@ -1156,7 +1156,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
-      createObserver(focusedAndroidObservation("original")),
+      createObserver(focusedAndroidObservation("a😀")),
       { textClient: textClient.client },
     );
     expect(
@@ -1240,6 +1240,96 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(
       events.indexOf("adb:shell settings delete secure selected_input_method_subtype"),
     ).toBeLessThan(events.indexOf(`adb:shell ime disable ${commitImeId}`));
+  });
+
+  test.each([
+    ["5551234567", "(555) 123-4567", true, false, "ime", "insert"],
+    ["5551234567", "(555) 123-45", false, false, "ime", "insert"],
+    ["5551234567", "5551234567", true, false, "ime", "insert"],
+    ["5551234567", "", false, false, "ime", "insert"],
+    ["5551234567", "••••••••••", true, true, "ime", "insert"],
+    ["5551234567", null, true, false, "ime", "insert"],
+    ["5551234567", "(555) 123-4567", true, false, "auto", "insert"],
+    ["5551234567", "(555) 123-45", false, false, "auto", "insert"],
+    ["5551234567", "(555) 123-4567", true, false, "ime", "replace"],
+    ["5551234567", "(555) 123-45", false, false, "ime", "replace"],
+    ["5551234567", "(555) 123-4567", true, false, "auto", "replace"],
+    ["5551234567", "(555) 123-45", false, false, "auto", "replace"],
+    ["abc", "ABC", true, false, "ime", "insert"],
+    ["555-0142", "5550142", true, false, "ime", "insert"],
+    ["5550142", "555-0", false, false, "ime", "insert"],
+    ["hello", "helo", false, false, "ime", "insert"],
+    ["HeLLo", "HELO", false, false, "ime", "insert"],
+  ] as const)(
+    "checks plain IME read-back: sent=%s field=%s success=%s secure=%s mode=%s operation=%s",
+    async (text, fieldText, success, secure, mode, operation) => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+        { stdout: priorImeId, stderr: "" },
+        { stdout: commitImeId, stderr: "" },
+      ]);
+      const observer = createObserver(
+        fieldText === null
+          ? ({ timestamp: timer.now() } as ObserveResult)
+          : focusedAndroidObservation(fieldText, secure ? { password: "true" } : {}, timer.now()),
+      );
+      const textClient = createTextClient({
+        commitViaIme: async () => ({ success: true, committedUnits: Array.from(text).length }),
+      });
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text, mode, operation });
+
+      expect(result).toMatchObject({
+        success,
+        resolvedMode: "ime",
+        textLength: Array.from(text).length,
+        committedUnits: Array.from(text).length,
+      });
+      expect(result.partialApplication).toBe(success ? undefined : true);
+      if (!success) {
+        expect(result.error).toContain(`IME partial commit: sent "${text}"`);
+        expect(result.error).toContain(`the focused field holds "${fieldText}"`);
+      }
+      // Auto also observes once before typing to choose password-safe delivery.
+      expect(observer.calls).toBe(mode === "auto" ? 2 : 1);
+      expect(observer.options.at(-1)).toEqual({ signal: undefined, freshness: "fresh" });
+      expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
+      expect(textClient.calls.includes("clear")).toBe(operation === "replace");
+      expect(
+        adb.getExecutedCommands().some((command) => command.startsWith("shell input keyevent")),
+      ).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("skips plain IME read-back for empty text", async () => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const observer = createObserver(focusedAndroidObservation("existing", {}, timer.now()));
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      observer,
+      { textClient: textClient.client },
+    );
+
+    expect(await executor.type({ action: "type", text: "", mode: "ime" })).toMatchObject({
+      success: true,
+    });
+    expect(observer.calls).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test.each([

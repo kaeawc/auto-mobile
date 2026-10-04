@@ -21,6 +21,7 @@ import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import {
   imeCommitSegmentCount,
+  imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
   imeCommitUnitFields,
 } from "../observe/android/CtrlProxyText";
@@ -875,17 +876,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
       safeToRestore = this.canRestoreAfterImeCommit(result);
-      if (result.success && mode === "ime" && imeCommitSegmentCount(text) > 1) {
-        const observation = await this.observer.execute({ signal, freshness: "fresh" });
-        const committedText = this.readFocusedText(observation);
-        if (committedText !== undefined && imeCommitSuffixMatches(committedText, text) === false) {
+      if (result.success && mode === "ime" && text.length > 0) {
+        const error = await this.verifyImeCommit(text, signal);
+        if (error !== undefined) {
           return {
             outcome: {
               ...this.describeImeCommitFailure({
                 success: false,
                 partialApplication: true,
                 ...imeCommitUnitFields(result),
-                error: "IME partial commit: the focused field does not end with the requested text",
+                error,
               }),
               resolvedMode: mode,
             },
@@ -905,6 +905,27 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     } catch (error) {
       return { failure: error, safeToRestore };
     }
+  }
+
+  private async verifyImeCommit(text: string, signal?: AbortSignal): Promise<string | undefined> {
+    const observation = await this.observer.execute({ signal, freshness: "fresh" });
+    const committedText = this.readFocusedText(observation);
+    if (committedText === undefined) {
+      return undefined;
+    }
+    const suffixMatches = imeCommitSuffixMatches(committedText, text);
+    if (imeCommitSegmentCount(text) > 1) {
+      return suffixMatches === false
+        ? "IME partial commit: the focused field does not end with the requested text"
+        : undefined;
+    }
+    // Preserve the existing unverifiable marker-only case.
+    // For insert, pre-existing content can satisfy the whole-field subsequence check;
+    // detecting that requires a pre-commit read. Replace clears the field first.
+    if (suffixMatches === undefined || imeCommitSubsequenceMatches(committedText, text)) {
+      return undefined;
+    }
+    return `IME partial commit: sent ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(committedText)}`;
   }
 
   private describeImeCommitFailure(result: TextActionResult): TextActionResult {

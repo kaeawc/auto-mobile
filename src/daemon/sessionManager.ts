@@ -1518,15 +1518,17 @@ export class SessionManager {
    */
   private async reclaimAndRefreshExistingSession(existing: Session): Promise<void> {
     const now = this.timer.now();
-    if (existing.ownership === "awaiting-owner") {
-      existing.ownership = "owned";
-      existing.awaitingOwnerSince = undefined;
-    }
     const previousActivity = {
       lastUsedAt: existing.lastUsedAt,
       lastHeartbeat: existing.lastHeartbeat,
       expiresAt: existing.expiresAt,
+      ownership: existing.ownership,
+      awaitingOwnerSince: existing.awaitingOwnerSince,
     };
+    if (existing.ownership === "awaiting-owner") {
+      existing.ownership = "owned";
+      existing.awaitingOwnerSince = undefined;
+    }
     existing.lastUsedAt = now;
     existing.lastHeartbeat = now;
     existing.expiresAt = now + existing.sessionTimeoutMs;
@@ -1538,7 +1540,9 @@ export class SessionManager {
       // An awaited activity refresh cannot advertise fresh in-memory liveness
       // after its durable write failed; callers receive the typed failure.
       // Only the latest refresh may roll back, so an older failure cannot clobber newer liveness.
-      rollbackSessionActivityIfCurrent(existing, previousActivity, capturedGeneration);
+      if (existing.activityGeneration === capturedGeneration) {
+        Object.assign(existing, previousActivity);
+      }
       throw error;
     }
   }
@@ -4768,6 +4772,9 @@ export class SessionManager {
       lastUsedAt: session.lastUsedAt,
       lastHeartbeat: session.lastHeartbeat,
       expiresAt: session.expiresAt,
+      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      ownership: session.ownership,
+      awaitingOwnerSince: session.awaitingOwnerSince,
     };
     session.lastHeartbeat = now;
     session.lastUsedAt = now;
@@ -4782,8 +4789,13 @@ export class SessionManager {
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch((error) => {
-        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
+        if (session.activityGeneration === capturedGeneration) {
+          Object.assign(session, previousActivity);
+        }
+        logger.warn(
+          `[SessionManager] Failed to record session activity: ${errorMessage(error)}`,
+          error,
+        );
       });
   }
 

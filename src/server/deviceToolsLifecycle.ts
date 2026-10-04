@@ -22,6 +22,7 @@ import {
   getDeviceTeardownService,
   getDeviceToolsDependencies,
   isTeardownFailure,
+  isProvisionDeviceCallerAbort,
   pooledAvdKillIdentity,
   pooledAvdNameRefusalMessage,
   reserveStableDeviceLifecycle,
@@ -314,16 +315,16 @@ export function createLifecycleHandlers() {
         },
       );
     } catch (error) {
-      // Caller cancellation ends only this wait; the accepted teardown continues independently.
-      logger.debug(
-        `[DeviceTools] teardown caller stopped waiting for ${args.operationId}: ${String(error instanceof Error ? error.message : error)}`,
-      );
-      return createTeardownFailureResponse(
-        args,
-        "precondition",
-        "operation_cancelled",
-        String(error instanceof Error ? error.message : error),
-      );
+      const message = String(error instanceof Error ? error.message : error);
+      if (isProvisionDeviceCallerAbort(error, callerSignal)) {
+        // Caller cancellation ends only this wait; the accepted teardown continues independently.
+        logger.debug(
+          `[DeviceTools] teardown caller stopped waiting for ${args.operationId}: ${message}`,
+        );
+        return createTeardownFailureResponse(args, "precondition", "operation_cancelled", message);
+      }
+      logger.warn(`[DeviceTools] teardown operation ${args.operationId} failed: ${message}`, error);
+      return createTeardownFailureResponse(args, "precondition", "operation_failed", message);
     }
   }
 

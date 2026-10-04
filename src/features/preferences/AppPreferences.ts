@@ -1134,7 +1134,7 @@ function parseFloatValue(value: string): number {
   return parsed;
 }
 
-function stringValue(value: PreferenceValue | null): string {
+function stringValue(value: PreferenceResultValue | null): string {
   if (value === null) {
     return "";
   }

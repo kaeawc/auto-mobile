@@ -25,6 +25,8 @@ export class FakeTalkBackNavigationDriver
     selector?: AccessibilityNodeSelector;
   }> = [];
 
+  tapDispatched = false;
+
   private tapOverrides: A11yTapCoordinatesResult[] = [];
   private actionOverrides: A11yActionResult[] = [];
 
@@ -60,14 +62,15 @@ export class FakeTalkBackNavigationDriver
     x: number,
     y: number,
     durationMs: number,
+    onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult> {
     this.tapHistory.push({ x, y, durationMs });
 
-    if (this.tapOverrides.length > 0) {
-      return this.tapOverrides.shift()!;
+    const result = this.tapOverrides.shift() ?? this.tapResult;
+    if (result.success || this.tapDispatched) {
+      onDispatch?.();
     }
-
-    return this.tapResult;
+    return result;
   }
 
   async requestAction(action: string, resourceId?: string): Promise<A11yActionResult> {

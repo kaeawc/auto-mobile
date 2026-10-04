@@ -76,6 +76,80 @@ describe("SendKeys IME failure after typing", () => {
     },
   );
 
+  test.each([false, true])(
+    "a failed Android done wire result is a tool failure (afterTyping=%s)",
+    async (afterTyping) => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+      adb.setScreenState(true);
+      const device = { ...androidDevice, deviceId: `ime-done-failure-${afterTyping}` };
+      const reason = "No focused editable node found for IME action";
+      const requests: Record<string, unknown>[] = [];
+      const client = AndroidCtrlProxyClient.createForTesting(
+        device,
+        adb,
+        (url) => {
+          const socket = new FakeWebSocket(url, "none", 0, timer);
+          socket.send = (data: unknown) => {
+            const request = JSON.parse(String(data)) as Record<string, unknown>;
+            if (request.type === "request_ime_action") {
+              requests.push(request);
+              socket.simulateMessage(
+                JSON.stringify({
+                  type: "ime_action_result",
+                  requestId: request.requestId,
+                  action: "done",
+                  success: false,
+                  error: reason,
+                  totalTimeMs: 0,
+                }),
+              );
+            }
+          };
+          return socket;
+        },
+        timer,
+      );
+      const { client: textClient, calls } = createTextClient();
+      textClient.ime = (action) => client.requestImeAction(action);
+      const observer = createObserver(focusedAndroidObservation("", {}, 1));
+      const executor = new DefaultSendKeysCommandExecutor(device, createAdbFactory(adb), observer, {
+        textClient,
+        timer,
+      });
+      const sendKeys = new SendKeys(device, undefined, {
+        executor,
+        observer,
+        timer,
+        timestampProvider: { now: async () => 0 },
+      });
+      try {
+        expect(await client.ensureConnected()).toBe(true);
+        const result = await sendKeys.execute([
+          ...(afterTyping
+            ? [{ action: "type" as const, text: "note", mode: "a11y" as const }]
+            : []),
+          { action: "key", key: "done" },
+        ]);
+        const error = afterTyping
+          ? `IME action 'done' failed after the text was entered: ${reason}. Do not retype the text.`
+          : reason;
+        expect(requests).toMatchObject([{ type: "request_ime_action", action: "done" }]);
+        expect(calls).toEqual(afterTyping ? ["insert:note"] : []);
+        expect(result).toMatchObject({
+          success: false,
+          completedCommands: afterTyping ? 1 : 0,
+          failedIndex: afterTyping ? 1 : 0,
+          error,
+        });
+        expect(result.commands.at(-1)).toMatchObject({ action: "key", success: false, error });
+      } finally {
+        await client.close();
+      }
+    },
+  );
+
   test("does not claim typing succeeded when the type step fails", async () => {
     const { client } = createTextClient();
     client.insert = async () => ({ success: false, error: "typing failed" });

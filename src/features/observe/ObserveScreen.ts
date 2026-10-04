@@ -1981,21 +1981,37 @@ export class RealObserveScreen implements ObserveScreen {
    * post-action and waitFor flows use this after their final observation so a
    * retry/poll loop creates at most one screenshot.
    */
-  private async screenshotDisplayId(signal?: AbortSignal): Promise<number | undefined> {
-    if (
-      this.device.platform !== "android" ||
-      !this.requestedDisplay ||
-      this.requestedDisplay === "active"
-    ) {
+  private async screenshotDisplayId(
+    signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<number | undefined> {
+    if (this.device.platform !== "android" || this.requestedDisplay === "active") {
       return undefined;
     }
-    const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {});
-    return this.observedAndroidDisplayCache.logicalIdForPanel(
-      this.device,
-      this.adb,
-      panel.key,
-      signal,
-    );
+    const display = this.requestedDisplay || observation?.display?.key;
+    if (!display) {
+      return undefined;
+    }
+    try {
+      const panel = resolveTargetDisplay(this.device.displays, display, {});
+      const displayId = await this.observedAndroidDisplayCache.logicalIdForPanel(
+        this.device,
+        this.adb,
+        panel.key,
+        signal,
+      );
+      // Inferred primary-panel captures retain the legacy command; explicit selectors keep their id.
+      return !this.requestedDisplay && displayId === 0 ? undefined : displayId;
+    } catch (error) {
+      if (this.requestedDisplay) {
+        throw error;
+      }
+      // Observation hints are optional; legacy capture remains safe if the panel cannot be resolved.
+      logger.debug(
+        `Screenshot panel "${display}" could not be mapped; using default display: ${describeError(error).replace(/\s+/g, " ")}`,
+      );
+      return undefined;
+    }
   }
 
   async captureScreenshot(
@@ -2006,7 +2022,7 @@ export class RealObserveScreen implements ObserveScreen {
     screenshotOptions?: ScreenshotEncodingOptions,
   ): Promise<void> {
     const screenshotObservation = observation ?? this.createBaseResult();
-    const displayId = await this.screenshotDisplayId(signal);
+    const displayId = await this.screenshotDisplayId(signal, observation);
     const screenshotMode = resolveScreenshotMode(screenshot);
     if (observation) {
       observation.screenshotCaptureAttempted = true;

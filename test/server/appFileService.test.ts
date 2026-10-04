@@ -59,6 +59,304 @@ describe("AppFileService", () => {
     platform: "ios",
   };
 
+  describe("Android batch rollback contract", () => {
+    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+
+    for (const cleanupFails of [false, true]) {
+      test(`user_files rolls back pushed but unindexed files (cleanup failure=${cleanupFails})`, async () => {
+        const adb = new FakeAdbExecutor();
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        if (cleanupFails) {
+          adb.setCommandError("shell rm -f", new Error("cleanup denied"));
+        }
+        const sharedStorageService = createSharedStorageServiceForTesting({
+          adbFactory: adbFactoryFor(adb),
+          timer,
+          fileSystem: {
+            stat: async () => ({ size: 7, isFile: () => true }),
+            mkdtemp: async () => "/fake/unused",
+            writeFileBuffer: async () => {},
+            rm: async () => {},
+          },
+          createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "primary" }) }),
+        });
+        const service = createAppFileServiceForTesting({
+          sharedStorageService,
+          fileSystem: new TestAppFileFileSystem(),
+        });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const error = await service
+            .putFile({
+              device,
+              target: { domain: "user_files", namespace: "fixtures", indexMedia: true },
+              files: ["a.txt", "b.png", "c.txt"].map((destinationPath) => ({
+                contentText: "fixture",
+                destinationPath,
+              })),
+            })
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            );
+          expect(error).toBeInstanceOf(ActionableError);
+          expect((error as Error).message).toBe(
+            "Android shared-storage batch staging failed for b.png: Android media indexing did not complete for /storage/emulated/0/Download/fixtures/b.png within 5 seconds. " +
+              (cleanupFails
+                ? "Rolled back: none. Rollback failures: b.png, a.txt: Android shared-storage operation failed: cleanup denied."
+                : "Rolled back: b.png, a.txt. Rollback failures: none."),
+          );
+          expect(
+            adb
+              .getExecutedArgv()
+              .filter((args) => args[0] === "push")
+              .map((args) => args[2]),
+          ).toEqual([
+            "/storage/emulated/0/Download/fixtures/a.txt",
+            "/storage/emulated/0/Download/fixtures/b.png",
+          ]);
+          expect(
+            adb.getExecutedCommands().filter((command) => command.startsWith("shell rm -f")),
+          ).toEqual([
+            "shell rm -f '/storage/emulated/0/Download/fixtures/b.png' '/storage/emulated/0/Download/fixtures/a.txt'",
+          ]);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    }
+
+    for (const cleanupFails of [false, true]) {
+      test(`app_containers rolls back the prefix after third run-as write fails (cleanup failure=${cleanupFails})`, async () => {
+        const adb = new FakeAdbExecutor();
+        const execute = adb.executeCommand.bind(adb);
+        const rollbackCommands: string[] = [];
+        spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+          const [command] = args;
+          if (command.includes("rm -f 'files/b.txt'")) {
+            rollbackCommands.push(command);
+          }
+          if (command.includes(" cp ") && command.includes("c.txt")) {
+            throw new Error("copy failed");
+          }
+          if (cleanupFails && command.includes("rm -f 'files/b.txt'")) {
+            throw new Error("cleanup denied");
+          }
+          return execute(...args);
+        });
+        const service = createAppFileServiceForTesting({
+          adbFactory: adbFactoryFor(adb),
+          fileSystem: new TestAppFileFileSystem(),
+          idGenerator: new CountingIdGenerator("tmp"),
+          timer: new FakeTimer(),
+        });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const error = await service
+            .putFile({
+              device,
+              userId: 0,
+              target: {
+                domain: "app_containers",
+                appId: "com.example.app",
+                container: "documents",
+              },
+              files: ["a.txt", "b.txt", "c.txt"].map((destinationPath) => ({
+                contentText: "fixture",
+                destinationPath,
+              })),
+            })
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            );
+          expect(error).toBeInstanceOf(ActionableError);
+          expect((error as Error).message).toBe(
+            "Android app-container batch staging failed for c.txt: Failed to write Android documents app files for com.example.app on emulator-5554: copy failed " +
+              (cleanupFails
+                ? "Rolled back: none. Rollback failures: b.txt, a.txt: cleanup denied."
+                : "Rolled back: b.txt, a.txt. Rollback failures: none."),
+          );
+          expect(rollbackCommands).toEqual([
+            "shell run-as 'com.example.app' rm -f 'files/b.txt' 'files/a.txt'",
+          ]);
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    }
+
+    for (const container of ["documents", "externalFiles"] as const) {
+      test(`successful three-file ${container} batch commits every file without rollback`, async () => {
+        const adb = new FakeAdbExecutor();
+        const service = createAppFileServiceForTesting({
+          adbFactory: adbFactoryFor(adb),
+          fileSystem: new TestAppFileFileSystem(),
+          idGenerator: new CountingIdGenerator("tmp"),
+          timer: new FakeTimer(),
+        });
+        const result = await service.putFile({
+          device,
+          userId: 0,
+          target: { domain: "app_containers", appId: "com.example.app", container },
+          files: ["a.txt", "b.txt", "c.txt"].map((destinationPath) => ({
+            contentText: "fixture",
+            destinationPath,
+          })),
+        });
+        expect(
+          result.files.map((file) => ({
+            destinationPath: file.destinationPath,
+            byteCount: file.byteCount,
+          })),
+        ).toEqual([
+          { destinationPath: "a.txt", byteCount: 7 },
+          { destinationPath: "b.txt", byteCount: 7 },
+          { destinationPath: "c.txt", byteCount: 7 },
+        ]);
+        const commands = adb.getExecutedCommands();
+        expect(commands.filter((command) => command.includes("mv -f "))).toHaveLength(3);
+        expect(
+          commands
+            .filter((command) => command.includes(" rm -f "))
+            .every((command) => command.includes("automobile-")),
+        ).toBe(true);
+        if (container === "externalFiles") {
+          expect(
+            commands
+              .filter((command) => command.startsWith("push "))
+              .every((command) => command.endsWith(".tmp'")),
+          ).toBe(true);
+        }
+      });
+    }
+
+    test("app-container rollback outlives cancellation in a resolved work profile", async () => {
+      const adb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const execute = adb.executeCommand.bind(adb);
+      const rollbackSignals: Array<{
+        signal: AbortSignal | undefined;
+        ambient: AbortSignal | undefined;
+      }> = [];
+      spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+        const [command, , , , signal] = args;
+        if (command.includes(" cp ") && command.includes("c.txt")) {
+          controller.abort(new Error("request cancelled"));
+          controller.signal.throwIfAborted();
+        }
+        if (command.includes("rm -f 'files/b.txt'")) {
+          rollbackSignals.push({ signal, ambient: getAbortSignal() });
+        }
+        (signal ?? getAbortSignal())?.throwIfAborted();
+        return execute(...args);
+      });
+      const service = createAppFileServiceForTesting({
+        adbFactory: adbFactoryFor(adb),
+        fileSystem: new TestAppFileFileSystem(),
+        timer: new FakeTimer(),
+      });
+      const error = await runWithAbortSignal(controller.signal, () =>
+        service.putFile({
+          device,
+          userId: 10,
+          target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+          files: ["a.txt", "b.txt", "c.txt"].map((destinationPath) => ({
+            contentText: "fixture",
+            destinationPath,
+          })),
+          signal: controller.signal,
+        }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect((error as Error).message).toBe(
+        "Android app-container batch staging failed for c.txt: Failed to write Android documents app files for com.example.app on emulator-5554: request cancelled Rolled back: b.txt, a.txt. Rollback failures: none.",
+      );
+      expect(adb.getExecutedCommands()).toContain(
+        "shell run-as 'com.example.app' --user 10 rm -f 'files/b.txt' 'files/a.txt'",
+      );
+      expect(rollbackSignals).toHaveLength(1);
+      expect(rollbackSignals[0]?.signal?.aborted).toBe(false);
+      expect(rollbackSignals[0]?.ambient).toBeUndefined();
+    });
+
+    test("app-container failure reports temporary cleanup failures without masking the copy error", async () => {
+      const adb = new FakeAdbExecutor();
+      const execute = adb.executeCommand.bind(adb);
+      spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+        const [command] = args;
+        if (command.includes(" cp ") && command.includes("c.txt")) {
+          throw new Error("copy failed");
+        }
+        if (command === "shell run-as 'com.example.app' rm -f 'files/.automobile-tmp-3.tmp'") {
+          throw new Error("temporary cleanup denied");
+        }
+        return execute(...args);
+      });
+      const service = createAppFileServiceForTesting({
+        adbFactory: adbFactoryFor(adb),
+        fileSystem: new TestAppFileFileSystem(),
+        idGenerator: new CountingIdGenerator("tmp"),
+        timer: new FakeTimer(),
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const error = await service
+          .putFile({
+            device,
+            userId: 0,
+            target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+            files: ["a.txt", "b.txt", "c.txt"].map((destinationPath) => ({
+              contentText: "fixture",
+              destinationPath,
+            })),
+          })
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+        expect((error as Error).message).toBe(
+          "Android app-container batch staging failed for c.txt: Failed to write Android documents app files for com.example.app on emulator-5554: copy failed Rolled back: b.txt, a.txt. Rollback failures: c.txt staging cleanup (shell run-as 'com.example.app' rm -f 'files/.automobile-tmp-3.tmp'): temporary cleanup denied.",
+        );
+        expect(warn).toHaveBeenCalledWith(
+          "Android app-file staging cleanup failed",
+          expect.any(Error),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("single app-container write copies to a sibling temporary file before rename", async () => {
+      const adb = new FakeAdbExecutor();
+      const service = createAppFileServiceForTesting({
+        adbFactory: adbFactoryFor(adb),
+        fileSystem: new TestAppFileFileSystem(),
+        idGenerator: new CountingIdGenerator("tmp"),
+        timer: new FakeTimer(),
+      });
+      const result = await service.putFile({
+        device,
+        userId: 0,
+        target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+        files: [{ contentText: "fixture", destinationPath: "nested/a.txt" }],
+      });
+      expect(result.success).toBe(true);
+      const script =
+        "mkdir -p 'files/nested' && cp '/data/local/tmp/automobile-tmp-1-a.txt' 'files/nested/.automobile-tmp-1.tmp' && chmod 600 'files/nested/.automobile-tmp-1.tmp' && mv -f 'files/nested/.automobile-tmp-1.tmp' 'files/nested/a.txt'";
+      expect(adb.getExecutedCommands()).toContain(
+        `shell run-as 'com.example.app' sh -c ${shellQuote(script)}`,
+      );
+      expect(adb.getExecutedCommands()).toContain(
+        "shell run-as 'com.example.app' rm -f 'files/nested/.automobile-tmp-1.tmp'",
+      );
+    });
+  });
+
   describe("detached Android staging cleanup", () => {
     for (const outcome of ["cancel", "push-error", "success", "cleanup-error"] as const) {
       test(`cleans staging once and preserves ${outcome}`, async () => {
@@ -110,9 +408,13 @@ describe("AppFileService", () => {
               signal: controller.signal,
             }),
           );
-          if (outcome === "cancel" || outcome === "push-error") {
+          if (outcome === "cancel" || outcome === "push-error" || outcome === "cleanup-error") {
             await expect(operation).rejects.toThrow(
-              outcome === "cancel" ? "request cancelled" : "partial push failed",
+              outcome === "cancel"
+                ? "request cancelled"
+                : outcome === "push-error"
+                  ? "partial push failed"
+                  : "staging cleanup",
             );
           } else {
             expect((await operation).success).toBe(true);
@@ -642,6 +944,13 @@ describe("AppFileService", () => {
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
     const sharedStorageService = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
+      timer: new FakeTimer(),
+      fileSystem: {
+        stat: async () => ({ size: 3, isFile: () => true }),
+        mkdtemp: async () => "/fake/unused",
+        writeFileBuffer: async () => {},
+        rm: async () => {},
+      },
       createUserResolver: () => ({
         resolve: async (request) => {
           expect(request?.explicitUserId).toBe(12);
@@ -649,17 +958,27 @@ describe("AppFileService", () => {
         },
       }),
     });
-    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const service = createAppFileServiceForTesting({
+      sharedStorageService,
+      fileSystem: new TestAppFileFileSystem(),
+    });
 
     const result = await service.putFile({
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
       target: { domain: "media_library" },
       userId: 12,
-      files: [
-        { contentBase64: Buffer.from([1, 2, 3]).toString("base64"), destinationPath: "photo.png" },
-      ],
+      files: ["photo.png", "second.png", "third.png"].map((destinationPath) => ({
+        contentBase64: Buffer.from([1, 2, 3]).toString("base64"),
+        destinationPath,
+      })),
     });
 
+    expect(result.files.map((file) => file.destinationPath)).toEqual([
+      "photo.png",
+      "second.png",
+      "third.png",
+    ]);
+    expect(result.files.every((file) => file.effects[0]?.status === "completed")).toBe(true);
     expect(result.files[0]?.effects).toEqual([
       {
         type: "media_index",
@@ -1038,12 +1357,13 @@ describe("AppFileService", () => {
       });
       const script =
         "mkdir -p 'files/fixtures' && " +
-        "cp '/data/local/tmp/automobile-tmp-1-welcome.txt' 'files/fixtures/welcome.txt' && " +
-        "chmod 600 'files/fixtures/welcome.txt'";
+        "cp '/data/local/tmp/automobile-tmp-1-welcome.txt' 'files/fixtures/.automobile-tmp-1.tmp' && " +
+        "chmod 600 'files/fixtures/.automobile-tmp-1.tmp' && " +
+        "mv -f 'files/fixtures/.automobile-tmp-1.tmp' 'files/fixtures/welcome.txt'";
       expect(adbFactory.getFakeClient().getAllCommands()[1]).toBe(
         `shell run-as 'com.example.app'${userId === 10 ? " --user 10" : ""} sh -c ${shellQuote(script)}`,
       );
-      expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(4);
+      expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(5);
       expect(adbFactory.getFakeClient().getLastCommand()).toBe("shell dumpsys activity processes");
     }
   });
@@ -2115,6 +2435,8 @@ describe("AppFileService", () => {
     const adbFactory = new FakeAdbClientFactory();
     const service = createAppFileServiceForTesting({
       adbFactory,
+      fileSystem: new TestAppFileFileSystem(),
+      timer: new FakeTimer(),
       simctlFactory: () => {
         throw new Error("simctl not used");
       },
@@ -2140,14 +2462,14 @@ describe("AppFileService", () => {
     // push to temp, run-as cp, and the rm cleanup all flow through the helper / adb.
     expect(calls.length).toBeGreaterThanOrEqual(3);
     expect(calls.every((call) => call.noRetry === true)).toBe(true);
-    const cleanupCalls = calls.filter((call) => call.command.startsWith("shell rm -f"));
-    expect(cleanupCalls).toHaveLength(1);
+    const cleanupCalls = calls.filter((call) => call.command.includes(" rm -f "));
+    expect(cleanupCalls).toHaveLength(2);
     expect(cleanupCalls[0]?.signal).not.toBe(controller.signal);
     expect(cleanupCalls[0]?.signal?.aborted).toBe(false);
     expect(cleanupCalls[0]?.timeoutMs).toBe(5000);
     expect(
       calls
-        .filter((call) => !call.command.startsWith("shell rm -f"))
+        .filter((call) => !call.command.includes(" rm -f "))
         .every((call) => call.signal === controller.signal),
     ).toBe(true);
   });
@@ -2477,14 +2799,22 @@ function appFileOperationCommands(
   const prefix = `shell run-as 'com.example.app'${userId ? ` --user ${userId}` : ""}`;
   if (operation === "put") {
     if (container === "externalFiles") {
-      return [`shell mkdir -p '${root}/fixtures'`, `push '/fixtures/welcome.txt' '${path}'`];
+      const temporary = `${root}/fixtures/.automobile-tmp-1.tmp`;
+      return [
+        `shell mkdir -p '${root}/fixtures'`,
+        `push '/fixtures/welcome.txt' '${temporary}'`,
+        `shell sh -c ${shellQuote(`mv -f '${temporary}' '${path}'`)}`,
+        `shell rm -f '${temporary}'`,
+      ];
     }
     const temp = "/data/local/tmp/automobile-tmp-1-welcome.txt";
-    const script = `mkdir -p '${root}/fixtures' && cp '${temp}' '${path}' && chmod 600 '${path}'`;
+    const temporary = `${root}/fixtures/.automobile-tmp-1.tmp`;
+    const script = `mkdir -p '${root}/fixtures' && cp '${temp}' '${temporary}' && chmod 600 '${temporary}' && mv -f '${temporary}' '${path}'`;
     return [
       `push '/fixtures/welcome.txt' '${temp}'`,
       `${prefix} sh -c ${shellQuote(script)}`,
       `shell rm -f '${temp}'`,
+      `${prefix} rm -f '${temporary}'`,
     ];
   }
   if (operation === "read") {
@@ -2926,7 +3256,9 @@ describe("Android app-file profile details", () => {
     expect(adb.getExecutedCommands().filter((c) => c === "shell am get-current-user")).toHaveLength(
       1,
     );
-    const writes = adb.getExecutedCommands().filter((c) => c.startsWith("shell run-as"));
+    const writes = adb
+      .getExecutedCommands()
+      .filter((c) => c.startsWith("shell run-as") && c.includes(" sh -c "));
     expect(writes).toHaveLength(2);
     expect(
       writes.every((c) => c.startsWith("shell run-as 'com.example.app' --user 10 sh -c")),

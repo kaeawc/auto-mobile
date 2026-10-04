@@ -312,6 +312,29 @@ describe("DeviceServiceClient connection cooldown", () => {
     expect(client.connectionClosedCount).toBe(1);
   });
 
+  test("continues replacement when stale socket listener cleanup throws", async () => {
+    const timer = new FakeTimer();
+    const sockets: FakeWebSocket[] = [];
+    client = new TestDeviceServiceClient(timer, (url) => {
+      const socket = new FakeWebSocket(url, "none", 0, timer);
+      sockets.push(socket);
+      return socket;
+    });
+    expect(await client.ensureConnected()).toBe(true);
+    const stale = sockets[0]!;
+    stale.readyState = WebSocketState.CLOSING;
+    stale.removeAllListeners = () => {
+      throw new Error("stale cleanup failed");
+    };
+    expect(await client.ensureConnected()).toBe(true);
+    expect(sockets).toHaveLength(2);
+    expect(client.connectionClosedCount).toBe(1);
+    stale.emit("close");
+    expect(client.isConnected()).toBe(true);
+    expect(client.connectionClosedCount).toBe(1);
+    expect(client.getLastConnectionFailureMessage()).toBeUndefined();
+  });
+
   test("background recovery preserves the caller budget and stops after the cap", async () => {
     const timer = new FakeTimer();
     let factoryCalls = 0;

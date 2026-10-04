@@ -292,7 +292,9 @@ const waitForElementBaseSchema = z
     if (value.textMatch === "regex" && value.text !== undefined) {
       try {
         new RegExp(value.text);
-      } catch {
+      } catch (error) {
+        // Invalid caller regexes are expected validation failures reported by the schema.
+        logger.debug(`waitFor regex validation failed: ${errorMessage(error)}`);
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "text must be a valid regular expression when textMatch is regex",
@@ -2239,11 +2241,14 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
 
       // Include setup timing if this is the first observe after accessibility service setup
       const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId);
-      if (setupTiming && result.perfTiming) {
-        // Prepend setup timing to the observe timing
-        result.perfTiming = [setupTiming, ...result.perfTiming];
-      } else if (setupTiming) {
-        result.perfTiming = [setupTiming];
+      if (setupTiming) {
+        const setupEntries = Array.isArray(setupTiming) ? setupTiming : Object.values(setupTiming);
+        const observeEntries = result.perfTiming
+          ? Array.isArray(result.perfTiming)
+            ? result.perfTiming
+            : Object.values(result.perfTiming)
+          : [];
+        result.perfTiming = [...setupEntries, ...observeEntries];
       }
 
       // Record back stack information in navigation graph if available

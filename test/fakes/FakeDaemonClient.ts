@@ -185,6 +185,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     sessionId?: string,
     reason?: string,
     release?: DaemonNotification["release"],
+    uri?: string,
   ): void {
     for (const handler of this.notificationHandlers) {
       handler({
@@ -193,6 +194,7 @@ export class FakeDaemonClient implements DaemonClientLike {
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(reason !== undefined ? { reason } : {}),
         ...(release !== undefined ? { release } : {}),
+        ...(uri !== undefined ? { uri } : {}),
       });
     }
   }

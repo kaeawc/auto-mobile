@@ -3,7 +3,7 @@ import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
-import type { DisplayFenceDependencies } from "./BaseVisualChange";
+import type { DisplayFence, DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -34,7 +34,10 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
 import { boundsArea, boundsEqual, clamp, intersectBounds, parseBounds } from "../../utils/bounds";
 import { buildContainerFromElement, isTruthyFlag } from "../utility/elementProperties";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../utils/screenBounds";
@@ -67,6 +70,23 @@ type PinchTarget = {
   targetType: "screen" | "container";
   container?: PinchOnOptions["container"];
   warning?: string;
+};
+
+type PinchGeometry = Pick<
+  PinchOnResult,
+  "centerX" | "centerY" | "distanceStart" | "distanceEnd" | "scale" | "duration" | "rotationDegrees"
+> & { rotationDegrees: number };
+
+type PinchExecutionContext = {
+  perf: PerformanceTracker;
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+  displayTarget?: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+};
+
+type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestPinch"]>> & {
+  observation?: ObserveResult;
+  pinchPath?: string;
 };
 
 interface PinchOnDependencies extends DisplayFenceDependencies {
@@ -150,16 +170,7 @@ export class PinchOn extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<PinchOnResult> {
     throwIfAborted(signal);
-    if (
-      options.duration !== undefined &&
-      (!Number.isInteger(options.duration) ||
-        options.duration < PINCH_DURATION_MIN_MS ||
-        options.duration > PINCH_DURATION_MAX_MS)
-    ) {
-      throw new ActionableError(
-        `pinchOn duration must be an integer from ${PINCH_DURATION_MIN_MS} to ${PINCH_DURATION_MAX_MS} ms`,
-      );
-    }
+    this.validateDuration(options.duration);
     let displayTarget: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     if (options.display !== undefined) {
       try {
@@ -173,48 +184,10 @@ export class PinchOn extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("pinchOn");
 
-    if (!options.direction) {
+    const validationError = this.validateOptions(options);
+    if (validationError) {
       perf.end();
-      return this.createErrorResult("Pinch direction is required ('in' or 'out')", options);
-    }
-
-    if (this.device.platform !== "android" && this.device.platform !== "ios") {
-      perf.end();
-      return this.createErrorResult(
-        unsupportedPlatformError(this.device.platform, "pinch on elements").message,
-        options,
-      );
-    }
-
-    if (options.scale !== undefined && options.scale <= PINCH_SCALE_EXCLUSIVE_MIN) {
-      perf.end();
-      return this.createErrorResult("scale must be greater than 0", options);
-    }
-
-    if (
-      options.distanceStart !== undefined &&
-      options.distanceStart <= PINCH_DISTANCE_EXCLUSIVE_MIN
-    ) {
-      perf.end();
-      return this.createErrorResult("distanceStart must be greater than 0", options);
-    }
-
-    if (options.distanceEnd !== undefined && options.distanceEnd <= PINCH_DISTANCE_EXCLUSIVE_MIN) {
-      perf.end();
-      return this.createErrorResult("distanceEnd must be greater than 0", options);
-    }
-
-    if (options.container) {
-      const selectorCount = [options.container.elementId, options.container.text].filter(
-        Boolean,
-      ).length;
-      if (selectorCount !== 1) {
-        perf.end();
-        return this.createErrorResult(
-          "pinchOn container must specify exactly one of elementId or text",
-          options,
-        );
-      }
+      return this.createErrorResult(validationError, options);
     }
 
     if (this.device.platform === "android") {
@@ -232,149 +205,7 @@ export class PinchOn extends BaseVisualChange {
     }
 
     try {
-      const fence = options.display === undefined ? this.captureDisplayFence() : undefined;
-      const target = await perf.track("resolveTarget", () =>
-        this.resolveTarget(options, signal, displayTarget?.observation),
-      );
-      const { centerX, centerY } = this.getCenter(target.bounds);
-      let { distanceStart, distanceEnd, scale } = this.resolveDistances(options, target.bounds);
-      if (this.device.platform === "ios") {
-        distanceStart = Math.round(distanceStart);
-        distanceEnd = Math.round(distanceEnd);
-        scale = distanceStart > 0 ? distanceEnd / distanceStart : scale;
-      }
-      const duration = options.duration ?? 300;
-      const rotationDegrees = options.rotationDegrees ?? 0;
-      let iosDispatchTimestamp: number | undefined;
-
-      const dispatchAndroidPinch = async () => {
-        throwIfAborted(signal);
-        displayTarget?.assertCurrent();
-        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-        fence?.assertCurrent();
-        const result = await awaitWhileRequestIsLive(
-          AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory).requestPinch(
-            centerX,
-            centerY,
-            distanceStart,
-            distanceEnd,
-            rotationDegrees,
-            duration,
-            resolveGestureCtrlProxyTimeoutMs(duration),
-            perf,
-            signal,
-            displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
-            displayTarget?.assertCurrent,
-          ),
-          signal,
-        );
-        throwIfAborted(signal);
-        displayTarget?.assertCurrent();
-        return result;
-      };
-      const pinchResult = await this.observedInteraction(
-        async () => {
-          throwIfAborted(signal);
-          if (this.device.platform === "ios") {
-            // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-            fence?.assertCurrent();
-            const result = await awaitWhileRequestIsLive(
-              IOSCtrlProxyClient.getInstance(this.device).requestPinch(
-                centerX,
-                centerY,
-                distanceStart,
-                distanceEnd,
-                rotationDegrees,
-                duration,
-                resolveGestureCtrlProxyTimeoutMs(duration),
-                perf,
-              ),
-              signal,
-            );
-            throwIfAborted(signal);
-            if (result.success) {
-              iosDispatchTimestamp = this.timer.now();
-              IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-            }
-            return result;
-          }
-
-          return dispatchAndroidPinch();
-        },
-        {
-          changeExpected: false,
-          display: options.display,
-          timeoutMs: 8000,
-          progress,
-          perf,
-          signal,
-          observationTimestampProvider: () => iosDispatchTimestamp,
-          predictionContext: {
-            toolName: "pinchOn",
-            toolArgs: {
-              ...options,
-              centerX,
-              centerY,
-              distanceStart,
-              distanceEnd,
-              rotationDegrees,
-              duration,
-            },
-          },
-        },
-      );
-      throwIfAborted(signal);
-
-      perf.end();
-      if (!pinchResult.success) {
-        return {
-          success: false,
-          direction: options.direction,
-          distanceStart,
-          distanceEnd,
-          scale,
-          duration,
-          rotationDegrees,
-          centerX,
-          centerY,
-          targetType: target.targetType,
-          container: target.container,
-          warning: target.warning,
-          observation: pinchResult.observation,
-          // sendCommand's timeout result means dispatch completed without a confirmed reply.
-          error: pinchResult.error?.startsWith("Pinch timed out after ")
-            ? `Pinch outcome is indeterminate: the request was dispatched but no result was confirmed (${pinchResult.error}). Do not retry automatically.`
-            : pinchResult.error,
-        };
-      }
-
-      // iOS may fall back to the public element-anchored pinch when the private
-      // XCTest event-synthesis symbols are unavailable; that path zooms from the
-      // screen center and ignores the requested centerX/centerY (and rotation).
-      // Surface it so callers know the center was not honored (#2910).
-      const fallbackWarning =
-        pinchResult.pinchPath === "element-anchored"
-          ? "pinchOn used the iOS public element-anchored fallback; the gesture zoomed from the screen center and did not honor the requested center/rotation."
-          : undefined;
-      const warning = [target.warning, fallbackWarning].filter(Boolean).join(" ") || undefined;
-
-      return {
-        success: true,
-        direction: options.direction,
-        distanceStart,
-        distanceEnd,
-        scale,
-        duration,
-        rotationDegrees,
-        centerX,
-        centerY,
-        targetType: target.targetType,
-        container: target.container,
-        warning,
-        observation: pinchResult.observation,
-        a11yTotalTimeMs: pinchResult.totalTimeMs,
-        a11yGestureTimeMs: pinchResult.gestureTimeMs,
-      };
+      return await this.performPinch(options, { perf, progress, signal, displayTarget });
     } catch (error) {
       perf.end();
       throwIfAborted(signal);
@@ -407,6 +238,239 @@ export class PinchOn extends BaseVisualChange {
 
       return this.createErrorResult(finalErrorMessage, options);
     }
+  }
+
+  private validateDuration(duration: PinchOnOptions["duration"]): void {
+    if (
+      duration !== undefined &&
+      (!Number.isInteger(duration) ||
+        duration < PINCH_DURATION_MIN_MS ||
+        duration > PINCH_DURATION_MAX_MS)
+    ) {
+      throw new ActionableError(
+        `pinchOn duration must be an integer from ${PINCH_DURATION_MIN_MS} to ${PINCH_DURATION_MAX_MS} ms`,
+      );
+    }
+  }
+
+  private validateOptions(options: PinchOnOptions): string | undefined {
+    if (!options.direction) {
+      return "Pinch direction is required ('in' or 'out')";
+    }
+    if (this.device.platform !== "android" && this.device.platform !== "ios") {
+      return unsupportedPlatformError(this.device.platform, "pinch on elements").message;
+    }
+    const distanceError = this.validateDistanceOptions(options);
+    if (distanceError) {
+      return distanceError;
+    }
+    if (options.container) {
+      const selectorCount = [options.container.elementId, options.container.text].filter(
+        Boolean,
+      ).length;
+      if (selectorCount !== 1) {
+        return "pinchOn container must specify exactly one of elementId or text";
+      }
+    }
+    return undefined;
+  }
+
+  private validateDistanceOptions(options: PinchOnOptions): string | undefined {
+    if (options.scale !== undefined && options.scale <= PINCH_SCALE_EXCLUSIVE_MIN) {
+      return "scale must be greater than 0";
+    }
+    if (
+      options.distanceStart !== undefined &&
+      options.distanceStart <= PINCH_DISTANCE_EXCLUSIVE_MIN
+    ) {
+      return "distanceStart must be greater than 0";
+    }
+    if (options.distanceEnd !== undefined && options.distanceEnd <= PINCH_DISTANCE_EXCLUSIVE_MIN) {
+      return "distanceEnd must be greater than 0";
+    }
+    return undefined;
+  }
+
+  private async performPinch(
+    options: PinchOnOptions,
+    context: PinchExecutionContext,
+  ): Promise<PinchOnResult> {
+    const { perf, signal, displayTarget } = context;
+    const fence = options.display === undefined ? this.captureDisplayFence() : undefined;
+    const target = await perf.track("resolveTarget", () =>
+      this.resolveTarget(options, signal, displayTarget?.observation),
+    );
+    const geometry = this.resolveGestureGeometry(options, target.bounds);
+    const pinchResult = await this.dispatchObservedPinch(options, geometry, {
+      ...context,
+      fence,
+    });
+    throwIfAborted(signal);
+
+    perf.end();
+    return this.formatPinchResult(options, target, geometry, pinchResult);
+  }
+
+  private resolveGestureGeometry(
+    options: PinchOnOptions,
+    bounds: Element["bounds"],
+  ): PinchGeometry {
+    const { centerX, centerY } = this.getCenter(bounds);
+    let { distanceStart, distanceEnd, scale } = this.resolveDistances(options, bounds);
+    if (this.device.platform === "ios") {
+      distanceStart = Math.round(distanceStart);
+      distanceEnd = Math.round(distanceEnd);
+      scale = distanceStart > 0 ? distanceEnd / distanceStart : scale;
+    }
+    const duration = options.duration ?? 300;
+    const rotationDegrees = options.rotationDegrees ?? 0;
+    return { centerX, centerY, distanceStart, distanceEnd, scale, duration, rotationDegrees };
+  }
+
+  private async dispatchObservedPinch(
+    options: PinchOnOptions,
+    geometry: PinchGeometry,
+    context: PinchExecutionContext & { fence?: DisplayFence },
+  ): Promise<ObservedPinchResult> {
+    const { centerX, centerY, distanceStart, distanceEnd, duration, rotationDegrees } = geometry;
+    const { perf, progress, signal, displayTarget, fence } = context;
+    let iosDispatchTimestamp: number | undefined;
+
+    const dispatchAndroidPinch = async () => {
+      throwIfAborted(signal);
+      displayTarget?.assertCurrent();
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
+      const result = await awaitWhileRequestIsLive(
+        AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory).requestPinch(
+          centerX,
+          centerY,
+          distanceStart,
+          distanceEnd,
+          rotationDegrees,
+          duration,
+          resolveGestureCtrlProxyTimeoutMs(duration),
+          perf,
+          signal,
+          displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
+          displayTarget?.assertCurrent,
+        ),
+        signal,
+      );
+      throwIfAborted(signal);
+      displayTarget?.assertCurrent();
+      return result;
+    };
+    return this.observedInteraction(
+      async () => {
+        throwIfAborted(signal);
+        if (this.device.platform === "ios") {
+          // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+          fence?.assertCurrent();
+          const result = await awaitWhileRequestIsLive(
+            IOSCtrlProxyClient.getInstance(this.device).requestPinch(
+              centerX,
+              centerY,
+              distanceStart,
+              distanceEnd,
+              rotationDegrees,
+              duration,
+              resolveGestureCtrlProxyTimeoutMs(duration),
+              perf,
+            ),
+            signal,
+          );
+          throwIfAborted(signal);
+          if (result.success) {
+            iosDispatchTimestamp = this.timer.now();
+            IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+          }
+          return result;
+        }
+
+        return dispatchAndroidPinch();
+      },
+      {
+        changeExpected: false,
+        display: options.display,
+        timeoutMs: 8000,
+        progress,
+        perf,
+        signal,
+        observationTimestampProvider: () => iosDispatchTimestamp,
+        predictionContext: {
+          toolName: "pinchOn",
+          toolArgs: {
+            ...options,
+            centerX,
+            centerY,
+            distanceStart,
+            distanceEnd,
+            rotationDegrees,
+            duration,
+          },
+        },
+      },
+    );
+  }
+
+  private formatPinchResult(
+    options: PinchOnOptions,
+    target: PinchTarget,
+    geometry: PinchGeometry,
+    pinchResult: ObservedPinchResult,
+  ): PinchOnResult {
+    const { centerX, centerY, distanceStart, distanceEnd, scale, duration, rotationDegrees } =
+      geometry;
+    if (!pinchResult.success) {
+      return {
+        success: false,
+        direction: options.direction,
+        distanceStart,
+        distanceEnd,
+        scale,
+        duration,
+        rotationDegrees,
+        centerX,
+        centerY,
+        targetType: target.targetType,
+        container: target.container,
+        warning: target.warning,
+        observation: pinchResult.observation,
+        // sendCommand's timeout result means dispatch completed without a confirmed reply.
+        error: pinchResult.error?.startsWith("Pinch timed out after ")
+          ? `Pinch outcome is indeterminate: the request was dispatched but no result was confirmed (${pinchResult.error}). Do not retry automatically.`
+          : pinchResult.error,
+      };
+    }
+
+    // iOS may fall back to the public element-anchored pinch when the private
+    // XCTest event-synthesis symbols are unavailable; that path zooms from the
+    // screen center and ignores the requested centerX/centerY (and rotation).
+    // Surface it so callers know the center was not honored (#2910).
+    const fallbackWarning =
+      pinchResult.pinchPath === "element-anchored"
+        ? "pinchOn used the iOS public element-anchored fallback; the gesture zoomed from the screen center and did not honor the requested center/rotation."
+        : undefined;
+    const warning = [target.warning, fallbackWarning].filter(Boolean).join(" ") || undefined;
+
+    return {
+      success: true,
+      direction: options.direction,
+      distanceStart,
+      distanceEnd,
+      scale,
+      duration,
+      rotationDegrees,
+      centerX,
+      centerY,
+      targetType: target.targetType,
+      container: target.container,
+      warning,
+      observation: pinchResult.observation,
+      a11yTotalTimeMs: pinchResult.totalTimeMs,
+      a11yGestureTimeMs: pinchResult.gestureTimeMs,
+    };
   }
 
   private async prepareDisplayTarget(options: PinchOnOptions, signal?: AbortSignal) {
@@ -683,6 +747,32 @@ export class PinchOn extends BaseVisualChange {
     const screenHeight = Math.max(1, screenBounds.bottom - screenBounds.top);
     const screenArea = screenWidth * screenHeight;
 
+    const { candidates, windowRanks } = this.collectAutoTargetCandidates(snapshot, screenArea);
+
+    let best: { element: Element; score: number; windowRank: number } | null = null;
+    for (const element of candidates.values()) {
+      if (!this.boundsWithinScreen(element.bounds, screenBounds)) {
+        continue;
+      }
+      const area = boundsArea(element.bounds);
+      if (area <= 0) {
+        continue;
+      }
+      let score = scorePinchElement(element, screenArea);
+      if (isLikelyBottomSheet(element, screenBounds)) {
+        score *= 0.2;
+      }
+
+      const windowRank = windowRanks.get(element) ?? 0;
+      if (!best || score > best.score || (score === best.score && windowRank < best.windowRank)) {
+        best = { element, score, windowRank };
+      }
+    }
+
+    return best?.element ?? null;
+  }
+
+  private collectAutoTargetCandidates(snapshot: HierarchySnapshot, screenArea: number) {
     const candidates = new Map<string, Element>();
     const windowRanks = new Map<Element, number>();
     const addCandidate = (element: Element, rank: number) => {
@@ -717,27 +807,7 @@ export class PinchOn extends BaseVisualChange {
       }
     }
 
-    let best: { element: Element; score: number; windowRank: number } | null = null;
-    for (const element of candidates.values()) {
-      if (!this.boundsWithinScreen(element.bounds, screenBounds)) {
-        continue;
-      }
-      const area = boundsArea(element.bounds);
-      if (area <= 0) {
-        continue;
-      }
-      let score = scorePinchElement(element, screenArea);
-      if (isLikelyBottomSheet(element, screenBounds)) {
-        score *= 0.2;
-      }
-
-      const windowRank = windowRanks.get(element) ?? 0;
-      if (!best || score > best.score || (score === best.score && windowRank < best.windowRank)) {
-        best = { element, score, windowRank };
-      }
-    }
-
-    return best?.element ?? null;
+    return { candidates, windowRanks };
   }
 
   private resolveDistances(
@@ -751,29 +821,7 @@ export class PinchOn extends BaseVisualChange {
     const maxDistance = minDimension * PINCH_MAX_DISTANCE_RATIO;
     const minDistance = Math.max(PINCH_MIN_DISTANCE_PX, minDimension * 0.1);
 
-    let distanceStart = options.distanceStart ?? null;
-    let distanceEnd = options.distanceEnd ?? null;
-
-    if (options.scale !== undefined && options.scale > 0) {
-      if (distanceStart === null && distanceEnd !== null) {
-        distanceStart = distanceEnd / options.scale;
-      } else if (distanceEnd === null && distanceStart !== null) {
-        distanceEnd = distanceStart * options.scale;
-      } else if (distanceStart === null && distanceEnd === null) {
-        distanceStart = minDimension * 0.25;
-        distanceEnd = distanceStart * options.scale;
-      }
-    }
-
-    if (distanceStart === null || distanceEnd === null) {
-      if (options.direction === "out") {
-        distanceStart = distanceStart ?? minDimension * 0.2;
-        distanceEnd = distanceEnd ?? minDimension * 0.6;
-      } else {
-        distanceStart = distanceStart ?? minDimension * 0.6;
-        distanceEnd = distanceEnd ?? minDimension * 0.2;
-      }
-    }
+    let { distanceStart, distanceEnd } = this.inferDistances(options, minDimension);
 
     if (options.direction === "out" && distanceEnd <= distanceStart) {
       distanceEnd = Math.min(maxDistance, distanceStart * 1.5);
@@ -788,6 +836,40 @@ export class PinchOn extends BaseVisualChange {
 
     const scale = distanceStart > 0 ? distanceEnd / distanceStart : undefined;
     return { distanceStart, distanceEnd, scale };
+  }
+
+  private inferDistances(options: PinchOnOptions, minDimension: number) {
+    let { distanceStart, distanceEnd } = this.inferScaledDistances(options, minDimension);
+
+    if (distanceStart === null || distanceEnd === null) {
+      if (options.direction === "out") {
+        distanceStart = distanceStart ?? minDimension * 0.2;
+        distanceEnd = distanceEnd ?? minDimension * 0.6;
+      } else {
+        distanceStart = distanceStart ?? minDimension * 0.6;
+        distanceEnd = distanceEnd ?? minDimension * 0.2;
+      }
+    }
+
+    return { distanceStart, distanceEnd };
+  }
+
+  private inferScaledDistances(options: PinchOnOptions, minDimension: number) {
+    let distanceStart = options.distanceStart ?? null;
+    let distanceEnd = options.distanceEnd ?? null;
+
+    if (options.scale !== undefined && options.scale > 0) {
+      if (distanceStart === null && distanceEnd !== null) {
+        distanceStart = distanceEnd / options.scale;
+      } else if (distanceEnd === null && distanceStart !== null) {
+        distanceEnd = distanceStart * options.scale;
+      } else if (distanceStart === null && distanceEnd === null) {
+        distanceStart = minDimension * 0.25;
+        distanceEnd = distanceStart * options.scale;
+      }
+    }
+
+    return { distanceStart, distanceEnd };
   }
 
   private getScreenBounds(

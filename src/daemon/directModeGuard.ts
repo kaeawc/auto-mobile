@@ -63,11 +63,15 @@ function normalizeDbPath(dbPath: string): string {
   const absolute = resolve(dbPath);
   try {
     return realpathSync(absolute);
-  } catch {
+  } catch (error) {
+    // A fresh-install DB may not exist yet; the ancestor fallback preserves path comparison.
+    logger.debug(`Direct-mode DB realpath unavailable: ${errorMessage(error)}`);
     // File itself doesn't exist yet — canonicalize the nearest existing ancestor.
     try {
       return resolve(realpathSync(dirname(absolute)), basename(absolute));
-    } catch {
+    } catch (error) {
+      // A fresh-install parent may also be absent; textual normalization remains available.
+      logger.debug(`Direct-mode DB parent realpath unavailable: ${errorMessage(error)}`);
       // Ancestor also missing (fresh install, no daemon can own it yet) — textual
       // normalization is the best available; both processes resolve os.homedir()
       // identically in that case.

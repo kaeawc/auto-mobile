@@ -34,6 +34,7 @@ extension ElementLocator {
         /// Deduplicates by alert label text to avoid showing the same alert twice.
         func getSystemAlerts(
             appSnapshot: XCUIElementSnapshot,
+            truncationReasons: inout Set<String>,
             keyboardFocus: KeyboardFocus? = nil
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
@@ -45,6 +46,7 @@ extension ElementLocator {
                     snapshot,
                     depth: 0,
                     screenBounds: snapshot.frame,
+                    truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus
                 )
             }
@@ -62,6 +64,7 @@ extension ElementLocator {
             )
             let springboardCapture = try getAlertsFromSpringboard(
                 runSnapshot: runSpringboardSnapshot,
+                truncationReasons: &truncationReasons,
                 keyboardFocus: keyboardFocus
             )
 
@@ -105,6 +108,7 @@ extension ElementLocator {
         /// (issue #5474).
         private func getAlertsFromSpringboard(
             runSnapshot: Bool,
+            truncationReasons: inout Set<String>,
             keyboardFocus: KeyboardFocus? = nil
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
@@ -129,6 +133,7 @@ extension ElementLocator {
                     snapshot,
                     depth: 0,
                     screenBounds: snapshot.frame,
+                    truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus
                 )
             }
@@ -169,6 +174,7 @@ extension ElementLocator {
             _ snapshot: XCUIElementSnapshot,
             depth: Int,
             screenBounds: CGRect,
+            truncationReasons: inout Set<String>,
             parentPath: String = "",
             childIndex: Int = 0,
             keyboardFocus: KeyboardFocus? = nil,
@@ -247,6 +253,7 @@ extension ElementLocator {
                             child,
                             depth: depth + 1,
                             screenBounds: screenBounds,
+                            truncationReasons: &truncationReasons,
                             parentPath: currentPath,
                             childIndex: idx,
                             keyboardFocus: keyboardFocus,
@@ -270,6 +277,12 @@ extension ElementLocator {
 
                     childNodes = filteredChildren.isEmpty ? nil : filteredChildren
                 }
+            } else if let reason = Self.depthCapTruncationReason(
+                depth: depth,
+                maxDepth: ElementLocator.maxDepth,
+                hasChildren: !snapshot.children.isEmpty
+            ) {
+                truncationReasons.insert(reason)
             }
 
             // Determine boolean properties - only set to "true", leave nil for false

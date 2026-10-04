@@ -80,6 +80,22 @@ describe("IOSCtrlProxyClient", function () {
     );
   });
 
+  test("client installs the iOS serializer and rounds hierarchy polling intervals", () => {
+    const context = ctrlProxyClient["createDelegateContext"]();
+    expect(context.serializeRequest?.({ type: "request_tap_coordinates", duration: 0.4 })).toBe(
+      '{"type":"request_tap_coordinates","duration":1}',
+    );
+    const sent = spyOn(ctrlProxyClient, "sendMessage").mockReturnValue(true);
+    const connected = spyOn(ctrlProxyClient, "isConnected").mockReturnValue(true);
+    try {
+      ctrlProxyClient.refreshObservationStreamHierarchyCadence(250.5);
+      expect(sent).toHaveBeenCalledWith('{"type":"set_hierarchy_poll_interval","intervalMs":251}');
+    } finally {
+      sent.mockRestore();
+      connected.mockRestore();
+    }
+  });
+
   test("single-panel requestScreenshot uses the runner without invoking simctl", async () => {
     testDevice.displays = {
       panels: [{ key: "primary", role: "unknown", sizePx: { width: 1179, height: 2556 } }],

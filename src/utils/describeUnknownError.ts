@@ -31,8 +31,20 @@ export function describeUnknownError(value: unknown): string {
 
 /** Extracts a single-line message from an unknown thrown value (message-only; no stack/cause). */
 export function errorMessage(value: unknown): string {
-  // This IS the canonical implementation the no-inline-error-normalize rule
-  // steers every other call site toward, so the idiom is expected here.
-  // oxlint-disable-next-line auto-mobile/no-inline-error-normalize
-  return value instanceof Error ? value.message : String(value);
+  try {
+    // This IS the canonical implementation the no-inline-error-normalize rule
+    // steers every other call site toward, so the idiom is expected here.
+    // oxlint-disable-next-line auto-mobile/no-inline-error-normalize
+    return value instanceof Error ? value.message : String(value);
+    // Formatting failures must not escape the caller's error handler; logging here could recurse.
+    // oxlint-disable-next-line auto-mobile/catch-convention
+  } catch {
+    try {
+      return Object.prototype.toString.call(value);
+      // A hostile Symbol.toStringTag getter can also throw; keep error formatting non-throwing.
+      // oxlint-disable-next-line auto-mobile/catch-convention
+    } catch {
+      return "Unknown error";
+    }
+  }
 }

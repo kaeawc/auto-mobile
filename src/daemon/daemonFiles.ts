@@ -17,11 +17,21 @@ import {
 import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
-import { logger } from "../utils/logger";
+import { logger, registerLogRetentionNamespaceSource } from "../utils/logger";
 import type { DaemonLaunchLogOwner, DaemonPidFileEnumeration } from "../utils/logPruner";
 import { releaseVersion } from "../utils/mcpVersion";
 import { isProcessRunning } from "../utils/processLiveness";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+
+// Register hoisted functions only: no discovery/read or logger access at module
+// initialization. CLI/MCP/doctor and daemon imports all share this wiring. A
+// logger-only path retains launch logs conservatively until this module loads.
+registerLogRetentionNamespaceSource({
+  listDaemonPidFilesSync,
+  readPidFileDataSync,
+  readDaemonOwnerForRetentionSync,
+  readDaemonLaunchLogOwnerTombstoneSync,
+});
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
   get defaultPath() {

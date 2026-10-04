@@ -1,14 +1,58 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import type { BootedDevice } from "../../models";
+import { ActionableError, type BootedDevice } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
+import {
+  isAdbMissingDeviceError,
+  isAdbDeviceOfflineError,
+} from "../../utils/android-cmdline-tools/AdbDeviceHealth";
+
+function isProvablyUndeliveredAdbError(error: unknown): boolean {
+  const underlying = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  if (
+    [error, underlying].some(
+      (candidate) =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        "code" in candidate &&
+        (candidate.code === "ENOENT" || candidate.code === "EACCES"),
+    )
+  ) {
+    return true;
+  }
+  const stderr =
+    underlying instanceof Error && "stderr" in underlying ? underlying.stderr : undefined;
+  const rawMessage = errorMessage(underlying);
+  // Command-failure messages embed caller input; only trust adb stderr or standalone errors.
+  const message = (
+    typeof stderr === "string" || Buffer.isBuffer(stderr)
+      ? stderr.toString()
+      : rawMessage.trimStart().startsWith("Command failed:")
+        ? ""
+        : rawMessage
+  )
+    .trim()
+    .toLowerCase();
+  return (
+    isAdbMissingDeviceError(message) ||
+    isAdbDeviceOfflineError(message) ||
+    message.startsWith("executable not found") ||
+    [
+      "no devices/emulators found",
+      "cannot connect to daemon",
+      "cannot connect to the daemon",
+      "cannot connect to adb",
+    ].some((pattern) => message.includes(pattern))
+  );
+}
 
 export const SUPPORTED_INPUT_KEYS = [
   "enter",
@@ -92,6 +136,13 @@ export class InputKey {
   private readonly device: BootedDevice;
   private readonly adb: AdbExecutor;
 
+  static indeterminateError(error: unknown): ActionableError {
+    return new ActionableError(
+      `Key outcome is indeterminate: the request was dispatched but did not complete normally (${errorMessage(error)}). The key may have been delivered. Do not retry automatically.`,
+      { cause: error },
+    );
+  }
+
   constructor(
     device: BootedDevice,
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
@@ -124,7 +175,9 @@ export class InputKey {
     { displayId, signal, onDispatch }: InputKeyRouting = {},
   ): Promise<InputKeyResult> {
     const keyCode = INPUT_KEY_CODE_MAP[key];
+    let dispatched = false;
     try {
+      throwIfAborted(signal);
       const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
       const uniqueModifiers = [...new Set(modifiers)];
       const inputArgsResult = await this.resolveAndroidInputArgs(
@@ -133,6 +186,7 @@ export class InputKey {
         uniqueModifiers,
         deadlineMs,
       );
+      throwIfAborted(signal);
       if ("failure" in inputArgsResult) {
         return inputArgsResult.failure;
       }
@@ -154,36 +208,42 @@ export class InputKey {
           timeoutMs: adbTimeoutMs,
           noRetry: true,
           signal,
-          beforeDispatch:
-            frameContext === undefined && !onDispatch
-              ? undefined
-              : async () => {
-                  if (frameContext !== undefined) {
-                    validationFailure = await this.validateBeforeDispatch(
-                      key,
-                      keyCode,
-                      frameContext,
-                      deadlineMs,
-                    );
-                    if (validationFailure) {
-                      throw new Error(validationFailure.error);
-                    }
-                  }
-                  onDispatch?.();
-                },
+          beforeDispatch: async () => {
+            throwIfAborted(signal);
+            if (frameContext !== undefined) {
+              validationFailure = await this.validateBeforeDispatch(
+                key,
+                keyCode,
+                frameContext,
+                deadlineMs,
+              );
+              if (validationFailure) {
+                throw new Error(validationFailure.error);
+              }
+            }
+            throwIfAborted(signal);
+            dispatched = true;
+            onDispatch?.();
+          },
         });
       } catch (error) {
         if (validationFailure) {
+          throwIfAborted(signal);
           return validationFailure;
         }
         throw error;
       }
+      throwIfAborted(signal);
       return {
         success: true,
         key,
         keyCode,
       };
     } catch (error) {
+      if (dispatched && !isProvablyUndeliveredAdbError(error)) {
+        throw InputKey.indeterminateError(error);
+      }
+      throwIfAborted(signal);
       const message = errorMessage(error);
       logger.warn(`input/key failed for ${key}: ${message}`, error);
       return {

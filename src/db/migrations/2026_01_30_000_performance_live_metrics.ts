@@ -16,7 +16,7 @@ async function addColumnIfNotExists(
   db: Kysely<unknown>,
   tableName: string,
   columnName: string,
-  columnType: string,
+  columnType: "real" | "integer",
 ): Promise<void> {
   if (await columnExists(db, tableName, columnName)) {
     return;

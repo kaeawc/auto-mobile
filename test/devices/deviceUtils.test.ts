@@ -989,6 +989,77 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
+  test("listDeviceImages(either) propagates cancellation during iOS image discovery", async () => {
+    await withProcessPlatform("linux", async () => {
+      const controller = new AbortController();
+      const reason = new Error("iOS image discovery request cancelled");
+      const androidImage: DeviceInfo = {
+        name: "Pixel_8",
+        platform: "android",
+        isRunning: false,
+      };
+      const fakeSimctl = {
+        isAvailable: async () => true,
+        listSimulatorImages: async () => {
+          controller.abort(reason);
+          throw new Error("simctl listing interrupted");
+        },
+      } as unknown as SimCtlClient;
+      const fakeEmulator = createFakeAndroidEmulator({
+        listAvds: async () => [androidImage],
+        getBootedDevicesChecked: async () => [],
+      });
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        fakeEmulator,
+      );
+
+      await expect(manager.listDeviceImages("either", controller.signal)).rejects.toBe(reason);
+    });
+  });
+
+  test("listDeviceImages(either) forwards a live signal to iOS image discovery", async () => {
+    await withProcessPlatform("linux", async () => {
+      const controller = new AbortController();
+      let recordedOptions: Parameters<SimCtlClient["listSimulatorImages"]>[1];
+      const androidImage: DeviceInfo = {
+        name: "Pixel_8",
+        platform: "android",
+        isRunning: false,
+      };
+      const iosImage: DeviceInfo = { name: "iPhone 17", platform: "ios", isRunning: false };
+      const fakeSimctl = {
+        isAvailable: async () => true,
+        listSimulatorImages: async (
+          _timeoutMs?: number,
+          options?: Parameters<SimCtlClient["listSimulatorImages"]>[1],
+        ) => {
+          recordedOptions = options;
+          return [iosImage];
+        },
+      } as unknown as SimCtlClient;
+      const fakeEmulator = createFakeAndroidEmulator({
+        listAvds: async () => [androidImage],
+        getBootedDevicesChecked: async () => [],
+      });
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        fakeEmulator,
+      );
+
+      await expect(manager.listDeviceImages("either", controller.signal)).resolves.toEqual([
+        androidImage,
+        iosImage,
+      ]);
+      expect(recordedOptions?.signal).toBeDefined();
+      expect(recordedOptions?.signal?.aborted).toBe(false);
+      controller.abort(new Error("request cancelled after discovery"));
+      expect(recordedOptions?.signal?.aborted).toBe(true);
+    });
+  });
+
   test("listDeviceImages(android) reports isRunning for the booted emulator, like iOS", async () => {
     // Issue #6850: the Android image listing hardcoded isRunning:false even for
     // the emulator being driven, while iOS reports its booted state correctly.

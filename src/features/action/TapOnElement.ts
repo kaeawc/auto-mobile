@@ -142,6 +142,7 @@ import {
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { getScreenBounds } from "../../utils/screenBounds";
 import { compareSelectionRank } from "../utility/selectionRank";
+import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
 
 function intersectTapBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
   const bounds = {
@@ -184,6 +185,7 @@ type TapVerificationOptions = TapOnElementOptions & {
 };
 
 interface TapPointContext {
+  chromeElements?: readonly Element[];
   options: TapOnElementOptions;
   screenSize?: ObserveResult["screenSize"];
 }
@@ -1054,12 +1056,53 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private invisibleMatchError(
     selection: ElementSelectionResult,
     options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
   ): string {
     const matched = selection.matchedElement ?? selection.element;
+    if (this.isCoveredByNavigationBar(selection, hierarchy, screenSize)) {
+      return `Target ${JSON.stringify(matched?.text ?? options.text ?? options.elementId ?? "target")} is covered by the navigation bar; scroll it into view with swipeOn, then retry tapOn.`;
+    }
     return (
       `Matched element ${JSON.stringify(matched?.text ?? options.text ?? options.elementId ?? "target")} ` +
       `has no visible tap area (bounds ${JSON.stringify(matched?.bounds)}). ` +
       "Scroll it into view with swipeOn, then retry tapOn."
+    );
+  }
+
+  private navigationTapBounds(
+    bounds: ElementBounds,
+    hierarchy: ViewHierarchyResult,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    elements: readonly Element[],
+  ): ReturnType<typeof clipIosChromeBounds> {
+    if (this.device.platform !== "ios" || !isUsableScreenSize(screenSize)) {
+      return { bounds };
+    }
+    return clipIosChromeBounds({
+      bounds,
+      hierarchy,
+      screen: screenSize,
+      elements,
+      regions: ["navigation bar"],
+      forTapTarget: true,
+    });
+  }
+
+  private isCoveredByNavigationBar(
+    selection: ElementSelectionResult,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
+  ): boolean {
+    const target = selection.element ?? selection.matchedElement;
+    if (!target) {
+      return false;
+    }
+    const matched = selection.matchedElement ?? target;
+    const overlap = intersectTapBounds(target.bounds, matched.bounds);
+    return (
+      !!overlap &&
+      !!this.navigationTapBounds(overlap, hierarchy, screenSize, [matched, target]).coveredBy
     );
   }
 
@@ -1077,27 +1120,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const matched = this.matchedTapElement(selection, target, options);
     const matchedBounds = matched.bounds;
     const matchForTap = hasTapArea(matchedBounds) ? matched : target;
-    const overlap = intersectTapBounds(target.bounds, matchForTap.bounds);
-    // Some injected/legacy captures omit screen dimensions. In that case we
-    // still constrain the point to the matched/actionable overlap; live observe
-    // supplies dimensions for the viewport and chrome checks.
-    const screen = isUsableScreenSize(screenSize)
-      ? getScreenBounds(screenSize, undefined, true)
-      : undefined;
-    const visible = overlap && screen ? intersectTapBounds(overlap, screen) : overlap;
-    if (!visible) {
-      return null;
-    }
-    if (!isUsableScreenSize(screenSize) || this.device.platform !== "ios") {
+    let visible = intersectTapBounds(target.bounds, matchForTap.bounds);
+    // Legacy captures without dimensions still constrain the matched/actionable overlap.
+    if (!visible || !isUsableScreenSize(screenSize)) {
       return visible;
     }
-    const belowStatusBar = this.clipBelowStatusBar(
-      visible,
-      matchForTap,
-      target,
+    visible = intersectTapBounds(visible, getScreenBounds(screenSize, undefined, true));
+    if (!visible || this.device.platform !== "ios") {
+      return visible;
+    }
+    const belowChrome = clipIosChromeBounds({
+      bounds: visible,
       hierarchy,
-      screenSize,
-    );
+      screen: screenSize,
+      elements: [matchForTap, target],
+      forTapTarget: true,
+    }).bounds;
+    const belowStatusBar =
+      belowChrome &&
+      this.clipBelowStatusBar(belowChrome, matchForTap, target, hierarchy, screenSize);
     return belowStatusBar
       ? this.clipBelowTabBars(belowStatusBar, matchForTap, target, hierarchy, screenSize)
       : null;
@@ -1122,14 +1163,53 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     context: TapPointContext,
   ): { x: number; y: number } | null {
     const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    if (pointInTapBounds(point, visibleBounds)) {
+    if (this.device.platform !== "ios" && pointInTapBounds(point, visibleBounds)) {
       return point;
     }
     const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
-    return ime
-      ? tapPointOutsideIme([left, top, right, bottom], ime.bounds)
-      : this.geometry.getElementCenter({ bounds: visibleBounds });
+    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
+    if (this.device.platform !== "ios") {
+      return ime ? exposedImePoint : this.geometry.getElementCenter({ bounds: visibleBounds });
+    }
+    const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });
+    const chromeElements = context.chromeElements ?? [target];
+    const navClipped = this.navigationTapBounds(
+      target.bounds,
+      hierarchy,
+      context.screenSize,
+      chromeElements,
+    ).bounds;
+    if (!navClipped) {
+      return null;
+    }
+    const candidates = boundsEqual(navClipped, target.bounds)
+      ? [point, exposedImePoint, exposedCenter]
+      : [exposedImePoint, exposedCenter, point];
+    const imeBounds = ime && {
+      left: ime.bounds[0],
+      top: ime.bounds[1],
+      right: ime.bounds[2],
+      bottom: ime.bounds[3],
+    };
+    return (
+      candidates.find(
+        (candidate) =>
+          candidate !== null &&
+          Number.isInteger(candidate.x) &&
+          Number.isInteger(candidate.y) &&
+          pointInTapBounds(candidate, visibleBounds) &&
+          pointInTapBounds(candidate, target.bounds) &&
+          (!imeBounds || !pointInTapBounds(candidate, imeBounds)) &&
+          (!isUsableScreenSize(context.screenSize) ||
+            !isIosTapPointCoveredByChrome({
+              point: candidate,
+              hierarchy,
+              screen: context.screenSize,
+              elements: chromeElements,
+            })),
+      ) ?? null
+    );
   }
 
   private clipBelowStatusBar(
@@ -1745,6 +1825,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     target: Element,
     nodes: readonly SearchableEntry[],
     labelText?: string,
+    preTapHierarchy?: ViewHierarchyResult,
   ): Element | undefined {
     const focusedFields = nodes.filter(
       (node) =>
@@ -1758,8 +1839,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const candidate = distinctFocusedFields[0].element;
     return candidate &&
-      (this.hasStableFocusIdentity(target, candidate, labelText) ||
-        this.hasEmptyTextFocusIdentity(target, candidate, nodes, labelText)) &&
+      (this.device.platform === "android" && !candidate.text
+        ? this.hasEmptyTextFocusIdentity(target, candidate, nodes, labelText, preTapHierarchy)
+        : this.hasStableFocusIdentity(target, candidate, labelText)) &&
       horizontalExtentNearlyEqual(
         target.bounds,
         candidate.bounds,
@@ -1769,41 +1851,156 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       : undefined;
   }
 
+  private focusFieldSizeMatches(target: Element, candidate: Element): boolean {
+    const epsilon = TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX;
+    return (
+      horizontalExtentNearlyEqual(target.bounds, candidate.bounds, epsilon) &&
+      Math.abs(
+        target.bounds.right - target.bounds.left - (candidate.bounds.right - candidate.bounds.left),
+      ) <= epsilon &&
+      Math.abs(
+        target.bounds.bottom - target.bounds.top - (candidate.bounds.bottom - candidate.bounds.top),
+      ) <= epsilon
+    );
+  }
+
+  private focusScrollDelta(
+    before: readonly SearchableEntry[],
+    after: readonly SearchableEntry[],
+  ): number | undefined {
+    if (!before.length || before.length !== after.length) {
+      return undefined;
+    }
+    const delta = after[0].element!.bounds.top - before[0].element!.bounds.top;
+    const consistent = before.every((field, ordinal) => {
+      const target = field.element!;
+      const candidate = after[ordinal].element!;
+      return (
+        target.class === candidate.class &&
+        this.focusFieldSizeMatches(target, candidate) &&
+        boundsNearlyEqual(
+          {
+            ...target.bounds,
+            top: target.bounds.top + delta,
+            bottom: target.bounds.bottom + delta,
+          },
+          candidate.bounds,
+          TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+        )
+      );
+    });
+    return consistent ? delta : undefined;
+  }
+
+  private attachedFocusLabel(element: Element): string | undefined {
+    const source = getHierarchyNodeSource(element);
+    if (!source) {
+      return undefined;
+    }
+    const labels = new SearchableHierarchy()
+      .project({ hierarchy: { node: source } })
+      .filter((node) => node.parentIndex === 0 && !isFocusEditableElement(node.properties))
+      .map((node) => node.textSources.text)
+      .filter((text) => typeof text === "string" && text.trim().length > 0);
+    return labels.length ? labels.join("\n") : undefined;
+  }
+
+  private focusIdentitySignals(target: Element, candidate: Element, labelText?: string) {
+    if (
+      !isFocusEditableElement(target) ||
+      target.class !== candidate.class ||
+      !this.focusFieldSizeMatches(target, candidate) ||
+      (["resource-id", "test-tag", "view-id"] as const).some(
+        (key) =>
+          [target[key], candidate[key]].some(
+            (value) => value && !(key === "view-id" && value.startsWith("s2-")),
+          ) && target[key] !== candidate[key],
+      )
+    ) {
+      return { conflict: true, matched: false };
+    }
+    const pairs = [
+      ...(["hint-text", "hint", "placeholder", "content-desc", "test-tag"] as const).map((key) => [
+        target[key],
+        candidate[key],
+      ]),
+      [
+        this.attachedFocusLabel(target) ?? labelText ?? target.text,
+        this.attachedFocusLabel(candidate),
+      ],
+    ].filter((pair) => pair.every((value) => typeof value === "string" && value.trim().length > 0));
+    return {
+      conflict: pairs.some(([before, after]) => before !== after),
+      matched: pairs.some(([before, after]) => before === after),
+    };
+  }
+
   private hasEmptyTextFocusIdentity(
     target: Element,
     candidate: Element,
     nodes: readonly SearchableEntry[],
     labelText?: string,
+    preTapHierarchy?: ViewHierarchyResult,
   ): boolean {
-    // An empty Compose field can lose its merged label on focus (#8997).
-    // Only the sole focused field may use this fallback, at the original bounds.
-    if (
-      this.device.platform !== "android" ||
-      !isFocusEditableElement(target) ||
-      target.class !== candidate.class ||
-      !(target.text || labelText) ||
-      (candidate.text !== undefined && candidate.text !== "") ||
-      (["resource-id", "test-tag", "view-id"] as const).some((key) =>
-        [target[key], candidate[key]].some(
-          (value) => value && !(key === "view-id" && value.startsWith("s2-")),
-        ),
-      )
-    ) {
+    // Empty Compose fields can lose labels/s2 IDs on focus. Require matching size and
+    // no label/hint or ordinal conflict, plus a label match, sole empty field at
+    // adjusted bounds, or matching ordinal with a uniform pre/post scroll (including 0).
+    const signals = this.focusIdentitySignals(target, candidate, labelText);
+    if (signals.conflict) {
       return false;
     }
-    const sameBoundsFields = nodes.filter(
+    const fields = this.distinctFocusFields(
+      nodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
+    );
+    const sameBoundsFields = fields.filter((node) =>
+      boundsNearlyEqual(
+        node.element!.bounds,
+        candidate.bounds,
+        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+      ),
+    );
+    if (sameBoundsFields.length !== 1) {
+      return false;
+    }
+    const preNodes = preTapHierarchy
+      ? new SearchableHierarchy().project(resolveViewHierarchyForSearch(preTapHierarchy)!)
+      : [];
+    const preFields = this.distinctFocusFields(
+      preNodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
+    );
+    const targetFields = preFields.filter(
       (node) =>
-        node.element &&
-        isFocusEditableElement(node.properties) &&
-        boundsNearlyEqual(
-          target.bounds,
-          node.element.bounds,
-          TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-        ),
+        node.source === getHierarchyNodeSource(target) ||
+        (node.className === target.class &&
+          boundsNearlyEqual(
+            node.element!.bounds,
+            target.bounds,
+            TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+          )),
+    );
+    const targetOrdinal = targetFields.length === 1 ? preFields.indexOf(targetFields[0]) : -1;
+    const candidateOrdinal = fields.findIndex((node) => node.element === candidate);
+    if (targetOrdinal >= 0 && targetOrdinal !== candidateOrdinal) {
+      return false;
+    }
+    const delta = this.focusScrollDelta(preFields, fields);
+    const scrollDelta = delta ?? 0;
+    const adjustedBounds = {
+      ...target.bounds,
+      top: target.bounds.top + scrollDelta,
+      bottom: target.bounds.bottom + scrollDelta,
+    };
+    const atTargetBounds = boundsNearlyEqual(
+      adjustedBounds,
+      candidate.bounds,
+      TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+    );
+    const emptyFields = fields.filter(
+      (node) => node.className === target.class && !node.element!.text,
     );
     return (
-      this.distinctFocusFields(sameBoundsFields).length === 1 &&
-      sameBoundsFields.some((node) => node.element === candidate)
+      signals.matched ||
+      (atTargetBounds && (emptyFields.length === 1 || (targetOrdinal >= 0 && delta !== undefined)))
     );
   }
 
@@ -1949,6 +2146,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     observation?: ObserveResult,
     labelText?: string,
     selectedIndex?: number,
+    preTapHierarchy?: ViewHierarchyResult,
   ): boolean {
     if (!observation?.viewHierarchy) {
       return false;
@@ -1980,7 +2178,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (focused) {
       return true;
     }
-    if (this.findSoleFocusedFieldByStableIdentity(target, nodes, labelText)) {
+    if (this.findSoleFocusedFieldByStableIdentity(target, nodes, labelText, preTapHierarchy)) {
       return true;
     }
     if (!options.testTag && !(options.elementId && target["resource-id"])) {
@@ -2470,10 +2668,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       latestViewHierarchy,
     );
     let selection = initialSearch.selection;
+    const invisibleError = () =>
+      this.invisibleMatchError(selection, options, latestViewHierarchy, latestScreenSize);
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
     if (!element && selection.matchedElement) {
-      visibilityError = this.invisibleMatchError(selection, options);
+      visibilityError = invisibleError();
     }
 
     if (
@@ -2481,7 +2681,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       this.isElementTapTargetOffScreen(selection, latestViewHierarchy, latestScreenSize, options)
     ) {
       if (element) {
-        visibilityError = this.invisibleMatchError(selection, options);
+        visibilityError = invisibleError();
         logger.warn(
           `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
             `bounds=${JSON.stringify(element.bounds)}, ` +
@@ -2547,13 +2747,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         element = selection.element;
         containerFoundEver = containerFoundEver || searchResult.containerFound;
         if (!element && selection.matchedElement) {
-          visibilityError = this.invisibleMatchError(selection, options);
+          visibilityError = invisibleError();
         }
         if (
           element &&
           this.isElementTapTargetOffScreen(selection, refreshedHierarchy, latestScreenSize, options)
         ) {
-          visibilityError = this.invisibleMatchError(selection, options);
+          visibilityError = invisibleError();
           logger.warn(
             `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
               `bounds=${JSON.stringify(element.bounds)}`,
@@ -3296,10 +3496,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       result.observation,
       labelText,
       result.selectedElement?.indexInMatches,
+      target.observation.viewHierarchy,
     );
     if (!result.focusVerified) {
       result.success = false;
-      result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(result.element, options)}`;
+      result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(result.element, options)}: the focused field could not be matched to the target`;
     }
     return result;
   }
@@ -3388,6 +3589,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const perf = createGlobalPerformanceTracker();
     perf.serial("tapOnElement");
     let previousObserveResult: ObserveResult | null = null;
+    let preTapHierarchy: ViewHierarchyResult | undefined;
     let selectionCapture: SelectionCaptureState | null = null;
     let searchUntilStats: SearchUntilStats | undefined;
     let focusTarget: Element | undefined;
@@ -3400,6 +3602,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       const result = await this.observedInteraction(
         async (observeResult: ObserveResult, fence) => {
           previousObserveResult = observeResult;
+          preTapHierarchy = observeResult.viewHierarchy;
           throwIfAborted(signal);
 
           let viewHierarchy = observeResult.viewHierarchy;
@@ -3634,18 +3837,30 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           );
           if (!visibleBounds) {
             throw new ActionableError(
-              "Matched element has no visible tap area on this screen. " +
-                "Scroll it into view with swipeOn, then retry tapOn.",
+              this.isCoveredByNavigationBar(finalSelection, viewHierarchy, screenSize)
+                ? this.invisibleMatchError(finalSelection, options, viewHierarchy, screenSize)
+                : "Matched element has no visible tap area on this screen. " +
+                    "Scroll it into view with swipeOn, then retry tapOn.",
             );
           }
           const tapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
             options,
             screenSize,
+            chromeElements: [
+              this.matchedTapElement(
+                finalSelection,
+                tapElement,
+                requestedAction === "focus" ? { ...options, action: "focus" } : options,
+              ),
+              tapElement,
+            ],
           });
           if (!tapPoint) {
             throw new ActionableError(
-              "Matched element has no unobstructed visible tap area. " +
-                "Dismiss the keyboard or scroll it into view, then retry tapOn.",
+              this.isCoveredByNavigationBar(finalSelection, viewHierarchy, screenSize)
+                ? this.invisibleMatchError(finalSelection, options, viewHierarchy, screenSize)
+                : "Matched element has no unobstructed visible tap area. " +
+                    "Dismiss the keyboard or scroll it into view, then retry tapOn.",
             );
           }
           const tapBounds = tapElement.bounds;
@@ -3796,10 +4011,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           result.observation,
           focusLabelText,
           result.selectedElement?.indexInMatches,
+          preTapHierarchy,
         );
         if (!result.focusVerified) {
           result.success = false;
-          result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(target, options)}`;
+          result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
         }
       }
 

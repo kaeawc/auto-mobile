@@ -15,6 +15,64 @@ function grepMRotationLines(fixtureFile: string): string {
 }
 
 describe("parseWindowManagerRotation", () => {
+  for (const [file, expected] of [
+    ["dumpsys-window-displays-mirror-landscape.txt", 1],
+    ["dumpsys-window-displays-mirror-portrait.txt", 0],
+    ["dumpsys-window-displays-nomirror-landscape.txt", 1],
+    ["dumpsys-window-displays-nomirror-portrait.txt", 0],
+  ] as const) {
+    test(`reads default display rotation from ${file}`, () => {
+      expect(parseWindowManagerRotation(readFileSync(join(WINDOW_DUMPS_DIR, file), "utf8"))).toBe(
+        expected,
+      );
+    });
+  }
+
+  test("reads an explicitly requested mirror display", () => {
+    const stdout = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-mirror-landscape.txt"),
+      "utf8",
+    );
+    expect(parseWindowManagerRotation(stdout, { displayId: 3 })).toBe(0);
+  });
+
+  test("reads the portrait capture's explicitly requested mirror display", () => {
+    const stdout = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-mirror-portrait.txt"),
+      "utf8",
+    );
+    expect(parseWindowManagerRotation(stdout, { displayId: 4 })).toBe(0);
+  });
+
+  test("returns null when a captured display header has no rotation yet", () => {
+    const stdout = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-mirror-landscape.txt"),
+      "utf8",
+    );
+    const beforeRotation = stdout.slice(0, stdout.indexOf("    mRotation="));
+    expect(parseWindowManagerRotation(beforeRotation, { displayId: 3 })).toBeNull();
+  });
+
+  test("keeps the first authoritative rotation for repeated display headers", () => {
+    const landscape = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-mirror-landscape.txt"),
+      "utf8",
+    );
+    const portrait = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-mirror-portrait.txt"),
+      "utf8",
+    );
+    expect(parseWindowManagerRotation(landscape + portrait)).toBe(1);
+  });
+
+  test("returns null for a display absent from a headered dump", () => {
+    const stdout = readFileSync(
+      join(WINDOW_DUMPS_DIR, "dumpsys-window-displays-mirror-portrait.txt"),
+      "utf8",
+    );
+    expect(parseWindowManagerRotation(stdout, { displayId: 3 })).toBeNull();
+  });
+
   test("parses the authoritative WindowManagerService rotation", () => {
     const stdout = "  mRotation=1 mAltOrientation=false";
     expect(parseWindowManagerRotation(stdout)).toBe(1);
@@ -95,6 +153,9 @@ describe("parseWindowManagerRotation", () => {
   ] as const) {
     test(`parses the live rotation out of the real ${file} fixture`, () => {
       expect(parseWindowManagerRotation(grepMRotationLines(file))).toBe(expected);
+      expect(parseWindowManagerRotation(readFileSync(join(WINDOW_DUMPS_DIR, file), "utf8"))).toBe(
+        expected,
+      );
     });
   }
 
@@ -110,6 +171,9 @@ describe("parseWindowManagerRotation", () => {
   ] as const) {
     test(`parses the live rotation out of the real ${file} fixture`, () => {
       expect(parseWindowManagerRotation(grepMRotationLines(file))).toBe(expected);
+      expect(parseWindowManagerRotation(readFileSync(join(WINDOW_DUMPS_DIR, file), "utf8"))).toBe(
+        expected,
+      );
     });
   }
 

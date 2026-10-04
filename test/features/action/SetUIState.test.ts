@@ -1,5 +1,9 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { SetUIState } from "../../../src/features/action/SetUIState";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
+import { getHierarchyNodeSource } from "../../../src/features/observe/output/elementProvenance";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -88,6 +92,139 @@ describe("SetUIState", () => {
   });
 
   describe("text field handling", () => {
+    test.each(["text", "elementId"] as const)(
+      "fills the captured Compose input selected by %s across focus ID churn (#9094, #9095)",
+      async (selectorKind) => {
+        const loadCapture = (moment: "pre" | "post"): ViewHierarchyResult =>
+          JSON.parse(
+            readFileSync(
+              new URL(
+                `../../fixtures/android-focus/playground-text-field-${moment}-tap.json`,
+                import.meta.url,
+              ),
+              "utf8",
+            ),
+          ).viewHierarchy;
+        const pre = loadCapture("pre");
+        const post = loadCapture("post");
+        const target = new ResolverElementSelector().selectByText(pre, "Basic Text Field", {
+          intentAction: "focus-input",
+        }).element!;
+        expect(target["view-id"]).toBe("s2-0a67f33121084cd4");
+        const detect = spyOn(fakeFieldTypeDetector, "detect");
+        fakeObserve.setResultFactory(() =>
+          createObserveResult(fakeObserve.getCallCount() === 1 ? pre : post),
+        );
+        const action = new SetUIState(device, null, {
+          tapOnElement: fakeTap,
+          inputText: {
+            execute: async (text) => {
+              const result = await fakeInput.execute(text);
+              fakeFieldTypeDetector.setTextValue("", text);
+              return result;
+            },
+          },
+          clearText: fakeClear,
+          swipeOn: fakeSwipe,
+          observeScreen: fakeObserve,
+          fieldTypeDetector: fakeFieldTypeDetector,
+          timer: fakeTimer,
+        });
+        const selector =
+          selectorKind === "text" ? { text: "Basic Text Field" } : { elementId: target["view-id"] };
+        const result = await action.execute({
+          fields: [{ selector, value: "captured input" }],
+        });
+        expect(result.success).toBe(true);
+        expect(result.fields[0]).toMatchObject({ success: true, fieldType: "text", attempts: 1 });
+        expect(
+          detect.mock.calls.some(([element]) => element.class === "android.widget.EditText"),
+        ).toBe(true);
+        expect(fakeTap.getCalls()[0].options).toEqual({ ...selector, action: "focus" });
+        expect(fakeClear.getCallCount()).toBe(1);
+        expect(fakeInput.getCalls().map((call) => call.text)).toEqual(["captured input"]);
+      },
+    );
+
+    test.each([false, true])(
+      "derived variant: label promotion preserves its source (shared resource ID: %s)",
+      async (sharedId) => {
+        const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+          readFileSync(
+            new URL(
+              "../../fixtures/android-focus/playground-text-field-pre-tap.json",
+              import.meta.url,
+            ),
+            "utf8",
+          ),
+        );
+        // Derived variant: retain the first two captured rows, with controlled label IDs.
+        const fields = new SearchableHierarchy()
+          .project(capture.viewHierarchy)
+          .filter((node) => node.className === "android.widget.EditText" && node.rootGroup === 0)
+          .slice(0, 2);
+        const hierarchy: ViewHierarchyResult = {
+          hierarchy: { node: fields.map((field) => field.source) },
+        };
+        const nodes = new SearchableHierarchy().project(hierarchy);
+        fields.forEach((field, index) => {
+          nodeAttributes(field.source)["resource-id"] =
+            index === 0 ? "field-first" : "field-second";
+          const label = nodes.find(
+            (node) =>
+              node.parentIndex === nodes.find((node) => node.source === field.source)!.index &&
+              node.properties.text,
+          )!;
+          label.source.bounds = field.bounds;
+          nodeAttributes(label.source).text = index === 0 ? "First" : "Second";
+          nodeAttributes(label.source)["resource-id"] = sharedId
+            ? "shared-label"
+            : `label-${index}`;
+        });
+        const resolver = new ResolverElementSelector();
+        const selected = resolver.selectByResourceId(
+          hierarchy,
+          sharedId ? "shared-label" : "label-1",
+          { intentAction: "focus-input" },
+        );
+        expect(selected.element?.["resource-id"]).toBe(sharedId ? "field-first" : "field-second");
+        expect(selected.matchedElement?.text).toBe(sharedId ? "First" : "Second");
+        expect(getHierarchyNodeSource(selected.matchedElement!)).toBeDefined();
+        fakeObserve.setResult(createObserveResult(hierarchy));
+        const detect = spyOn(fakeFieldTypeDetector, "detect");
+        const result = await createSetUIState().execute({
+          fields: [{ selector: { text: "Second" }, value: "new value" }],
+        });
+        expect(
+          detect.mock.calls.some(([element]) => element["resource-id"] === "field-first"),
+        ).toBe(false);
+        expect(result.success).toBe(!sharedId);
+        expect(fakeInput.getCallCount()).toBe(sharedId ? 0 : 1);
+        expect(fakeClear.getCallCount()).toBe(sharedId ? 0 : 1);
+      },
+    );
+
+    test("rejects a captured label without an enclosing editable field (#9095)", async () => {
+      const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+        readFileSync(
+          new URL(
+            "../../fixtures/android-focus/playground-text-field-pre-tap.json",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      );
+      fakeObserve.setResult(createObserveResult(capture.viewHierarchy));
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { text: "Text" }, value: "must not type" }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.fields[0].error).toContain("not an editable field");
+      expect(result.fields[0].attempts).toBe(1);
+      expect(fakeClear.getCallCount()).toBe(0);
+      expect(fakeInput.getCallCount()).toBe(0);
+    });
+
     const textField = (elementId: string, top: number): Element => ({
       "resource-id": elementId,
       text: "",
@@ -342,42 +479,48 @@ describe("SetUIState", () => {
   });
 
   describe("checkbox handling", () => {
-    test("taps checkbox when state needs to change", async () => {
-      const initialHierarchy = createHierarchyWithElement({
-        "resource-id": "remember_me",
-        class: "android.widget.CheckBox",
-        checkable: "true" as any,
-        checked: "false" as any,
-      });
-      const updatedHierarchy = createHierarchyWithElement({
-        "resource-id": "remember_me",
-        class: "android.widget.CheckBox",
-        checkable: "true" as any,
-        checked: "true" as any,
-      });
+    test.each(["elementId", "text"])(
+      "taps checkbox when state needs to change selected by %s",
+      async (kind) => {
+        const initialHierarchy = createHierarchyWithElement({
+          "resource-id": "remember_me",
+          text: "Remember Me",
+          class: "android.widget.CheckBox",
+          checkable: "true" as any,
+          checked: "false" as any,
+        });
+        const updatedHierarchy = createHierarchyWithElement({
+          "resource-id": "remember_me",
+          text: "Remember Me",
+          class: "android.widget.CheckBox",
+          checkable: "true" as any,
+          checked: "true" as any,
+        });
 
-      let observeCallCount = 0;
-      fakeObserve.setResultFactory(() => {
-        observeCallCount++;
-        if (observeCallCount <= 1) {
-          return createObserveResult(initialHierarchy);
-        }
-        return createObserveResult(updatedHierarchy);
-      });
-      fakeFieldTypeDetector.setFieldType("remember_me", "checkbox");
+        let observeCallCount = 0;
+        fakeObserve.setResultFactory(() => {
+          observeCallCount++;
+          if (observeCallCount <= 1) {
+            return createObserveResult(initialHierarchy);
+          }
+          return createObserveResult(updatedHierarchy);
+        });
+        fakeFieldTypeDetector.setFieldType("remember_me", "checkbox");
 
-      const setUIState = createSetUIState();
-      const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "remember_me" }, selected: true }],
-      });
+        const setUIState = createSetUIState();
+        const selector = kind === "text" ? { text: "remember" } : { elementId: "remember_me" };
+        const result = await setUIState.execute({
+          fields: [{ selector, selected: true }],
+        });
 
-      expect(result.success).toBe(true);
-      expect(result.fields[0].success).toBe(true);
-      expect(result.fields[0].fieldType).toBe("checkbox");
+        expect(result.success).toBe(true);
+        expect(result.fields[0].success).toBe(true);
+        expect(result.fields[0].fieldType).toBe("checkbox");
 
-      // Verify tap was called to toggle
-      expect(fakeTap.getCallCount()).toBe(1);
-    });
+        // Verify tap was called to toggle
+        expect(fakeTap.getCallCount()).toBe(1);
+      },
+    );
 
     test("skips checkbox when already has correct state", async () => {
       const hierarchy = createHierarchyWithElement({
@@ -405,82 +548,92 @@ describe("SetUIState", () => {
   });
 
   describe("toggle handling", () => {
-    test("taps toggle when state needs to change", async () => {
-      const initialHierarchy = createHierarchyWithElement({
-        "resource-id": "dark_mode",
-        class: "android.widget.Switch",
-        checkable: "true" as any,
-        checked: "true" as any,
-      });
-      const updatedHierarchy = createHierarchyWithElement({
-        "resource-id": "dark_mode",
-        class: "android.widget.Switch",
-        checkable: "true" as any,
-        checked: "false" as any,
-      });
+    test.each(["elementId", "text"])(
+      "taps toggle when state needs to change selected by %s",
+      async (kind) => {
+        const initialHierarchy = createHierarchyWithElement({
+          "resource-id": "dark_mode",
+          text: "Dark Mode",
+          class: "android.widget.Switch",
+          checkable: "true" as any,
+          checked: "true" as any,
+        });
+        const updatedHierarchy = createHierarchyWithElement({
+          "resource-id": "dark_mode",
+          text: "Dark Mode",
+          class: "android.widget.Switch",
+          checkable: "true" as any,
+          checked: "false" as any,
+        });
 
-      let observeCallCount = 0;
-      fakeObserve.setResultFactory(() => {
-        observeCallCount++;
-        if (observeCallCount <= 1) {
-          return createObserveResult(initialHierarchy);
-        }
-        return createObserveResult(updatedHierarchy);
-      });
-      fakeFieldTypeDetector.setFieldType("dark_mode", "toggle");
+        let observeCallCount = 0;
+        fakeObserve.setResultFactory(() => {
+          observeCallCount++;
+          if (observeCallCount <= 1) {
+            return createObserveResult(initialHierarchy);
+          }
+          return createObserveResult(updatedHierarchy);
+        });
+        fakeFieldTypeDetector.setFieldType("dark_mode", "toggle");
 
-      const setUIState = createSetUIState();
-      const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "dark_mode" }, selected: false }],
-      });
+        const setUIState = createSetUIState();
+        const selector = kind === "text" ? { text: "dark" } : { elementId: "dark_mode" };
+        const result = await setUIState.execute({
+          fields: [{ selector, selected: false }],
+        });
 
-      expect(result.success).toBe(true);
-      expect(result.fields[0].success).toBe(true);
-      expect(result.fields[0].fieldType).toBe("toggle");
+        expect(result.success).toBe(true);
+        expect(result.fields[0].success).toBe(true);
+        expect(result.fields[0].fieldType).toBe("toggle");
 
-      // Verify tap was called to toggle off
-      expect(fakeTap.getCallCount()).toBe(1);
-    });
+        // Verify tap was called to toggle off
+        expect(fakeTap.getCallCount()).toBe(1);
+      },
+    );
   });
 
   describe("dropdown handling", () => {
-    test("opens dropdown and selects value", async () => {
-      const initialHierarchy = createHierarchyWithElement({
-        "resource-id": "country",
-        text: "Select Country",
-        class: "android.widget.Spinner",
-      });
-      const updatedHierarchy = createHierarchyWithElement({
-        "resource-id": "country",
-        text: "United States",
-        class: "android.widget.Spinner",
-      });
+    test.each(["elementId", "text"])(
+      "opens dropdown and selects value selected by %s",
+      async (kind) => {
+        const initialHierarchy = createHierarchyWithElement({
+          "resource-id": "country",
+          text: "Select Country",
+          class: "android.widget.Spinner",
+        });
+        const updatedHierarchy = createHierarchyWithElement({
+          "resource-id": "country",
+          text: "United States",
+          class: "android.widget.Spinner",
+        });
 
-      let observeCallCount = 0;
-      fakeObserve.setResultFactory(() => {
-        observeCallCount++;
-        if (observeCallCount <= 1) {
-          return createObserveResult(initialHierarchy);
-        }
-        return createObserveResult(updatedHierarchy);
-      });
-      fakeFieldTypeDetector.setFieldType("country", "dropdown");
+        let observeCallCount = 0;
+        fakeObserve.setResultFactory(() => {
+          observeCallCount++;
+          if (observeCallCount <= 1) {
+            return createObserveResult(initialHierarchy);
+          }
+          return createObserveResult(updatedHierarchy);
+        });
+        fakeFieldTypeDetector.setFieldType("country", "dropdown");
 
-      const setUIState = createSetUIState();
-      const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "country" }, value: "United States" }],
-      });
+        const setUIState = createSetUIState();
+        const selector = kind === "text" ? { text: "select" } : { elementId: "country" };
+        const result = await setUIState.execute({
+          fields: [{ selector, value: "United States" }],
+        });
 
-      expect(result.success).toBe(true);
-      expect(result.fields[0].success).toBe(true);
-      expect(result.fields[0].fieldType).toBe("dropdown");
+        expect(result.success).toBe(true);
+        expect(result.fields[0].success).toBe(true);
+        expect(result.fields[0].fieldType).toBe("dropdown");
 
-      // Verify first tap to open dropdown
-      expect(fakeTap.getCallCount()).toBe(2);
-      expect(fakeTap.getCalls()[0].options.elementId).toBe("country");
-      // Second tap selects the value
-      expect(fakeTap.getCalls()[1].options.text).toBe("United States");
-    });
+        // Verify first tap to open dropdown
+        expect(fakeTap.getCallCount()).toBe(2);
+        expect(fakeTap.getCalls()[0].options).toEqual({ ...selector, action: "tap" });
+        // Second tap selects the value
+        expect(fakeTap.getCalls()[1].options.text).toBe("United States");
+      },
+    );
   });
 
   describe("scroll to find", () => {

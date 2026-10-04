@@ -1,6 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-/** Scheduling seam; callbacks and cancellation run on the same gesture thread as dispatch. */
+/** Timer seam for pacing and timeouts; callbacks and cancellation run on the gesture thread. */
 internal fun interface GestureDeadline {
   fun schedule(delayMs: Long, onTimeout: () -> Unit): () -> Unit
 }
@@ -8,6 +8,12 @@ internal fun interface GestureDeadline {
 /**
  * Dispatch a fixed plan through the streaming stroke adapter. Unlike a live stream, a drag has a
  * deadline per segment and must attempt to lift its continued pointer before reporting failure.
+ *
+ * Continued strokes complete at their last emitted event, so a stationary press completes at once;
+ * the pointer stays down between continued strokes while this session waits out their planned time.
+ * The press is timed from its completion callback because DOWN is injected after the dispatch call.
+ * A stationary non-initial continued stroke is reported cancelled by the framework, so it is
+ * replaced by a wait.
  */
 internal class DragStrokeSession<S>(
   private val plan: List<GestureSegment>,
@@ -28,11 +34,16 @@ internal class DragStrokeSession<S>(
   fun start() = dispatchSegment(0)
 
   private fun dispatchSegment(index: Int) {
+    if (terminal || cleaningUp) return
     if (index == plan.size) {
       finish(true, null)
       return
     }
     val segment = plan[index]
+    if (!segment.isInitial && onlyPutsPointerDown(segment)) {
+      waitThenAdvance(segment.durationMs, index + 1)
+      return
+    }
     val precedingLift = liftFrom
     try {
       val stroke =
@@ -45,12 +56,10 @@ internal class DragStrokeSession<S>(
         stroke,
         segment.durationMs + CALLBACK_GRACE_MS,
         onComplete = {
-          val elapsed = nowMs() - dispatchedAtMs
-          if (elapsed < segment.durationMs - EARLY_COMPLETION_TOLERANCE_MS) {
-            fail("Drag stroke completed early: ${elapsed}ms of ${segment.durationMs}ms")
-          } else {
-            dispatchSegment(index + 1)
-          }
+          val remaining =
+            if (onlyPutsPointerDown(segment)) segment.durationMs
+            else segment.durationMs - (nowMs() - dispatchedAtMs)
+          waitThenAdvance(remaining, index + 1)
         },
         onFailed = ::fail,
         onRejected = { error ->
@@ -63,6 +72,23 @@ internal class DragStrokeSession<S>(
       liftFrom = precedingLift
       fail(e.message ?: "Failed to build or dispatch drag stroke")
     }
+  }
+
+  private fun onlyPutsPointerDown(segment: GestureSegment): Boolean =
+    segment.willContinue &&
+      Math.round(segment.from.x) == Math.round(segment.to.x) &&
+      Math.round(segment.from.y) == Math.round(segment.to.y)
+
+  private fun waitThenAdvance(delayMs: Long, nextIndex: Int) {
+    if (delayMs <= 0) {
+      dispatchSegment(nextIndex)
+      return
+    }
+    val token = ++generation
+    cancelDeadline =
+      deadline.schedule(delayMs) {
+        if (claim(token)) dispatchSegment(nextIndex)
+      }
   }
 
   private fun dispatch(
@@ -137,10 +163,6 @@ internal class DragStrokeSession<S>(
   }
 
   companion object {
-    // Allow framework scheduling/rounding jitter, but reject a stroke that ended at once because
-    // nothing was emitted. Durations at or below this tolerance cannot complete materially early.
-    private const val EARLY_COMPLETION_TOLERANCE_MS = 50L
-
     // One missed callback plus a bounded lift still fits the client's 600ms timeout allowance.
     private const val CALLBACK_GRACE_MS = 250L
   }

@@ -91,6 +91,61 @@ describe("proxy server session ownership errors", () => {
     }
   });
 
+  test("resources/read passes the MCP request signal to the proxy and daemon client", async () => {
+    const started = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const fakeClient = new FakeDaemonClient();
+    const read = fakeClient.readResource.bind(fakeClient);
+    fakeClient.readResource = async (...args) => {
+      const result = await read(...args);
+      started.resolve();
+      await gate.promise;
+      return result;
+    };
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        timer: new FakeTimer(),
+        clientFactory: () => fakeClient,
+        daemonManager,
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "resource-cancel-client", version: "0.0.1" });
+    const call = spyOn(proxy, "readResource");
+    const controller = new AbortController();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = client
+        .readResource({ uri: "automobile:devices/booted" }, { signal: controller.signal })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      await started.promise;
+      const signal = call.mock.calls[0][1]?.signal;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(fakeClient.readResourceSignals[0]).toBe(signal);
+      controller.abort(new Error("cancel MCP resource read"));
+      expect(await result).toMatchObject({
+        message: expect.stringContaining("cancel MCP resource read"),
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      controller.abort();
+      gate.resolve();
+      call.mockRestore();
+      await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
+
   test.each(["heartbeat-timeout", "missing-first-heartbeat"])(
     "returns machine-readable %s ownership loss as an error CallToolResult",
     async (releaseReason) => {

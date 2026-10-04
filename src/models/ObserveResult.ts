@@ -150,7 +150,7 @@ export interface ScreenIdentity {
 /**
  * Represents the result of observing the device state
  */
-export interface ObserveResult {
+export type ObserveResult = {
   /** Physical panel represented by this capture; always present on emitted observations. */
   display: DisplayRef;
   /** Opt-in Android display:"all" aggregate; the proposed additive shape (#8256). */
@@ -576,7 +576,7 @@ export interface ObserveResult {
    * `features/observe/output/ObserveScopeExperiments.ts`.
    */
   observeScope?: ObserveScopeMetadata;
-}
+};
 
 /** Same capture/projection and freshness types as a single-panel observation. */
 export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &

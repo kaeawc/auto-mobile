@@ -72,6 +72,7 @@ export interface DaemonStateAccess {
     ): Promise<void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
     refreshDevices(): Promise<number>;
+    refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
@@ -319,12 +320,20 @@ export async function handleDaemonRequest(
     }
     case "daemon/refreshDevices": {
       const pool = state.getDevicePool();
-      const addedCount = await pool.refreshDevices();
+      const outcome = pool.refreshDevicesWithOutcome
+        ? await pool.refreshDevicesWithOutcome()
+        : { addedCount: await pool.refreshDevices() };
+      if (outcome.failure !== undefined) {
+        return {
+          success: false,
+          error: `Could not refresh device list: ${outcome.failure}. Resolve the cause and retry.`,
+        };
+      }
       const stats = pool.getStats();
       return {
         success: true,
         result: {
-          addedDevices: addedCount,
+          addedDevices: outcome.addedCount,
           totalDevices: stats.total,
           availableDevices: stats.idle,
           stats,

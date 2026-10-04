@@ -9,21 +9,23 @@ import { SwipeResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { throwIfAborted } from "../../utils/toolUtils";
 
 /**
  * Executes swipe gestures on specific UI elements
  */
 export class SwipeOnElement extends BaseVisualChange {
-  private executeGesture: ExecuteGesture;
+  private executeGesture: Pick<ExecuteGesture, "swipe">;
   private geometry: ElementGeometry;
 
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     geometry: ElementGeometry = new DefaultElementGeometry(),
+    executeGesture?: Pick<ExecuteGesture, "swipe">,
   ) {
     super(device, adb);
-    this.executeGesture = new ExecuteGesture(device, adb);
+    this.executeGesture = executeGesture ?? new ExecuteGesture(device, adb);
     this.geometry = geometry;
   }
 
@@ -54,6 +56,7 @@ export class SwipeOnElement extends BaseVisualChange {
 
     return this.observedInteraction(
       async () => {
+        throwIfAborted(signal);
         logger.info(`[SwipeOnElement] In observedInteraction callback`);
 
         const { startX, startY, endX, endY } = this.geometry.getSwipeWithinBounds(
@@ -83,6 +86,7 @@ export class SwipeOnElement extends BaseVisualChange {
               flooredEndY,
               options,
               perf,
+              signal,
             ),
           );
           if (this.device.platform === "ios" && result.success) {

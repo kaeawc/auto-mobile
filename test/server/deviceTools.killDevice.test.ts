@@ -1432,6 +1432,78 @@ describe("killDevice handler", () => {
     });
   });
 
+  test("a successful kill preserves its result and retires ownership when reservation release rejects", async () => {
+    const outcomes: unknown[] = [];
+    for (const releaseRejects of [false, true]) {
+      if (releaseRejects) {
+        await reset();
+      }
+      const timer = new FakeTimer();
+      const deviceSessionRepository = new FakeDeviceSessionRepository();
+      const successfulManager = new SuccessfulKillDeviceManager();
+      manager = successfulManager;
+      sessionManager = new SessionManager(timer, deviceSessionRepository);
+      const image: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+        isRunning: false,
+        source: "local",
+      };
+      successfulManager.setDeviceImages("android", [image]);
+      setDeviceToolsDependencies({ deviceManagerFactory: () => successfulManager, timer });
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: successfulManager,
+          retryExecutor: new DefaultRetryExecutor(timer),
+          deviceSessionRepository,
+        }),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+      let releaseCalls = 0;
+      const reserve = pool.reserveDeviceForShutdown.bind(pool);
+      pool.reserveDeviceForShutdown = async (...args) => {
+        const reservation = await reserve(...args);
+        if (!reservation) {
+          return undefined;
+        }
+        return {
+          ...reservation,
+          release: async () => {
+            releaseCalls++;
+            await reservation.release();
+            if (releaseRejects) {
+              throw new Error("reservation release failed");
+            }
+          },
+        };
+      };
+      const response = await ToolRegistry.getTool("killDevice")!.handler({
+        device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+      });
+      const outcome = JSON.parse(response.content[0].text);
+      delete outcome.timing;
+      outcomes.push(outcome);
+      expect(outcome.message).toBe("android 'Pixel 8' shutdown successfully");
+      expect(releaseCalls).toBeGreaterThan(0);
+      expect(pool.getDevice(image.deviceId!)).toBeNull();
+      expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+        sessionId: "session-1",
+        deviceId: image.deviceId,
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+      Object.assign(successfulManager.childProcess, { exitCode: 0 });
+      successfulManager.childProcess.emit("exit", 0, null);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(successfulManager.getCallCount("startDevice")).toBe(1);
+    }
+    expect(outcomes[1]).toEqual(outcomes[0]);
+  });
+
   test("terminally fences a session released while shutdown is being confirmed", async () => {
     const timer = new FakeTimer();
     const deviceSessionRepository = new FakeDeviceSessionRepository();
@@ -4693,86 +4765,110 @@ describe("killDevice handler", () => {
     expect(JSON.stringify(response)).not.toContain("Timed out waiting for");
   });
 
-  test.skipIf(process.platform === "win32")(
-    "restores an active Android observer when an ordinary kill failure leaves its incarnation booted",
-    async () => {
-      const timer = new FakeTimer();
-      const device: BootedDevice = {
-        name: "Pixel 8",
-        platform: "android",
-        deviceId: "emulator-5554",
-      };
-      manager.setBootedDevices("android", [device]);
-      const deviceSessionRepository = new FakeDeviceSessionRepository();
-      sessionManager = new SessionManager(timer, deviceSessionRepository);
-      const image: DeviceInfo = {
-        name: device.name,
-        platform: device.platform,
-        deviceId: device.deviceId,
-        isRunning: false,
-        source: "local",
-      };
-      manager.setDeviceImages("android", [image]);
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionRepository: deviceSessionRepository,
-        }),
-      );
-      DaemonState.getInstance().initialize(sessionManager, pool);
-      await pool.assignMultipleDevices(["session-5503"], 1_000, "android");
-      setDeviceToolsDependencies({
-        deviceManagerFactory: () => manager,
-        notifyResourcesChanged: async () => {},
-        ensureCtrlProxyReady: async () => {},
-        clearInstalledAppsForDevice: async () => {},
-        timer,
-      });
-      // An active observation-stream subscriber has already caused this singleton
-      // to exist. Its cadence callback later resolves only an existing instance.
-      const activeObserver = AndroidCtrlProxyClient.getInstance(
-        { ...device },
-        new FakeAdbClientFactory(),
-      );
-      activeObserver.bindSession("session-5503");
-      const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
-      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-      let restoredObserver: AndroidCtrlProxyClient | undefined;
-      let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
-      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-        (target) => {
-          restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-          ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected")
-            .mockResolvedValueOnce(false)
-            .mockResolvedValue(true);
-          return restoredObserver;
-        },
-      );
-      try {
-        const tool = ToolRegistry.getTool("killDevice");
-        if (!tool) {
-          throw new Error("killDevice not registered");
+  for (const releaseRejects of [false, true]) {
+    test.skipIf(process.platform === "win32")(
+      `restores an active Android observer after the original kill failure (reservation release rejects=${releaseRejects})`,
+      async () => {
+        const timer = new FakeTimer();
+        const device: BootedDevice = {
+          name: "Pixel 8",
+          platform: "android",
+          deviceId: "emulator-5554",
+        };
+        manager.setBootedDevices("android", [device]);
+        const deviceSessionRepository = new FakeDeviceSessionRepository();
+        sessionManager = new SessionManager(timer, deviceSessionRepository);
+        const image: DeviceInfo = {
+          name: device.name,
+          platform: device.platform,
+          deviceId: device.deviceId,
+          isRunning: false,
+          source: "local",
+        };
+        manager.setDeviceImages("android", [image]);
+        const pool = new DevicePool(
+          createDevicePoolDependencies(sessionManager, "daemon-session", {
+            timer: timer,
+            installedAppsRepository: new FakeInstalledAppsRepository(),
+            deviceManager: manager,
+            retryExecutor: new DefaultRetryExecutor(timer),
+            deviceSessionRepository: deviceSessionRepository,
+          }),
+        );
+        DaemonState.getInstance().initialize(sessionManager, pool);
+        await pool.assignMultipleDevices(["session-5503"], 1_000, "android");
+        let releaseCalls = 0;
+        const reserve = pool.reserveDeviceForShutdown.bind(pool);
+        pool.reserveDeviceForShutdown = async (...args) => {
+          const reservation = await reserve(...args);
+          if (!reservation) {
+            return undefined;
+          }
+          return {
+            ...reservation,
+            release: async () => {
+              releaseCalls++;
+              await reservation.release();
+              if (releaseRejects) {
+                throw new Error("reservation release failed");
+              }
+            },
+          };
+        };
+        setDeviceToolsDependencies({
+          deviceManagerFactory: () => manager,
+          notifyResourcesChanged: async () => {},
+          ensureCtrlProxyReady: async () => {},
+          clearInstalledAppsForDevice: async () => {},
+          timer,
+        });
+        // An active observation-stream subscriber has already caused this singleton
+        // to exist. Its cadence callback later resolves only an existing instance.
+        const activeObserver = AndroidCtrlProxyClient.getInstance(
+          { ...device },
+          new FakeAdbClientFactory(),
+        );
+        activeObserver.bindSession("session-5503");
+        const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+        const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+        let restoredObserver: AndroidCtrlProxyClient | undefined;
+        let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+        const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+          (target) => {
+            restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+            ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected")
+              .mockResolvedValueOnce(false)
+              .mockResolvedValue(true);
+            return restoredObserver;
+          },
+        );
+        const resumeSpy = spyOn(AndroidCtrlProxyClient, "resumeAfterDeviceStart");
+        try {
+          const tool = ToolRegistry.getTool("killDevice");
+          if (!tool) {
+            throw new Error("killDevice not registered");
+          }
+
+          await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+
+          expect(releaseCalls).toBeGreaterThan(0);
+          expect(resumeSpy).toHaveBeenCalledWith(device.deviceId);
+          expect(closeSpy).toHaveBeenCalledTimes(1);
+          expect(getInstanceSpy).toHaveBeenCalledWith(device);
+          expect(ensureConnectedSpy).toHaveBeenCalledTimes(2);
+          const registeredObserver = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
+          expect(registeredObserver).toBe(restoredObserver);
+          expect(registeredObserver).not.toBe(activeObserver);
+          expect(registeredObserver?.getBoundSessionId()).toBe("session-5503");
+        } finally {
+          resumeSpy.mockRestore();
+          ensureConnectedSpy?.mockRestore();
+          getInstanceSpy.mockRestore();
+          closeSpy.mockRestore();
         }
-
-        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
-
-        expect(closeSpy).toHaveBeenCalledTimes(1);
-        expect(getInstanceSpy).toHaveBeenCalledWith(device);
-        expect(ensureConnectedSpy).toHaveBeenCalledTimes(2);
-        const registeredObserver = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
-        expect(registeredObserver).toBe(restoredObserver);
-        expect(registeredObserver).not.toBe(activeObserver);
-        expect(registeredObserver?.getBoundSessionId()).toBe("session-5503");
-      } finally {
-        ensureConnectedSpy?.mockRestore();
-        getInstanceSpy.mockRestore();
-        closeSpy.mockRestore();
-      }
-    },
-  );
+      },
+    );
+  }
 
   test.skipIf(process.platform === "win32")(
     "keeps the original kill failure bounded when observer reconnection stalls",

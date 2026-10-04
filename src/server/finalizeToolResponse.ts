@@ -503,7 +503,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
-    const observeResult = payload as unknown as ObserveResult;
+    const observeResult = payload;
     const { uncapped, capped: sanitized } = sanitizedCopies(observeResult);
     if (canDiff && ctx.args?.display !== "all") {
       // Diff against the full sanitized tree, never the scoped/projected copy — the
@@ -581,7 +581,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       };
     }
     attachObservationScreenshotUri(served);
-    sanitizedPayload = served as unknown as Record<string, unknown>;
+    sanitizedPayload = served;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
     if (noObserveEnabled) {

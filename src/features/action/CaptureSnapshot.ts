@@ -286,8 +286,8 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
       return manifest;
     } catch (error) {
-      logger.error(`Failed to capture settings snapshot: ${error}`);
-      throw new ActionableError(`Failed to capture settings snapshot: ${error}`);
+      logger.error(`Failed to capture settings snapshot: ${errorMessage(error)}`, error);
+      throw toActionableError(error, "Failed to capture settings snapshot");
     }
   }
 

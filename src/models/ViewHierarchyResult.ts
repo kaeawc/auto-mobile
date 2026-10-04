@@ -145,7 +145,7 @@ export interface ContentHiddenRegion {
   areaPercent: number;
 }
 
-export interface Hierarchy {
+export type Hierarchy = {
   error?: string;
   /** Why an iOS CtrlProxy hierarchy could not be retrieved. */
   iosUnavailableReason?: IosHierarchyUnavailableReason;
@@ -165,7 +165,7 @@ export interface Hierarchy {
    * reliable primary detection point for this failure class (#7534).
    */
   transportFailure?: boolean;
-}
+};
 
 export type IosHierarchyUnavailableReason =
   | "runner_not_running"
@@ -202,7 +202,7 @@ export interface NodeAttributes {
   [key: string]: unknown;
 }
 
-export interface ViewHierarchyNode {
+export type ViewHierarchyNode = {
   displayId?: number | null;
   panelUniqueId?: string | null;
   $?: NodeAttributes;
@@ -223,11 +223,11 @@ export interface ViewHierarchyNode {
   "test-tag"?: string;
   "view-id"?: string;
   extras?: Record<string, string>;
-}
+};
 
 /** iOS CtrlProxy nests attributes in `$`; Android and cleaned iOS nodes are flat. */
-export function nodeAttributes(node: ViewHierarchyNode): NodeAttributes {
-  return node.$ ?? (node as NodeAttributes);
+export function nodeAttributes(node: { $?: NodeAttributes }): NodeAttributes {
+  return node.$ ?? node;
 }
 
 /** Direct bounds take precedence when a converter also carries bounds in `$`. */

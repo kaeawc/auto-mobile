@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import crypto from "crypto";
@@ -199,7 +200,9 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
     // Schedule captures at each interval
     for (const interval of this.config.intervals) {
       const timeoutId = this.timer.setTimeout(() => {
-        this.captureAtInterval(currentSequenceId, interval);
+        this.captureAtInterval(currentSequenceId, interval).catch((error) => {
+          logger.warn(`[ScreenshotBackoff] Backoff capture failed: ${errorMessage(error)}`, error);
+        });
       }, interval);
       this.pendingTimeouts.push(timeoutId);
     }
@@ -493,7 +496,9 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
     }
 
     this.keepAliveTimeout = this.timer.setTimeout(() => {
-      this.captureKeepAlive(sequenceId);
+      this.captureKeepAlive(sequenceId).catch((error) => {
+        logger.warn(`[ScreenshotBackoff] Keepalive capture failed: ${errorMessage(error)}`, error);
+      });
     }, keepAliveIntervalMs);
     logger.debug(
       `[ScreenshotBackoff] Scheduled keepalive capture in ${keepAliveIntervalMs}ms (sequence ${sequenceId})`,

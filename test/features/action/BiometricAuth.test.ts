@@ -436,6 +436,57 @@ describe("BiometricAuth", () => {
   });
 
   describe("error handling", () => {
+    test.each(["touch", "remove"] as const)(
+      "returns failure when emu finger %s reports KO on stdout",
+      async (step) => {
+        // Output from test/utils/android-cmdline-tools/vmSnapshot.property.test.ts.
+        const output = "KO: failed";
+        fakeAdb.setCommandResponse(`emu finger ${step} 1`, { stdout: output, stderr: "" });
+
+        const result = await biometricAuth.execute({ action: "match" });
+
+        expect(result.success).toBe(false);
+        expect(result.action).toBe("match");
+        expect(result.modality).toBe("any");
+        expect(result.fingerprintId).toBe(1);
+        expect(result.supported).toBe(true);
+        expect(result.error).toContain(`emu finger ${step} failed`);
+        expect(result.error).toContain(output);
+        expect(fakeAdb.wasCommandExecuted("emu finger touch 1")).toBe(true);
+        expect(fakeAdb.wasCommandExecuted("emu finger remove 1")).toBe(step === "remove");
+      },
+    );
+
+    test.each(["touch", "remove"] as const)(
+      "includes both output streams when emu finger %s fails",
+      async (step) => {
+        // Outputs from this file's command-failure test and vmSnapshot.property.test.ts.
+        fakeAdb.setCommandResponse(`emu finger ${step} 1`, {
+          stdout: "KO: failed",
+          stderr: "Command failed",
+        });
+
+        const result = await biometricAuth.execute({ action: "match" });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("KO: failed");
+        expect(result.error).toContain("Command failed");
+      },
+    );
+
+    test("preserves failure for arbitrary stderr from emu finger remove", async () => {
+      // Output from this file's existing emu finger command-failure test.
+      fakeAdb.setCommandResponse("emu finger remove 1", {
+        stdout: "",
+        stderr: "Command failed",
+      });
+
+      const result = await biometricAuth.execute({ action: "match" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("emu finger remove failed: Command failed");
+    });
+
     test("should handle emu finger command failures", async () => {
       fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "Command failed" });
       fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });

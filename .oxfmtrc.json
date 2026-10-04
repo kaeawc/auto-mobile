@@ -5,6 +5,7 @@
     "ios/**",
     "android/**",
     "scratch/**",
+    "test/fixtures/android-display/fold-pixel10pf-api36/README.md",
     "test/fixtures/release/CHANGELOG-0.0.82.md",
     "test/fixtures/ios-sdk-network/*.json",
     "test/fixtures/ios-lock-state/**",
@@ -13,6 +14,7 @@
     "test/fixtures/ios-devicectl/motion-*.json",
     "test/fixtures/ios-contract/**",
     "test/fixtures/observe-output/ios-keyboard-tabbar/*.json",
+    "test/fixtures/observe-output/ios-keyboard-states/*.json",
     "**/*.generated.ts",
     "**/generated/**"
   ]

@@ -5,7 +5,11 @@ import fs from "fs";
 import path from "path";
 import { statAsync } from "./io";
 import { ensureSecureLogsDirSync } from "./tempDir";
-import { pruneLogFiles, type DaemonPidFileEnumeration } from "./logPruner";
+import {
+  pruneLogFiles,
+  type DaemonPidFileEnumeration,
+  type LogRetentionNamespaceSource,
+} from "./logPruner";
 import {
   resolveAutomobileLogFormat,
   resolveAutomobileLogSink,
@@ -416,13 +420,43 @@ const MAX_LOG_FILES = 10;
 // host. A live process's active log has a recent mtime and is never touched.
 const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+let logRetentionNamespaceSource: LogRetentionNamespaceSource | undefined;
+
+export function registerLogRetentionNamespaceSource(source: LogRetentionNamespaceSource): void {
+  logRetentionNamespaceSource = source;
+  if (startupLogSweep && !startupLogSweep.registeredSweepStarted) {
+    scheduleStartupLogSweep(startupLogSweep);
+  }
+}
+
+export function resetLogRetentionNamespaceSourceForTesting(options?: {
+  timer: Timer;
+  prune: () => Promise<void>;
+}): void {
+  logRetentionNamespaceSource = undefined;
+  if (startupLogSweep?.timeout !== undefined) {
+    startupLogSweep.timer.clearTimeout(startupLogSweep.timeout);
+  }
+  // Replacing the state also invalidates work queued behind an in-flight sweep.
+  startupLogSweep = options ? createStartupLogSweep(options.timer, options.prune) : undefined;
+}
+
+export function flushLogRetentionStartupSweepForTesting(): Promise<void> {
+  return startupLogSweep?.pending ?? Promise.resolve();
+}
+
+function requireLogRetentionNamespaceSource(): LogRetentionNamespaceSource {
+  if (!logRetentionNamespaceSource) {
+    throw new Error("Log retention namespace source is not registered");
+  }
+  return logRetentionNamespaceSource;
+}
+
 // Whether a daemon is currently running (owns the pidfile and is alive). A
 // `daemon-launch-<pid>.log`'s fd is inherited by the detached daemon child, so
 // it must not be swept while that daemon is live even though the manager named
-// in the filename has exited (issue #6194). The daemon pidfile module is
-// required lazily for readPidFileDataSync and listDaemonPidFilesSync so this
-// foundational logger module keeps no static import of daemonFiles.ts (which
-// imports THIS module) and it is resolved only at sweep time.
+// in the filename has exited (issue #6194). Namespace discovery is supplied by
+// the daemon layer and resolved only at sweep time.
 //
 // Crucially this considers EVERY daemon namespace that could own a launch log
 // in the shared log dir — the pruning process's own pid file plus co-located
@@ -433,16 +467,15 @@ const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // to `pruneLogFiles` via `daemonPidFiles` + `readDaemonOwner` below.
 const isDaemonRunning = (): boolean => {
   try {
-    const { readPidFileDataSync, listDaemonPidFilesSync } =
-      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-    const { pidFiles, uncertain } = listDaemonPidFilesSync();
+    const source = requireLogRetentionNamespaceSource();
+    const { pidFiles, uncertain } = source.listDaemonPidFilesSync();
     // Enumeration incomplete (custom namespace / failed scan): a live daemon may
     // exist in a namespace we could not discover — retain rather than risk it.
     if (uncertain) {
       return true;
     }
     return pidFiles.some((pidFilePath) => {
-      const data = readPidFileDataSync(pidFilePath);
+      const data = source.readPidFileDataSync(pidFilePath);
       return data ? isProcessRunning(data.pid) : false;
     });
   } catch (error) {
@@ -455,18 +488,13 @@ const isDaemonRunning = (): boolean => {
 
 // Enumerate the daemon pid files of every namespace that could own a launch log
 // in this shared log dir (plus whether that enumeration is complete). Passed to
-// `pruneLogFiles` as a THUNK so the enumeration — and the `daemonFiles` require
-// it drives — is evaluated LAZILY at sweep time, never during this module's own
-// init. An eager call here reached `listDaemonPidFilesSync` before `export const
-// logger` (below) was initialized; its error path then touched `logger` in its
-// TDZ and aborted the import with a ReferenceError (issue #6194).
+// `pruneLogFiles` as a THUNK so discovery waits until sweep time, after the
+// asynchronous directory read. Registration itself performs no I/O (issue #6194).
 const daemonPidFiles = (): DaemonPidFileEnumeration => {
   try {
-    const { listDaemonPidFilesSync } =
-      require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-    return listDaemonPidFilesSync();
+    return requireLogRetentionNamespaceSource().listDaemonPidFilesSync();
   } catch (error) {
-    // The pidfile module could not be resolved, so no namespace could be
+    // The namespace source is unavailable/failed, so no namespace could be
     // enumerated — carry uncertainty so `pruneLogFiles` retains launch logs.
     logger.debug(`daemon pidfile enumeration for log pruning failed: ${error}`, error);
     return { pidFiles: [], uncertain: true };
@@ -478,15 +506,19 @@ const readDaemonOwner = (pidFilePath: string) => {
   // returns undefined only for a confidently-absent file and THROWS on an
   // unreadable/malformed one, and that throw must propagate to `pruneLogFiles`'s
   // retain-on-ambiguity path rather than be flattened to "absent" (issue #6194).
-  const { readDaemonOwnerForRetentionSync } =
-    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-  return readDaemonOwnerForRetentionSync(pidFilePath);
+  return requireLogRetentionNamespaceSource().readDaemonOwnerForRetentionSync(pidFilePath);
 };
 
 const readDaemonLaunchLogOwnerTombstone = (launchLogPath: string) => {
-  const { readDaemonLaunchLogOwnerTombstoneSync } =
-    require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
-  return readDaemonLaunchLogOwnerTombstoneSync(launchLogPath);
+  return requireLogRetentionNamespaceSource().readDaemonLaunchLogOwnerTombstoneSync(launchLogPath);
+};
+
+/** The same lazy callbacks used by startup sweeping and size-based rotation. */
+export const logRetentionNamespaces = {
+  daemonPidFiles,
+  readDaemonOwner,
+  readDaemonLaunchLogOwnerTombstone,
+  isDaemonRunning,
 };
 
 // Remove old log files. Only ever deletes (a) this process's own rotated backups
@@ -505,25 +537,65 @@ const pruneOldLogFiles = (): Promise<void> => {
     // Namespace-aware retention: read every co-located namespace's exact
     // launch-log ownership declaration (issue #6194).
     // Passed as the thunk itself (not `daemonPidFiles()`) so enumeration is
-    // deferred to sweep time — an eager call crashed the cyclic logger import
-    // before `logger` was initialized (issue #6194).
-    daemonPidFiles,
-    readDaemonOwner,
-    readDaemonLaunchLogOwnerTombstone,
-    isDaemonRunning,
+    // deferred to sweep time rather than during registration (issue #6194).
+    ...logRetentionNamespaces,
   });
 };
 
-// Sweep logs abandoned by already-exited processes once at startup. Short-lived
-// agents exit with small logs and never reach the size-based rotation that would
-// otherwise trigger a sweep, so without this their per-PID files would accumulate
-// in the shared logs dir on a busy multi-agent host. Fire-and-forget so it never
-// delays logger initialization; the sweep itself only removes dead-owner files.
-if (logsDir) {
-  pruneOldLogFiles().catch(() => {
-    /* best-effort startup sweep */
-  });
+interface StartupLogSweep {
+  timer: Timer;
+  prune: () => Promise<void>;
+  timeout?: NodeJS.Timeout;
+  pending: Promise<void>;
+  fallbackStarted: boolean;
+  registeredSweepStarted: boolean;
 }
+
+function scheduleStartupLogSweep(state: StartupLogSweep): void {
+  if (state.timeout !== undefined) {
+    return;
+  }
+  state.timeout = state.timer.setTimeout(() => {
+    state.timeout = undefined;
+    // Serialize a registration sweep after an in-flight unregistered fallback.
+    // Repeated registration can replace readers, but never adds another sweep.
+    state.pending = state.pending.then(async () => {
+      if (state !== startupLogSweep || state.registeredSweepStarted) {
+        return;
+      }
+      const registered = logRetentionNamespaceSource !== undefined;
+      if (state.fallbackStarted && !registered) {
+        return;
+      }
+      state.fallbackStarted = true;
+      state.registeredSweepStarted = registered;
+      try {
+        await state.prune();
+      } catch (error) {
+        logger.warn("Startup log pruning failed", error);
+      }
+    });
+  }, 0);
+}
+
+function createStartupLogSweep(timer: Timer, prune: () => Promise<void>): StartupLogSweep {
+  const state: StartupLogSweep = {
+    timer,
+    prune,
+    pending: Promise.resolve(),
+    fallbackStarted: false,
+    registeredSweepStarted: false,
+  };
+  scheduleStartupLogSweep(state);
+  return state;
+}
+
+// Give module-load reader registration one event-loop turn without delaying
+// logger initialization. The zero-delay timer stays ref'd so even a short-lived
+// CLI process starts the sweep before exiting. Logger-only paths still get
+// bounded, fail-closed cleanup. If daemonFiles loads later,
+// registration schedules exactly one sweep with readers, even after the fallback.
+let startupLogSweep = logsDir ? createStartupLogSweep(defaultTimer, pruneOldLogFiles) : undefined;
 
 // Closes the active stream ahead of rotation and WAITS for it to actually
 // finish before the caller opens a replacement at the same path. A

@@ -3910,7 +3910,8 @@ export class DaemonMcpProxy {
   /**
    * Read a resource from the daemon
    */
-  async readResource(uri: string): Promise<any> {
+  async readResource(uri: string, { signal }: { signal?: AbortSignal } = {}): Promise<any> {
+    signal?.throwIfAborted();
     const terminalSessionUuid = this.terminalBoundSession?.sessionUuid;
     // A tool-output artifact read is session-independent, so it survives a
     // terminal release without any session params at all (issue #5917). The
@@ -3933,11 +3934,20 @@ export class DaemonMcpProxy {
             [DAEMON_RELEASED_SESSION_PARAM]: terminalSessionUuid,
           }
         : (ownerForwardedParams ?? this.withBoundSessionUuid({}));
-    return await this.withRecoverableReconnect(
-      () => this.requireClient().readResource(uri, forwardedParams),
+    const forwarding = this.withRecoverableReconnect(
+      () => this.requireClient().readResource(uri, forwardedParams, { signal }),
       this.sessionUuidFromArgs(forwardedParams),
       allowReleasedSession,
+      true,
+      undefined,
+      signal,
     );
+    // Recovery is shared with siblings; abandon this wait without cancelling it.
+    return await raceWithDeadline(forwarding, {
+      timer: this.timer,
+      signal,
+      label: `Daemon resource ${uri}`,
+    });
   }
 
   /**

@@ -8,6 +8,7 @@ import { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeRecordingPerformanceTracker } from "../../fakes/FakeRecordingPerformanceTracker";
 
 const device: BootedDevice = {
   name: "test-device",
@@ -21,6 +22,41 @@ function adbFactoryFor(adb: FakeAdbExecutor): AdbClientFactory {
 
 describe("ClearAppData", () => {
   describe("android", () => {
+    test("ends the performance block exactly once and propagates target-user resolution errors", async () => {
+      const adb = new FakeAdbExecutor();
+      const failure = new Error("adb offline during user resolution");
+      adb.getForegroundApp = async () => {
+        throw failure;
+      };
+      const perf = new FakeRecordingPerformanceTracker();
+      const action = new ClearAppData(device, adbFactoryFor(adb), {}, () => perf);
+
+      await expect(action.execute("com.example.app")).rejects.toBe(failure);
+
+      expect(perf.serialNames).toEqual(["clearAppData"]);
+      expect(perf.endCalls).toBe(1);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test.each(["Success", "Failed", "throw"])(
+      "ends the performance block exactly once for pm clear %s",
+      async (outcome) => {
+        const adb = new FakeAdbExecutor();
+        if (outcome === "throw") {
+          adb.setCommandError("shell pm clear", new Error("adb offline"));
+        } else {
+          adb.setCommandResponse("shell pm clear", { stdout: outcome, stderr: "" });
+        }
+        const perf = new FakeRecordingPerformanceTracker();
+        const action = new ClearAppData(device, adbFactoryFor(adb), {}, () => perf);
+
+        const result = await action.execute("com.example.app", 0);
+
+        expect(result.success).toBe(outcome === "Success");
+        expect(perf.endCalls).toBe(1);
+      },
+    );
+
     test("clears the explicitly requested Android user", async () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse("shell pm clear --user 10", { stdout: "Success\n", stderr: "" });

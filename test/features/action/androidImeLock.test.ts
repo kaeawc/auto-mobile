@@ -1,7 +1,52 @@
 import { expect, test } from "bun:test";
-import { withAndroidImeLock } from "../../../src/features/action/androidImeLock";
+import {
+  quarantineAndroidIme,
+  withAndroidImeLock,
+} from "../../../src/features/action/androidImeLock";
 
 let deviceNumber = 0;
+
+test("ordinary IME operations refuse a quarantined device without running their action", async () => {
+  const deviceId = `ime-lock-quarantine-${++deviceNumber}`;
+  quarantineAndroidIme(deviceId);
+  let ran = false;
+  await expect(
+    withAndroidImeLock(deviceId, async () => {
+      ran = true;
+    }),
+  ).rejects.toThrow("IME state is unknown after an unacknowledged cancellation;");
+  expect(ran).toBe(false);
+});
+
+test("allowQuarantined bypasses refusal without clearing quarantine itself", async () => {
+  const deviceId = `ime-lock-quarantine-${++deviceNumber}`;
+  quarantineAndroidIme(deviceId);
+  expect(
+    await withAndroidImeLock(deviceId, async () => true, undefined, { allowQuarantined: true }),
+  ).toBe(true);
+  await expect(withAndroidImeLock(deviceId, async () => true)).rejects.toThrow(
+    "IME state is unknown",
+  );
+});
+
+test("allowQuarantined preserves cancellation before lock acquisition", async () => {
+  const deviceId = `ime-lock-quarantine-${++deviceNumber}`;
+  quarantineAndroidIme(deviceId);
+  const controller = new AbortController();
+  controller.abort();
+  let ran = false;
+  await expect(
+    withAndroidImeLock(
+      deviceId,
+      async () => {
+        ran = true;
+      },
+      controller.signal,
+      { allowQuarantined: true },
+    ),
+  ).rejects.toThrow();
+  expect(ran).toBe(false);
+});
 
 test("aborts a queued middle waiter promptly and preserves FIFO for other waiters", async () => {
   const deviceId = `ime-lock-cancel-${++deviceNumber}`;

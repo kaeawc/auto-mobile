@@ -9,6 +9,8 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
+import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 
 describe("DragAndDrop", () => {
   const device: BootedDevice = {
@@ -154,6 +156,117 @@ describe("DragAndDrop", () => {
     expect(
       (dragAndDrop as any).resolveTarget(hierarchy, { elementId: "source-row" }, "source").bounds,
     ).toEqual({ left: 0, top: 0, right: 100, bottom: 100 });
+  });
+
+  test("rethrows abort when post-action observation returns normally", async () => {
+    const controller = new AbortController();
+    const observe = spyOn(fakeObserveScreen, "execute").mockImplementation(async (options) => {
+      expect(options?.signal).toBe(controller.signal);
+      expect(fakeA11yService.getDragHistory()).toHaveLength(1);
+      controller.abort();
+      return createObserveResult();
+    });
+    try {
+      await expect(
+        dragAndDrop.execute(
+          {
+            source: { elementId: "source-id" },
+            target: { elementId: "target-id" },
+          },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toThrow("Operation cancelled");
+      expect(observe).toHaveBeenCalledTimes(1);
+    } finally {
+      observe.mockRestore();
+    }
+  });
+
+  test("rethrows abort from a thrown drag before vision enrichment", async () => {
+    const controller = new AbortController();
+    const capturer = new FakeScreenshotCapturer();
+    Object.assign(dragAndDrop, {
+      visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: true },
+      screenshotCapturer: capturer,
+    });
+    const drag = spyOn(fakeA11yService, "requestDrag").mockImplementation(async () => {
+      controller.abort();
+      throw new Error("drag cancelled");
+    });
+    try {
+      await expect(
+        dragAndDrop.execute(
+          {
+            source: { elementId: "source-id" },
+            target: { elementId: "target-id" },
+          },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toThrow("Operation cancelled");
+      expect(drag).toHaveBeenCalledTimes(1);
+      expect(capturer.getCallCount()).toBe(0);
+    } finally {
+      drag.mockRestore();
+    }
+  });
+
+  test("rethrows abort swallowed by vision enrichment", async () => {
+    const controller = new AbortController();
+    const capturer = new FakeScreenshotCapturer();
+    const capture = spyOn(capturer, "capture").mockImplementation(async () => {
+      expect(controller.signal.aborted).toBe(false);
+      controller.abort();
+      throw new Error("screenshot cancelled");
+    });
+    Object.assign(dragAndDrop, {
+      visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: true },
+      screenshotCapturer: capturer,
+    });
+    try {
+      await expect(
+        dragAndDrop.execute(
+          {
+            source: { elementId: "missing-source" },
+            target: { elementId: "target-id" },
+          },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toThrow("Operation cancelled");
+      expect(capture).toHaveBeenCalledTimes(1);
+      expect(fakeA11yService.getDragHistory()).toHaveLength(0);
+    } finally {
+      capture.mockRestore();
+    }
+  });
+
+  test("preserves the full non-abort Android drag failure result", async () => {
+    const controller = new AbortController();
+    const observation = createObserveResult();
+    fakeObserveScreen.setObserveResult(observation);
+    fakeA11yService.setDragResult({ success: false, totalTimeMs: 300, error: "boom" });
+
+    const result = await dragAndDrop.execute(
+      {
+        source: { elementId: "source-id" },
+        target: { elementId: "target-id" },
+      },
+      undefined,
+      controller.signal,
+    );
+
+    expect(controller.signal.aborted).toBe(false);
+    expect(result).toEqual({
+      success: false,
+      duration: 300,
+      distance: Math.hypot(200, 200),
+      a11yTotalTimeMs: undefined,
+      a11yGestureTimeMs: undefined,
+      error: "boom",
+      observation,
+    });
   });
 
   test("returns error when accessibility service reports failure", async () => {

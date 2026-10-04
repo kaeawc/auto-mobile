@@ -338,24 +338,21 @@ export function compactExclusiveSelectorProperties(
   }
 }
 
-export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: FieldAliasMap): T {
-  const aliased = z.preprocess(
-    (input) => normalizeFieldAliases(input, aliases),
-    schema,
-  ) as unknown as T;
+export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: FieldAliasMap) {
+  const aliased = z.preprocess((input) => normalizeFieldAliases(input, aliases), schema);
   if (isInjectedDeviceIdSchema(schema)) {
     injectedDeviceIdSchemas.add(aliased);
   }
   return aliased;
 }
 
-export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T): T {
+export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T) {
   const appIdAliases = withFieldAliases(schema, { appId: appIdFieldAliases }).superRefine(
     (value, ctx) => {
       validateAppIds(value, ctx);
     },
   );
-  return appIdAliases as T;
+  return appIdAliases;
 }
 
 function validateAppIds(
@@ -464,21 +461,14 @@ const deviceTargetingShape = {
  * definition (used for `platform`, where some schemas declare a stricter
  * required/defaulted field).
  *
- * The cast is safe: at runtime the result is `schema.extend(...)` with base
- * keys taking precedence, which matches the declared intersection type modulo
- * key-precedence (base keys win in both).
+ * Zod infers the merged shape directly; base definitions take precedence.
  */
-function extendPreservingBase<T extends z.ZodObject<z.ZodRawShape>, S extends z.ZodRawShape>(
-  schema: T,
-  fields: S,
-): z.ZodObject<Omit<S, keyof T["shape"]> & T["shape"]> {
-  const added: Record<string, z.core.$ZodType> = {};
-  for (const [key, field] of Object.entries(fields)) {
-    if (!(key in schema.shape)) {
-      added[key] = field;
-    }
-  }
-  return schema.extend(added) as unknown as z.ZodObject<Omit<S, keyof T["shape"]> & T["shape"]>;
+function extendPreservingBase<
+  T extends z.ZodRawShape,
+  S extends z.ZodRawShape,
+  C extends z.core.$ZodObjectConfig,
+>(schema: z.ZodObject<T, C>, fields: S) {
+  return schema.extend({ ...fields, ...schema.shape });
 }
 
 /**
@@ -488,14 +478,19 @@ function extendPreservingBase<T extends z.ZodObject<z.ZodRawShape>, S extends z.
  * The sessionUuid parameter is optional and allows tools to be targeted
  * at specific devices through session context.
  */
-export function addSessionUuidToSchema<T extends z.ZodObject<z.ZodRawShape>>(schema: T) {
+export function addSessionUuidToSchema<S extends z.ZodRawShape, C extends z.core.$ZodObjectConfig>(
+  schema: z.ZodObject<S, C>,
+) {
   return extendPreservingBase(schema, sessionUuidShape);
 }
 
 /**
  * Helper to add sessionUuid + device label + deviceId + platform fields to tool schemas.
  */
-export function addDeviceTargetingToSchema<T extends z.ZodObject<z.ZodRawShape>>(schema: T) {
+export function addDeviceTargetingToSchema<
+  S extends z.ZodRawShape,
+  C extends z.core.$ZodObjectConfig,
+>(schema: z.ZodObject<S, C>) {
   const extended = extendPreservingBase(schema, deviceTargetingShape);
   if (!("deviceId" in schema.shape)) {
     injectedDeviceIdSchemas.add(extended);

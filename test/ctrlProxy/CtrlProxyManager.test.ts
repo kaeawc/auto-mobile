@@ -91,6 +91,25 @@ describe("CtrlProxyManager", function () {
   let originalLaunchCwdEnv: string | undefined;
   let prefetchCacheDir: string;
 
+  test("setup preserves classified failures and warns before returning", async () => {
+    const error = new Error("setup unavailable");
+    const compatibility = spyOn(
+      accessibilityServiceClient,
+      "ensureCompatibleVersion",
+    ).mockRejectedValue(error);
+    const log = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await accessibilityServiceClient.setup();
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(error.message);
+      expect(result.cause).toBe(error);
+      expect(log).toHaveBeenCalledWith("[CTRL_PROXY] Setup failed: setup unavailable", error);
+    } finally {
+      compatibility.mockRestore();
+      log.mockRestore();
+    }
+  });
+
   beforeEach(async function () {
     originalApkPathEnv = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;

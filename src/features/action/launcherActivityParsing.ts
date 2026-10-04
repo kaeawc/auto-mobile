@@ -28,29 +28,82 @@ function activityFromMatch(match: string, packageName: string): string | undefin
   return match.startsWith(packageName + ".") ? match : undefined;
 }
 
-export function parseFallbackMainActivities(stdout: string, packageName: string): string[] {
-  const activities: string[] = [];
-  const pattern = new RegExp(`${RegExp.escape(packageName)}[^\\s]*`, "g");
-  const lines = stdout.split("\n");
-  for (const line of lines) {
-    if (!isMainActivityLine(line)) {
-      continue;
-    }
-    for (const match of line.match(pattern) ?? []) {
-      if (!activities.includes(match)) {
-        activities.push(match);
-      }
-    }
-  }
-  return activities;
+interface PackageDumpFilter {
+  component: string;
+  indentation: number;
+  hasMain: boolean;
+  hasLauncher: boolean;
 }
 
-function isMainActivityLine(line: string): boolean {
-  return (
-    line.includes("android.intent.action.MAIN") ||
-    line.includes("MainActivity") ||
-    line.includes(".Main")
-  );
+/** Read complete intent filters only within the Activity Resolver Table. */
+export function parseLauncherActivitiesFromPackageDump(
+  stdout: string,
+  packageName: string,
+): string[] {
+  const activities = new Set<string>();
+  let inActivityTable = false;
+  let filter: PackageDumpFilter | undefined;
+
+  for (const rawLine of stdout.split("\n")) {
+    const dumpLine = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    const line = dumpLine.trim();
+    if (!inActivityTable) {
+      inActivityTable = dumpLine === "Activity Resolver Table:";
+      continue;
+    }
+    if (!line) {
+      continue;
+    }
+    const indentation = dumpLine.length - dumpLine.trimStart().length;
+    // Any unindented section ends this table, including Receiver/Service tables.
+    if (indentation === 0) {
+      break;
+    }
+    const nextFilter = parsePackageDumpFilterHeader(line, indentation);
+    if (nextFilter || (filter && indentation <= filter.indentation)) {
+      addPackageDumpLauncherActivity(filter, packageName, activities);
+      filter = nextFilter;
+      continue;
+    }
+    // A remaining open filter can only receive lines deeper than its header.
+    if (filter) {
+      filter.hasMain ||= line === 'Action: "android.intent.action.MAIN"';
+      filter.hasLauncher ||= line === 'Category: "android.intent.category.LAUNCHER"';
+    }
+  }
+  addPackageDumpLauncherActivity(filter, packageName, activities);
+  return [...activities];
+}
+
+function parsePackageDumpFilterHeader(
+  line: string,
+  indentation: number,
+): PackageDumpFilter | undefined {
+  const tokens = line.split(/\s+/);
+  if (
+    tokens.length !== 4 ||
+    !/^[0-9a-f]+$/i.test(tokens[0]) ||
+    !tokens[1].includes("/") ||
+    tokens[2] !== "filter" ||
+    !/^[0-9a-f]+$/i.test(tokens[3])
+  ) {
+    return undefined;
+  }
+  return { component: tokens[1], indentation, hasMain: false, hasLauncher: false };
+}
+
+function addPackageDumpLauncherActivity(
+  filter: PackageDumpFilter | undefined,
+  packageName: string,
+  activities: Set<string>,
+): void {
+  if (!filter?.hasMain || !filter.hasLauncher) {
+    return;
+  }
+  const [componentPackage, activity] = filter.component.split("/");
+  if (componentPackage === packageName && activity) {
+    activities.add(activity);
+  }
 }
 
 export function resolveComponentActivity(

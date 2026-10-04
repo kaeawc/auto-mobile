@@ -522,6 +522,49 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertEqual(store.evaluate(request("b"))?.faultId, "reset-1")
         }
 
+        func testFaultRulesMatchHeaderNamesCaseInsensitively() {
+            let store = NetworkMockRuleStore()
+            store.setFaultRules([
+                NetworkFaultRuleDTO(
+                    faultId: "header-1",
+                    transport: .urlSession,
+                    host: ".*",
+                    port: nil,
+                    scheme: nil,
+                    path: ".*",
+                    method: "*",
+                    headers: ["x-test": "1"],
+                    origin: nil,
+                    connectionId: nil,
+                    sessionId: nil,
+                    action: .error,
+                    statusCode: nil,
+                    responseHeaders: nil,
+                    responseBody: nil,
+                    contentType: nil,
+                    errorType: "timeout",
+                    delayMs: nil,
+                    bandwidthBytesPerSecond: nil,
+                    dropBytes: nil,
+                    limit: nil,
+                    expiresAtEpochMs: nil,
+                    scope: nil,
+                    dryRun: false
+                ),
+            ])
+            let request = { (headers: [String: String]) in
+                NetworkMockRuleStore.FaultRequest(
+                    transport: .urlSession, host: "api.example.com", port: 443, scheme: "https",
+                    path: "/v1", method: "GET", headers: headers, origin: nil,
+                    connectionId: nil, sessionId: nil
+                )
+            }
+
+            XCTAssertEqual(store.evaluate(request(["X-Test": "1"]))?.faultId, "header-1")
+            XCTAssertNil(store.evaluate(request(["X-Test": "2"])))
+            XCTAssertNil(store.evaluate(request([:])))
+        }
+
         func testFaultRulesHonorExpiryAndDryRunWithoutConsuming() {
             let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
             let store = NetworkMockRuleStore(dateProvider: dateProvider)

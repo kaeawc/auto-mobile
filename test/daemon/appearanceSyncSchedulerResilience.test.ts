@@ -17,6 +17,7 @@ function makeScheduler(
   options: { timer?: FakeTimer; applyDeadlineMs?: number } = {},
 ): AppearanceSyncScheduler {
   return new AppearanceSyncScheduler(options.timer ?? new FakeTimer(), {
+    isEnabled: () => true,
     getConfig: async () => ({ syncWithHost: true }) as AppearanceConfig,
     resolveMode: async () => "dark",
     getTargets: targets,
@@ -48,6 +49,7 @@ describe("AppearanceSyncScheduler resilience", () => {
       throw new Error("no such table: appearance_configs");
     });
     const scheduler = new AppearanceSyncScheduler(new FakeTimer(), {
+      isEnabled: () => true,
       getConfig,
       resolveMode: async () => "dark",
       getTargets: () => [],

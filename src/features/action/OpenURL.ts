@@ -16,7 +16,7 @@ import {
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
-import { LaunchApp } from "./LaunchApp";
+import { LaunchApp, amStartReportedFailure } from "./LaunchApp";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
@@ -274,13 +274,21 @@ export class OpenURL extends BaseVisualChange {
     // so the URL is single-quoted for that shell (issue #4213). Double quotes
     // would leave `"`, `$`, backticks and `\` live.
     throwIfAborted(signal);
-    await awaitWhileRequestIsLive(
+    const result = await awaitWhileRequestIsLive(
       this.adb.execute(["shell", `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`], {
         signal,
       }),
       signal,
     );
     throwIfAborted(signal);
+
+    if (amStartReportedFailure(result.stdout, result.stderr)) {
+      return {
+        success: false,
+        url,
+        error: `Failed to open URI ${url}: ${[result.stdout, result.stderr].filter(Boolean).join("\n").trim()}. Verify that an installed app handles this URI.`,
+      };
+    }
 
     return {
       success: true,

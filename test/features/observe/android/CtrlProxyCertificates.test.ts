@@ -25,6 +25,7 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { PortManager } from "../../../../src/utils/PortManager";
+import { shellQuote } from "../../../../src/utils/shellQuote";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../../src/utils/workingDirectory";
 
 describe("CtrlProxyCertificates (Android)", function () {
@@ -68,6 +69,34 @@ describe("CtrlProxyCertificates (Android)", function () {
     send(data: any): void {
       this.sentMessages.push(data.toString());
       super.send(data);
+    }
+  }
+
+  class CleanupAdbExecutor extends FakeAdbExecutor {
+    finishCleanup?: () => void;
+    cleanupFinished = false;
+
+    constructor(private readonly cleanupMode: "pending" | "throw") {
+      super();
+    }
+
+    override executeCommand(
+      ...args: Parameters<FakeAdbExecutor["executeCommand"]>
+    ): ReturnType<FakeAdbExecutor["executeCommand"]> {
+      const result = super.executeCommand(...args);
+      if (!args[0].startsWith("shell rm -f ")) {
+        return result;
+      }
+      if (this.cleanupMode === "throw") {
+        throw new Error("Synchronous cleanup failure");
+      }
+      return result.then(async (response) => {
+        await new Promise<void>((resolve) => {
+          this.finishCleanup = resolve;
+        });
+        this.cleanupFinished = true;
+        return response;
+      });
     }
   }
 
@@ -202,12 +231,21 @@ describe("CtrlProxyCertificates (Android)", function () {
     return { client, socket };
   };
 
-  const failingClient = (): AndroidCtrlProxyClient =>
+  const failingClient = (
+    certificateFileSystem?: FakeCertificateFileSystem,
+  ): AndroidCtrlProxyClient =>
     AndroidCtrlProxyClient.createForTesting(
       testDevice,
       fakeAdb,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      certificateFileSystem,
     );
 
   // ===========================================================================
@@ -317,7 +355,7 @@ describe("CtrlProxyCertificates (Android)", function () {
     const relativeCertificatePath = path.join("fixtures", "certs", "relative ca.crt");
     const daemonLaunchCwd = path.join(process.cwd(), "tmp", "automobile-launch");
     const relativeResolvedPath = path.join(daemonLaunchCwd, relativeCertificatePath);
-    const fileUrlResolvedPath = path.join(process.cwd(), "tmp", "automobile ca.crt");
+    const fileUrlResolvedPath = path.join(process.cwd(), "tmp", "my ca's cert.crt");
 
     test("rejects an empty path without touching the device", async function () {
       const { client, socket } = await connectClient();
@@ -380,7 +418,7 @@ describe("CtrlProxyCertificates (Android)", function () {
         daemonLaunchCwd,
       },
       {
-        name: "a file URL",
+        name: "a file URL with a space and single quote",
         certificatePath: pathToFileURL(fileUrlResolvedPath).href,
         resolvedPath: fileUrlResolvedPath,
         daemonLaunchCwd: undefined,
@@ -411,6 +449,8 @@ describe("CtrlProxyCertificates (Android)", function () {
             expect(push?.replace(/\\\\/g, "\\")).toContain(`"${resolvedPath}"`);
             expect(push).toEndWith(`"${sent.devicePath}"`);
 
+            expect(fakeAdb.wasCommandExecuted("shell rm -f ")).toBe(false);
+
             socket.simulateMessage(
               JSON.stringify({
                 type: "ca_cert_result",
@@ -428,6 +468,10 @@ describe("CtrlProxyCertificates (Android)", function () {
               action: "install",
               alias: "user-ca-cert",
             });
+            const commands = fakeAdb.getExecutedCommands();
+            const cleanupCommand = `shell rm -f ${shellQuote(sent.devicePath)}`;
+            expect(commands).toContain(cleanupCommand);
+            expect(commands.indexOf(cleanupCommand)).toBeGreaterThan(commands.indexOf(push!));
           } finally {
             await client.close();
           }
@@ -440,6 +484,163 @@ describe("CtrlProxyCertificates (Android)", function () {
         }
       },
     );
+
+    const beginFileInstall = async (timeoutMs = 10000) => {
+      const resolvedPath = "/tmp/ca.crt";
+      const fakeFileSystem = new FakeCertificateFileSystem();
+      fakeFileSystem.setFile(resolvedPath, 128);
+      const { client, socket } = await connectClient(fakeFileSystem);
+      const baseCount = socket.sentMessages.length;
+      const resultPromise = client.requestInstallCaCertificateFromFile(resolvedPath, timeoutMs);
+      await waitForSentMessages(socket, baseCount + 1);
+      const sent: { devicePath: string; requestId: string } = findSentMessage(
+        socket,
+        "install_ca_cert_from_path",
+      );
+      return { client, socket, sent, resultPromise };
+    };
+
+    test.each(["timeout", "cancellation"] as const)(
+      "cleans up on %s without waiting for a pending removal",
+      async function (exit) {
+        const cleanupAdb = new CleanupAdbExecutor("pending");
+        fakeAdb = cleanupAdb;
+        const { client, sent, resultPromise } = await beginFileInstall(25);
+        try {
+          const observed = resultPromise.then((result) => ({ result }));
+          if (exit === "timeout") {
+            fakeTimer.advanceTime(26);
+          } else {
+            await client.close();
+          }
+          // Observe completion without awaiting a promise that a regressed cleanup might block.
+          let completed: Awaited<typeof observed> | undefined;
+          const observation = observed.then((value) => {
+            completed = value;
+          });
+          await flushPromises();
+          expect(completed?.result.success).toBe(false);
+          expect(completed?.result.error).toContain(
+            exit === "timeout" ? "timeout after 25ms" : "closed",
+          );
+          expect(fakeAdb.getExecutedCommands()).toContain(
+            `shell rm -f ${shellQuote(sent.devicePath)}`,
+          );
+          const call = fakeAdb
+            .getCommandCalls()
+            .find((call) => call.command.startsWith("shell rm -f "));
+          expect(call?.timeoutMs).toBe(1500);
+          expect(call?.maxBuffer).toBeUndefined();
+          expect(call?.noRetry).toBe(true);
+          expect(call?.signal?.aborted).toBe(false);
+          expect(cleanupAdb.cleanupFinished).toBe(false);
+          cleanupAdb.finishCleanup?.();
+          await observation;
+        } finally {
+          cleanupAdb.finishCleanup?.();
+          await client.close();
+        }
+      },
+    );
+
+    test("cleans up when connection fails after a successful push", async function () {
+      const resolvedPath = "/tmp/ca.crt";
+      const fakeFileSystem = new FakeCertificateFileSystem();
+      fakeFileSystem.setFile(resolvedPath, 128);
+      const client = failingClient(fakeFileSystem);
+      try {
+        const result = await client.requestInstallCaCertificateFromFile(resolvedPath);
+        expect(result.error).toBe("Failed to connect to accessibility service");
+        const commands = fakeAdb.getExecutedCommands();
+        const push = commands.find((command) => command.startsWith("push "));
+        expect(push).toBeDefined();
+        const devicePath = push!.slice(push!.lastIndexOf(' "') + 2, -1);
+        expect(commands).toContain(`shell rm -f ${shellQuote(devicePath)}`);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("cleans up after an unsuccessful install reply", async function () {
+      const { client, socket, sent, resultPromise } = await beginFileInstall();
+      try {
+        expect(fakeAdb.wasCommandExecuted("shell rm -f ")).toBe(false);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: sent.requestId,
+            success: false,
+            action: "install",
+            totalTimeMs: 3,
+            error: "Device owner required",
+          }),
+        );
+        expect(await resultPromise).toMatchObject({
+          success: false,
+          error: "Device owner required",
+        });
+        expect(fakeAdb.getExecutedCommands()).toContain(
+          `shell rm -f ${shellQuote(sent.devicePath)}`,
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    test.each(["rejection", "synchronous throw"] as const)(
+      "cleanup %s preserves the success result with no unhandled rejection",
+      async function (failure) {
+        if (failure === "synchronous throw") {
+          fakeAdb = new CleanupAdbExecutor("throw");
+        } else {
+          fakeAdb.setCommandError("rm -f", new Error("Cleanup rejected"));
+        }
+        const unhandled: unknown[] = [];
+        const onUnhandled = (error: unknown): void => {
+          unhandled.push(error);
+        };
+        process.on("unhandledRejection", onUnhandled);
+        const { client, socket, sent, resultPromise } = await beginFileInstall();
+        try {
+          const success = {
+            success: true,
+            action: "install",
+            alias: "user-ca-cert",
+            totalTimeMs: 3,
+          };
+          socket.simulateMessage(
+            JSON.stringify({ type: "ca_cert_result", requestId: sent.requestId, ...success }),
+          );
+          const result = await resultPromise;
+          await flushPromises();
+          expect(result).toEqual({ ...success, error: undefined, perfTiming: undefined });
+          expect(fakeAdb.getExecutedCommands()).toContain(
+            `shell rm -f ${shellQuote(sent.devicePath)}`,
+          );
+          expect(unhandled).toEqual([]);
+        } finally {
+          process.off("unhandledRejection", onUnhandled);
+          await client.close();
+        }
+      },
+    );
+
+    test("does not remove a device file when pushing fails", async function () {
+      fakeAdb.setCommandError("push ", new Error("Push failed"));
+      const resolvedPath = "/tmp/ca.crt";
+      const fakeFileSystem = new FakeCertificateFileSystem();
+      fakeFileSystem.setFile(resolvedPath, 128);
+      const { client, socket } = await connectClient(fakeFileSystem);
+      try {
+        const result = await client.requestInstallCaCertificateFromFile(resolvedPath);
+        expect(result).toMatchObject({ success: false, error: "Push failed" });
+        expect(fakeAdb.wasCommandExecuted("push ")).toBe(true);
+        expect(fakeAdb.wasCommandExecuted("shell rm ")).toBe(false);
+        expect(hasSentMessage(socket, "install_ca_cert_from_path")).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
 
     test("rejects an empty certificate file before pushing or sending a wire request", async function () {
       const resolvedPath = "/tmp/empty-ca.crt";

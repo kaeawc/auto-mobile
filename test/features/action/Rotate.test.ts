@@ -16,6 +16,17 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+const mirrorLandscape = readFileSync(
+  join(__dirname, "..", "observe", "windowDumps", "dumpsys-window-displays-mirror-landscape.txt"),
+  "utf8",
+);
+const mirrorPortrait = readFileSync(
+  join(__dirname, "..", "observe", "windowDumps", "dumpsys-window-displays-mirror-portrait.txt"),
+  "utf8",
+);
 
 describe("Rotate", () => {
   let rotate: Rotate;
@@ -94,6 +105,31 @@ describe("Rotate", () => {
     (rotate as any).window = fakeWindow;
   });
 
+  test("rotates to landscape successfully while the mirror is present", async () => {
+    fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+      createExecResult(mirrorPortrait),
+      createExecResult(mirrorLandscape),
+    ]);
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.currentOrientation).toBe("landscape");
+    expect(result.previousOrientation).toBe("portrait");
+  });
+
+  test("rotates from mirrored landscape to portrait instead of reporting a no-op", async () => {
+    fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+      createExecResult(mirrorLandscape),
+      createExecResult(mirrorPortrait),
+    ]);
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.currentOrientation).toBe("portrait");
+    expect(result.previousOrientation).toBe("landscape");
+    expect(fakeAdb.getExecutedCommands()).toContain("shell settings put system user_rotation 0");
+  });
+
   test("output schema accepts optional base metadata on a real no-op result", async () => {
     const result = await rotate.execute("portrait");
     expect(result.rotationPerformed).toBe(false);
@@ -123,7 +159,7 @@ describe("Rotate", () => {
   });
 
   describe("end-of-call Android orientation", () => {
-    const liveCommand = 'shell dumpsys window | grep -i "mRotation="';
+    const liveCommand = "shell dumpsys window displays";
 
     function scriptLandscapeRotation(afterObservation: () => void = () => {}) {
       fakeAdb.setCommandResponseSequence(liveCommand, [
@@ -367,7 +403,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         auto.map(createExecResult),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
         createExecResult("mRotation=1"),
       ]);
@@ -399,10 +435,7 @@ describe("Rotate", () => {
 
     test("session already-matching orientation locks and records before its first write", async () => {
       const original = useSession();
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=1"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
       fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
         createExecResult("1"),
         createExecResult("0"),
@@ -438,7 +471,7 @@ describe("Rotate", () => {
       async ({ key, live }) => {
         const original = useSession();
         fakeAdb.setCommandResponse(
-          'shell dumpsys window | grep -i "mRotation="',
+          "shell dumpsys window displays",
           createExecResult(`mRotation=${live}`),
         );
         fakeAdb.setCommandResponse(`shell settings get system ${key}`, createExecResult("null"));
@@ -479,7 +512,7 @@ describe("Rotate", () => {
       async (outcome) => {
         useSession();
         settingsSequence(["1", "0"]);
-        fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
           createExecResult("mRotation=0"),
           createExecResult(
             outcome === "unreadable" ? "" : outcome === "match" ? "mRotation=1" : "mRotation=0",
@@ -553,7 +586,7 @@ describe("Rotate", () => {
       "confirmed mismatch preserves another actor's user_rotation $actorValue on the $path",
       async ({ path, actorValue }) => {
         fakeAdb.setCommandResponse(
-          'shell dumpsys window | grep -i "mRotation="',
+          "shell dumpsys window displays",
           createExecResult("mRotation=0"),
         );
         fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
@@ -580,10 +613,7 @@ describe("Rotate", () => {
     );
 
     test("confirmed direct reversion rolls user_rotation back to its pre-call value", async () => {
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=0"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0"));
       fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
         createExecResult("2"),
         createExecResult("1"),
@@ -600,7 +630,7 @@ describe("Rotate", () => {
 
     test("waitForRotation failure rolls user_rotation back only after confirmed mismatch", async () => {
       settingsSequence(["1"]);
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
       ]);
       fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
@@ -623,7 +653,7 @@ describe("Rotate", () => {
 
     test("a user_rotation write that applies then rejects still rolls back", async () => {
       settingsSequence(["1"]);
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
       ]);
       fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
@@ -653,7 +683,7 @@ describe("Rotate", () => {
 
     test("rollback write failure adds warning and preserves the original rotation failure", async () => {
       settingsSequence(["1"]);
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
       ]);
       fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
@@ -681,7 +711,7 @@ describe("Rotate", () => {
       "failed rotation skips rollback for unreadable or unchanged pre-call user_rotation %s",
       async (previous) => {
         settingsSequence(["1"]);
-        fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
           createExecResult("mRotation=0"),
         ]);
         fakeAdb.setCommandResponse(
@@ -706,7 +736,7 @@ describe("Rotate", () => {
     );
 
     test("unknown achieved orientation never rolls user_rotation back", async () => {
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
         createExecResult(""),
       ]);
@@ -767,10 +797,7 @@ describe("Rotate", () => {
       // `user_rotation` setting (only meaningful while auto-rotate is off)
       // is still stuck at its old portrait value.
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=1"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
 
       const orientation = await rotate.getCurrentOrientation();
 
@@ -779,10 +806,7 @@ describe("Rotate", () => {
 
     test("should fall back to user_rotation when dumpsys window has no mRotation", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult(""),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult(""));
 
       const orientation = await rotate.getCurrentOrientation();
 
@@ -865,10 +889,7 @@ describe("Rotate", () => {
         viewHierarchy: { hierarchy: {} },
       }));
       Object.assign(rotate, { observeScreen: fakeObserveScreen });
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=0"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0"));
 
       const result = await rotate.execute("portrait");
 
@@ -893,7 +914,7 @@ describe("Rotate", () => {
         viewHierarchy: { hierarchy: {} },
       }));
       Object.assign(rotate, { observeScreen: fakeObserveScreen });
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
         createExecResult("mRotation=1"),
       ]);
@@ -912,10 +933,7 @@ describe("Rotate", () => {
         viewHierarchy: { hierarchy: {} },
       }));
       Object.assign(rotate, { observeScreen: fakeObserveScreen });
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=0"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0"));
 
       const result = await rotate.execute("portrait", undefined, true);
 
@@ -930,7 +948,7 @@ describe("Rotate", () => {
     test("should skip rotation when already in desired orientation", async () => {
       // Setup: device is already in portrait orientation
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult(""), // Preserve the initial user_rotation fallback.
         createExecResult("mRotation=0"), // End-of-call confirmation.
       ]);
@@ -958,7 +976,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"),
         createExecResult("mRotation=0"),
       ]);
@@ -987,7 +1005,7 @@ describe("Rotate", () => {
         createExecResult("1"),
       );
       fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
+        "shell dumpsys window displays",
         createExecResult(dumpsysWindowGrepOutput),
       );
 
@@ -1012,7 +1030,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"),
         createExecResult(""),
       ]);
@@ -1034,7 +1052,7 @@ describe("Rotate", () => {
       // and the sensor settles on portrait (live mRotation=0) once
       // auto-rotate is restored. The post-restore confirmation read is LIVE
       // (mRotation), never a fallback to user_rotation (#6199 review).
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"),
         createExecResult("mRotation=0"),
       ]);
@@ -1061,7 +1079,7 @@ describe("Rotate", () => {
       // and the sensor settles on landscape (live mRotation=1) once
       // auto-rotate is restored. The post-restore confirmation read is LIVE
       // (mRotation), never a fallback to user_rotation (#6199 review).
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
         createExecResult("mRotation=1"),
       ]);
@@ -1083,7 +1101,7 @@ describe("Rotate", () => {
     test("should coincide currentOrientation and previousOrientation when already in orientation (#6057)", async () => {
       // Device already in portrait: no rotation performed, fields legitimately coincide.
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult(""),
         createExecResult("mRotation=0"),
       ]);
@@ -1144,7 +1162,7 @@ describe("Rotate", () => {
         createExecResult("1"),
         createExecResult("0"),
       ]);
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
         createExecResult("mRotation=1"),
       ]);
@@ -1217,7 +1235,7 @@ describe("Rotate", () => {
       // settles on portrait (live mRotation=0) once auto-rotate is restored
       // (no override). The post-restore confirmation read is LIVE
       // (mRotation), never a fallback to user_rotation (#6199 review).
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"),
         createExecResult("mRotation=0"),
       ]);
@@ -1255,7 +1273,7 @@ describe("Rotate", () => {
         createExecResult("1"),
         createExecResult("0"),
       ]);
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"),
         createExecResult("mRotation=0"),
       ]);
@@ -1277,7 +1295,7 @@ describe("Rotate", () => {
         createExecResult("1"),
         createExecResult("0"),
       ]);
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=0"),
         createExecResult("mRotation=1"),
       ]);
@@ -1307,10 +1325,7 @@ describe("Rotate", () => {
         createExecResult("1"),
         createExecResult("0"),
       ]);
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=1"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
 
       const result = await rotate.execute("landscape", undefined, true);
 
@@ -1334,10 +1349,7 @@ describe("Rotate", () => {
         createExecResult("1"),
         createExecResult("0"),
       ]);
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=2"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=2"));
 
       const result = await rotate.execute("portrait", undefined, true);
 
@@ -1361,7 +1373,7 @@ describe("Rotate", () => {
           "shell settings get system accelerometer_rotation",
           createExecResult("1"),
         );
-        fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
           createExecResult("mRotation=1"),
           createExecResult(liveRotation),
           createExecResult(liveRotation),
@@ -1386,10 +1398,7 @@ describe("Rotate", () => {
         createExecResult("1"),
         createExecResult("0"),
       ]);
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=1"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
       fakeAdb.setCommandError(
         "shell settings put system user_rotation 0",
         new Error("settings provider unavailable"),
@@ -1417,10 +1426,7 @@ describe("Rotate", () => {
         createExecResult("0"),
         createExecResult("1"),
       ]);
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=0"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0"));
 
       const result = await rotate.execute("portrait", undefined, false);
 
@@ -1472,7 +1478,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=1"), // post-restore confirm attempt 1: transient/unsettled
         createExecResult("mRotation=0"), // post-restore confirm attempt 2: settled
@@ -1502,7 +1508,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape
@@ -1528,7 +1534,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult(""), // settle attempt 1: unreadable
         createExecResult(""), // settle attempt 2: unreadable
@@ -1553,7 +1559,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait (lone, then broken)
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (breaks the streak)
@@ -1577,7 +1583,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult(""), // every confirm attempt thereafter is unparseable
       ]);
@@ -1604,7 +1610,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=0"), // post-write-failure confirm reads: portrait genuinely holds
       ]);
@@ -1625,7 +1631,7 @@ describe("Rotate", () => {
       // orientation — it must be re-queried, not assumed (#6211 review).
       const dumpsysCalls = fakeAdb
         .getExecutedCommands()
-        .filter((cmd) => cmd.includes('shell dumpsys window | grep -i "mRotation="')).length;
+        .filter((cmd) => cmd.includes("shell dumpsys window displays")).length;
       expect(dumpsysCalls).toBeGreaterThan(1);
     });
 
@@ -1639,7 +1645,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=0"), // post-restore confirm attempt 1: portrait
         createExecResult("mRotation=0"), // post-restore confirm attempt 2: portrait (confirmed stable)
@@ -1681,7 +1687,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult(""), // every post-restore confirm attempt is unparseable
       ]);
@@ -1830,10 +1836,7 @@ describe("Rotate", () => {
       );
       // mRotation reads landscape both before AND after the forced rotation +
       // restore — the sensor never let go of landscape.
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=1"),
-      );
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
 
       fakeObserveScreen = new FakeObserveScreen();
       fakeObserveScreen.setObserveResult(() => createObserveResult());
@@ -1869,7 +1872,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=0"), // post-restore confirm attempt 1: matches requested portrait...
         createExecResult("mRotation=1"), // ...but attempt 2 reveals it swung back to landscape
@@ -1904,7 +1907,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check (landscape before)
         createExecResult("mRotation=1"), // post-write-failure confirm reads: reverted to landscape
       ]);
@@ -1945,7 +1948,7 @@ describe("Rotate", () => {
         "shell settings get system accelerometer_rotation",
         createExecResult("1"),
       );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
         createExecResult("mRotation=1"), // pre-rotation state check
         createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
         createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (confirmed stable)

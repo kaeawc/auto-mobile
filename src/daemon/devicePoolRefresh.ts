@@ -1,3 +1,4 @@
+import { truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { Mutex } from "async-mutex";
@@ -18,6 +19,25 @@ export interface DevicePoolRefreshResult {
   addedCount: number;
   completeness?: DiscoveryCompleteness;
   failure?: string;
+}
+
+/** Preserve partial discovery and report Android failures through the refresh outcome. */
+export function discoveryRefreshOutcome(
+  discovery: BootedDeviceDiscovery,
+  addedCount: number,
+): DevicePoolRefreshResult {
+  const androidError = discovery.discoveryErrors?.android;
+  return {
+    addedCount,
+    ...(androidError && androidError.code !== "unavailable"
+      ? { failure: androidError.message }
+      : {}),
+  };
+}
+
+/** Client-facing form of the existing refresh failure, bounded independently of logs. */
+export function deviceListRefreshFailureMessage(failure: string): string {
+  return `Could not refresh device list: ${truncateBodyText(failure.split(/[\r\n\u2028\u2029]/, 1)[0], 256)}. Resolve the cause and retry.`;
 }
 
 /** Live pool state is read at each use, including after awaits. */
@@ -215,7 +235,7 @@ export class DevicePoolRefresh {
       }
 
       return {
-        addedCount,
+        ...discoveryRefreshOutcome(discovery, addedCount),
         completeness: this.currentRefreshCompleteness(discovery, refreshGeneration),
       };
     } catch (error) {

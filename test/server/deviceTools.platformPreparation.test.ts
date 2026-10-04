@@ -12,6 +12,11 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
+import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
+import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -122,6 +127,28 @@ describe("platform device preparation tools", () => {
       typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
     );
   }
+
+  test("getAndroid retains a bounded Android discovery failure before lifecycle allocation", async () => {
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      { isAvailable: async () => false } as unknown as SimCtlClient,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => {
+          throw new Error(`${"x".repeat(300)}\nsecond line must stay in logs`);
+        },
+      }),
+    );
+    setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+    await expect(callTool("getAndroid", { deviceId: "emulator-5604" })).rejects.toMatchObject({
+      message: `Could not refresh device list: ${("Android booted-device discovery failed: " + "x".repeat(300)).slice(0, 256)}. Resolve the cause and retry.`,
+    });
+  });
+
+  test("getAndroid preserves the exact absent-device error after working discovery", async () => {
+    await expect(callTool("getAndroid", { deviceId: "emulator-5604" })).rejects.toMatchObject({
+      message: "Device 'emulator-5604' not found. Available booted: none. Available images: none.",
+    });
+  });
 
   async function awaitPromptly(promise: Promise<void>, label: string): Promise<void> {
     await Promise.race([

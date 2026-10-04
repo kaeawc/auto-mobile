@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 /**
  * Unit tests for the barrier path of CriticalSectionCoordinator
@@ -11,45 +11,25 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 describe("CriticalSectionCoordinator.awaitBarrier", () => {
   let coordinator: CriticalSectionCoordinator;
   let fakeTimer: FakeTimer;
-  let originalSetTimeout: typeof global.setTimeout;
-  let originalClearTimeout: typeof global.clearTimeout;
-  let originalDateNow: typeof Date.now;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
-    originalSetTimeout = global.setTimeout;
-    originalClearTimeout = global.clearTimeout;
-    originalDateNow = Date.now;
-
-    global.setTimeout = ((callback: (...args: any[]) => void, ms?: number, ...args: any[]) => {
-      return fakeTimer.setTimeout(() => callback(...args), ms ?? 0);
-    }) as typeof global.setTimeout;
-    global.clearTimeout = ((handle: NodeJS.Timeout) => {
-      fakeTimer.clearTimeout(handle);
-    }) as typeof global.clearTimeout;
-    Date.now = () => fakeTimer.now();
-
-    coordinator = CriticalSectionCoordinator.getInstance();
-    coordinator.reset();
+    coordinator = CriticalSectionCoordinator.createForTesting(fakeTimer);
   });
 
   afterEach(() => {
-    Date.now = originalDateNow;
-    global.setTimeout = originalSetTimeout;
-    global.clearTimeout = originalClearTimeout;
+    coordinator.reset();
     fakeTimer.reset();
   });
 
   const wait = async (ms: number): Promise<void> => {
-    const promise = defaultTimer.sleep(ms);
-    fakeTimer.advanceTime(ms);
-    await promise;
+    await fakeTimer.sleep(ms);
   };
 
   test("single device with deviceCount 1 proceeds immediately", async () => {
-    const start = Date.now();
     await coordinator.awaitBarrier("solo", "device-1", 1);
-    expect(Date.now() - start).toBeLessThan(100);
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
+    expect(fakeTimer.getPendingTimeouts()).toEqual([5000]); // cleanup only
   });
 
   test("all devices are released only after the last arrives", async () => {
@@ -58,12 +38,20 @@ describe("CriticalSectionCoordinator.awaitBarrier", () => {
 
     const promises = ["device-1", "device-2", "device-3"].map(async (deviceId, index) => {
       await wait(index * 10); // stagger arrivals
-      arrivals.push({ deviceId, at: Date.now() });
+      arrivals.push({ deviceId, at: fakeTimer.now() });
       await coordinator.awaitBarrier("sync", deviceId, 3);
-      passes.push({ deviceId, at: Date.now() });
+      passes.push({ deviceId, at: fakeTimer.now() });
     });
 
+    await fakeTimer.advanceTimeAsync(0);
+    expect(arrivals).toHaveLength(1);
+    expect(passes).toEqual([]);
+    await fakeTimer.advanceTimeAsync(10);
+    expect(arrivals).toHaveLength(2);
+    expect(passes).toEqual([]);
+    await fakeTimer.advanceTimeAsync(10);
     await Promise.all(promises);
+    expect(fakeTimer.getSleepHistory()).toEqual([0, 10, 20]);
 
     expect(passes.length).toBe(3);
     const lastArrival = Math.max(...arrivals.map((a) => a.at));
@@ -78,12 +66,17 @@ describe("CriticalSectionCoordinator.awaitBarrier", () => {
 
     const deviceWork = async (deviceId: string) => {
       await coordinator.awaitBarrier("no-serialize", deviceId, 2);
-      log.push({ deviceId, event: "start", time: Date.now() });
+      log.push({ deviceId, event: "start", time: fakeTimer.now() });
       await wait(20);
-      log.push({ deviceId, event: "end", time: Date.now() });
+      log.push({ deviceId, event: "end", time: fakeTimer.now() });
     };
 
-    await Promise.all([deviceWork("device-1"), deviceWork("device-2")]);
+    const work = Promise.all([deviceWork("device-1"), deviceWork("device-2")]);
+    await drainUntil(() => log.length === 2, { description: "both devices starting work" });
+    expect(log.map((entry) => entry.event)).toEqual(["start", "start"]);
+    expect(fakeTimer.getSleepHistory()).toEqual([20, 20]);
+    fakeTimer.advanceTime(20);
+    await work;
 
     // Both start before either ends — proof there is no mutual exclusion.
     const starts = log.filter((e) => e.event === "start").map((e) => e.time);

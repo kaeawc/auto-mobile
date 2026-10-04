@@ -43,7 +43,7 @@ extension ElementLocator {
         /// Deduplicates by alert label text to avoid showing the same alert twice.
         func getSystemAlerts(
             appSnapshot: XCUIElementSnapshot,
-            keyboardFocusFrame: CGRect? = nil
+            keyboardFocus: KeyboardFocus? = nil
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
@@ -54,7 +54,7 @@ extension ElementLocator {
                     snapshot,
                     depth: 0,
                     screenBounds: snapshot.frame,
-                    keyboardFocusFrame: keyboardFocusFrame
+                    keyboardFocus: keyboardFocus
                 )
             }
 
@@ -71,7 +71,7 @@ extension ElementLocator {
             )
             let springboardCapture = try getAlertsFromSpringboard(
                 runSnapshot: runSpringboardSnapshot,
-                keyboardFocusFrame: keyboardFocusFrame
+                keyboardFocus: keyboardFocus
             )
 
             // Deduplicate by alert label text
@@ -114,7 +114,7 @@ extension ElementLocator {
         /// (issue #5474).
         private func getAlertsFromSpringboard(
             runSnapshot: Bool,
-            keyboardFocusFrame: CGRect? = nil
+            keyboardFocus: KeyboardFocus? = nil
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
@@ -138,7 +138,7 @@ extension ElementLocator {
                     snapshot,
                     depth: 0,
                     screenBounds: snapshot.frame,
-                    keyboardFocusFrame: keyboardFocusFrame
+                    keyboardFocus: keyboardFocus
                 )
             }
             return (alerts, capture.rotation)
@@ -180,7 +180,7 @@ extension ElementLocator {
             screenBounds: CGRect,
             parentPath: String = "",
             childIndex: Int = 0,
-            keyboardFocusFrame: CGRect? = nil,
+            keyboardFocus: KeyboardFocus? = nil,
             disableAllFiltering: Bool = false,
             enclosingFrame: CGRect? = nil,
             coordinateOffset: CGPoint = .zero
@@ -258,7 +258,7 @@ extension ElementLocator {
                             screenBounds: screenBounds,
                             parentPath: currentPath,
                             childIndex: idx,
-                            keyboardFocusFrame: keyboardFocusFrame,
+                            keyboardFocus: keyboardFocus,
                             disableAllFiltering: disableAllFiltering,
                             enclosingFrame: frame,
                             coordinateOffset: resolved.offset
@@ -299,23 +299,18 @@ extension ElementLocator {
             } else {
                 isChecked = isCheckable && isSelected
             }
-            // Prefer the focus frame from the captured text inputs or predicate fallback;
-            // some iPhone UIKit fields do not report keyboard input focus via snapshot.hasFocus.
-            let hasFocus: Bool
-            if let focusFrame = keyboardFocusFrame, !frame.isEmpty, !focusFrame.isEmpty {
-                let epsilon: CGFloat = 0.5
-                let framesMatch = abs(frame.origin.x - focusFrame.origin.x) < epsilon
-                    && abs(frame.origin.y - focusFrame.origin.y) < epsilon
-                    && abs(frame.width - focusFrame.width) < epsilon
-                    && abs(frame.height - focusFrame.height) < epsilon
-                let isTextInput = snapshot.elementType == .textField
-                    || snapshot.elementType == .textView
-                    || snapshot.elementType == .secureTextField
-                    || snapshot.elementType == .searchField
-                hasFocus = framesMatch && isTextInput
-            } else {
-                hasFocus = snapshot.hasFocus
-            }
+            // Snapshot focus preserves each node's captured hasFocus; live focus remains
+            // authoritative for text inputs because some iPhone UIKit snapshots omit focus.
+            let isTextInput = snapshot.elementType == .textField
+                || snapshot.elementType == .textView
+                || snapshot.elementType == .secureTextField
+                || snapshot.elementType == .searchField
+            let hasFocus = Self.resolveKeyboardFocus(
+                nodeFrame: frame,
+                isTextInput: isTextInput,
+                snapshotHasFocus: snapshot.hasFocus,
+                keyboardFocus: keyboardFocus
+            )
             let isPassword = snapshot.elementType == .secureTextField
 
             // Only include actions for text input elements (click is implied by clickable)
@@ -334,10 +329,6 @@ extension ElementLocator {
             // accessibility label (which is typically the placeholder for
             // UISearchBar / UITextField). Mask password content to avoid
             // leaking secrets through the hierarchy.
-            let isTextInput = snapshot.elementType == .textField
-                || snapshot.elementType == .textView
-                || snapshot.elementType == .secureTextField
-                || snapshot.elementType == .searchField
             var enteredValue: String?
             if isTextInput, let raw = snapshot.value as? String, !raw.isEmpty {
                 enteredValue = isPassword ? String(repeating: "•", count: raw.count) : raw

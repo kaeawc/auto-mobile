@@ -1,5 +1,15 @@
 import Foundation
 
+struct KeyboardFocus {
+    enum Source {
+        case snapshot
+        case liveQuery
+    }
+
+    let frame: CGRect
+    let source: Source
+}
+
 enum KeyboardFocusDecision: Equatable {
     case skip
     case useSnapshotFrame(CGRect)
@@ -228,6 +238,33 @@ extension ElementLocator {
             return .useSnapshotFrame(focused.frame)
         }
         return .liveQuery
+    }
+
+    /// Live focus overrides captured focus for usable frames. Snapshot-derived focus
+    /// supplements captured focus so other focused nodes retain their own state.
+    nonisolated static func resolveKeyboardFocus(
+        nodeFrame: CGRect,
+        isTextInput: Bool,
+        snapshotHasFocus: Bool,
+        keyboardFocus: KeyboardFocus?
+    )
+        -> Bool
+    {
+        guard let keyboardFocus, !nodeFrame.isEmpty, !keyboardFocus.frame.isEmpty else {
+            return snapshotHasFocus
+        }
+        let focusFrame = keyboardFocus.frame
+        let epsilon: CGFloat = 0.5
+        let framesMatch = abs(nodeFrame.origin.x - focusFrame.origin.x) < epsilon
+            && abs(nodeFrame.origin.y - focusFrame.origin.y) < epsilon
+            && abs(nodeFrame.width - focusFrame.width) < epsilon
+            && abs(nodeFrame.height - focusFrame.height) < epsilon
+        switch keyboardFocus.source {
+        case .liveQuery:
+            return framesMatch && isTextInput
+        case .snapshot:
+            return (framesMatch && isTextInput) || snapshotHasFocus
+        }
     }
 
     /// Whether a second SpringBoard snapshot is required to discover system-owned

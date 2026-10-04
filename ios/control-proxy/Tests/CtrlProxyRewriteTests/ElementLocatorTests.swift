@@ -1349,6 +1349,108 @@ final class ElementLocatorTests: XCTestCase {
         )
     }
 
+    // Scalar logic tests, not captured device snapshots (issue #9248).
+    func testResolveKeyboardFocus_snapshotPreservesFocusedWrapper() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        let focus = KeyboardFocus(frame: frame, source: .snapshot)
+        XCTAssertTrue(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: frame, isTextInput: true, snapshotHasFocus: true, keyboardFocus: focus
+        ))
+        XCTAssertTrue(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: CGRect(x: 0, y: 0, width: 200, height: 200),
+            isTextInput: false, snapshotHasFocus: true, keyboardFocus: focus
+        ))
+    }
+
+    func testResolveKeyboardFocus_snapshotPreservesSecondFocusedInput() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        let focus = KeyboardFocus(frame: frame, source: .snapshot)
+        XCTAssertTrue(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: frame, isTextInput: true, snapshotHasFocus: true, keyboardFocus: focus
+        ))
+        XCTAssertTrue(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: CGRect(x: 10, y: 80, width: 100, height: 40),
+            isTextInput: true, snapshotHasFocus: true, keyboardFocus: focus
+        ))
+    }
+
+    func testResolveKeyboardFocus_liveQueryRemainsAuthoritative() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        let focus = KeyboardFocus(frame: frame, source: .liveQuery)
+        XCTAssertTrue(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: frame, isTextInput: true, snapshotHasFocus: false, keyboardFocus: focus
+        ))
+        XCTAssertFalse(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: CGRect(x: 10, y: 80, width: 100, height: 40),
+            isTextInput: true, snapshotHasFocus: true, keyboardFocus: focus
+        ))
+        XCTAssertFalse(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: frame, isTextInput: false, snapshotHasFocus: true, keyboardFocus: focus
+        ))
+    }
+
+    func testResolveKeyboardFocus_nilPreservesSnapshotFocus() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        for hasFocus in [false, true] {
+            for isTextInput in [false, true] {
+                XCTAssertEqual(ElementLocator.resolveKeyboardFocus(
+                    nodeFrame: frame, isTextInput: isTextInput,
+                    snapshotHasFocus: hasFocus, keyboardFocus: nil
+                ), hasFocus)
+            }
+        }
+    }
+
+    func testResolveKeyboardFocus_snapshotDoesNotFocusMatchingWrapper() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        XCTAssertFalse(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: frame, isTextInput: false, snapshotHasFocus: false,
+            keyboardFocus: KeyboardFocus(frame: frame, source: .snapshot)
+        ))
+        XCTAssertTrue(ElementLocator.resolveKeyboardFocus(
+            nodeFrame: frame, isTextInput: true, snapshotHasFocus: false,
+            keyboardFocus: KeyboardFocus(frame: frame, source: .snapshot)
+        ))
+    }
+
+    func testResolveKeyboardFocus_emptyFramesPreserveSnapshotFocus() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        for source in [KeyboardFocus.Source.snapshot, .liveQuery] {
+            for hasFocus in [false, true] {
+                XCTAssertEqual(ElementLocator.resolveKeyboardFocus(
+                    nodeFrame: .zero, isTextInput: true, snapshotHasFocus: hasFocus,
+                    keyboardFocus: KeyboardFocus(frame: frame, source: source)
+                ), hasFocus)
+                XCTAssertEqual(ElementLocator.resolveKeyboardFocus(
+                    nodeFrame: frame, isTextInput: true, snapshotHasFocus: hasFocus,
+                    keyboardFocus: KeyboardFocus(frame: .zero, source: source)
+                ), hasFocus)
+            }
+        }
+    }
+
+    func testResolveKeyboardFocus_preservesStrictFrameEpsilon() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        for source in [KeyboardFocus.Source.snapshot, .liveQuery] {
+            let focus = KeyboardFocus(frame: frame, source: source)
+            XCTAssertTrue(ElementLocator.resolveKeyboardFocus(
+                nodeFrame: CGRect(x: 10.25, y: 20.25, width: 100.25, height: 40.25),
+                isTextInput: true, snapshotHasFocus: false, keyboardFocus: focus
+            ))
+            for nodeFrame in [
+                CGRect(x: 10.5, y: 20, width: 100, height: 40),
+                CGRect(x: 10, y: 20.5, width: 100, height: 40),
+                CGRect(x: 10, y: 20, width: 100.5, height: 40),
+                CGRect(x: 10, y: 20, width: 100, height: 40.5),
+            ] {
+                XCTAssertFalse(ElementLocator.resolveKeyboardFocus(
+                    nodeFrame: nodeFrame, isTextInput: true,
+                    snapshotHasFocus: false, keyboardFocus: focus
+                ))
+            }
+        }
+    }
+
     func testShouldSnapshotSpringboardForAlerts_skipsWhenForegroundIsSpringboard() {
         // SpringBoard's tree is already the app snapshot — never take a second one.
         XCTAssertFalse(

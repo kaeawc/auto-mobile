@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import path, { resolve } from "node:path";
 import ts from "typescript";
-import { moduleExportResolver, resolveModule } from "./moduleExportResolver";
+import { moduleExportResolver, resolveModule, toPosixPath } from "./moduleExportResolver";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
@@ -78,7 +78,7 @@ function isWrite(node: ts.Node): boolean {
 
 /** Syntax-only constant resolution: no imports execute and no application state is opened. */
 function extractReads(sources: { path: string; text: string }[]): Set<string> {
-  const texts = new Map(sources.map(({ path, text }) => [resolve(path), text]));
+  const texts = new Map(sources.map(({ path, text }) => [toPosixPath(resolve(path)), text]));
   const known = new Set(texts.keys());
   const files: ts.SourceFile[] = [];
   const parsed = new Set<string>();
@@ -519,6 +519,33 @@ describe("environment variable documentation", () => {
       "AUTOMOBILE_SUFFIX",
       "AUTOMOBILE_TYPED",
     ]);
+  });
+  test("Windows module paths resolve files, directory indexes and JavaScript specifiers", () => {
+    const known = new Set(["D:/virtual/b.ts", "D:/virtual/hop/index.ts"]);
+    for (const [specifier, expected] of [
+      ["./b", "D:/virtual/b.ts"],
+      ["./hop", "D:/virtual/hop/index.ts"],
+      ["./b.js", "D:/virtual/b.ts"],
+      ["./b.ts", "D:/virtual/b.ts"],
+    ]) {
+      expect(resolveModule("D:\\virtual\\c.ts", specifier, known, path.win32)).toBe(expected);
+    }
+  });
+  test("Windows-style source paths retain imported and re-exported environment reads", () => {
+    const found = extractReads([
+      {
+        path: "D:\\virtual\\b.ts",
+        text: 'export const KEY = "AUTOMOBILE_WINDOWS"; export const OTHER = "AUTOMOBILE_WINDOWS_NAMESPACE";',
+      },
+      { path: "D:\\virtual\\hop\\index.ts", text: 'export { KEY } from "../b.js";' },
+      {
+        path: "D:\\virtual\\c.ts",
+        text: `import { KEY as RENAMED } from "./hop";
+          import * as NS from "./b";
+          process.env[RENAMED]; process.env[NS.OTHER];`,
+      },
+    ]);
+    expect([...found].sort()).toEqual(["AUTOMOBILE_WINDOWS", "AUTOMOBILE_WINDOWS_NAMESPACE"]);
   });
   test("named and namespace imports resolve exported keys under local aliases", () => {
     const found = extractReads(

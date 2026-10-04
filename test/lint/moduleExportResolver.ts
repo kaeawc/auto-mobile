@@ -1,40 +1,48 @@
-import { dirname, resolve } from "node:path";
+import path, { type PlatformPath } from "node:path";
 import ts from "typescript";
 
 type ImportedBinding = { module: string; name: string };
+
+export function toPosixPath(p: string): string {
+  return p.replaceAll("\\", "/");
+}
 
 export function resolveModule(
   from: string,
   specifier: string,
   known: Set<string>,
+  pathApi: Pick<PlatformPath, "dirname" | "resolve"> = path,
 ): string | undefined {
   if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
     return undefined;
   }
-  const path = resolve(dirname(from), specifier);
-  const stem = path.endsWith(".js") ? path.slice(0, -3) : path;
-  return [path, `${stem}.ts`, resolve(stem, "index.ts")].find((candidate) => known.has(candidate));
+  const resolved = pathApi.resolve(pathApi.dirname(from), specifier);
+  const stem = resolved.endsWith(".js") ? resolved.slice(0, -3) : resolved;
+  return [resolved, `${stem}.ts`, pathApi.resolve(stem, "index.ts")]
+    .map(toPosixPath)
+    .find((candidate) => known.has(candidate));
 }
 
 /** Resolve only supplied relative modules; never execute imports or consult the filesystem. */
 export function moduleExportResolver(files: ts.SourceFile[]) {
-  const known = new Set(files.map((file) => file.fileName));
+  const known = new Set(files.map((file) => toPosixPath(file.fileName)));
   const imports = new Map<string, Map<string, ImportedBinding>>();
   const namespaces = new Map<string, Map<string, string>>();
   const bindings = new Map<string, Map<string, ts.Expression>>();
   const exports = new Map<string, Map<string, ImportedBinding>>();
   const stars = new Map<string, string[]>();
   for (const file of files) {
+    const fileName = toPosixPath(file.fileName);
     const imported = new Map<string, ImportedBinding>();
     const namespace = new Map<string, string>();
     const local = new Map<string, ts.Expression>();
     const exported = new Map<string, ImportedBinding>();
     const wildcard: string[] = [];
-    imports.set(file.fileName, imported);
-    namespaces.set(file.fileName, namespace);
-    bindings.set(file.fileName, local);
-    exports.set(file.fileName, exported);
-    stars.set(file.fileName, wildcard);
+    imports.set(fileName, imported);
+    namespaces.set(fileName, namespace);
+    bindings.set(fileName, local);
+    exports.set(fileName, exported);
+    stars.set(fileName, wildcard);
     for (const node of file.statements) {
       if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
         const named = node.importClause?.namedBindings;
@@ -109,20 +117,22 @@ export function moduleExportResolver(files: ts.SourceFile[]) {
   };
   return {
     localValue(node: ts.Identifier): ts.Expression | undefined {
-      return bindings.get(node.getSourceFile().fileName)?.get(node.text);
+      return bindings.get(toPosixPath(node.getSourceFile().fileName))?.get(node.text);
     },
     importedName(node: ts.Identifier): string {
-      return imports.get(node.getSourceFile().fileName)?.get(node.text)?.name ?? node.text;
+      return (
+        imports.get(toPosixPath(node.getSourceFile().fileName))?.get(node.text)?.name ?? node.text
+      );
     },
     importedValue(node: ts.Identifier): ts.Expression | undefined {
-      const path = node.getSourceFile().fileName;
+      const path = toPosixPath(node.getSourceFile().fileName);
       const entry = imports.get(path)?.get(node.text);
       return entry
         ? exportedValue(resolveModule(path, entry.module, known), entry.name)
         : undefined;
     },
     namespaceValue(node: ts.PropertyAccessExpression): ts.Expression | undefined {
-      const path = node.getSourceFile().fileName;
+      const path = toPosixPath(node.getSourceFile().fileName);
       const module = ts.isIdentifier(node.expression)
         ? namespaces.get(path)?.get(node.expression.text)
         : undefined;

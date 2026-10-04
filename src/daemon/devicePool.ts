@@ -5738,6 +5738,10 @@ export class DevicePool {
     return async () => {
       const previousDevice = this.devices.get(previousDeviceId);
       const wasAutolocked = previousDevice?.autolockSessionId === sessionId;
+      const replacement = this.devices.get(deviceId);
+      if (wasAutolocked && replacement?.sessionId === sessionId) {
+        replacement.autolockSessionId = sessionId;
+      }
       const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
         stableDeviceId,
       });
@@ -5745,10 +5749,6 @@ export class DevicePool {
         this.autolockManager.clearRebindAutolockLock(sessionId, previousDeviceId, previousDevice);
       }
       await this.releaseDevice(previousDeviceId, sessionId);
-      const replacement = this.devices.get(deviceId);
-      if (wasAutolocked && replacement?.sessionId === sessionId) {
-        replacement.autolockSessionId = sessionId;
-      }
       return session;
     };
   }

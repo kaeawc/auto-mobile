@@ -4688,6 +4688,29 @@ describe("DevicePool", () => {
         });
       });
 
+      test("transfers the autolock before rebind publishes the replacement assignment", async () => {
+        const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
+        const publishedStates: Array<{
+          assignedDevice: string | undefined;
+          lock: string | undefined;
+          route: string | undefined;
+        }> = [];
+        sessionManager.onSessionDeviceUnbound(() => {
+          publishedStates.push({
+            assignedDevice: sessionManager.getSession(sessionId!)?.assignedDevice,
+            lock: devicePool.getDevice("emulator-new")?.autolockSessionId,
+            route: devicePool.resolveAutolockSessionForMcpSession("mcp-1"),
+          });
+        });
+
+        await rebind(sessionId!);
+
+        expect(publishedStates).toEqual([
+          { assignedDevice: "emulator-new", lock: sessionId, route: sessionId },
+        ]);
+        expect(devicePool.captureAutolockSessionForMcpSession("mcp-1")).toBe(sessionId);
+      });
+
       test("clears only the old lock before pool release and reuses the MCP session after rebind", async () => {
         const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
         const events: string[] = [];

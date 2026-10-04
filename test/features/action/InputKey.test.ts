@@ -25,7 +25,7 @@ function createAdbFactory(fakeAdb: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("InputKey", () => {
-  test.each(["cancelled", "timed out", "device offline"])(
+  test.each(["cancelled", "timed out", "closed"])(
     "reports an indeterminate outcome when ADB fails after dispatch: %s",
     async (reason) => {
       const fakeAdb = new FakeAdbExecutor();
@@ -51,7 +51,7 @@ describe("InputKey", () => {
 
       await expect(result).rejects.toBeInstanceOf(ActionableError);
       await expect(result).rejects.toThrow(
-        `Key outcome is indeterminate: the request was dispatched but no result was confirmed (ADB keyevent ${reason}). The key may have been delivered. Do not retry automatically.`,
+        `Key outcome is indeterminate: the request was dispatched but did not complete normally (ADB keyevent ${reason}). The key may have been delivered. Do not retry automatically.`,
       );
       expect(onDispatch).toHaveBeenCalledTimes(1);
     },
@@ -139,9 +139,10 @@ describe("InputKey", () => {
       new FakeTimer(),
     );
 
-    await expect(
-      inputKey.press("enter", 500, undefined, [], { signal: controller.signal }),
-    ).rejects.toThrow("Key outcome is indeterminate");
+    const result = inputKey.press("enter", 500, undefined, [], { signal: controller.signal });
+    await expect(result).rejects.toThrow("Key outcome is indeterminate");
+    await expect(result).rejects.toThrow("Do not retry automatically");
+    await expect(result).rejects.not.toThrow("no result was confirmed");
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_ENTER"]);
   });
 
@@ -399,10 +400,43 @@ describe("InputKey", () => {
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
-  test("wraps an ADB keyevent failure in a stable error envelope", async () => {
+  test.each([
+    new Error("device offline"),
+    new Error("device 'x' not found"),
+    Object.assign(new Error("spawn adb ENOENT"), { code: "ENOENT" }),
+    Object.assign(new Error("spawn adb EACCES"), { code: "EACCES" }),
+    new Error("ADB unavailable", {
+      cause: Object.assign(new Error("spawn adb ENOENT"), { code: "ENOENT" }),
+    }),
+    new Error("ADB unavailable", {
+      cause: Object.assign(new Error("spawn adb EACCES"), { code: "EACCES" }),
+    }),
+    Object.assign(new Error("spawn adb ENOENT", { cause: new Error("unknown") }), {
+      code: "ENOENT",
+    }),
+    new Error("executable not found: adb"),
+    new Error("error: no devices/emulators found"),
+    new Error("error: cannot connect to daemon at tcp:5037"),
+    new Error("error: cannot connect to the daemon at tcp:5037"),
+    new Error("error: cannot connect to adb at tcp:5037"),
+    Object.assign(new Error("Command failed: adb shell input keyevent KEYCODE_TAB"), {
+      stderr: "error: device offline",
+    }),
+    Object.assign(new Error("Command failed: adb shell input keyevent KEYCODE_TAB"), {
+      stderr: Buffer.from("error: device 'x' not found"),
+    }),
+    new Error("ADB command failed", {
+      cause: Object.assign(new Error("Command failed: adb shell input keyevent KEYCODE_TAB"), {
+        stderr: "error: cannot connect to daemon",
+      }),
+    }),
+  ])("wraps an ADB keyevent failure in a stable error envelope: %s", async (error) => {
     const fakeAdb = new FakeAdbExecutor();
-    // Fail before beforeDispatch runs: no key event could have been sent.
-    spyOn(fakeAdb, "execute").mockRejectedValue(new Error("device offline"));
+    const onDispatch = mock(() => {});
+    spyOn(fakeAdb, "execute").mockImplementation(async (_args, options) => {
+      await options?.beforeDispatch?.(options.timeoutMs);
+      throw error;
+    });
     const inputKey = new InputKey(
       androidDevice,
       createAdbFactory(fakeAdb),
@@ -412,15 +446,64 @@ describe("InputKey", () => {
 
     const result = await inputKey.press("tab", 500, undefined, [], {
       signal: new AbortController().signal,
+      onDispatch,
     });
 
     expect(result).toEqual({
       success: false,
       key: "tab",
       keyCode: "KEYCODE_TAB",
-      error: 'Failed to press key "tab": device offline',
+      error: `Failed to press key "tab": ${error.message}`,
     });
+    expect(onDispatch).toHaveBeenCalledTimes(1);
   });
+
+  test("preserves plain cancellation for a provably undelivered key after the hook", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    spyOn(fakeAdb, "execute").mockImplementation(async (_args, options) => {
+      await options?.beforeDispatch?.(options.timeoutMs);
+      controller.abort();
+      throw new Error("device offline");
+    });
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      undefined,
+      new FakeTimer(),
+    );
+
+    const result = inputKey.press("tab", 500, undefined, [], { signal: controller.signal });
+    await expect(result).rejects.toThrow("Operation cancelled");
+    await expect(result).rejects.not.toThrow("Key outcome is indeterminate");
+  });
+
+  test.each([
+    new Error("Command failed: adb shell input keyevent 'device offline'"),
+    new Error("Command failed: adb shell input keyevent \"device 'x' not found\""),
+    new Error("Command failed: adb shell input keyevent 'no devices/emulators found'"),
+    new Error("Command failed: adb shell input keyevent 'cannot connect to daemon'"),
+    new Error("Command failed: adb shell input keyevent 'cannot connect to the daemon'"),
+    new Error("Command failed: adb shell input keyevent 'cannot connect to adb'"),
+    Object.assign(new Error("Command failed: adb shell input keyevent 'device offline'"), {
+      stderr: "closed",
+    }),
+    Object.assign(new Error("device offline"), { stderr: "unknown ADB failure" }),
+  ])(
+    "keeps unknown failures indeterminate without trusting command arguments: %s",
+    async (error) => {
+      const fakeAdb = new FakeAdbExecutor();
+      fakeAdb.setCommandError("KEYCODE_TAB", error);
+      const inputKey = new InputKey(
+        androidDevice,
+        createAdbFactory(fakeAdb),
+        undefined,
+        new FakeTimer(),
+      );
+
+      await expect(inputKey.press("tab", 500)).rejects.toThrow("Key outcome is indeterminate");
+    },
+  );
 
   test("routes iOS discrete keys and modifiers through CtrlProxy", async () => {
     const fakeAdb = new FakeAdbExecutor();

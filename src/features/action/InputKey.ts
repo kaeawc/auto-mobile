@@ -10,6 +10,49 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
+import {
+  isAdbMissingDeviceError,
+  isAdbDeviceOfflineError,
+} from "../../utils/android-cmdline-tools/AdbDeviceHealth";
+
+function isProvablyUndeliveredAdbError(error: unknown): boolean {
+  const underlying = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  if (
+    [error, underlying].some(
+      (candidate) =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        "code" in candidate &&
+        (candidate.code === "ENOENT" || candidate.code === "EACCES"),
+    )
+  ) {
+    return true;
+  }
+  const stderr =
+    underlying instanceof Error && "stderr" in underlying ? underlying.stderr : undefined;
+  const rawMessage = errorMessage(underlying);
+  // Command-failure messages embed caller input; only trust adb stderr or standalone errors.
+  const message = (
+    typeof stderr === "string" || Buffer.isBuffer(stderr)
+      ? stderr.toString()
+      : rawMessage.trimStart().startsWith("Command failed:")
+        ? ""
+        : rawMessage
+  )
+    .trim()
+    .toLowerCase();
+  return (
+    isAdbMissingDeviceError(message) ||
+    isAdbDeviceOfflineError(message) ||
+    message.startsWith("executable not found") ||
+    [
+      "no devices/emulators found",
+      "cannot connect to daemon",
+      "cannot connect to the daemon",
+      "cannot connect to adb",
+    ].some((pattern) => message.includes(pattern))
+  );
+}
 
 export const SUPPORTED_INPUT_KEYS = [
   "enter",
@@ -95,7 +138,7 @@ export class InputKey {
 
   static indeterminateError(error: unknown): ActionableError {
     return new ActionableError(
-      `Key outcome is indeterminate: the request was dispatched but no result was confirmed (${errorMessage(error)}). The key may have been delivered. Do not retry automatically.`,
+      `Key outcome is indeterminate: the request was dispatched but did not complete normally (${errorMessage(error)}). The key may have been delivered. Do not retry automatically.`,
       { cause: error },
     );
   }
@@ -197,7 +240,7 @@ export class InputKey {
         keyCode,
       };
     } catch (error) {
-      if (dispatched) {
+      if (dispatched && !isProvablyUndeliveredAdbError(error)) {
         throw InputKey.indeterminateError(error);
       }
       throwIfAborted(signal);

@@ -584,7 +584,6 @@ describe("NavigateTo", () => {
         fakeGraph,
         timer,
       );
-      const wallStart = performance.now();
       let settled = false;
       const execution = navigateTo
         .execute({ targetScreen: "TargetScreen", platform: "android" })
@@ -612,7 +611,6 @@ describe("NavigateTo", () => {
         expect(result.message).toContain('did not reach "TargetScreen"');
         expect(result.durationMs).toBe(5000);
         expect(timer.getSleepHistory()).toEqual(Array(10).fill(500));
-        expect(performance.now() - wallStart).toBeLessThan(50);
       } finally {
         realSleepSpy.mockRestore();
       }

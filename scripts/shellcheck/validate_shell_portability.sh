@@ -55,10 +55,10 @@ scan() {
     while IFS=: read -r lineno text; do
       [ -z "$lineno" ] && continue
       # skip comment-only lines and lines with an explicit suppression
-      printf '%s' "$text" | grep -qE '^[[:space:]]*#' && continue
-      printf '%s' "$text" | grep -q 'portability-ok' && continue
+      grep -qE '^[[:space:]]*#' <<<"${text}" && continue
+      [[ "${text}" == *"portability-ok"* ]] && continue
       if [ -n "$inverse" ]; then
-        printf '%s' "$text" | grep -qE "$inverse" && continue
+        grep -qE "$inverse" <<<"${text}" && continue
       fi
       report "$label" "$file" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')" "$hint"
     done < <(grep -nE "$pattern" "$file" 2>/dev/null || true)

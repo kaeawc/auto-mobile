@@ -216,7 +216,7 @@ if try_adb_root; then
 fi
 
 system_after_root="skipped"
-if adb_cmd shell id | grep -q 'uid=0(root)'; then
+if root_identity=$(adb_cmd shell id) && [[ "${root_identity}" == *'uid=0(root)'* ]]; then
   system_after_root="failed"
   if try_system_locale_setprop "after adb root"; then
     system_after_root="succeeded"

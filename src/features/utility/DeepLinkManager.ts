@@ -369,8 +369,16 @@ export class DeepLinkManager implements DeepLinkManager {
         `shell dumpsys package ${shellQuote(appId)}`,
       );
 
-      // Check if the command failed (stderr indicates failure)
-      if (packageInfoResult.stderr && packageInfoResult.stderr.trim().length > 0) {
+      const hasStderr = packageInfoResult.stderr.trim().length > 0;
+      const packageMarker = `Package [${appId}]`;
+      const hasUsablePackageDump =
+        !outputReportsMissingPackage(packageInfoResult.stdout) &&
+        packageInfoResult.stdout.split("\n").some((line) => {
+          const trimmed = line.trim();
+          return trimmed === packageMarker || trimmed.startsWith(`${packageMarker} `);
+        });
+
+      if (hasStderr && !hasUsablePackageDump) {
         logger.error(
           `[DeepLinkManager] ADB command failed for ${appId}: ${packageInfoResult.stderr}`,
         );
@@ -385,6 +393,13 @@ export class DeepLinkManager implements DeepLinkManager {
           },
           error: packageInfoResult.stderr,
         };
+      }
+
+      if (hasStderr) {
+        // A matching package header makes the dump usable despite device-image warnings.
+        logger.debug(
+          `[DeepLinkManager] Benign stderr alongside a complete dumpsys package dump for ${appId}: ${packageInfoResult.stderr}`,
+        );
       }
 
       if (outputReportsMissingPackage(packageInfoResult.stdout)) {

@@ -20,6 +20,40 @@ const analysis = (overrides: Partial<ClaudeVisionAnalysis> = {}): ClaudeVisionAn
 
 describe("parseClaudeResponse", () => {
   test.each([
+    "{}",
+    '{"elementFound":false,"confidence":0,"reasoning":"","steps":null,"similarElements":null}',
+  ])("preserves falsey defaults from %s", (text) => {
+    expect(parseClaudeResponse(makeResponse(text))).toEqual({
+      elementFound: false,
+      elementLocation: undefined,
+      suggestedText: undefined,
+      suggestedResourceId: undefined,
+      navigationRequired: false,
+      steps: undefined,
+      visualDescription: "",
+      similarElements: [],
+      confidence: 0,
+      reasoning: "",
+    });
+  });
+
+  test("preserves all populated fields from an inline response", () => {
+    const expected = {
+      elementFound: true,
+      elementLocation: { x: 1, y: 2 },
+      suggestedText: "OK",
+      suggestedResourceId: "id",
+      navigationRequired: true,
+      steps: [],
+      visualDescription: "screen",
+      similarElements: [],
+      confidence: 0.8,
+      reasoning: "visible",
+    };
+    expect(parseClaudeResponse(makeResponse(JSON.stringify(expected)))).toEqual(expected);
+  });
+
+  test.each([
     ["a malformed fenced JSON response", '```json\n{ "elementFound": tr,\n```'],
     ["a malformed inline JSON response", "here is a result: { not valid json at all }"],
     ["a prose-only response", "Claude returned only prose, no JSON here."],

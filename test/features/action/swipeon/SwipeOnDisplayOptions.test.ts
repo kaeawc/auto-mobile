@@ -7,6 +7,7 @@ import type {
 } from "../../../../src/models";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import { frame, harness } from "./displaySwipeHarness";
+import { runSessionDisplayPin } from "../../../../src/server/sessionDisplayPin";
 
 const displaySwipe: SwipeOnOptions = { direction: "up", display: "external" };
 const real = { "resource-id": "real", bounds: "[40,70][140,170]", scrollable: "true" };
@@ -375,6 +376,41 @@ const unsupported: Array<Partial<SwipeOnOptions>> = [
   { scrollMode: "adb" },
 ];
 for (const extra of unsupported) {
+  test(`session pin options: multi-panel iOS ${Object.keys(extra)[0]} names the pin and remedy`, async () => {
+    const h = optionsHarness({ platform: "ios" });
+    const result = await runSessionDisplayPin({
+      name: "swipeOn",
+      acceptsDisplay: true,
+      device: {
+        name: "Search fake",
+        deviceId: "swipe-display-search",
+        platform: "ios",
+        displays: {
+          panels: [
+            { key: "internal", role: "inner", sizePx: { width: 100, height: 100 } },
+            { key: "external", role: "external", sizePx: { width: 200, height: 200 } },
+          ],
+          postures: [],
+        },
+      },
+      sessionUuid: "s1",
+      store: { getDeviceForSession: () => "swipe-display-search", getDisplayPin: () => "external" },
+      args: {},
+      invoke: (args) =>
+        h.action.execute({
+          direction: "up",
+          ...extra,
+          display: typeof args.display === "string" ? args.display : undefined,
+        }),
+    });
+    expect(result).toMatchObject({
+      success: false,
+      error: `${Object.keys(extra)[0]} is not supported while the session is pinned to display "external". Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), then retry.`,
+    });
+    expect(h.observe.getExecuteCallCount()).toBe(0);
+    expect(h.legs()).toEqual([]);
+  });
+
   test(`iOS rejects ${Object.keys(extra)[0]} before observes or dispatch`, async () => {
     const h = optionsHarness({ platform: "ios" });
     const result = await h.action.execute({ ...displaySwipe, ...extra });

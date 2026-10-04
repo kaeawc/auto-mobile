@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 /// Unhandled crash detection.
@@ -13,6 +13,10 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     private var buffer: SdkEventBuffer?
     private var _isInitialized = false
     private var previousExceptionHandler: (@convention(c) (NSException) -> Void)?
+    // A later reporter may still chain into our handler after reset(). Keep the
+    // original predecessor and reactivate in place rather than capturing that
+    // reporter on re-initialize (which would create a handler cycle).
+    private var exceptionHandlerRetainedInChain = false
     private var installedSignalHandlers = false
 
     /// Signals to intercept for crash reporting.
@@ -56,7 +60,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         NSGetUncaughtExceptionHandler()
     }
 
-    var installUncaughtHandler: (( @convention(c) (NSException) -> Void)?) -> Void = {
+    var installUncaughtHandler: ((@convention(c) (NSException) -> Void)?) -> Void = {
         NSSetUncaughtExceptionHandler($0)
     }
 
@@ -71,15 +75,29 @@ public final class AutoMobileCrashes: @unchecked Sendable {
             lock.unlock()
             return
         }
+        let reactivateInPlace = exceptionHandlerRetainedInChain
+        lock.unlock()
+
+        // Call the process accessor outside the state lock; the injected
+        // accessor may itself enter the exception handler.
+        let previousHandler = reactivateInPlace ? nil : captureUncaughtHandler()
+        lock.lock()
+        // Another initializer may have finished while we captured the handler.
+        guard !_isInitialized else {
+            lock.unlock()
+            return
+        }
         _isInitialized = true
         self.bundleId = bundleId
         self.buffer = buffer
-        // Capture the previous handler under the lock so the locked reads in
-        // handleException/reset can't observe a stale nil (issue #3633).
-        previousExceptionHandler = captureUncaughtHandler()
+        if !reactivateInPlace {
+            previousExceptionHandler = previousHandler
+        }
         lock.unlock()
 
-        installUncaughtHandler(Self.uncaughtExceptionHandler)
+        if !reactivateInPlace {
+            installUncaughtHandler(Self.uncaughtExceptionHandler)
+        }
 
         // Signal handlers are opt-in via enableSignalHandlers() because they
         // interfere with debuggers and test frameworks. NSSetUncaughtExceptionHandler
@@ -133,11 +151,15 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
     // MARK: - Exception Handler
 
-    private func handleException(_ exception: NSException) {
+    // Internal so tests can deliver an exception to an isolated test instance,
+    // without invoking the process-global routing handler or installing it.
+    func handleException(_ exception: NSException) {
         // Still chain to previous handler even when disabled, but skip telemetry
         let enabled = AutoMobileSDK.shared.isEnabled
 
         lock.lock()
+        let initialized = _isInitialized
+        let configuredBundleId = bundleId
         let currentBuffer = buffer
         let previousHandler = previousExceptionHandler
         // Snapshot the provider under the lock; invoke it below, outside the lock,
@@ -145,8 +167,8 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         let screenProvider = _currentScreenProvider
         lock.unlock()
 
-        if enabled {
-            let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
+        if enabled, initialized {
+            let currentBundleId = configuredBundleId ?? Bundle.main.bundleIdentifier ?? ""
             let currentScreen = screenProvider?()
             let stackTrace = exception.callStackSymbols.joined(separator: "\n")
 
@@ -170,7 +192,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
     // MARK: - Testing Support
 
-    internal func reset() {
+    func reset() {
         lock.lock()
         // If we were never initialized (e.g. host opted out via
         // enableCrashReporting: false, or shutdown() is called a second time),
@@ -183,18 +205,33 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         _isInitialized = false
         bundleId = nil
         buffer = nil
-        // Restore previous exception handler to prevent recursive re-entry
-        // if initialize() is called again (e.g. between tests)
         let prevHandler = previousExceptionHandler
-        previousExceptionHandler = nil
+        let previousScreenProvider = _currentScreenProvider
         // Direct backing-field write: we already hold `lock` here, and the computed
         // `currentScreenProvider` setter would re-acquire the non-recursive lock.
         _currentScreenProvider = nil
         // Note: signal handlers cannot be safely uninstalled, leave installedSignalHandlers as-is
         lock.unlock()
 
-        // Restore process-level handler outside the lock
-        installUncaughtHandler(prevHandler)
+        let currentHandler = captureUncaughtHandler()
+        let ownsCurrentHandler = currentHandler.map {
+            unsafeBitCast($0, to: UnsafeRawPointer.self)
+                == unsafeBitCast(Self.uncaughtExceptionHandler, to: UnsafeRawPointer.self)
+        } ?? false
+
+        lock.lock()
+        exceptionHandlerRetainedInChain = !ownsCurrentHandler
+        if ownsCurrentHandler {
+            previousExceptionHandler = nil
+        }
+        lock.unlock()
+
+        // A foreign handler may chain through our now-dormant handler. Preserve
+        // its predecessor so forwarding still reaches the original reporter.
+        if ownsCurrentHandler {
+            installUncaughtHandler(prevHandler)
+        }
+        withExtendedLifetime(previousScreenProvider) {}
     }
 }
 
@@ -238,7 +275,8 @@ private func signalHandler(sig: Int32) {
 extension AutoMobileCrashes {
     /// Set up the file path for signal crash persistence.
     func setupSignalCrashFile() {
-        let cacheDir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
+        let cacheDir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true)
+            .first ?? NSTemporaryDirectory()
         let filePath = (cacheDir as NSString).appendingPathComponent("automobile_last_signal_crash")
         signalCrashFilePath = strdup(filePath)
     }

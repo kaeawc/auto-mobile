@@ -1,3 +1,4 @@
+import { resolveTransportDeadlineMs } from "./formTools";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { toActionableError } from "../models/ActionableError";
@@ -8,15 +9,13 @@ import { TapOnElement } from "../features/action/TapOnElement";
 import {
   LONG_PRESS_MIN_MS,
   LONG_PRESS_MAX_MS,
+  LONG_PRESS_HARD_MAX_MS,
   LONG_PRESS_DEFAULT_MS,
 } from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
-import {
-  TapAnyElement,
-  TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
-} from "../features/action/TapAnyElement";
+import { TapAnyElement } from "../features/action/TapAnyElement";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../devices/DeviceLockStore";
 import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
@@ -419,7 +418,14 @@ export const tapOnSchema = withJsonSchemaOverride(
           ),
         // A negative duration used to be accepted and silently degraded a
         // longPress into a plain tap (#5769); bound it like the sibling params.
-        duration: z.number().min(0, "must be >= 0").optional().describe("Long press duration (ms)"),
+        duration: z
+          .number()
+          .min(0, "must be >= 0")
+          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
+          .optional()
+          .describe(
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
+          ),
         subtext: z
           .object({
             text: z
@@ -690,9 +696,10 @@ export const tapAnySchema = withJsonSchemaOverride(
         duration: z
           .number()
           .min(0, "must be >= 0")
+          .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
           .optional()
           .describe(
-            `Long press duration (ms; maximum for action 'longPress': ${TAP_ANY_LONG_PRESS_MAX_DURATION_MS} ms after rounding)`,
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
           ),
         searchUntil: z
           .object({
@@ -2118,6 +2125,8 @@ export async function tapOnHandler(
     },
     progress,
     signal,
+    undefined,
+    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -2243,6 +2252,7 @@ export async function tapAnyHandler(
     },
     progress,
     signal,
+    { requestDeadlineMs: resolveTransportDeadlineMs(args) },
   );
 
   const searchSummary = buildTapAnySearchSummary(result);

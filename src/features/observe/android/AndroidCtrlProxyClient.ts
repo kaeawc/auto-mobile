@@ -3491,6 +3491,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const startTime = this.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
     let pendingRequestId: string | undefined;
+    let dispatched = false;
 
     this.cancelScreenshotBackoff();
 
@@ -3507,6 +3508,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: "Failed to connect to accessibility service",
+          dispatched: false,
+          acknowledged: false,
         };
       }
 
@@ -3526,8 +3529,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           action,
           totalTimeMs: this.timer.now() - startTime,
           error: `Action timeout after ${timeout}ms`,
+          acknowledged: false,
         }),
-        (error, totalTimeMs) => ({ success: false, action, totalTimeMs, error }),
+        (error, totalTimeMs) => ({
+          success: false,
+          action,
+          totalTimeMs,
+          error,
+          acknowledged: true,
+        }),
       );
 
       const cancellableAction = this.awaitCancellableRequest(
@@ -3545,6 +3555,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
         );
         this.ws.send(message);
+        dispatched = true;
         logger.debug(
           `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, ` +
             `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
@@ -3563,7 +3574,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         logger.warn(`[CTRL_PROXY] Action failed after ${clientDuration}ms: ${result.error}`);
       }
 
-      return result;
+      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
     } catch (error) {
       if (pendingRequestId) {
         this.requestManager.resolveError(
@@ -3574,7 +3585,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
-      return { success: false, action, totalTimeMs: duration, error: `${error}` };
+      return {
+        success: false,
+        action,
+        totalTimeMs: duration,
+        error: `${error}`,
+        dispatched,
+        acknowledged: false,
+      };
     }
   }
 

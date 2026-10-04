@@ -1,6 +1,8 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -24,7 +26,173 @@ class StoppedDeviceManager extends FakeDeviceManager {
   }
 }
 
+async function idleTrackedCohort(stopSignals: NodeJS.Signals[], onLoss = true) {
+  const timer = new FakeTimer();
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const manager = new StoppedDeviceManager();
+  const incidents = new InMemoryEmulatorLossIncidentStore(timer);
+  const pool = new DevicePool(
+    createDevicePoolDependencies(sessions, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      retryExecutor: new DefaultRetryExecutor(timer),
+      emulatorLossIncidentStore: incidents,
+      recoveryPolicy: { onLoss, maxAttempts: 1 },
+    }),
+  );
+  const children = stopSignals.map((stopSignal) => {
+    const process = new FakeChildProcess(timer);
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    process.kill = (signal) => {
+      signals.push(signal);
+      if (signal === stopSignal) {
+        process.signalCode = stopSignal;
+        process.emit("exit", null, stopSignal);
+        process.emit("close", null, stopSignal);
+      }
+      return true;
+    };
+    return { process, signals };
+  });
+  for (const [index, { process }] of children.entries()) {
+    const booted: BootedDevice = {
+      platform: "android",
+      name: index === 0 ? "Pixel_A" : "Pixel_B",
+      deviceId: `emulator-${5554 + index * 2}`,
+    };
+    const image: DeviceInfo = {
+      name: booted.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices.push(booted);
+    await pool.addDevice(booted, image);
+    const sessionId = `session-${index}`;
+    await pool.bindOrReuseDeviceSession(
+      sessionId,
+      booted.deviceId,
+      "android",
+      image,
+      process as unknown as ChildProcess,
+      booted,
+    );
+    await pool.releaseDevice(booted.deviceId, sessionId);
+  }
+  const devices = children.map((_, index) => pool.getDevice(`emulator-${5554 + index * 2}`)!);
+  manager.bootedDevices = [];
+  return { timer, sessions, manager, incidents, pool, children, devices };
+}
+
 describe("ADB server reset session recovery", () => {
+  test.each([false, true])(
+    "intentional idle reset stop records no loss or relaunch (onLoss=%s)",
+    async (onLoss) => {
+      const h = await idleTrackedCohort(["SIGTERM"], onLoss);
+      try {
+        const detached = await h.pool.detachAdbServerResetCohort(h.devices);
+        await drainMicrotasks(156);
+        expect(await h.incidents.list()).toEqual([]);
+        expect(h.manager.startedDevices).toEqual([]);
+        expect(detached).toEqual({ devices: h.devices, deferred: false });
+        expect(h.children[0].signals).toEqual(["SIGTERM"]);
+        expect(h.pool.getDevice(h.devices[0].id)).toBeNull();
+        await h.pool.releaseAdbServerResetCohortReservations(detached.devices);
+      } finally {
+        h.sessions.stopCleanupTimer();
+      }
+    },
+  );
+
+  test("intentional two-member reset stop preserves the cohort while escalating SIGKILL", async () => {
+    const h = await idleTrackedCohort(["SIGTERM", "SIGKILL"]);
+    try {
+      const detaching = h.pool.detachAdbServerResetCohort(h.devices);
+      await drainMicrotasks(156);
+      const incidentsBeforeExit = await h.incidents.list();
+      const startsBeforeExit = [...h.manager.startedDevices];
+      const pooledBeforeExit = h.devices.map((device) => h.pool.getDevice(device.id));
+      expect(h.children[1].signals).toEqual(["SIGTERM"]);
+      h.timer.advanceTime(1_000);
+      const detached = await detaching;
+      await drainMicrotasks(156);
+      expect(startsBeforeExit).toEqual([]);
+      expect(incidentsBeforeExit).toEqual([]);
+      expect(pooledBeforeExit).toEqual(h.devices);
+      expect(h.manager.startedDevices).toEqual([]);
+      expect(await h.incidents.list()).toEqual([]);
+      expect(detached).toEqual({ devices: h.devices, deferred: false });
+      expect(h.children.map(({ signals }) => signals)).toEqual([
+        ["SIGTERM"],
+        ["SIGTERM", "SIGKILL"],
+      ]);
+      expect(h.devices.map((device) => h.pool.getDevice(device.id))).toEqual([null, null]);
+      await h.pool.releaseAdbServerResetCohortReservations(detached.devices);
+    } finally {
+      h.sessions.stopCleanupTimer();
+    }
+  });
+
+  test("unexpected tracked idle exit records one loss and relaunches once", async () => {
+    const h = await idleTrackedCohort(["SIGTERM"]);
+    try {
+      const process = h.children[0].process;
+      process.exitCode = 1;
+      process.emit("exit", 1, null);
+      process.emit("close", 1, null);
+      await drainMicrotasks(156);
+      const incidents = await h.incidents.list();
+      expect(incidents).toHaveLength(1);
+      expect(incidents[0]).toMatchObject({
+        deviceId: h.devices[0].id,
+        detectionPath: "watched-process-exit",
+        recovery: {
+          outcome: "recovered",
+          attempts: [{ attempt: 1, outcome: "succeeded" }],
+        },
+      });
+      expect(h.manager.startedDevices.map((device) => device.name)).toEqual(["Pixel_A"]);
+    } finally {
+      h.sessions.stopCleanupTimer();
+    }
+  });
+
+  test("session reset recovery intentionally stops its tracked process without a second loss", async () => {
+    const h = await idleTrackedCohort(["SIGTERM"]);
+    try {
+      const device = h.devices[0];
+      const booted: BootedDevice = {
+        deviceId: device.id,
+        name: device.name,
+        platform: "android",
+      };
+      h.manager.bootedDevices = [booted];
+      await h.pool.bindOrReuseDeviceSession(
+        "session-recovery",
+        device.id,
+        "android",
+        device.androidImage,
+      );
+      h.manager.bootedDevices = [];
+      await expect(
+        h.pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(device.id, device),
+      ).resolves.toBe(true);
+      await drainMicrotasks(156);
+      expect(h.children[0].signals).toEqual(["SIGTERM"]);
+      expect(h.manager.startedDevices.map((image) => image.name)).toEqual(["Pixel_A"]);
+      const incidents = await h.incidents.list();
+      expect(incidents).toHaveLength(1);
+      expect(incidents[0]).toMatchObject({
+        detectionPath: "adb-server-reset",
+        recovery: { outcome: "recovered" },
+      });
+      expect(h.sessions.getSession("session-recovery")?.assignedDevice).toBe("Pixel_A");
+    } finally {
+      h.sessions.stopCleanupTimer();
+    }
+  });
+
   test("recovery targets read reset reservations live after cohort release", async () => {
     const timer = new FakeTimer();
     const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());

@@ -1,3 +1,4 @@
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { logger } from "../../../src/utils/logger";
@@ -278,7 +279,7 @@ describe("SetUIState", () => {
           fields: [{ selector: { text: "Password" }, value: "pw-label-2" }],
         });
         expect(result.success).toBe(true);
-        expect(warn).not.toHaveBeenCalled();
+        expect(loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]")).toHaveLength(0);
         expect(fakeTap.execute).toHaveBeenCalledWith(
           { elementId: "password", action: "focus" },
           undefined,
@@ -301,8 +302,9 @@ describe("SetUIState", () => {
         expect(result.success).toBe(false);
         expect(result.fields[0].error).toBe(scenario.focusError.message);
         expect(scenario.dismissCalls()).toBe(1);
-        expect(warn).toHaveBeenCalledTimes(1);
-        expect(warn.mock.calls[0][0]).toBe("[SetUIState] IME recovery failed");
+        const warnings = loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]");
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0][0]).toBe("[SetUIState] IME recovery failed");
       } finally {
         warn.mockRestore();
       }
@@ -318,8 +320,9 @@ describe("SetUIState", () => {
             fields: [{ selector: { text: "Password" }, value: "pw-label-2" }],
           });
           expect(result.success).toBe(false);
-          expect(warn).toHaveBeenCalledTimes(1);
-          expect(warn.mock.calls[0][0]).toBe("[SetUIState] IME recovery failed");
+          const warnings = loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]");
+          expect(warnings).toHaveLength(1);
+          expect(warnings[0][0]).toBe("[SetUIState] IME recovery failed");
         } finally {
           warn.mockRestore();
         }

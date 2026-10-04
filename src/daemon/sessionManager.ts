@@ -1342,6 +1342,16 @@ export class SessionManager {
     throw new DaemonSessionCreationRejectedError(session.sessionId, snapshot);
   }
 
+  /** Read-only admission probe; recovery itself remains owned by getOrCreateSession. */
+  async isReleasedSessionInRestartRecoveryWindow(sessionId: string): Promise<boolean> {
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
+      return false;
+    }
+    const deadline = restartRecoveryDeadlineFromPersisted(persisted);
+    return deadline !== undefined && this.timer.now() < deadline;
+  }
+
   private async getPersistedTerminalRelease(
     sessionId: string,
   ): Promise<SessionReleaseSnapshot | undefined> {

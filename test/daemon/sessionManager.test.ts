@@ -6115,3 +6115,61 @@ describe("explicit-release regression", () => {
     }
   });
 });
+
+describe("released-session restart recovery window read-only probe", () => {
+  test.each([
+    { reason: "device-restart:Pixel", elapsed: 0, expiresAt: 600_000, expected: true },
+    { reason: "device-restart:Pixel", elapsed: 179_999, expiresAt: 600_000, expected: true },
+    { reason: "device-restart:Pixel", elapsed: 180_000, expiresAt: 600_000, expected: false },
+    { reason: "device-restart:Pixel", elapsed: 1_000, expiresAt: 1_000, expected: false },
+    { reason: "explicit-release", elapsed: 0, expiresAt: 600_000, expected: false },
+    { reason: "heartbeat-timeout", elapsed: 0, expiresAt: 600_000, expected: false },
+    { reason: "superseded", elapsed: 0, expiresAt: 600_000, expected: false },
+    { reason: "device-killed", elapsed: 0, expiresAt: 600_000, expected: false },
+    { reason: "daemon-restart", elapsed: 0, expiresAt: 600_000, expected: false },
+  ])(
+    "reason=$reason elapsed=$elapsed expiresAt=$expiresAt => $expected",
+    async ({ reason, elapsed, expiresAt, expected }) => {
+      const timer = new FakeTimer();
+      const persistence = new FakeDeviceSessionPersistence();
+      const row = persistedRecoverySession({
+        status: "released",
+        release_reason: reason,
+        expires_at_ms: expiresAt,
+      });
+      persistence.seed(row);
+      const manager = new SessionManager(timer, persistence);
+      manager.stopCleanupTimer();
+      timer.advanceTime(elapsed);
+      const originalRow = { ...row };
+      expect(await manager.isReleasedSessionInRestartRecoveryWindow(row.session_uuid)).toBe(
+        expected,
+      );
+      expect(await persistence.getSession?.(row.session_uuid)).toEqual(originalRow);
+      expect(manager.getAllSessions()).toEqual([]);
+    },
+  );
+
+  test("no persisted row or release timestamp is not recoverable", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(
+      persistedRecoverySession({ release_reason: "device-restart:Pixel", released_at_ms: null }),
+    );
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow("missing")).toBe(false);
+    expect(await manager.isReleasedSessionInRestartRecoveryWindow("persisted-session")).toBe(false);
+  });
+
+  test("row query errors propagate to the socket admission boundary", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.getSession = async () => {
+      throw new Error("read failed");
+    };
+    const manager = new SessionManager(new FakeTimer(), persistence);
+    manager.stopCleanupTimer();
+    await expect(manager.isReleasedSessionInRestartRecoveryWindow("missing")).rejects.toThrow(
+      "read failed",
+    );
+  });
+});

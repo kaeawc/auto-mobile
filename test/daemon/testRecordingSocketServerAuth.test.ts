@@ -271,3 +271,42 @@ test("recording stop cannot disguise another device as the caller's own", async 
     }
   }
 });
+
+test("socket stop preserves a partial-plan warning in its existing error field", async () => {
+  const timer = new FakeTimer();
+  const error = new Error("getevent exited with code 1");
+  const recorder = {
+    start: async () => {},
+    stop: async () => ({
+      steps: [{ tool: "tapOn", params: { text: "OK" } }],
+      stepCount: 1,
+      touchTrackFailure: { error, failedAt: 1250 },
+    }),
+    stepCount: 1,
+  };
+  const active = await startTestRecording(
+    { deviceId: "fake-device", platform: "android", name: "Fake" },
+    timer,
+    new CountingIdGenerator(),
+    () => recorder,
+  );
+  const server = new TestableServer(undefined, timer, recordingAuthenticator([]));
+  try {
+    const response = await server.invoke({
+      command: "stop",
+      sessionUuid: "live",
+      recordingId: active.recordingId,
+      planName: "partial",
+    });
+    expect(response.success).toBe(true);
+    expect(response.stepCount).toBe(1);
+    expect(response.planContent).toContain("tapOn");
+    expect(response.error).toBe(
+      "Warning: Touch track (getevent) stopped 1250 ms after recording start: getevent exited with code 1. Later taps may be missing.",
+    );
+  } finally {
+    if (getTestRecordingStatus(timer)) {
+      await stopTestRecording(active.recordingId, "cleanup", timer);
+    }
+  }
+});

@@ -282,7 +282,8 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     server.subscribe(socket, filter);
     await server.backfill(socket, filter);
     expect(messages()[0].data.data).toEqual({ ...row(1), screenshotUri: null });
-    expect(warnSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toStartWith("Telemetry screenshot URI lookup failed:");
   });
 
   test.each([
@@ -324,7 +325,14 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     if (exceptionType === undefined) {
       expect(messages()[0].data.data).not.toHaveProperty("exceptionType");
     }
-    expect(warnSpy).not.toHaveBeenCalled();
+    if (json === "invalid" || json === "[null]") {
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(String(warnSpy.mock.calls[0][0])).toStartWith(
+        "Telemetry stored stack trace parse failed:",
+      );
+    } else {
+      expect(warnSpy).not.toHaveBeenCalled();
+    }
   });
 
   test("reads exception summary before bounding oversized stack traces", async () => {

@@ -1,0 +1,86 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "scroll",
+      "child": {
+        "type": "scroll",
+        "child": {
+          "type": "scroll",
+          "child": {
+            "type": "scroll",
+            "child": {
+              "type": "scroll",
+              "child": {
+                "type": "scroll",
+                "child": {
+                  "type": "scroll",
+                  "child": {
+                    "type": "scroll",
+                    "child": {
+                      "type": "scroll",
+                      "child": {
+                        "type": "scroll",
+                        "child": {
+                          "type": "scroll",
+                          "child": {
+                            "type": "scroll",
+                            "child": {
+                              "type": "scroll",
+                              "child": {
+                                "type": "scroll",
+                                "child": {
+                                  "type": "scroll",
+                                  "child": {
+                                    "type": "scroll",
+                                    "child": {
+                                      "type": "scroll",
+                                      "child": {
+                                        "type": "scroll",
+                                        "child": {
+                                          "type": "scroll",
+                                          "child": {
+                                            "type": "scroll",
+                                            "child": {
+                                              "type": "scroll",
+                                              "child": {
+                                                "type": "scroll",
+                                                "child": {
+                                                  "type": "scroll",
+                                                  "child": {
+                                                    "type": "scroll",
+                                                    "child": {
+                                                      "type": "spacer"
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child.child"
+}

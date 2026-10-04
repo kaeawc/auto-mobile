@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "bottomSheet",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "detents": ["half"],
+      "child": {
+        "type": "spacer"
+      }
+    },
+    "state": {
+      "open": "yes"
+    }
+  },
+  "expectedPath": "root.openWhen.key"
+}

@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
@@ -326,8 +327,8 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
           // the daemon's current foreground app (#5851 / #5534).
           screenshotUris.set(key, buildNavigationNodeScreenshotUri(node.id, node.app_id));
         }
-      } catch {
-        /* best-effort screenshot URI lookup */
+      } catch (error) {
+        logger.warn(`Telemetry screenshot URI lookup failed: ${errorMessage(error)}`);
       }
     }
     for (const r of rows) {
@@ -439,8 +440,8 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
           exceptionType = frames[0].className ?? frames[0].declaringClass;
         }
       }
-    } catch {
-      /* ignore parse errors */
+    } catch (error) {
+      logger.warn(`Telemetry stored stack trace parse failed: ${errorMessage(error)}`);
     }
     return { exceptionType, stackTrace };
   }

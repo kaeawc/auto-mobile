@@ -1,12 +1,170 @@
-import { expect, describe, test, beforeAll, beforeEach, afterAll, afterEach } from "bun:test";
+import {
+  expect,
+  describe,
+  test,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+  spyOn,
+} from "bun:test";
 import { HierarchyNavigationDetector } from "../../../src/features/navigation/HierarchyNavigationDetector";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { AccessibilityHierarchy } from "../../../src/features/navigation/ScreenFingerprint";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { NavigationRepository } from "../../../src/db/navigationRepository";
+import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
 import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
 } from "../../helpers/navigationTestHarness";
+
+describe("NavigationGraphManager tool call attribution", () => {
+  let harness: InMemoryNavManagerHarness;
+  let manager: NavigationGraphManager;
+  let timer: FakeTimer;
+
+  beforeAll(async () => {
+    harness = await installInMemoryNavManager();
+  });
+  beforeEach(async () => {
+    await harness.manager.clearCurrentGraph();
+    timer = new FakeTimer();
+    timer.setCurrentTime(1_000_000);
+    manager = NavigationGraphManager.createForTesting(
+      new NavigationRepository(harness.db),
+      new TestCoverageRepository(undefined, harness.db),
+      timer,
+    );
+    await manager.setCurrentApp("com.x");
+    harness.manager = manager;
+  });
+  afterAll(async () => {
+    await harness.dispose();
+  });
+
+  async function navigate(destination: string): Promise<void> {
+    await manager.recordNavigationEvent({
+      applicationId: "com.x",
+      destination,
+      source: "sdk",
+      arguments: {},
+      metadata: {},
+      timestamp: timer.now(),
+      sequenceNumber: 0,
+    });
+  }
+
+  test("redirect chain Login -> Loading -> Home only attributes the first edge", async () => {
+    await navigate("Login");
+    timer.setCurrentTime(1_010_000);
+    manager.recordToolCall("tapOn", { text: "Sign in" });
+    timer.setCurrentTime(1_010_300);
+    await navigate("Loading");
+    timer.setCurrentTime(1_011_500);
+    await navigate("Home");
+
+    expect((await manager.getEdgesFrom("Login"))[0].interaction?.args).toEqual({ text: "Sign in" });
+    expect((await manager.getEdgesFrom("Loading"))[0].interaction).toBeUndefined();
+    expect((await manager.getStats()).toolCallHistorySize).toBe(0);
+  });
+
+  test("withdrawn failed tap cannot label Splash -> Home auto-advance", async () => {
+    await navigate("Splash");
+    timer.setCurrentTime(1_010_000);
+    const withdraw = manager.recordToolCall("tapOn", { text: "Does not exist" });
+    withdraw();
+    timer.setCurrentTime(1_011_000);
+    await navigate("Home");
+
+    expect((await manager.getEdgesFrom("Splash"))[0].interaction).toBeUndefined();
+  });
+
+  test("initial and same-screen events leave a tap eligible for one transition", async () => {
+    manager.recordToolCall("tapOn", { text: "Next" });
+    await navigate("Login");
+    await navigate("Login");
+    await navigate("Home");
+    expect((await manager.getEdgesFrom("Login"))[0].interaction?.args).toEqual({ text: "Next" });
+  });
+
+  test("a rolled-back edge write leaves the tool call eligible", async () => {
+    await navigate("Login");
+    manager.recordToolCall("tapOn", { text: "Next" });
+    const createEdge = spyOn(NavigationRepository.prototype, "createEdge").mockRejectedValueOnce(
+      new Error("edge write failed"),
+    );
+    try {
+      await expect(navigate("Home")).rejects.toThrow("edge write failed");
+    } finally {
+      createEdge.mockRestore();
+    }
+    expect((await manager.getStats()).toolCallHistorySize).toBe(1);
+    await navigate("Home");
+    expect((await manager.getEdgesFrom("Login"))[0].interaction?.args).toEqual({ text: "Next" });
+    expect((await manager.getStats()).toolCallHistorySize).toBe(0);
+  });
+
+  test("two successive tool calls each label their own edge", async () => {
+    await navigate("Login");
+    manager.recordToolCall("tapOn", { text: "Next" });
+    await navigate("Loading");
+    manager.recordToolCall("tapOn", { text: "Continue" });
+    await navigate("Home");
+    expect((await manager.getEdgesFrom("Login"))[0].interaction?.args).toEqual({ text: "Next" });
+    expect((await manager.getEdgesFrom("Loading"))[0].interaction?.args).toEqual({
+      text: "Continue",
+    });
+  });
+
+  test("withdrawal is idempotent and cannot remove a newer call at the same timestamp", async () => {
+    await navigate("Login");
+    const withdraw = manager.recordToolCall("tapOn", { text: "Next" });
+    await navigate("Loading");
+    manager.recordToolCall("tapOn", { text: "Continue" });
+    withdraw();
+    withdraw();
+    await navigate("Home");
+    expect((await manager.getEdgesFrom("Loading"))[0].interaction?.args).toEqual({
+      text: "Continue",
+    });
+  });
+
+  test.each([2000, 2001])(
+    "preserves the inclusive 2 s correlation window at %d ms",
+    async (delay) => {
+      await navigate("Login");
+      manager.recordToolCall("tapOn", { text: "Next" });
+      timer.advanceTime(delay);
+      await navigate("Home");
+      expect(Boolean((await manager.getEdgesFrom("Login"))[0].interaction)).toBe(delay === 2000);
+    },
+  );
+
+  test("unmatched calls retain the existing 10 s TTL", async () => {
+    manager.recordToolCall("tapOn", { text: "Old" });
+    timer.advanceTime(10_000);
+    await navigate("Login");
+    expect((await manager.getStats()).toolCallHistorySize).toBe(1);
+    timer.advanceTime(1);
+    await navigate("Home");
+    expect((await manager.getStats()).toolCallHistorySize).toBe(0);
+    expect((await manager.getEdgesFrom("Login"))[0].interaction).toBeUndefined();
+  });
+
+  test("swipeOn retains scroll metadata but labels only its first transition", async () => {
+    await navigate("Login");
+    manager.recordToolCall("swipeOn", { direction: "down", lookFor: { text: "Next" } });
+    const scrollPosition = { direction: "down" as const, targetElement: { text: "Next" } };
+    manager.updateScrollPosition(scrollPosition);
+    await navigate("Loading");
+    await navigate("Home");
+    expect((await manager.getEdgesFrom("Login"))[0].uiState?.scrollPosition).toEqual(
+      scrollPosition,
+    );
+    expect((await manager.getEdgesFrom("Loading"))[0].interaction).toBeUndefined();
+  });
+});
 
 describe("HierarchyNavigationDetector", () => {
   let manager: NavigationGraphManager;

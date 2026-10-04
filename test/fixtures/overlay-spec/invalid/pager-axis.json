@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "pager",
+      "id": "p",
+      "axis": "horizontal",
+      "children": [
+        {
+          "type": "spacer"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.axis"
+}

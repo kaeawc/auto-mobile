@@ -2,6 +2,7 @@ import { expect, describe, test, beforeEach } from "bun:test";
 import { GetDeepLinks } from "../../../src/features/utility/GetDeepLinks";
 import { DeepLinkManager } from "../../../src/features/utility/DeepLinkManager";
 import { DeepLinkResult } from "../../../src/models";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 describe("GetDeepLinks", () => {
   let getDeepLinks: GetDeepLinks;
@@ -79,17 +80,40 @@ describe("GetDeepLinks", () => {
     });
 
     test("should handle deep link manager failures", async () => {
+      const controller = new AbortController();
       // Mock a failing deep link manager
       mockDeepLinkManager.getDeepLinks = async () => {
         throw new Error("Deep link query failed");
       };
 
-      const result = await getDeepLinks.execute("com.example.app");
+      const result = await runWithAbortSignal(controller.signal, () =>
+        getDeepLinks.execute("com.example.app"),
+      );
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Deep link query failed");
-      expect(result.appId).toBe("com.example.app");
-      expect(result.deepLinks.schemes).toHaveLength(0);
+      expect(result).toEqual({
+        success: false,
+        appId: "com.example.app",
+        deepLinks: {
+          schemes: [],
+          hosts: [],
+          intentFilters: [],
+          supportedMimeTypes: [],
+        },
+        error: "Deep link query failed",
+      });
+    });
+
+    test("propagates the original cancellation when the request is aborted", async () => {
+      const controller = new AbortController();
+      const cancellation = new DOMException("Request cancelled", "AbortError");
+      mockDeepLinkManager.getDeepLinks = async () => {
+        controller.abort();
+        throw cancellation;
+      };
+
+      await expect(
+        runWithAbortSignal(controller.signal, () => getDeepLinks.execute("com.example.app")),
+      ).rejects.toBe(cancellation);
     });
 
     test("should handle deep link manager returning failure result", async () => {

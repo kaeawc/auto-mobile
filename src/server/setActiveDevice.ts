@@ -54,7 +54,12 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
 async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<PooledDevice> {
   let device = pool.getDevice(deviceId);
   if (!device) {
-    await pool.refreshDevices();
+    const outcome = await pool.refreshDevicesWithOutcome();
+    if (outcome.failure !== undefined) {
+      throw new ActionableError(
+        `Could not refresh device list: ${outcome.failure}. Resolve the cause and retry.`,
+      );
+    }
     device = pool.getDevice(deviceId);
   }
   if (!device) {

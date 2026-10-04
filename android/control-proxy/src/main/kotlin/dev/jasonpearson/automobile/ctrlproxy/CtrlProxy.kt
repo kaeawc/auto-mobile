@@ -358,6 +358,44 @@ internal fun navigationEventResponse(event: TimestampedNavigationEvent): Navigat
       ),
   )
 
+internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
+  if (reportedMs > 0) reportedMs else nowMs
+
+internal fun crashEventResponse(
+  timestamp: Long,
+  exceptionClass: String,
+  exceptionMessage: String?,
+  stackTrace: String,
+  threadName: String,
+  currentScreen: String?,
+  packageName: String,
+  appVersion: String?,
+  deviceModel: String,
+  deviceManufacturer: String,
+  osVersion: String,
+  sdkInt: Int,
+): CrashEvent =
+  CrashEvent(
+    timestamp = timestamp,
+    event =
+      CrashData(
+        exceptionClass = exceptionClass,
+        message = exceptionMessage,
+        stackTrace = stackTrace,
+        threadName = threadName,
+        currentScreen = currentScreen,
+        packageName = packageName,
+        appVersion = appVersion,
+        deviceInfo =
+          DeviceInfo(
+            model = deviceModel,
+            manufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
+          ),
+      ),
+  )
+
 /**
  * Owns the "serialize once → write file → broadcast → always release the frame-context entry"
  * sequence for a single hierarchy delivery (issue #5469 follow-up).
@@ -7464,26 +7502,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
+      // Fall back to now because the legacy intent timestamp extra defaults to 0.
       val response =
-        CrashEvent(
-          timestamp = System.currentTimeMillis(),
-          event =
-            CrashData(
-              exceptionClass = exceptionClass,
-              message = exceptionMessage,
-              stackTrace = stackTrace,
-              threadName = threadName,
-              currentScreen = currentScreen,
-              packageName = packageName,
-              appVersion = appVersion,
-              deviceInfo =
-                DeviceInfo(
-                  model = deviceModel,
-                  manufacturer = deviceManufacturer,
-                  osVersion = osVersion,
-                  sdkInt = sdkInt,
-                ),
-            ),
+        crashEventResponse(
+          timestamp = crashEventTimestamp(timestamp, System.currentTimeMillis()),
+          exceptionClass = exceptionClass,
+          exceptionMessage = exceptionMessage,
+          stackTrace = stackTrace,
+          threadName = threadName,
+          currentScreen = currentScreen,
+          packageName = packageName,
+          appVersion = appVersion,
+          deviceModel = deviceModel,
+          deviceManufacturer = deviceManufacturer,
+          osVersion = osVersion,
+          sdkInt = sdkInt,
         )
 
       webSocketServer.broadcast(response)

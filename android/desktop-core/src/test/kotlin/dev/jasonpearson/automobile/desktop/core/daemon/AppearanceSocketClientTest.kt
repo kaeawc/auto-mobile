@@ -23,6 +23,45 @@ class AppearanceSocketClientTest {
     )
 
   @Test
+  fun `a hung peer times out with the client label`() {
+    HungSocketServer().use { server ->
+      SocketRequestTask {
+        AppearanceSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            requestTimeoutMs = 30,
+          )
+          .getConfig()
+      }
+        .use { task ->
+          server.awaitRequest()
+          val error = assertFailsWith<McpConnectionException> { task.result() }
+          assertTrue(error.message!!.contains("Appearance"))
+          assertTrue(error.message!!.contains("timed out"))
+        }
+    }
+  }
+
+  @Test
+  fun `a normal reply with a custom timeout cancels the watchdog`() {
+    val watchdog = FakeSocketRequestWatchdog()
+    server(resultJson = """{"config": $configJson}""").use { server ->
+      SocketRequestTask {
+        AppearanceSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            requestTimeoutMs = 1_000,
+            watchdog = watchdog,
+          )
+          .getConfig()
+      }
+        .use { task ->
+          val result = task.result()
+          assertEquals("dark", result.config.defaultMode)
+        }
+    }
+    watchdog.assertCancelled(1_000)
+  }
+
+  @Test
   fun `get_appearance_config sends the documented envelope`() {
     server(resultJson = """{"config": $configJson}""").use { s ->
       AppearanceSocketClient(socketPathValue = s.socketPath.toString()).getConfig()

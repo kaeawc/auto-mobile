@@ -85,13 +85,13 @@ describe("GetAppMetadata (Android)", () => {
     expect(result).toBeNull();
   });
 
-  test("returns null when adb command throws", async () => {
+  test("rejects with actionable context when adb command throws", async () => {
     fakeAdb.setCommandError("shell dumpsys package 'com.example.app'", new Error("device offline"));
 
     const metadata = new GetAppMetadata(androidDevice, fakeAdbFactory(fakeAdb));
-    const result = await metadata.execute("com.example.app");
-
-    expect(result).toBeNull();
+    await expect(metadata.execute("com.example.app")).rejects.toThrow(
+      "Failed to run dumpsys package for com.example.app: device offline",
+    );
   });
 
   test("passes optional ADB lookup timeout and cancellation without warning", async () => {

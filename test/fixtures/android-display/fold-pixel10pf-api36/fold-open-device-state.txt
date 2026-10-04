@@ -1,0 +1,1 @@
+Committed state: DeviceState{identifier=2, name='OPENED', app_accessible=true, cancel_when_requester_not_on_top=false}

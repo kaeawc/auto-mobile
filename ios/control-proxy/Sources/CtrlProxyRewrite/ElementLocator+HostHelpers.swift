@@ -1,5 +1,11 @@
 import Foundation
 
+enum KeyboardFocusDecision: Equatable {
+    case skip
+    case useSnapshotFrame(CGRect)
+    case liveQuery
+}
+
 extension ElementLocator {
     // MARK: - Platform-independent helpers (host-compiled and host-tested)
 
@@ -193,14 +199,35 @@ extension ElementLocator {
             || element.hintText != nil
     }
 
-    /// Whether the live keyboard-focus predicate query should run (issue #5474).
+    /// Whether usable text-input snapshots justify looking for keyboard focus (issue #5474).
     ///
     /// The keyboard-focus frame is only ever applied to text-input nodes when
     /// building element info, so when the captured snapshot exposes no text-input
     /// node there is nothing a focus frame could annotate — the extra live query
-    /// (a main-thread IPC round trip) is pure overhead and is skipped.
+    /// (a main-thread IPC round trip) is pure overhead and is skipped. When inputs
+    /// exist, `keyboardFocusDecision` chooses a captured focus frame or a live query.
     nonisolated static func shouldQueryKeyboardFocus(textInputSnapshotCount: Int) -> Bool {
         return textInputSnapshotCount > 0
+    }
+
+    /// Skip when no usable input exists, reuse the first non-empty focused snapshot
+    /// frame without IPC, or query live when usable inputs do not report focus.
+    /// Snapshot focus works for some fields, but iPhone UIKit may require the live
+    /// keyboard-focus predicate. Reusing captured focus avoids another remote
+    /// resolution that can block when the app backgrounds (issue #9082).
+    nonisolated static func keyboardFocusDecision(
+        textInputCandidates: [(frame: CGRect, hasFocus: Bool)]
+    )
+        -> KeyboardFocusDecision
+    {
+        let usableInputs = textInputCandidates.filter { !$0.frame.isEmpty }
+        guard shouldQueryKeyboardFocus(textInputSnapshotCount: usableInputs.count) else {
+            return .skip
+        }
+        if let focused = usableInputs.first(where: { $0.hasFocus }) {
+            return .useSnapshotFrame(focused.frame)
+        }
+        return .liveQuery
     }
 
     /// Whether a second SpringBoard snapshot is required to discover system-owned

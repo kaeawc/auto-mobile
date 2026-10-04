@@ -1,3 +1,5 @@
+import { runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
@@ -68,6 +70,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 const APP_FILE_PUSH_TIMEOUT_MS = 120_000;
+const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
@@ -901,20 +904,20 @@ class AndroidAppFileProvider
 
     const runAs = androidRunAsPrefix(appTarget.appId, userId);
     const tempDevicePath = `/data/local/tmp/automobile-${this.idGenerator.next()}-${posix.basename(request.destinationPath)}`;
-    await executeAndroidAppFileCommand(
-      adb,
-      `push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`,
-      {
-        device: request.device,
-        appId: appTarget.appId,
-        container: appTarget.container,
-        operation: "write",
-        userId,
-        access: "run-as",
-      },
-      { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
-    );
     try {
+      await executeAndroidAppFileCommand(
+        adb,
+        `push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`,
+        {
+          device: request.device,
+          appId: appTarget.appId,
+          container: appTarget.container,
+          operation: "write",
+          userId,
+          access: "run-as",
+        },
+        { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
+      );
       const command =
         `mkdir -p ${shellQuote(posix.dirname(target.relativePath))} && ` +
         `cp ${shellQuote(tempDevicePath)} ${shellQuote(target.relativePath)} && ` +
@@ -933,18 +936,31 @@ class AndroidAppFileProvider
         { noRetry: true, signal: request.signal },
       );
     } finally {
-      await adb
-        .executeCommand(
-          `shell rm -f ${shellQuote(tempDevicePath)}`,
-          undefined,
-          undefined,
-          true,
-          request.signal,
-        )
-        .catch((error) => {
-          // A leftover staging file does not invalidate a completed write or mask its failure.
-          logger.debug("Android app-file staging cleanup failed", error);
-        });
+      const cleanup = new AbortController();
+      try {
+        // Staging cleanup must outlive both explicit and ambient request cancellation.
+        await runWithAbortSignal(undefined, () =>
+          raceWithDeadline(
+            () =>
+              adb.executeCommand(
+                `shell rm -f ${shellQuote(tempDevicePath)}`,
+                APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS,
+                undefined,
+                true,
+                cleanup.signal,
+              ),
+            {
+              timer: this.timer,
+              timeoutMs: APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS,
+              label: "Android app-file staging cleanup",
+              onTimeout: () => cleanup.abort(),
+            },
+          ),
+        );
+      } catch (error) {
+        // Preserve the completed write or its original error even if staging cleanup fails.
+        logger.warn("Android app-file staging cleanup failed", error);
+      }
     }
   }
 

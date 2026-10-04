@@ -71,8 +71,11 @@ function runtimeModule(node: ts.Node): ts.Expression | undefined {
 }
 
 function isShippedSpecifier(specifier: string, sourcePath: string): boolean {
+  if (isBuiltin(specifier)) {
+    return true;
+  }
   if (specifier.startsWith("node:")) {
-    return isBuiltin(specifier);
+    return false;
   }
   if (specifier.startsWith("./") || specifier.startsWith("../")) {
     const resolved = posix.join(posix.dirname(sourcePath), specifier);
@@ -129,6 +132,7 @@ const cases: [string, string[]][] = [
   ['import ts from "typescript";', ["typescript"]],
   ['import { x } from "@jimp/core/subpath";', []],
   ['import { x } from "@jimp/unshipped";', ["@jimp/unshipped"]],
+  ['import { readFileSync } from "fs";', []],
   ['import { readFileSync } from "node:fs";', []],
   ['import { x } from "node:unshipped";', ["node:unshipped"]],
   ['import { EVENT_TABLES } from "../eventTables";', []],

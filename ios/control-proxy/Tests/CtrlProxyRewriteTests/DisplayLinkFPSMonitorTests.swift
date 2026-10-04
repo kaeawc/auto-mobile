@@ -1,4 +1,5 @@
 @testable import CtrlProxyRewrite
+import Darwin
 import XCTest
 
 // Anchored unit tests for `DisplayLinkFPSMonitor`. The reference computed its frame
@@ -55,6 +56,28 @@ final class DisplayLinkFPSMonitorTests: XCTestCase {
     }
 
     // MARK: - system metrics (non-deterministic; assert reachable + in range)
+
+    func testCpuSamplingDoesNotLeakThreadSendRights() {
+        let thread = mach_thread_self()
+        defer { _ = mach_port_deallocate(mach_task_self_, thread) }
+
+        var before = mach_port_urefs_t(0)
+        XCTAssertEqual(
+            mach_port_get_refs(mach_task_self_, thread, mach_port_right_t(MACH_PORT_RIGHT_SEND), &before),
+            KERN_SUCCESS
+        )
+
+        for _ in 0 ..< 20 {
+            XCTAssertNotNil(DisplayLinkFPSMonitor.collectCpuUsagePercent())
+        }
+
+        var after = mach_port_urefs_t(0)
+        XCTAssertEqual(
+            mach_port_get_refs(mach_task_self_, thread, mach_port_right_t(MACH_PORT_RIGHT_SEND), &after),
+            KERN_SUCCESS
+        )
+        XCTAssertEqual(after, before)
+    }
 
     func testSystemMetricsAreReadable() {
         let memory = DisplayLinkFPSMonitor.collectMemoryUsageMb()

@@ -20,12 +20,29 @@ import os
         private var relativeApp: XCUIApplication?
         private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "GesturePerformer")
 
+        // Providers are created per gesture; share the reference across the runner process.
+        private static let referenceScreenCache = ReferenceScreenCache {
+            do {
+                return try catchingObjCException {
+                    let frame = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
+                    return GestureSize(width: Double(frame.width), height: Double(frame.height))
+                }
+            } catch {
+                let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "GesturePerformer")
+                logger.warning("tap reference screen unavailable: \(error)")
+                return nil
+            }
+        }
+
         init(app: XCUIApplication, locator: any ElementLocating) {
             self.app = app
             self.locator = locator
         }
 
-        var cachedGeometry: GestureCoordinateGeometry? { locator.gestureCoordinateGeometry }
+        var cachedGeometry: GestureCoordinateGeometry? {
+            guard let cached = locator.gestureCoordinateGeometry else { return nil }
+            return cached.resolvingSinglePanel(reference: Self.referenceScreenCache.cachedScreen(for: cached)) ?? cached
+        }
 
         var observedApplication: XCUIApplication {
             relativeApp ?? locator.foregroundBundleId.map { XCUIApplication(bundleIdentifier: $0) } ?? app
@@ -65,12 +82,16 @@ import os
             guard let cached = locator.gestureCoordinateGeometry else { return nil }
             // No extra platform reads for folded / ordinary single-panel observations.
             guard hasMultiPanelMismatch(app: cached.app, screen: cached.screen) else { return cached }
+            let reference = Self.referenceScreenCache.screen(for: cached)
+            if let corrected = cached.resolvingSinglePanel(reference: reference) { return corrected }
             do {
                 return try catchingObjCException {
                     let target = locator.foregroundBundleId.map { XCUIApplication(bundleIdentifier: $0) } ?? app
                     relativeApp = target
                     let frame = target.frame
-                    let screen = UIScreen.main.bounds
+                    let screen = reference ?? GestureSize(
+                        width: Double(UIScreen.main.bounds.width), height: Double(UIScreen.main.bounds.height)
+                    )
                     let size = GestureSize(width: Double(frame.width), height: Double(frame.height))
                     // A changed app frame requires another observation before a relative mapping.
                     let sameFrame = abs(size.width - cached.app.width) <= 1 &&
@@ -78,7 +99,7 @@ import os
                     let observation = sameFrame ? cached.observation : GestureSize(width: 0, height: 0)
                     let rotation = DeviceRotation.current() ?? cached.rotation
                     return GestureCoordinateGeometry(
-                        app: size, screen: GestureSize(width: Double(screen.width), height: Double(screen.height)),
+                        app: size, screen: screen,
                         observation: observation,
                         rotation: GestureCoordinateGeometry.observationRotation(rotation, size: observation)
                     )

@@ -1,9 +1,12 @@
 import { ExecResult } from "../../models";
+import { ActionableError } from "../../models/ActionableError";
+import { truncateBodyText } from "../truncateBodyText";
 
 export type VmSnapshotAction = "save" | "load" | "delete";
 
 const OK_TOKEN = /\bOK\b/;
 const KO_TOKEN = /\bKO\b/;
+const VM_SNAPSHOT_INVALID_NAME_CHARACTERS = /[\s\p{Cc}]/u;
 
 // The emulator console spells deletion `del`, not `delete` — `save`/`load` are
 // spelled the same either way. Keep the wire verb here and the human-readable
@@ -15,6 +18,18 @@ const VM_SNAPSHOT_CONSOLE_VERBS: Record<VmSnapshotAction, string> = {
 };
 
 export function buildVmSnapshotCommand(action: VmSnapshotAction, snapshotName: string): string {
+  if (VM_SNAPSHOT_INVALID_NAME_CHARACTERS.test(snapshotName)) {
+    const displayName =
+      snapshotName.length > 64 ? `${truncateBodyText(snapshotName, 64)}…` : snapshotName;
+    // JSON escapes C0 controls; escape DEL and C1 controls as well.
+    const quotedName = JSON.stringify(displayName).replace(
+      /\p{Cc}/gu,
+      (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+    );
+    throw new ActionableError(
+      `VM snapshot name ${quotedName} is not valid: it must not contain whitespace or control characters. Use letters, numbers, dots, underscores and hyphens.`,
+    );
+  }
   return `emu avd snapshot ${VM_SNAPSHOT_CONSOLE_VERBS[action]} ${snapshotName}`;
 }
 

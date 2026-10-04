@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
@@ -16,6 +17,7 @@ import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 export interface DevicePoolRefreshResult {
   addedCount: number;
   completeness?: DiscoveryCompleteness;
+  failure?: string;
 }
 
 /** Live pool state is read at each use, including after awaits. */
@@ -218,11 +220,9 @@ export class DevicePoolRefresh {
       };
     } catch (error) {
       const elapsed = this.pool.getTimer().now() - startTime;
-      logger.error(`Failed to refresh device pool after ${elapsed}ms: ${error}`);
-      if (error instanceof Error) {
-        logger.error(`Stack trace: ${error.stack}`);
-      }
-      return { addedCount: 0 };
+      const failure = errorMessage(error) || "Unknown refresh failure";
+      logger.warn(`Failed to refresh device pool after ${elapsed}ms: ${failure}`, error);
+      return { addedCount: 0, failure };
     } finally {
       this.inFlightRefreshFloors.delete(refreshGeneration);
       this.pruneDeviceRemovalStamps();

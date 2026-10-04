@@ -501,7 +501,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   });
 
   // Register resources/read handler - forward to daemon
-  server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  server.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
     const uri = request.params.uri;
 
     if (!uri) {
@@ -511,7 +511,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
 
     try {
-      const result = await proxy.readResource(uri);
+      const result = await proxy.readResource(uri, { signal: extra.signal });
       return result;
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {

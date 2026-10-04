@@ -1,3 +1,4 @@
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -57,6 +58,143 @@ describe("AppFileService", () => {
     name: "iPhone",
     platform: "ios",
   };
+
+  describe("detached Android staging cleanup", () => {
+    for (const outcome of ["cancel", "push-error", "success", "cleanup-error"] as const) {
+      test(`cleans staging once and preserves ${outcome}`, async () => {
+        const adb = new FakeAdbExecutor();
+        const timer = new FakeTimer();
+        const controller = new AbortController();
+        const cleanupSignals: Array<{ aborted: boolean; ambient: AbortSignal | undefined }> = [];
+        const execute = adb.executeCommand.bind(adb);
+        spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+          const [command, , , , signal] = args;
+          const effectiveSignal = signal ?? getAbortSignal();
+          if (command.startsWith("shell rm -f")) {
+            cleanupSignals.push({
+              aborted: effectiveSignal?.aborted ?? false,
+              ambient: getAbortSignal(),
+            });
+          }
+          effectiveSignal?.throwIfAborted();
+          const result = await execute(...args);
+          if (outcome === "cancel" && command.includes(" cp ")) {
+            controller.abort(new Error("request cancelled"));
+            controller.signal.throwIfAborted();
+          }
+          return result;
+        });
+        if (outcome === "push-error") {
+          adb.setCommandError("push ", new Error("partial push failed"));
+        }
+        if (outcome === "cleanup-error") {
+          adb.setCommandError("shell rm -f", new Error("cleanup denied"));
+        }
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const service = createAppFileServiceForTesting({
+          adbFactory: adbFactoryFor(adb),
+          fileSystem: new TestAppFileFileSystem(),
+          timer,
+        });
+        try {
+          const operation = runWithAbortSignal(controller.signal, () =>
+            service.putFile({
+              device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+              userId: 0,
+              target: {
+                domain: "app_containers",
+                appId: "com.example.app",
+                container: "documents",
+              },
+              files: [{ contentText: "fixture", destinationPath: "fixture.txt" }],
+              signal: controller.signal,
+            }),
+          );
+          if (outcome === "cancel" || outcome === "push-error") {
+            await expect(operation).rejects.toThrow(
+              outcome === "cancel" ? "request cancelled" : "partial push failed",
+            );
+          } else {
+            expect((await operation).success).toBe(true);
+          }
+          expect(cleanupSignals).toEqual([{ aborted: false, ambient: undefined }]);
+          expect(
+            adb.getCommandCalls().filter((call) => call.command.startsWith("shell rm -f")),
+          ).toMatchObject([
+            {
+              command: expect.stringContaining("'/data/local/tmp/automobile-"),
+              timeoutMs: 5000,
+              noRetry: true,
+            },
+          ]);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+          if (outcome === "cleanup-error") {
+            expect(warn).toHaveBeenCalledWith(
+              "Android app-file staging cleanup failed",
+              expect.any(Error),
+            );
+          }
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    }
+  });
+
+  test("staging cleanup deadline preserves cancellation even when ADB never settles", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const started = Promise.withResolvers<void>();
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof adb.executeCommand>>>();
+    let cleanupSignal: AbortSignal | undefined;
+    const execute = adb.executeCommand.bind(adb);
+    spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+      const [command, , , , signal] = args;
+      if (command.startsWith("shell rm -f")) {
+        cleanupSignal = signal;
+        started.resolve();
+        return pending.promise;
+      }
+      const result = await execute(...args);
+      if (command.includes(" cp ")) {
+        controller.abort(new Error("request cancelled"));
+        controller.signal.throwIfAborted();
+      }
+      return result;
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const service = createAppFileServiceForTesting({
+      adbFactory: adbFactoryFor(adb),
+      fileSystem: new TestAppFileFileSystem(),
+      timer,
+    });
+    try {
+      const operation = runWithAbortSignal(controller.signal, () =>
+        service.putFile({
+          device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+          userId: 0,
+          target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+          files: [{ contentText: "fixture", destinationPath: "fixture.txt" }],
+          signal: controller.signal,
+        }),
+      );
+      await started.promise;
+      expect(cleanupSignal?.aborted).toBe(false);
+      expect(timer.getPendingTimeouts()).toEqual([5000]);
+      timer.advanceTime(5000);
+      await expect(operation).rejects.toThrow("request cancelled");
+      expect(cleanupSignal?.aborted).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        "Android app-file staging cleanup failed",
+        expect.any(Error),
+      );
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      pending.reject(new Error("late cleanup failure"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   describe("running-app warnings", () => {
     const appId = "com.example.app";
@@ -569,8 +707,7 @@ describe("AppFileService", () => {
     expect(
       executor.getExecutedCommands().filter((command) => command.includes("shell rm -f")),
     ).toEqual([
-      "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png'",
-      "shell rm -f '/storage/emulated/12/Download/automobile-media/first.png'",
+      "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png' '/storage/emulated/12/Download/automobile-media/first.png'",
     ]);
   });
 
@@ -608,7 +745,9 @@ describe("AppFileService", () => {
     expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
     expect(
       executor.getExecutedCommands().filter((command) => command.includes("shell rm -f")),
-    ).toHaveLength(3);
+    ).toEqual([
+      "shell rm -f '/storage/emulated/12/Download/automobile-media/third.png' '/storage/emulated/12/Download/automobile-media/second.png' '/storage/emulated/12/Download/automobile-media/first.png'",
+    ]);
   });
 
   test("validates the entire media batch before writing any file", async () => {
@@ -665,7 +804,7 @@ describe("AppFileService", () => {
           })),
         }),
       ).rejects.toThrow(
-        "Rollback failures: second.png: Android shared-storage operation failed: device unavailable",
+        "Rolled back: none. Rollback failures: second.png: Android shared-storage operation failed: device unavailable; first.png: Android shared-storage operation failed: device unavailable",
       );
     } finally {
       warnSpy.mockRestore();
@@ -1972,7 +2111,7 @@ describe("AppFileService", () => {
     expect(calls.every((call) => call.noRetry === true)).toBe(true);
   });
 
-  test("propagates noRetry and the caller's AbortSignal through every Android putFile command", async () => {
+  test("propagates noRetry and keeps Android staging cleanup independent of the caller signal", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const service = createAppFileServiceForTesting({
       adbFactory,
@@ -2001,7 +2140,16 @@ describe("AppFileService", () => {
     // push to temp, run-as cp, and the rm cleanup all flow through the helper / adb.
     expect(calls.length).toBeGreaterThanOrEqual(3);
     expect(calls.every((call) => call.noRetry === true)).toBe(true);
-    expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
+    const cleanupCalls = calls.filter((call) => call.command.startsWith("shell rm -f"));
+    expect(cleanupCalls).toHaveLength(1);
+    expect(cleanupCalls[0]?.signal).not.toBe(controller.signal);
+    expect(cleanupCalls[0]?.signal?.aborted).toBe(false);
+    expect(cleanupCalls[0]?.timeoutMs).toBe(5000);
+    expect(
+      calls
+        .filter((call) => !call.command.startsWith("shell rm -f"))
+        .every((call) => call.signal === controller.signal),
+    ).toBe(true);
   });
 
   test("lists Android externalFiles with file names, directory markers, byte sizes, and last-modified metadata", async () => {

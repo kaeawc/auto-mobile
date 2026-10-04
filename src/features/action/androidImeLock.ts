@@ -11,7 +11,7 @@ export function quarantineAndroidIme(deviceId: string): void {
   unsafeImeDevices.add(deviceId);
 }
 
-/** Call only after a verified runner restart or device reset. */
+/** Call only after verified explicit IME selection, runner restart, or device reset. */
 export function clearAndroidImeQuarantine(deviceId: string): void {
   unsafeImeDevices.delete(deviceId);
 }
@@ -45,6 +45,7 @@ export async function withAndroidImeLock<T>(
   deviceId: string,
   action: () => Promise<T>,
   signal?: AbortSignal,
+  options: { allowQuarantined?: boolean } = {},
 ): Promise<T> {
   let lock = imeLocks.get(deviceId);
   if (!lock) {
@@ -53,9 +54,9 @@ export async function withAndroidImeLock<T>(
   }
   const release = await acquireImeLock(lock, signal);
   try {
-    if (unsafeImeDevices.has(deviceId)) {
+    if (unsafeImeDevices.has(deviceId) && !options.allowQuarantined) {
       throw new Error(
-        "IME state is unknown after an unacknowledged cancellation; restart AutoMobile before changing keyboards.",
+        'IME state is unknown after an unacknowledged cancellation; run "keyboard setIme <imeId>" with an enabled IME, or restart AutoMobile before other IME operations.',
       );
     }
     signal?.throwIfAborted();

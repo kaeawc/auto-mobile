@@ -16,6 +16,14 @@ async function tableExists(db: Kysely<unknown>, tableName: string): Promise<bool
 }
 
 export async function up(db: Kysely<unknown>): Promise<void> {
+  await createFailureGroups(db);
+  await createFailureOccurrences(db);
+  await createFailureOccurrenceScreens(db);
+  await createFailureCaptures(db);
+  await createFailureNotifications(db);
+}
+
+async function createFailureGroups(db: Kysely<unknown>): Promise<void> {
   // Main failure groups table - groups similar failures by signature
   if (!(await tableExists(db, "failure_groups"))) {
     await db.schema
@@ -58,7 +66,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .column("last_occurrence")
       .execute();
   }
+}
 
+async function createFailureOccurrences(db: Kysely<unknown>): Promise<void> {
   // Individual failure occurrences
   if (!(await tableExists(db, "failure_occurrences"))) {
     await db.schema
@@ -111,7 +121,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .column("device_id")
       .execute();
   }
+}
 
+async function createFailureOccurrenceScreens(db: Kysely<unknown>): Promise<void> {
   // Screens visited during a failure occurrence
   if (!(await tableExists(db, "failure_occurrence_screens"))) {
     await db.schema
@@ -133,7 +145,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .column("occurrence_id")
       .execute();
   }
+}
 
+async function createFailureCaptures(db: Kysely<unknown>): Promise<void> {
   // Captures (screenshots/videos) associated with failures
   if (!(await tableExists(db, "failure_captures"))) {
     await db.schema
@@ -157,7 +171,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .column("occurrence_id")
       .execute();
   }
+}
 
+async function createFailureNotifications(db: Kysely<unknown>): Promise<void> {
   // Notifications for real-time streaming - tracks which occurrences are new
   if (!(await tableExists(db, "failure_notifications"))) {
     await db.schema

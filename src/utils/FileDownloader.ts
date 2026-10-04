@@ -205,6 +205,13 @@ export class DefaultFileDownloader implements FileDownloader {
       return true;
     }
 
+    return this.isCommandUnavailableMessage(err, command);
+  }
+
+  private isCommandUnavailableMessage(
+    err: NodeJS.ErrnoException & { stderr?: string },
+    command: string,
+  ): boolean {
     const combinedMessage = `${err.message ?? ""} ${err.stderr ?? ""}`.toLowerCase();
     if (
       combinedMessage.includes("command not found") ||

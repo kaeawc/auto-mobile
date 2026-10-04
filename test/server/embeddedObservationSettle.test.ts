@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import {
   EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
+  EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
   settleEmbeddedObservation,
   settleEmbeddedObservationInResponse,
 } from "../../src/server/embeddedObservationSettle";
@@ -10,6 +11,9 @@ import { assignStableViewIds } from "../../src/features/observe/android/StableNo
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { ObserveScreenExecuteOptions } from "../../src/features/observe/interfaces/ObserveScreen";
+import { hierarchyUpdatedAtToMillis } from "../../src/features/observe/observeTimestamp";
+import { logger } from "../../src/utils/logger";
 
 /**
  * Unit coverage for the navigation-class embedded-observation settle gate
@@ -85,6 +89,156 @@ function airplaneRowStableId(observation: ObserveResult): string {
 function settleFor(fake: FakeObserveScreen, timer: FakeTimer): RealSettleObserve {
   return new RealSettleObserve(fake, timer);
 }
+
+/** Model CtrlProxy's rejected-cache wait; only a sync can read past the initial still frame. */
+class StillFrameObserveScreen extends FakeObserveScreen {
+  private cached: ObserveResult;
+
+  constructor(
+    captured: ObserveResult,
+    private readonly timer: FakeTimer,
+  ) {
+    super();
+    this.cached = captured;
+  }
+
+  override async execute(options: ObserveScreenExecuteOptions = {}): Promise<ObserveResult> {
+    const next = await super.execute(options);
+    const cachedMs = hierarchyUpdatedAtToMillis(this.cached.viewHierarchy) ?? 0;
+    if ((options.minTimestamp ?? 0) > cachedMs) {
+      // Selected panels use a routed synchronous capture, independently of the push wait.
+      if (!options.skipWaitForFresh && options.display === undefined) {
+        await this.timer.sleep(options.timeoutMs ?? 1000);
+        return this.cached;
+      }
+      // Simulate device work without using the wall clock. Sync really re-extracts the tree.
+      await this.timer.sleep(
+        Math.min(EMBEDDED_OBSERVATION_SETTLE_POLL_MS / 2, options.timeoutMs ?? 1000),
+      );
+    }
+    this.cached = next;
+    return next;
+  }
+}
+
+describe("embedded settle on a still Android frame (#9579)", () => {
+  test("syncs past the action capture, then settles without waiting for a nonexistent push", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const captured = obs(AIRPLANE_ROW_INFLATED, 10);
+    captured.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
+    const fresh = { ...obs(AIRPLANE_ROW_INFLATED, 20), display: captured.display };
+    const fake = new StillFrameObserveScreen(captured, timer);
+    fake.setObserveResult(fresh);
+    const warning = spyOn(logger, "warn");
+    try {
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: captured,
+        settleObserve: settleFor(fake, timer),
+      });
+      expect(result.settled).toBe(true);
+      expect(result.observation.viewHierarchy?.updatedAt).toBe(20);
+      expect(fake.getExecuteMinTimestamps()).toEqual([11, 20]);
+      expect(timer.getSleepHistory()).toEqual([75, 150]);
+      expect(timer.now()).toBe(225);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("waits through changes until two consecutive equal captures", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    const fake = new StillFrameObserveScreen(captured, timer);
+    fake.setObserveSequence([
+      obs(AIRPLANE_ROW_HALF_INFLATED, 20),
+      obs(AIRPLANE_ROW_INFLATED, 30),
+      obs(AIRPLANE_ROW_INFLATED, 40),
+    ]);
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+    expect(result.settled).toBe(true);
+    expect(fake.getExecuteCallCount()).toBe(3);
+    expect(result.observation.viewHierarchy?.updatedAt).toBe(40);
+    expect(timer.getSleepHistory()).toEqual([75, 150, 150]);
+    expect(timer.now()).toBe(375);
+  });
+
+  test("times out honestly when fresh captures never stabilize", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    const fake = new StillFrameObserveScreen(captured, timer);
+    fake.setObserveResult((index) =>
+      obs(index % 2 ? AIRPLANE_ROW_INFLATED : AIRPLANE_ROW_HALF_INFLATED, 20 + index),
+    );
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+    expect(result.settled).toBe(false);
+    expect(fake.getExecuteCallCount()).toBe(7);
+    expect(timer.now()).toBe(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
+    expect(timer.getSleepHistory()).toEqual([75, 150, 150, 150, 150, 150, 150, 25]);
+  });
+
+  test("the action frame alone cannot prove stability even if sync returns it", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const captured = obs(AIRPLANE_ROW_INFLATED, 10);
+    const fake = new StillFrameObserveScreen(captured, timer);
+    fake.setObserveResult(captured);
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+    expect(result.settled).toBe(false);
+    expect(fake.getExecuteMinTimestamps().every((floor) => floor === 11)).toBe(true);
+  });
+
+  test.each([false, true])(
+    "routed polls ignore an unverified other panel (pinned: %s)",
+    async (pinned) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const captured = obs(AIRPLANE_ROW_INFLATED, 10);
+      captured.display = {
+        key: "outside",
+        role: "cover",
+        posture: "closed",
+        generation: 2,
+        pinned,
+      };
+      const other = obs(AIRPLANE_ROW_INFLATED, 20);
+      other.display = { key: "inside", role: "inner", posture: "opened", generation: 2 };
+      // ObserveScreen rejects a misrouted capture; it cannot advance the settle predicate.
+      other.freshness = { isFresh: false, verified: false };
+      const target = { ...obs(AIRPLANE_ROW_INFLATED, 30), display: captured.display };
+      const fake = new FakeObserveScreen();
+      fake.setObserveSequence([other, target, target]);
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: captured,
+        args: pinned ? undefined : { display: "cover" },
+        settleObserve: settleFor(fake, timer),
+      });
+      expect(result.settled).toBe(true);
+      expect(result.observation.display?.key).toBe("outside");
+      expect(result.observation.viewHierarchy?.updatedAt).toBe(30);
+      expect(fake.getExecuteOptions().every((options) => options.display === "outside")).toBe(true);
+      expect(fake.getExecuteCallCount()).toBe(3);
+      expect(timer.getSleepHistory()).toEqual([150, 150]);
+    },
+  );
+});
 
 describe("settleEmbeddedObservation (#6866)", () => {
   test("navigation-class capture is replaced by the settled hierarchy and marked settled", async () => {

@@ -3611,10 +3611,15 @@ describe("AndroidCtrlProxyClient", function () {
         updatedAt: 1,
         packageName: "com.example",
         hierarchy: { text: "root" },
-        truncationReasons: ["max_nodes", "cancelled"],
+        truncationReasons: ["max_nodes", "cancelled", "max_children", "future_code"],
       });
 
-      expect(result.truncationReasons).toEqual(["max_nodes", "cancelled"]);
+      expect(result.truncationReasons).toEqual([
+        "max_nodes",
+        "cancelled",
+        "max_children",
+        "future_code",
+      ]);
     });
 
     test("should convert accessibility hierarchy to ViewHierarchyResult format", function () {

@@ -47,6 +47,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import {
   runWithSelectedDisplayPin,
   displayPinFailure,
+  selectedDisplayPin,
 } from "../../src/features/observe/SessionDisplayContext";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -55,6 +56,7 @@ import { getToolSelectionContext } from "../../src/features/toolSelection/toolSe
 import { CachingDisplayInventoryProvider } from "../../src/devices/DisplayInventoryProvider";
 import { FakeDisplayInventorySource } from "../fakes/FakeDisplayInventoryProvider";
 import type { BootedDevice } from "../../src/models";
+import { settleEmbeddedObservationInResponse } from "../../src/server/embeddedObservationSettle";
 
 const device: BootedDevice = {
   deviceId: "pin-device",
@@ -254,7 +256,7 @@ for (const inventoryKind of ["single", "empty", "one panel"] as const) {
           store: sessions,
           invoke,
         });
-        expect(calls).toEqual(["0", "active"]);
+        expect(calls).toEqual([name === "tapOn" ? undefined : "0", "active"]);
       }
       await expect(
         handler({ deviceId: device.deviceId, sessionUuid: "one", display: "missing" }),
@@ -267,6 +269,125 @@ for (const inventoryKind of ["single", "empty", "one panel"] as const) {
     });
   }
 }
+
+for (const option of [
+  { focusFirst: true },
+  { subtext: { text: "Terms" } },
+  { accessibilityLink: "Terms" },
+  { screenReaderNavigation: true },
+]) {
+  test(`sole-panel tapOn pin preserves ${Object.keys(option)[0]} and all response stamps`, async () => {
+    sessions.setDisplayPin("one", "inner");
+    const target = {
+      ...device,
+      displays: { panels: device.displays!.panels.slice(0, 1), postures: [] },
+    };
+    const stamp = { key: "inside", generation: 0 };
+    const response = await runSessionDisplayPin({
+      name: "tapOn",
+      acceptsDisplay: true,
+      device: target,
+      args: option,
+      sessionUuid: "one",
+      store: sessions,
+      invoke: (args) => {
+        expect(args).toEqual(option);
+        expect(selectedDisplayPin()).toBe("inner");
+        return createStructuredToolResponse({
+          display: stamp,
+          observation: { display: stamp },
+          commands: [{ display: stamp, observation: { display: stamp } }],
+        });
+      },
+    });
+    expect(response).toMatchObject({
+      structuredContent: {
+        display: { pinned: true },
+        observation: { display: { pinned: true } },
+        commands: [{ display: { pinned: true }, observation: { display: { pinned: true } } }],
+      },
+    });
+    expect(stamp).not.toHaveProperty("pinned");
+    expect(selectedDisplayPin()).toBeUndefined();
+  });
+}
+
+test("registered sole-panel iOS swipeOn pin preserves lookFor and ordinary defaults", async () => {
+  const target: BootedDevice = {
+    ...device,
+    platform: "ios",
+    displays: { panels: device.displays!.panels.slice(0, 1), postures: [] },
+  };
+  sessions.setDisplayPin("one", "inner");
+  const lookFor = { text: "Terms" };
+  setSwipeOnFactory(() => ({
+    execute: async (options) => {
+      expect(options).toMatchObject({ lookFor, autoTarget: true, includeSystemInsets: false });
+      expect(options.display).toBeUndefined();
+      expect(selectedDisplayPin()).toBe("inner");
+      return { success: true, targetType: "screen", x1: 0, y1: 0, x2: 0, y2: 0, duration: 0 };
+    },
+  }));
+  registerInteractionTools();
+  const response = await ToolRegistry.callInternal(
+    "swipeOn",
+    { direction: "up", lookFor },
+    undefined,
+    undefined,
+    {
+      targetDevice: target,
+      sessionUuid: "one",
+    },
+  );
+  expect(getStructuredPayload(response)?.success).toBe(true);
+});
+
+test("sole-panel ordinary action keeps settling bound to the pin and preserves its stamp", async () => {
+  sessions.setDisplayPin("one", "inner");
+  const target = {
+    ...device,
+    displays: { panels: device.displays!.panels.slice(0, 1), postures: [] },
+  };
+  const observation = structuredClone(loadAndroidHomeObserve().observe);
+  observation.display = { key: "inside", role: "inner", posture: "unknown", generation: 0 };
+  const response = createStructuredToolResponse({ success: true, observation });
+  await runSessionDisplayPin({
+    name: "tapOn",
+    acceptsDisplay: true,
+    device: target,
+    args: { focusFirst: true },
+    sessionUuid: "one",
+    store: sessions,
+    invoke: (args) => {
+      expect(args.display).toBeUndefined();
+      return response;
+    },
+  });
+  const settled = { ...observation, freshness: { isFresh: true, verified: true } };
+  await settleEmbeddedObservationInResponse(response, {
+    name: "tapOn",
+    args: {},
+    internal: false,
+    createSettleObserve: () => ({
+      execute: async (options) => {
+        expect(options?.display).toBe("inside");
+        return {
+          observation: settled,
+          settled: true,
+          polls: 2,
+          waitMs: 150,
+          terminalReason: "settled",
+        };
+      },
+    }),
+  });
+  expect(getStructuredPayload(response)?.observation).toMatchObject({
+    settled: true,
+    display: { key: "inside", pinned: true, generation: 0 },
+  });
+  expect(observation.display).not.toHaveProperty("pinned");
+  expect(settled.display).not.toHaveProperty("pinned");
+});
 
 test("strict display schema adds nullable string without weakening other fields", () => {
   expect(

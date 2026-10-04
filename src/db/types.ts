@@ -719,7 +719,7 @@ export interface LogEventsTable {
   level: number;
   tag: string;
   message: string;
-  filter_name: string | null;
+  filter_name: string;
   created_at: Generated<string>;
 }
 

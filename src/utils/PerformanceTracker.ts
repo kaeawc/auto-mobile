@@ -462,31 +462,32 @@ function filterZeroTimings(timings: TimingData): TimingData {
         }
         return true;
       });
-  } else {
-    // Filter object entries
-    const filtered: Record<string, TimingEntry> = {};
-    for (const [key, entry] of Object.entries(timings)) {
-      if (entry.durationMs > 0) {
-        const filteredEntry: TimingEntry = {
-          ...entry,
-          children: entry.children ? filterZeroTimings(entry.children) : undefined,
-        };
-
-        // Only include if has children after filtering or has no children
-        if (filteredEntry.children) {
-          const hasChildren = Array.isArray(filteredEntry.children)
-            ? filteredEntry.children.length > 0
-            : Object.keys(filteredEntry.children).length > 0;
-          if (hasChildren) {
-            filtered[key] = filteredEntry;
-          }
-        } else {
-          filtered[key] = filteredEntry;
-        }
-      }
-    }
-    return filtered;
   }
+
+  // Filter object entries
+  const filtered: Record<string, TimingEntry> = {};
+  for (const [key, entry] of Object.entries(timings)) {
+    if (!(entry.durationMs > 0)) {
+      continue;
+    }
+    const filteredEntry: TimingEntry = {
+      ...entry,
+      children: entry.children ? filterZeroTimings(entry.children) : undefined,
+    };
+
+    // Only include if has children after filtering or has no children
+    if (!filteredEntry.children) {
+      filtered[key] = filteredEntry;
+      continue;
+    }
+    const hasChildren = Array.isArray(filteredEntry.children)
+      ? filteredEntry.children.length > 0
+      : Object.keys(filteredEntry.children).length > 0;
+    if (hasChildren) {
+      filtered[key] = filteredEntry;
+    }
+  }
+  return filtered;
 }
 
 /**

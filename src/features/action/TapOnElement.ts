@@ -1,4 +1,6 @@
+import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
+import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
@@ -3660,7 +3662,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           ["subtext", "accessibilityLink", "focusFirst", "screenReaderNavigation"] as const
         ).find((key) => options[key] !== undefined);
         if (unsupported) {
-          throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
+          throw new ActionableError(unsupportedDisplayOptionMessage(unsupported));
         }
         if (options.ensureTap) {
           options = { ...options, preTapStability: true, retryIfNoChange: true };
@@ -4975,7 +4977,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         fence?.assertCurrent();
         await this.adb.executeCommand(
-          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
           longPressTimeoutMs,
           undefined,
           undefined,
@@ -4991,7 +4993,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         // Only a non-cancellation failure may use the legacy input source.
         fence?.assertCurrent();
         await this.adb.executeCommand(
-          `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          `shell input swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
           longPressTimeoutMs,
           undefined,
           undefined,

@@ -42,6 +42,14 @@ export interface PlanSerializer {
   importPlanFromYaml(yamlContent: string): Plan;
 }
 
+interface LoggedToolCall {
+  timestamp: string;
+  tool: string;
+  params: Record<string, any>;
+  optional?: boolean;
+  result: { success: boolean; data?: any; error?: string };
+}
+
 // Tools that should be omitted from plans
 const OMITTED_TOOLS = new Set([
   "startDevice",
@@ -103,38 +111,10 @@ export class YamlPlanSerializer implements PlanSerializer {
       }
 
       // Collect all successful tool calls
-      const allToolCalls: Array<{
-        timestamp: string;
-        tool: string;
-        params: Record<string, any>;
-        optional?: boolean;
-        result: { success: boolean; data?: any; error?: string };
-      }> = [];
+      const allToolCalls: LoggedToolCall[] = [];
 
       for (const logFile of logFiles) {
-        try {
-          const logPath = path.join(logDir, logFile);
-          const content = await fs.readFile(logPath, "utf-8");
-
-          // Handle both single JSON objects and newline-delimited JSON
-          const lines = content
-            .trim()
-            .split("\n")
-            .filter((line) => line.trim());
-
-          for (const line of lines) {
-            try {
-              const logEntry = JSON.parse(line.trim());
-              if (logEntry.result?.success) {
-                allToolCalls.push(logEntry);
-              }
-            } catch (parseError) {
-              logger.warn(`Failed to parse line in ${logFile}: ${parseError}`);
-            }
-          }
-        } catch (error) {
-          logger.warn(`Failed to read log file ${logFile}: ${error}`);
-        }
+        await this.readSuccessfulToolCalls(logDir, logFile, allToolCalls);
       }
 
       if (allToolCalls.length === 0) {
@@ -207,6 +187,44 @@ export class YamlPlanSerializer implements PlanSerializer {
     } catch (error) {
       logger.error(`Failed to export plan: ${error}`);
       return { success: false, error: `${error}` };
+    }
+  }
+
+  private async readSuccessfulToolCalls(
+    logDir: string,
+    logFile: string,
+    allToolCalls: LoggedToolCall[],
+  ): Promise<void> {
+    try {
+      const logPath = path.join(logDir, logFile);
+      const content = await fs.readFile(logPath, "utf-8");
+
+      // Handle both single JSON objects and newline-delimited JSON
+      const lines = content
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim());
+
+      this.appendSuccessfulLogEntries(lines, logFile, allToolCalls);
+    } catch (error) {
+      logger.warn(`Failed to read log file ${logFile}: ${error}`);
+    }
+  }
+
+  private appendSuccessfulLogEntries(
+    lines: string[],
+    logFile: string,
+    allToolCalls: LoggedToolCall[],
+  ): void {
+    for (const line of lines) {
+      try {
+        const logEntry = JSON.parse(line.trim());
+        if (logEntry.result?.success) {
+          allToolCalls.push(logEntry);
+        }
+      } catch (parseError) {
+        logger.warn(`Failed to parse line in ${logFile}: ${parseError}`);
+      }
     }
   }
 

@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
-import { applyAppearanceOnConnect } from "../../src/utils/appearance/applyAppearanceOnConnect";
+import { applyAppearanceOnConnect } from "../../src/server/applyAppearanceOnConnect";
 import { isAppearanceSyncEnabled } from "../../src/utils/appearance/appearanceSyncPolicy";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";

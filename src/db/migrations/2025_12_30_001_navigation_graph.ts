@@ -1,6 +1,17 @@
 import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
+  await createNavigationApps(db);
+  await createNavigationNodes(db);
+  await createNavigationEdges(db);
+  await createUIElements(db);
+  await createEdgeUIElements(db);
+  await createNodeModals(db);
+  await createEdgeModals(db);
+  await createScrollPositions(db);
+}
+
+async function createNavigationApps(db: Kysely<unknown>): Promise<void> {
   // Create navigation_apps table
   await db.schema
     .createTable("navigation_apps")
@@ -9,7 +20,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .addColumn("updated_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
+}
 
+async function createNavigationNodes(db: Kysely<unknown>): Promise<void> {
   // Create navigation_nodes table
   await db.schema
     .createTable("navigation_nodes")
@@ -35,7 +48,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .columns(["app_id", "screen_name"])
     .unique()
     .execute();
+}
 
+async function createNavigationEdges(db: Kysely<unknown>): Promise<void> {
   // Create navigation_edges table
   await db.schema
     .createTable("navigation_edges")
@@ -73,7 +88,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .on("navigation_edges")
     .column("to_screen")
     .execute();
+}
 
+async function createUIElements(db: Kysely<unknown>): Promise<void> {
   // Create ui_elements table
   await db.schema
     .createTable("ui_elements")
@@ -104,7 +121,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .on("ui_elements")
     .column("app_id")
     .execute();
+}
 
+async function createEdgeUIElements(db: Kysely<unknown>): Promise<void> {
   // Create edge_ui_elements junction table
   await db.schema
     .createTable("edge_ui_elements")
@@ -126,7 +145,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .columns(["edge_id", "ui_element_id"])
     .unique()
     .execute();
+}
 
+async function createNodeModals(db: Kysely<unknown>): Promise<void> {
   // Create node_modals table
   await db.schema
     .createTable("node_modals")
@@ -147,7 +168,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .columns(["node_id", "stack_level"])
     .unique()
     .execute();
+}
 
+async function createEdgeModals(db: Kysely<unknown>): Promise<void> {
   // Create edge_modals table
   await db.schema
     .createTable("edge_modals")
@@ -169,7 +192,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .columns(["edge_id", "position", "stack_level"])
     .unique()
     .execute();
+}
 
+async function createScrollPositions(db: Kysely<unknown>): Promise<void> {
   // Create scroll_positions table
   await db.schema
     .createTable("scroll_positions")

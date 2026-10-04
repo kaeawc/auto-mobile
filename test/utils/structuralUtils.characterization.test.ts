@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import fs from "fs/promises";
+import path from "path";
 import { PNG } from "pngjs";
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { summarizeObserveResultForFailure } from "../../src/utils/plan/summarizeFailureObservation";
@@ -13,6 +14,11 @@ import { FakeImageBackend } from "../fakes/FakeImageBackend";
 
 const createdAt = "2026-01-01T00:00:00.000Z";
 const version = releaseVersion(getMcpServerVersion());
+const logPaths = {
+  a: path.join("/logs", "a.json"),
+  b: path.join("/logs", "b.json"),
+  c: path.join("/logs", "c.json"),
+};
 
 function logEntry(tool: string, timestamp: number, optional?: boolean): string {
   return JSON.stringify({
@@ -25,14 +31,23 @@ function logEntry(tool: string, timestamp: number, optional?: boolean): string {
 }
 
 describe("Plan export characterization", () => {
+  test("log fixture paths match Windows joins without changing the native path module", () => {
+    const windowsPaths = ["a.json", "b.json", "c.json"].map((file) =>
+      path.win32.join("/logs", file),
+    );
+    expect(Object.values(logPaths).map((file) => path.win32.normalize(file))).toEqual(windowsPaths);
+    expect(windowsPaths[0]).toBe("\\logs\\a.json");
+    expect(windowsPaths[0]).not.toBe(path.posix.join("/logs", "a.json"));
+  });
+
   test("exports exact YAML after ordered parsing, failures, omissions and last-observe selection", async () => {
     const logs = new Map([
       [
-        "/logs/a.json",
+        logPaths.a,
         `${logEntry("observe", 1)}\ninvalid\nnull\n${JSON.stringify({ result: { success: false } })}\n${logEntry("tapOn", 3, true)}\n`,
       ],
       [
-        "/logs/c.json",
+        logPaths.c,
         `${logEntry("observe", 5, false)}\n${logEntry("inputText", 2, false)}\n${logEntry("listDevices", 4)}\n`,
       ],
     ]);
@@ -63,9 +78,9 @@ describe("Plan export characterization", () => {
         stepCount: 3,
       });
       expect(reading.mock.calls.map(([file]) => file)).toEqual([
-        "/logs/a.json",
-        "/logs/b.json",
-        "/logs/c.json",
+        logPaths.a,
+        logPaths.b,
+        logPaths.c,
       ]);
       expect(writing.mock.calls).toEqual([["/out.yaml", content, "utf-8"]]);
       expect(warning.mock.calls.map(([message]) => String(message).split(":")[0])).toEqual([

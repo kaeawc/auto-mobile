@@ -9,7 +9,7 @@ import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGra
 import { UIStateExtractor } from "./UIStateExtractor";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { PressButton } from "../action/PressButton";
-import { getStructuredField } from "../../utils/toolUtils";
+import { throwIfAborted, awaitWhileRequestIsLive, getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 
@@ -22,7 +22,7 @@ import { defaultTimer, Timer } from "../../utils/SystemTimer";
  * real ObserveScreen (WebSocket / device I/O).
  */
 export interface ObserveScreenLike {
-  execute(): Promise<ObserveResult>;
+  execute(options?: { signal?: AbortSignal }): Promise<ObserveResult>;
 }
 
 export class DefaultUIStateSetup implements UIStateSetup {
@@ -55,7 +55,12 @@ export class DefaultUIStateSetup implements UIStateSetup {
    * Set up the required UI state before executing a navigation step.
    * Handles modal stack alignment and selected elements.
    */
-  async setupUIState(edge: NavigationEdge, platform: string): Promise<string[]> {
+  async setupUIState(
+    edge: NavigationEdge,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    throwIfAborted(signal);
     const requiredState = edge.uiState;
 
     // Early return if no UI state requirements
@@ -67,7 +72,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     const setupActions: string[] = [];
 
     // Get current UI state from a fresh observation
-    const currentState = await this.getCurrentUIState(platform);
+    const currentState = await this.getCurrentUIState(platform, signal);
     if (!currentState) {
       logger.warn(`[UI_STATE_SETUP] Could not get current UI state, proceeding anyway`);
       return [];
@@ -79,6 +84,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         currentState.modalStack || [],
         requiredState.modalStack,
         platform,
+        signal,
       );
       setupActions.push(...modalStackActions);
     }
@@ -87,7 +93,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     if (requiredState.selectedElements?.length) {
       // Get current state again after modal stack changes if modals were dismissed
       const updatedState =
-        setupActions.length > 0 ? await this.getCurrentUIState(platform) : currentState;
+        setupActions.length > 0 ? await this.getCurrentUIState(platform, signal) : currentState;
 
       if (updatedState) {
         setupActions.push(
@@ -95,6 +101,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
             requiredState.selectedElements,
             updatedState.selectedElements,
             platform,
+            signal,
           )),
         );
       }
@@ -114,6 +121,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
   async setupScrollPosition(
     scrollPosition: ScrollPosition,
     platform: string,
+    signal?: AbortSignal,
   ): Promise<string | null> {
     logger.info(
       `[UI_STATE_SETUP] Setting up scroll position: ` +
@@ -122,6 +130,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     );
 
     try {
+      throwIfAborted(signal);
       // Resolve swipeOn first so a missing tool degrades gracefully (return null)
       // rather than throwing out of the `callInternalTyped` seam below.
       const swipeOnTool = ToolRegistry.getTool("swipeOn");
@@ -180,7 +189,14 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // scroll-position and #2758 lastHierarchy fixes). With `result` typed,
       // `result.found` is a compile error and the `getStructuredField` keys are
       // checked against the payload.
-      const result = await ToolRegistry.callInternalTyped("swipeOn", swipeOnArgs);
+      throwIfAborted(signal);
+      const result = await ToolRegistry.callInternalTyped(
+        "swipeOn",
+        swipeOnArgs,
+        undefined,
+        signal,
+      );
+      throwIfAborted(signal);
 
       if (getStructuredField(result, "success") && getStructuredField(result, "found")) {
         logger.info(`[UI_STATE_SETUP] Successfully scrolled to target element`);
@@ -194,6 +210,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         return null;
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[UI_STATE_SETUP] Error setting up scroll position: ${error}, continuing anyway`);
       return null;
     }
@@ -204,10 +221,18 @@ export class DefaultUIStateSetup implements UIStateSetup {
   /**
    * Get the current UI state by performing an observation.
    */
-  private async getCurrentUIState(_platform: string): Promise<UIState | undefined> {
+  private async getCurrentUIState(
+    _platform: string,
+    signal?: AbortSignal,
+  ): Promise<UIState | undefined> {
     try {
+      throwIfAborted(signal);
       const observeScreen = this.observeScreenProvider();
-      const result = await observeScreen.execute();
+      const result = await awaitWhileRequestIsLive(
+        observeScreen.execute(signal ? { signal } : undefined),
+        signal,
+      );
+      throwIfAborted(signal);
 
       if (!result.viewHierarchy) {
         return undefined;
@@ -215,6 +240,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
       return new UIStateExtractor().extractFromObservation(result);
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[UI_STATE_SETUP] Error getting current UI state: ${error}`);
       return undefined;
     }
@@ -258,10 +284,11 @@ export class DefaultUIStateSetup implements UIStateSetup {
     required: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
     current: Array<{ text?: string; resourceId?: string; contentDesc?: string }>,
     platform: string,
+    signal?: AbortSignal,
   ): Promise<string[]> {
     const actions: string[] = [];
     for (const element of this.findMissingSelections(required, current)) {
-      if (await this.tapOnElement(element, platform)) {
+      if (await this.tapOnElement(element, platform, signal)) {
         actions.push(`tapOn(${JSON.stringify(element)})`);
       }
     }
@@ -274,6 +301,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
   private async tapOnElement(
     element: { text?: string; resourceId?: string; contentDesc?: string },
     platform: string,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     const tapTool = ToolRegistry.getTool("tapOn");
     if (!tapTool) {
@@ -291,6 +319,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     logger.info(`[UI_STATE_SETUP] Setting up UI state: tapping "${identifier}"`);
 
     try {
+      throwIfAborted(signal);
       const args: Record<string, unknown> = {
         action: "tap",
         platform,
@@ -310,14 +339,17 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
       // Internal setup tap (#3087) via the callInternal seam (#3108): no
       // diff/strip, no baseline advance.
-      const response = await ToolRegistry.callInternal(tapTool, args);
+      throwIfAborted(signal);
+      const response = await ToolRegistry.callInternal(tapTool, args, undefined, signal);
+      throwIfAborted(signal);
       throwIfInternalToolFailed(response, "tapOn", platform);
 
       // Small delay for UI to update
-      await this.sleep(100);
+      await this.sleep(100, signal);
 
       return true;
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[UI_STATE_SETUP] Failed to tap on "${identifier}": ${error}`);
       return false;
     }
@@ -331,6 +363,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     currentStack: ModalState[],
     requiredStack: ModalState[],
     platform: string,
+    signal?: AbortSignal,
   ): Promise<string[]> {
     const actions: string[] = [];
 
@@ -339,12 +372,12 @@ export class DefaultUIStateSetup implements UIStateSetup {
       const topModal = currentStack[currentStack.length - 1];
       logger.info(`[UI_STATE_SETUP] Dismissing modal: ${topModal.type} (layer ${topModal.layer})`);
 
-      const dismissed = await this.dismissTopModal(topModal, platform);
+      const dismissed = await this.dismissTopModal(topModal, platform, signal);
       if (dismissed) {
         actions.push(`dismissModal(${topModal.type})`);
         currentStack.pop();
         // Small delay for modal to dismiss
-        await this.sleep(300);
+        await this.sleep(300, signal);
       } else {
         logger.warn(
           `[UI_STATE_SETUP] Failed to dismiss ${topModal.type}, stopping modal alignment`,
@@ -370,34 +403,40 @@ export class DefaultUIStateSetup implements UIStateSetup {
    * Dismiss the top modal using context-aware dismissal methods.
    * Tries different strategies based on modal type.
    */
-  private async dismissTopModal(modal: ModalState, platform: string): Promise<boolean> {
+  private async dismissTopModal(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     logger.debug(`[UI_STATE_SETUP] Attempting to dismiss ${modal.type} modal`);
 
     // Strategy 1: Try back button (works for most dialogs)
     if (modal.type === "dialog") {
       try {
-        await this.pressBack(platform);
-        await this.sleep(200);
+        throwIfAborted(signal);
+        await this.pressBack(platform, signal);
+        await this.sleep(200, signal);
 
         // Verify dismissal
-        if (await this.isModalConfirmedDismissed(modal, platform)) {
+        if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
           logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button`);
           return true;
         }
       } catch (error) {
+        throwIfAborted(signal);
         logger.debug(`[UI_STATE_SETUP] Back button failed for ${modal.type}: ${error}`);
       }
     }
 
     // Strategy 2: Swipe down for bottom sheets
-    if (modal.type === "bottomsheet" && (await this.dismissBottomSheet(modal, platform))) {
+    if (modal.type === "bottomsheet" && (await this.dismissBottomSheet(modal, platform, signal))) {
       return true;
     }
 
     // Strategy 3: Look for close/cancel button
     if (
       (modal.type === "dialog" || modal.type === "bottomsheet") &&
-      (await this.dismissWithCloseButton(modal, platform))
+      (await this.dismissWithCloseButton(modal, platform, signal))
     ) {
       return true;
     }
@@ -405,21 +444,23 @@ export class DefaultUIStateSetup implements UIStateSetup {
     // Strategy 4: Tap outside (for popups and menus)
     if (
       (modal.type === "popup" || modal.type === "menu" || modal.type === "overlay") &&
-      (await this.dismissByTappingOutside(modal, platform))
+      (await this.dismissByTappingOutside(modal, platform, signal))
     ) {
       return true;
     }
 
     // Final fallback: back button
     try {
-      await this.pressBack(platform);
-      await this.sleep(200);
+      throwIfAborted(signal);
+      await this.pressBack(platform, signal);
+      await this.sleep(200, signal);
 
-      if (await this.isModalConfirmedDismissed(modal, platform)) {
+      if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button (fallback)`);
         return true;
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.debug(`[UI_STATE_SETUP] Final back button attempt failed: ${error}`);
     }
 
@@ -427,8 +468,13 @@ export class DefaultUIStateSetup implements UIStateSetup {
     return false;
   }
 
-  private async dismissBottomSheet(modal: ModalState, platform: string): Promise<boolean> {
+  private async dismissBottomSheet(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     try {
+      throwIfAborted(signal);
       // The registered interaction tool is `swipeOn`, not `swipe` (see
       // src/server/interactionTools.ts). Resolving `getTool("swipe")` always
       // returned undefined, so this whole branch was dead code and bottom
@@ -444,59 +490,85 @@ export class DefaultUIStateSetup implements UIStateSetup {
         // want the full-screen downward swipe (executeScreenSwipe) that a
         // dismissal needs. Internal setup swipe (#3087) via the callInternal
         // seam (#3108): no diff/strip, no baseline advance.
-        await ToolRegistry.callInternal(swipeTool, {
-          direction: "down",
-          autoTarget: false,
-          platform,
-          deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        });
-        await this.sleep(200);
-        if (await this.isModalConfirmedDismissed(modal, platform)) {
+        await ToolRegistry.callInternal(
+          swipeTool,
+          {
+            direction: "down",
+            autoTarget: false,
+            platform,
+            deviceId: this.device.deviceId,
+            ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+          },
+          undefined,
+          signal,
+        );
+        throwIfAborted(signal);
+        await this.sleep(200, signal);
+        if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
           logger.info("[UI_STATE_SETUP] Dismissed bottom sheet with swipe down");
           return true;
         }
       }
 
-      await this.pressBack(platform);
-      await this.sleep(200);
-      if (await this.isModalConfirmedDismissed(modal, platform)) {
+      await this.pressBack(platform, signal);
+      await this.sleep(200, signal);
+      if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
         logger.info("[UI_STATE_SETUP] Dismissed bottom sheet with back button");
         return true;
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.debug(`[UI_STATE_SETUP] Swipe down failed for bottom sheet: ${error}`);
     }
     return false;
   }
 
-  private async dismissWithCloseButton(modal: ModalState, platform: string): Promise<boolean> {
+  private async dismissWithCloseButton(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     try {
-      if (await this.tapCloseButton(modal, platform)) {
+      throwIfAborted(signal);
+      if (await this.tapCloseButton(modal, platform, signal)) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with close button`);
         return true;
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.debug(`[UI_STATE_SETUP] Close button tap failed: ${error}`);
     }
     return false;
   }
 
-  private async dismissByTappingOutside(modal: ModalState, platform: string): Promise<boolean> {
+  private async dismissByTappingOutside(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     if (platform !== "android") {
       return false;
     }
     try {
+      throwIfAborted(signal);
       // Android supports coordinate taps, which preserve the established
       // scrim-dismissal behavior. iOS has no equivalent public interaction
       // tool, so it proceeds to the single platform-aware back fallback.
-      await this.adb.executeCommand("shell input tap 50 50");
-      await this.sleep(200);
-      if (await this.isModalConfirmedDismissed(modal, platform)) {
+      await this.adb.executeCommand(
+        "shell input tap 50 50",
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      throwIfAborted(signal);
+      await this.sleep(200, signal);
+      if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} by tapping outside`);
         return true;
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.debug(`[UI_STATE_SETUP] Tap outside failed: ${error}`);
     }
     return false;
@@ -508,8 +580,12 @@ export class DefaultUIStateSetup implements UIStateSetup {
    * observation error) leaves the outcome unconfirmed (#6319, #6748), so the
    * caller tries the next candidate or strategy instead of claiming success.
    */
-  private async isModalConfirmedDismissed(modal: ModalState, platform: string): Promise<boolean> {
-    const currentState = await this.getCurrentUIState(platform);
+  private async isModalConfirmedDismissed(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const currentState = await this.getCurrentUIState(platform, signal);
     if (!currentState) {
       return false;
     }
@@ -530,7 +606,11 @@ export class DefaultUIStateSetup implements UIStateSetup {
    * failed or ineffective candidate falls through to the next text instead of
    * short-circuiting the loop.
    */
-  private async tapCloseButton(modal: ModalState, platform: string): Promise<boolean> {
+  private async tapCloseButton(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     const tapTool = ToolRegistry.getTool("tapOn");
     if (!tapTool) {
       return false;
@@ -541,19 +621,26 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
     for (const text of closeTexts) {
       try {
+        throwIfAborted(signal);
         // Internal close-button tap (#3087) via the callInternal seam (#3108):
         // no diff/strip, no baseline advance.
-        const response = await ToolRegistry.callInternal(tapTool, {
-          selector: { text },
-          action: "tap",
-          platform,
-          deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        });
+        const response = await ToolRegistry.callInternal(
+          tapTool,
+          {
+            selector: { text },
+            action: "tap",
+            platform,
+            deviceId: this.device.deviceId,
+            ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+          },
+          undefined,
+          signal,
+        );
+        throwIfAborted(signal);
         throwIfInternalToolFailed(response, "tapOn", platform);
 
-        await this.sleep(200);
-        if (await this.isModalConfirmedDismissed(modal, platform)) {
+        await this.sleep(200, signal);
+        if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
           logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
           return true;
         }
@@ -561,6 +648,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
           `[UI_STATE_SETUP] Tapped "${text}" but ${modal.type} is still present, trying next candidate`,
         );
       } catch (error) {
+        throwIfAborted(signal);
         // Button not found, or the tap failed outright — try the next candidate.
         logger.debug(`[UI_STATE_SETUP] Close button candidate "${text}" failed: ${error}`);
         continue;
@@ -573,12 +661,19 @@ export class DefaultUIStateSetup implements UIStateSetup {
   /**
    * Press the back button.
    */
-  private async pressBack(platform: string): Promise<void> {
+  private async pressBack(platform: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     if (platform === "android") {
       // Modal recovery belongs to this instance's injected ADB/timer boundary.
       // Calling press() avoids a nested observed interaction while preserving
       // the accessibility-service then ADB fallback behavior.
-      const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+      const result = await new PressButton(this.device, this.adb, this.timer).press(
+        "back",
+        undefined,
+        undefined,
+        signal,
+      );
+      throwIfAborted(signal);
       if (!result.success) {
         throw new Error(result.error ?? "Android back navigation failed");
       }
@@ -586,12 +681,18 @@ export class DefaultUIStateSetup implements UIStateSetup {
       return;
     }
 
-    const response = await ToolRegistry.callInternal("pressButton", {
-      button: "back",
-      platform,
-      deviceId: this.device.deviceId,
-      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-    });
+    const response = await ToolRegistry.callInternal(
+      "pressButton",
+      {
+        button: "back",
+        platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+      },
+      undefined,
+      signal,
+    );
+    throwIfAborted(signal);
     throwIfInternalToolFailed(response, "pressButton", platform);
     logger.debug(`[UI_STATE_SETUP] Pressed back via ${platform} interaction tool`);
   }
@@ -599,7 +700,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
   /**
    * Sleep for the specified duration.
    */
-  private sleep(ms: number): Promise<void> {
-    return this.timer.sleep(ms);
+  private async sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(this.timer.sleep(ms), signal);
+    throwIfAborted(signal);
   }
 }

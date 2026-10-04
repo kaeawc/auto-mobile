@@ -264,6 +264,13 @@ export class PressButton extends BaseVisualChange {
       budget === undefined
         ? PressButton.GLOBAL_ACTION_TIMEOUT_MS
         : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
+    let dispatched = false;
+    const indeterminateResult = (reason: string | undefined): PressButtonResult => ({
+      success: false,
+      button,
+      keyCode,
+      error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
+    });
     try {
       throwIfAborted(signal);
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
@@ -274,6 +281,10 @@ export class PressButton extends BaseVisualChange {
           undefined,
           frameContext,
           signal,
+          () => {
+            // HOME is idempotent; only latch presses that must not be replayed.
+            dispatched = normalized !== "home";
+          },
         ),
         signal,
       );
@@ -297,14 +308,17 @@ export class PressButton extends BaseVisualChange {
           `[PRESS_BUTTON] Global action for ${button} reported success but foreground app did not change to the launcher; falling back to ADB`,
         );
       } else {
+        if (dispatched && !result.acknowledged) {
+          return indeterminateResult(result.error);
+        }
         logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
       }
     } catch (error) {
       throwIfAborted(signal);
-      // The validated ADB fallback remains safe when the global-action RPC fails.
-      logger.debug(
-        `[PRESS_BUTTON] Global action threw for ${button}, falling back to ADB: ${error}`,
-      );
+      logger.warn(`[PRESS_BUTTON] Global action threw for ${button}`, error);
+      if (dispatched) {
+        return indeterminateResult(errorMessage(error));
+      }
     }
     return undefined;
   }

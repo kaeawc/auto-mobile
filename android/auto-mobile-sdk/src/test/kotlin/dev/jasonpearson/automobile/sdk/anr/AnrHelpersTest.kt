@@ -24,6 +24,16 @@ class AnrHelpersTest {
       )
       .apply { isAccessible = true }
 
+  private val cursorClass =
+    AutoMobileAnr::class.java.declaredClasses.single { it.simpleName == "AnrCursor" }
+  private val cursorConstructor =
+    cursorClass.getDeclaredConstructor(Long::class.javaPrimitiveType, Set::class.java).apply {
+      isAccessible = true
+    }
+
+  private fun cursor(timestamp: Long, idsAtTimestamp: Set<String>? = null): Any =
+    cursorConstructor.newInstance(timestamp, idsAtTimestamp)
+
   private val reportMethod =
     AutoMobileAnr::class
       .java
@@ -31,7 +41,8 @@ class AnrHelpersTest {
         "reportNewAnrs",
         List::class.java,
         Function1::class.java,
-        Long::class.javaPrimitiveType,
+        Function1::class.java,
+        cursorClass,
         Function1::class.java,
       )
       .apply { isAccessible = true }
@@ -45,9 +56,17 @@ class AnrHelpersTest {
     items: List<Long>,
     lastReported: Long = 0L,
     send: (Long) -> Boolean,
-  ): Long {
+  ): Any {
     val timestampOf: (Long) -> Long = { it }
-    return reportMethod.invoke(AutoMobileAnr, items, timestampOf, lastReported, send) as Long
+    val identityOf: (Long) -> String = { it.toString() }
+    return reportMethod.invoke(
+      AutoMobileAnr,
+      items,
+      timestampOf,
+      identityOf,
+      cursor(lastReported),
+      send,
+    )
   }
 
   @Test
@@ -128,7 +147,7 @@ class AnrHelpersTest {
       }
 
     assertEquals(listOf(10L, 20L, 30L), sent)
-    assertEquals(30L, watermark)
+    assertEquals(cursor(30L, setOf("30")), watermark)
   }
 
   @Test
@@ -142,7 +161,7 @@ class AnrHelpersTest {
       }
 
     assertEquals(listOf(10L), sent)
-    assertEquals(5L, watermark)
+    assertEquals(cursor(5L), watermark)
   }
 
   @Test
@@ -156,7 +175,7 @@ class AnrHelpersTest {
       }
 
     assertEquals(listOf(10L, 20L), sent)
-    assertEquals(10L, watermark)
+    assertEquals(cursor(10L, setOf("10")), watermark)
   }
 
   @Test
@@ -170,7 +189,7 @@ class AnrHelpersTest {
       }
 
     assertEquals(listOf(30L), sent)
-    assertEquals(30L, watermark)
+    assertEquals(cursor(30L, setOf("30")), watermark)
   }
 
   @Test
@@ -183,7 +202,7 @@ class AnrHelpersTest {
         true
       }
 
-    assertEquals(20L, watermark)
+    assertEquals(cursor(20L), watermark)
     assertFalse(sent)
   }
 

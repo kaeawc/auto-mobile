@@ -3033,15 +3033,6 @@
           "type": "string",
           "enum": ["absolute", "normalized", "percent"]
         },
-        "raw": {
-          "description": "Return the raw view hierarchy instead of the compact skeleton",
-          "type": "boolean"
-        },
-        "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
-          "type": "string",
-          "enum": ["full", "skeleton"]
-        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -24334,15 +24325,6 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
-        },
-        "raw": {
-          "description": "Return the raw view hierarchy instead of the compact skeleton",
-          "type": "boolean"
-        },
-        "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
-          "type": "string",
-          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",

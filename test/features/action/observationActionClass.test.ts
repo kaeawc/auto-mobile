@@ -31,14 +31,12 @@ const advertisedClasses = {
   swipeOn: "scroll",
   dragAndDrop: "scroll",
   biometricAuth: "unknown",
-  hitTest: "unknown",
   launchApp: "unknown",
   observe: "unknown", // Top-level projection; included to cover every raw/project advertiser.
   pinchOn: "unknown",
   pressButton: "unknown", // Missing button; argument-dependent cases are pinned below.
   rotate: "unknown",
   sendKeys: "inPlace", // Missing commands; argument-dependent cases are pinned below.
-  setPosture: "unknown",
   shake: "unknown",
   systemTray: "unknown",
   // Pinned unknown pending an owner decision on whether coordinate taps should be settle-gated navigation actions.

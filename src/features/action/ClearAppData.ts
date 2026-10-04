@@ -18,7 +18,10 @@ import {
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
 
 const CLEAR_APP_DATA_TIMEOUT_MS = 60_000;
 
@@ -60,11 +63,13 @@ export class ClearAppData {
   private isSimulatorOverride?: () => boolean;
   private readonly backendResolver: typeof resolveIosClearDataBackend;
   private readonly cacheInvalidator: DeviceWindowCacheInvalidator;
+  private readonly createPerformanceTracker: () => PerformanceTracker;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     options: ClearAppDataOptions = {},
+    performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -73,6 +78,7 @@ export class ClearAppData {
     this.isSimulatorOverride = options.isSimulatorFn;
     this.backendResolver = options.backendResolver ?? resolveIosClearDataBackend;
     this.cacheInvalidator = options.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
+    this.createPerformanceTracker = performanceTrackerFactory;
   }
 
   async execute(packageName: string, userId?: number): Promise<ClearAppDataResult> {
@@ -90,58 +96,59 @@ export class ClearAppData {
 
   private async executeAndroid(packageName: string, userId?: number): Promise<ClearAppDataResult> {
     const adb: AdbExecutor = this.adbFactory.create(this.device);
-    const perf = createGlobalPerformanceTracker();
+    const perf = this.createPerformanceTracker();
     perf.serial("clearAppData");
 
-    // Auto-detect target user if not specified
-    const targetUserId = await perf.track("detectTargetUser", async () => {
-      return (
-        await new AndroidUserTargetResolver(adb).resolve({
-          packageName,
-          explicitUserId: userId,
-        })
-      ).userId;
-    });
-
     try {
-      // pm clear both clears data AND stops the app, no need for separate force-stop
-      const result = await perf.track("pmClear", async () => {
-        try {
-          return await adb.executeCommand(
-            `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
-            CLEAR_APP_DATA_TIMEOUT_MS,
-          );
-        } finally {
-          this.cacheInvalidator.invalidate(this.device);
-        }
+      // Auto-detect target user if not specified
+      const targetUserId = await perf.track("detectTargetUser", async () => {
+        return (
+          await new AndroidUserTargetResolver(adb).resolve({
+            packageName,
+            explicitUserId: userId,
+          })
+        ).userId;
       });
 
-      const output = `${result.stdout}${result.stderr}`.trim();
-      const succeeded = result.stdout.split(/\r?\n/).some((line) => line.trim() === "Success");
-      if (!succeeded) {
-        const error = `Failed to clear application data: ${output || "pm clear returned no output"}`;
-        logger.warn(`[ClearAppData] ${error}`);
-        perf.end();
-        return { success: false, packageName, userId: targetUserId, error };
-      }
+      try {
+        // pm clear both clears data AND stops the app, no need for separate force-stop
+        const result = await perf.track("pmClear", async () => {
+          try {
+            return await adb.executeCommand(
+              `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
+              CLEAR_APP_DATA_TIMEOUT_MS,
+            );
+          } finally {
+            this.cacheInvalidator.invalidate(this.device);
+          }
+        });
 
-      logger.info(`Clearing app data was successful for user ${targetUserId}`);
+        const output = `${result.stdout}${result.stderr}`.trim();
+        const succeeded = result.stdout.split(/\r?\n/).some((line) => line.trim() === "Success");
+        if (!succeeded) {
+          const error = `Failed to clear application data: ${output || "pm clear returned no output"}`;
+          logger.warn(`[ClearAppData] ${error}`);
+          return { success: false, packageName, userId: targetUserId, error };
+        }
+
+        logger.info(`Clearing app data was successful for user ${targetUserId}`);
+        return {
+          success: true,
+          packageName,
+          userId: targetUserId,
+        };
+      } catch (error) {
+        const message = errorMessage(error);
+        logger.warn(`[ClearAppData] Failed to clear application data: ${message}`, error);
+        return {
+          success: false,
+          packageName,
+          userId: targetUserId,
+          error: `Failed to clear application data: ${message}`,
+        };
+      }
+    } finally {
       perf.end();
-      return {
-        success: true,
-        packageName,
-        userId: targetUserId,
-      };
-    } catch (error) {
-      const message = errorMessage(error);
-      logger.warn(`[ClearAppData] Failed to clear application data: ${message}`, error);
-      perf.end();
-      return {
-        success: false,
-        packageName,
-        userId: targetUserId,
-        error: `Failed to clear application data: ${message}`,
-      };
     }
   }
 

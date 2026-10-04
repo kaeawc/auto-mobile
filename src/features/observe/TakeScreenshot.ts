@@ -66,6 +66,8 @@ import { displayTransitions } from "./DisplayTransition";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
+const SCREENSHOT_CLEANUP_TIMEOUT_MS = 1500;
+
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
   const oldExtension = path.extname(filePath);
   return `${filePath.slice(0, filePath.length - oldExtension.length)}.${extension}`;
@@ -768,9 +770,25 @@ export class TakeScreenshot implements ScreenshotService {
       : `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
     // Use larger maxBuffer (50MB) to handle high-resolution screenshots
     const maxBuffer = 50 * 1024 * 1024; // 50MB
-    const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () => {
-      throwIfAborted(signal);
-      return this.adb.executeCommand(command, undefined, maxBuffer, undefined, signal);
+    let captureCompleted = false;
+    const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, async () => {
+      try {
+        throwIfAborted(signal);
+        const captured = await this.adb.executeCommand(
+          command,
+          undefined,
+          maxBuffer,
+          undefined,
+          signal,
+        );
+        captureCompleted = true;
+        return captured;
+      } finally {
+        // Successful captures already remove the file in the unchanged chained command.
+        if (!readOnly && (!captureCompleted || signal?.aborted)) {
+          this.removeBase64TempScreenshot(tempFile);
+        }
+      }
     });
     const cmdDuration = this.timer.now() - cmdStartTime;
     logger.info(`[SCREENSHOT] Combined ADB command took ${cmdDuration}ms`);
@@ -804,6 +822,22 @@ export class TakeScreenshot implements ScreenshotService {
       screenshotImageSize: readImageHeaderDimensions(encoded) ?? undefined,
       ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
     };
+  }
+
+  private removeBase64TempScreenshot(path: string): void {
+    const cleanup = this.adb
+      .execute(["shell", "rm", "-f", path], {
+        timeoutMs: SCREENSHOT_CLEANUP_TIMEOUT_MS,
+        // Override ADB's ambient request signal so cancellation still permits bounded cleanup.
+        signal: new AbortController().signal,
+        noRetry: true,
+      })
+      .catch((error: unknown) => {
+        // Best-effort removal is idempotent and must not replace the capture error or cancellation.
+        logger.debug("[SCREENSHOT] Could not remove temporary base64 screenshot", error);
+      });
+    // Failed/cancelled captures must settle immediately, even if the cleanup executor stalls.
+    void cleanup;
   }
 
   /**

@@ -45,6 +45,7 @@ internal fun DevicesSection(
   onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
   onKillDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
   onUpdateService: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
+  daemonStatusError: String? = null,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -83,6 +84,14 @@ internal fun DevicesSection(
     // Daemon status info
     if (daemonStatus != null) {
       DaemonStatusInfo(daemonStatus = daemonStatus)
+    }
+
+    if (daemonStatusError != null) {
+      Text(
+        daemonStatusError,
+        fontSize = 10.sp,
+        color = Color(0xFFE53935),
+      )
     }
 
     if (error != null) {

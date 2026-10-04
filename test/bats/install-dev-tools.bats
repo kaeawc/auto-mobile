@@ -119,6 +119,8 @@ set -euo pipefail
 if [[ "${1:-}" == "list" ]]; then
   if [[ -f "${INSTALL_ATTEMPTED}" ]]; then
     printf '%s\n' shellcheck jq ripgrep yq gum hadolint xmlstarlet swiftformat swiftlint xcodegen libusbmuxd ideviceinstaller
+    # Exceed the pipe buffer with matches first to expose grep -q's SIGPIPE.
+    seq -f 'filler-%g' 1 20000
   fi
   exit 0
 fi
@@ -138,6 +140,38 @@ STUB
 
   [ "$status" -eq 42 ]
   [[ "$output" == *"Homebrew reported an error"* ]]
+}
+
+@test "macOS development tools already listed in a large Homebrew inventory are not reinstalled" {
+  local brew_calls="${TEST_DIR}/brew-calls"
+
+  cat > "${STUB_BIN}/brew" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "list" ]]; then
+  printf '%s\n' shellcheck jq ripgrep yq gum hadolint xmlstarlet swiftformat swiftlint xcodegen libusbmuxd ideviceinstaller
+  # Keep the same large inventory as the post-install regression test.
+  seq -f 'filler-%g' 1 20000
+  exit 0
+fi
+
+if [[ "${1:-}" == "install" ]]; then
+  printf 'install\n' >> "${BREW_REINSTALL_CALLS}"
+  exit 0
+fi
+
+exit 1
+STUB
+  "$CHMOD" +x "${STUB_BIN}/brew"
+  export BREW_REINSTALL_CALLS="${brew_calls}"
+
+  run _install_dev_tools_brew
+  echo "$output"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Development tools ready."* ]]
+  [ ! -e "${brew_calls}" ]
 }
 
 @test "Linux development tool installer fails when any apt package install fails" {

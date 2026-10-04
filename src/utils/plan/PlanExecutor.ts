@@ -706,7 +706,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
     executionOptions?: PlanExecutionOptions,
   ): Promise<PlanExecutionResult> {
     let executedSteps = 0;
-    const debugMode = isDebugModeEnabled();
     const startTime = this.timer.now();
     // Always capture step data for test recording, not just in debug mode
     const debugSteps: ExecutePlanStepDebugInfo[] = [];
@@ -745,7 +744,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           });
         }
         const step = plan.steps[i];
-        const stepStartTime = debugMode ? this.timer.now() : 0;
+        const stepStartTime = this.timer.now();
         const stepLabel =
           step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);
         logger.info(

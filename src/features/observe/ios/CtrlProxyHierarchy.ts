@@ -18,7 +18,7 @@ import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
 import { maxObservationAgeMs } from "../observationFreshness";
-import { assignStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
+import { assignIosStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
 import type {
   HierarchyDelegateContext,
   CtrlProxyNode,
@@ -592,7 +592,7 @@ export class CtrlProxyHierarchy {
     // the shared element selector rather than advertising an opaque UUID.
     // SDK-only children can move between parents as the SDK snapshot catches up
     // with XCUITest frames. Their sdk.source marker survives beside $ in extras.
-    assignStableViewIds(filteredNode, { excludeSdkInjectedNodes: true });
+    assignIosStableViewIds(filteredNode);
 
     return {
       hierarchy: {

@@ -256,6 +256,11 @@ export interface StableViewIdOptions {
   excludeSdkInjectedNodes?: boolean;
 }
 
+/** iOS ingest always excludes SDK-only nodes from real-node identity. */
+export function assignIosStableViewIds(root: unknown): Map<string, string> {
+  return assignStableViewIds(root, { excludeSdkInjectedNodes: true });
+}
+
 /**
  * Rewrite every generated (UUID-shaped) `view-id` under `root` — in place —
  * into a content-derived stable id: `s2-<hash16>` for a node whose content hash

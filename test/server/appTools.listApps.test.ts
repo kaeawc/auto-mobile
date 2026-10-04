@@ -1,3 +1,9 @@
+import { TerminateApp } from "../../src/features/action/TerminateApp";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeTimer } from "../fakes/FakeTimer";
+import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { spyOn } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -287,6 +293,70 @@ describe("terminateApp tool", () => {
     ToolRegistry.clearTools();
     resetListAppsToolDependencies();
     resetTerminateAppToolDependencies();
+  });
+
+  test("forwards the handler signal to TerminateApp.execute", async () => {
+    const controller = new AbortController();
+    const execute = spyOn(
+      {
+        execute: async (..._args: Parameters<TerminateApp["execute"]>) => ({
+          success: true,
+          packageName: "com.example.app",
+          wasInstalled: false,
+          wasRunning: false,
+          wasForeground: false,
+        }),
+      },
+      "execute",
+    );
+    setTerminateAppToolDependencies({ createTerminateApp: () => ({ execute }) });
+    setInstalledAppResourceRefresh(async () => {});
+    try {
+      await ToolRegistry.getTool("terminateApp")!.deviceAwareHandler!(
+        device,
+        { appId: "com.example.app" },
+        undefined,
+        controller.signal,
+      );
+      expect(execute).toHaveBeenCalledWith(
+        "com.example.app",
+        { skipUiStability: true },
+        controller.signal,
+      );
+    } finally {
+      resetInstalledAppResourceRefresh();
+    }
+  });
+
+  test("raises the Android listing error through the registered handler", async () => {
+    const adb = new FakeAdbClient();
+    adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    adb.setCommandError("shell pm list packages --user 0", new Error("device offline"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const target: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
+    const app = new TerminateApp(target, adb as unknown as AdbClient, { timer });
+    const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable");
+    });
+    setInstalledAppResourceRefresh(async () => {});
+    setTerminateAppToolDependencies({
+      createTerminateApp: () => {
+        return { execute: (appId) => app.execute(appId, { skipObservation: true }) };
+      },
+    });
+    try {
+      await expect(
+        ToolRegistry.getTool("terminateApp")!.deviceAwareHandler!(
+          { deviceId: "emulator-9426", name: "Pixel", platform: "android" },
+          { appId: "com.example.app" },
+        ),
+      ).rejects.toThrow("device offline");
+      expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    } finally {
+      ctrlProxySpy.mockRestore();
+      resetInstalledAppResourceRefresh();
+    }
   });
 
   test("surfaces a typed TerminateApp failure instead of reporting success", async () => {

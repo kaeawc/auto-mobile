@@ -2,13 +2,22 @@ package dev.jasonpearson.automobile.sdk.database
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
+import android.system.StructStat
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.After
 import org.junit.Before
@@ -16,6 +25,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.annotation.SQLiteMode
+import org.robolectric.shadows.ShadowLinux
 
 @RunWith(RobolectricTestRunner::class)
 class SQLiteDatabaseDriverTest {
@@ -26,11 +40,115 @@ class SQLiteDatabaseDriverTest {
   @Before
   fun setup() {
     context = RuntimeEnvironment.getApplication()
+    // Load native SQLite in setup rather than charging shared-library startup to the first test.
+    SQLiteDatabase.create(null).close()
   }
 
   @After
   fun tearDown() {
     filesToDelete.forEach { it.delete() }
+  }
+
+  @Test
+  @Config(sdk = [29, 30], shadows = [DatabaseFileStatShadow::class])
+  @SQLiteMode(SQLiteMode.Mode.NATIVE)
+  fun `cached inspector reads recreated database rather than the deleted file`() {
+    val file = createDatabase("cached-replacement.db")
+    val driver = SQLiteDatabaseDriver(context)
+    val fresh = SQLiteDatabaseDriver(context)
+    try {
+      assertEquals(listOf(listOf(1L, 0L)), driver.getTableData(file.path, "items", 10, 0).rows)
+      val oldHandle = cachedHandle(driver, file.path)
+      val oldIdentity = Os.stat(file.path)
+      assertTrue(oldIdentity.st_ino != 0L, "stat must expose a real inode")
+      assertTrue(context.deleteDatabase(file.name))
+      createDatabase(file.name)
+      context.openOrCreateDatabase(file.name, Context.MODE_PRIVATE, null).use { db ->
+        db.execSQL("UPDATE items SET value = 1")
+      }
+      val newIdentity = Os.stat(file.path)
+      assertNotEquals(
+        oldIdentity.st_dev to oldIdentity.st_ino,
+        newIdentity.st_dev to newIdentity.st_ino,
+      )
+      assertEquals(listOf(listOf(1L, 1L)), fresh.getTableData(file.path, "items", 10, 0).rows)
+      assertEquals(listOf(listOf(1L, 1L)), driver.getTableData(file.path, "items", 10, 0).rows)
+      assertFalse(oldHandle.isOpen)
+    } finally {
+      driver.closeAll()
+      fresh.closeAll()
+      context.deleteDatabase(file.name)
+    }
+  }
+
+  @Test
+  @Config(sdk = [29, 30], shadows = [DatabaseFileStatShadow::class])
+  @SQLiteMode(SQLiteMode.Mode.NATIVE)
+  fun `cached inspector reports not found after database is deleted`() {
+    val file = createDatabase("cached-deleted.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      driver.getTableData(file.path, "items", 10, 0)
+      val oldHandle = cachedHandle(driver, file.path)
+      assertTrue(context.deleteDatabase(file.name))
+      assertFailsWith<DatabaseError.NotFound> {
+        driver.getTableData(file.path, "items", 10, 0)
+      }
+      assertFalse(oldHandle.isOpen)
+    } finally {
+      driver.closeAll()
+      context.deleteDatabase(file.name)
+    }
+  }
+
+  @Test
+  @Config(sdk = [29, 30], shadows = [DatabaseFileStatShadow::class])
+  @SQLiteMode(SQLiteMode.Mode.NATIVE)
+  fun `unchanged database reuses its cached handle even when rows change`() {
+    val file = createDatabase("cached-unchanged.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      driver.getTableData(file.path, "items", 10, 0)
+      val handle = cachedHandle(driver, file.path)
+      context.openOrCreateDatabase(file.name, Context.MODE_PRIVATE, null).use { db ->
+        db.execSQL("UPDATE items SET value = 1")
+      }
+      assertEquals(listOf(listOf(1L, 1L)), driver.getTableData(file.path, "items", 10, 0).rows)
+      assertSame(handle, cachedHandle(driver, file.path))
+      assertTrue(handle.isOpen)
+    } finally {
+      driver.closeAll()
+      context.deleteDatabase(file.name)
+    }
+  }
+
+  @Test
+  @Config(sdk = [29, 30], shadows = [DatabaseFileStatShadow::class])
+  @SQLiteMode(SQLiteMode.Mode.NATIVE)
+  fun `replacing one database preserves the other cached handle`() {
+    val replaced = createDatabase("cached-independent-replaced.db")
+    val unchanged = createDatabase("cached-independent-unchanged.db")
+    val driver = SQLiteDatabaseDriver(context)
+    try {
+      driver.getTableData(replaced.path, "items", 10, 0)
+      driver.getTableData(unchanged.path, "items", 10, 0)
+      val oldHandle = cachedHandle(driver, replaced.path)
+      val unchangedHandle = cachedHandle(driver, unchanged.path)
+      assertTrue(context.deleteDatabase(replaced.name))
+      createDatabase(replaced.name)
+      context.openOrCreateDatabase(replaced.name, Context.MODE_PRIVATE, null).use { db ->
+        db.execSQL("UPDATE items SET value = 1")
+      }
+      assertEquals(listOf(listOf(1L, 1L)), driver.getTableData(replaced.path, "items", 10, 0).rows)
+      assertFalse(oldHandle.isOpen)
+      assertTrue(unchangedHandle.isOpen)
+      assertEquals(listOf(listOf(1L, 0L)), driver.getTableData(unchanged.path, "items", 10, 0).rows)
+      assertSame(unchangedHandle, cachedHandle(driver, unchanged.path))
+    } finally {
+      driver.closeAll()
+      context.deleteDatabase(replaced.name)
+      context.deleteDatabase(unchanged.name)
+    }
   }
 
   @Test
@@ -387,6 +505,18 @@ class SQLiteDatabaseDriverTest {
     return dbFile
   }
 
+  // Inspect only after synchronous driver calls; no production API or unlocked open call is needed.
+  private fun cachedHandle(driver: SQLiteDatabaseDriver, path: String): SQLiteDatabase {
+    val cacheField = SQLiteDatabaseDriver::class.java.getDeclaredField("openDatabases")
+    cacheField.isAccessible = true
+    val entry = (cacheField.get(driver) as Map<*, *>)[path]!!
+    // Also supports the original bare-handle cache when running the pre-fix regression tests.
+    if (entry is SQLiteDatabase) return entry
+    val databaseField = entry.javaClass.getDeclaredField("database")
+    databaseField.isAccessible = true
+    return databaseField.get(entry) as SQLiteDatabase
+  }
+
   private fun createNotesDatabase(name: String): File {
     val dbFile = context.getDatabasePath(name)
     dbFile.parentFile?.mkdirs()
@@ -414,4 +544,37 @@ class SQLiteDatabaseDriverTest {
   }
 
   private data class Classification(val returnsRows: Boolean, val readOnly: Boolean)
+}
+
+// Robolectric 4.17's ShadowLinux.stat hardcodes st_dev and st_ino to zero, even with native SQLite.
+// Supply real host identities only in the replacement tests; production uses API-21 Os.stat.
+@Implements(className = "libcore.io.Linux", minSdk = 26, isInAndroidSdk = false)
+class DatabaseFileStatShadow : ShadowLinux() {
+  @Implementation
+  override fun stat(path: String?): StructStat {
+    // ShadowLinux.fstat delegates with a null path; retain its default behavior for that case.
+    if (path == null) return super.stat(null)
+    val attributes =
+      try {
+        Files.readAttributes(File(path).toPath(), "unix:dev,ino")
+      } catch (error: IOException) {
+        throw ErrnoException("stat", OsConstants.ENOENT, error)
+      }
+    val original = super.stat(path)
+    return StructStat(
+      attributes.getValue("dev") as Long,
+      attributes.getValue("ino") as Long,
+      original.st_mode,
+      original.st_nlink,
+      original.st_uid,
+      original.st_gid,
+      original.st_rdev,
+      original.st_size,
+      original.st_atime,
+      original.st_mtime,
+      original.st_ctime,
+      original.st_blksize,
+      original.st_blocks,
+    )
+  }
 }

@@ -290,6 +290,152 @@ describe("TalkBackToggle", () => {
     });
   });
 
+  describe("bounded state confirmation", () => {
+    test.each([true, false])(
+      "reports a bounded state mismatch for requested enabled=%s",
+      async (enabled) => {
+        const initialService = enabled ? "unknown" : "talkback";
+        fakeDetector.setTalkBackEnabled(!enabled);
+        fakeDetector.enqueueDetectMethodResults(initialService);
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await new TalkBackToggle(
+            ANDROID_DEVICE,
+            fakeAdb,
+            fakeDetector,
+            fakeTimer,
+            fakeSecureSettings,
+          ).toggle(enabled);
+
+          const reason = enabled
+            ? "TalkBack requested enabled but observed disabled after 1500ms of confirmation waits"
+            : "TalkBack requested disabled but observed enabled after 1500ms of confirmation waits";
+          expect(result).toEqual({
+            supported: true,
+            applied: false,
+            currentState: !enabled,
+            reason,
+          });
+          expect(warn).toHaveBeenCalledWith(`[TalkBackToggle] ${reason}`);
+          // One idempotency read + four confirmation reads. Enabling also has
+          // three sleeps in the existing no-dialog dismissal loop.
+          expect(fakeDetector.getDetectionCallCount()).toBe(5);
+          expect(fakeDetector.getInvalidatedDevices()).toHaveLength(5);
+          expect(fakeTimer.getSleepHistory()).toEqual(
+            enabled ? [500, 500, 500, 500, 500, 500] : [500, 500, 500],
+          );
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test.each([true, false])(
+      "confirms a delayed state change for requested enabled=%s",
+      async (enabled) => {
+        const initialService = enabled ? "unknown" : "talkback";
+        const requestedService = enabled ? "talkback" : "unknown";
+        fakeDetector.enqueueDetectMethodResults(initialService, initialService, requestedService);
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(enabled);
+
+        expect(result).toEqual({ supported: true, applied: true, currentState: enabled });
+        expect(result.reason).toBeUndefined();
+        expect(fakeDetector.getDetectionCallCount()).toBe(3);
+        // Three dialog sleeps on enable + exactly one confirmation sleep.
+        expect(fakeTimer.getSleepHistory()).toEqual(enabled ? [500, 500, 500, 500] : [500]);
+      },
+    );
+
+    test.each([true, false])(
+      "confirms on the last bounded read for requested enabled=%s",
+      async (enabled) => {
+        const initialService = enabled ? "unknown" : "talkback";
+        const requestedService = enabled ? "talkback" : "unknown";
+        fakeDetector.enqueueDetectMethodResults(
+          initialService,
+          initialService,
+          initialService,
+          initialService,
+          requestedService,
+        );
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(enabled);
+
+        expect(result).toEqual({ supported: true, applied: true, currentState: enabled });
+        expect(fakeDetector.getDetectionCallCount()).toBe(5);
+        expect(fakeTimer.getSleepHistory()).toEqual(
+          enabled ? [500, 500, 500, 500, 500, 500] : [500, 500, 500],
+        );
+      },
+    );
+
+    test.each([true, false])(
+      "confirms immediately without extra sleeps for requested enabled=%s",
+      async (enabled) => {
+        fakeDetector.enqueueDetectMethodResults(
+          enabled ? "unknown" : "talkback",
+          enabled ? "talkback" : "unknown",
+        );
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(enabled);
+
+        expect(result).toEqual({ supported: true, applied: true, currentState: enabled });
+        expect(fakeDetector.getDetectionCallCount()).toBe(2);
+        // Only the existing three dialog sleeps on enable; confirmation adds none.
+        expect(fakeTimer.getSleepHistory()).toEqual(enabled ? [500, 500, 500] : []);
+      },
+    );
+
+    test("preserves a blocking prompt and warning when state confirmation fails", async () => {
+      fakeDetector.setTalkBackEnabled(false);
+      fakeAdb.setForegroundApp({
+        packageName: "com.google.android.permissioncontroller",
+        userId: 0,
+        activityName:
+          "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+      });
+      const result = await new TalkBackToggle(
+        ANDROID_DEVICE,
+        fakeAdb,
+        fakeDetector,
+        fakeTimer,
+        fakeSecureSettings,
+      ).toggle(true);
+
+      expect(result).toMatchObject({
+        supported: true,
+        applied: false,
+        currentState: false,
+        reason:
+          "TalkBack requested enabled but observed disabled after 1500ms of confirmation waits",
+        blockingPrompt: {
+          kind: "runtime-permission",
+          package: "com.google.android.permissioncontroller",
+          activity:
+            "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+        },
+        warning: expect.stringContaining("Nothing was tapped"),
+      });
+      expect(fakeAdb.wasCommandExecuted("shell input")).toBe(false);
+    });
+  });
+
   describe("enable TalkBack", () => {
     test("returns supported:true applied:true when TalkBack is installed and currently disabled", async () => {
       // Pre-apply idempotency detect: not talkback -> proceed. Post-apply
@@ -628,6 +774,13 @@ describe("TalkBackToggle", () => {
       expect(result.applied).toBe(false);
       expect(result.currentState).toBe(true);
       expect(fakeAdb.wasCommandExecuted("accessibility_enabled 1")).toBe(false);
+      expect(result.reason).toBeUndefined();
+      expect(fakeSecureSettings.putCalls).toEqual([]);
+      expect(fakeAdb.getCommandCalls().map((call) => call.command)).toEqual([
+        "shell pm list packages com.google.android.marvin.talkback",
+      ]);
+      expect(fakeDetector.getDetectionCallCount()).toBe(1);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
     test("enables TalkBack when another service is active but TalkBack is not", async () => {
@@ -825,6 +978,11 @@ describe("TalkBackToggle", () => {
       expect(result.applied).toBe(false);
       expect(result.currentState).toBe(false);
       expect(fakeAdb.wasCommandExecuted("accessibility_enabled 0")).toBe(false);
+      expect(result.reason).toBeUndefined();
+      expect(fakeSecureSettings.putCalls).toEqual([]);
+      expect(fakeAdb.getCommandCalls()).toEqual([]);
+      expect(fakeDetector.getDetectionCallCount()).toBe(1);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
   });
 

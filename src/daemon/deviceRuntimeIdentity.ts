@@ -20,6 +20,11 @@ import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } fr
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 type MutableMetadataSource = "refresh" | "snapshot";
 
+export type DeviceRetirementOptions = Pick<DiscoveryReconcileOptions, "excludeExecutionId"> & {
+  /** ANR failure releases session work separately and retains sessionless work. */
+  cancelDeviceBoundExecutions?: boolean;
+};
+
 function unknownAndroidRuntimeName(deviceId: string): string {
   return `Unknown (${deviceId})`;
 }
@@ -34,6 +39,7 @@ export interface DeviceRuntimeIdentityPoolPort {
   getTimer(): Timer;
   getRefreshGeneration(): number;
   hasReusableSerial(device: PooledDevice): boolean;
+  isReservedForShutdown(device: PooledDevice): boolean;
   cancelDeviceExecutions?(
     deviceId: string,
     reason: ReturnType<typeof deviceLossCancellationReason>,
@@ -48,6 +54,10 @@ export interface DeviceRuntimeIdentityPoolPort {
 
 /** Resolves and caches pooled runtime identity without deciding pool membership. */
 export class DeviceRuntimeIdentity {
+  // Quarantine still withholds identity trust during shutdown. Remember only
+  // its deferred cancellation, not another shutdown fence; the existing
+  // reservation decides when cancellation is safe. Removed entries are not held.
+  private readonly deferredQuarantineCancellations = new WeakSet<PooledDevice>();
   private readonly pendingIdentityReplacements = new Map<string, BootedDevice>();
   private readonly pendingIdentityReplacementUnresolvedObservations = new Map<
     string,
@@ -396,6 +406,7 @@ export class DeviceRuntimeIdentity {
       return;
     }
     delete pooled.identityUnresolved;
+    this.deferredQuarantineCancellations.delete(pooled);
     // Full: quarantine hid an untrusted runtime; lifting it needs a fresh trusted screen.
     this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
     logger.info(
@@ -719,6 +730,11 @@ export class DeviceRuntimeIdentity {
    * naming the serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
    * review).
    *
+   * An active intentional-shutdown reservation defers cancellation, whichever
+   * discovery enters quarantine. Quarantine still withholds identity trust; if
+   * shutdown fails, a later unresolved observation cancels after release.
+   * A confirmed retirement flushes it before detaching the pooled session.
+   *
    * Exclude the explicit {@link DiscoveryReconcileOptions.excludeExecutionId},
    * or the ambient execution whose own discovery produced this observation. It is the
    * operation that is about to act on this evidence -- a session-bound
@@ -737,17 +753,53 @@ export class DeviceRuntimeIdentity {
     // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
     this.recordIdentityObservation(pooled, evidence);
     this.clearPooledIdentityReconciliation(pooled);
-    if (pooled.identityUnresolved === true) {
+    if (pooled.identityUnresolved === true && !this.deferredQuarantineCancellations.has(pooled)) {
       return;
     }
-    pooled.identityUnresolved = true;
-    // Full: the serial may now identify another runtime, so its screen/context is untrusted.
-    this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
-    logger.warn(`[DevicePool] Quarantining ${pooled.id}: ${reason}`);
+    if (pooled.identityUnresolved !== true) {
+      pooled.identityUnresolved = true;
+      // Full: the serial may now identify another runtime, so its screen/context is untrusted.
+      this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
+      logger.warn(`[DevicePool] Quarantining ${pooled.id}: ${reason}`);
+    }
+    // Discovery can see the dying emulator before the kill's own preflight.
+    // Read the existing incarnation-scoped reservation synchronously: this
+    // path may hold assignmentMutex, so the public accessor would re-enter it.
+    if (this.pool.isReservedForShutdown(pooled)) {
+      this.deferredQuarantineCancellations.add(pooled);
+      return;
+    }
+    this.deferredQuarantineCancellations.delete(pooled);
+    await this.cancelQuarantinedDeviceExecutions(pooled, options);
+  }
+
+  private async cancelQuarantinedDeviceExecutions(
+    pooled: PooledDevice,
+    options: DiscoveryReconcileOptions,
+  ): Promise<void> {
+    await this.cancelPooledDeviceExecutions(pooled, options, pooled.sessionId);
+  }
+
+  /** A confirmed shutdown retires serial-bound work even without quarantine. */
+  async cancelRetiredDeviceExecutions(
+    pooled: PooledDevice,
+    options: DeviceRetirementOptions = {},
+  ): Promise<void> {
+    const deferred = this.deferredQuarantineCancellations.delete(pooled);
+    if (options.cancelDeviceBoundExecutions === false) {
+      return;
+    }
+    await this.cancelPooledDeviceExecutions(pooled, options, deferred ? pooled.sessionId : null);
+  }
+
+  private async cancelPooledDeviceExecutions(
+    pooled: PooledDevice,
+    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId">,
+    sessionId: PooledDevice["sessionId"],
+  ): Promise<void> {
     const cancellationOptions = {
       excludeExecutionId: options.excludeExecutionId ?? this.pool.getAmbientExecutionId?.(),
     };
-    const sessionId = pooled.sessionId;
     // Invoke both cancellers before awaiting either drain: serial-bound work
     // exists without a session, and session-only work must also stop immediately.
     const counts = await Promise.all([
@@ -768,7 +820,7 @@ export class DeviceRuntimeIdentity {
     if (cancelled > 0) {
       logger.warn(
         `[DevicePool] Cancelled ${counts[0]} device-bound and ${counts[1]} session-bound ` +
-          `in-flight execution(s) while quarantining ${pooled.id}`,
+          `in-flight execution(s) for ${pooled.id}`,
       );
     }
   }

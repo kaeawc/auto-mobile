@@ -60,7 +60,7 @@ fi
 # Test 4: Java is installed
 echo -e "\n${YELLOW}Test 4: Checking Java version...${NC}"
 JAVA_OUTPUT=$(docker exec "${CONTAINER_NAME}" java -version 2>&1)
-if echo "${JAVA_OUTPUT}" | grep -q "openjdk.*21"; then
+if grep -q "openjdk.*21" <<<"${JAVA_OUTPUT}"; then
   echo -e "${GREEN}✓ Java 21 is installed${NC}"
 else
   echo -e "${RED}✗ Java 21 not found${NC}"
@@ -166,7 +166,7 @@ if [ "${STDIO_EXIT_CODE}" -ne 0 ]; then
   sed -n '1,5p' "${STDIO_TEST_ERROR}"
 fi
 
-if echo "${RESPONSE}" | grep -q '"jsonrpc":"2.0"'; then
+if grep -q '"jsonrpc":"2.0"' <<<"${RESPONSE}"; then
   echo -e "${GREEN}✓ MCP server responds to stdio protocol${NC}"
   echo -e "  Response: ${RESPONSE:0:100}..."
 else

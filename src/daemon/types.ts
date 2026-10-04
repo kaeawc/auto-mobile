@@ -204,6 +204,9 @@ export function sanitizeBoundSessionLoss(value: unknown): BoundSessionLoss | und
  */
 export const PROGRESS_NOTIFICATION_METHOD = "notifications/progress";
 
+export const RESOURCE_SUBSCRIBE_METHOD = "resources/subscribe";
+export const RESOURCE_UNSUBSCRIBE_METHOD = "resources/unsubscribe";
+
 /**
  * Server-pushed notification frame sent from daemon to a subscribed CLI client
  * over the control socket (issue #3223). Clients discriminate on `type`.
@@ -214,6 +217,8 @@ export interface DaemonNotification {
   type: "daemon_notification";
   /** MCP notification method, e.g. "notifications/tools/list_changed". */
   method: string;
+  /** Exact subscribed URI for notifications/resources/updated. */
+  uri?: string;
   /**
    * Released session key for `notifications/session/released` frames (issue
    * #4610). Absent for list-changed frames. The proxy fences its remembered

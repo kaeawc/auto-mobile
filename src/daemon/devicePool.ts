@@ -115,7 +115,11 @@ import {
   type MissingDeviceEvictionOptions,
   type MissingDeviceLivenessPoolPort,
 } from "./missingDeviceLiveness";
-import { DeviceRuntimeIdentity, type DeviceRuntimeIdentityPoolPort } from "./deviceRuntimeIdentity";
+import {
+  DeviceRuntimeIdentity,
+  type DeviceRuntimeIdentityPoolPort,
+  type DeviceRetirementOptions,
+} from "./deviceRuntimeIdentity";
 import {
   DeviceShutdownReservations,
   type DeviceShutdownReservationsPoolPort,
@@ -1071,6 +1075,7 @@ export class DevicePool {
       getTimer: () => this.timer,
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       hasReusableSerial: (device) => this.hasReusableSerial(device),
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
       cancelDeviceExecutions: (deviceId, reason, options) =>
         this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(deviceId, reason, options) ??
         Promise.resolve(0),
@@ -4778,8 +4783,15 @@ export class DevicePool {
    * A device that has been explicitly stopped must not become assignable in the
    * interval between its session release and pool removal.
    */
-  async retireDeviceForShutdown(expectedDevice: PooledDevice): Promise<boolean> {
+  async retireDeviceForShutdown(
+    expectedDevice: PooledDevice,
+    options: DeviceRetirementOptions = {},
+  ): Promise<boolean> {
     return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return false;
+      }
+      await this.runtimeIdentity.cancelRetiredDeviceExecutions(expectedDevice, options);
       if (this.devices.get(expectedDevice.id) !== expectedDevice) {
         return false;
       }
@@ -4813,7 +4825,9 @@ export class DevicePool {
         releaseError = error;
       }
     }
-    const retired = await this.retireDeviceForShutdown(expectedDevice);
+    const retired = await this.retireDeviceForShutdown(expectedDevice, {
+      cancelDeviceBoundExecutions: false,
+    });
     if (releaseError) {
       throw releaseError;
     }
@@ -4829,8 +4843,15 @@ export class DevicePool {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     beforeReplacementPublishes?: () => void,
+    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
   ): Promise<PooledDevice | undefined> {
     return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return undefined;
+      }
+      // A kill's same-serial successor must not inherit the old device's work.
+      // System UI recovery uses its separate session-preserving handoff.
+      await this.runtimeIdentity.cancelRetiredDeviceExecutions(expectedDevice, options);
       if (this.devices.get(expectedDevice.id) !== expectedDevice) {
         return undefined;
       }
@@ -4862,6 +4883,7 @@ export class DevicePool {
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
     beforeReplacementPublishes?: () => void,
+    excludeExecutionId?: string,
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.assignmentMutex.runExclusive(async () => {
       // The caller's marker must cover the entire visible replacement
@@ -4890,6 +4912,7 @@ export class DevicePool {
           replacement,
           sourceImage,
           beforeReplacementPublishes,
+          excludeExecutionId,
         );
         await this.trackStartedDeviceProcess(replacement, childProcess);
         if (this.devices.get(replacementDevice.id) !== replacementDevice) {
@@ -5014,6 +5037,7 @@ export class DevicePool {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     beforeReplacementPublishes?: () => void,
+    excludeExecutionId?: string,
   ): Promise<PooledDevice> {
     const priorAssignmentCount = expectedDevice.assignmentCount;
     const priorLastUsedAt = expectedDevice.lastUsedAt;
@@ -5022,6 +5046,7 @@ export class DevicePool {
     if (existingReplacement && existingReplacement !== expectedDevice) {
       this.assertPooledSystemUiAnrReplacement(existingReplacement, sourceImage);
       if (this.devices.get(expectedDevice.id) === expectedDevice) {
+        await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
         this.releaseCapturedDeviceForShutdown(expectedDevice);
         await this.removeDevice(expectedDevice.id, false, expectedDevice);
       }
@@ -5036,6 +5061,7 @@ export class DevicePool {
     // removeDevice rejects busy entries, so detach pool ownership only after
     // capturing any session that must be rebound below. The replacement remains
     // unavailable through the caller's readiness reservation while this runs.
+    await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
     this.releaseCapturedDeviceForShutdown(expectedDevice);
     await this.removeDevice(expectedDevice.id, false, expectedDevice);
     if (this.devices.has(replacement.deviceId)) {
@@ -5059,6 +5085,23 @@ export class DevicePool {
     replacementDevice.assignmentCount = priorAssignmentCount;
     replacementDevice.lastUsedAt = priorLastUsedAt;
     return replacementDevice;
+  }
+
+  private async cancelOldDeviceWorkForSystemUiAnr(
+    deviceId: string,
+    excludeExecutionId?: string,
+  ): Promise<void> {
+    if (excludeExecutionId === undefined) {
+      logger.warn(
+        `[DevicePool] Left old-device work running for ${deviceId} because the System UI ANR recovery execution is unknown`,
+      );
+      return;
+    }
+    await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
+      deviceId,
+      deviceLossCancellationReason(deviceId),
+      { excludeExecutionId },
+    );
   }
 
   private assertPooledSystemUiAnrReplacement(
@@ -5765,15 +5808,19 @@ export class DevicePool {
     }
 
     return async () => {
-      const wasAutolocked = this.devices.get(previousDeviceId)?.autolockSessionId === sessionId;
-      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
-        stableDeviceId,
-      });
-      await this.releaseDevice(previousDeviceId, sessionId);
+      const previousDevice = this.devices.get(previousDeviceId);
+      const wasAutolocked = previousDevice?.autolockSessionId === sessionId;
       const replacement = this.devices.get(deviceId);
       if (wasAutolocked && replacement?.sessionId === sessionId) {
         replacement.autolockSessionId = sessionId;
       }
+      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
+        stableDeviceId,
+      });
+      if (previousDevice) {
+        this.autolockManager.clearRebindAutolockLock(sessionId, previousDeviceId, previousDevice);
+      }
+      await this.releaseDevice(previousDeviceId, sessionId);
       return session;
     };
   }

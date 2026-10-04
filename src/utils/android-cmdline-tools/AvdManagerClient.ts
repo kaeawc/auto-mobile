@@ -143,7 +143,7 @@ export class AvdManagerClient {
     const result = await this.execute(
       path,
       ["list", "avd"],
-      { env, timeoutMs: 60_000, maxStdoutChars: MAX_LIST_STDOUT_CHARS },
+      { env, timeoutMs: options.timeoutMs ?? 60_000, maxStdoutChars: MAX_LIST_STDOUT_CHARS },
       options,
     );
     this.throwIfUnsuccessful("Failed to list AVDs", path, result);
@@ -164,19 +164,19 @@ export class AvdManagerClient {
       if (params.force) {
         args.push("--force");
       }
-      if (params.path) {
-        args.push("-p", params.path);
-      }
-      if (params.tag) {
-        args.push("-t", params.tag);
-      }
-      if (params.abi) {
-        args.push("--abi", params.abi);
+      for (const [flag, value] of [
+        ["-p", params.path],
+        ["-t", params.tag],
+        ["--abi", params.abi],
+      ] as const) {
+        if (value) {
+          args.push(flag, value);
+        }
       }
       const result = await this.execute(
         path,
         args,
-        { input: "\n", env, timeoutMs: 300_000 },
+        { input: "\n", env, timeoutMs: options.timeoutMs ?? 300_000 },
         options,
       );
       if (result.exitCode === 0) {
@@ -193,6 +193,9 @@ export class AvdManagerClient {
           `AVD creation failed: ${getFailureSummary(result)}`,
       };
     } catch (error) {
+      if (options.signal?.aborted) {
+        throw error;
+      }
       const message = `Failed to create AVD ${params.name}: ${(error as Error).message}`;
       this.dependencies.logger.error(message);
       return { success: false, message };
@@ -221,6 +224,9 @@ export class AvdManagerClient {
           `AVD deletion failed: ${getFailureSummary(result)}`,
       };
     } catch (error) {
+      if (options.signal?.aborted) {
+        throw error;
+      }
       const message = `Failed to delete AVD ${name}: ${(error as Error).message}`;
       this.dependencies.logger.error(message);
       return { success: false, message };
@@ -232,7 +238,7 @@ export class AvdManagerClient {
     const result = await this.execute(
       path,
       ["list", "device"],
-      { env, timeoutMs: 60_000, maxStdoutChars: MAX_LIST_STDOUT_CHARS },
+      { env, timeoutMs: options.timeoutMs ?? 60_000, maxStdoutChars: MAX_LIST_STDOUT_CHARS },
       options,
     );
     this.throwIfUnsuccessful("Failed to list devices", path, result);

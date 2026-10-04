@@ -4764,7 +4764,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         timer: this.timer,
         credentialStore: new DeviceLockStore(),
       });
-      const result = await wakeAndUnlock.execute();
+      const result = await wakeAndUnlock.execute(undefined, signal);
       await this.waitForPrimaryUserUnlock(device, signal);
       if (!result.unlocked && result.secure) {
         logger.info(

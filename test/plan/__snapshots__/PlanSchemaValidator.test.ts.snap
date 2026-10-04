@@ -1,0 +1,147 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`PlanSchemaValidator preserves the complete validation result for valid 1`] = `
+{
+  "valid": true,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for additional property 1`] = `
+{
+  "errors": [
+    {
+      "column": undefined,
+      "field": "root",
+      "line": undefined,
+      "message": "Unknown property 'unknown'. This might be a legacy field - check the migration guide.",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for required 1`] = `
+{
+  "errors": [
+    {
+      "column": undefined,
+      "field": "root",
+      "line": undefined,
+      "message": "Missing required property 'name'",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for enum 1`] = `
+{
+  "errors": [
+    {
+      "column": 1,
+      "field": "platform",
+      "line": 2,
+      "message": "Must be one of: android, ios",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for type 1`] = `
+{
+  "errors": [
+    {
+      "column": 1,
+      "field": "name",
+      "line": 1,
+      "message": "Must be of type 'string', but got number",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for root type 1`] = `
+{
+  "errors": [
+    {
+      "column": undefined,
+      "field": "root",
+      "line": undefined,
+      "message": "Must be of type 'object', but got object",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for minimum items 1`] = `
+{
+  "errors": [
+    {
+      "column": 1,
+      "field": "steps",
+      "line": 2,
+      "message": "Must have at least 1 item",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for minimum length 1`] = `
+{
+  "errors": [
+    {
+      "column": 1,
+      "field": "name",
+      "line": 1,
+      "message": "Must be at least 1 character long",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for default message 1`] = `
+{
+  "errors": [
+    {
+      "column": 1,
+      "field": "mcpVersion",
+      "line": 2,
+      "message": "must match pattern "^\\d+\\.\\d+\\.\\d+$"",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for nested location 1`] = `
+{
+  "errors": [
+    {
+      "column": 1,
+      "field": "metadata.version",
+      "line": 3,
+      "message": "Must be of type 'string', but got number",
+    },
+  ],
+  "valid": false,
+}
+`;
+
+exports[`PlanSchemaValidator preserves the complete validation result for array location 1`] = `
+{
+  "errors": [
+    {
+      "column": 1,
+      "field": "secretParameters[0]",
+      "line": 2,
+      "message": "Must be at least 1 character long",
+    },
+  ],
+  "valid": false,
+}
+`;

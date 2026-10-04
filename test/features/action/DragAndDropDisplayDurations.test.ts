@@ -249,6 +249,18 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
 });
 
 describe("dragAndDrop display durations", () => {
+  test("adb external display rounds a fractional drag duration", async () => {
+    const { action, adb } = fixture({ supportsDisplay: false, display: "external" });
+    const result = await action.execute({
+      ...endpoints,
+      display: "external",
+      dragDurationMs: 500.5,
+    });
+    expect(result.success).toBe(true);
+    expect(adb.getAllCommands()).toContain(
+      "shell input touchscreen -d 2 draganddrop 50 40 150 140 501",
+    );
+  });
   for (const display of [undefined, "external"]) {
     test(`CtrlProxy ${display ?? "default"} display uses the documented default durations`, async () => {
       const { action, adb, drag } = fixture({ supportsDisplay: true, display });

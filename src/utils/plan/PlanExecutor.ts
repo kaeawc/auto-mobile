@@ -1,3 +1,4 @@
+import { classifyToolResult } from "../toolEnvelopePayload";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
@@ -187,33 +188,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
    * If the response already has "success" at the top level (not wrapped), it is
    * returned as-is for backward compatibility.
    */
-  private extractToolResult(response: any): any {
-    if (!response || typeof response !== "object") {
-      return response;
+  private extractToolResult(response: unknown, toolName: string): any {
+    const result = classifyToolResult(response, toolName);
+    if ("failure" in result) {
+      return result.failure;
     }
-
-    // If "success" exists at the top level, the response is already unwrapped
-    if ("success" in response) {
-      return response;
-    }
-
-    // Unwrap MCP content format: { content: [{ type: "text", text: "JSON string" }] }
-    if (Array.isArray(response.content) && response.content.length > 0) {
-      const firstContent = response.content[0];
-      if (firstContent?.type === "text" && typeof firstContent.text === "string") {
-        try {
-          const parsed = JSON.parse(firstContent.text);
-          if (parsed && typeof parsed === "object" && "success" in parsed) {
-            return parsed;
-          }
-          return response;
-        } catch {
-          return response;
-        }
-      }
-    }
-
-    return response;
+    return result.kind === "payload" ? result.payload : response;
   }
 
   private parseStructuredToolPayload(response: unknown): Record<string, unknown> | null {
@@ -533,7 +513,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       );
       throwIfAborted(context.signal);
 
-      const toolResult = this.extractToolResult(response);
+      const toolResult = this.extractToolResult(response, step.tool);
       logger.info(
         `${context.logPrefix} ${step.tool} completed. Response success: ${toolResult?.success !== false ? "true" : "FALSE"}`,
       );
@@ -1173,6 +1153,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
     };
   }
 
+  private resolveTrackDeviceId(deviceLabel: string, sessionUuid?: string): string | undefined {
+    const daemonState = DaemonState.getInstance();
+    if (!sessionUuid || !daemonState.isInitialized()) {
+      return undefined;
+    }
+    const sessionManager = daemonState.getSessionManager();
+    const trackSessionUuid = sessionManager.getDeviceLabels(sessionUuid)?.[deviceLabel];
+    // A plan label is not a device ID. Unallocated tracks must never cancel
+    // another track's jobs by falling back to the orchestrator's base device.
+    return trackSessionUuid
+      ? (sessionManager.getDeviceForSession(trackSessionUuid) ?? undefined)
+      : undefined;
+  }
+
   private async settleDeviceTracks<T>(
     devicePromises: Promise<T>[],
     getDeviceLoss: () => DeviceLostError | undefined,
@@ -1243,7 +1237,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         const stepStartTime = this.timer.now();
         const stepResult = await this.executeStep(step, {
           platform,
-          deviceId,
+          deviceId: this.resolveTrackDeviceId(device, sessionUuid),
           sessionUuid,
           signal,
           logPrefix: `[PARALLEL_EXEC][${device}]`,

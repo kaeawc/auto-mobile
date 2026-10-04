@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { BootedDevice } from "../models";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import { GetAppMetadata } from "../features/observe/GetAppMetadata";
+import { IosAppMetadataReader, type AppMetadataReader } from "./IosAppMetadataReader";
 import type { IosAppMetadataSource } from "../models/IosAppMetadataSource";
 import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
 import { DefaultChecksumCalculator, type ChecksumCalculator } from "./ChecksumCalculator";
@@ -258,7 +258,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
  * content yields the same hash). Simulator bundles are host-filesystem dirs.
  */
 export class IosBundleContentHasher implements AppContentHasher {
-  constructor(private readonly metadata: GetAppMetadata) {}
+  constructor(private readonly metadata: AppMetadataReader) {}
 
   async computeHash(_device: BootedDevice, packageId: string): Promise<string> {
     const meta = await this.metadata.execute(packageId);
@@ -290,6 +290,6 @@ export function createContentHashProvider(
     return new CachingContentHashProvider(new AndroidApkContentHasher(adb));
   }
   // iOS resolves the bundle path via iosSource (adb is unused for iOS metadata).
-  const metadata = new GetAppMetadata(device, defaultAdbClientFactory, iosSource);
+  const metadata = new IosAppMetadataReader(device, iosSource);
   return new CachingContentHashProvider(new IosBundleContentHasher(metadata));
 }

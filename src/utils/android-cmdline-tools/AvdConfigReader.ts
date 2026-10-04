@@ -202,7 +202,6 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     avdHome?: string,
   ) {
     const fs = require("fs");
-    const path = require("path");
     this.readFileFn = readFileFn ?? ((p: string, e: string) => fs.promises.readFile(p, e));
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
@@ -210,18 +209,32 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     const androidUserHome = nonEmptyEnvironmentValue(process.env.ANDROID_USER_HOME);
     const avdHomeEnv = nonEmptyEnvironmentValue(process.env.ANDROID_AVD_HOME);
     const androidSdkHome = nonEmptyEnvironmentValue(process.env.ANDROID_SDK_HOME);
-    const configHome =
-      nonEmptyEnvironmentValue(process.env.ANDROID_EMULATOR_HOME) ||
-      androidUserHome ||
-      (androidSdkHome ? path.join(androidSdkHome, ".android") : undefined) ||
-      (homeDir ? path.join(homeDir, ".android") : "");
+    const configHome = this.resolveConfigHome(
+      androidUserHome,
+      androidSdkHome,
+      homeDir ? join(homeDir, ".android") : "",
+    );
     this.avdHome = avdHome ?? avdHomeEnv ?? resolveAndroidAvdHome(process.env, homeDir);
     this.configHome = avdHome
       ? dirname(avdHome)
-      : nonEmptyEnvironmentValue(process.env.ANDROID_EMULATOR_HOME) ||
-        androidUserHome ||
-        (androidSdkHome ? path.join(androidSdkHome, ".android") : undefined) ||
-        (avdHomeEnv ? dirname(this.avdHome) : configHome);
+      : this.resolveConfigHome(
+          androidUserHome,
+          androidSdkHome,
+          avdHomeEnv ? dirname(this.avdHome) : configHome,
+        );
+  }
+
+  private resolveConfigHome(
+    androidUserHome: string | undefined,
+    androidSdkHome: string | undefined,
+    fallback: string,
+  ): string {
+    return (
+      nonEmptyEnvironmentValue(process.env.ANDROID_EMULATOR_HOME) ||
+      androidUserHome ||
+      (androidSdkHome ? join(androidSdkHome, ".android") : undefined) ||
+      fallback
+    );
   }
 
   getAvdHome(): string {

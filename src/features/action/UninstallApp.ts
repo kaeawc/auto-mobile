@@ -251,6 +251,7 @@ export class UninstallApp {
         await new AndroidUserTargetResolver(this.adb).resolve({
           packageName,
           explicitUserId: userId,
+          installedOnly: true,
           signal,
         })
       ).userId;

@@ -21,6 +21,9 @@ import {
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
 import { displayInventoryOutcome } from "../models/DeviceInfo";
+import { selectablePanels } from "../models/DisplayPanel";
+
+const pinRestrictedActions = new Set(["tapOn", "swipeOn"]);
 
 export interface SessionDisplayPinStore {
   getDeviceForSession(sessionUuid: string): string | null;
@@ -132,7 +135,13 @@ export function runSessionDisplayPin<T>(input: SessionDisplayPinInput<T>): T | P
   // Stop must remain possible after a recording's panel is unplugged.
   const eligible = input.acceptsDisplay && !(name === "videoRecording" && args.action === "stop");
   const session = input.sessionUuid;
-  if (!eligible || args.display !== undefined || !session) {
+  if (args.display !== undefined) {
+    // An explicit selector overrides even an enclosing internal call's pin provenance.
+    return eligible && pinRestrictedActions.has(name)
+      ? runWithSelectedDisplayPin(undefined, () => input.invoke(args))
+      : input.invoke(args);
+  }
+  if (!eligible || !session) {
     return input.invoke(args);
   }
   const store = input.store ?? pinStore();
@@ -161,10 +170,12 @@ async function runPinnedSessionDisplay({
         outcome: device[displayInventoryOutcome],
         pin,
       });
-      const effectiveArgs = {
-        ...args,
-        display: resolveTargetDisplay(inventory, undefined, { displayPin: pin }).key,
-      };
+      // Validate the pin even when ordinary input necessarily targets the same sole panel.
+      const panel = resolveTargetDisplay(inventory, undefined, { displayPin: pin });
+      // Inventory has no live focus/default identity. Do not infer it for multiple panels.
+      const ordinaryAction =
+        pinRestrictedActions.has(name) && selectablePanels(inventory).length === 1;
+      const effectiveArgs = ordinaryAction ? args : { ...args, display: panel.key };
       const response = await input.invoke(effectiveArgs);
       stampResponse(response);
       return response;

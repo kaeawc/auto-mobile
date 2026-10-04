@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "bottomNav",
+      "stateKey": "selected",
+      "items": [
+        {
+          "label": "x"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.items"
+}

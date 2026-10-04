@@ -1,0 +1,75 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "floating",
+      "gravity": "bottomEnd",
+      "offset": {
+        "x": -16,
+        "y": -32
+      }
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "box",
+    "anchor": {
+      "type": "element",
+      "selector": {
+        "elementId": "42",
+        "text": "Buy",
+        "testTag": "buy",
+        "container": {
+          "elementId": "card",
+          "index": 0,
+          "selectionStrategy": "unique",
+          "container": {
+            "text": "Screen"
+          }
+        }
+      },
+      "alignment": "cover",
+      "offset": {
+        "x": 1.5,
+        "y": -2
+      }
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Buy",
+        "onTap": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      },
+      {
+        "type": "image",
+        "asset": "button",
+        "contentScale": "fit"
+      },
+      {
+        "type": "scroll",
+        "child": {
+          "type": "text",
+          "text": "Default vertical"
+        }
+      },
+      {
+        "type": "bottomSheet",
+        "child": {
+          "type": "text",
+          "text": "Closed on false"
+        },
+        "openWhen": {
+          "key": "open",
+          "equals": false
+        },
+        "detents": ["half"]
+      }
+    ]
+  }
+}

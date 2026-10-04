@@ -1,9 +1,14 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import type { BootedDevice } from "../../src/models";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS,
+  ANDROID_SCREENRECORD_MAX_SECONDS,
+} from "../../src/features/video/androidScreenrecord";
+import { logger } from "../../src/utils/logger";
 
 /** Drain all pending microtasks (setImmediate runs after the microtask queue). */
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -48,6 +53,237 @@ function makeActiveRecording(id: string, outputPath: string) {
     outputName: undefined,
   };
 }
+
+const rotationStopBudgetMs =
+  ANDROID_SCREENRECORD_MAX_SECONDS * 1000 - ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
+
+function makePendingStopSession() {
+  const timer = new FakeTimer();
+  const pendingStop = Promise.withResolvers<{
+    metadata: ReturnType<typeof makeStopMetadata>;
+    evictedRecordingIds: string[];
+  }>();
+  const start = mock(async (request: { outputName?: string }) =>
+    makeActiveRecording(`id-${request.outputName}`, `/tmp/${request.outputName}.mp4`),
+  );
+  const stop = mock(async (id?: string) =>
+    id === "id-bounded"
+      ? pendingStop.promise
+      : { metadata: makeStopMetadata(id ?? "missing", `/tmp/${id}.mp4`), evictedRecordingIds: [] },
+  );
+  const rollback = mock(async (_id: string) => {});
+  const session = new AndroidSegmentedPlanVideoSession({
+    device: androidDevice,
+    outputNamePrefix: "bounded",
+    timer,
+    segmentRotateAfterMs: 1000,
+    startVideoRecording: start,
+    stopVideoRecording: stop,
+    rollbackVideoRecordingStart: rollback,
+  });
+  return { timer, pendingStop, start, stop, rollback, session };
+}
+
+describe("AndroidSegmentedPlanVideoSession rotation stop deadline", () => {
+  test("a stop completing within the budget preserves both segments and clears its deadline", async () => {
+    const { session, timer, pendingStop, start, stop } = makePendingStopSession();
+    await session.startFirstSegment();
+    timer.advanceTime(1000);
+    const rotation = session.onBeforePlanStep();
+    timer.advanceTime(rotationStopBudgetMs - 1);
+    pendingStop.resolve({
+      metadata: makeStopMetadata("id-bounded", "/tmp/id-bounded.mp4"),
+      evictedRecordingIds: [],
+    });
+    await rotation;
+    const result = await session.finalize();
+    expect(start.mock.calls.map(([request]) => request.outputName)).toEqual([
+      "bounded",
+      "bounded-seg1",
+    ]);
+    expect(stop.mock.calls.map(([id]) => id)).toEqual(["id-bounded", "id-bounded-seg1"]);
+    expect(result.recordingIds).toEqual(["id-bounded", "id-bounded-seg1"]);
+    expect(result.filePaths).toEqual(["/tmp/id-bounded.mp4", "/tmp/id-bounded-seg1.mp4"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("an ordinary stop failure still halts timer rotation without starting a replacement", async () => {
+    const { session, timer, pendingStop, start, rollback } = makePendingStopSession();
+    await session.start();
+    timer.advanceTime(1000);
+    pendingStop.reject(new Error("adb stop failed"));
+    await flush();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    await expect(session.stop()).rejects.toThrow("Failed to finalize every segmented recording");
+    await session.abort();
+    expect(rollback.mock.calls.map(([id]) => id)).toEqual(["id-bounded"]);
+  });
+
+  test("a hung stop expires and starts the next segment before finalization", async () => {
+    const { session, timer, start, stop, rollback } = makePendingStopSession();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await session.startFirstSegment();
+      timer.advanceTime(1000);
+      let finished = false;
+      const rotation = session.onBeforePlanStep().then(() => {
+        finished = true;
+      });
+      timer.advanceTime(rotationStopBudgetMs - 1);
+      await flush();
+      expect(finished).toBe(false);
+      timer.advanceTime(1);
+      await flush();
+      expect(finished).toBe(true);
+      await rotation;
+      expect(start.mock.calls.map(([request]) => request.outputName)).toEqual([
+        "bounded",
+        "bounded-seg1",
+      ]);
+      expect(
+        warn.mock.calls.some(
+          ([message]) =>
+            message.includes(androidDevice.deviceId) &&
+            message.includes("id-bounded") &&
+            message.includes("timed out"),
+        ),
+      ).toBe(true);
+      await expect(session.finalize()).rejects.toThrow(
+        "Failed to finalize every segmented recording",
+      );
+      expect(stop.mock.calls.map(([id]) => id)).toEqual(["id-bounded", "id-bounded-seg1"]);
+      expect(Reflect.get(session, "completedRecordingIds")).toEqual(["id-bounded-seg1"]);
+      expect(Reflect.get(session, "completedFilePaths")).toEqual(["/tmp/id-bounded-seg1.mp4"]);
+      await session.abort();
+      expect(rollback.mock.calls.map(([id]) => id)).toEqual(["id-bounded", "id-bounded-seg1"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a late stop completion cannot mutate replacement segment state", async () => {
+    const { session, timer, pendingStop, start } = makePendingStopSession();
+    await session.startFirstSegment();
+    timer.advanceTime(1000);
+    let finished = false;
+    const rotation = session.onBeforePlanStep().then(() => {
+      finished = true;
+    });
+    timer.advanceTime(rotationStopBudgetMs);
+    await flush();
+    expect(finished).toBe(true);
+    await rotation;
+    const fields = [
+      "activeRecordingId",
+      "completedRecordingIds",
+      "completedFilePaths",
+      "completedMetadata",
+      "completedHighlights",
+      "segmentIndex",
+      "segmentStartedAtMs",
+      "lastActivePanel",
+    ];
+    const snapshot = fields.map((field) => structuredClone(Reflect.get(session, field)));
+    pendingStop.resolve({
+      metadata: makeStopMetadata("id-bounded", "/tmp/late.mp4"),
+      evictedRecordingIds: [],
+    });
+    await flush();
+    expect(fields.map((field) => Reflect.get(session, field))).toEqual(snapshot);
+    expect(start).toHaveBeenCalledTimes(2);
+    await expect(session.finalize()).rejects.toThrow(
+      "Failed to finalize every segmented recording",
+    );
+    expect(Reflect.get(session, "completedRecordingIds")).toEqual(["id-bounded-seg1"]);
+    expect(Reflect.get(session, "completedFilePaths")).toEqual(["/tmp/id-bounded-seg1.mp4"]);
+    await session.abort();
+  });
+
+  test("a late stop rejection is handled after the deadline", async () => {
+    const { session, timer, pendingStop } = makePendingStopSession();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await session.startFirstSegment();
+      timer.advanceTime(1000);
+      let finished = false;
+      const rotation = session.onBeforePlanStep().then(() => {
+        finished = true;
+      });
+      timer.advanceTime(rotationStopBudgetMs);
+      await flush();
+      expect(finished).toBe(true);
+      await rotation;
+      pendingStop.reject(new Error("late adb stop rejection"));
+      await flush();
+      expect(unhandled).toEqual([]);
+      expect(Reflect.get(session, "activeRecordingId")).toBe("id-bounded-seg1");
+      await session.abort();
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  test("plan cancellation abandons a pending stop without advancing the timer", async () => {
+    const { session, timer, pendingStop, start, rollback } = makePendingStopSession();
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled");
+    await session.startFirstSegment();
+    timer.advanceTime(1000);
+    let rejection: unknown;
+    const rotation = session
+      .onBeforePlanStep({ stepIndex: 1, totalSteps: 2, signal: controller.signal })
+      .catch((error: unknown) => {
+        rejection = error;
+      });
+    controller.abort(reason);
+    await flush();
+    expect(rejection).toBe(reason);
+    await rotation;
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    await session.abort();
+    expect(rollback.mock.calls.map(([id]) => id)).toEqual(["id-bounded"]);
+    pendingStop.resolve({
+      metadata: makeStopMetadata("id-bounded", "/tmp/late.mp4"),
+      evictedRecordingIds: [],
+    });
+    await flush();
+    expect((await session.finalize()).recordingIds).toEqual([]);
+  });
+
+  test("session abort drains a timer-driven pending stop without its deadline", async () => {
+    const { session, timer, start, rollback } = makePendingStopSession();
+    await session.start();
+    timer.advanceTime(1000);
+    let finished = false;
+    const aborting = session.abort().then(() => {
+      finished = true;
+    });
+    await flush();
+    expect(finished).toBe(true);
+    await aborting;
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(rollback.mock.calls.map(([id]) => id)).toEqual(["id-bounded"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("timer-driven rotation also expires a hung stop and reschedules", async () => {
+    const { session, timer, start } = makePendingStopSession();
+    await session.start();
+    timer.advanceTime(1000);
+    timer.advanceTime(rotationStopBudgetMs);
+    await flush();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(timer.getPendingTimeouts()).toEqual([1000]);
+    await expect(session.stop()).rejects.toThrow("Failed to finalize every segmented recording");
+    await session.abort();
+  });
+});
 
 describe("AndroidSegmentedPlanVideoSession", () => {
   test("forwards session ownership to every segment", async () => {

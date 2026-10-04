@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
 import type {
@@ -367,7 +368,9 @@ export class FailureAnalyticsRepository {
       // this fire-and-forget writer is drained (or skipped) before closeDatabase().
       this.getBarrier()
         .track(() => this.cleanupRetention())
-        .catch(() => {});
+        .catch((error) => {
+          logger.warn(`[FailureAnalyticsRepository] Retention task failed: ${errorMessage(error)}`);
+        });
 
       return occurrenceId;
     } catch (error) {

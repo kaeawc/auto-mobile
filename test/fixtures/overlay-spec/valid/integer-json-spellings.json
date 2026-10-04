@@ -1,0 +1,5 @@
+{
+  "id": "numbers",
+  "window": { "placement": { "type": "fullscreen" }, "opacity": 1e2 },
+  "root": { "type": "text", "text": "finite", "style": { "fontWeight": 500.0, "maxLines": 1 } }
+}

@@ -2,16 +2,10 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeAdbClient } from "../../fakes/FakeAdbClient";
-import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
-import type {
-  ObserveScreen,
-  ObserveScreenExecuteOptions,
-} from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import {
@@ -26,7 +20,6 @@ interface TestInputText {
     imeAction?: undefined,
     dismissKeyboard?: boolean,
     mode?: InputTextMode,
-    previousObserveResult?: ObserveResult,
     signal?: AbortSignal,
   ) => Promise<{
     success: boolean;
@@ -357,7 +350,6 @@ describe("InputText", () => {
           undefined,
           false,
           "eventAll",
-          undefined,
           controller.signal,
         ),
       ).rejects.toBe(deviceLoss);
@@ -487,481 +479,6 @@ describe("InputText", () => {
     expect(result.method).toBe("a11y");
     expect(setTextCalls).toEqual(["你好😊"]);
     expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test("eventOnly clears and types mappable text without requestSetText", async () => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const setTextCalls: string[] = [];
-    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-
-    stubAndroidSetText(async (text) => {
-      setTextCalls.push(text);
-      return { success: true, totalTimeMs: 1 };
-    });
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "@ab C",
-      undefined,
-      false,
-      "eventOnly",
-      observeResultWithFocusedText("old"),
-    );
-
-    expect(result).toEqual({
-      success: true,
-      text: "@ab C",
-      imeAction: undefined,
-      method: "eventOnly",
-    });
-    expect(setTextCalls).toEqual([]);
-    expect(inputCommands(factory)).toEqual([
-      "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
-      "shell input keyevent KEYCODE_AT",
-      "shell input keyevent KEYCODE_A",
-      "shell input keyevent KEYCODE_B",
-      "shell input keyevent KEYCODE_SPACE",
-      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_C",
-    ]);
-  });
-
-  test("eventOnly rejects unsupported text without requestSetText or key events", async () => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const setTextCalls: string[] = [];
-
-    stubAndroidSetText(async (text) => {
-      setTextCalls.push(text);
-      return { success: true, totalTimeMs: 1 };
-    });
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "hello 你好",
-      undefined,
-      false,
-      "eventOnly",
-      observeResultWithFocusedText("existing"),
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.method).toBe("eventOnly");
-    expect(result.error).toContain("cannot type");
-    expect(setTextCalls).toEqual([]);
-    expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test("eventOnly rejects shifted ASCII before Android 12 without requestSetText or key events", async () => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const setTextCalls: string[] = [];
-    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
-
-    stubAndroidSetText(async (text) => {
-      setTextCalls.push(text);
-      return { success: true, totalTimeMs: 1 };
-    });
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "A",
-      undefined,
-      false,
-      "eventOnly",
-      observeResultWithFocusedText("existing"),
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.method).toBe("eventOnly");
-    expect(result.error).toContain("cannot type");
-    expect(setTextCalls).toEqual([]);
-    expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test.each([
-    ["no focused node", { focused: false }],
-    ["a focused non-input node", { class: "android.widget.TextView" }],
-  ])("eventOnly rejects %s before sending input events", async (_description, properties) => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const observeResult = observeResultWithFocusedText("existing", properties);
-    const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult(observeResult);
-    inputText.observeScreen = observeScreen;
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "eventOnly",
-      observeResult,
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.method).toBe("eventOnly");
-    expect(result.error).toBe("eventOnly requires a focused editable field");
-    expect(observeScreen.getExecuteCallCount()).toBe(1);
-    expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test("eventOnly refreshes a stale cached hierarchy before rejecting the focused-field precondition", async () => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveSequence([
-      {
-        viewHierarchy: {
-          hierarchy: {
-            node: {
-              class: "android.view.inputmethod.SoftInputWindow",
-            },
-          },
-        },
-      } as ObserveResult,
-      observeResultWithFocusedText("old"),
-    ]);
-    inputText.observeScreen = observeScreen;
-
-    const result = await inputText.execute("next", undefined, false, "eventOnly");
-
-    expect(result.success).toBe(true);
-    expect(result.method).toBe("eventOnly");
-    expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(1);
-    expect(observeScreen.getExecuteCallCount()).toBe(2);
-    expect(observeScreen.getExecuteOptions()[0]?.freshness).toBe("fresh");
-    expect(inputCommands(factory)).toEqual([
-      "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
-      "shell input keyevent KEYCODE_N",
-      "shell input keyevent KEYCODE_E",
-      "shell input keyevent KEYCODE_X",
-      "shell input keyevent KEYCODE_T",
-    ]);
-  });
-
-  test("eventOnly rejects after a refreshed hierarchy still lacks a focused editable field", async () => {
-    const inputText = new InputText(androidDevice, new FakeAdbExecutor());
-    const observeScreen = new FakeObserveScreen();
-    const unfocused = {
-      viewHierarchy: {
-        updatedAt: 42,
-        hierarchy: {
-          node: {
-            class: "android.view.inputmethod.SoftInputWindow",
-          },
-        },
-      },
-    } as ObserveResult;
-    observeScreen.setObserveSequence([unfocused, unfocused]);
-    inputText.observeScreen = observeScreen;
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "eventOnly",
-      unfocused,
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("eventOnly requires a focused editable field");
-    expect(observeScreen.getExecuteCallCount()).toBe(1);
-    expect(observeScreen.getExecuteOptions()[0]?.freshness).toBe("fresh");
-    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(43);
-  });
-
-  test("eventOnly rejects a stale focused refresh from the same second without sending key events", async () => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const observeScreen = new FakeObserveScreen();
-    const staleCachedHierarchy = {
-      viewHierarchy: {
-        updatedAt: 1_700_000_000_500,
-        hierarchy: {
-          node: {
-            class: "android.view.inputmethod.SoftInputWindow",
-          },
-        },
-      },
-    } as ObserveResult;
-    observeScreen.setObserveSequence([
-      {
-        ...observeResultWithFocusedText("old"),
-        freshness: {
-          requestedAfter: 1_700_000_000_501,
-          actualTimestamp: 1_700_000_000_500,
-          isFresh: false,
-          staleDurationMs: 1,
-        },
-      },
-    ]);
-    inputText.observeScreen = observeScreen;
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "eventOnly",
-      staleCachedHierarchy,
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("eventOnly requires a focused editable field");
-    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(1_700_000_000_501);
-    expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test("eventOnly accepts a newer fresh focused refresh", async () => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const observeScreen = new FakeObserveScreen();
-    const staleCachedHierarchy = {
-      viewHierarchy: {
-        updatedAt: 1_700_000_000_500,
-        hierarchy: {
-          node: {
-            class: "android.view.inputmethod.SoftInputWindow",
-          },
-        },
-      },
-    } as ObserveResult;
-    observeScreen.setObserveSequence([
-      {
-        ...observeResultWithFocusedText("old"),
-        freshness: {
-          requestedAfter: 1_700_000_000_501,
-          actualTimestamp: 1_700_000_000_501,
-          isFresh: true,
-        },
-      },
-    ]);
-    inputText.observeScreen = observeScreen;
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "eventOnly",
-      staleCachedHierarchy,
-    );
-
-    expect(result.success).toBe(true);
-    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(1_700_000_000_501);
-    expect(inputCommands(factory)).toEqual([
-      "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
-      "shell input keyevent KEYCODE_N",
-      "shell input keyevent KEYCODE_E",
-      "shell input keyevent KEYCODE_X",
-      "shell input keyevent KEYCODE_T",
-    ]);
-  });
-
-  // Regression for https://github.com/kaeawc/auto-mobile/issues/4617.
-  // When the failed cached hierarchy carries no `updatedAt`, the refresh lower
-  // bound must be derived from the DEVICE clock (getDeviceTimestampMs), not the
-  // host FakeTimer/wall clock. Android interprets `minTimestamp` in the
-  // device-authored hierarchy clock domain, so a device clock running AHEAD of
-  // the host would let an older cached focused hierarchy satisfy a host-clock
-  // lower bound and be wrongly accepted as fresh — dispatching key events.
-  test("eventOnly derives the no-updatedAt refresh lower bound from the device clock, not the host", async () => {
-    const factory = new FakeAdbClientFactory();
-    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-    // Device clock is far ahead of the host FakeTimer (which starts at 0).
-    const deviceNowMs = 1_700_000_000_000;
-    factory.getFakeClient().setDeviceTimestampMs(deviceNowMs);
-    const hostTimer = new FakeTimer(); // now() === 0, strictly behind the device clock
-    const inputText = new InputText(
-      androidDevice,
-      factory as AdbClientFactory,
-      undefined,
-      hostTimer,
-    );
-
-    // A cached focused hierarchy captured EARLIER in device time than "now" —
-    // stale — but still newer than the host clock (0). Under the old host-clock
-    // fallback its timestamp satisfies minTimestamp and it is wrongly accepted.
-    const cachedFocusedDeviceTs = 1_699_999_999_000;
-    const observeExecuteOptions: ObserveScreenExecuteOptions[] = [];
-    const focused = observeResultWithFocusedText("old");
-    const observe = {
-      execute: async (options?: ObserveScreenExecuteOptions): Promise<ObserveResult> => {
-        observeExecuteOptions.push({ ...(options ?? {}) });
-        const lowerBound = options?.minTimestamp ?? 0;
-        return {
-          ...focused,
-          viewHierarchy: { ...focused.viewHierarchy, updatedAt: cachedFocusedDeviceTs },
-          freshness: {
-            requestedAfter: lowerBound,
-            actualTimestamp: cachedFocusedDeviceTs,
-            isFresh: cachedFocusedDeviceTs >= lowerBound,
-            staleDurationMs: Math.max(0, lowerBound - cachedFocusedDeviceTs),
-          },
-        } as ObserveResult;
-      },
-    };
-    inputText.observeScreen = observe as unknown as ObserveScreen;
-
-    // The cached hierarchy that FAILED the focused-editable check: no focus, no updatedAt.
-    const cachedUnfocused = {
-      viewHierarchy: {
-        hierarchy: { node: { class: "android.view.inputmethod.SoftInputWindow" } },
-      },
-    } as ObserveResult;
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "eventOnly",
-      cachedUnfocused,
-    );
-
-    // Device-domain lower bound rejects the stale cached focused hierarchy: no
-    // key events are dispatched. The host-clock fallback (minTimestamp 0) would
-    // have accepted it and typed.
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("eventOnly requires a focused editable field");
-    expect(observeExecuteOptions[0]?.minTimestamp).toBe(deviceNowMs);
-    expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test("eventOnly advances a second-granularity lower bound past the current second", async () => {
-    const fakeAdb = new FakeAdbClient();
-    fakeAdb.setDeviceTimestampMs(1_700_000_000_000);
-    fakeAdb.setDeviceTimestampSource("device-seconds");
-    const factory = new FakeAdbClientFactory(fakeAdb);
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const observeExecuteOptions: ObserveScreenExecuteOptions[] = [];
-    inputText.observeScreen = {
-      execute: async (options?: ObserveScreenExecuteOptions): Promise<ObserveResult> => {
-        observeExecuteOptions.push({ ...(options ?? {}) });
-        const lowerBound = options?.minTimestamp ?? 0;
-        const actualTimestamp = 1_700_000_000_500;
-        return {
-          viewHierarchy: observeResultWithFocusedText("old").viewHierarchy,
-          freshness: {
-            requestedAfter: lowerBound,
-            actualTimestamp,
-            isFresh: actualTimestamp >= lowerBound,
-            staleDurationMs: Math.max(0, lowerBound - actualTimestamp),
-          },
-        } as ObserveResult;
-      },
-    } as unknown as ObserveScreen;
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "eventOnly",
-      { viewHierarchy: { hierarchy: { node: { class: "android.view.View" } } } } as ObserveResult,
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("eventOnly requires a focused editable field");
-    expect(observeExecuteOptions[0]?.minTimestamp).toBe(1_700_000_001_000);
-    expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test("eventOnly fails closed when the device timestamp falls back to the host clock", async () => {
-    const fakeAdb = new FakeAdbClient();
-    fakeAdb.setDeviceTimestampMs(0);
-    fakeAdb.setDeviceTimestampSource("host");
-    const factory = new FakeAdbClientFactory(fakeAdb);
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    const observeExecuteOptions: ObserveScreenExecuteOptions[] = [];
-    inputText.observeScreen = {
-      execute: async (options?: ObserveScreenExecuteOptions): Promise<ObserveResult> => {
-        observeExecuteOptions.push({ ...(options ?? {}) });
-        return {
-          viewHierarchy: observeResultWithFocusedText("old").viewHierarchy,
-          freshness: {
-            requestedAfter: options?.minTimestamp ?? 0,
-            actualTimestamp: 1,
-            isFresh: true,
-          },
-        } as ObserveResult;
-      },
-    } as unknown as ObserveScreen;
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "eventOnly",
-      { viewHierarchy: { hierarchy: { node: { class: "android.view.View" } } } } as ObserveResult,
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("eventOnly requires a focused editable field");
-    expect(observeExecuteOptions).toEqual([]);
-    expect(inputCommands(factory)).toEqual([]);
-  });
-
-  test("eventOnly delegates keyboard dismissal to the keyboard closer", async () => {
-    const factory = new FakeAdbClientFactory();
-    const closeCalls: string[] = [];
-    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard already closed" };
-      },
-    }));
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      true,
-      "eventOnly",
-      observeResultWithFocusedText("old"),
-    );
-
-    expect(result.success).toBe(true);
-    expect(closeCalls).toEqual(["close"]);
-    expect(inputCommands(factory)).toEqual([
-      "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
-      "shell input keyevent KEYCODE_N",
-      "shell input keyevent KEYCODE_E",
-      "shell input keyevent KEYCODE_X",
-      "shell input keyevent KEYCODE_T",
-    ]);
-  });
-
-  test("eventOnly warns about a keyboard dismissal failure without sending raw Back", async () => {
-    const factory = new FakeAdbClientFactory();
-    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
-      }),
-    }));
-
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "next",
-      undefined,
-      true,
-      "eventOnly",
-      observeResultWithFocusedText("old"),
-    );
-
-    // #6868: the characters landed — only the best-effort dismissal epilogue
-    // failed, so this is a success carrying a warning, not an error.
-    expect(result.success).toBe(true);
-    expect(result.error).toBeUndefined();
-    expect(result.keyboardDismissed).toBe(false);
-    expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
-    expect(inputCommands(factory)).toEqual([
-      "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
-      "shell input keyevent KEYCODE_N",
-      "shell input keyevent KEYCODE_E",
-      "shell input keyevent KEYCODE_X",
-      "shell input keyevent KEYCODE_T",
-    ]);
   });
 
   // Regression for https://github.com/kaeawc/auto-mobile/issues/5887.
@@ -1269,7 +786,6 @@ describe("InputText", () => {
         undefined,
         true,
         "a11y",
-        undefined,
         controller.signal,
       ),
     ).rejects.toBe(deviceLoss);
@@ -1310,7 +826,6 @@ describe("InputText", () => {
       undefined,
       false,
       "a11y",
-      observeResultWithFocusedText("old"),
     );
 
     expect(result.success).toBe(false);
@@ -1320,7 +835,7 @@ describe("InputText", () => {
     expect(inputCommands(factory)).toEqual([]);
   });
 
-  test("a11y does not fall back to eventOnly for non-timeout failures", async () => {
+  test("a11y does not fall back to key events for non-timeout failures", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
     const setTextCalls: string[] = [];
@@ -1335,7 +850,6 @@ describe("InputText", () => {
       undefined,
       false,
       "a11y",
-      observeResultWithFocusedText("old"),
     );
 
     expect(result.success).toBe(false);
@@ -1347,7 +861,7 @@ describe("InputText", () => {
 
   // Issue #3351: an interactive client mirroring a keyboard sends one call per
   // keystroke. Every other Android mode is replace-shaped (a11y sets the whole
-  // string; eventAll/eventOnly clear first), so per-keystroke typing through
+  // string; eventAll clears first), so per-keystroke typing through
   // them leaves only the last character and wipes whatever was in the field.
   test("append types with key events and never clears or sets text", async () => {
     const factory = new FakeAdbClientFactory();
@@ -1372,7 +886,7 @@ describe("InputText", () => {
     // The whole point: no ACTION_SET_TEXT at all, so the field's existing
     // contents survive.
     expect(setTextCalls).toEqual([]);
-    // And no clear either - unlike eventOnly, which deletes the field first.
+    // And no clear either - unlike eventAll, which clears the field first.
     const commands = inputCommands(factory);
     expect(commands.length).toBeGreaterThan(0);
     expect(commands.some((command) => command.includes("KEYCODE_DEL"))).toBe(false);

@@ -294,14 +294,25 @@ export async function checkAdbVersion(
       currentProbe.signal,
     );
 
-    // Parse version from output like "Android Debug Bridge version 35.0.0"
-    const versionMatch = result.stdout.match(/Android Debug Bridge version (\d+\.\d+\.\d+)/);
-    const version = versionMatch ? versionMatch[1] : "unknown";
+    // The banner reports the protocol version; the Version line reports platform-tools.
+    const versionMatch = result.stdout.match(/^Version (\d+\.\d+\.\d+)(?:-(\S+))?/m);
+    if (!versionMatch) {
+      const excerpt = (result.stdout.trim() || result.stderr.trim())
+        .replace(/\s+/g, " ")
+        .slice(0, 80);
+      return {
+        name: "ADB Version",
+        status: "warn",
+        message: `Could not determine ADB version (platform-tools): ${excerpt || "empty output"}`,
+      };
+    }
+    const version = versionMatch[1];
+    const protocol = result.stdout.match(/^Android Debug Bridge version (\d+\.\d+\.\d+)/m)?.[1];
 
     return {
       name: "ADB Version",
       status: "pass",
-      message: `Version ${version}`,
+      message: `Version ${version}${protocol ? ` (protocol ${protocol})` : ""}`,
       value: version,
     };
   } catch (error) {

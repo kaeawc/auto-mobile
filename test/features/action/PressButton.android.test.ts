@@ -162,6 +162,97 @@ describe("PressButton Android keycode dispatch", () => {
     expect(fakeAdb.getExecutedCommands()).toEqual([`shell input keyevent ${keyCode}`]);
   });
 
+  describe("global action delivery safety", () => {
+    for (const [button, keyCode] of [
+      ["back", 4],
+      ["recent", 187],
+    ] as const) {
+      test.each(["timeout", "socket closed", "thrown after send"])(
+        `${button} does not repeat a press after %s`,
+        async (reason) => {
+          getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+            requestGlobalAction: async (
+              ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
+            ) => {
+              args[5]?.();
+              if (reason === "thrown after send") {
+                throw new Error(reason);
+              }
+              return {
+                success: false,
+                action: button,
+                totalTimeMs: 3000,
+                error: reason,
+                acknowledged: false,
+              };
+            },
+          } as unknown as AndroidCtrlProxyClient);
+          const result = await press(button);
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("may have been applied");
+          expect(result.error).toContain("Observe before retrying");
+          expect(fakeAdb.getExecutedCommands()).toEqual([]);
+        },
+      );
+      test.each(["WebSocket not connected", "send failed", "device refused", "unsupported"])(
+        `${button} falls back exactly once after %s`,
+        async (reason) => {
+          getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+            requestGlobalAction: async (
+              ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
+            ) => {
+              const acknowledged = reason === "device refused" || reason === "unsupported";
+              if (acknowledged) {
+                args[5]?.();
+              }
+              return {
+                success: false,
+                action: button,
+                totalTimeMs: 0,
+                error: reason,
+                acknowledged,
+              };
+            },
+          } as unknown as AndroidCtrlProxyClient);
+          expect(await press(button)).toEqual({ success: true, button, keyCode });
+          expect(fakeAdb.getExecutedCommands()).toEqual([`shell input keyevent ${keyCode}`]);
+        },
+      );
+      test(`${button} acknowledged success does not use ADB`, async () => {
+        getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+          requestGlobalAction: async (
+            ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
+          ) => {
+            args[5]?.();
+            return { success: true, action: button, totalTimeMs: 1, acknowledged: true };
+          },
+        } as unknown as AndroidCtrlProxyClient);
+        expect(await press(button)).toEqual({ success: true, button, keyCode });
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+    }
+    test("home still falls back after a dispatched timeout and verifies the launcher", async () => {
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async (
+          ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
+        ) => {
+          args[5]?.();
+          return {
+            success: false,
+            action: "home",
+            totalTimeMs: 3000,
+            error: "timeout",
+            acknowledged: false,
+          };
+        },
+      } as unknown as AndroidCtrlProxyClient);
+      expect((await press("home", launcherWindow())).success).toBe(true);
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("input keyevent")),
+      ).toEqual(["shell input keyevent 3"]);
+    });
+  });
+
   // Home-press verification (issue #6147): "home" additionally must confirm
   // the foreground app actually became the launcher before trusting either
   // the global action or the ADB keyevent fallback.

@@ -406,8 +406,9 @@ function cliToolResultPayload(result: any): any {
     if (result.content.length > 0 && result.content[0].type === "text") {
       try {
         actualResult = JSON.parse(result.content[0].text);
-      } catch {
-        // If parsing fails, keep the original result
+      } catch (error) {
+        // MCP text may be plain text; preserving the envelope is the CLI fallback.
+        logger.debug(`CLI tool result is not JSON: ${errorMessage(error)}`);
         actualResult = result;
       }
     }
@@ -733,6 +734,8 @@ function showToolHelp(toolName: string, output: CliOutput): void {
       output.log("  No parameters required");
     }
   } catch (error) {
+    // Help remains usable without schema details; debug preserves default CLI output.
+    logger.debug(`CLI parameter schema help unavailable: ${errorMessage(error)}`);
     output.log("  Could not parse parameter schema");
   }
 

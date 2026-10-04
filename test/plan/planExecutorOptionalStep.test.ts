@@ -6,6 +6,8 @@ import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
+import { convertDebugStepsToRecords } from "../../src/server/planExecutionOrchestrator";
 
 /**
  * Optional (best-effort) plan steps. A step marked `optional: true` whose tool fails must NOT abort
@@ -15,8 +17,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
  */
 describe("PlanExecutor — optional steps", () => {
   let planExecutor: DefaultPlanExecutor;
+  let originalDebugMode: boolean;
 
   beforeEach(() => {
+    originalDebugMode = isDebugModeEnabled();
+    setDebugModeEnabled(false);
     planExecutor = new DefaultPlanExecutor();
     const deviceSchema = z.object({
       platform: z.string().optional(),
@@ -89,6 +94,7 @@ describe("PlanExecutor — optional steps", () => {
   });
 
   afterEach(() => {
+    setDebugModeEnabled(originalDebugMode);
     unregisterTemporaryTools(
       "observe",
       "optionalStepFail",
@@ -96,7 +102,73 @@ describe("PlanExecutor — optional steps", () => {
       "optionalStepOk",
       "optionalStepStrict",
       "optionalStepTimedFail",
+      "optionalStepTimed",
     );
+  });
+
+  for (const debugMode of [false, true]) {
+    for (const outcome of ["completed", "failed", "skipped", "aborted"] as const) {
+      test(`records step elapsed time for ${outcome} with debug mode ${debugMode}`, async () => {
+        setDebugModeEnabled(debugMode);
+        const timer = new FakeTimer();
+        timer.setCurrentTime(1_790_000_000_000);
+        const controller = new AbortController();
+        ToolRegistry.register("optionalStepTimed", "timed step", z.object({}), async () => {
+          timer.advanceTime(250);
+          if (outcome === "aborted") {
+            controller.abort();
+          }
+          return createStructuredToolResponse({
+            success: outcome === "completed" || outcome === "aborted",
+            error: outcome === "completed" ? undefined : "timed failure",
+          });
+        });
+        const result = await new DefaultPlanExecutor(timer).executePlan(
+          {
+            name: "step-duration",
+            steps: [{ tool: "optionalStepTimed", params: {}, optional: outcome === "skipped" }],
+          },
+          0,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        );
+
+        expect(result.success).toBe(outcome === "completed" || outcome === "skipped");
+        expect(result.debug?.executionTimeMs).toBe(250);
+        expect(result.debug?.steps?.[0]?.status).toBe(outcome === "aborted" ? "failed" : outcome);
+        expect(result.debug?.steps?.[0]?.durationMs).toBe(250);
+        expect(convertDebugStepsToRecords(result.debug?.steps)[0]?.durationMs).toBe(250);
+      });
+    }
+  }
+
+  test("parallel tracks record their own skipped-step elapsed times", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_790_000_000_000);
+    timer.enableAutoAdvance();
+    ToolRegistry.register(
+      "optionalStepTimed",
+      "timed parallel failure",
+      z.object({ device: z.string(), elapsed: z.number() }),
+      async ({ elapsed }) => {
+        await timer.sleep(elapsed);
+        return createStructuredToolResponse({ success: false, error: "timed failure" });
+      },
+    );
+    const result = await new DefaultPlanExecutor(timer).executePlan({
+      name: "parallel-step-durations",
+      devices: ["device-a", "device-b"],
+      steps: [
+        { tool: "optionalStepTimed", params: { device: "device-a", elapsed: 250 }, optional: true },
+        { tool: "optionalStepTimed", params: { device: "device-b", elapsed: 400 }, optional: true },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.perDeviceResults?.get("device-a")?.skippedSteps?.[0]?.durationMs).toBe(250);
+    expect(result.perDeviceResults?.get("device-b")?.skippedSteps?.[0]?.durationMs).toBe(400);
   });
 
   test("continues past a failed optional step and still succeeds", async () => {

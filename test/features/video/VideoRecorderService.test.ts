@@ -12,6 +12,7 @@ import {
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
 import { FakeSecurePermissions } from "../../fakes/FakeSecurePermissions";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../../src/utils/ChildProcessTracker";
 
@@ -59,11 +60,9 @@ describe("parseVideoRecordingConfig", () => {
     expect(parseVideoRecordingConfig({ fps: 29.7 }).fps).toBe(30);
   });
 
-  // LIVE DEFECT (characterization): fps is validated as > 0 BEFORE being rounded,
-  // so a positive sub-0.5 fps passes the guard and then rounds to 0 — producing a
-  // 0-fps recording rather than falling back to the default. Pinned so a fix that
-  // clamps this to the default is a deliberate, visible change.
-  test("a positive sub-0.5 fps rounds to a broken 0 fps (known defect)", () => {
+  // Internal-only characterization: the tool schema and CLI parsers reject this
+  // input before it reaches recording startup (pinned in videoRecordingToolSegmented).
+  test("an internal positive sub-0.5 fps rounds to 0", () => {
     expect(parseVideoRecordingConfig({ fps: 0.4 }).fps).toBe(0);
   });
 
@@ -83,15 +82,46 @@ describe("parseVideoRecordingConfig", () => {
     expect(config.targetBitrateKbps).toBe(2000);
   });
 
-  // LIVE DEFECT (characterization): the cap is floor(maxThroughputMbps * 1000)
-  // Kbps; a throughput below 0.001 Mbps floors to 0, is treated as "no cap", and
-  // the full requested bitrate ships uncapped. Pinned to make a fix visible.
-  test("a sub-1-Kbps throughput silently disables the cap (known defect)", () => {
-    const config = parseVideoRecordingConfig({
-      targetBitrateKbps: 10000,
-      maxThroughputMbps: 0.0005,
+  test.each([0.0005, Number.MIN_VALUE])(
+    "keeps a cap for positive throughput %p",
+    (maxThroughputMbps) => {
+      const config = parseVideoRecordingConfig({
+        targetBitrateKbps: 10000,
+        maxThroughputMbps,
+      });
+      expect(config.targetBitrateKbps).toBe(1);
+      expect(config.maxThroughputMbps).toBe(maxThroughputMbps);
+    },
+  );
+
+  test.each([
+    [10000, 0.001, 1],
+    [10000, 0.001999, 1],
+    [10000, 0.002, 2],
+    [1, 0.002, 1],
+  ])(
+    "preserves target %p under neighbouring throughput %p",
+    (targetBitrateKbps, maxThroughputMbps, expected) => {
+      expect(
+        parseVideoRecordingConfig({ targetBitrateKbps, maxThroughputMbps }).targetBitrateKbps,
+      ).toBe(expected);
+    },
+  );
+
+  test("passes the minimum throughput cap to the capture backend", async () => {
+    const timer = new FakeTimer();
+    const backend = new FakeVideoCaptureBackend();
+    const service = new VideoRecorderService({
+      backend,
+      archiveRoot: path.join(os.tmpdir(), "video-throughput-cap"),
+      securePermissions: new FakeSecurePermissions(false),
+      idGenerator: new CountingIdGenerator("cap"),
+      now: () => new Date(timer.now()),
     });
-    expect(config.targetBitrateKbps).toBe(10000);
+    await service.startRecording({
+      config: { targetBitrateKbps: 10000, maxThroughputMbps: 0.0005 },
+    });
+    expect(backend.startCalls[0]?.targetBitrateKbps).toBe(1);
   });
 
   test("accepts valid resolution", () => {

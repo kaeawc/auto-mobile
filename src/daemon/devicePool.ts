@@ -34,6 +34,7 @@ import {
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { SingleFlight } from "../utils/cache/SingleFlight";
+import { TTLCache } from "../utils/cache/Cache";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -751,6 +752,7 @@ export class DevicePool {
   private readonly missingDeviceLiveness: MissingDeviceLiveness;
   private readonly refreshCoordinator: DevicePoolRefresh;
   private readonly allocationRefresh = new SingleFlight<"allocation", DevicePoolRefreshResult>();
+  private readonly recoveryRetryRefresh: TTLCache<"allocation", DevicePoolRefreshResult>;
   private readonly runtimeIdentity: DeviceRuntimeIdentity;
   private readonly shutdownReservationCoordinator: DeviceShutdownReservations;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
@@ -815,6 +817,9 @@ export class DevicePool {
   private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
   private readonly DEVICE_WAIT_INTERVAL_MS = 1000; // Check every 1 second
   private readonly RECOVERY_RESPONSE_MARGIN_MS = 1000;
+  // Match the daemon's 5s disconnect-monitor cadence: client retries must not
+  // turn the three-miss eviction threshold into a tight-loop reboot trigger.
+  private readonly RECOVERY_RETRY_REFRESH_INTERVAL_MS = 5000;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
 
@@ -859,6 +864,10 @@ export class DevicePool {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
+    this.recoveryRetryRefresh = new TTLCache(timer, {
+      ttlMs: this.RECOVERY_RETRY_REFRESH_INTERVAL_MS,
+      maxEntries: 1,
+    });
     this.deviceHealthMarkers = resolveDeviceHealthMarkers(deviceHealthMarkers, timer);
     sessionManager.setDeviceHealthMarkers(
       this.deviceHealthMarkers,
@@ -3673,10 +3682,15 @@ export class DevicePool {
       async (attempt) => {
         // Ordinary allocation must capture candidates before yielding to release/readiness.
         if (recoveryTarget) {
-          lossIncident = await this.checkRecoveryAssignmentLoss(sessionId, recoveryTarget);
+          lossIncident = await this.settledRecoveryLossIncident(sessionId, recoveryTarget);
         }
         // Try to assign device (mutex ensures atomic assignment)
-        const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
+        const assignResult = await this.tryAssignDevice(
+          sessionId,
+          platform,
+          recoveryTarget,
+          lossIncident !== undefined,
+        );
         if (assignResult.refreshCompleted) {
           refreshFailure = assignResult.refreshFailure;
         }
@@ -3692,14 +3706,12 @@ export class DevicePool {
         }
 
         if (recoveryTarget) {
-          const recoveryFailure = this.recoveryFailure(
+          lossIncident = await this.checkRecoveryAssignmentFailure(
             sessionId,
             recoveryTarget,
             assignResult.refreshCompleteness,
+            lossIncident,
           );
-          if (recoveryFailure) {
-            throw recoveryFailure;
-          }
         }
 
         // No device available - check if we should wait or fail
@@ -3814,25 +3826,35 @@ export class DevicePool {
     );
   }
 
-  private async checkRecoveryAssignmentLoss(
+  private async checkRecoveryAssignmentFailure(
     sessionId: string,
     target: SessionRecoveryTarget,
+    refreshCompleteness: DiscoveryCompleteness | undefined,
+    incident: EmulatorLossIncident | undefined,
   ): Promise<EmulatorLossIncident | undefined> {
+    // Loss can settle while discovery is in flight. Re-read diagnostics before
+    // deciding whether this attempt should report pending.
+    incident ??= await this.settledRecoveryLossIncident(sessionId, target);
+    const failure = this.recoveryFailure(sessionId, target, refreshCompleteness);
+    // Proven serial reuse is terminal even inside the recovery window.
     if (
-      target.restartRecoveryDeadlineMs === undefined ||
-      this.timer.now() >= target.restartRecoveryDeadlineMs
+      failure instanceof SessionRecoveryIdentityLossError &&
+      failure.reason === "identity-continuity-lost"
     ) {
-      return undefined;
+      throw failure;
     }
-    const incident = await this.settledRecoveryLossIncident(sessionId, target);
-    // Reading diagnostics can cross the restart deadline. Only the existing
-    // recoveryFailure path may decide identity loss once that window closes.
+    // Reading diagnostics or discovery can cross the restart deadline. Only
+    // recoveryFailure may decide absence once that window closes.
     if (
       incident &&
+      target.restartRecoveryDeadlineMs !== undefined &&
       this.timer.now() < target.restartRecoveryDeadlineMs &&
       this.getDevicesMatchingRecoveryTarget(target).length === 0
     ) {
       throw this.recoveryAssignmentError(sessionId, target, incident);
+    }
+    if (failure) {
+      throw failure;
     }
     return incident;
   }
@@ -3882,7 +3904,11 @@ export class DevicePool {
     sessionId: string,
     target: SessionRecoveryTarget,
   ): Promise<EmulatorLossIncident | undefined> {
-    if (target.platform !== "android" || target.restartRecoveryDeadlineMs === undefined) {
+    if (
+      target.platform !== "android" ||
+      target.restartRecoveryDeadlineMs === undefined ||
+      this.timer.now() >= target.restartRecoveryDeadlineMs
+    ) {
       return undefined;
     }
     try {
@@ -3913,6 +3939,7 @@ export class DevicePool {
     sessionId: string,
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
+    settledRecoveryLoss = false,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -3933,6 +3960,7 @@ export class DevicePool {
       recoveryTarget ? "recovery target pool empty" : "platform pool empty",
       () => this.hasPendingAndroidRecovery(platform),
       recoveryTarget,
+      settledRecoveryLoss,
     );
   }
 
@@ -3975,6 +4003,7 @@ export class DevicePool {
     emptyCandidatePoolReason: string,
     hasPendingRecovery: () => boolean,
     recoveryTarget?: SessionRecoveryTarget,
+    settledRecoveryLoss = false,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -4101,7 +4130,7 @@ export class DevicePool {
         // must not inherit one caller's cancellation; each waiter can stop alone.
         const refreshResult = await this.allocationRefresh.run(
           "allocation",
-          () => runWithAbortSignal(undefined, () => this.refreshDevicesInternal(false)),
+          () => this.refreshForAllocation(recoveryTarget, settledRecoveryLoss),
           getAbortSignal(),
         );
         refreshCompleteness = refreshResult.completeness;
@@ -4137,6 +4166,43 @@ export class DevicePool {
         };
       }
     }
+  }
+
+  private refreshForAllocation(
+    target: SessionRecoveryTarget | undefined,
+    settledRecoveryLoss: boolean,
+  ): Promise<DevicePoolRefreshResult> {
+    return runWithAbortSignal(undefined, () =>
+      target
+        ? this.refreshForRecoveryRetry(target, settledRecoveryLoss)
+        : this.refreshDevicesInternal(false),
+    );
+  }
+
+  private async refreshForRecoveryRetry(
+    target: SessionRecoveryTarget,
+    settledRecoveryLoss: boolean,
+  ): Promise<DevicePoolRefreshResult> {
+    if (
+      target.restartRecoveryDeadlineMs === undefined ||
+      this.timer.now() >= target.restartRecoveryDeadlineMs
+    ) {
+      return this.refreshDevicesInternal(false);
+    }
+    // Pool-wide, not per session: multiple recovering sessions must not each
+    // spend a miss against the same bystander. Ordinary refreshes are not cached
+    // here, so the first recovery retry still discovers after the loss.
+    // Only the settled-loss fast pending error enables cache reuse. Unsettled
+    // recovery retains its existing in-call polling and caller deadlines.
+    const recent = settledRecoveryLoss ? this.recoveryRetryRefresh.get("allocation") : undefined;
+    if (recent) {
+      return recent;
+    }
+    const result = await this.refreshDevicesInternal(false);
+    // Cache even inconclusive results to bound retries during discovery failure.
+    // SingleFlight owns this task independently of each caller's cancellation.
+    this.recoveryRetryRefresh.set("allocation", result);
+    return result;
   }
 
   private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {

@@ -16,6 +16,7 @@ test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
 test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 scripts/unit-test-device-spawn-allowlist.txt text eol=lf
+test/fixtures/android-fold-displays/*.txt text eol=lf
 
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling

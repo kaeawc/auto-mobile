@@ -2,7 +2,7 @@ import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/obse
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
 import type { ElementGeometry } from "../../../../src/utils/interfaces/ElementGeometry";
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
@@ -151,6 +151,38 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
     talkBackExecutor = new FakeTalkBackSwipeExecutor();
+  });
+
+  test("lookFor scroll resolution leaves hint fallback off for a filled Android field", () => {
+    const resolver = new ElementResolver();
+    const resolve = spyOn(resolver, "resolve");
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      resolver,
+    });
+    try {
+      const hierarchy = {
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            class: "android.widget.EditText",
+            text: "5551234",
+            "hint-text": "Phone",
+            focusable: true,
+          },
+        },
+      };
+      expect(scroll.resolveElement(hierarchy, { text: "Phone" }, "inspect", true)).toBeNull();
+      expect(resolve.mock.calls[0][2].allowHintFallback).toBeUndefined();
+      expect(resolve.mock.calls[0][2].action).toBe("inspect");
+    } finally {
+      resolve.mockRestore();
+    }
   });
 
   test("already aborted scroll observes no device state", async () => {

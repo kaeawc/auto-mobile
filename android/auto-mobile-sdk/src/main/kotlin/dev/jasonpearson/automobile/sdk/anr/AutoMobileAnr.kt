@@ -174,16 +174,6 @@ object AutoMobileAnr {
   private inline fun <T> reportNewAnrs(
     items: List<T>,
     noinline timestampOf: (T) -> Long,
-    lastReported: Long,
-    send: (T) -> Boolean,
-  ): Long {
-    // Retain the timestamp-only seam used by the existing pure-JVM tests.
-    return reportNewAnrs(items, timestampOf, { "" }, AnrCursor(lastReported, null), send).timestamp
-  }
-
-  private inline fun <T> reportNewAnrs(
-    items: List<T>,
-    noinline timestampOf: (T) -> Long,
     identityOf: (T) -> String,
     lastReported: AnrCursor,
     send: (T) -> Boolean,
@@ -193,8 +183,15 @@ object AutoMobileAnr {
     for (item in items.sortedBy(timestampOf)) {
       val timestamp = timestampOf(item)
       val identity = identityOf(item)
-      if (timestamp < watermark || (timestamp == watermark && reportedIds == null)) continue
-      if (timestamp == watermark && identity in reportedIds.orEmpty()) continue
+      val shouldSkip =
+        timestamp < watermark ||
+          (timestamp == watermark && (reportedIds == null || identity in reportedIds.orEmpty()))
+      if (shouldSkip) {
+        AutoMobileSDK.logger.d(TAG) {
+          "Skipping already reported ANR: time=$timestamp, identity=$identity"
+        }
+        continue
+      }
       if (!send(item)) break
       if (timestamp > watermark) {
         watermark = timestamp

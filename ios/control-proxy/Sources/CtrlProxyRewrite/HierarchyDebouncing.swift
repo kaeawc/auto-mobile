@@ -12,7 +12,11 @@ public protocol HierarchyDebouncing: Sendable {
     /// backoff to the new base and, if running, reschedules the pending poll.
     func updatePollIntervalMs(_ pollIntervalMs: Int64)
 
+    /// Reserve an ordering token immediately before extraction, on the same actor turn.
+    /// Shared by polls and commands; independent of the hierarchy's wire timestamp.
+    func beginCapture() -> UInt64
+
     /// Remember a raw, filtered XCUITest capture without changing poll detection or cadence.
-    /// Older captures must not replace the latest hierarchy.
-    func recordCommandCapture(_ hierarchy: ViewHierarchy)
+    /// A capture that began earlier must not replace one that began later.
+    func recordCommandCapture(_ hierarchy: ViewHierarchy, captureSequence: UInt64)
 }

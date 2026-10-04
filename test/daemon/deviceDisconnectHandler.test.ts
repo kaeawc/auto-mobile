@@ -51,6 +51,7 @@ function harness() {
   const events: string[] = [];
   const outcomes = new Map<string | undefined, EmulatorRecoveryOutcome>();
   const settlements: (string | undefined)[] = [];
+  const fallbacks: ("exhausted" | "not-attempted")[] = [];
   let reserved = false;
   let recoveryEnabled = false;
   let rebootResult = false;
@@ -92,6 +93,7 @@ function harness() {
       outcomes.set(id, outcome);
     },
     refreshEmulatorLossRecoverySettlement: async (id, fallback) => {
+      fallbacks.push(fallback);
       const outcome = outcomes.get(id) ?? fallback;
       events.push(`complete:${outcome}`);
       outcomes.set(id, outcome);
@@ -115,6 +117,7 @@ function harness() {
     events,
     outcomes,
     settlements,
+    fallbacks,
     port,
     handler: new DeviceDisconnectHandler(port),
     reserve: () => {
@@ -163,7 +166,7 @@ describe("DeviceDisconnectHandler", () => {
     expect(h.settlements).toEqual(["incident"]);
   });
 
-  test.each([undefined, "not-attempted"] as const)(
+  test.each([undefined, "not-attempted", "exhausted", "recovered"] as const)(
     "settles throwing intentional shutdown removal with persisted outcome %s",
     async (persistedOutcome) => {
       const h = harness();
@@ -179,10 +182,34 @@ describe("DeviceDisconnectHandler", () => {
       await expect(h.handler.removeDisconnectedDevice(h.device.id, false, "incident")).rejects.toBe(
         failure,
       );
-      const outcome = persistedOutcome ?? "exhausted";
+      const outcome = persistedOutcome ?? "not-attempted";
+      expect(h.fallbacks).toEqual(["not-attempted"]);
       expect(h.events).toEqual(["marker-deleted", "remove:true", `complete:${outcome}`, "settle"]);
       expect(h.outcomes.get("incident")).toBe(outcome);
       expect(h.settlements).toEqual(["incident"]);
+    },
+  );
+
+  test.each([
+    "getIntentionalShutdownMarker",
+    "deleteIntentionalShutdownMarker",
+    "getRecoveryPolicy",
+  ] as const)(
+    "keeps exhausted fallback when %s throws before intentional removal",
+    async (method) => {
+      const h = harness();
+      h.markers.set(h.device.id, h.device.incarnation);
+      const failure = new Error("intentional shutdown check failed");
+      h.port[method] = () => {
+        throw failure;
+      };
+      await expect(h.handler.removeDisconnectedDevice(h.device.id, true, "incident")).rejects.toBe(
+        failure,
+      );
+      expect(h.fallbacks).toEqual(["exhausted"]);
+      expect(h.outcomes.get("incident")).toBe("exhausted");
+      expect(h.settlements).toEqual(["incident"]);
+      expect(h.events).not.toContain("remove:true");
     },
   );
 
@@ -276,6 +303,7 @@ describe("DeviceDisconnectHandler", () => {
       throw failure;
     };
     await expect(h.handler.removeDisconnectedDevice(h.device.id, false)).rejects.toBe(failure);
+    expect(h.fallbacks).toEqual(["exhausted"]);
     expect(h.events).toEqual([
       "record",
       "reboot",
@@ -392,61 +420,66 @@ describe("DeviceDisconnectHandler", () => {
     },
   );
 
-  test("real ledger wait resolves promptly after intentional shutdown cleanup throws", async () => {
-    const h = harness();
-    const store = new InMemoryEmulatorLossIncidentStore(h.timer, new FakeIdGenerator());
-    const sessions = new SessionManager(h.timer, new FakeDeviceSessionPersistence());
-    const session = await sessions.createSession("session", h.device.id, "android");
-    let sessionPresent = true;
-    const retryExecutor: RetryExecutor = {
-      execute: async () => {
-        throw new Error("unused");
-      },
-      executeOrThrow: async (operation) => operation(1),
-    };
-    const ledger = new EmulatorLossIncidentLedger(
-      {
-        getDevice: () => h.device,
-        getRecoveryPolicy: h.port.getRecoveryPolicy,
-        getSessionForDevice: () => session.sessionId,
-        getSession: () => (sessionPresent ? session : null),
-        getProcessOutputTail: () => undefined,
-      },
-      store,
-      h.timer,
-      retryExecutor,
-    );
-    h.port.refreshEmulatorLossRecoverySettlement = (id, outcome) =>
-      ledger.refreshEmulatorLossRecoverySettlement(id, outcome);
-    h.port.settleEmulatorLossIncident = (id) => ledger.settleEmulatorLossIncident(id);
-    const id = (await ledger.recordEmulatorLossIncident(h.device.id, "device-discovery-miss"))!;
-    expect((await store.get(id))?.session?.sessionUuid).toBe(session.sessionId);
-    // The caller cancelled and released this session before disconnect cleanup.
-    sessionPresent = false;
-    const waiting = ledger.waitForEmulatorLossIncident(id);
-    let resolved = false;
-    void waiting.then(() => {
-      resolved = true;
-    });
-    expect(h.timer.getPendingTimeouts()).toEqual([120_000]);
-    h.markers.set(h.device.id, h.device.incarnation);
-    const failure = new Error("cache cleanup failed");
-    h.port.removeDevice = async () => {
-      throw failure;
-    };
-    await expect(h.handler.removeDisconnectedDevice(h.device.id, false, id)).rejects.toBe(failure);
-    await drainUntil(() => resolved, {
-      description: "incident wait after throwing cleanup",
-      maxTurns: 100,
-    });
-    const incident = await waiting;
-    expect(incident?.recovery.outcome).toBe("exhausted");
-    expect(incident?.session?.state).toBe("released");
-    expect(ledger.emulatorLossRecoveryResolvers.size).toBe(0);
-    expect(ledger.emulatorLossRecoverySettlements.size).toBe(0);
-    expect(h.timer.getPendingTimeoutCount()).toBe(0);
-    expect(h.timer.now()).toBe(0);
-  });
+  test.each([false, true])(
+    "real ledger settles throwing intentional removal with session present=%s",
+    async (sessionPresent) => {
+      const h = harness();
+      const store = new InMemoryEmulatorLossIncidentStore(h.timer, new FakeIdGenerator());
+      const sessions = new SessionManager(h.timer, new FakeDeviceSessionPersistence());
+      const session = await sessions.createSession("session", h.device.id, "android");
+      const retryExecutor: RetryExecutor = {
+        execute: async () => {
+          throw new Error("unused");
+        },
+        executeOrThrow: async (operation) => operation(1),
+      };
+      let capturingSession = true;
+      const ledger = new EmulatorLossIncidentLedger(
+        {
+          getDevice: () => h.device,
+          getRecoveryPolicy: h.port.getRecoveryPolicy,
+          getSessionForDevice: () => session.sessionId,
+          getSession: () => (capturingSession || sessionPresent ? session : null),
+          getProcessOutputTail: () => undefined,
+        },
+        store,
+        h.timer,
+        retryExecutor,
+      );
+      h.port.refreshEmulatorLossRecoverySettlement = (id, outcome) =>
+        ledger.refreshEmulatorLossRecoverySettlement(id, outcome);
+      h.port.settleEmulatorLossIncident = (id) => ledger.settleEmulatorLossIncident(id);
+      const id = (await ledger.recordEmulatorLossIncident(h.device.id, "device-discovery-miss"))!;
+      expect((await store.get(id))?.session?.sessionUuid).toBe(session.sessionId);
+      capturingSession = false;
+      // The incident can retain a session snapshot even though the pooled device is unassigned.
+      const waiting = ledger.waitForEmulatorLossIncident(id);
+      let resolved = false;
+      void waiting.then(() => {
+        resolved = true;
+      });
+      expect(h.timer.getPendingTimeouts()).toEqual([120_000]);
+      h.markers.set(h.device.id, h.device.incarnation);
+      const failure = new Error("cache cleanup failed");
+      h.port.removeDevice = async () => {
+        throw failure;
+      };
+      await expect(h.handler.removeDisconnectedDevice(h.device.id, false, id)).rejects.toBe(
+        failure,
+      );
+      await drainUntil(() => resolved, {
+        description: "incident wait after throwing cleanup",
+        maxTurns: 100,
+      });
+      const incident = await waiting;
+      expect(incident?.recovery.outcome).toBe("not-attempted");
+      expect(incident?.session?.state).toBe(sessionPresent ? "active" : "released");
+      expect(ledger.emulatorLossRecoveryResolvers.size).toBe(0);
+      expect(ledger.emulatorLossRecoverySettlements.size).toBe(0);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      expect(h.timer.now()).toBe(0);
+    },
+  );
 
   test("rechecks incarnation after a delayed stale-signal discovery", async () => {
     const h = harness();

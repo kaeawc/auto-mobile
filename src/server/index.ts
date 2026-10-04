@@ -908,7 +908,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // Get the registered tool
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
-      const hint = getRemovedToolHint(name);
+      const registeredTool = ToolRegistry.getRegisteredTool(name);
+      const hint = registeredTool
+        ? ToolRegistry.getToolAvailabilityGateReasons(registeredTool).join("; ")
+        : getRemovedToolHint(name);
       throw new ActionableError(`Unknown tool: ${name}${hint ? `. ${hint}` : ""}`);
     }
 

@@ -1,6 +1,6 @@
 import { ActionableError } from "./ActionableError";
-import type { DeviceDisplays, DisplayPanel } from "./DisplayPanel";
-import { selectablePanels } from "./DisplayPanel";
+import type { DeviceDisplays, DisplayPanel, DisconnectedPanelContext } from "./DisplayPanel";
+import { buildDisconnectedPanelMessage, selectablePanels } from "./DisplayPanel";
 
 export interface PinnedDisplayDetails {
   pin: string;
@@ -41,13 +41,31 @@ export class DisplayPinNeedsSessionError extends ActionableError {
 
 export class PinnedDisplayUnavailableError extends ActionableError {
   readonly details: PinnedDisplayDetails;
-  constructor(pin: string, inventory: DeviceDisplays | undefined, options?: ErrorOptions) {
+  constructor(
+    pin: string,
+    inventory: DeviceDisplays | undefined,
+    options?: ErrorOptions & {
+      disconnectedPanel?: DisconnectedPanelContext;
+    },
+  ) {
+    const disconnected = options?.disconnectedPanel;
     super(
-      `Pinned display "${pin}" is unavailable. Available panels: ${panelChoices(inventory)}. Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly.`,
+      disconnected
+        ? buildDisconnectedPanelMessage(
+            disconnected.panel.key,
+            disconnected.panel.role,
+            disconnected.connectedPanels,
+            disconnected.hasPostures,
+            true,
+          )
+        : `Pinned display "${pin}" is unavailable. Known panels (connection status unknown): ${panelChoices(inventory)}. Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly.`,
       options,
     );
     this.name = "PinnedDisplayUnavailableError";
-    this.details = { pin, availablePanels: availableDisplayPanels(inventory) };
+    this.details = {
+      pin,
+      availablePanels: disconnected?.connectedPanels ?? availableDisplayPanels(inventory),
+    };
   }
 }
 

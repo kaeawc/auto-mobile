@@ -13,7 +13,7 @@ import { displayTransitions, type DisplayTransitionReader } from "../observe/Dis
 import { resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
-import { POSTURE_PANEL_ROLES, type DisplayPanel } from "../../models/DisplayPanel";
+import { buildDisconnectedPanelMessage, type DisplayPanel } from "../../models/DisplayPanel";
 import {
   logicalDisplayIdForPanel,
   parseAndroidDisplayInfos,
@@ -21,24 +21,7 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectedDisplayPin } from "../observe/SessionDisplayContext";
 
-/** Guidance for a known panel whose logical display is absent in this posture. */
-export function buildDisconnectedPanelMessage(
-  panelKey: string,
-  panelRole: DisplayPanel["role"],
-  connected: readonly { key: string; role?: DisplayPanel["role"] }[],
-  hasPostures: boolean,
-  pinned: boolean,
-): string {
-  const choices = connected.map(({ key, role }) => (role ? `${key} (${role})` : key)).join(", ");
-  const posture = POSTURE_PANEL_ROLES.find(([, role]) => role === panelRole)?.[0];
-  const postureRemedy = hasPostures
-    ? `; to make this panel available, change the device posture with ${posture ? `setPosture {posture: "${posture}"}` : "setPosture using a supported posture"}`
-    : "";
-  const pinRemedy = pinned
-    ? " Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly."
-    : "";
-  return `Display "${panelKey}" (${panelRole}) is not connected in the current posture. Connected panels: ${choices}. Target a connected panel, omit display, or use display: "active"${postureRemedy}.${pinRemedy}`;
-}
+export { buildDisconnectedPanelMessage } from "../../models/DisplayPanel";
 
 async function readActionDisplayInfos(
   adb: Pick<AdbExecutor, "executeCommand">,

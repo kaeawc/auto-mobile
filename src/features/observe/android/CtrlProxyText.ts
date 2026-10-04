@@ -68,6 +68,68 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
   return committedText.endsWith(text) || committedText.replace(markers, "").endsWith(projectedText);
 }
 
+/**
+ * Accept canonical spellings, decimal digit values, and locale-independent case
+ * filters. Lowercase expansions stay atomic (İ is not i + a separate dot), while
+ * uppercase expansions allow input filters such as straße -> STRASSE.
+ * Formatting may remove punctuation/symbols only when sent content remains.
+ */
+export function imeCommitSubsequenceMatches(committedText: string, text: string): boolean {
+  const field = committedText.normalize("NFC");
+  const sent = text.normalize("NFC");
+  if (imeCaseSubsequenceMatches(field, sent)) {
+    return true;
+  }
+  const formatting = /[^\p{L}\p{N}\p{M}]/gu;
+  // Recompose after stripping formatting so e-◌́ still matches canonical é.
+  const sentContent = sent.replace(formatting, "").normalize("NFC");
+  return (
+    sentContent.length > 0 &&
+    imeCaseSubsequenceMatches(field.replace(formatting, "").normalize("NFC"), sentContent)
+  );
+}
+
+function imeCaseSubsequenceMatches(field: string, sent: string): boolean {
+  const lowerTokens = (value: string): string[] =>
+    Array.from(value, (codePoint) => imeDecimalDigit(codePoint).toLowerCase());
+  const upperTokens = (value: string): string[] =>
+    Array.from(value, imeDecimalDigit).flatMap((codePoint) => Array.from(codePoint.toUpperCase()));
+  return (
+    imeCodePointSubsequenceMatches(lowerTokens(field), lowerTokens(sent)) ||
+    imeCodePointSubsequenceMatches(upperTokens(field), upperTokens(sent))
+  );
+}
+
+function imeDecimalDigit(codePoint: string): string {
+  if (!/\p{Nd}/u.test(codePoint)) {
+    return codePoint;
+  }
+  const value = codePoint.codePointAt(0)!;
+  let start = value;
+  // Unicode decimal digits are ordered runs of ten; adjacent sets (e.g. math
+  // styles) form longer runs. Modulo ten preserves the value in every set.
+  while (start > 0 && /\p{Nd}/u.test(String.fromCodePoint(start - 1))) {
+    start--;
+  }
+  return String((value - start) % 10);
+}
+
+function imeCodePointSubsequenceMatches(
+  field: readonly string[],
+  sent: readonly string[],
+): boolean {
+  let index = 0;
+  for (const codePoint of field) {
+    if (codePoint === sent[index]) {
+      index++;
+    }
+    if (index === sent.length) {
+      return true;
+    }
+  }
+  return index === sent.length;
+}
+
 export const IME_COMMIT_TIMEOUT = {
   baseMs: 10_000,
   perSegmentMs: 750,

@@ -10,6 +10,7 @@ import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecut
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
+import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
 import {
@@ -170,10 +171,23 @@ export class DevicePoolError extends Error {
   constructor(
     message: string,
     public readonly isRetryable: boolean,
+    public readonly refreshFailure?: string,
   ) {
     super(message);
     this.name = "DevicePoolError";
   }
+}
+
+function refreshFailureContext(failure: string | Error | undefined): string {
+  const reason =
+    failure instanceof DevicePoolError
+      ? failure.refreshFailure
+      : typeof failure === "string"
+        ? failure
+        : undefined;
+  return reason === undefined
+    ? ""
+    : `Could not refresh device list: ${truncateBodyText(reason.split(/[\r\n\u2028\u2029]/, 1)[0], 256)}.\n`;
 }
 
 /**
@@ -1898,7 +1912,7 @@ export class DevicePool {
     );
 
     // Validate we have enough devices
-    await this.ensurePoolRefreshed();
+    let refreshFailure = await this.ensurePoolRefreshed();
     const preallocationCandidates = this.getDevicesByPlatform(platform);
     await this.pruneStaleIdleIosDevices(preallocationCandidates);
     await this.evictUnavailableIdleDevicesMatching(
@@ -1913,7 +1927,7 @@ export class DevicePool {
         platform,
       );
       if (started > 0) {
-        await this.refreshDevices();
+        refreshFailure = (await this.refreshDevicesWithOutcome()).failure;
         stats = this.getStatsForPlatform(platform);
       } else if (platform === "android") {
         // A queued start may have joined a boot without launching a device.
@@ -1931,6 +1945,7 @@ export class DevicePool {
     ) {
       throw new ActionableError(
         `Not enough devices in pool: need ${requiredCount}, have ${stats.total}.\n` +
+          refreshFailureContext(refreshFailure) +
           `Device pool status:\n` +
           `  Total devices: ${stats.total}\n` +
           `  Idle: ${stats.idle}\n` +
@@ -1952,10 +1967,12 @@ export class DevicePool {
       async () => {
         // Try to assign all remaining sessions
         while (assigned.size < requiredCount) {
-          const sessionIndex = assigned.size;
-          const sessionId = sessionIds[sessionIndex];
+          const sessionId = sessionIds[assigned.size];
 
           const assignResult = await this.tryAssignDevice(sessionId, platform);
+          if (assignResult.refreshCompleted) {
+            refreshFailure = assignResult.refreshFailure;
+          }
 
           if (assignResult.success) {
             assigned.add(sessionId);
@@ -1967,8 +1984,7 @@ export class DevicePool {
               });
             }
             logger.info(
-              `[DevicePool] Allocated device ${assignResult.deviceId} to session ${sessionId} ` +
-                `(${assigned.size}/${requiredCount})`,
+              `[DevicePool] Allocated device ${assignResult.deviceId} to session ${sessionId} (${assigned.size}/${requiredCount})`,
             );
           } else if (assignResult.livenessUnknown) {
             throw new DevicePoolError(
@@ -1997,11 +2013,10 @@ export class DevicePool {
             if (!firstWaitLogged) {
               firstWaitLogged = true;
               logger.info(
-                `[DevicePool] Waiting for ${requiredCount - assigned.size} more device(s) ` +
-                  `(${assignResult.totalDevices} total, all currently busy)...`,
+                `[DevicePool] Waiting for ${requiredCount - assigned.size} more device(s) (${assignResult.totalDevices} total, all currently busy)...`,
               );
             }
-            throw new DevicePoolError("All devices busy", true);
+            throw new DevicePoolError("All devices busy", true, refreshFailure);
           }
         }
 
@@ -2031,6 +2046,7 @@ export class DevicePool {
       const currentStats = this.getStatsForPlatform(platform);
       throw new ActionableError(
         `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${result.attempts} attempts).\n` +
+          refreshFailureContext(refreshFailure) +
           `Required: ${requiredCount} devices, allocated: ${assigned.size}\n` +
           `Device pool status:\n` +
           `  Total devices: ${currentStats.total}\n` +
@@ -2079,7 +2095,7 @@ export class DevicePool {
         `(timeout: ${timeoutMs / 1000}s)`,
     );
 
-    await this.ensurePoolRefreshed();
+    let refreshFailure = await this.ensurePoolRefreshed();
     const sortedRequests = this.criteriaMatcher.sortBySpecificity(requests);
     await this.pruneStaleIdleIosDevices(this.getDevicesMatchingAnyRequest(sortedRequests));
     await this.evictUnavailableIdleDevicesMatching((device) =>
@@ -2098,7 +2114,7 @@ export class DevicePool {
     }
 
     if (needsRefresh) {
-      await this.refreshDevices();
+      refreshFailure = (await this.refreshDevicesWithOutcome()).failure;
     }
 
     const started = await this.startAdditionalDevicesForCriteria(
@@ -2119,6 +2135,7 @@ export class DevicePool {
         const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
         throw new ActionableError(
           `No devices match criteria for session ${request.sessionId}${summary}.\n` +
+            refreshFailureContext(refreshFailure) +
             `Ensure the required devices are installed, startable, and available.`,
         );
       }
@@ -2134,6 +2151,7 @@ export class DevicePool {
         await this.rollbackAssignments(assignmentsToRollback);
         throw new ActionableError(
           `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
+            refreshFailureContext(refreshFailure) +
             `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
             `Suggestions:\n` +
             `  - Boot additional simulators or emulators that match the plan requirements\n` +
@@ -2150,6 +2168,9 @@ export class DevicePool {
         }
 
         const result = await this.tryAssignDeviceWithCriteria(request.sessionId, request.criteria);
+        if (result.refreshCompleted) {
+          refreshFailure = result.refreshFailure;
+        }
 
         if (result.success) {
           assignments.set(request.sessionId, result.deviceId!);
@@ -2604,11 +2625,12 @@ export class DevicePool {
 
   /**
    * Ensure device pool has been refreshed at least once
+   * Return the refresh failure so allocation errors can retain its cause.
    */
-  private async ensurePoolRefreshed(): Promise<void> {
+  private async ensurePoolRefreshed(): Promise<string | undefined> {
     if (this.devices.size === 0) {
       logger.info("[DevicePool] Pool is empty, attempting auto-refresh...");
-      await this.refreshDevices();
+      return (await this.refreshDevicesWithOutcome()).failure;
     }
   }
 
@@ -3611,6 +3633,7 @@ export class DevicePool {
         (recoveryDeadline === undefined ? 0 : 1),
     );
     let firstAttemptLogged = false;
+    let refreshFailure: string | undefined;
     let lossIncident: EmulatorLossIncident | undefined;
 
     // Select synchronously: the ordinary path calls the original executor directly,
@@ -3649,6 +3672,9 @@ export class DevicePool {
         }
         // Try to assign device (mutex ensures atomic assignment)
         const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
+        if (assignResult.refreshCompleted) {
+          refreshFailure = assignResult.refreshFailure;
+        }
 
         if (assignResult.success) {
           if (attempt > 1) {
@@ -3687,7 +3713,7 @@ export class DevicePool {
                 `session ${sessionId} waiting for availability (timeout: ${timeoutMs / 1000}s)...`,
             );
           }
-          throw new DevicePoolError("All devices busy", true);
+          throw new DevicePoolError("All devices busy", true, refreshFailure);
         } else {
           // No devices at all - fail immediately with non-retryable error
           const stats = this.getStatsForPlatform(platform);
@@ -3769,6 +3795,7 @@ export class DevicePool {
     const stats = this.getStatsForPlatform(platform);
     throw new ActionableError(
       `Timed out waiting for device after ${Math.round(timeoutMs / 1000)}s (${attempts} attempts).\n` +
+        refreshFailureContext(error) +
         `Session: ${sessionId}\n` +
         `Device pool status:\n` +
         `  Total devices: ${stats.total}\n` +
@@ -3903,6 +3930,8 @@ export class DevicePool {
     totalDevices: number;
     livenessUnknown?: boolean;
     refreshCompleteness?: DiscoveryCompleteness;
+    refreshFailure?: string;
+    refreshCompleted?: boolean;
   }> {
     return this.tryAssignFrom(
       sessionId,
@@ -3927,6 +3956,8 @@ export class DevicePool {
     totalDevices: number;
     livenessUnknown?: boolean;
     refreshCompleteness?: DiscoveryCompleteness;
+    refreshFailure?: string;
+    refreshCompleted?: boolean;
   }> {
     return this.tryAssignFrom(
       sessionId,
@@ -3961,9 +3992,13 @@ export class DevicePool {
     totalDevices: number;
     livenessUnknown?: boolean;
     refreshCompleteness?: DiscoveryCompleteness;
+    refreshFailure?: string;
+    refreshCompleted?: boolean;
   }> {
     let livenessUnknown = false;
     let refreshCompleteness: DiscoveryCompleteness | undefined;
+    let refreshFailure: string | undefined;
+    let refreshCompleted = false;
     let refreshed = false;
     let refreshInconclusive = false;
     let staleRetries = 0;
@@ -4067,7 +4102,7 @@ export class DevicePool {
       });
       const { shouldRefresh, snapshotStale, ...assignment } = result;
       if (assignment.success) {
-        return assignment;
+        return { ...assignment, refreshCompleteness, refreshFailure, refreshCompleted };
       }
       if (shouldRefresh) {
         refreshed = true;
@@ -4079,6 +4114,9 @@ export class DevicePool {
           getAbortSignal(),
         );
         refreshCompleteness = refreshResult.completeness;
+        refreshFailure = refreshResult.failure;
+        // Discarded discovery is neither a failure nor a successful refresh.
+        refreshCompleted = refreshFailure !== undefined || refreshCompleteness !== undefined;
         // A background refresh can still supersede this flight. Its discarded
         // result (or failed discovery) cannot establish authoritative absence,
         // including for exact recovery targets; let the public retry bound it.
@@ -4086,14 +4124,26 @@ export class DevicePool {
         continue;
       }
       if (refreshInconclusive) {
-        return { ...assignment, shouldWait: true };
+        return {
+          ...assignment,
+          shouldWait: true,
+          refreshCompleteness,
+          refreshFailure,
+          refreshCompleted,
+        };
       }
       if (!snapshotStale) {
-        return assignment;
+        return { ...assignment, refreshCompleteness, refreshFailure, refreshCompleted };
       }
       if (staleRetries++ >= ALLOCATION_SNAPSHOT_STALE_RETRIES) {
         // Let the existing allocation timeout/retry loop bound sustained churn.
-        return { ...assignment, shouldWait: true };
+        return {
+          ...assignment,
+          shouldWait: true,
+          refreshCompleteness,
+          refreshFailure,
+          refreshCompleted,
+        };
       }
     }
   }
@@ -5982,6 +6032,11 @@ export class DevicePool {
   /** Read the shutdown fence under the assignment lock used to install it. */
   isShutdownReserved(deviceId: string): Promise<boolean> {
     return this.shutdownReservationCoordinator.isShutdownReserved(deviceId);
+  }
+
+  /** Read only the active shutdown reservation under the assignment lock. */
+  isShutdownReservationHeld(deviceId: string): Promise<boolean> {
+    return this.shutdownReservationCoordinator.isShutdownReservationHeld(deviceId);
   }
 
   /**

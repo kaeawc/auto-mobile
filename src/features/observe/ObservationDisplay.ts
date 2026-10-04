@@ -1,5 +1,9 @@
 import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
-import { POSTURE_PANEL_ROLES, type Posture } from "../../models/DisplayPanel";
+import {
+  buildDisconnectedPanelMessage,
+  POSTURE_PANEL_ROLES,
+  type Posture,
+} from "../../models/DisplayPanel";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
@@ -15,6 +19,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { DisplaySelectionError } from "./DisplaySelection";
+import { selectedDisplayPin } from "./SessionDisplayContext";
 import type { Timer } from "../../utils/SystemTimer";
 
 export interface ObservedAndroidDisplay {
@@ -22,6 +27,8 @@ export interface ObservedAndroidDisplay {
   logicalId: number;
   panelKeysByLogicalId?: Readonly<Record<number, string>>;
 }
+
+export class AndroidDisplayReadError extends ActionableError {}
 
 function singlePanelKeyOrDefault(panels: readonly DisplayPanel[]): string {
   return panels.length === 1 ? panels[0].key : "0";
@@ -152,14 +159,35 @@ export class ObservedAndroidDisplayCache {
     }
     const result = await readAndroidDisplayInfos(adb, signal);
     if (result.infos === null) {
-      throw new ActionableError(
+      throw new AndroidDisplayReadError(
         `Android display list could not be read while selecting panel "${key}": ${result.reason}. Retry the request.`,
       );
     }
     const id = logicalDisplayIdForPanel(result.infos, key);
     if (id === undefined) {
+      const panel = device.displays?.panels.find((candidate) => candidate.key === key) ?? {
+        key,
+        role: "unknown" as const,
+      };
+      const connectedPanels = result.infos.map((info) => {
+        const key = physicalPanelKey(info.uniqueId ?? "") || info.logicalId;
+        return {
+          key,
+          role:
+            device.displays?.panels.find((candidate) => candidate.key === key)?.role ??
+            ("unknown" as const),
+        };
+      });
+      const hasPostures = (device.displays?.postures.length ?? 0) > 0;
       throw new DisplaySelectionError(
-        `Display panel "${key}" is not currently connected. Choose an active panel and retry.`,
+        buildDisconnectedPanelMessage(
+          panel.key,
+          panel.role,
+          connectedPanels,
+          hasPostures,
+          selectedDisplayPin() !== undefined,
+        ),
+        { disconnectedPanel: { panel, connectedPanels, hasPostures } },
       );
     }
     return id;
@@ -241,22 +269,37 @@ export class ObservedAndroidDisplayCache {
     ) {
       return { ...cached.value, display: { ...cached.value.display } };
     }
-    const value = await observedAndroidDisplay(
+    const { value, cacheable } = await readObservedAndroidDisplay(
       device,
       adb,
       signal,
       lastKnownAndroidDisplay.get(device.deviceId),
     );
     signal?.throwIfAborted();
-    if (!this.readOnly) {
-      lastKnownAndroidDisplay.set(device.deviceId, value);
-      androidDisplayCache.set(device.deviceId, {
-        inventory,
-        value: { ...value, display: { ...value.display } },
-        at: this.timer.now(),
-      });
-    }
+    this.cacheRead(device.deviceId, inventory, value, cacheable);
     return value;
+  }
+
+  private cacheRead(
+    deviceId: string,
+    inventory: string,
+    value: ObservedAndroidDisplay,
+    cacheable: boolean,
+  ): void {
+    if (this.readOnly) {
+      return;
+    }
+    if (!cacheable) {
+      // Even a forced read failure must let the next owner resolve retry immediately.
+      androidDisplayCache.delete(deviceId);
+      return;
+    }
+    lastKnownAndroidDisplay.set(deviceId, value);
+    androidDisplayCache.set(deviceId, {
+      inventory,
+      value: { ...value, display: { ...value.display } },
+      at: this.timer.now(),
+    });
   }
 }
 
@@ -267,26 +310,45 @@ export async function observedAndroidDisplay(
   signal?: AbortSignal,
   previous?: ObservedAndroidDisplay,
 ): Promise<ObservedAndroidDisplay> {
+  return (await readObservedAndroidDisplay(device, adb, signal, previous)).value;
+}
+
+/** Keep read status private so best-effort fallbacks never become cached evidence. */
+async function readObservedAndroidDisplay(
+  device: BootedDevice,
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+  previous?: ObservedAndroidDisplay,
+): Promise<{ value: ObservedAndroidDisplay; cacheable: boolean }> {
   const panels = device.displays?.panels;
   if (!panels?.length) {
     // Single-screen discovery omits its inventory; avoid a shell probe.
     return {
-      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
-      logicalId: 0,
+      value: {
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+        logicalId: 0,
+      },
+      cacheable: true,
     };
   }
   const result = await readAndroidDisplayInfos(adb, signal);
   const infos = result.infos ?? [];
   if (infos.length === 0 && previous) {
-    return { ...previous, display: { ...previous.display } };
+    return {
+      value: { ...previous, display: { ...previous.display } },
+      cacheable: result.infos !== null,
+    };
   }
   return {
-    ...displayForAndroidInfos(panels, infos),
-    panelKeysByLogicalId: Object.fromEntries(
-      infos
-        .filter((info) => info.uniqueId)
-        .map((info) => [Number(info.logicalId), physicalPanelKey(info.uniqueId!)]),
-    ),
+    value: {
+      ...displayForAndroidInfos(panels, infos),
+      panelKeysByLogicalId: Object.fromEntries(
+        infos
+          .filter((info) => info.uniqueId)
+          .map((info) => [Number(info.logicalId), physicalPanelKey(info.uniqueId!)]),
+      ),
+    },
+    cacheable: result.infos !== null,
   };
 }
 

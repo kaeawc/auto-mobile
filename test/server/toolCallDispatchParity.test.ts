@@ -11,6 +11,7 @@ import { ActionableError } from "../../src/models";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -119,6 +120,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
   let isAvailableSpy: ReturnType<typeof spyOn> | undefined;
   let restoreHermeticServer: () => void;
   const handlerArgs: Record<string, unknown>[] = [];
+  const originalDebug = isDebugModeEnabled();
 
   beforeAll(async () => {
     restoreHermeticServer = installHermeticServerFixture();
@@ -189,6 +191,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
 
   beforeEach(() => {
     handlerArgs.length = 0;
+    setDebugModeEnabled(false);
   });
 
   afterAll(async () => {
@@ -201,6 +204,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     ToolRegistry.unregister(DECLARED_SESSION_TOOL);
     ToolRegistry.unregister(ERROR_CASE_TOOL);
     restoreHermeticServer();
+    setDebugModeEnabled(originalDebug);
   });
 
   const entryPoints: Array<[string, CallEntryPoint]> = [
@@ -208,6 +212,12 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     ["daemon loopback", (name, args) => callThrough(daemonLoopback.client, name, args)],
     ["proxy", (name, args) => callThrough(proxyClient, name, args)],
   ];
+
+  test.each(entryPoints)("%s explains the debug-only tool gate", async (_label, call) => {
+    const outcome = await call("setUIState", {});
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("start the daemon with --debug");
+  });
 
   const cases: Array<{
     label: string;

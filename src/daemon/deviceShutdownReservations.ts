@@ -321,6 +321,13 @@ export class DeviceShutdownReservations {
     return this.shutdownReservations.get(device.id) === device;
   }
 
+  /** Whether an active reservation holds the current device or its absent slot. */
+  isDeviceUnderShutdownReservation(deviceId: string): boolean {
+    const device = this.pool.getDevices().get(deviceId);
+    const reservation = this.shutdownReservations.get(deviceId);
+    return reservation !== undefined && (device === undefined || reservation === device);
+  }
+
   /**
    * Whether the currently-bound incarnation of a device is being killed: either
    * held under an active shutdown reservation, or carrying an intentional-shutdown
@@ -330,11 +337,10 @@ export class DeviceShutdownReservations {
    * stale marker left behind by a device that is already gone.
    */
   isDeviceUnderShutdown(deviceId: string): boolean {
-    const device = this.pool.getDevices().get(deviceId);
-    const reservation = this.shutdownReservations.get(deviceId);
-    if (reservation !== undefined && (device === undefined || reservation === device)) {
+    if (this.isDeviceUnderShutdownReservation(deviceId)) {
       return true;
     }
+    const device = this.pool.getDevices().get(deviceId);
     const markerIncarnation = this.pool.getIntentionalShutdowns().get(deviceId);
     if (markerIncarnation === undefined) {
       return false;
@@ -352,5 +358,13 @@ export class DeviceShutdownReservations {
     return await this.pool
       .getAssignmentMutex()
       .runExclusive(() => this.isDeviceUnderShutdown(deviceId));
+  }
+
+  /** Read only the active shutdown reservation under the assignment lock. */
+  // Do not call inside assignmentMutex.runExclusive: this accessor takes the same mutex.
+  async isShutdownReservationHeld(deviceId: string): Promise<boolean> {
+    return await this.pool
+      .getAssignmentMutex()
+      .runExclusive(() => this.isDeviceUnderShutdownReservation(deviceId));
   }
 }

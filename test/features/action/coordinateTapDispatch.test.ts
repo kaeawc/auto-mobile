@@ -11,6 +11,7 @@ import {
   type CoordinateTapClient,
 } from "../../../src/features/action/coordinateTapDispatch";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { LONG_PRESS_MIN_MS } from "../../../src/features/action/tapAtGesture";
 import { observation } from "../../helpers/tapAtCoordinate";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
@@ -47,6 +48,23 @@ describe("dispatchAndroidCoordinateTap", () => {
 
     expect(adb.getExecutedCommands()).toEqual(["shell input touchscreen tap 10 20"]);
     expect(adb.getCommandCalls()[0].timeoutMs).toBeUndefined();
+  });
+
+  test("uses the shared long-press boundary for the ADB fallback", async () => {
+    const adb = new FakeAdbExecutor();
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
+    };
+
+    await dispatchAndroidCoordinateTap(client, adb, 10, 20, LONG_PRESS_MIN_MS - 1);
+    await dispatchAndroidCoordinateTap(client, adb, 10, 20, LONG_PRESS_MIN_MS);
+
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input touchscreen tap 10 20",
+      `shell input touchscreen swipe 10 20 10 20 ${LONG_PRESS_MIN_MS}`,
+    ]);
+    expect(adb.getCommandCalls()[0].timeoutMs).toBeUndefined();
+    expect(adb.getCommandCalls()[1].timeoutMs).toBeDefined();
   });
 
   test.each([false, true])(

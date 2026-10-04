@@ -4,6 +4,105 @@ import XCTest
 
 @MainActor
 final class CommandHierarchyCaptureTests: XCTestCase {
+    func testCaptureRecordsIntoRealDebouncerWhenWallClockStepsBack() async throws {
+        let initial = ViewHierarchy(updatedAt: 20, hierarchy: UIElementInfo(text: "initial"))
+        let captured = ViewHierarchy(updatedAt: 10, hierarchy: UIElementInfo(text: "command"))
+        let locator = RewriteFakeElementLocator(hierarchy: captured)
+        let perf = FakePerfTracking(flushResult: nil)
+        let debouncer = HierarchyDebouncer(
+            hierarchyExtractor: RewriteFakeElementLocator(hierarchy: initial),
+            perf: perf, timer: FakeProxyTimer(mode: .manual)
+        )
+        debouncer.start()
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: perf, hierarchyDebouncer: debouncer
+        )
+
+        let result = try await handler.captureHierarchy()
+
+        XCTAssertEqual(result.updatedAt, 10)
+        XCTAssertEqual(result.hierarchy?.text, "command")
+        XCTAssertEqual(debouncer.getLastHierarchy()?.updatedAt, 10)
+        XCTAssertEqual(debouncer.getLastHierarchy()?.hierarchy?.text, "command")
+        XCTAssertEqual(locator.filteringRequests, [false])
+    }
+
+    func testEarlierCommandCaptureCannotReplaceLaterPoll() async throws {
+        let polled = ViewHierarchy(updatedAt: 10, hierarchy: UIElementInfo(text: "poll"))
+        let captured = ViewHierarchy(updatedAt: 20, hierarchy: UIElementInfo(text: "command"))
+        let locator = RewriteFakeElementLocator(hierarchy: captured)
+        let timer = FakeProxyTimer(mode: .manual)
+        let perf = FakePerfTracking(flushResult: nil)
+        let debouncer = HierarchyDebouncer(
+            hierarchyExtractor: RewriteFakeElementLocator(hierarchy: polled), perf: perf, timer: timer
+        )
+        debouncer.start()
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: perf, hierarchyDebouncer: debouncer
+        )
+        // Synchronously complete a later poll during command extraction. This models
+        // reversed completion order without sleeps or main-queue scheduling assumptions.
+        locator.onCapture = { timer.advance(by: 1000) }
+
+        let result = try await handler.captureHierarchy()
+
+        XCTAssertEqual(result.updatedAt, 20)
+        XCTAssertEqual(result.hierarchy?.text, "command")
+        XCTAssertEqual(debouncer.getLastHierarchy()?.updatedAt, 10)
+        XCTAssertEqual(debouncer.getLastHierarchy()?.hierarchy?.text, "poll")
+        XCTAssertEqual(locator.filteringRequests, [false])
+    }
+
+    func testUnfilteredCaptureLeavesRealDebouncerUnchanged() async throws {
+        let initial = ViewHierarchy(updatedAt: 10, hierarchy: UIElementInfo(text: "initial"))
+        let captured = ViewHierarchy(updatedAt: 20, hierarchy: UIElementInfo(text: "unfiltered"))
+        let locator = RewriteFakeElementLocator(hierarchy: captured)
+        let perf = FakePerfTracking(flushResult: nil)
+        let debouncer = HierarchyDebouncer(
+            hierarchyExtractor: RewriteFakeElementLocator(hierarchy: initial),
+            perf: perf, timer: FakeProxyTimer(mode: .manual)
+        )
+        debouncer.start()
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: perf, hierarchyDebouncer: debouncer
+        )
+
+        let result = try await handler.captureHierarchy(disableAllFiltering: true)
+
+        XCTAssertEqual(result.hierarchy?.text, "unfiltered")
+        XCTAssertEqual(debouncer.getLastHierarchy()?.updatedAt, 10)
+        XCTAssertEqual(debouncer.getLastHierarchy()?.hierarchy?.text, "initial")
+        XCTAssertEqual(locator.filteringRequests, [true])
+    }
+
+    func testFailedCaptureLeavesRealDebouncerUnchanged() async {
+        let locator = RewriteFakeElementLocator()
+        let perf = FakePerfTracking(flushResult: nil)
+        let debouncer = HierarchyDebouncer(
+            hierarchyExtractor: locator, perf: perf, timer: FakeProxyTimer(mode: .manual)
+        )
+        debouncer.start()
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: perf, hierarchyDebouncer: debouncer
+        )
+        locator.onCapture = { throw CommandError.executionFailed("scripted extraction failure") }
+
+        do {
+            _ = try await handler.captureHierarchy()
+            XCTFail("Expected extraction failure")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Command execution failed: scripted extraction failure")
+        }
+
+        XCTAssertEqual(debouncer.getLastHierarchy()?.updatedAt, RewriteFakeElementLocator.defaultHierarchy.updatedAt)
+        XCTAssertEqual(debouncer.getLastHierarchy()?.hierarchy?.text, "Fake Root")
+        XCTAssertEqual(locator.filteringRequests, [false, false])
+    }
+
     func testHierarchyRequestRecordsRawFilteredCaptureBeforeEnrichment() async throws {
         let fixture = CaptureFixture()
         let request = try JSONDecoder().decode(RequestHierarchy.self, from: Data(#"{"requestId":"capture"}"#.utf8))

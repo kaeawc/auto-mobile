@@ -96,3 +96,9 @@ describe("session display pin precedence", () => {
     ).toThrow(/unplugged.*setActiveDevice.*display: null/);
   });
 });
+
+test("pin without a live list labels inventory connection status as unknown", () => {
+  expect(() => resolveTargetDisplay(displays, undefined, { displayPin: "unplugged" })).toThrow(
+    "Known panels (connection status unknown): inner-id (inner), cover-id (cover)",
+  );
+});

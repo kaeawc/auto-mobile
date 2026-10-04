@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../../helpers/cliDataDirIsolation";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   Window,
   parseActiveWindowModern,
@@ -42,6 +43,7 @@ describe("Window.getActive deadline + abort plumbing (#6289)", () => {
   let fakeAdb: FakeAdbExecutor;
   let device: BootedDevice;
   let window: Window;
+  let dataDir: IsolatedCliDataDir;
 
   const execResult = (stdout: string): ExecResult => ({
     stdout,
@@ -51,7 +53,10 @@ describe("Window.getActive deadline + abort plumbing (#6289)", () => {
     includes: (s: string) => stdout.includes(s),
   });
 
+  afterEach(() => dataDir.restore());
+
   beforeEach(async () => {
+    dataDir = isolateCliDataDir("automobile-window-test-");
     device = { deviceId: "abort-device", name: "Abort Device", platform: "android" };
     fakeAdb = new FakeAdbExecutor();
     // These tests assert cancellation PROPAGATION, so the fake rejects reads that

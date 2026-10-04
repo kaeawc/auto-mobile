@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { isDeviceLostError } from "./deviceLossOutcome";
 
 // Barrier tool schema. A barrier is a pure synchronization point: every
 // participating device arrives, and once all `deviceCount` devices have
@@ -77,6 +78,9 @@ const barrierHandler = async (
 
     const errorMsg = errorMessage(error);
     logger.error(`Device ${device.deviceId} error at barrier "${lock}": ${errorMsg}`);
+    if (isDeviceLostError(error)) {
+      throw error;
+    }
     throw new ActionableError(
       `Barrier "${lock}" failed for device ${device.deviceId}: ${errorMsg}`,
     );

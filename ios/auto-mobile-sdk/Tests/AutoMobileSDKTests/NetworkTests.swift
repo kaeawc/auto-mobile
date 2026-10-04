@@ -58,6 +58,19 @@ private final class NetworkRecordCollector: @unchecked Sendable {
 }
 
 final class AutoMobileNetworkTests: XCTestCase {
+    func testStopBeforeTaskStorageRejectsSuspendedTask() throws {
+        let request = try URLRequest(url: XCTUnwrap(URL(string: "https://example.invalid/stopped")))
+        let client = RecordingURLProtocolClient()
+        let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+        proto.stopLoading()
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.dataTask(with: request)
+        XCTAssertFalse(proto.storeTaskIfRunning(task, session: session))
+        XCTAssertEqual(task.state, .suspended, "rejected tasks are never resumed")
+        XCTAssertTrue(client.calls.isEmpty)
+    }
+
     override func tearDown() {
         AutoMobileNetwork.shared.reset()
         #if DEBUG
@@ -1367,6 +1380,42 @@ final class NetworkCaptureRecorderTests: XCTestCase {
     }
 
     #if DEBUG
+        func testConcurrentProtocolDataCallbacksPreserveCaptureAndAllowReentrantStop() throws {
+            let collector = EventCollector()
+            let buffer = SdkEventBuffer(timerFactory: { FakeTimer() }, onFlush: { collector.collect($0) })
+            AutoMobileNetwork.shared.initialize(bundleId: "test.bundle", buffer: buffer)
+            AutoMobileNetwork.shared.setCaptureBodies(true)
+            AutoMobileNetwork.shared.setMaxBodyBytes(8)
+            let request = URLRequest(url: URL(string: "https://example.com/concurrent-callbacks")!)
+            let client = RecordingURLProtocolClient(onCallback: { $0.stopLoading() })
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            // Drive delegate callbacks directly. The task is never resumed, so no I/O occurs.
+            let task = session.dataTask(with: request)
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/plain"]
+            )!
+            proto.urlSession(session, dataTask: task, didReceive: response) { disposition in
+                XCTAssertEqual(disposition, .allow)
+            }
+
+            DispatchQueue.concurrentPerform(iterations: 32) { _ in
+                proto.urlSession(session, dataTask: task, didReceive: Data("xx".utf8))
+            }
+            proto.urlSession(session, task: task, didCompleteWithError: nil)
+            buffer.flush()
+
+            let event = try XCTUnwrap(collector.events.first as? SdkNetworkRequestEvent)
+            XCTAssertEqual(event.statusCode, 200)
+            XCTAssertEqual(event.responseBodySize, 64)
+            XCTAssertEqual(event.responseBody, "xxxxxxxx")
+            XCTAssertEqual(client.calls.filter { $0 == "didLoad" }.count, 32)
+            XCTAssertEqual(client.calls.first, "didReceive")
+            XCTAssertEqual(client.calls.last, "finish")
+        }
+
         private func makeDelayedFaultProtocol(client: RecordingURLProtocolClient) -> AutoMobileURLProtocol {
             AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: SdkEventBuffer { _ in })
             NetworkMockRuleStore.shared.setFaultRules([
@@ -1476,6 +1525,13 @@ final class NetworkCaptureRecorderTests: XCTestCase {
 private final class RecordingURLProtocolClient: NSObject, URLProtocolClient {
     private let lock = NSLock()
     private var _calls: [String] = []
+    private let onCallback: (@Sendable (URLProtocol) -> Void)?
+
+    init(onCallback: (@Sendable (URLProtocol) -> Void)? = nil) {
+        self.onCallback = onCallback
+        super.init()
+    }
+
     var calls: [String] {
         lock.lock(); defer { lock.unlock() }; return _calls
     }
@@ -1489,12 +1545,21 @@ private final class RecordingURLProtocolClient: NSObject, URLProtocolClient {
     }
 
     func urlProtocol(_: URLProtocol, cachedResponseIsValid _: CachedURLResponse) { record("cached") }
-    func urlProtocol(_: URLProtocol, didReceive _: URLResponse, cacheStoragePolicy _: URLCache.StoragePolicy) {
+    func urlProtocol(_ proto: URLProtocol, didReceive _: URLResponse, cacheStoragePolicy _: URLCache.StoragePolicy) {
         record("didReceive")
+        onCallback?(proto)
     }
 
-    func urlProtocol(_: URLProtocol, didLoad _: Data) { record("didLoad") }
-    func urlProtocolDidFinishLoading(_: URLProtocol) { record("finish") }
+    func urlProtocol(_ proto: URLProtocol, didLoad _: Data) {
+        record("didLoad")
+        onCallback?(proto)
+    }
+
+    func urlProtocolDidFinishLoading(_ proto: URLProtocol) {
+        record("finish")
+        onCallback?(proto)
+    }
+
     func urlProtocol(_: URLProtocol, didFailWithError _: Error) { record("didFail") }
     func urlProtocol(_: URLProtocol, didReceive _: URLAuthenticationChallenge) { record("challenge") }
     func urlProtocol(_: URLProtocol, didCancel _: URLAuthenticationChallenge) { record("cancelChallenge") }

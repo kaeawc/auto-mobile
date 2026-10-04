@@ -1,0 +1,52 @@
+{
+  "id": "anchored-edge",
+  "window": {
+    "placement": {
+      "type": "floating",
+      "gravity": "center",
+      "offset": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  "root": {
+    "type": "icon",
+    "name": "info",
+    "anchor": {
+      "type": "element",
+      "alignment": "bottom",
+      "offset": {
+        "x": -4,
+        "y": 8
+      },
+      "selector": {
+        "text": "Details",
+        "container": {
+          "text": "Card",
+          "container": {
+            "text": "Card",
+            "container": {
+              "text": "Card",
+              "container": {
+                "text": "Card",
+                "container": {
+                  "text": "Card",
+                  "container": {
+                    "text": "Card",
+                    "container": {
+                      "text": "Card",
+                      "container": {
+                        "elementId": "outer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -26,9 +26,11 @@ class FakeGestureEmitter implements GestureEmitter {
   startCount = 0;
   stopCount = 0;
   private onGestureHandler?: (event: GestureEvent) => void;
+  onError?: (err: Error) => void;
 
-  start(onGesture: (event: GestureEvent) => void, _onError?: (err: Error) => void): void {
+  start(onGesture: (event: GestureEvent) => void, onError?: (err: Error) => void): void {
     this.startCount++;
+    this.onError = onError;
     this.onGestureHandler = onGesture;
   }
 
@@ -116,6 +118,33 @@ describe("DualTrackRecorder", () => {
     fakeA11y = new FakeA11ySource();
     fakeTimer = new FakeTimer();
     recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+  });
+
+  test("retains the first touch-track failure with injected timing through stop", async () => {
+    fakeTimer.advanceTime(10_000);
+    await recorder.start();
+    fakeTimer.advanceTime(1250);
+    const error = new Error("getevent exited with code 1");
+    fakeGestures.onError?.(error);
+    fakeTimer.advanceTime(100);
+    fakeGestures.onError?.(new Error("later error"));
+    expect(recorder.touchTrackFailure).toEqual({ error, failedAt: 11_250 });
+    const result = await recorder.stop();
+    expect(result.touchTrackFailure).toEqual({ error, failedAt: 11_250 });
+    expect(await recorder.stop()).toEqual(result);
+  });
+
+  test("normal stop keeps the result shape and ignores shutdown errors", async () => {
+    await recorder.start();
+    const stop = spyOn(fakeGestures, "stop").mockImplementation(() => {
+      fakeGestures.onError?.(new Error("getevent killed by caller"));
+    });
+    try {
+      expect(await recorder.stop()).toEqual({ steps: [], stepCount: 0 });
+      expect(recorder.touchTrackFailure).toBeUndefined();
+    } finally {
+      stop.mockRestore();
+    }
   });
 
   test("S1 known hit wins over an earlier unknown tap", async () => {

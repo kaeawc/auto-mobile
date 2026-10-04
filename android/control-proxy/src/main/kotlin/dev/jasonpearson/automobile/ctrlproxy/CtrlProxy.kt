@@ -708,6 +708,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       },
       onResult = ::broadcastGestureResult,
+      logWarning = { Log.w(TAG, it) },
     )
 
   private class ImeCommitState {
@@ -1653,7 +1654,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             port = 8765,
             scope = serviceScope,
             messageHandler = queuedHandler,
-            onClientDisconnected = queuedHandler::disconnect,
+            onClientDisconnected = { client ->
+              queuedHandler.disconnect(client)
+              gestureStreamRouter.cancelOwnedBy(client)
+            },
             onPermanentStartFailure = { disableSelf() },
           )
         webSocketLifecycle.replace(webSocketServer)
@@ -1926,10 +1930,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       requestId,
     )
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
+  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
+    var extractionRequested = false
     hierarchyDebouncer.extractIfStale(sinceTimestamp) {
+      extractionRequested = true
       launchRequestScope(requestId) { extractHierarchyNow(requestId = requestId) }
+        .invokeOnCompletion { cause ->
+          // Also release when the service scope cancels the launch before extraction starts.
+          if (cause is CancellationException && ::webSocketServer.isInitialized) {
+            webSocketServer.releaseRequestOwner(requestId)
+          }
+        }
     }
+    if (!extractionRequested && ::webSocketServer.isInitialized) {
+      webSocketServer.releaseRequestOwner(requestId)
+    }
+  }
 
   override fun setHierarchyInterval(intervalMs: Long?) {
     val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
@@ -2055,7 +2071,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return
     }
-    gestureStreamRouter.start(requestId, gestureId, x.toFloat(), y.toFloat(), displayId)
+    gestureStreamRouter.start(
+      requestId,
+      gestureId,
+      x.toFloat(),
+      y.toFloat(),
+      displayId,
+      CommandOriginContext.currentClient(),
+    )
   }
 
   override fun requestSwipe(
@@ -2153,7 +2176,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return
     }
-    gestureStreamRouter.start(requestId, gestureId, x.toFloat(), y.toFloat())
+    gestureStreamRouter.start(
+      requestId,
+      gestureId,
+      x.toFloat(),
+      y.toFloat(),
+      owner = CommandOriginContext.currentClient(),
+    )
   }
 
   override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {
@@ -2169,7 +2198,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     cancel: Boolean,
   ) {
     rememberedInsert = null
-    gestureStreamRouter.end(requestId, gestureId, x.toFloat(), y.toFloat(), cancel)
+    gestureStreamRouter.end(
+      requestId,
+      gestureId,
+      x.toFloat(),
+      y.toFloat(),
+      cancel,
+      requester = CommandOriginContext.currentClient(),
+    )
   }
 
   /** Ack one streamed-gesture request, reusing the shared `swipe_result` frame. */
@@ -3670,32 +3706,63 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             serviceScope.coroutineContext[Job]?.isActive == false
         }
       )
-    val hierarchy =
-      hierarchyDebouncer.extractImmediately(
-        skipFlowEmit = true,
-        disableAllFiltering = disableAllFiltering,
-        snapshotOptions = cancellableOptions,
-      )
-    if (hierarchy != null) {
-      // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
-      // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
-      // encode throws (leak fix).
-      deliverHierarchyFrame(
-        serialize = {
-          commandJob?.ensureActive()
-          perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-        },
-        write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
-        broadcast = { serialized ->
-          broadcastHierarchyUpdate(
-            hierarchy,
-            sync = true,
-            serialized = serialized,
-            requestId = requestId,
+    try {
+      val hierarchy =
+        try {
+          hierarchyDebouncer.extractImmediately(
+            skipFlowEmit = true,
+            disableAllFiltering = disableAllFiltering,
+            snapshotOptions = cancellableOptions,
           )
-        },
-        releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
-      )
+        } catch (e: CancellationException) {
+          // Command cancellation must unwind; an independently cancelled snapshot returns null.
+          throw e
+        } catch (e: Exception) {
+          Log.e(TAG, "Error extracting WebSocket hierarchy for requestId=$requestId", e)
+          if (requestId == null) throw e
+          commandJob?.let { it.ensureActive() }
+          serviceScope.coroutineContext[Job]?.ensureActive()
+          broadcastHierarchyExtractFrame(
+            HierarchyExtractErrorFrames.thrownFrame(requestId, e),
+            externallyCorrelated = false,
+          )
+          if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
+          // The extraction failure is settled here, so neither the queue nor scope guard replies.
+          return
+        }
+      if (hierarchy != null) {
+        // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
+        // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
+        // encode throws (leak fix).
+        deliverHierarchyFrame(
+          serialize = {
+            commandJob?.ensureActive()
+            perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+          },
+          write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
+          broadcast = { serialized ->
+            broadcastHierarchyUpdate(
+              hierarchy,
+              sync = true,
+              serialized = serialized,
+              requestId = requestId,
+              routeByRequestId = false,
+            )
+          },
+          releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+        )
+      } else {
+        commandJob?.ensureActive()
+        serviceScope.coroutineContext[Job]?.ensureActive()
+        broadcastHierarchyExtractFrame(
+          HierarchyExtractErrorFrames.nullResultFrame(requestId),
+          externallyCorrelated = false,
+        )
+      }
+      if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
+    } catch (e: CancellationException) {
+      if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
+      throw e
     }
   }
 
@@ -3899,14 +3966,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Routed through [ResultBroadcaster.guard] so a throw while *sending* this frame degrades to the
    * daemon's timeout rather than escaping the receiver coroutine (issue #3045 / #3085).
    */
-  private suspend fun broadcastHierarchyExtractFrame(frame: ErrorResponse?) {
+  private suspend fun broadcastHierarchyExtractFrame(
+    frame: ErrorResponse?,
+    externallyCorrelated: Boolean = true,
+  ) {
     // A null frame means there was nothing to correlate (blank/absent uuid, or a cooperative
     // cancellation that must propagate); HierarchyExtractErrorFrames already made that decision, so
     // there is no WebSocket frame to send here. See issue #3131.
     if (frame == null) return
     resultBroadcaster.guard(frame.requestId, "hierarchy_extract_error") {
       if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-        webSocketServer.broadcastExternallyCorrelatedResponse(frame)
+        if (externallyCorrelated) webSocketServer.broadcastExternallyCorrelatedResponse(frame)
+        else webSocketServer.broadcast(frame)
       }
     }
   }
@@ -3922,6 +3993,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     sync: Boolean = false,
     serialized: String? = null,
     requestId: String? = null,
+    routeByRequestId: Boolean = false,
   ) {
     val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
@@ -3959,13 +4031,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // Enqueue in call order; each client's sender preserves FIFO without waiting for
           // delivery.
           webSocketServer.broadcastWithPerfSync(
-            routeByRequestId = false,
+            routeByRequestId = routeByRequestId,
             messageBuilder = messageBuilder,
           )
         } else {
           // Async broadcast - for normal event-driven updates
           webSocketServer.broadcastWithPerf(
-            routeByRequestId = false,
+            routeByRequestId = routeByRequestId,
             messageBuilder = messageBuilder,
           )
         }
@@ -5189,6 +5261,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  internal enum class ImeActionStep(val error: String? = null) {
+    NO_FOCUSED_EDITABLE("No focused editable node found for IME action"),
+    NEXT,
+    PREVIOUS,
+    IME_ENTER,
+    KEYCODE_ENTER,
+    UNSUPPORTED;
+
+    companion object {
+      fun select(action: String, hasFocusedEditable: Boolean, sdkInt: Int): ImeActionStep {
+        if (!hasFocusedEditable) {
+          return NO_FOCUSED_EDITABLE
+        }
+        return when (action) {
+          "next" -> NEXT
+          "previous" -> PREVIOUS
+          "done",
+          "go",
+          "send",
+          "search" -> if (sdkInt >= android.os.Build.VERSION_CODES.R) IME_ENTER else KEYCODE_ENTER
+          else -> UNSUPPORTED
+        }
+      }
+    }
+  }
+
   /**
    * Perform IME action using AccessibilityService. This properly handles focus movement
    * (next/previous) and keyboard actions (done/go/search/send).
@@ -5207,10 +5305,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       focusedNode = findFocusedEditableNode(root)
       perfProvider.endOperation("findFocusedNode")
 
-      if (focusedNode == null && action in listOf("next", "previous")) {
+      val step = ImeActionStep.select(action, focusedNode != null, android.os.Build.VERSION.SDK_INT)
+      val error = step.error
+      if (error != null) {
         perfProvider.end()
         val errorTime = System.currentTimeMillis()
-        val error = "No focused editable node found for IME action"
         Log.w(TAG, error)
         launchRequestScope(requestId) {
           broadcastImeActionResult(requestId, action, false, error, errorTime - startTime)
@@ -5220,8 +5319,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       perfProvider.startOperation("executeAction")
       val success =
-        when (action) {
-          "next" -> {
+        when (step) {
+          ImeActionStep.NEXT -> {
             // Find next focusable element and focus it
             val nextNode = findNextFocusableNode(root, focusedNode!!)
             if (nextNode != null) {
@@ -5236,7 +5335,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               false
             }
           }
-          "previous" -> {
+          ImeActionStep.PREVIOUS -> {
             // Find previous focusable element and focus it
             val prevNode = findPreviousFocusableNode(root, focusedNode!!)
             if (prevNode != null) {
@@ -5251,39 +5350,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               false
             }
           }
-          "done",
-          "go",
-          "send",
-          "search" -> {
-            // For these actions, trigger the IME's enter/submit action
-            // This properly submits forms, navigates URLs, performs searches, etc.
-            if (
-              focusedNode != null &&
-                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R
-            ) {
-              // API 30+: Use ACTION_IME_ENTER for proper IME action handling
-              @Suppress("NewApi")
-              val actionId =
-                android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
-                  .ACTION_IME_ENTER
-                  .id
-              val imeResult = focusedNode.performAction(actionId)
-              Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
-              imeResult
-            } else if (focusedNode != null) {
-              // Pre-API 30: Fall back to pressing Enter key via input shell command
-              // This is less reliable but works on older devices
-              Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
-              try {
-                Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
-              } catch (e: Exception) {
-                Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
-                false
-              }
-            } else {
-              // No focused node - fall back to global back action
-              Log.w(TAG, "No focused node for IME action, falling back to GLOBAL_ACTION_BACK")
-              performGlobalAction(GLOBAL_ACTION_BACK)
+          ImeActionStep.IME_ENTER -> {
+            // API 30+: Use ACTION_IME_ENTER for proper IME action handling
+            @Suppress("NewApi")
+            val actionId =
+              android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER
+                .id
+            val imeResult = focusedNode!!.performAction(actionId)
+            Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
+            imeResult
+          }
+          ImeActionStep.KEYCODE_ENTER -> {
+            // Pre-API 30: Fall back to pressing Enter key via input shell command
+            // This is less reliable but works on older devices
+            Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
+            try {
+              Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
+            } catch (e: Exception) {
+              Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
+              false
             }
           }
           else -> {
@@ -5366,10 +5451,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.startOperation("setSelection")
       // Get the text length to set selection from 0 to end
       val text = focusedNode.text
-      val textLength = text?.length ?: 0
+      val plan =
+        planSelectAll(
+          text?.length ?: 0,
+          focusedNode.isShowingHintText,
+          focusedNode.textSelectionStart,
+          focusedNode.textSelectionEnd,
+        )
+      val textLength = plan.textLength
 
-      val success =
-        if (textLength > 0) {
+      val outcome =
+        if (plan.shouldPerformAction) {
           // Use ACTION_SET_SELECTION with start=0 and end=textLength to select all
           val arguments =
             android.os.Bundle().apply {
@@ -5383,15 +5475,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 textLength,
               )
             }
-          focusedNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-            arguments,
+          val actionSucceeded =
+            focusedNode.performAction(
+              android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
+              arguments,
+            )
+          val selectionRefreshed = !actionSucceeded && focusedNode.refresh()
+          selectAllOutcome(
+            textLength,
+            actionSucceeded,
+            selectionRefreshed,
+            if (selectionRefreshed) focusedNode.textSelectionStart else -1,
+            if (selectionRefreshed) focusedNode.textSelectionEnd else -1,
           )
         } else {
-          // No text to select
-          Log.d(TAG, "No text in focused node to select")
-          true // Consider it a success - nothing to select
+          // No text to select, or all text is already selected
+          if (textLength == 0) Log.d(TAG, "No text in focused node to select")
+          SelectAllOutcome(true, null)
         }
+      val success = outcome.success
 
       focusedNode.recycle()
       perfProvider.endOperation("setSelection")
@@ -5406,7 +5508,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         broadcastSelectAllResult(
           requestId,
           success,
-          if (success) null else "performAction returned false",
+          outcome.error,
           totalTime,
         )
       }

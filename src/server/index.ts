@@ -1133,12 +1133,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       typeof rawSessionUuid === "string" && rawSessionUuid.trim().length > 0
         ? rawSessionUuid
         : undefined;
+    const executionSessionUuid =
+      derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
 
     // Check if tool call should be blocked due to active executePlan in this session
     const decision = planExecutionLock.evaluate({
       toolName: name,
       sessionId,
-      sessionUuid: providedSessionUuid ?? routingSessionUuid,
+      sessionUuid: executionSessionUuid,
     });
     if (decision.blocked) {
       logger.warn(
@@ -1164,8 +1166,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // #6869: the capabilities this acquisition declares, validated up front.
     const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);
 
-    const executionSessionUuid =
-      derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
     const handlerRoutingSessionUuid =
       tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
         ? routingBaseSessionUuid

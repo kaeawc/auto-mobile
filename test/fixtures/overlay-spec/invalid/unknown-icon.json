@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "icon",
+      "name": "custom_logo"
+    }
+  },
+  "expectedPath": "root.name"
+}

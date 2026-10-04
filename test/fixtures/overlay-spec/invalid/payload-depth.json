@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "boundaries",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "nested",
+          "payload": [[[[[[[[[[[[[[[[[[[[[[[[[null]]]]]]]]]]]]]]]]]]]]]]]]]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].payload"
+}

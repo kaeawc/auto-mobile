@@ -40,16 +40,18 @@ function encodeAudio(pcm16le: Buffer): Buffer {
 
 function withFakeSpawner(
   target: CaptureTarget = { kind: "device", deviceId: "00008140-001A2B3C0AE2401E" },
+  timer = new FakeTimer(),
 ): {
   fake: FakeChildProcess;
   spawnArgs: { command: string; args: string[] };
   helper: IosScreenCaptureHelper;
 } {
-  const fake = new FakeChildProcess();
+  const fake = new FakeChildProcess(timer);
   const spawnArgs = { command: "", args: [] as string[] };
   const helper = new IosScreenCaptureHelper({
     binaryPath: "/fake/screen-capture-helper",
     target,
+    timer,
     spawner: (command, args) => {
       spawnArgs.command = command;
       spawnArgs.args = args;
@@ -549,13 +551,116 @@ describe("IosScreenCaptureHelper", () => {
   });
 
   test("stop() sends SIGTERM and resolves with exit info", async () => {
-    const { fake, helper } = withFakeSpawner();
+    const timer = new FakeTimer();
+    const { fake, helper } = withFakeSpawner(undefined, timer);
     helper.start();
 
-    const result = await helper.stop();
+    const stopped = helper.stop();
+    timer.advanceTime(0);
+    const result = await stopped;
 
     expect(fake.killed).toBe(true);
     expect(result?.signal).toBe("SIGTERM");
+  });
+
+  test("healthy stdin accepts a keyframe request", () => {
+    const { fake, helper } = withFakeSpawner();
+    helper.start();
+
+    expect(helper.requestKeyFrame()).toBe(true);
+    expect(fake.getStdinData().toString()).toBe('{"cmd":"forceKeyFrame"}\n');
+  });
+
+  test("handles stdin errors at warn and disables further keyframe requests", () => {
+    const { fake, helper } = withFakeSpawner();
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    helper.start();
+    const error = new Error("EPIPE: broken pipe");
+
+    try {
+      expect(() => fake.stdin.emit("error", error)).not.toThrow();
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("stdin"), error);
+      expect(helper.requestKeyFrame()).toBe(false);
+      expect(fake.getStdinData()).toHaveLength(0);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("handles asynchronous stdin write failures from the fake", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    fake.setStdinError("EPIPE: broken pipe");
+    helper.start();
+    // Observe the async event without allowing unfixed code to crash the test runner.
+    const failedWrite = new Promise<Error>((resolve) => fake.stdin.once("error", resolve));
+
+    try {
+      expect(helper.requestKeyFrame()).toBe(true);
+      const error = await failedWrite;
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("stdin"), error);
+      expect(fake.stdin.listenerCount("error")).toBeGreaterThan(0);
+      expect(helper.requestKeyFrame()).toBe(false);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test.each(["destroyed", "ended"])("rejects keyframe requests when stdin is %s", (state) => {
+    const { fake, helper } = withFakeSpawner();
+    helper.start();
+    fake.stdin.once("error", () => {});
+    if (state === "destroyed") {
+      fake.stdin.destroy();
+    } else {
+      fake.stdin.end();
+    }
+
+    expect(helper.requestKeyFrame()).toBe(false);
+    expect(fake.getStdinData()).toHaveLength(0);
+  });
+
+  test.each(["ENOENT", "EACCES"])(
+    "stop resolves immediately after spawn fails with %s",
+    async (code) => {
+      const timer = new FakeTimer();
+      const { fake, helper } = withFakeSpawner(undefined, timer);
+      const errors: Error[] = [];
+      helper.on("error", (error) => errors.push(error));
+      fake.setSpawnError(`spawn ${code}`);
+      helper.start();
+      // Node reports a failed spawn with a non-null exitCode but no exit event.
+      fake.exitCode = -2;
+      fake.simulateSpawn();
+      timer.advanceTime(0);
+
+      let result: Awaited<ReturnType<IosScreenCaptureHelper["stop"]>> | undefined;
+      const stopped = helper.stop().then((info) => {
+        result = info;
+      });
+      await flush();
+      expect(result).toEqual({ code: -2, signal: null });
+      await stopped;
+      expect(timer.now()).toBe(0);
+      expect(fake.killed).toBe(false);
+      expect(errors.map((error) => error.message)).toEqual([`spawn ${code}`]);
+    },
+  );
+
+  test("normal stop waits for the process exit", async () => {
+    const timer = new FakeTimer();
+    const { fake, helper } = withFakeSpawner(undefined, timer);
+    fake.setExitDelay(10);
+    helper.start();
+    let settled = false;
+    const stopped = helper.stop().then((result) => {
+      settled = true;
+      return result;
+    });
+    await flush();
+    expect(settled).toBe(false);
+    timer.advanceTime(10);
+    expect(await stopped).toEqual({ code: null, signal: "SIGTERM" });
   });
 
   test("stop() is a no-op when never started", async () => {

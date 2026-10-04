@@ -1,5 +1,15 @@
 import Foundation
 
+struct KeyboardFocus {
+    enum Source {
+        case snapshot
+        case liveQuery
+    }
+
+    let frame: CGRect
+    let source: Source
+}
+
 enum KeyboardFocusDecision: Equatable {
     case skip
     case useSnapshotFrame(CGRect)
@@ -204,19 +214,24 @@ extension ElementLocator {
     /// The keyboard-focus frame is only ever applied to text-input nodes when
     /// building element info, so when the captured snapshot exposes no text-input
     /// node there is nothing a focus frame could annotate — the extra live query
-    /// (a main-thread IPC round trip) is pure overhead and is skipped. When inputs
-    /// exist, `keyboardFocusDecision` chooses a captured focus frame or a live query.
+    /// (a main-thread IPC round trip) is pure overhead and is skipped. With usable
+    /// inputs, `keyboardFocusDecision` prefers captured focus and only queries live
+    /// when the captured keyboard is visible but no input reports focus. The live
+    /// lookup also requires a foreground app and an existing match before snapshotting.
     nonisolated static func shouldQueryKeyboardFocus(textInputSnapshotCount: Int) -> Bool {
         return textInputSnapshotCount > 0
     }
 
     /// Skip when no usable input exists, reuse the first non-empty focused snapshot
-    /// frame without IPC, or query live when usable inputs do not report focus.
+    /// frame without IPC, or query live only when the captured keyboard is visible
+    /// and no usable input reports focus. Otherwise rely on snapshot.hasFocus.
     /// Snapshot focus works for some fields, but iPhone UIKit may require the live
     /// keyboard-focus predicate. Reusing captured focus avoids another remote
-    /// resolution that can block when the app backgrounds (issue #9082).
+    /// resolution that can block when the app backgrounds (issue #9082). Live lookup
+    /// is gated on foreground state and a no-wait existence check before snapshotting.
     nonisolated static func keyboardFocusDecision(
-        textInputCandidates: [(frame: CGRect, hasFocus: Bool)]
+        textInputCandidates: [(frame: CGRect, hasFocus: Bool)],
+        keyboardVisibleInSnapshot: Bool = false
     )
         -> KeyboardFocusDecision
     {
@@ -227,7 +242,34 @@ extension ElementLocator {
         if let focused = usableInputs.first(where: { $0.hasFocus }) {
             return .useSnapshotFrame(focused.frame)
         }
-        return .liveQuery
+        return keyboardVisibleInSnapshot ? .liveQuery : .skip
+    }
+
+    /// Live focus overrides captured focus for usable frames. Snapshot-derived focus
+    /// supplements captured focus so other focused nodes retain their own state.
+    nonisolated static func resolveKeyboardFocus(
+        nodeFrame: CGRect,
+        isTextInput: Bool,
+        snapshotHasFocus: Bool,
+        keyboardFocus: KeyboardFocus?
+    )
+        -> Bool
+    {
+        guard let keyboardFocus, !nodeFrame.isEmpty, !keyboardFocus.frame.isEmpty else {
+            return snapshotHasFocus
+        }
+        let focusFrame = keyboardFocus.frame
+        let epsilon: CGFloat = 0.5
+        let framesMatch = abs(nodeFrame.origin.x - focusFrame.origin.x) < epsilon
+            && abs(nodeFrame.origin.y - focusFrame.origin.y) < epsilon
+            && abs(nodeFrame.width - focusFrame.width) < epsilon
+            && abs(nodeFrame.height - focusFrame.height) < epsilon
+        switch keyboardFocus.source {
+        case .liveQuery:
+            return framesMatch && isTextInput
+        case .snapshot:
+            return (framesMatch && isTextInput) || snapshotHasFocus
+        }
     }
 
     /// Whether a second SpringBoard snapshot is required to discover system-owned

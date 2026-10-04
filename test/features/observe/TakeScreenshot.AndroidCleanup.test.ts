@@ -3,6 +3,9 @@ import {
   TakeScreenshot,
   type ScreenshotOptions,
 } from "../../../src/features/observe/TakeScreenshot";
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { createExecResult } from "../../../src/utils/execResult";
 import type { ScreenshotResult } from "../../../src/models/ScreenshotResult";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../../src/utils/logger";
@@ -153,7 +156,7 @@ describe("Android base64 screenshot cleanup", () => {
       new Promise((_resolve, reject) => {
         rejectCleanup = reject;
       });
-    const debug = spyOn(logger, "debug");
+    const warn = spyOn(logger, "warn");
     try {
       await expect(
         captureFor(adb).captureScreenshotBase64("/screenshots/result.png", options),
@@ -161,12 +164,12 @@ describe("Android base64 screenshot cleanup", () => {
       expect(rejectCleanup).toBeDefined();
       rejectCleanup?.(cleanupFailure);
       await pendingSentinel();
-      expect(debug).toHaveBeenCalledWith(
+      expect(warn).toHaveBeenCalledWith(
         "[SCREENSHOT] Could not remove temporary base64 screenshot",
         cleanupFailure,
       );
     } finally {
-      debug.mockRestore();
+      warn.mockRestore();
     }
   });
 
@@ -181,4 +184,213 @@ describe("Android base64 screenshot cleanup", () => {
 
     expect(adb.getExecutedCommands()).toEqual([`shell "screencap -d 0 -p | base64"`]);
   });
+});
+
+interface FilePullCapture {
+  captureScreenshotFilePull(
+    finalPath: string,
+    options: ScreenshotOptions,
+    signal?: AbortSignal,
+  ): Promise<ScreenshotResult>;
+}
+
+function filePullHarness(
+  controller: AbortController,
+  captureOutcome:
+    | "success"
+    | "screencap abort"
+    | "pull abort"
+    | "pull cancelled"
+    | "write cancelled"
+    | "failure" = "success",
+  cleanupOutcome: "success" | "pending" | "failure" = "success",
+) {
+  const timer = new FakeTimer();
+  const commands: string[] = [];
+  const failure = new Error("capture failed");
+  const cleanupFailure = new Error("device offline during cleanup");
+  const adb = new AdbClient(
+    androidDevice("file-pull-cleanup"),
+    async (command) => {
+      commands.push(command);
+      if (command.includes("shell rm -f")) {
+        if (cleanupOutcome === "pending") {
+          return new Promise(() => {});
+        }
+        if (cleanupOutcome === "failure") {
+          throw cleanupFailure;
+        }
+      }
+      if (
+        (captureOutcome === "screencap abort" && command.includes("screencap")) ||
+        (captureOutcome.startsWith("pull") && command.includes(" pull "))
+      ) {
+        controller.abort(failure);
+        if (captureOutcome !== "pull cancelled") {
+          throw failure;
+        }
+      }
+      if (captureOutcome === "failure" && command.includes("screencap")) {
+        throw failure;
+      }
+      return createExecResult(command.includes("screencap") ? "AM_SCREENCAP_RC:0" : "", "");
+    },
+    null,
+    undefined,
+    timer,
+  );
+  const execute = spyOn(adb, "execute");
+  const fileSystem = new FakeFileSystem();
+  const finalPath = "/screenshots/result.png";
+  fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
+  const screenshot = new TakeScreenshot(
+    androidDevice("file-pull-cleanup"),
+    new FakeAdbClientFactory(adb),
+    timer,
+    new FakeIdGenerator(["cleanup"]),
+    {
+      async write(path, bytes) {
+        fileSystem.setBinaryFile(path, bytes);
+        if (captureOutcome === "write cancelled") {
+          controller.abort(failure);
+        }
+      },
+      async remove(path) {
+        await fileSystem.remove(path);
+      },
+    },
+    fileSystem,
+    () => "/screenshots/cache",
+    undefined,
+    false,
+    { pathProtection: new FakeScreenshotPathProtection(timer) },
+  ) as unknown as FilePullCapture;
+  return {
+    commands,
+    execute,
+    failure,
+    cleanupFailure,
+    fileSystem,
+    finalPath,
+    capture: () =>
+      runWithAbortSignal(controller.signal, () =>
+        screenshot.captureScreenshotFilePull(finalPath, options, controller.signal),
+      ),
+  };
+}
+
+const filePullTempFile = `/sdcard/screenshot_${screenshotTempIdToken("cleanup")}.png`;
+
+function expectDetachedFilePullCleanup(
+  harness: ReturnType<typeof filePullHarness>,
+  controller: AbortController,
+) {
+  expect(harness.commands.filter((command) => command.includes("shell rm -f"))).toHaveLength(1);
+  const removals = harness.execute.mock.calls.filter(
+    ([args]) => args[0] === "shell" && args[1] === "rm",
+  );
+  expect(removals).toHaveLength(1);
+  expect(removals[0]?.[0]).toEqual(["shell", "rm", "-f", filePullTempFile]);
+  const cleanupOptions = removals[0]?.[1];
+  expect(cleanupOptions?.timeoutMs).toBe(1500);
+  expect(cleanupOptions?.noRetry).toBe(true);
+  expect(cleanupOptions?.signal).toBeInstanceOf(AbortSignal);
+  expect(cleanupOptions?.signal).not.toBe(controller.signal);
+  expect(cleanupOptions?.signal?.aborted).toBe(false);
+}
+
+describe("Android file-pull screenshot cleanup with ambient cancellation", () => {
+  test.each(["screencap abort", "pull abort"] as const)(
+    "dispatches detached cleanup after %s without changing rejection",
+    async (stage) => {
+      const controller = new AbortController();
+      const harness = filePullHarness(controller, stage);
+      await expect(harness.capture()).rejects.toBe(harness.failure);
+      await pendingSentinel();
+      expectDetachedFilePullCleanup(harness, controller);
+    },
+  );
+
+  test.each(["screencap abort", "pull cancelled"] as const)(
+    "does not await stalled cleanup after %s",
+    async (stage) => {
+      const controller = new AbortController();
+      const harness = filePullHarness(controller, stage, "pending");
+      const outcome = await Promise.race([
+        harness.capture().catch((error: unknown) => error),
+        pendingSentinel(),
+      ]);
+      if (stage === "screencap abort") {
+        expect(outcome).toBe(harness.failure);
+      } else {
+        expect(outcome).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+      }
+      expectDetachedFilePullCleanup(harness, controller);
+      expect(harness.fileSystem.existsSync(harness.finalPath)).toBe(false);
+      expect(harness.fileSystem.existsSync(`${harness.finalPath}.temp`)).toBe(false);
+    },
+  );
+
+  test.each(["already aborted", "before dispatch"])(
+    "skips removal when capture was never dispatched: %s",
+    async (stage) => {
+      const controller = new AbortController();
+      const harness = filePullHarness(controller);
+      if (stage === "already aborted") {
+        controller.abort();
+      }
+      const capture = harness.capture();
+      if (stage === "before dispatch") {
+        controller.abort();
+      }
+      await expect(capture).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      expect(harness.commands).toEqual([]);
+      expect(harness.execute.mock.calls).toEqual([]);
+    },
+  );
+
+  test("removes the device file exactly once on success", async () => {
+    const controller = new AbortController();
+    const harness = filePullHarness(controller);
+    expect((await harness.capture()).success).toBe(true);
+    expectDetachedFilePullCleanup(harness, controller);
+    expect(harness.fileSystem.existsSync(harness.finalPath)).toBe(true);
+  });
+
+  test("discards a completed frame on late cancellation without awaiting cleanup", async () => {
+    const controller = new AbortController();
+    const harness = filePullHarness(controller, "write cancelled", "pending");
+    const result = await Promise.race([harness.capture(), pendingSentinel()]);
+    expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+    expectDetachedFilePullCleanup(harness, controller);
+    expect(harness.fileSystem.existsSync(harness.finalPath)).toBe(false);
+    expect(harness.fileSystem.existsSync(`${harness.finalPath}.temp`)).toBe(false);
+  });
+
+  test.each(["success", "failure", "pull cancelled"] as const)(
+    "warns about cleanup failure without changing %s",
+    async (outcome) => {
+      const controller = new AbortController();
+      const harness = filePullHarness(controller, outcome, "failure");
+      const warn = spyOn(logger, "warn");
+      try {
+        const result = await harness.capture().catch((error: unknown) => error);
+        if (outcome === "failure") {
+          expect(result).toBe(harness.failure);
+        } else if (outcome === "pull cancelled") {
+          expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        } else {
+          expect(result).toMatchObject({ success: true, path: harness.finalPath });
+        }
+        await pendingSentinel();
+        expectDetachedFilePullCleanup(harness, controller);
+        expect(warn).toHaveBeenCalledWith(
+          "[SCREENSHOT] Could not remove temporary file-pull screenshot",
+          harness.cleanupFailure,
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 });

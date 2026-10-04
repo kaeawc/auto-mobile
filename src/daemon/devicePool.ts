@@ -1,5 +1,6 @@
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { isSessionReleasing } from "./sessionReleaseState";
+import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
   InMemoryDeviceHealthMarkers,
   type DeviceHealthMarkers,
@@ -1410,8 +1411,36 @@ export class DevicePool {
       });
 
     this.sessionManager.setRecoveryExpiryReleaseHandler({
-      release: (sessionId, reason, attempt) =>
-        this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(sessionId, reason, attempt),
+      release: (sessionId, reason, attempt) => {
+        const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
+          sessionId,
+          reason,
+          attempt,
+        );
+        if (recoveryRelease) {
+          return recoveryRelease;
+        }
+        const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
+        if (!terminalRelease || !this.sessionManager.hasSession(sessionId)) {
+          return undefined;
+        }
+        // A retained explicit-release fence upgrades the expiry reason, so its
+        // notification captures ownership instead of freeing the device below.
+        let releasedDeviceId: string | null = null;
+        return releaseSessionAndDevice(
+          this.sessionManager,
+          this,
+          terminalRelease.deviceId,
+          sessionId,
+          reason,
+          {
+            release: async () => {
+              releasedDeviceId = await attempt();
+              return releasedDeviceId;
+            },
+          },
+        ).then(() => releasedDeviceId);
+      },
     });
 
     // Expiry has no caller available to return the device to the pool. Explicit

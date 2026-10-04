@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import {
+  clearAndroidImeQuarantine,
   quarantineAndroidIme,
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
+
+import { getDeviceIncarnationListeners } from "../../../src/utils/deviceIncarnation";
 
 let deviceNumber = 0;
 
@@ -109,4 +112,21 @@ test("rejects an already aborted waiter before its action runs", async () => {
     ),
   ).rejects.toThrow();
   expect(ran).toBe(false);
+});
+
+test("snapshot restore keeps unsafe guest IME state quarantined", async () => {
+  const deviceId = `ime-lock-snapshot-${++deviceNumber}`;
+  quarantineAndroidIme(deviceId);
+  try {
+    const listener = getDeviceIncarnationListeners().find(
+      ({ name }) => name === "android-ime-quarantine",
+    );
+    expect(listener).toBeDefined();
+    await listener!.onDeviceIncarnationChanged(deviceId);
+    await expect(withAndroidImeLock(deviceId, async () => true)).rejects.toThrow(
+      "IME state is unknown",
+    );
+  } finally {
+    clearAndroidImeQuarantine(deviceId);
+  }
 });

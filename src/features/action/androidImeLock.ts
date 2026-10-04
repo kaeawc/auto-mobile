@@ -12,15 +12,18 @@ export function quarantineAndroidIme(deviceId: string): void {
   unsafeImeDevices.add(deviceId);
 }
 
-/** Call only after verified explicit IME selection, runner restart, or device teardown/reset. */
+/**
+ * Call only after verified explicit IME selection, runner restart, or identity replacement
+ * of the device behind the serial; NOT on removal or same-device restart.
+ */
 export function clearAndroidImeQuarantine(deviceId: string): void {
   unsafeImeDevices.delete(deviceId);
 }
 
 registerDeviceIncarnationListener({
   name: "android-ime-quarantine",
-  onDeviceRemoved: clearAndroidImeQuarantine,
-  // A snapshot restore can retain unsafe guest IME state; only teardown clears it here.
+  onDeviceIdentityReplaced: clearAndroidImeQuarantine,
+  // Snapshot restore and same-device re-pool retain guest IME state and its quarantine.
   onDeviceIncarnationChanged: () => {},
 });
 

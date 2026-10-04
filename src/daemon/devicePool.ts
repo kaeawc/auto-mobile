@@ -1,4 +1,4 @@
-import { notifyDeviceIncarnationRemoved } from "../utils/deviceIncarnation";
+import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { isSessionReleasing } from "./sessionReleaseState";
 import {
   InMemoryDeviceHealthMarkers,
@@ -1611,16 +1611,16 @@ export class DevicePool {
    * Replace a pooled connection whose stable serial now identifies a different
    * runtime.
    *
-   * Reaching here means the discovered name genuinely disagrees with the pooled
-   * one (see {@link matchesRuntimeIdentity}, which tolerates the placeholder an
-   * unreadable AVD name produces), so a different AVD has taken this serial.
-   * AutoMobile-owned emulator state belongs to the AVD that is gone and must not
-   * be carried across.
+   * Callers reach here when {@link matchesRuntimeIdentity} rejects discovery.
+   * An unverified pooled placeholder can also cause that rejection, so clearing
+   * serial-scoped guest state additionally requires resolved identity evidence
+   * after the captured entry has been retired.
    */
   private async replacePooledDeviceForRuntimeIdentity(
     pooledDevice: PooledDevice,
     bootedDevice: BootedDevice,
   ): Promise<boolean> {
+    const capturedEntryStillPooled = this.devices.get(pooledDevice.id) === pooledDevice;
     this.runtimeIdentity.beginPendingReplacement(bootedDevice);
     try {
       await this.evictMissingPooledDevice(
@@ -1643,6 +1643,22 @@ export class DevicePool {
         )
           ? pendingUnresolvedEvidence
           : replacementEvidence;
+      // Eviction must have retired the captured entry, with no successor already
+      // published. Placeholder names assert no identity unless the pool knows its AVD.
+      if (
+        capturedEntryStillPooled &&
+        pooledDevice.id === replacement.deviceId &&
+        !identityEvidence.unresolved &&
+        !this.runtimeIdentity.matchesRuntimeIdentity(pooledDevice, replacement) &&
+        this.runtimeIdentity.comparePooledIdentityEvidence(pooledDevice, replacement) !== "stale" &&
+        !this.runtimeIdentity.hasUnresolvedEmulatorName({
+          deviceId: pooledDevice.id,
+          platform: pooledDevice.platform,
+          name: pooledDevice.avdName ?? pooledDevice.name,
+        })
+      ) {
+        notifyDeviceIdentityReplaced(pooledDevice.id);
+      }
       await this.addDevice(replacement, undefined, true, identityEvidence);
       return true;
     } finally {
@@ -1673,7 +1689,6 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
-    notifyDeviceIncarnationRemoved(deviceId);
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);

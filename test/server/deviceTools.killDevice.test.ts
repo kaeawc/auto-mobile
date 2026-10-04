@@ -718,7 +718,7 @@ describe("killDevice handler", () => {
   afterEach(cleanup);
   afterAll(cleanup);
 
-  test("confirmed direct-mode kill clears IME quarantine without a pool", async () => {
+  test("confirmed direct-mode kill keeps IME quarantine without a pool", async () => {
     const device: BootedDevice = {
       deviceId: "ime-direct-kill",
       name: "Pixel",
@@ -730,7 +730,9 @@ describe("killDevice handler", () => {
     quarantineAndroidIme(device.deviceId);
     try {
       await ToolRegistry.getTool("killDevice")!.handler({ device });
-      expect(await withAndroidImeLock(device.deviceId, async () => true)).toBe(true);
+      await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
+        "IME state is unknown",
+      );
     } finally {
       clearAndroidImeQuarantine(device.deviceId);
     }

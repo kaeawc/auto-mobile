@@ -13,6 +13,7 @@ import type {
   isUnknownAndroidRuntimeName,
   runWithinShutdownDeadline,
 } from "./deviceTools";
+import { getShutdownInitiatingExecutionId } from "./deviceToolsShutdown";
 import type {
   shouldClearIntentionalShutdownAfterFailure,
   waitForDeviceShutdown,
@@ -330,6 +331,7 @@ async function handoffSystemUiAnrReplacement(
     sourceImage,
     replacementBoot.processHandle,
     () => publishReplacementReadinessMarker?.(replacementBoot.device),
+    getShutdownInitiatingExecutionId(),
   );
 }
 

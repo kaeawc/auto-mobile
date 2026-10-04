@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, toActionableError } from "../models/index";
+import { isDeviceLostError } from "../models/DeviceLostError";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
@@ -134,6 +135,46 @@ function formatCriticalSectionError(result: Record<string, unknown>, tool: strin
   );
 }
 
+// PlanExecutor treats failed tool lookup as fatal even for optional steps.
+class CriticalSectionToolNotFoundError extends ActionableError {}
+
+function handleCriticalSectionStepFailure(
+  error: unknown,
+  step: { tool: string; optional?: boolean },
+  context: {
+    deviceId: string;
+    lock: string;
+    stepNumber: number;
+    totalSteps: number;
+    signal?: AbortSignal;
+    warnings: string[];
+  },
+): void {
+  const { deviceId, lock, stepNumber, totalSteps, signal, warnings } = context;
+  if (
+    step.optional &&
+    (isDeviceLostError(error) || signal?.aborted || error instanceof z.ZodError)
+  ) {
+    throw error;
+  }
+
+  const errorMsg = errorMessage(error);
+  if (step.optional && !(error instanceof CriticalSectionToolNotFoundError)) {
+    warnings.push(`step ${stepNumber} (${step.tool}): optional step failed; skipped: ${errorMsg}`);
+    logger.warn(
+      `Device ${deviceId} optional step ${step.tool} failed; skipping and continuing: ${errorMsg}`,
+    );
+    return;
+  }
+
+  logger.error(
+    `Device ${deviceId} failed at step ${stepNumber}/${totalSteps} in critical section "${lock}": ${errorMsg}`,
+  );
+  throw new ActionableError(
+    `Failed at step ${stepNumber}/${totalSteps} (${step.tool}): ${errorMsg}`,
+  );
+}
+
 /**
  * Critical section tool handler.
  * Coordinates multiple devices to execute steps serially at a synchronization point.
@@ -200,7 +241,7 @@ const criticalSectionHandler = async (
         // as executePlan for tools hidden from MCP discovery.
         const tool = ToolRegistry.getToolForPlan(step.tool);
         if (!tool) {
-          throw new ActionableError(`Tool "${step.tool}" not found in registry`);
+          throw new CriticalSectionToolNotFoundError(`Tool "${step.tool}" not found in registry`);
         }
 
         const result = await ToolRegistry.callInternal(tool, step.params, undefined, signal, {
@@ -220,15 +261,14 @@ const criticalSectionHandler = async (
         executedSteps.push({ tool: step.tool, success: true });
       } catch (error) {
         executedSteps.push({ tool: step.tool, success: false });
-
-        const errorMsg = errorMessage(error);
-        logger.error(
-          `Device ${device.deviceId} failed at step ${i + 1}/${steps.length} in critical section "${lock}": ${errorMsg}`,
-        );
-
-        throw new ActionableError(
-          `Failed at step ${i + 1}/${steps.length} (${step.tool}): ${errorMsg}`,
-        );
+        handleCriticalSectionStepFailure(error, step, {
+          deviceId: device.deviceId,
+          lock,
+          stepNumber: i + 1,
+          totalSteps: steps.length,
+          signal,
+          warnings,
+        });
       }
     }
 

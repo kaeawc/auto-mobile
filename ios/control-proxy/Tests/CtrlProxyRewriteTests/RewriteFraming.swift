@@ -26,7 +26,12 @@ enum RewriteFraming {
     }
 
     static func completeHTTPRequestLength(in data: Data) -> Int? {
-        WebSocketFraming.completeHTTPRequestLength(in: data)
+        guard case let .complete(length) = classifyHTTPRequest(in: data) else { return nil }
+        return length
+    }
+
+    static func classifyHTTPRequest(in data: Data) -> WebSocketFraming.HTTPRequestFraming {
+        WebSocketFraming.classifyHTTPRequest(in: data)
     }
 
     static func sha1(_ data: Data) -> Data {
@@ -38,7 +43,9 @@ enum RewriteFraming {
         declaredPayloadLength: UInt64,
         inProgressOpcode: UInt8?,
         alreadyBuffered: Int
-    ) -> (tag: String, reason: String?) {
+    )
+        -> (tag: String, reason: String?)
+    {
         switch WebSocketFraming.preReadDataFrameDecision(
             opcode: opcode,
             declaredPayloadLength: declaredPayloadLength,
@@ -65,8 +72,10 @@ enum RewriteFraming {
         payload: Data,
         inProgressOpcode: UInt8?
         // Module-agnostic parity tuple mirroring the framing result's five fields.
+    )
         // swiftlint:disable:next large_tuple
-    ) -> (tag: String, data: Data?, reason: String?, buffer: Data, inProgress: UInt8?) {
+        -> (tag: String, data: Data?, reason: String?, buffer: Data, inProgress: UInt8?)
+    {
         var buf = buffer
         var inProg = inProgressOpcode
         let result = WebSocketFraming.accumulate(

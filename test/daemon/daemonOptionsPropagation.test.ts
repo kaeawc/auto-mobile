@@ -65,6 +65,111 @@ const PROPAGATING_BOOLEAN_FLAGS: (keyof DaemonOptions)[] = [
 ];
 
 describe("daemon startup-option propagation", () => {
+  test.each<{ flag: string; field: keyof DaemonOptions; value: string; warning: string }>([
+    { flag: "--port", field: "port", value: "abc", warning: "Invalid port: abc" },
+    { flag: "--port", field: "port", value: "99999", warning: "Invalid port: 99999" },
+    { flag: "--port", field: "port", value: "-5", warning: "Invalid port: -5" },
+    { flag: "--video-fps", field: "videoFps", value: "abc", warning: "Invalid video fps: abc" },
+    { flag: "--video-fps", field: "videoFps", value: "-5", warning: "Invalid video fps: -5" },
+    {
+      flag: "--video-target-bitrate-kbps",
+      field: "videoTargetBitrateKbps",
+      value: "abc",
+      warning: "Invalid video target bitrate: abc",
+    },
+    {
+      flag: "--video-max-throughput-mbps",
+      field: "videoMaxThroughputMbps",
+      value: "0",
+      warning: "Invalid video max throughput: 0",
+    },
+    {
+      flag: "--video-archive-size-mb",
+      field: "videoMaxArchiveSizeMb",
+      value: "Infinity",
+      warning: "Invalid video max archive size: Infinity",
+    },
+  ])("rejects $flag $value with the main CLI warning", ({ flag, field, value, warning }) => {
+    const warnings: string[] = [];
+    const parsed = parseDaemonArgs(
+      [flag, value, "--strict-port"],
+      {},
+      {
+        warn: (message) => warnings.push(message),
+      },
+    );
+    expect(parsed[field]).toBeUndefined();
+    expect(parsed.strictPort).toBe(true);
+    expect(warnings).toEqual([warning]);
+  });
+
+  test.each<{ flag: string; field: keyof DaemonOptions }>([
+    { flag: "--port", field: "port" },
+    { flag: "--video-target-bitrate-kbps", field: "videoTargetBitrateKbps" },
+    { flag: "--video-max-throughput-mbps", field: "videoMaxThroughputMbps" },
+    { flag: "--video-fps", field: "videoFps" },
+    { flag: "--video-archive-size-mb", field: "videoMaxArchiveSizeMb" },
+    { flag: "--video-quality", field: "videoQualityPreset" },
+    { flag: "--video-quality-preset", field: "videoQualityPreset" },
+    { flag: "--video-format", field: "videoFormat" },
+    { flag: "--accessibility-level", field: "accessibilityLevel" },
+    { flag: "--a11y-level", field: "accessibilityLevel" },
+    { flag: "--accessibility-failure-mode", field: "accessibilityFailureMode" },
+    { flag: "--a11y-failure-mode", field: "accessibilityFailureMode" },
+    { flag: "--accessibility-min-severity", field: "accessibilityMinSeverity" },
+    { flag: "--a11y-min-severity", field: "accessibilityMinSeverity" },
+  ])("$flag never consumes a following flag or stores it as a value", ({ flag, field }) => {
+    const parsed = parseDaemonArgs([flag, "--strict-port"], {}, { warn: () => {} });
+    expect(parsed[field]).toBeUndefined();
+    expect(parsed.strictPort).toBe(true);
+    expect(parseDaemonArgs([flag], {}, { warn: () => {} })[field]).toBeUndefined();
+  });
+
+  test("preserves valid numeric, video and accessibility values", () => {
+    const warnings: string[] = [];
+    const parsed = parseDaemonArgs(
+      [
+        "--port",
+        "3000",
+        "--video-fps",
+        "30",
+        "--video-target-bitrate-kbps",
+        "4000",
+        "--video-max-throughput-mbps",
+        "2.5",
+        "--video-archive-size-mb",
+        "12.5",
+        "--video-quality",
+        "high",
+        "--video-format",
+        "mp4",
+        "--a11y-level",
+        "AAA",
+        "--a11y-failure-mode",
+        "strict",
+        "--a11y-min-severity",
+        "error",
+        "--strict-port",
+      ],
+      {},
+      { warn: (message) => warnings.push(message) },
+    );
+    expect(parsed).toMatchObject({
+      port: 3000,
+      videoFps: 30,
+      videoTargetBitrateKbps: 4000,
+      videoMaxThroughputMbps: 2.5,
+      videoMaxArchiveSizeMb: 12.5,
+      videoQualityPreset: "high",
+      videoFormat: "mp4",
+      accessibilityLevel: "AAA",
+      accessibilityFailureMode: "strict",
+      accessibilityMinSeverity: "error",
+      strictPort: true,
+    });
+    expect(warnings).toEqual([]);
+  });
+
   test("each propagating boolean flag round-trips serialize -> parse", () => {
     for (const field of PROPAGATING_BOOLEAN_FLAGS) {
       const args = serialize({ [field]: true } as DaemonOptions);

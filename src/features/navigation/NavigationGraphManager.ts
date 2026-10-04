@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../../utils/navigationResourceUri";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -985,19 +986,26 @@ export class NavigationGraphManager implements NavigationGraphService {
     this.notifyGraphUpdated();
 
     // Push to telemetry dashboard via TelemetryRecorder (has device context for subscriber filtering)
-    TelemetryRecorder.getInstance().recordNavigationEvent({
-      timestamp,
-      applicationId: appId,
-      destination: screenName,
-      source: event.source ?? null,
-      arguments: event.arguments ?? null,
-      metadata: event.metadata ?? null,
-      triggeringInteraction: event.triggeringInteraction ?? null,
-      // Scope to `appId` (== the app that just navigated): this URI is pushed live
-      // to telemetry-dashboard subscribers, which may be foregrounding a different
-      // app when they follow it, so an unscoped form would resolve cross-app (#5600).
-      screenshotUri: buildNavigationNodeScreenshotUri(node.id, appId),
-    });
+    TelemetryRecorder.getInstance()
+      .recordNavigationEvent({
+        timestamp,
+        applicationId: appId,
+        destination: screenName,
+        source: event.source ?? null,
+        arguments: event.arguments ?? null,
+        metadata: event.metadata ?? null,
+        triggeringInteraction: event.triggeringInteraction ?? null,
+        // Scope to `appId` (== the app that just navigated): this URI is pushed live
+        // to telemetry-dashboard subscribers, which may be foregrounding a different
+        // app when they follow it, so an unscoped form would resolve cross-app (#5600).
+        screenshotUri: buildNavigationNodeScreenshotUri(node.id, appId),
+      })
+      .catch((error) => {
+        logger.warn(
+          `[NAVIGATION_GRAPH] Navigation telemetry failed: ${errorMessage(error)}`,
+          error,
+        );
+      });
   }
 
   /**
@@ -2227,9 +2235,11 @@ export class NavigationGraphManager implements NavigationGraphService {
     );
     for (const listener of this.graphUpdateListeners) {
       try {
-        listener();
+        Promise.resolve(listener()).catch((error) => {
+          logger.warn(`[NAVIGATION_GRAPH] Listener error: ${errorMessage(error)}`, error);
+        });
       } catch (error) {
-        logger.warn(`[NAVIGATION_GRAPH] Listener error: ${error}`);
+        logger.warn(`[NAVIGATION_GRAPH] Listener error: ${errorMessage(error)}`, error);
       }
     }
   }

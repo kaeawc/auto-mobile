@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
-  parseFallbackMainActivities,
   parseLauncherActivities,
+  parseLauncherActivitiesFromPackageDump,
   resolveComponentActivity,
 } from "../../../src/features/action/launcherActivityParsing";
 
@@ -79,32 +79,6 @@ describe("launcher activity parsing characterization", () => {
     expect(parseLauncherActivities(stdout, "com.foo.bar")).toEqual([]);
   });
 
-  test.each(["android.intent.action.MAIN", "MainActivity", ".Main"])(
-    "shape probe: fallback collects every package token on a line triggered by %s",
-    (trigger) => {
-      expect(
-        parseFallbackMainActivities(`${trigger} com.foo.bar/.One com.foo.bar/.Two`, "com.foo.bar"),
-      ).toEqual(["com.foo.bar/.One", "com.foo.bar/.Two"]);
-    },
-  );
-
-  test("shape probe: fallback dedupes across lines in first-seen order and ignores other lines", () => {
-    expect(
-      parseFallbackMainActivities(
-        "com.foo.bar/.Ignored\nandroid.intent.action.MAIN com.foo.bar/.Two com.foo.bar/.One\n" +
-          "MainActivity com.foo.bar/.One com.foo.bar/.Three\n.Main com.foo.bar/.Two",
-        "com.foo.bar",
-      ),
-    ).toEqual(["com.foo.bar/.Two", "com.foo.bar/.One", "com.foo.bar/.Three"]);
-  });
-
-  test.each(["", "unrelated MainActivity", "com.foo.bar/.Ignored"])(
-    "shape probe: fallback has no matches in %j",
-    (stdout) => {
-      expect(parseFallbackMainActivities(stdout, "com.foo.bar")).toEqual([]);
-    },
-  );
-
   test.each([
     ["com.foo.bar/.Main", "com.foo.bar.Main"],
     ["com.foo.bar/com.other.Main", "com.other.Main"],
@@ -119,11 +93,10 @@ describe("launcher activity parsing characterization", () => {
 
 describe("literal package escaping (input-shape probes, not device captures)", () => {
   test.each(["comXfooXbar", "com-foo-bar", "com_foo_bar", "com/foo/bar"])(
-    "rejects dot-position look-alike %s in both parsers",
+    "rejects dot-position look-alike %s in the query parser",
     (lookAlike) => {
       const stdout = `${lookAlike}/.Main ${lookAlike}.SomeActivity/.Two ${lookAlike}.Class/.Three`;
       expect(parseLauncherActivities(stdout, "com.foo.bar")).toEqual([]);
-      expect(parseFallbackMainActivities(stdout, "com.foo.bar")).toEqual([]);
     },
   );
 
@@ -141,24 +114,113 @@ describe("literal package escaping (input-shape probes, not device captures)", (
       `${packageName}.HomeActivity`,
       `${packageName}.Home`,
     ]);
-    expect(parseFallbackMainActivities(stdout, packageName)).toEqual([
-      `${packageName}/.Main`,
-      `${packageName}.HomeActivity`,
-      `${packageName}.Home`,
-    ]);
   });
 
-  test("still matches a real package name literally in all three patterns and the fallback", () => {
+  test("still matches a real package name literally in all three patterns", () => {
     const stdout = "com.foo.bar/.Main com.foo.bar.HomeActivity com.foo.bar.Home";
     expect(parseLauncherActivities(stdout, "com.foo.bar")).toEqual([
       ".Main",
       "com.foo.bar.HomeActivity",
       "com.foo.bar.Home",
     ]);
-    expect(parseFallbackMainActivities(stdout, "com.foo.bar")).toEqual([
-      "com.foo.bar/.Main",
-      "com.foo.bar.HomeActivity",
-      "com.foo.bar.Home",
+  });
+});
+
+describe("package dump launcher filters", () => {
+  const playgroundPackage = "dev.jasonpearson.automobile.playground";
+  const playground = readFileSync(
+    new URL(
+      "../../fixtures/android-launcher/dumpsys-package-playground-launcher.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const egg = readFileSync(
+    new URL("../../fixtures/android-launcher/dumpsys-package-egg-no-launcher.txt", import.meta.url),
+    "utf8",
+  );
+
+  test("real playground dump returns only its MAIN plus LAUNCHER activity", () => {
+    expect(parseLauncherActivitiesFromPackageDump(playground, playgroundPackage)).toEqual([
+      ".MainActivity",
     ]);
+  });
+
+  test("real egg dump rejects MAIN activities without LAUNCHER", () => {
+    expect(parseLauncherActivities(egg, "com.android.egg")[0]).toBe(".landroid.MainActivity");
+    expect(parseLauncherActivitiesFromPackageDump(egg, "com.android.egg")).toEqual([]);
+  });
+
+  test("real playground dump with CRLF still returns its launcher activity", () => {
+    expect(
+      parseLauncherActivitiesFromPackageDump(
+        playground.replaceAll("\n", "\r\n"),
+        playgroundPackage,
+      ),
+    ).toEqual([".MainActivity"]);
+  });
+
+  test("real egg dump with CRLF still rejects activities without LAUNCHER", () => {
+    expect(
+      parseLauncherActivitiesFromPackageDump(egg.replaceAll("\n", "\r\n"), "com.android.egg"),
+    ).toEqual([]);
+  });
+
+  test("real playground dump with doubled indentation still returns its launcher activity", () => {
+    const reindented = playground
+      .split("\n")
+      .map((line) => " ".repeat(line.length - line.trimStart().length) + line)
+      .join("\n");
+    expect(parseLauncherActivitiesFromPackageDump(reindented, playgroundPackage)).toEqual([
+      ".MainActivity",
+    ]);
+  });
+
+  test("real playground dump rejects a different package and package prefixes", () => {
+    for (const packageName of [
+      "com.android.egg",
+      "dev.jasonpearson.automobile",
+      playgroundPackage + "$test",
+    ]) {
+      expect(parseLauncherActivitiesFromPackageDump(playground, packageName)).toEqual([]);
+    }
+  });
+
+  test("real filters repeated under actions are deduplicated in dump order", () => {
+    const activityTable = playground.slice(0, playground.indexOf("Receiver Resolver Table:"));
+    const entries = activityTable.slice(activityTable.indexOf("  Non-Data Actions:"));
+    expect(
+      parseLauncherActivitiesFromPackageDump(activityTable + entries, playgroundPackage),
+    ).toEqual([".MainActivity"]);
+  });
+
+  test("activity filters placed after the real receiver table are ignored", () => {
+    const activityTable = playground.slice(0, playground.indexOf("Receiver Resolver Table:"));
+    const receiverTable = playground.slice(
+      playground.indexOf("Receiver Resolver Table:"),
+      playground.indexOf("Domain verification status:"),
+    );
+    expect(
+      parseLauncherActivitiesFromPackageDump(
+        egg.slice(0, egg.indexOf("Receiver Resolver Table:")) +
+          receiverTable +
+          activityTable.slice(activityTable.indexOf("  Non-Data Actions:")),
+        playgroundPackage,
+      ),
+    ).toEqual([]);
+  });
+
+  test("another top-level section ends the activity resolver table", () => {
+    const activityTable = playground.slice(0, playground.indexOf("Receiver Resolver Table:"));
+    const otherSections = playground.slice(playground.indexOf("Domain verification status:"));
+    const eggTable = egg.slice(0, egg.indexOf("Receiver Resolver Table:"));
+    expect(
+      parseLauncherActivitiesFromPackageDump(
+        eggTable +
+          otherSections +
+          activityTable.slice(activityTable.indexOf("  Non-Data Actions:")),
+        playgroundPackage,
+      ),
+    ).toEqual([]);
   });
 });

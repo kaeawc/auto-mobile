@@ -6,10 +6,13 @@
  */
 export function resolveIosObserveRotation(
   runnerRotation: number | undefined,
-  screenSize: { width: number; height: number },
+  screenSize: { width: number; height: number } | undefined,
 ): number | undefined {
   const validRotation =
     Number.isInteger(runnerRotation) && runnerRotation! >= 0 && runnerRotation! <= 3;
+  if (!screenSize) {
+    return validRotation ? runnerRotation : undefined;
+  }
   const validSize = [screenSize.width, screenSize.height].every(
     (value) => Number.isFinite(value) && value > 0,
   );

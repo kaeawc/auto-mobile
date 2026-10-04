@@ -1,3 +1,5 @@
+import { getAbortSignal } from "../../utils/AbortContext";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
@@ -33,6 +35,8 @@ export class SetAndroidNotificationPolicyAccess {
     packageName: string,
     input: SetAndroidNotificationPolicyAccessInput,
   ): Promise<AndroidDeviceShellToolResult> {
+    const signal = getAbortSignal();
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("setAndroidNotificationPolicyAccess");
 
@@ -51,6 +55,7 @@ export class SetAndroidNotificationPolicyAccess {
     try {
       await perf.track(sub, async () => {
         const execResult = await this.adb.executeCommand(cmd, undefined, undefined, true);
+        throwIfAborted(signal);
         const stdout = execResult.stdout;
         const stderr = execResult.stderr ?? "";
         const bad = outputLooksLikeShellFailure(stdout, stderr);
@@ -77,16 +82,10 @@ export class SetAndroidNotificationPolicyAccess {
     } catch (cause) {
       perf.end();
       const message = errorMessage(cause);
-      if (input.allowed) {
-        logger.warn(
-          `[SetAndroidNotificationPolicyAccess] allow_dnd failed for ${packageName}: ${message}`,
-        );
-        return { success: false, appId: packageName, error: message };
-      }
-      logger.warn(
-        `[SetAndroidNotificationPolicyAccess] disallow_dnd threw for ${packageName}: ${message}`,
-      );
-      return { success: true, appId: packageName };
+      const label = input.allowed ? "allow_dnd failed" : "disallow_dnd threw";
+      logger.warn(`[SetAndroidNotificationPolicyAccess] ${label} for ${packageName}: ${message}`);
+      throwIfAborted(signal);
+      return { success: false, appId: packageName, error: message };
     }
   }
 }

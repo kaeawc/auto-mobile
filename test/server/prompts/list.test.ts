@@ -4,13 +4,48 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 
+const listPromptsResponseSchema = z.object({
+  prompts: z.array(
+    z.object({
+      name: z.string(),
+      description: z.string().optional(),
+      arguments: z
+        .array(
+          z.object({
+            name: z.string(),
+            description: z.string().optional(),
+            required: z.boolean().optional(),
+          }),
+        )
+        .optional(),
+    }),
+  ),
+});
+
 describe("MCP Prompts List", () => {
   let fixture: McpTestFixture;
   let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
-    // Keep the cold server import outside each unit test's timing budget.
+    // Keep cold server creation, connection, and request validation outside the
+    // per-test timing budget. Each test still creates its own isolated server.
     await import("../../../src/server/index");
+    ToolRegistry.clearTools();
+    const restoreWarmupServer = installHermeticServerFixture();
+    const warmupFixture = new McpTestFixture();
+    try {
+      await warmupFixture.setup();
+      await warmupFixture
+        .getContext()
+        .client.request({ method: "prompts/list", params: {} }, listPromptsResponseSchema);
+    } finally {
+      try {
+        await warmupFixture.teardown();
+      } finally {
+        restoreWarmupServer();
+        ToolRegistry.clearTools();
+      }
+    }
   });
 
   beforeEach(async () => {
@@ -32,24 +67,6 @@ describe("MCP Prompts List", () => {
     const { client } = fixture.getContext();
 
     // Send prompts/list request
-    const listPromptsResponseSchema = z.object({
-      prompts: z.array(
-        z.object({
-          name: z.string(),
-          description: z.string().optional(),
-          arguments: z
-            .array(
-              z.object({
-                name: z.string(),
-                description: z.string().optional(),
-                required: z.boolean().optional(),
-              }),
-            )
-            .optional(),
-        }),
-      ),
-    });
-
     const result = await client.request(
       {
         method: "prompts/list",
@@ -99,24 +116,6 @@ describe("MCP Prompts List", () => {
     );
 
     // Send prompts/list request
-    const listPromptsResponseSchema = z.object({
-      prompts: z.array(
-        z.object({
-          name: z.string(),
-          description: z.string().optional(),
-          arguments: z
-            .array(
-              z.object({
-                name: z.string(),
-                description: z.string().optional(),
-                required: z.boolean().optional(),
-              }),
-            )
-            .optional(),
-        }),
-      ),
-    });
-
     const result = await client.request(
       {
         method: "prompts/list",

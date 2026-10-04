@@ -30,6 +30,18 @@ function methodsSent(server: FakeMcpServer): string[] {
   return server.server.notifications.map((n) => n.method);
 }
 
+async function subscribe(server: FakeMcpServer, uri: string): Promise<void> {
+  const handler = server.server.handlersBySchema.get(SubscribeRequestSchema);
+  expect(handler).toBeDefined();
+  await handler!({ params: { uri } });
+}
+
+async function unsubscribe(server: FakeMcpServer, uri: string): Promise<void> {
+  const handler = server.server.handlersBySchema.get(UnsubscribeRequestSchema);
+  expect(handler).toBeDefined();
+  await handler!({ params: { uri } });
+}
+
 describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
   beforeEach(() => {
     // The registry singleton is shared across suites; drop servers registered
@@ -246,7 +258,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     }
   });
 
-  test("notifyResourceUpdated reaches every registered server for a subscribed URI", async () => {
+  test("notifyResourceUpdated reaches only subscribed live servers (issue #3223)", async () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
     ResourceRegistry.registerWithServer(first as unknown as McpServer);
@@ -267,12 +279,133 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       await ResourceRegistry.notifyResourceUpdated("automobile:test/updated-resource");
 
       expect(methodsSent(first)).toEqual(["notifications/resources/updated"]);
-      expect(methodsSent(second)).toEqual(["notifications/resources/updated"]);
+      expect(methodsSent(second)).toEqual([]);
     } finally {
       ResourceRegistry.unregister("automobile:test/updated-resource");
       const unsubscribeHandler = first.server.handlersBySchema.get(UnsubscribeRequestSchema);
       await unsubscribeHandler?.({ params: { uri: "automobile:test/updated-resource" } });
     }
+  });
+});
+
+describe("ResourceRegistry connection subscriptions", () => {
+  const URI = "automobile:test/connection-subscriptions";
+  const OTHER_URI = "automobile:test/closing-subscription";
+
+  function registerServer(): FakeMcpServer {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    return server;
+  }
+
+  beforeEach(() => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.clearServersForTesting();
+    for (const uri of [URI, OTHER_URI]) {
+      ResourceRegistry.register(uri, "Test", "Connection test", "text/plain", async () => ({
+        uri,
+        text: "x",
+      }));
+    }
+  });
+
+  test("another connection's unsubscribe does not remove the owner's subscription", async () => {
+    const first = registerServer();
+    const second = registerServer();
+    await subscribe(first, URI);
+    await unsubscribe(second, URI);
+
+    await ResourceRegistry.notifyResourceUpdated(URI);
+
+    expect(methodsSent(first)).toEqual(["notifications/resources/updated"]);
+    expect(methodsSent(second)).toEqual([]);
+    expect(ResourceRegistry.isSubscribed(URI)).toBe(true);
+  });
+
+  test("both subscribed sessions receive updates, then unsubscribe affects only its session (issue #3223)", async () => {
+    const first = registerServer();
+    const second = registerServer();
+    await subscribe(first, URI);
+    await subscribe(second, URI);
+
+    await ResourceRegistry.notifyResourcesUpdated([URI]);
+    expect(methodsSent(first)).toEqual(["notifications/resources/updated"]);
+    expect(methodsSent(second)).toEqual(["notifications/resources/updated"]);
+    expect(ResourceRegistry.getSubscriptions().size).toBe(1);
+
+    await unsubscribe(first, URI);
+    await ResourceRegistry.notifyResourceUpdated(URI);
+
+    expect(methodsSent(first)).toEqual(["notifications/resources/updated"]);
+    expect(methodsSent(second)).toEqual([
+      "notifications/resources/updated",
+      "notifications/resources/updated",
+    ]);
+    expect(ResourceRegistry.isSubscribed(URI)).toBe(true);
+  });
+
+  test("close prunes subscriptions and chains the existing hook without removing a survivor's subscription", async () => {
+    const closing = new FakeMcpServer();
+    let closeCalls = 0;
+    closing.server.onclose = () => {
+      closeCalls++;
+    };
+    ResourceRegistry.registerWithServer(closing as unknown as McpServer);
+    const surviving = registerServer();
+    await subscribe(closing, URI);
+    await subscribe(closing, OTHER_URI);
+    await subscribe(surviving, URI);
+
+    closing.server.onclose?.();
+    await ResourceRegistry.notifyResourcesUpdated([URI, OTHER_URI]);
+
+    expect(closeCalls).toBe(1);
+    expect(methodsSent(closing)).toEqual([]);
+    expect(methodsSent(surviving)).toEqual(["notifications/resources/updated"]);
+    expect(ResourceRegistry.isSubscribed(OTHER_URI)).toBe(false);
+    expect(ResourceRegistry.getSubscriptions()).toEqual(new Set([URI]));
+
+    surviving.server.onclose?.();
+    expect(ResourceRegistry.isSubscribed(URI)).toBe(false);
+    expect(ResourceRegistry.getSubscriptions().size).toBe(0);
+  });
+
+  test("a late subscribe from a closed connection cannot retain a subscription", async () => {
+    const closing = registerServer();
+    const surviving = registerServer();
+    closing.server.onclose?.();
+
+    await subscribe(closing, URI);
+    await ResourceRegistry.notifyResourceUpdated(URI);
+
+    expect(ResourceRegistry.isSubscribed(URI)).toBe(false);
+    expect(ResourceRegistry.getSubscriptions().size).toBe(0);
+    expect(methodsSent(closing)).toEqual([]);
+    expect(methodsSent(surviving)).toEqual([]);
+  });
+
+  test("clearResources clears subscriptions and live connections can subscribe again", async () => {
+    const server = registerServer();
+    await subscribe(server, URI);
+
+    ResourceRegistry.clearResources();
+    expect(ResourceRegistry.isSubscribed(URI)).toBe(false);
+    expect(ResourceRegistry.getSubscriptions().size).toBe(0);
+
+    await subscribe(server, URI);
+    expect(ResourceRegistry.getSubscriptions()).toEqual(new Set([URI]));
+  });
+
+  test("clearServersForTesting drops subscriptions and ignores the old handlers", async () => {
+    const server = registerServer();
+    await subscribe(server, URI);
+
+    ResourceRegistry.clearServersForTesting();
+    expect(ResourceRegistry.isSubscribed(URI)).toBe(false);
+    expect(ResourceRegistry.getSubscriptions().size).toBe(0);
+
+    await subscribe(server, OTHER_URI);
+    expect(ResourceRegistry.getSubscriptions().size).toBe(0);
   });
 });
 
@@ -286,11 +419,6 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
     return server.server.notifications
       .filter((n) => n.method === "notifications/resources/updated")
       .map((n) => (n.params as { uri: string }).uri);
-  }
-
-  async function subscribe(server: FakeMcpServer, uri: string): Promise<void> {
-    const handler = server.server.handlersBySchema.get(SubscribeRequestSchema);
-    await handler!({ params: { uri } });
   }
 
   beforeEach(() => {
@@ -409,7 +537,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
     expect(urisNotified(server)).toEqual(["automobile:plain/one?appId=x&limit=10"]);
   });
 
-  test("fan-out reaches every registered server (issue #3223)", async () => {
+  test("page updates reach only subscribed live servers (issue #3223)", async () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
     ResourceRegistry.registerWithServer(first as unknown as McpServer);
@@ -419,7 +547,34 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
     await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
 
     expect(urisNotified(first)).toEqual([PAGE_A]);
-    expect(urisNotified(second)).toEqual([PAGE_A]);
+    expect(urisNotified(second)).toEqual([]);
+  });
+
+  test("canonical updates resolve each connection's own page URI (issue #6198)", async () => {
+    const first = new FakeMcpServer();
+    const second = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(first as unknown as McpServer);
+    ResourceRegistry.registerWithServer(second as unknown as McpServer);
+    await subscribe(first, PAGE_A);
+    await subscribe(second, PAGE_B);
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(first)).toEqual([PAGE_A]);
+    expect(urisNotified(second)).toEqual([PAGE_B]);
+  });
+
+  test("a connection closing during delivery receives no further page updates", async () => {
+    const closing = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(closing as unknown as McpServer);
+    await subscribe(closing, PAGE_A);
+    await subscribe(closing, PAGE_B);
+    closing.server.notificationStarted = () => closing.server.onclose?.();
+
+    await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
+
+    expect(urisNotified(closing)).toEqual([PAGE_A]);
+    expect(ResourceRegistry.getSubscriptions().size).toBe(0);
   });
 });
 

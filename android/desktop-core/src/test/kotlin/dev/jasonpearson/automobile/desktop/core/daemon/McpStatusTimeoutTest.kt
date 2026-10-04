@@ -122,6 +122,31 @@ class McpStatusTimeoutTest {
   }
 
   @Test
+  fun `HTTP observe tool error propagates connection exception`() {
+    val client =
+      httpClientForResponse(
+        """{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Error: no device"}],"isError":true}}"""
+      )
+
+    val error = assertFailsWith<McpConnectionException> { client.observe("android") }
+
+    assertTrue(error.message.orEmpty().contains("no device"))
+  }
+
+  @Test
+  fun `HTTP malformed observe payload becomes connection exception`() {
+    val client =
+      httpClientForResponse(
+        """{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"not json"}]}}"""
+      )
+
+    val error = assertFailsWith<McpConnectionException> { client.observe("android") }
+
+    assertTrue(error.message.orEmpty().contains("Failed to decode observe response"))
+    assertTrue(error.cause is IllegalArgumentException)
+  }
+
+  @Test
   fun `HTTP omits missing session header and preserves negotiated protocol header`() {
     val client = httpClientForResponse("""{"jsonrpc":"2.0","result":{"tools":[]}}""")
     assertEquals(emptyList(), client.listTools())
@@ -140,6 +165,32 @@ class McpStatusTimeoutTest {
     try {
       val error = assertFailsWith<McpConnectionException> { client.listTools() }
       assertTrue(error.message.orEmpty().contains("tools/list response contained no result"))
+    } finally {
+      client.close()
+    }
+  }
+
+  @Test
+  fun `STDIO observe tool error propagates connection exception`() {
+    val client =
+      stdioClientForResult(
+        """{"content":[{"type":"text","text":"Error: no device"}],"isError":true}"""
+      )
+    try {
+      val error = assertFailsWith<McpConnectionException> { client.observe("android") }
+      assertTrue(error.message.orEmpty().contains("no device"))
+    } finally {
+      client.close()
+    }
+  }
+
+  @Test
+  fun `STDIO malformed observe payload becomes connection exception`() {
+    val client = stdioClientForResult("""{"content":[{"type":"text","text":"not json"}]}""")
+    try {
+      val error = assertFailsWith<McpConnectionException> { client.observe("android") }
+      assertTrue(error.message.orEmpty().contains("Failed to decode observe response"))
+      assertTrue(error.cause is IllegalArgumentException)
     } finally {
       client.close()
     }

@@ -173,6 +173,10 @@ export class DeviceSessionRepository {
     return this.db ?? getDatabase();
   }
 
+  private nowIso(): string {
+    return new Date(this.timer.now()).toISOString();
+  }
+
   async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
     // Mirrors `DeviceTeardownOperationRepository.begin()`'s
     // `expires_at_ms <= now` pattern: a cheap, unconditional, indexed range
@@ -183,7 +187,7 @@ export class DeviceSessionRepository {
     await this.pruneExpiredSessions(this.timer.now());
     try {
       const db = await this.getDb();
-      const now = new Date().toISOString();
+      const now = this.nowIso();
       const row: NewDeviceSession = {
         session_uuid: record.sessionUuid,
         device_id: record.deviceId,
@@ -203,6 +207,7 @@ export class DeviceSessionRepository {
         session_timeout_ms: record.sessionTimeoutMs,
         heartbeat_timeout_ms: record.heartbeatTimeoutMs,
         ...livenessColumns(record),
+        created_at: now,
         updated_at: now,
       };
 
@@ -258,7 +263,7 @@ export class DeviceSessionRepository {
           // clears this contract only when an older binary updates legacy
           // liveness columns without advancing this generation.
           liveness_contract_generation: sql`liveness_contract_generation + 1`,
-          updated_at: new Date().toISOString(),
+          updated_at: this.nowIso(),
         })
         .where("session_uuid", "=", sessionUuid)
         .where("status", "=", "active")
@@ -281,7 +286,7 @@ export class DeviceSessionRepository {
         .updateTable("device_sessions")
         .set({
           liveness_owner_token: ownerToken,
-          updated_at: new Date().toISOString(),
+          updated_at: this.nowIso(),
         })
         .where("session_uuid", "=", sessionUuid)
         .where("status", "=", "active")
@@ -320,7 +325,7 @@ export class DeviceSessionRepository {
           expires_at_ms: input.expiresAtMs,
           released_at_ms: null,
           release_reason: null,
-          updated_at: new Date().toISOString(),
+          updated_at: this.nowIso(),
         })
         .where("session_uuid", "=", sessionUuid)
         // Like activity refresh, delayed autolock metadata may only update a
@@ -349,7 +354,7 @@ export class DeviceSessionRepository {
           released_at_ms: releasedAtMs,
           release_reason: reason,
           ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
-          updated_at: new Date().toISOString(),
+          updated_at: this.nowIso(),
         })
         .where("session_uuid", "=", sessionUuid)
         .execute();
@@ -386,7 +391,7 @@ export class DeviceSessionRepository {
         released_at_ms: releasedAtMs,
         release_reason: reason,
         ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
-        updated_at: new Date().toISOString(),
+        updated_at: this.nowIso(),
       })
       .where("status", "=", "active")
       .where((eb) => {

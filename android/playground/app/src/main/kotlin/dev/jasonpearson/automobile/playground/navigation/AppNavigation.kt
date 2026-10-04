@@ -338,7 +338,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
   NavDisplay(
     modifier = Modifier.semantics { testTagsAsResourceId = true },
     backStack = backStack,
-    onBack = { backStack.removeLastOrNull() },
+    onBack = { backStack.popOrGoHome(HomeDestination()) },
     entryDecorators =
       listOf(
         rememberSaveableStateHolderNavEntryDecorator(),
@@ -493,13 +493,15 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             SlidesScreen(
               initialSlideIndex = slidesDestination.slideIndex,
               onNavigateBack = {
-                Log.d(TAG, "Navigating back from SlidesScreen to HomeScreen")
+                val destination = backStack.popOrGoHome(HomeDestination())
+                val screenName =
+                  destination::class.simpleName?.removeSuffix("Destination") + "Screen"
+                Log.d(TAG, "Navigating back from SlidesScreen to $screenName")
                 NavigationTracker.trackNavigation(
                   "SlidesScreen",
-                  "HomeScreen",
+                  screenName,
                   "back_navigation",
                 )
-                backStack.removeLastOrNull()
               },
             )
           }
@@ -526,13 +528,15 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             VideoPlayerScreen(
               videoId = videoPlayerDestination.videoId,
               onNavigateBack = {
-                Log.d(TAG, "Navigating back from VideoPlayerScreen to HomeScreen")
+                val destination = backStack.popOrGoHome(HomeDestination())
+                val screenName =
+                  destination::class.simpleName?.removeSuffix("Destination") + "Screen"
+                Log.d(TAG, "Navigating back from VideoPlayerScreen to $screenName")
                 NavigationTracker.trackNavigation(
                   "VideoPlayerScreen",
-                  "HomeScreen",
+                  screenName,
                   "back_navigation",
                 )
-                backStack.removeLastOrNull()
               },
             )
           }
@@ -595,7 +599,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
               },
               onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
               onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
-              onNavigateBack = { backStack.removeLastOrNull() },
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -607,7 +611,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("DesignSystemDemoScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DesignSystemDemoDestination>()) {
-            DesignSystemDemoScreen(onBackClick = { backStack.removeLastOrNull() })
+            DesignSystemDemoScreen(onBackClick = { backStack.popOrGoHome(HomeDestination()) })
           }
         }
 
@@ -620,7 +624,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           Box(modifier = Modifier.destinationSemanticModifier<DemoUxStartDestination>()) {
             UxFlowStartScreen(
               onNavigateNext = { backStack.add(DemoUxDetailsDestination) },
-              onNavigateBack = { backStack.removeLastOrNull() },
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -634,7 +638,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           Box(modifier = Modifier.destinationSemanticModifier<DemoUxDetailsDestination>()) {
             UxFlowDetailsScreen(
               onNavigateNext = { backStack.add(DemoUxSummaryDestination) },
-              onNavigateBack = { backStack.removeLastOrNull() },
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -647,8 +651,9 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoUxSummaryDestination>()) {
             UxFlowSummaryScreen(
-              onRestartFlow = { repeat(2) { backStack.removeLastOrNull() } },
-              onNavigateBack = { backStack.removeLastOrNull() },
+              // Pop summary and details, stopping at a root for short deep-linked stacks.
+              onRestartFlow = { repeat(2) { backStack.popOrGoHome(HomeDestination()) } },
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -660,7 +665,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("StartupDemoScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoStartupDestination>()) {
-            StartupDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            StartupDemoScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
           }
         }
 
@@ -675,7 +680,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
               onNavigateToDetail = { itemId ->
                 backStack.add(DemoPerformanceDetailDestination(itemId))
               },
-              onNavigateBack = { backStack.removeLastOrNull() },
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -700,7 +705,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           ) {
             PerformanceDetailScreen(
               itemId = destination.itemId,
-              onNavigateBack = { backStack.removeLastOrNull() },
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -712,7 +717,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("ContrastDemoScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoContrastDestination>()) {
-            ContrastDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            ContrastDemoScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
           }
         }
 
@@ -723,7 +728,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("TapTargetsDemoScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoTapTargetsDestination>()) {
-            TapTargetsDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            TapTargetsDemoScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
           }
         }
 
@@ -734,7 +739,9 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("XmlSemanticLinksDemoScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoXmlSemanticLinksDestination>()) {
-            XmlSemanticLinksDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            XmlSemanticLinksDemoScreen(
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) }
+            )
           }
         }
 
@@ -747,7 +754,9 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           Box(
             modifier = Modifier.destinationSemanticModifier<DemoComposeSemanticLinksDestination>()
           ) {
-            ComposeSemanticLinksDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            ComposeSemanticLinksDemoScreen(
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) }
+            )
           }
         }
 
@@ -758,7 +767,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("BugReproScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoBugReproDestination>()) {
-            BugReproScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            BugReproScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
           }
         }
 
@@ -769,7 +778,9 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("HandledExceptionDemoScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoHandledExceptionDestination>()) {
-            HandledExceptionDemoScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            HandledExceptionDemoScreen(
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) }
+            )
           }
         }
 
@@ -780,7 +791,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("NetworkTestScreen")
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoNetworkTestDestination>()) {
-            NetworkTestScreen(onNavigateBack = { backStack.removeLastOrNull() })
+            NetworkTestScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
           }
         }
       },

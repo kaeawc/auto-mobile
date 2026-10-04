@@ -128,7 +128,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       name: "no identifier",
       nodes: [{ bounds: real.bounds, scrollable: "true", class: "android.widget.ScrollView" }],
       warning:
-        "Auto-targeted scrollable container lacks a usable identifier; swiping the screen. Provide container.elementId or container.text to target it explicitly.",
+        "Auto-targeted scrollable container lacks a usable identifier; swiping within its bounds without container metadata.",
       candidates: [{ className: "android.widget.ScrollView" }],
     },
   ];
@@ -138,11 +138,11 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       const result = await h.action.execute({ ...displaySwipe, autoTarget: true });
       expect(result).toMatchObject({
         success: true,
-        targetType: "screen",
-        x1: 100,
+        targetType: entry.name === "no identifier" ? "element" : "screen",
+        x1: entry.name === "no identifier" ? 90 : 100,
         y1: 160,
-        x2: 100,
-        y2: 40,
+        x2: entry.name === "no identifier" ? 90 : 100,
+        y2: entry.name === "no identifier" ? 80 : 40,
       });
       expect(result.warning).toBe(entry.warning);
       expect(result.scrollableCandidates).toEqual(entry.candidates);
@@ -413,5 +413,35 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     });
     expect(result.success).toBe(true);
     expect(h.legs()[0]).toMatchObject({ x1: 90, y1: 90, x2: 90, y2: 150 });
+  });
+}
+
+for (const route of ["ctrlproxy", "adb"] as const) {
+  test(`auto-target screen fallback respects available selected-display insets via ${route}`, async () => {
+    const h = optionsHarness({ route, available: true, nodes: [] });
+    const result = await h.action.execute({ ...displaySwipe, autoTarget: true });
+    expect(result).toMatchObject({ targetType: "screen", x1: 110, y1: 156, x2: 110, y2: 84 });
+  });
+
+  test(`unnamed selected-display auto-target reports unchanged hierarchy via ${route}`, async () => {
+    const h = optionsHarness({
+      route,
+      available: true,
+      unchanged: true,
+      foundAfter: 99,
+      nodes: [{ bounds: real.bounds, scrollable: "true", class: "android.widget.ScrollView" }],
+    });
+    h.useRealObservedInteraction();
+    const result = await h.action.execute({ ...displaySwipe, autoTarget: true });
+    expect(result).toMatchObject({
+      success: true,
+      targetType: "element",
+      x1: 90,
+      y1: 160,
+      x2: 90,
+      y2: 80,
+      effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
+    });
+    expect(result.warning).toContain("inside the scrollable");
   });
 }

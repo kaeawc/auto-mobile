@@ -12,6 +12,16 @@ export type AccessibilityService = "talkback" | "voiceover" | "unknown";
  */
 export interface AccessibilityDetector {
   /**
+   * CtrlProxy's actual enabled state; null means detection failed or was skipped.
+   * Omit adb to consume only an existing cached read (e.g. after an observe audit).
+   */
+  isCtrlProxyServiceEnabled(
+    deviceId: string,
+    adb?: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<boolean | null>;
+
+  /**
    * Check if accessibility services are enabled on the device
    *
    * @param deviceId - The device identifier (for caching)

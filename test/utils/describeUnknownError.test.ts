@@ -74,6 +74,41 @@ describe("describeUnknownError", () => {
 });
 
 describe("errorMessage", () => {
+  test("formats a null-prototype object without throwing", () => {
+    expect(errorMessage(Object.create(null))).toBe("[object Object]");
+  });
+
+  test("falls back when an object's toString throws", () => {
+    expect(
+      errorMessage({
+        toString() {
+          throw new Error("cannot stringify");
+        },
+      }),
+    ).toBe("[object Object]");
+  });
+
+  test("stays non-throwing when the fallback's toStringTag getter also throws", () => {
+    const value = {
+      toString() {
+        throw new Error("cannot stringify");
+      },
+      get [Symbol.toStringTag]() {
+        throw new Error("cannot describe");
+      },
+    };
+    expect(errorMessage(value)).toBe("Unknown error");
+  });
+
+  test("preserves Error, string, number, and plain-object messages", () => {
+    expect([new Error("boom"), "plain", 42, { a: 1 }].map(errorMessage)).toEqual([
+      "boom",
+      "plain",
+      "42",
+      "[object Object]",
+    ]);
+  });
+
   test("returns an Error's message", () => {
     expect(errorMessage(new Error("boom"))).toBe("boom");
   });

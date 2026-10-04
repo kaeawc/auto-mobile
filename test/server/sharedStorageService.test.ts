@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
+import { logger } from "../../src/utils/logger";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   createSharedStorageServiceForTesting,
   type SharedStorageFileSystem,
@@ -31,6 +33,282 @@ function adbFactoryFor(executor: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("SharedStorageService", () => {
+  test("detached rollback removes both files after cancellation on the second push", async () => {
+    const executor = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    executor.abortAfterCommand("second.png", controller);
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    const removed: string[] = [];
+    const execute = executor.executeCommand.bind(executor);
+    spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+      const [command, timeoutMs, , , signal] = args;
+      const effectiveSignal = signal ?? getAbortSignal();
+      effectiveSignal?.throwIfAborted();
+      if (command.startsWith("shell rm -f")) {
+        expect(getAbortSignal()).toBeUndefined();
+        expect(effectiveSignal?.aborted).toBe(false);
+        expect(timeoutMs).toBe(5000);
+        removed.push(command);
+      }
+      return execute(...args);
+    });
+    const fileSystem: SharedStorageFileSystem = {
+      stat: async () => ({ size: 3, isFile: () => true }),
+      mkdtemp: async () => "/fake/unused",
+      writeFileBuffer: async () => {},
+      rm: async () => {},
+    };
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      timer,
+      fileSystem,
+    });
+    await expect(
+      runWithAbortSignal(controller.signal, () =>
+        service.stage({
+          device: androidDevice,
+          namespace: "cancelled-media",
+          rollbackOnFailure: true,
+          signal: controller.signal,
+          files: [
+            { sourcePath: "/fixtures/first.png", destinationPath: "first.png" },
+            { sourcePath: "/fixtures/second.png", destinationPath: "second.png" },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/aborted.*Rolled back: second.png, first.png.*Rollback failures: none/);
+    expect(controller.signal.aborted).toBe(true);
+    expect(removed).toEqual([
+      "shell rm -f '/storage/emulated/0/Download/cancelled-media/second.png' '/storage/emulated/0/Download/cancelled-media/first.png'",
+    ]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  for (const outcome of ["cancel", "failure"] as const) {
+    for (const cleanupOutcome of ["success", "failure", "timeout"] as const) {
+      test(`rolls back 12 staged files after ${outcome} with cleanup ${cleanupOutcome}`, async () => {
+        const executor = new FakeAdbExecutor();
+        const timer = new FakeTimer();
+        const controller = new AbortController();
+        const started = Promise.withResolvers<void>();
+        const pending =
+          Promise.withResolvers<Awaited<ReturnType<typeof executor.executeCommand>>>();
+        const files = Array.from({ length: 12 }, (_, index) => ({
+          sourcePath: `/fixtures/file-${index}.png`,
+          destinationPath: `file-${index}.png`,
+        }));
+        const reversePaths = files.map((file) => file.destinationPath).reverse();
+        const removed: string[] = [];
+        const timeouts: Array<number | undefined> = [];
+        let cleanupSignal: AbortSignal | undefined;
+        executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+        const execute = executor.executeCommand.bind(executor);
+        spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+          const [command, timeoutMs, , , signal] = args;
+          (signal ?? getAbortSignal())?.throwIfAborted();
+          if (command.includes("MEDIA_SCANNER_SCAN_FILE") && command.includes("file-11.png")) {
+            if (outcome === "cancel") {
+              controller.abort(new Error("request cancelled"));
+              controller.signal.throwIfAborted();
+            }
+            throw new Error("indexing failed");
+          }
+          if (command.startsWith("shell rm -f")) {
+            expect(getAbortSignal()).toBeUndefined();
+            expect(signal?.aborted).toBe(false);
+            cleanupSignal = signal;
+            removed.push(command);
+            timeouts.push(timeoutMs);
+            started.resolve();
+            if (cleanupOutcome === "failure") {
+              throw new Error("cleanup denied");
+            }
+            if (cleanupOutcome === "timeout") {
+              return pending.promise;
+            }
+          }
+          return execute(...args);
+        });
+        const service = createSharedStorageServiceForTesting({
+          adbFactory: adbFactoryFor(executor),
+          timer,
+          fileSystem: {
+            stat: async () => ({ size: 3, isFile: () => true }),
+            mkdtemp: async () => "/fake/unused",
+            writeFileBuffer: async () => {},
+            rm: async () => {},
+          },
+        });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const operation = runWithAbortSignal(controller.signal, () =>
+            service.stage({
+              device: androidDevice,
+              namespace: "batch",
+              rollbackOnFailure: true,
+              signal: controller.signal,
+              files,
+            }),
+          );
+          const report = operation.then(
+            () => "unexpected success",
+            (error: unknown) => {
+              if (!(error instanceof Error)) {
+                throw error;
+              }
+              return error.message;
+            },
+          );
+          await started.promise;
+          if (cleanupOutcome === "timeout") {
+            expect(timer.getPendingTimeouts()).toEqual([5000]);
+            timer.advanceTime(5000);
+          }
+          const message = await report;
+          expect(message).toContain(outcome === "cancel" ? "request cancelled" : "indexing failed");
+          expect(removed).toEqual([
+            `shell rm -f ${reversePaths.map((path) => `'/storage/emulated/0/Download/batch/${path}'`).join(" ")}`,
+          ]);
+          expect(timeouts).toEqual([5000]);
+          if (cleanupOutcome === "success") {
+            expect(message).toContain(
+              `Rolled back: ${reversePaths.join(", ")}. Rollback failures: none.`,
+            );
+          } else {
+            const reason =
+              cleanupOutcome === "failure" ? "cleanup denied" : "timed out after 5000ms";
+            expect(message).toContain("Rolled back: none. Rollback failures:");
+            for (const path of reversePaths) {
+              expect(message).toContain(`${path}:`);
+            }
+            expect(message.split(reason)).toHaveLength(13);
+            expect(warn).toHaveBeenCalled();
+          }
+          expect(cleanupSignal?.aborted).toBe(cleanupOutcome === "timeout");
+          expect(timer.now()).toBe(cleanupOutcome === "timeout" ? 5000 : 0);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+          if (cleanupOutcome === "timeout") {
+            pending.reject(new Error("late rollback failure"));
+          }
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    }
+  }
+
+  test("rollback chunks 64 paths, caps command time at remaining budget, and reports undispatched files", async () => {
+    const executor = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const started = Array.from({ length: 4 }, () => Promise.withResolvers<void>());
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof executor.executeCommand>>>();
+    const files = Array.from({ length: 257 }, (_, index) => ({
+      sourcePath: `/fixtures/file-${index}.txt`,
+      destinationPath: `file-${index}.txt`,
+    }));
+    const reversePaths = files.map((file) => file.destinationPath).reverse();
+    const removed: string[] = [];
+    const timeouts: Array<number | undefined> = [];
+    const cleanupSignals: AbortSignal[] = [];
+    const execute = executor.executeCommand.bind(executor);
+    spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+      const [command, timeoutMs, , , signal] = args;
+      (signal ?? getAbortSignal())?.throwIfAborted();
+      if (command.startsWith("push /fixtures/trigger.txt")) {
+        controller.abort(new Error("request cancelled"));
+        controller.signal.throwIfAborted();
+      }
+      if (command.startsWith("shell rm -f")) {
+        expect(getAbortSignal()).toBeUndefined();
+        expect(signal?.aborted).toBe(false);
+        if (signal) {
+          cleanupSignals.push(signal);
+        }
+        removed.push(command);
+        timeouts.push(timeoutMs);
+        started[removed.length - 1]?.resolve();
+        if (removed.length > 1) {
+          return pending.promise;
+        }
+        await timer.sleep(4000);
+      }
+      return execute(...args);
+    });
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      timer,
+      fileSystem: {
+        stat: async () => ({ size: 3, isFile: () => true }),
+        mkdtemp: async () => "/fake/unused",
+        writeFileBuffer: async () => {},
+        rm: async () => {},
+      },
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const operation = runWithAbortSignal(controller.signal, () =>
+        service.stage({
+          device: androidDevice,
+          namespace: "chunked",
+          rollbackOnFailure: true,
+          signal: controller.signal,
+          files: [
+            ...files,
+            { sourcePath: "/fixtures/trigger.txt", destinationPath: "trigger.txt" },
+          ],
+        }),
+      );
+      const report = operation.then(
+        () => "unexpected success",
+        (error: unknown) => {
+          if (!(error instanceof Error)) {
+            throw error;
+          }
+          return error.message;
+        },
+      );
+      const durations = [4000, 5000, 5000, 1000];
+      for (const [index, commandStarted] of started.entries()) {
+        await commandStarted.promise;
+        timer.advanceTime(durations[index] ?? 0);
+      }
+      const message = await report;
+      expect(message).toContain("request cancelled");
+      const expectedCommands: string[] = [];
+      for (const offset of [0, 64, 128, 192]) {
+        const quotedPaths = reversePaths
+          .slice(offset, offset + 64)
+          .map((path) => `'/storage/emulated/0/Download/chunked/${path}'`);
+        expectedCommands.push(`shell rm -f ${quotedPaths.join(" ")}`);
+      }
+      expect(removed).toEqual(expectedCommands);
+      expect(timeouts).toEqual([5000, 5000, 5000, 1000]);
+      expect(message).toContain(`Rolled back: ${reversePaths.slice(0, 64).join(", ")}.`);
+      const failureReport = message.split("Rollback failures: ")[1] ?? "";
+      expect(failureReport.split("; ")).toHaveLength(193);
+      for (const [index, path] of reversePaths.slice(64).entries()) {
+        let reason = "timed out after 5000ms";
+        if (index >= 128) {
+          reason = "timed out after 1000ms";
+        }
+        if (index >= 192) {
+          reason = "exceeded total timeout of 15000ms";
+        }
+        expect(failureReport).toContain(`${path}: Shared-storage batch rollback ${reason}`);
+      }
+      expect(cleanupSignals.map((signal) => signal.aborted)).toEqual([false, true, true, true]);
+      expect(new Set(cleanupSignals).size).toBe(4);
+      expect(timer.now()).toBe(15000);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(warn).toHaveBeenCalledTimes(4);
+      pending.reject(new Error("late rollback failure"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("resets only the declared Downloads namespace, stages every file, and indexes media", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
@@ -344,6 +622,53 @@ describe("SharedStorageService", () => {
     ).rejects.toThrow("conflicts with a nested fixture");
     expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
   });
+
+  for (const cleanupFails of [false, true]) {
+    test(`cleans a failed inline write and preserves its error (cleanup fails: ${cleanupFails})`, async () => {
+      const original = new Error("disk full");
+      const cleanupError = new Error("cleanup denied");
+      const removed: string[] = [];
+      const fileSystem: SharedStorageFileSystem = {
+        stat: async () => {
+          throw new Error("not used");
+        },
+        mkdtemp: async () => "/fake/shared-write",
+        writeFileBuffer: async () => {
+          throw original;
+        },
+        rm: async (path) => {
+          removed.push(path);
+          if (cleanupFails) {
+            throw cleanupError;
+          }
+        },
+      };
+      const adbFactory = new FakeAdbClientFactory();
+      const service = createSharedStorageServiceForTesting({ fileSystem, adbFactory });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await expect(
+          service.stage({
+            device: androidDevice,
+            namespace: "run-42",
+            files: [{ contentText: "hello", destinationPath: "file.txt" }],
+          }),
+        ).rejects.toBe(original);
+        expect(removed).toEqual(["/fake/shared-write"]);
+        expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
+        if (cleanupFails) {
+          expect(warn).toHaveBeenCalledWith(
+            "Failed to remove inline shared-storage directory: cleanup denied",
+            cleanupError,
+          );
+        } else {
+          expect(warn).not.toHaveBeenCalled();
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
 
   test("cleans inline fixture directories when active user resolution fails", async () => {
     const removed: string[] = [];

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { AndroidWakeAndUnlock } from "../../../src/utils/android-cmdline-tools/AndroidWakeAndUnlock";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { ExecResult, BootedDevice, DeviceLockState } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -45,9 +47,9 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
     return createExecResult("", "");
   };
 
-  function runWakeAndUnlock(): Promise<void> {
+  function runWakeAndUnlock(signal?: AbortSignal): Promise<void> {
     const wakeAndUnlock = (emulatorClient as any).wakeAndUnlock.bind(emulatorClient);
-    return wakeAndUnlock(DEVICE);
+    return wakeAndUnlock(DEVICE, signal);
   }
 
   beforeEach(() => {
@@ -56,6 +58,45 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
     fakeTimer.enableAutoAdvance();
     fakeFactory = new TestAdbClientFactory(fakeAdb);
     emulatorClient = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+  });
+
+  test("an already-aborted boot request rejects without waking or unlocking the device", async () => {
+    fakeAdb.setScreenState(false, "Asleep");
+    fakeAdb.setDeviceLockSequence([LOCKED_SWIPE, UNLOCKED]);
+    const controller = new AbortController();
+    controller.abort(new Error("boot request cancelled"));
+
+    await expect(runWakeAndUnlock(controller.signal)).rejects.toBe(controller.signal.reason);
+
+    expect(fakeAdb.wasCommandExecuted("KEYCODE_WAKEUP")).toBe(false);
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    expect(fakeTimer.now()).toBe(0);
+  });
+
+  test("shared wake/unlock rejects an already-aborted signal before any ADB call", async () => {
+    fakeAdb.setScreenState(false, "Asleep");
+    fakeAdb.setDeviceLockSequence([LOCKED_SWIPE, UNLOCKED]);
+    const controller = new AbortController();
+    controller.abort();
+    const wakeAndUnlock = new AndroidWakeAndUnlock(DEVICE, fakeAdb, { timer: fakeTimer });
+
+    await expect(wakeAndUnlock.execute(undefined, controller.signal)).rejects.toThrow(
+      OPERATION_CANCELLED_MESSAGE,
+    );
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    expect(fakeTimer.now()).toBe(0);
+  });
+
+  test("a live boot signal still wakes the device and dismisses a swipe keyguard", async () => {
+    fakeAdb.setScreenState(false, "Asleep");
+    fakeAdb.setDeviceLockSequence([LOCKED_SWIPE, UNLOCKED]);
+    const controller = new AbortController();
+
+    await expect(runWakeAndUnlock(controller.signal)).resolves.toBeUndefined();
+
+    expect(fakeAdb.wasCommandExecuted("KEYCODE_WAKEUP")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("wm dismiss-keyguard")).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
   });
 
   test("wakes device and dismisses a swipe keyguard when device is Asleep", async () => {

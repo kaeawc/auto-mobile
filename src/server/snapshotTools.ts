@@ -6,6 +6,9 @@ import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { captureDeviceSnapshot, restoreDeviceSnapshot } from "./deviceSnapshotManager";
 
+/** Per-call VM snapshot budget: at most 30 minutes, safely below the timer overflow ceiling. */
+export const MAX_VM_SNAPSHOT_TIMEOUT_MS = 1_800_000;
+
 const snapshotNameRequiredMessage = "snapshotName is required when action is restore";
 const optionalSnapshotNameSchema = z.string().min(1).optional().describe("Snapshot name");
 
@@ -24,7 +27,15 @@ const deviceSnapshotCommonShape = {
     .describe(
       "iOS-only: fail the whole snapshot unless every requested bundle is backed up (all-or-nothing)",
     ),
-  vmSnapshotTimeoutMs: z.number().optional().describe("VM snapshot timeout ms"),
+  vmSnapshotTimeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_VM_SNAPSHOT_TIMEOUT_MS)
+    .optional()
+    .describe(
+      "VM snapshot timeout in milliseconds (positive integer; maximum 1800000 ms / 30 minutes)",
+    ),
   appBundleIds: z.array(z.string()).optional().describe("iOS bundle IDs for app data snapshot"),
 };
 

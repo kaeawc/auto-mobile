@@ -35,7 +35,8 @@ export function parseAndroidDisplayInfos(output: string): AndroidDisplayInfo[] {
     const uniqueIdIndex = tokens.findIndex((token) => token === "uniqueId");
     const uniqueId =
       /\buniqueId "([^"]+)"/.exec(line)?.[1] ??
-      (uniqueIdIndex >= 0 ? tokens[uniqueIdIndex + 1] : undefined);
+      // An unterminated quoted value cannot establish a panel's identity.
+      (uniqueIdIndex >= 0 && !/\buniqueId\s+"/.test(line) ? tokens[uniqueIdIndex + 1] : undefined);
     const typeToken = /\btype (INTERNAL|EXTERNAL|VIRTUAL)\b/.exec(line)?.[1];
     const type =
       typeToken === "INTERNAL" || typeToken === "EXTERNAL" || typeToken === "VIRTUAL"

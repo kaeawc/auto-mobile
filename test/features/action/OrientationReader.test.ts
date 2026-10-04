@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   AndroidOrientationReader,
   IosOrientationReader,
@@ -23,10 +25,30 @@ function result(stdout: string): ExecResult {
 }
 
 describe("OrientationReader", () => {
+  test.each(["landscape", "portrait"] as const)(
+    "reads %s from the default display while mirroring",
+    async (orientation) => {
+      const adb = new FakeAdbExecutor();
+      const stdout = readFileSync(
+        join(
+          __dirname,
+          "..",
+          "observe",
+          "windowDumps",
+          `dumpsys-window-displays-mirror-${orientation}.txt`,
+        ),
+        "utf8",
+      );
+      adb.setCommandResponse("shell dumpsys window displays", result(stdout));
+      adb.setCommandResponse("shell wm size", result("Physical size: 1080x2400"));
+      expect(await new AndroidOrientationReader(adb).readOrientation(device)).toBe(orientation);
+    },
+  );
+
   test("maps WindowManager rotations to portrait and landscape", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
+      "shell dumpsys window displays",
       result("  mRotation=1 mAltOrientation=false"),
     );
     const reader = new AndroidOrientationReader(adb);
@@ -34,7 +56,7 @@ describe("OrientationReader", () => {
     expect(await reader.readOrientation(device)).toBe("landscape");
 
     adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
+      "shell dumpsys window displays",
       result("  mRotation=2 mAltOrientation=false"),
     );
     expect(await reader.readOrientation(device)).toBe("portrait");
@@ -44,7 +66,7 @@ describe("OrientationReader", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("shell wm size", result("Physical size: 1080x2400"));
     adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
+      "shell dumpsys window displays",
       result("  mRotation=0 mAltOrientation=false"),
     );
     const reader = new AndroidOrientationReader(adb);
@@ -55,7 +77,7 @@ describe("OrientationReader", () => {
     expect(await reader.readOrientation(device)).toBe("landscape");
 
     adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
+      "shell dumpsys window displays",
       result("  mRotation=1 mAltOrientation=false"),
     );
     expect(await reader.readOrientation(device)).toBe("portrait");
@@ -64,7 +86,7 @@ describe("OrientationReader", () => {
   test("forwards an abort signal to both Android orientation commands", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
+      "shell dumpsys window displays",
       result("  mRotation=0 mAltOrientation=false"),
     );
     adb.setCommandResponse("shell wm size", result("Physical size: 1080x2400"));
@@ -81,7 +103,7 @@ describe("OrientationReader", () => {
   test("returns null when WindowManager output has no authoritative rotation", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
-      'shell dumpsys window | grep -i "mRotation="',
+      "shell dumpsys window displays",
       result("snapshot=TaskSnapshot{ mRotation=1 }"),
     );
 

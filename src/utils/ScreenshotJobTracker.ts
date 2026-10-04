@@ -351,33 +351,43 @@ export class ScreenshotJobTracker {
       ScreenshotJobTracker.latestJobIds.set(deviceId, jobId);
     }
 
-    promise.finally(() => {
-      const current = ScreenshotJobTracker.jobs.get(deviceId);
-      if (!current) {
-        ScreenshotJobTracker.runningJobIds.delete(jobId);
-        if (ScreenshotJobTracker.latestJobIds.get(deviceId) === jobId) {
-          ScreenshotJobTracker.latestJobIds.delete(deviceId);
-        }
-        cleanupParentSignal?.();
-        return;
-      }
-      const entryIndex = current.findIndex((candidate) => candidate.jobId === jobId);
-      if (entryIndex !== -1) {
-        current.splice(entryIndex, 1);
-      }
-      ScreenshotJobTracker.runningJobIds.delete(jobId);
-      if (current.length === 0) {
-        ScreenshotJobTracker.jobs.delete(deviceId);
-        ScreenshotJobTracker.latestJobIds.delete(deviceId);
-      }
-      cleanupParentSignal?.();
-    });
+    promise
+      .finally(() => ScreenshotJobTracker.finishJob(deviceId, jobId, cleanupParentSignal))
+      .catch((error) => {
+        logger.warn(`[ScreenshotJobTracker] Job cleanup failed: ${errorMessage(error)}`, error);
+      });
 
     return {
       jobId,
       promise,
       signal: abortController.signal,
     };
+  }
+
+  private static finishJob(
+    deviceId: string,
+    jobId: string,
+    cleanupParentSignal?: () => void,
+  ): void {
+    const current = ScreenshotJobTracker.jobs.get(deviceId);
+    if (!current) {
+      ScreenshotJobTracker.runningJobIds.delete(jobId);
+      if (ScreenshotJobTracker.latestJobIds.get(deviceId) === jobId) {
+        ScreenshotJobTracker.latestJobIds.delete(deviceId);
+      }
+      cleanupParentSignal?.();
+      return;
+    }
+    const entryIndex = current.findIndex((candidate) => candidate.jobId === jobId);
+    if (entryIndex !== -1) {
+      current.splice(entryIndex, 1);
+    }
+    ScreenshotJobTracker.runningJobIds.delete(jobId);
+    if (current.length === 0) {
+      ScreenshotJobTracker.jobs.delete(deviceId);
+      ScreenshotJobTracker.latestJobIds.delete(deviceId);
+    }
+    cleanupParentSignal?.();
   }
 
   static cancelJob(deviceId: string): void {

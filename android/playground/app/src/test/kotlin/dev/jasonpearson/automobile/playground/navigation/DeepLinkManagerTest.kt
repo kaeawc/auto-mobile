@@ -71,6 +71,13 @@ class DeepLinkManagerTest {
   }
 
   @Test
+  fun testParseUnknownVideoPlayerHierarchicalDeepLink() {
+    val uri = Uri.parse("automobile://playground/video_player/unknown")
+
+    assertEquals(VideoPlayerDestination("unknown"), DeepLinkManager.parseDeepLink(uri))
+  }
+
+  @Test
   fun testParseDeepLinkVideoPlayer() {
     val uri = Uri.parse("automobile:playground/video_player/sample123")
     val destination = DeepLinkManager.parseDeepLink(uri)

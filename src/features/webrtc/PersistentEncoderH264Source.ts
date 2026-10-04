@@ -2217,6 +2217,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         "adb read video-server process cmdline",
       );
       const argv = commandLine.stdout.split("\u0000");
+      if (commandLine.stdout.length === 0 || argv.every((argument) => argument.length === 0)) {
+        // An exited process needs no signal; forward and lease cleanup can safely continue.
+        logger.debug(
+          `[PersistentEncoderH264Source] stale-session process cleanup skipped socket=${lease.socketName}: process already exited`,
+        );
+        return;
+      }
       // Match the non-secret `--socket-name` argv token, not `--session-token` (issue #4731): the
       // lease no longer carries the raw token, and the opaque socket name gives the same PID-reuse
       // protection — a recycled PID running something else will not carry our socket name.

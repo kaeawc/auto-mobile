@@ -4,6 +4,7 @@ import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult, DeviceBootService } from "../devices/deviceBootService";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
 import type {
   StartDeviceArgs,
@@ -121,6 +122,17 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
   let shutdownWasConfirmed = false;
   let keepReadinessReservation = false;
   let replacementBoot: DeviceBootResult | undefined;
+  const releaseShutdownReservation = async (): Promise<void> => {
+    try {
+      await shutdownReservation?.release();
+    } catch (error) {
+      // Release is best-effort cleanup and must not replace the shutdown outcome.
+      logger.warn(
+        `[DeviceTools] Failed to release System UI ANR shutdown reservation: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  };
   try {
     shutdownReservation = await reserveSystemUiAnrShutdown(
       devicePool,
@@ -193,12 +205,20 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
     }
     throw error;
   } finally {
-    await shutdownReservation?.release();
+    await releaseShutdownReservation();
     if (!keepReadinessReservation) {
       shutdownReservation?.releaseRecoveryRouteLease();
     }
     if (!keepReadinessReservation) {
-      await releaseReadinessReservation?.();
+      try {
+        await releaseReadinessReservation?.();
+      } catch (error) {
+        // Release is best-effort cleanup and must not replace the recovery outcome.
+        logger.warn(
+          `[DeviceTools] Failed to release System UI ANR readiness reservation: ${errorMessage(error)}`,
+          error,
+        );
+      }
     }
   }
 }

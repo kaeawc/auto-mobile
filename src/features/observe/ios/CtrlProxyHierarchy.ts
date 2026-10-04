@@ -844,11 +844,17 @@ export class CtrlProxyHierarchy {
    * Filter hierarchy node - removes structural wrappers and nodes without meaningful properties
    * Similar to Android's optimizeHierarchy + filterViewHierarchy
    */
+  private filterHierarchyNode(node: ConvertedNode, isRoot: true): ConvertedNode | null;
+  private filterHierarchyNode(
+    node: ConvertedNode,
+    isRoot?: false,
+    insideSpringBoardIcon?: boolean,
+  ): ConvertedNode | ConvertedNode[] | null;
   private filterHierarchyNode(
     node: ConvertedNode,
     isRoot: boolean = false,
     insideSpringBoardIcon: boolean = false,
-  ): ConvertedNode | null {
+  ): ConvertedNode | ConvertedNode[] | null {
     const attrs = nodeAttributes(node);
     const children = node.node || [];
 
@@ -895,7 +901,7 @@ export class CtrlProxyHierarchy {
       // Promote children (collapse this wrapper)
       if (dedupedChildren.length > 0) {
         // Return children to be flattened into parent
-        return dedupedChildren as unknown as ConvertedNode;
+        return dedupedChildren;
       }
       // No children and no content - filter out completely
       return null;

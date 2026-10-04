@@ -22,16 +22,13 @@ const androidDevice: BootedDevice = { deviceId: "dev-1", name: "android", platfo
 describe("AccessibilityStateDetector", () => {
   test("marks a disabled auto-detect result synthetic without querying a functioning service", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("enabled_accessibility_services", {
-      stdout: "dev.jasonpearson.automobile.ctrlproxy/.AccessibilityService",
-      stderr: "",
-    });
     const flags = { isEnabled: () => false } as FeatureFlagService;
+    const accessibilityDetector = new DefaultAccessibilityDetector(new FakeTimer());
     const detector = new AccessibilityStateDetector({
       device: androidDevice,
       adb,
       featureFlags: flags,
-      accessibilityDetector: new DefaultAccessibilityDetector(new FakeTimer()),
+      accessibilityDetector,
     });
     const result = makeResult();
 
@@ -44,7 +41,8 @@ describe("AccessibilityStateDetector", () => {
     });
     expect(adb.getExecutedCommands()).toEqual([]);
     const actions: string[] = [];
-    invalidateReadinessForDisabledAccessibility(androidDevice, result, "owner", {
+    await invalidateReadinessForDisabledAccessibility(androidDevice, result, "owner", {
+      accessibilityDetector,
       resetSetupState: () => actions.push("reset"),
       isDaemonInitialized: () => true,
       invalidateAutomationReadiness: () => actions.push("invalidate"),
@@ -58,11 +56,12 @@ describe("AccessibilityStateDetector", () => {
     const flags = {
       isEnabled: (key: string) => key === "accessibility-auto-detect",
     } as FeatureFlagService;
+    const accessibilityDetector = new DefaultAccessibilityDetector(new FakeTimer());
     const detector = new AccessibilityStateDetector({
       device: androidDevice,
       adb,
       featureFlags: flags,
-      accessibilityDetector: new DefaultAccessibilityDetector(new FakeTimer()),
+      accessibilityDetector,
     });
     const result = makeResult();
 
@@ -77,7 +76,8 @@ describe("AccessibilityStateDetector", () => {
       "shell settings get secure enabled_accessibility_services",
     );
     const actions: string[] = [];
-    invalidateReadinessForDisabledAccessibility(androidDevice, result, "owner", {
+    await invalidateReadinessForDisabledAccessibility(androidDevice, result, "owner", {
+      accessibilityDetector,
       resetSetupState: () => actions.push("reset"),
       isDaemonInitialized: () => true,
       invalidateAutomationReadiness: () => actions.push("invalidate"),

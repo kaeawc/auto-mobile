@@ -2,9 +2,13 @@ package dev.jasonpearson.automobile.sdk.events
 
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -18,12 +22,13 @@ import kotlin.concurrent.withLock
  * @param maxBufferSize Maximum events before forced flush (default 50)
  * @param flushIntervalMs Periodic flush interval in milliseconds (default 500)
  * @param onFlush Callback invoked with the batch of events to send
- * @param persistence Optional disk persistence — events are written before broadcast and removed on
- *   success
+ * @param persistence Optional disk persistence for failed deliveries
  * @param executor Optional executor for periodic flush scheduling (for testing)
  * @param processors Event processors invoked in order before buffering; returning null drops the
  *   event
  * @param maxPendingEvents Hard cap on buffered events; oldest events are evicted when exceeded
+ * @param persistenceExecutor Background fallback for late retries; defaults to a lazy daemon pool
+ *   whose sole worker expires after two idle seconds
  */
 internal class SdkEventBuffer(
   private val maxBufferSize: Int = 50,
@@ -37,7 +42,45 @@ internal class SdkEventBuffer(
   private val processors: List<EventProcessor> = emptyList(),
   private val maxPendingEvents: Int = 500,
   private val backPressureStrategy: BackPressureStrategy = BackPressureStrategy.DROP_OLDEST,
+  persistenceExecutor: Executor? = null,
 ) {
+  // Preserve binary compatibility with the published nine-argument JVM constructor.
+  // No defaults here: omitted arguments select the primary without overload ambiguity.
+  constructor(
+    maxBufferSize: Int,
+    flushIntervalMs: Long,
+    onFlush: (List<SdkEvent>) -> Unit,
+    persistence: EventPersistence?,
+    executor: ScheduledExecutorService,
+    dropCounter: DropCounter?,
+    processors: List<EventProcessor>,
+    maxPendingEvents: Int,
+    backPressureStrategy: BackPressureStrategy,
+  ) : this(
+    maxBufferSize = maxBufferSize,
+    flushIntervalMs = flushIntervalMs,
+    onFlush = onFlush,
+    persistence = persistence,
+    executor = executor,
+    dropCounter = dropCounter,
+    processors = processors,
+    maxPendingEvents = maxPendingEvents,
+    backPressureStrategy = backPressureStrategy,
+    persistenceExecutor = null,
+  )
+
+  private val fallbackPersistenceExecutor: Executor by lazy {
+    persistenceExecutor
+      ?: ThreadPoolExecutor(
+        0,
+        1,
+        2,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue<Runnable>(),
+      ) { runnable ->
+        Thread(runnable, "SdkEventPersistence").apply { isDaemon = true }
+      }
+  }
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
   private val pendingBatches = ArrayDeque<MutableList<SdkEvent>>()
@@ -134,8 +177,11 @@ internal class SdkEventBuffer(
   /** Submit a task to run on the buffer's background executor. */
   fun execute(task: Runnable) {
     lock.withLock {
-      if (!isShutdown) {
+      if (isShutdown) return
+      try {
         executor.execute(task)
+      } catch (_: RejectedExecutionException) {
+        // Refused work is simply not run; replay leaves its file on disk for the next launch.
       }
     }
   }
@@ -220,25 +266,66 @@ internal class SdkEventBuffer(
     }
   }
 
+  /** Retry callbacks may arrive on the main looper; persist on our executor while active. */
+  internal fun persistUndelivered(events: List<SdkEvent>) {
+    val task = Runnable {
+      val persisted =
+        try {
+          persistence?.persist(events) != null
+        } catch (_: Exception) {
+          // Persistence is best-effort; contain custom failures to protect the host and executor.
+          false
+        }
+      // Only events that could not be retained on disk are delivery drops.
+      if (!persisted) countDeliveryFailure(events.size)
+    }
+    persistInBackground(task) { countDeliveryFailure(events.size) }
+  }
+
+  /** Submission and disk work must never run under [lock] or inline after shutdown. */
+  private fun persistInBackground(task: Runnable, onRejected: () -> Unit = {}) {
+    val accepting = lock.withLock { !isShutdown && !executor.isShutdown }
+    if (accepting) {
+      try {
+        executor.execute(task)
+        return
+      } catch (_: Exception) {
+        // Shutdown may race submission; the fallback also drains late retry callbacks.
+      }
+    }
+    try {
+      fallbackPersistenceExecutor.execute(task)
+    } catch (_: Exception) {
+      // Refused work cannot be retained; never fall back to caller-thread disk I/O.
+      onRejected()
+    }
+  }
+
+  private fun countDeliveryFailure(count: Int) {
+    try {
+      dropCounter?.increment(DropReason.DELIVERY_FAILED, count)
+    } catch (_: Exception) {
+      // Custom counters must not crash a host retry callback.
+    }
+  }
+
   private fun deliverBatch(events: List<SdkEvent>) {
     if (events.isEmpty()) return
     try {
-      // Delivery (onFlush -> sendBroadcast) is a synchronous, fire-and-forget
-      // in-process post whose success/failure is known immediately, so there is no
-      // asynchronous sink whose failure would need a disk-backed retry. Persisting
-      // before delivery meant a write-then-immediate-delete on every flush — pure
-      // I/O churn — so only persist when delivery actually throws, for next-launch
-      // replay (#3710, the twin of iOS #3636).
       onFlush(events)
     } catch (_: Exception) {
       // A throwing custom EventPersistence.persist() must NOT escape this task: it
       // runs inside scheduleAtFixedRate and an uncaught exception would silently
       // cancel all future periodic flushes (#3605), so guard the persist too.
-      try {
-        persistence?.persist(events)
-      } catch (_: Exception) {
-        // best-effort persistence for retry; delivery already failed
-      }
+      persistInBackground(
+        Runnable {
+          try {
+            persistence?.persist(events)
+          } catch (_: Exception) {
+            // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
+          }
+        }
+      )
       repeat(events.size) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
     }
   }

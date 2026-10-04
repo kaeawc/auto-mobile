@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -19,8 +20,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+// Pin the runtime for cutout fields independently of the injected sdkInt used to test API branches.
+@Config(sdk = [30])
 class OverlayManagerTest {
 
   private lateinit var windowManager: WindowManager
@@ -36,11 +40,103 @@ class OverlayManagerTest {
     every { windowManager.removeViewImmediate(any()) } just Runs
   }
 
-  private fun createOverlayManager(canDrawOverlays: Boolean): OverlayManager {
+  private fun createOverlayManager(
+    canDrawOverlays: Boolean,
+    sdkInt: Int = Build.VERSION.SDK_INT,
+  ): OverlayManager {
     return OverlayManager(
       RuntimeEnvironment.getApplication(),
       windowManager = windowManager,
       canDrawOverlays = { canDrawOverlays },
+      sdkInt = sdkInt,
+    )
+  }
+
+  @Test
+  fun `resolveCutoutMode returns null before API 28`() {
+    assertNull(OverlayManager.resolveCutoutMode(21))
+    assertNull(OverlayManager.resolveCutoutMode(27))
+  }
+
+  @Test
+  fun `resolveCutoutMode uses short edges on API 28 and 29`() {
+    assertEquals(
+      WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+      OverlayManager.resolveCutoutMode(28),
+    )
+    assertEquals(
+      WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+      OverlayManager.resolveCutoutMode(29),
+    )
+  }
+
+  @Test
+  fun `resolveCutoutMode always allows cutouts from API 30`() {
+    for (sdkInt in listOf(30, 34, 36)) {
+      assertEquals(
+        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+        OverlayManager.resolveCutoutMode(sdkInt),
+      )
+    }
+  }
+
+  @Test
+  fun `show leaves cutout mode unchanged on API 27`() {
+    val overlayManager = createOverlayManager(canDrawOverlays = false, sdkInt = 27)
+    assertTrue(overlayManager.show())
+
+    val layoutParams = paramsSlot.captured as WindowManager.LayoutParams
+    assertEquals(
+      WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT,
+      layoutParams.layoutInDisplayCutoutMode,
+    )
+  }
+
+  @Test
+  fun `show uses short edge cutouts on API 28`() {
+    val overlayManager = createOverlayManager(canDrawOverlays = true, sdkInt = 28)
+    assertTrue(overlayManager.show())
+
+    val layoutParams = paramsSlot.captured as WindowManager.LayoutParams
+    assertEquals(
+      WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+      layoutParams.layoutInDisplayCutoutMode,
+    )
+  }
+
+  @Test
+  fun `show uses short edge cutouts on API 29`() {
+    val overlayManager = createOverlayManager(canDrawOverlays = false, sdkInt = 29)
+    assertTrue(overlayManager.show())
+
+    val layoutParams = paramsSlot.captured as WindowManager.LayoutParams
+    assertEquals(
+      WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+      layoutParams.layoutInDisplayCutoutMode,
+    )
+  }
+
+  @Test
+  fun `show always allows cutouts on API 30`() {
+    val overlayManager = createOverlayManager(canDrawOverlays = true, sdkInt = 30)
+    assertTrue(overlayManager.show())
+
+    val layoutParams = paramsSlot.captured as WindowManager.LayoutParams
+    assertEquals(
+      WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+      layoutParams.layoutInDisplayCutoutMode,
+    )
+  }
+
+  @Test
+  fun `show always allows cutouts on API 36`() {
+    val overlayManager = createOverlayManager(canDrawOverlays = false, sdkInt = 36)
+    assertTrue(overlayManager.show())
+
+    val layoutParams = paramsSlot.captured as WindowManager.LayoutParams
+    assertEquals(
+      WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+      layoutParams.layoutInDisplayCutoutMode,
     )
   }
 
@@ -59,6 +155,8 @@ class OverlayManagerTest {
     assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, layoutParams.type)
     assertTrue(layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
     assertTrue(layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+    assertTrue(layoutParams.flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN != 0)
+    assertTrue(layoutParams.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS != 0)
   }
 
   @Test

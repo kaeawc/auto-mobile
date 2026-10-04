@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import {
+  getImeOccluder,
   getIosImeOccluder,
+  getVisibleIosImeBounds,
   type ImeOccluder,
 } from "../../../../src/features/observe/output/SkeletonProjection";
 import { iosKeyboardCapture } from "../../../fixtures/observe/iosKeyboardTabbar";
+import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import {
+  iosKeyboardVisibleHierarchy,
+  iosKeyboardMinimizedHierarchy,
+} from "../../../fixtures/observe/iosKeyboardStates";
 
 const measured: ImeOccluder = {
   bounds: iosKeyboardCapture.ime.bounds,
@@ -61,5 +68,68 @@ describe("iOS action keyboard geometry", () => {
     ]) {
       expect(getIosImeOccluder(measured, size)).toBe(measured);
     }
+  });
+});
+
+describe("real raw iOS keyboard captures", () => {
+  test.each([
+    ["visible", iosKeyboardVisibleHierarchy, [4, 597, 399, 813], [0, 597, 402, 874]],
+    ["minimized", iosKeyboardMinimizedHierarchy, [0, 918, 402, 1144], undefined],
+  ] as const)(
+    "finds the %s keyboard and clips its visible bounds",
+    (_name, hierarchy, bounds, visible) => {
+      expect([hierarchy.screenWidth, hierarchy.screenHeight]).toEqual([402, 874]);
+      const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios");
+      expect(elements).toBeDefined();
+      const ime = getImeOccluder(elements!);
+      expect(ime).toBeDefined();
+      // Visible key bounds omit the container margins and bottom emoji/dictation strip.
+      expect(ime!.bounds).toEqual(bounds);
+      expect(getVisibleIosImeBounds(ime!, { width: 402, height: 874 })).toEqual(visible);
+    },
+  );
+});
+
+// Synthetic geometry covers clipping and invalid shapes absent from the real captures.
+describe("synthetic visible iOS keyboard intersection", () => {
+  test.each([
+    ["fully visible floating", [50, 500, 250, 700], [50, 500, 250, 700]],
+    ["partially visible floating", [-20, 800, 250, 1000], [0, 800, 250, 874]],
+    ["partially off top", [50, -20, 250, 100], [50, 0, 250, 100]],
+    ["at bottom", [0, 874, 402, 1144], undefined],
+    ["off top docked", [0, -200, 402, 0], undefined],
+    ["off left wide", [-500, 600, 0, 800], undefined],
+    ["off right wide", [402, 600, 902, 800], undefined],
+    ["sub-point sliver", [0, 873.5, 402, 1144], undefined],
+    ["thin docked element above bottom", [0, 600, 402, 600.5], undefined],
+    ["zero height", [0, 600, 402, 600], undefined],
+    ["two-point minimum", [0, 872, 402, 1144], [0, 872, 402, 874]],
+    ["zero width", [10, 500, 10, 700], undefined],
+    ["invalid bounds", [0, NaN, 402, 800], undefined],
+  ] as const)("clips synthetic %s without fabricating height", (_name, bounds, expected) => {
+    const ime: ImeOccluder = { ...measured, bounds: [...bounds] };
+    const original = structuredClone(ime);
+    expect(getVisibleIosImeBounds(ime, { width: 402, height: 874 })).toEqual(expected);
+    expect(ime).toEqual(original);
+    if (
+      expected === undefined &&
+      bounds.every(Number.isFinite) &&
+      bounds[1] !== 873.5 &&
+      bounds[3] !== 600.5
+    ) {
+      expect(getIosImeOccluder(ime, { width: 402, height: 874 })).toBe(ime);
+    }
+  });
+
+  test.each([
+    undefined,
+    { width: 0, height: 874 },
+    { width: 402, height: 0 },
+    { width: NaN, height: 874 },
+    { width: 402, height: NaN },
+    { width: Infinity, height: 874 },
+    { width: 402, height: -1 },
+  ])("synthetic unknown or invalid screen has no visible rectangle: %j", (size) => {
+    expect(getVisibleIosImeBounds(measured, size)).toBeUndefined();
   });
 });

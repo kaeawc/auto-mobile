@@ -54,6 +54,79 @@ describe("AutoTargetSelector", () => {
 
       expect(selector.selectAutoTargetScrollable([small, large], null, "down")).toBe(large);
     });
+
+    test("filters sibling scrollables by capability before comparing area", () => {
+      const horizontal: Element = {
+        bounds: { left: 0, top: 0, right: 1000, bottom: 100 },
+        class: "android.widget.HorizontalScrollView",
+      };
+      const vertical: Element = {
+        bounds: { left: 0, top: 100, right: 100, bottom: 600 },
+        class: "android.widget.ScrollView",
+      };
+      expect(selector.selectAutoTargetScrollable([horizontal, vertical], null, "up")).toBe(
+        vertical,
+      );
+      expect(selector.selectAutoTargetScrollable([vertical, horizontal], null, "down")).toBe(
+        vertical,
+      );
+      expect(selector.selectAutoTargetScrollable([vertical, horizontal], null, "left")).toBe(
+        horizontal,
+      );
+    });
+
+    test("selects the innermost centre-containing candidate over a larger off-centre one", () => {
+      const screen = { left: 0, top: 0, right: 1000, bottom: 2000 };
+      const outer: Element = { bounds: screen, class: "android.widget.ScrollView" };
+      const middle: Element = {
+        bounds: { left: 300, top: 200, right: 700, bottom: 1800 },
+        class: "android.widget.ScrollView",
+      };
+      const inner: Element = {
+        bounds: { left: 450, top: 800, right: 550, bottom: 1200 },
+        class: "android.widget.ScrollView",
+      };
+      const offCentre: Element = {
+        bounds: { left: 0, top: 0, right: 450, bottom: 2000 },
+        class: "android.widget.ScrollView",
+      };
+      expect(
+        selector.selectAutoTargetScrollable([outer, offCentre, middle, inner], screen, "up"),
+      ).toBe(inner);
+    });
+
+    test("skips the screen-sized candidate even when only it contains the centre", () => {
+      const screen = { left: 0, top: 0, right: 1000, bottom: 2000 };
+      const outer = elementWithBounds(screen);
+      const small = elementWithBounds({ left: 0, top: 0, right: 100, bottom: 500 });
+      const large = elementWithBounds({ left: 0, top: 0, right: 300, bottom: 900 });
+      expect(selector.selectAutoTargetScrollable([outer, small, large], screen, "up")).toBe(large);
+    });
+
+    test("keeps a screen-sized axis match when smaller candidates match only the other axis", () => {
+      const screen = { left: 0, top: 0, right: 1000, bottom: 2000 };
+      const pager: Element = { bounds: screen, class: "androidx.viewpager2.widget.ViewPager2" };
+      const list: Element = {
+        bounds: { left: 0, top: 200, right: 900, bottom: 1800 },
+        class: "android.widget.ScrollView",
+      };
+      expect(selector.selectAutoTargetScrollable([pager, list], screen, "right")).toBe(pager);
+      expect(selector.selectAutoTargetScrollable([pager, list], screen, "down")).toBe(list);
+    });
+
+    test("returns null when every candidate has the wrong capability", () => {
+      const bounds = { left: 0, top: 0, right: 100, bottom: 1000 };
+      expect(
+        selector.selectAutoTargetScrollable(
+          [
+            { bounds, class: "android.widget.HorizontalScrollView" },
+            { bounds, class: "androidx.viewpager.widget.ViewPager" },
+          ],
+          bounds,
+          "up",
+        ),
+      ).toBeNull();
+    });
   });
 
   describe("pickLargestScrollable", () => {
@@ -69,6 +142,68 @@ describe("AutoTargetSelector", () => {
   });
 
   describe("matchesDirection", () => {
+    test.each(["HorizontalScrollView", "ViewPager", "ViewPager2", "LazyRow"])(
+      "%s is horizontal even when its bounds are tall",
+      (className) => {
+        const element: Element = {
+          bounds: { left: 0, top: 0, right: 100, bottom: 500 },
+          class: `example.${className}`,
+        };
+        expect(selector.matchesDirection(element, "up")).toBe(false);
+        expect(selector.matchesDirection(element, "down")).toBe(false);
+        expect(selector.matchesDirection(element, "left")).toBe(true);
+        expect(selector.matchesDirection(element, "right")).toBe(true);
+      },
+    );
+
+    test.each(["ScrollView", "NestedScrollView", "ListView", "ExpandableListView", "LazyColumn"])(
+      "%s is vertical even when its bounds are wide",
+      (className) => {
+        const element: Element = {
+          bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+          className: `example.${className}`,
+        };
+        expect(selector.matchesDirection(element, "up")).toBe(true);
+        expect(selector.matchesDirection(element, "down")).toBe(true);
+        expect(selector.matchesDirection(element, "left")).toBe(false);
+        expect(selector.matchesDirection(element, "right")).toBe(false);
+      },
+    );
+
+    test("uses exposed RecyclerView orientation before aspect ratio", () => {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 500 },
+        class: "androidx.recyclerview.widget.RecyclerView",
+        orientation: "horizontal",
+      };
+      expect(selector.matchesDirection(element, "up")).toBe(false);
+      expect(selector.matchesDirection(element, "left")).toBe(true);
+      element.orientation = "vertical";
+      element.bounds = { left: 0, top: 0, right: 500, bottom: 100 };
+      expect(selector.matchesDirection(element, "down")).toBe(true);
+      expect(selector.matchesDirection(element, "right")).toBe(false);
+    });
+
+    test("explicit orientation overrides the default ViewPager2 axis", () => {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+        class: "androidx.viewpager2.widget.ViewPager2",
+        orientation: "vertical",
+      };
+      expect(selector.matchesDirection(element, "up")).toBe(true);
+      expect(selector.matchesDirection(element, "left")).toBe(false);
+    });
+
+    test("axis-neutral scroll actions retain aspect fallback for a generic node", () => {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 500 },
+        class: "android.view.View",
+        actions: ["scroll_forward", "scroll_backward"],
+      };
+      expect(selector.matchesDirection(element, "up")).toBe(true);
+      expect(selector.matchesDirection(element, "left")).toBe(false);
+    });
+
     test("treats a tall element as vertically scrollable", () => {
       const tall = elementWithBounds({ left: 0, top: 0, right: 100, bottom: 500 });
       expect(selector.matchesDirection(tall, "up")).toBe(true);

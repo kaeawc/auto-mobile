@@ -73,6 +73,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   var startDeviceResult: StartDeviceResult = StartDeviceResult(success = true)
   var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
   var observeResult: ObserveResult = ObserveResult()
+  var observeError: Throwable? = null
   var killDeviceResult: KillDeviceResult = KillDeviceResult(success = true)
 
   /** The `force` flag of every killDevice call, in order (auto-mobile #6864). */
@@ -93,6 +94,9 @@ class FakeAutoMobileClient : AutoMobileClient {
   var setKeyValueResult: SetKeyValueResult = SetKeyValueResult(success = true)
   var removeKeyValueResult: RemoveKeyValueResult = RemoveKeyValueResult(success = true)
   var clearKeyValueFileResult: ClearKeyValueResult = ClearKeyValueResult(success = true)
+
+  /** Runs inside each blocking key-value mutation, allowing tests to coordinate cancellation. */
+  var onKeyValueMutation: (() -> Unit)? = null
   var callToolResult: JsonElement = JsonObject(emptyMap())
   var throwOnReadResource: Exception? = null
 
@@ -352,6 +356,7 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun observe(platform: String): ObserveResult {
     calls.add("observe")
+    observeError?.let { throw it }
     return observeResult
   }
 
@@ -461,6 +466,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ): SetKeyValueResult {
     calls.add("setKeyValue")
     setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type, platform))
+    onKeyValueMutation?.invoke()
     return setKeyValueResult
   }
 
@@ -473,6 +479,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ): RemoveKeyValueResult {
     calls.add("removeKeyValue")
     removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key, platform))
+    onKeyValueMutation?.invoke()
     return removeKeyValueResult
   }
 
@@ -484,6 +491,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ): ClearKeyValueResult {
     calls.add("clearKeyValueFile")
     clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName, platform))
+    onKeyValueMutation?.invoke()
     return clearKeyValueFileResult
   }
 

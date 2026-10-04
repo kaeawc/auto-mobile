@@ -234,12 +234,7 @@ class McpHttpClient(
           put("platform", JsonPrimitive(platform))
         },
       )
-    return try {
-      decodeToolResponse(json, response, serializer<ObserveResult>())
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
-      ObserveResult()
-    }
+    return decodeObserveResponse(json, response)
   }
 
   override fun killDevice(

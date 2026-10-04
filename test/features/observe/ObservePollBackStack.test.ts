@@ -186,7 +186,8 @@ describe("real settle pipeline deferred back stack (#6598)", () => {
     expect(h.captures()).toBe(3);
     expect(h.state.backStackCalls).toBe(1);
     expect(h.order).toEqual(["hierarchy", "hierarchy", "hierarchy", "backStack"]);
-    expect(result.observation.backStack?.capturedAt).toBe(30);
+    // The capped final sleep puts the deferred read at the budget, after the last hierarchy.
+    expect(result.observation.backStack?.capturedAt).toBe(21);
   });
 
   test("iOS keeps three hierarchy captures and identical fields without a backStack key", async () => {

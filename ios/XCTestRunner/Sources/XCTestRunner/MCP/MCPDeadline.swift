@@ -1,5 +1,23 @@
 import Foundation
 
+enum TimeoutConversion {
+    /// 24 hours, matching DaemonManager.maximumReceiveTimeoutSeconds.
+    static let maximumSeconds: TimeInterval = 24 * 60 * 60
+
+    /// Clamp seconds to 0...maximumSeconds. NaN, zero and negative values (including -infinity)
+    /// become zero; +infinity and values above the maximum become 24 hours.
+    static func clampedSeconds(_ seconds: TimeInterval) -> TimeInterval {
+        guard !seconds.isNaN else { return 0 }
+        return min(max(seconds, 0), maximumSeconds)
+    }
+
+    /// Convert clamped seconds to daemon wire milliseconds without trapping. Truncate fractional
+    /// milliseconds toward zero, preserving the existing Int(seconds * 1000) behavior in range.
+    static func milliseconds(forSeconds seconds: TimeInterval) -> Int {
+        Int(clampedSeconds(seconds) * 1000)
+    }
+}
+
 /// Cancellation-aware async delay shared by transport deadlines, recovery and executor retries.
 /// Implementations must release their sleep when cancelled; tests inject virtual time.
 public protocol DeadlineScheduler: Sendable {
@@ -7,10 +25,11 @@ public protocol DeadlineScheduler: Sendable {
 }
 
 /// Task.sleep releases the executor thread and reacts to cancellation of a losing deadline task.
+/// Delays are clamped to 24 hours; NaN and non-positive values become zero.
 public struct SystemDeadlineScheduler: DeadlineScheduler {
     public init() {}
     public func sleep(seconds: TimeInterval) async throws {
-        try await Task.sleep(for: .seconds(max(0, seconds)))
+        try await Task.sleep(for: .seconds(TimeoutConversion.clampedSeconds(seconds)))
     }
 }
 

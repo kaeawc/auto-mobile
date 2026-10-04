@@ -26,7 +26,7 @@ describe("logger init does not crash on a non-existent custom pid-file parent (i
     tempDirs.length = 0;
   });
 
-  test("a clean process imports the canonical logger with file logging and a missing pid-file parent", async () => {
+  test("a clean process imports daemonFiles and wires the canonical logger with a missing pid-file parent", async () => {
     const logDir = mkdtempSync(join(tmpdir(), "logger-init-crash-logdir-"));
     tempDirs.push(logDir);
     // A pid-file path whose PARENT directory does not exist: the directory scan
@@ -46,7 +46,12 @@ describe("logger init does not crash on a non-existent custom pid-file parent (i
         "--cwd",
         process.cwd(),
         "-e",
-        'const { logger } = await import("./src/utils/logger.ts"); await logger.closeAfterFlush();',
+        `await import("./src/daemon/daemonFiles.ts");
+         const { logger, logRetentionNamespaces } = await import("./src/utils/logger.ts");
+         if (!logRetentionNamespaces.daemonPidFiles().pidFiles.includes(process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH)) {
+           throw new Error("Real retention source was not registered");
+         }
+         await logger.closeAfterFlush();`,
       ],
       {
         env: {

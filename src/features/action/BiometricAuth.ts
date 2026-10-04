@@ -7,7 +7,7 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
-import { DeviceState } from "../utility/DeviceState";
+import { DeviceState, emulatorConsoleReportsFailure } from "../utility/DeviceState";
 
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error" | "enroll" | "unenroll";
@@ -411,7 +411,10 @@ export class BiometricAuth extends BaseVisualChange {
     try {
       const touchResult = await this.adb.executeCommand(`emu finger touch ${fingerprintId}`);
 
-      if (touchResult.stderr && touchResult.stderr.trim().length > 0) {
+      if (
+        emulatorConsoleReportsFailure(touchResult.stdout, touchResult.stderr) ||
+        touchResult.stderr.trim().length > 0
+      ) {
         return {
           success: false,
           action: options.action,
@@ -419,7 +422,7 @@ export class BiometricAuth extends BaseVisualChange {
           fingerprintId,
           errorCode: options.errorCode,
           supported: true,
-          error: `emu finger touch failed: ${touchResult.stderr}`,
+          error: `emu finger touch failed: ${[touchResult.stdout, touchResult.stderr].filter(Boolean).join("\n").trim()}`,
         };
       }
 
@@ -427,7 +430,10 @@ export class BiometricAuth extends BaseVisualChange {
 
       const removeResult = await this.adb.executeCommand(`emu finger remove ${fingerprintId}`);
 
-      if (removeResult.stderr && removeResult.stderr.trim().length > 0) {
+      if (
+        emulatorConsoleReportsFailure(removeResult.stdout, removeResult.stderr) ||
+        removeResult.stderr.trim().length > 0
+      ) {
         return {
           success: false,
           action: options.action,
@@ -435,7 +441,7 @@ export class BiometricAuth extends BaseVisualChange {
           fingerprintId,
           errorCode: options.errorCode,
           supported: true,
-          error: `emu finger remove failed: ${removeResult.stderr}`,
+          error: `emu finger remove failed: ${[removeResult.stdout, removeResult.stderr].filter(Boolean).join("\n").trim()}`,
         };
       }
 

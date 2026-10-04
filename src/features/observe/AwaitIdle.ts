@@ -54,7 +54,7 @@ export class AwaitIdle implements AwaitIdleInterface {
     while (true) {
       throwIfAborted(signal);
       const rotationResult = await awaitWhileRequestIsLive(
-        this.idle.getRotationStatus(targetRotation, startTime, timeoutMs),
+        this.idle.getRotationStatus(targetRotation, startTime, timeoutMs, undefined, signal),
         signal,
       );
 
@@ -68,7 +68,12 @@ export class AwaitIdle implements AwaitIdleInterface {
       }
 
       // Wait a short interval before checking again
-      await awaitWhileRequestIsLive(this.timer.sleep(this.pollIntervalMs), signal);
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(
+          Math.min(this.pollIntervalMs, Math.max(0, timeoutMs - (this.timer.now() - startTime))),
+        ),
+        signal,
+      );
     }
   }
 

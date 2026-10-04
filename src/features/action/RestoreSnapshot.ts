@@ -353,8 +353,8 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       logger.info("Settings snapshot restoration complete");
       return failures;
     } catch (error) {
-      logger.error(`Failed to restore settings snapshot: ${error}`);
-      throw new ActionableError(`Failed to restore settings snapshot: ${error}`);
+      logger.error(`Failed to restore settings snapshot: ${errorMessage(error)}`, error);
+      throw toActionableError(error, "Failed to restore settings snapshot");
     }
   }
 

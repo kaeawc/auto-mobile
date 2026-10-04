@@ -236,11 +236,7 @@ class McpStdioClient(
           put("platform", JsonPrimitive(platform))
         },
       )
-    return try {
-      decodeToolResponse(json, response, serializer<ObserveResult>())
-    } catch (e: Exception) {
-      ObserveResult()
-    }
+    return decodeObserveResponse(json, response)
   }
 
   override fun killDevice(

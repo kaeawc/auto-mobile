@@ -28,6 +28,7 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeHierarchyCollector.ts:FakeHierarchyCollector": "HierarchyCollector",
   "FakeMcpServer.ts:FakeMcpServer": "McpServer",
   "FakeNetServer.ts:FakeSocket": "Socket",
+  "FakeRecordingPerformanceTracker.ts:FakeRecordingPerformanceTracker": "PerformanceTracker",
   "FakeScreenshotRecorder.ts:FakeScreenshotRecorder": "ObserveScreenshotRecorder",
   "FakeSpawnedProcess.ts:FakeSpawnedProcess": "SpawnedProcess",
   "FakeTelemetryRepository.ts:FakeTelemetryRepository": "TelemetryRepository",

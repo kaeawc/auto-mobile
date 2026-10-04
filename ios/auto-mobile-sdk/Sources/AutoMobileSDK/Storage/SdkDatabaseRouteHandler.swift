@@ -264,7 +264,7 @@
                 rowsAffected: result.rowsAffected,
                 error: result.error,
                 diagnostic: result.diagnostic,
-                truncated: result.truncated
+                truncated: result.truncated || (rows?.count ?? 0) < (result.rows?.count ?? 0)
             )
             return encodeBoundedExecuteSql(payload, maxBytes: configuration.maxBytes)
         }

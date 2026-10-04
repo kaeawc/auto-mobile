@@ -38,6 +38,9 @@ fun interface DisplayChangeRegistrar {
  *
  * The rotation-change decision ([poll]) is a pure, synchronized function testable without a real
  * display or real timers. The poll loop's sleep is injected so it can be driven deterministically.
+ * During dispatch, reader failures are logged immediately, then every [FAILURE_LOG_EVERY] failures
+ * with suppressed counts; the next successful read logs recovery once, even if rotation is
+ * unchanged. Callback failures are logged once per change; the recorded rotation is not retried.
  */
 class RotationMonitor(
   private val reader: RotationReader,
@@ -45,10 +48,12 @@ class RotationMonitor(
   private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
   // Injected so the poll loop carries no real wall-clock dependency; production sleeps the thread.
   private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
+  private val log: (String) -> Unit = { System.err.println(it) },
 ) {
   private val lock = Any()
   private var started = false
   private var lastRotation = ROTATION_UNSET
+  private var consecutiveReaderFailures = 0L
 
   @Volatile private var stopped = false
   @Volatile private var onRotationChanged: ((Int) -> Unit)? = null
@@ -121,11 +126,51 @@ class RotationMonitor(
 
   /** Read a fresh rotation and, only on a real change, notify the listener with the new value. */
   private fun dispatch() {
-    val newRotation = poll() ?: return
-    onRotationChanged?.invoke(newRotation)
+    val (newRotation, readerLog) =
+      synchronized(lock) {
+        try {
+          val rotation = poll()
+          val recovery =
+            if (consecutiveReaderFailures > 0) {
+              "RotationMonitor reader recovered after $consecutiveReaderFailures consecutive failures"
+            } else {
+              null
+            }
+          consecutiveReaderFailures = 0
+          rotation to recovery
+        } catch (_: InterruptedException) {
+          Thread.currentThread().interrupt()
+          return
+        } catch (error: Exception) {
+          // Safe to continue: a failed read leaves lastRotation untouched; the next tick retries.
+          consecutiveReaderFailures++
+          val failure =
+            when {
+              consecutiveReaderFailures == 1L -> "RotationMonitor reader failed: ${error.message}"
+              (consecutiveReaderFailures - 1) % FAILURE_LOG_EVERY == 0L ->
+                "RotationMonitor reader failed: ${error.message} (${FAILURE_LOG_EVERY - 1} failures suppressed)"
+              else -> null
+            }
+          null to failure
+        }
+      }
+    readerLog?.let { log(it) }
+    if (newRotation == null) return
+    try {
+      onRotationChanged?.invoke(newRotation)
+    } catch (_: InterruptedException) {
+      Thread.currentThread().interrupt()
+      return
+    } catch (error: Exception) {
+      // Safe to continue: rotation is recorded, so only the next distinct change dispatches.
+      log("RotationMonitor callback failed: ${error.message}")
+    }
   }
 
   companion object {
+    /** Emit the first reader failure, then one line per ten further consecutive failures. */
+    internal const val FAILURE_LOG_EVERY = 10
+
     /** Sentinel that no rotation has been observed yet, so the first reading is not a "change". */
     const val ROTATION_UNSET = -1
 

@@ -11,7 +11,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
-import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
+import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { verifyIosRotation } from "./iosRotateVerification";
@@ -269,23 +269,19 @@ export class Rotate extends BaseVisualChange {
   }
 
   /**
-   * Read the live device rotation from the window manager (`dumpsys window`).
+   * Read display 0's live rotation from `dumpsys window displays`.
    * Unlike the `user_rotation` setting, this reflects the rotation actually
    * applied by the sensor when auto-rotate is on, so it cannot go stale the
    * way `user_rotation` does (issue #6129). Parsing is delegated to
-   * {@link parseWindowManagerRotation}, which selects the authoritative
-   * display rotation and skips stale/unrelated `mRotation=` occurrences
+   * {@link readWindowManagerRotation}, which attributes the authoritative
+   * rotation to display 0 and skips stale/unrelated `mRotation=` occurrences
    * (e.g. a cached TaskSnapshot) elsewhere in the dump (issue #6199).
    * @returns The parsed rotation value, or null if it could not be read
    */
   private async readLiveRotation(signal?: AbortSignal): Promise<number | null> {
     throwIfAborted(signal);
     try {
-      const { stdout } = await awaitWhileRequestIsLive(
-        this.adb.executeCommand('shell dumpsys window | grep -i "mRotation="'),
-        signal,
-      );
-      return parseWindowManagerRotation(stdout);
+      return await awaitWhileRequestIsLive(readWindowManagerRotation(this.adb, { signal }), signal);
     } catch (error) {
       throwIfAborted(signal);
       logger.warn("[Rotate] Failed to read live rotation via dumpsys window", error);

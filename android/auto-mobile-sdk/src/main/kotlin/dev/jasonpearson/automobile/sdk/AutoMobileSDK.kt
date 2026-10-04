@@ -42,6 +42,7 @@ import dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor
 import dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.replayEventBatches
 import dev.jasonpearson.automobile.sdk.session.SessionTracker
 import dev.jasonpearson.automobile.sdk.storage.DataStoreInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
@@ -159,21 +160,32 @@ object AutoMobileSDK {
           capabilityRegistry.isCapabilitySupported("network.control")
         }
 
-        // Create disk persistence for events
-        val eventPersistence = FileEventPersistence(File(appContext.cacheDir, "automobile_events"))
-        persistence = eventPersistence
-
         // Create drop counter for tracking event drops across the pipeline
         val counter = DefaultDropCounter()
         dropCounter = counter
         SdkEventBroadcaster.dropCounter = counter
 
+        // Construction is I/O-free; initialization and writes happen on the buffer executor.
+        val eventPersistence =
+          FileEventPersistence(
+            File(appContext.cacheDir, "automobile_events"),
+            dropCounter = counter,
+          )
+        persistence = eventPersistence
+
         // Create shared event buffer with broadcast flush callback and disk persistence
-        val buffer =
+        lateinit var buffer: SdkEventBuffer
+        buffer =
           SdkEventBuffer(
             maxBufferSize = configuration.bufferSize,
             flushIntervalMs = configuration.flushIntervalMs,
-            onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
+            onFlush = { events ->
+              SdkEventBroadcaster.broadcastBatch(
+                appContext,
+                events,
+                onUndelivered = buffer::persistUndelivered,
+              )
+            },
             persistence = eventPersistence,
             dropCounter = counter,
             processors = configuration.eventProcessors,
@@ -196,8 +208,8 @@ object AutoMobileSDK {
         // Replay pending batches and clean up old ones on the buffer's executor
         // to avoid blocking the calling thread with disk I/O.
         buffer.execute {
-          replayPendingBatches(appContext, eventPersistence)
           eventPersistence.cleanup()
+          replayPendingBatches(appContext, eventPersistence, buffer)
         }
 
         // Thread-safe subsystems — can initialize from any thread
@@ -229,10 +241,10 @@ object AutoMobileSDK {
         // thread
         val handler = Handler(Looper.getMainLooper())
         mainHandler = handler
-        handler.post {
+        val initializeOnMain: () -> Unit = initializeOnMain@{
           try {
             // Guard: if shutdown() was called before this posted block runs, no-op.
-            if (this@AutoMobileSDK.context == null) return@post
+            if (this@AutoMobileSDK.context == null) return@initializeOnMain
             AutoMobileOsEvents.initialize(appContext, buffer) { kind ->
               notifyRuntimeContextChanged(kind)
             }
@@ -263,6 +275,12 @@ object AutoMobileSDK {
             logger.e(TAG, error) { "AutoMobileSDK main-thread initialization failed; rolling back" }
             shutdown()
           }
+        }
+        // Register during onCreate so the launching Activity's start/resume callbacks are observed.
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+          initializeOnMain()
+        } else {
+          handler.post { initializeOnMain() }
         }
       } catch (error: Exception) {
         shutdown()
@@ -304,15 +322,21 @@ object AutoMobileSDK {
       dropCounter = counter
       SdkEventBroadcaster.dropCounter = counter
 
-      eventBuffer =
+      lateinit var buffer: SdkEventBuffer
+      buffer =
         SdkEventBuffer(
-            onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
-            dropCounter = counter,
-          )
-          .also {
-            it.isEnabled = _isEnabled
-            it.start()
-          }
+          onFlush = { events ->
+            SdkEventBroadcaster.broadcastBatch(
+              appContext,
+              events,
+              onUndelivered = buffer::persistUndelivered,
+            )
+          },
+          dropCounter = counter,
+        )
+      buffer.isEnabled = _isEnabled
+      buffer.start()
+      eventBuffer = buffer
     } catch (error: Exception) {
       logger.e(TAG, error) {
         "Navigation-only initialization failed; disabling navigation delivery"
@@ -575,14 +599,13 @@ object AutoMobileSDK {
    * Replay pending event batches from disk (events that survived process death). Each batch is
    * broadcast and removed on success; failures remain on disk.
    */
-  private fun replayPendingBatches(context: Context, persistence: EventPersistence) {
-    for ((batchId, events) in persistence.loadPending()) {
-      try {
-        SdkEventBroadcaster.broadcastBatch(context, events)
-        persistence.removeBatch(batchId)
-      } catch (_: Exception) {
-        // Keep on disk for next launch attempt
-      }
+  private fun replayPendingBatches(
+    context: Context,
+    persistence: EventPersistence,
+    buffer: SdkEventBuffer,
+  ) {
+    replayEventBatches(persistence, buffer::execute) { events, complete ->
+      SdkEventBroadcaster.broadcastBatch(context, events, onUndelivered = {}, onComplete = complete)
     }
   }
 

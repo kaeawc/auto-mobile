@@ -4,9 +4,7 @@ import java.io.Closeable
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -27,7 +25,8 @@ internal interface DaemonHeartbeatController {
 internal object DaemonHeartbeat {
   private const val DEFAULT_INTERVAL_MS = 1_000L
   private val json = Json { ignoreUnknownKeys = true }
-  private val backgroundHeartbeat = BackgroundHeartbeatManager()
+  private val backgroundHeartbeat = BackgroundHeartbeatManager(sendHeartbeat = ::sendHeartbeat)
+  private val userIdResolver = DaemonUserIdResolver()
   @JvmStatic internal var testController: DaemonHeartbeatController? = null
   private val defaultController =
     object : DaemonHeartbeatController {
@@ -81,80 +80,6 @@ internal object DaemonHeartbeat {
     }
   }
 
-  private class BackgroundHeartbeatManager {
-    private val sessions = ConcurrentHashMap.newKeySet<String>()
-    private val running = AtomicBoolean(false)
-    private val startLock = Any()
-    private val refCount = AtomicInteger(0)
-    @Volatile private var intervalMs: Long = DEFAULT_INTERVAL_MS
-    @Volatile private var heartbeatThread: Thread? = null
-
-    fun start(intervalMs: Long): Closeable {
-      this.intervalMs = intervalMs
-      ensureRunning()
-      refCount.incrementAndGet()
-      return Closeable { stop() }
-    }
-
-    fun addSession(sessionId: String) {
-      sessions.add(sessionId)
-      ensureRunning()
-    }
-
-    fun removeSession(sessionId: String) {
-      sessions.remove(sessionId)
-    }
-
-    private fun ensureRunning() {
-      if (running.get()) {
-        return
-      }
-      synchronized(startLock) {
-        if (running.get()) {
-          return
-        }
-        running.set(true)
-        heartbeatThread =
-          thread(start = true, isDaemon = true, name = "auto-mobile-daemon-heartbeat") {
-            runLoop()
-          }
-      }
-    }
-
-    private fun stop() {
-      if (refCount.decrementAndGet() > 0) {
-        return
-      }
-      synchronized(startLock) {
-        if (!running.get()) {
-          return
-        }
-        running.set(false)
-        heartbeatThread?.interrupt()
-        heartbeatThread = null
-      }
-    }
-
-    private fun runLoop() {
-      while (running.get()) {
-        val snapshot = sessions.toList()
-        snapshot.forEach { sessionId ->
-          try {
-            sendHeartbeat(sessionId)
-          } catch (_: Exception) {
-            // Best-effort heartbeat; ignore failures
-          }
-        }
-
-        try {
-          Thread.sleep(intervalMs)
-        } catch (_: InterruptedException) {
-          // Allow loop to exit if stopped.
-        }
-      }
-    }
-  }
-
   private fun controller(): DaemonHeartbeatController {
     return testController ?: defaultController
   }
@@ -188,33 +113,10 @@ internal object DaemonHeartbeat {
       val element = json.parseToJsonElement(content).jsonObject
       element["port"]?.jsonPrimitive?.intOrNull
     } catch (_: Exception) {
+      // A missing or invalid daemon port safely skips this best-effort heartbeat.
       null
     }
   }
 
-  private fun daemonPidPath(): String {
-    val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.pid"
-  }
-
-  private fun getUserId(): String {
-    val userName = System.getProperty("user.name", "default").ifBlank { "default" }
-    val osName = System.getProperty("os.name").lowercase()
-    if (osName.contains("win")) {
-      return userName
-    }
-
-    return try {
-      val process = ProcessBuilder("id", "-u").start()
-      val exitCode = process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-      if (!exitCode) {
-        process.destroy()
-        return userName
-      }
-      val uid = process.inputStream.bufferedReader().readText().trim()
-      if (uid.isNotEmpty()) uid else userName
-    } catch (_: Exception) {
-      userName
-    }
-  }
+  private fun daemonPidPath(): String = userIdResolver.pidPath()
 }

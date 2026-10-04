@@ -538,7 +538,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         updatedAt: hierarchy.updatedAt,
       });
       void recorder.recordLayoutEvent({
-        timestamp: Date.now(),
+        timestamp: this.timer.now(),
         applicationId: hierarchy.packageName ?? null,
         subType: "hierarchy_change",
         composableName: null,

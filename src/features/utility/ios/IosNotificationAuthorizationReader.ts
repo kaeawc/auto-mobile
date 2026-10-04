@@ -1,3 +1,5 @@
+import { promises as fs } from "node:fs";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import * as os from "os";
 import * as path from "path";
 import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
@@ -285,18 +287,40 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
   }
 }
 
+/** Prepare a blob for plutil; ownership transfers to rmTemp only on success. */
+export async function writeBulletinBoardTemp(
+  buf: Buffer,
+  files: {
+    mkdtemp(prefix: string): Promise<string>;
+    writeFile(file: string, data: Buffer): Promise<void>;
+    rm(directory: string, options: { recursive: true; force: true }): Promise<void>;
+  } = fs,
+): Promise<string> {
+  const dir = await files.mkdtemp(path.join(os.tmpdir(), "automobile-bb-"));
+  try {
+    const file = path.join(dir, "blob.bplist");
+    await files.writeFile(file, buf);
+    return file;
+  } catch (error) {
+    try {
+      await files.rm(dir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      // Cleanup failure must not mask the original preparation error.
+      logger.warn(
+        `Failed to remove BulletinBoard blob directory: ${errorMessage(cleanupError)}`,
+        cleanupError,
+      );
+    }
+    throw error;
+  }
+}
+
 /** Wire the real deps: host `plutil`, `fs` temp files, CoreSimulator device root. */
 export function defaultBulletinBoardReader(): IosNotificationAuthorizationReader {
   const plist = new PlistClient();
   return new BulletinBoardAuthorizationReader({
     plutilToXml: (path) => plist.readXmlFile(path),
-    writeTemp: async (buf) => {
-      const { promises: fs } = await import("fs");
-      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "automobile-bb-"));
-      const file = path.join(dir, "blob.bplist");
-      await fs.writeFile(file, buf);
-      return file;
-    },
+    writeTemp: (buf) => writeBulletinBoardTemp(buf),
     rmTemp: async (file) => {
       const { promises: fs } = await import("fs");
       await fs.rm(path.dirname(file), { recursive: true, force: true });

@@ -5,6 +5,7 @@ import type { ChecksumCalculator } from "../../src/utils/ChecksumCalculator";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import {
   AndroidApkContentHasher,
+  IosBundleContentHasher,
   CachingContentHashProvider,
   combineApkDigests,
   parsePmPathOutput,
@@ -434,4 +435,18 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
     expect(hash).toBe(combineApkDigests(`${DIGEST_B}  /a/base.apk\n${DIGEST_Z}  /a/split.apk`));
     expect(hash).not.toBe(combineApkDigests(`${DIGEST_A}  /a/base.apk`));
   });
+});
+
+test("IosBundleContentHasher accepts an install-path-only metadata reader", async () => {
+  const calls: string[] = [];
+  const hasher = new IosBundleContentHasher({
+    async execute(appId) {
+      calls.push(appId);
+      return { installPath: "" };
+    },
+  });
+  await expect(hasher.computeHash(fakeDevice("emu-1", "ios"), "com.example.app")).rejects.toThrow(
+    "Cannot resolve app bundle path for com.example.app",
+  );
+  expect(calls).toEqual(["com.example.app"]);
 });

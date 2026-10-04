@@ -5351,10 +5351,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.startOperation("setSelection")
       // Get the text length to set selection from 0 to end
       val text = focusedNode.text
-      val textLength = text?.length ?: 0
+      val plan =
+        planSelectAll(
+          text?.length ?: 0,
+          focusedNode.isShowingHintText,
+          focusedNode.textSelectionStart,
+          focusedNode.textSelectionEnd,
+        )
+      val textLength = plan.textLength
 
-      val success =
-        if (textLength > 0) {
+      val outcome =
+        if (plan.shouldPerformAction) {
           // Use ACTION_SET_SELECTION with start=0 and end=textLength to select all
           val arguments =
             android.os.Bundle().apply {
@@ -5368,15 +5375,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 textLength,
               )
             }
-          focusedNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-            arguments,
+          val actionSucceeded =
+            focusedNode.performAction(
+              android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
+              arguments,
+            )
+          val selectionRefreshed = !actionSucceeded && focusedNode.refresh()
+          selectAllOutcome(
+            textLength,
+            actionSucceeded,
+            selectionRefreshed,
+            if (selectionRefreshed) focusedNode.textSelectionStart else -1,
+            if (selectionRefreshed) focusedNode.textSelectionEnd else -1,
           )
         } else {
-          // No text to select
-          Log.d(TAG, "No text in focused node to select")
-          true // Consider it a success - nothing to select
+          // No text to select, or all text is already selected
+          if (textLength == 0) Log.d(TAG, "No text in focused node to select")
+          SelectAllOutcome(true, null)
         }
+      val success = outcome.success
 
       focusedNode.recycle()
       perfProvider.endOperation("setSelection")
@@ -5391,7 +5408,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         broadcastSelectAllResult(
           requestId,
           success,
-          if (success) null else "performAction returned false",
+          outcome.error,
           totalTime,
         )
       }

@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
+import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -795,6 +797,57 @@ class WebSocketServerTest {
       val frame = """{"type":"hierarchy_update","requestId":"hierarchy-1","data":{}}"""
 
       server.broadcastWithPerfSync(routeByRequestId = false) { frame }
+      runCurrent()
+
+      assertEquals(listOf(frame), first.messages)
+      assertEquals(listOf(frame), second.messages)
+    }
+
+  @Test
+  fun `hierarchy requests record a terminal response owner`() {
+    assertTrue(server.recordsRequestOwner(RequestHierarchy(requestId = "req_owner")))
+    assertTrue(
+      server.recordsRequestOwner(
+        RequestHierarchyIfStale(sinceTimestamp = 0L, requestId = "stale_owner")
+      )
+    )
+  }
+
+  @Test
+  fun `unowned stale error is dropped unless externally correlated`() =
+    runTest(testScope.testScheduler) {
+      val first = RecordingTransport()
+      val second = RecordingTransport()
+      server.registerClient(1, first)
+      server.registerClient(2, second)
+      val frame =
+        HierarchyExtractErrorFrames.thrownFrame(
+          "stale_unowned",
+          IllegalStateException("tree failed"),
+        )!!
+
+      server.broadcast(frame)
+      runCurrent()
+      assertTrue(first.messages.isEmpty())
+      assertTrue(second.messages.isEmpty())
+
+      server.broadcastExternallyCorrelatedResponse(frame)
+      runCurrent()
+      assertEquals(1, first.messages.size)
+      assertEquals(first.messages, second.messages)
+      assertEquals("stale_unowned", WebSocketServer.extractRequestId(first.messages.single()))
+    }
+
+  @Test
+  fun `unsolicited hierarchy still reaches every client`() =
+    runTest(testScope.testScheduler) {
+      val first = RecordingTransport()
+      val second = RecordingTransport()
+      server.registerClient(1, first)
+      server.registerClient(2, second)
+      val frame = """{"type":"hierarchy_update","data":{}}"""
+
+      server.broadcastWithPerfSync { frame }
       runCurrent()
 
       assertEquals(listOf(frame), first.messages)

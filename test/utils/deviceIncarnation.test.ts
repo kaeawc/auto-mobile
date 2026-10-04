@@ -1,13 +1,15 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   advanceDeviceIncarnation,
+  notifyDeviceIdentityReplaced,
   deviceIncarnationToken,
   type DeviceIncarnationListener,
   registerDeviceIncarnationListener,
   setDeviceIncarnationBumper,
   setDeviceIncarnationResolver,
 } from "../../src/utils/deviceIncarnation";
+import { logger } from "../../src/utils/logger";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -129,4 +131,36 @@ describe("deviceIncarnationToken", () => {
     expect(calls).toEqual(["emulator-5554"]);
     unregister();
   });
+});
+
+test("identity replacement isolates a failing listener and logs its name", () => {
+  const calls: string[] = [];
+  const failure = new Error("listener failed");
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const unregisterFailing = registerDeviceIncarnationListener({
+    name: "identity-test-failing",
+    onDeviceIdentityReplaced: () => {
+      throw failure;
+    },
+    onDeviceIncarnationChanged: () => {},
+  });
+  const unregisterFollowing = registerDeviceIncarnationListener({
+    name: "identity-test-following",
+    onDeviceIdentityReplaced: (deviceId) => {
+      calls.push(deviceId);
+    },
+    onDeviceIncarnationChanged: () => {},
+  });
+  try {
+    notifyDeviceIdentityReplaced("identity-listener-serial");
+    expect(calls).toEqual(["identity-listener-serial"]);
+    expect(warn).toHaveBeenCalledWith(
+      "[DeviceIncarnation] Failed to notify identity replacement for identity-test-failing for identity-listener-serial",
+      failure,
+    );
+  } finally {
+    unregisterFailing();
+    unregisterFollowing();
+    warn.mockRestore();
+  }
 });

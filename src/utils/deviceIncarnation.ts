@@ -1,3 +1,5 @@
+import { logger } from "./logger";
+
 /**
  * Process-local access to the device pool's connection-epoch counter.
  *
@@ -27,6 +29,11 @@ export interface DeviceIncarnationAdvanceResult {
 /** One owner of state keyed by a device serial. */
 export interface DeviceIncarnationListener {
   readonly name: string;
+  /**
+   * The pool has identity evidence that a different device now holds this serial;
+   * NOT for removal, disconnect, eviction, release, kill, or same-device re-pool.
+   */
+  onDeviceIdentityReplaced?(deviceId: string): void;
   /**
    * Quiesce host state while the current guest is still alive. VM snapshot
    * loading rewinds guest processes, so owners such as screen recording must
@@ -82,6 +89,24 @@ export function registerDeviceIncarnationListener(listener: DeviceIncarnationLis
       listeners.delete(listener.name);
     }
   };
+}
+
+/**
+ * The pool has identity evidence that a different device now holds this serial;
+ * NOT for removal, disconnect, eviction, release, kill, or same-device re-pool.
+ */
+export function notifyDeviceIdentityReplaced(deviceId: string): void {
+  for (const listener of getDeviceIncarnationListeners()) {
+    try {
+      listener.onDeviceIdentityReplaced?.(deviceId);
+    } catch (error) {
+      // Identity replacement is confirmed; an observer cannot prevent other owners from cleaning up.
+      logger.warn(
+        `[DeviceIncarnation] Failed to notify identity replacement for ${listener.name} for ${deviceId}`,
+        error,
+      );
+    }
+  }
 }
 
 /** Snapshot the module-init listener inventory for the restore invalidation funnel. */

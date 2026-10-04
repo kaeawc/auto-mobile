@@ -1530,13 +1530,10 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
-  fun `uncorrelated hierarchy success drops an unrelated later correlated frame`() = runBlocking {
-    // Issue #3190 (follow-up to #3159): a request_hierarchy carrying a requestId completes with an
-    // uncorrelated success — the action broadcasts a `hierarchy_update` frame that has NO requestId
-    // (production: CtrlProxy.kt broadcasts via HierarchyDebouncer without threading the requestId
-    // through). Because that frame cannot clear an owner entry, the server must NOT record one in
-    // the first place. A later correlated frame has no owner and must be dropped rather than
-    // leaked to every connected observer.
+  fun `hierarchy reply clears owner before a duplicate error`() = runBlocking {
+    // Explicit hierarchy replies consume their owner; subsequent unsolicited pushes still reach
+    // both clients, while a duplicate correlated error must be dropped (issue #9430).
+    val reply = """{"type":"hierarchy_update","requestId":"req-hierarchy","hierarchy":{}}"""
     lateinit var hierarchyServer: WebSocketServer
     hierarchyServer =
       WebSocketServer(
@@ -1549,8 +1546,9 @@ class WebSocketServerIntegrationTest {
                 disableAllFiltering: Boolean,
                 requestId: String?,
               ) {
-                // Mirror production: success broadcasts a hierarchy_update with no requestId.
+                // Mirror production: a terminal reply followed by an unsolicited event.
                 testScope.launch {
+                  hierarchyServer.broadcastWithPerfSync { reply }
                   hierarchyServer.broadcast("""{"type":"hierarchy_update","hierarchy":{}}""")
                 }
               }
@@ -1583,6 +1581,9 @@ class WebSocketServerIntegrationTest {
               ownerReady.complete(Unit)
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_hierarchy","requestId":"req-hierarchy"}"""))
+              ownerMessages.add(
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+              )
               ownerMessages.add(
                 (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
               )
@@ -1630,12 +1631,16 @@ class WebSocketServerIntegrationTest {
           bystanderJob.join()
 
           assertEquals(
-            "owner should not receive an unowned correlated error",
-            listOf("""{"type":"hierarchy_update","hierarchy":{}}""", """{"type":"probe"}"""),
+            "owner should receive one reply and the unsolicited push, but no duplicate error",
+            listOf(
+              reply,
+              """{"type":"hierarchy_update","hierarchy":{}}""",
+              """{"type":"probe"}""",
+            ),
             ownerMessages.toList(),
           )
           assertEquals(
-            "an uncorrelated hierarchy response leaves no owner, so a later same-ID frame is dropped",
+            "the bystander receives only the unsolicited push and probe",
             listOf("""{"type":"hierarchy_update","hierarchy":{}}""", """{"type":"probe"}"""),
             bystanderMessages.toList(),
           )

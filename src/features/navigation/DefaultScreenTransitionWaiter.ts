@@ -1,3 +1,4 @@
+import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { logger } from "../../utils/logger";
 import { NavigationGraphManager } from "./NavigationGraphManager";
 import { ScreenTransitionWaiter } from "./interfaces/ScreenTransitionWaiter";
@@ -29,26 +30,26 @@ export class DefaultScreenTransitionWaiter implements ScreenTransitionWaiter {
   /**
    * Wait for the navigation graph to report we're on the expected screen.
    */
-  async waitForScreen(screenName: string, timeoutMs: number): Promise<boolean> {
+  async waitForScreen(
+    screenName: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    throwIfAborted(signal);
     const startTime = this.timer.now();
 
     while (this.timer.now() - startTime < timeoutMs) {
+      throwIfAborted(signal);
       const currentScreen = this.navigationManager.getCurrentScreen();
       if (currentScreen === screenName) {
         logger.debug(`[SCREEN_TRANSITION_WAITER] Reached screen: ${screenName}`);
         return true;
       }
-      await this.sleep(this.pollIntervalMs);
+      await awaitWhileRequestIsLive(this.timer.sleep(this.pollIntervalMs), signal);
     }
 
+    throwIfAborted(signal);
     logger.debug(`[SCREEN_TRANSITION_WAITER] Timeout waiting for screen: ${screenName}`);
     return false;
-  }
-
-  /**
-   * Sleep for the specified duration.
-   */
-  private sleep(ms: number): Promise<void> {
-    return this.timer.sleep(ms);
   }
 }

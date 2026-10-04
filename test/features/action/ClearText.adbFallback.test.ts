@@ -176,6 +176,9 @@ describe("ClearText Android ADB fallback", () => {
       },
       "observedInteraction",
     ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) => fn(observeResult));
+    refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
+      focusedFieldObserve(""),
+    );
     configure?.(clearText);
     return clearText.execute(undefined, signal);
   };
@@ -271,9 +274,9 @@ describe("ClearText Android ADB fallback", () => {
     });
 
     const result = await runClearText(noFocusedFieldObserve(), (clearText) => {
-      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
-        focusedFieldObserve("hello"),
-      );
+      refreshSpy = spyOn(clearText.observeScreen, "execute")
+        .mockResolvedValue(focusedFieldObserve(""))
+        .mockResolvedValueOnce(focusedFieldObserve("hello"));
     });
 
     expect(result.success).toBe(true);
@@ -332,7 +335,7 @@ describe("ClearText Android ADB fallback", () => {
         noHierarchyObserve(),
       );
     });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(fakeAdb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
       ...deleteCommands(200),
@@ -361,6 +364,78 @@ describe("ClearText Android ADB fallback", () => {
       "shell input keyevent KEYCODE_MOVE_END",
       deleteCommand(5),
     ]);
+  });
+
+  test.each([
+    { after: "later\nlines", success: false },
+    { after: "", success: true },
+    { after: undefined, success: false },
+  ])("verifies the focused field after ADB deletes: %j", async ({ after, success }) => {
+    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+    const result = await runClearText(focusedFieldObserve("first\nlater\nlines"), (clearText) => {
+      refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
+        after === undefined ? noHierarchyObserve() : focusedFieldObserve(after),
+      );
+    });
+    expect(result.success).toBe(success);
+    if (after !== undefined && !success) {
+      expect(result.error).toContain("not fully cleared");
+      expect(result.error).toContain("11 UTF-16 units remain");
+    }
+    if (after === undefined) {
+      expect(result.error).toContain("Cannot verify");
+    }
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      deleteCommand(17),
+    ]);
+  });
+
+  test.each(["stale", "unreadable", "unfocused", "errored", "throws"] as const)(
+    "refuses success when post-clear verification is %s",
+    async (unavailable) => {
+      fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+      const result = await runClearText(focusedFieldObserve("hello"), (clearText) => {
+        const observation = focusedFieldObserve("");
+        if (unavailable === "stale") {
+          observation.freshness = { isFresh: false };
+        } else if (unavailable === "unreadable") {
+          delete observation.viewHierarchy!.hierarchy.node!.$!.text;
+        }
+        refreshSpy = spyOn(clearText.observeScreen, "execute");
+        if (unavailable === "throws") {
+          refreshSpy.mockRejectedValue(new Error("capture unavailable"));
+        } else {
+          refreshSpy.mockResolvedValue(
+            unavailable === "unfocused"
+              ? noFocusedFieldObserve()
+              : unavailable === "errored"
+                ? hierarchyErrorObserve()
+                : observation,
+          );
+        }
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Cannot verify key-event clear");
+    },
+  );
+
+  test("propagates cancellation during the post-clear observation", async () => {
+    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+    const controller = new AbortController();
+    const reason = new Error("cancelled verification");
+    await expect(
+      runClearText(
+        focusedFieldObserve("hello"),
+        (clearText) => {
+          refreshSpy = spyOn(clearText.observeScreen, "execute").mockImplementation(async () => {
+            controller.abort(reason);
+            return focusedFieldObserve("");
+          });
+        },
+        controller.signal,
+      ),
+    ).rejects.toBe(reason);
   });
 
   test("issues no key events when the focused field is already empty", async () => {

@@ -74,6 +74,21 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(ElementLocator.bundleIdFromSpringboardIdentifier(legacyIdentifier), legacyIdentifier)
     }
 
+    func testDepthCap_belowCapDoesNotReportTruncation() {
+        XCTAssertNil(ElementLocator.depthCapTruncationReason(depth: 29, maxDepth: 30, hasChildren: true))
+    }
+
+    func testDepthCap_childrenAtCapReportMaxDepth() {
+        XCTAssertEqual(
+            ElementLocator.depthCapTruncationReason(depth: 30, maxDepth: 30, hasChildren: true),
+            "max_depth"
+        )
+    }
+
+    func testDepthCap_leafAtCapDoesNotReportTruncation() {
+        XCTAssertNil(ElementLocator.depthCapTruncationReason(depth: 30, maxDepth: 30, hasChildren: false))
+    }
+
     func testForegroundBundleId_switcherOwnsForegroundOverAppCards() {
         XCTAssertEqual(
             ElementLocator.foregroundBundleId(
@@ -1344,8 +1359,100 @@ final class ElementLocatorTests: XCTestCase {
 
     private struct KeyboardSnapshotNode {
         var isKeyboard = false
+        var isTextInput = false
+        var hasFocus = false
         var frame: CGRect = .zero
         var children: [KeyboardSnapshotNode] = []
+    }
+
+    func testCollectTextInputNodes_preservesPreOrderThroughAllParents() {
+        let frames = (1 ... 5).map { CGRect(x: 10, y: $0 * 50, width: 100, height: 40) }
+        let root = KeyboardSnapshotNode(isTextInput: true, frame: frames[0], children: [
+            KeyboardSnapshotNode(isTextInput: true, frame: frames[1], children: [
+                KeyboardSnapshotNode(isTextInput: true, frame: frames[2]),
+            ]),
+            KeyboardSnapshotNode(isTextInput: true, children: [
+                KeyboardSnapshotNode(isTextInput: true, frame: frames[3]),
+            ]),
+            KeyboardSnapshotNode(frame: frames[0]),
+            KeyboardSnapshotNode(children: [
+                KeyboardSnapshotNode(isTextInput: true, frame: frames[4]),
+                KeyboardSnapshotNode(isTextInput: true, frame: CGRect(x: 0, y: 0, width: 0, height: 40)),
+            ]),
+        ])
+
+        let inputs = ElementLocator.collectTextInputNodes(
+            root,
+            isTextInput: { $0.isTextInput },
+            frame: { $0.frame },
+            children: { $0.children }
+        )
+        XCTAssertEqual(inputs.map { $0.frame }, frames)
+    }
+
+    func testCollectTextInputNodes_emptyTree() {
+        let inputs = ElementLocator.collectTextInputNodes(
+            KeyboardSnapshotNode(),
+            isTextInput: { $0.isTextInput },
+            frame: { $0.frame },
+            children: { $0.children }
+        )
+        XCTAssertTrue(inputs.isEmpty)
+    }
+
+    func testKeyboardFocusDecision_collectedInputsAndLazyKeyboardWalk() {
+        let inputFrame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        let focusedFrame = CGRect(x: 10, y: 80, width: 100, height: 40)
+        let input = KeyboardSnapshotNode(isTextInput: true, frame: inputFrame)
+        let focused = KeyboardSnapshotNode(isTextInput: true, hasFocus: true, frame: focusedFrame)
+        let keyboard = KeyboardSnapshotNode(isKeyboard: true, frame: CGRect(x: 0, y: 500, width: 375, height: 312))
+        let cases: [(root: KeyboardSnapshotNode, expected: KeyboardFocusDecision, walks: Int)] = [
+            (
+                KeyboardSnapshotNode(children: [input, focused, keyboard]),
+                .useSnapshotFrame(focusedFrame),
+                0
+            ),
+            (KeyboardSnapshotNode(children: [input, keyboard]), .liveQuery, 1),
+            (
+                KeyboardSnapshotNode(children: [input, KeyboardSnapshotNode(isKeyboard: true)]),
+                .skip,
+                1
+            ),
+            (KeyboardSnapshotNode(children: [input]), .skip, 1),
+            (
+                KeyboardSnapshotNode(children: [input, KeyboardSnapshotNode(children: [keyboard])]),
+                .liveQuery,
+                1
+            ),
+            (KeyboardSnapshotNode(children: [keyboard]), .skip, 0),
+        ]
+
+        for testCase in cases {
+            let inputs = ElementLocator.collectTextInputNodes(
+                testCase.root,
+                isTextInput: { $0.isTextInput },
+                frame: { $0.frame },
+                children: { $0.children }
+            )
+            var walkCount = 0
+            func walk() -> Bool {
+                walkCount += 1
+                return ElementLocator.keyboardVisibleInSnapshot(
+                    testCase.root,
+                    isKeyboard: { $0.isKeyboard },
+                    frame: { $0.frame },
+                    children: { $0.children }
+                )
+            }
+            XCTAssertEqual(
+                ElementLocator.keyboardFocusDecision(
+                    textInputCandidates: inputs.map { (frame: $0.frame, hasFocus: $0.hasFocus) },
+                    keyboardVisibleInSnapshot: walk()
+                ),
+                testCase.expected
+            )
+            XCTAssertEqual(walkCount, testCase.walks)
+        }
     }
 
     func testKeyboardVisibleInSnapshot_keyboardWithNonEmptyFrame() {

@@ -1,0 +1,57 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "sheet",
+      "edge": "bottom",
+      "height": 320
+    }
+  },
+  "state": {
+    "selected": 1
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "tabBar",
+        "stateKey": "selected",
+        "items": [
+          {
+            "label": "One"
+          },
+          {
+            "label": "Two"
+          }
+        ]
+      },
+      {
+        "type": "pager",
+        "id": "pages",
+        "children": [
+          {
+            "type": "text",
+            "text": "One"
+          },
+          {
+            "type": "image",
+            "asset": "other",
+            "contentScale": "fill"
+          }
+        ]
+      },
+      {
+        "type": "bottomNav",
+        "pager": "pages",
+        "items": [
+          {
+            "label": "One"
+          },
+          {
+            "label": "Two"
+          }
+        ]
+      }
+    ]
+  }
+}

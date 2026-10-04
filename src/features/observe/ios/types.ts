@@ -98,6 +98,7 @@ export interface XCTestHierarchy {
   rotation?: number;
   systemInsets?: { top: number; right: number; bottom: number; left: number };
   insets?: ObservationInsets;
+  truncationReasons?: string[];
   error?: string;
 }
 

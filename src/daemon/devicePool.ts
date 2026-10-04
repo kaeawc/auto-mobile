@@ -1,5 +1,6 @@
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { isSessionReleasing } from "./sessionReleaseState";
+import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
   InMemoryDeviceHealthMarkers,
   type DeviceHealthMarkers,
@@ -1070,6 +1071,7 @@ export class DevicePool {
       getTimer: () => this.timer,
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       hasReusableSerial: (device) => this.hasReusableSerial(device),
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
       cancelDeviceExecutions: (deviceId, reason, options) =>
         this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(deviceId, reason, options) ??
         Promise.resolve(0),
@@ -1410,8 +1412,36 @@ export class DevicePool {
       });
 
     this.sessionManager.setRecoveryExpiryReleaseHandler({
-      release: (sessionId, reason, attempt) =>
-        this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(sessionId, reason, attempt),
+      release: (sessionId, reason, attempt) => {
+        const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
+          sessionId,
+          reason,
+          attempt,
+        );
+        if (recoveryRelease) {
+          return recoveryRelease;
+        }
+        const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
+        if (!terminalRelease || !this.sessionManager.hasSession(sessionId)) {
+          return undefined;
+        }
+        // A retained explicit-release fence upgrades the expiry reason, so its
+        // notification captures ownership instead of freeing the device below.
+        let releasedDeviceId: string | null = null;
+        return releaseSessionAndDevice(
+          this.sessionManager,
+          this,
+          terminalRelease.deviceId,
+          sessionId,
+          reason,
+          {
+            release: async () => {
+              releasedDeviceId = await attempt();
+              return releasedDeviceId;
+            },
+          },
+        ).then(() => releasedDeviceId);
+      },
     });
 
     // Expiry has no caller available to return the device to the pool. Explicit
@@ -4833,6 +4863,7 @@ export class DevicePool {
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
     beforeReplacementPublishes?: () => void,
+    excludeExecutionId?: string,
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.assignmentMutex.runExclusive(async () => {
       // The caller's marker must cover the entire visible replacement
@@ -4861,6 +4892,7 @@ export class DevicePool {
           replacement,
           sourceImage,
           beforeReplacementPublishes,
+          excludeExecutionId,
         );
         await this.trackStartedDeviceProcess(replacement, childProcess);
         if (this.devices.get(replacementDevice.id) !== replacementDevice) {
@@ -4985,6 +5017,7 @@ export class DevicePool {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     beforeReplacementPublishes?: () => void,
+    excludeExecutionId?: string,
   ): Promise<PooledDevice> {
     const priorAssignmentCount = expectedDevice.assignmentCount;
     const priorLastUsedAt = expectedDevice.lastUsedAt;
@@ -4993,6 +5026,11 @@ export class DevicePool {
     if (existingReplacement && existingReplacement !== expectedDevice) {
       this.assertPooledSystemUiAnrReplacement(existingReplacement, sourceImage);
       if (this.devices.get(expectedDevice.id) === expectedDevice) {
+        await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
+          expectedDevice.id,
+          deviceLossCancellationReason(expectedDevice.id),
+          { excludeExecutionId },
+        );
         this.releaseCapturedDeviceForShutdown(expectedDevice);
         await this.removeDevice(expectedDevice.id, false, expectedDevice);
       }
@@ -5007,6 +5045,11 @@ export class DevicePool {
     // removeDevice rejects busy entries, so detach pool ownership only after
     // capturing any session that must be rebound below. The replacement remains
     // unavailable through the caller's readiness reservation while this runs.
+    await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
+      expectedDevice.id,
+      deviceLossCancellationReason(expectedDevice.id),
+      { excludeExecutionId },
+    );
     this.releaseCapturedDeviceForShutdown(expectedDevice);
     await this.removeDevice(expectedDevice.id, false, expectedDevice);
     if (this.devices.has(replacement.deviceId)) {
@@ -5736,15 +5779,19 @@ export class DevicePool {
     }
 
     return async () => {
-      const wasAutolocked = this.devices.get(previousDeviceId)?.autolockSessionId === sessionId;
-      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
-        stableDeviceId,
-      });
-      await this.releaseDevice(previousDeviceId, sessionId);
+      const previousDevice = this.devices.get(previousDeviceId);
+      const wasAutolocked = previousDevice?.autolockSessionId === sessionId;
       const replacement = this.devices.get(deviceId);
       if (wasAutolocked && replacement?.sessionId === sessionId) {
         replacement.autolockSessionId = sessionId;
       }
+      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
+        stableDeviceId,
+      });
+      if (previousDevice) {
+        this.autolockManager.clearRebindAutolockLock(sessionId, previousDeviceId, previousDevice);
+      }
+      await this.releaseDevice(previousDeviceId, sessionId);
       return session;
     };
   }

@@ -1,6 +1,12 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
-import type { GestureEmitter, GestureEvent, A11ySource, ReceivedInteraction } from "./types";
+import type {
+  GestureEmitter,
+  GestureEvent,
+  A11ySource,
+  ReceivedInteraction,
+  TouchTrackFailure,
+} from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
@@ -56,6 +62,11 @@ export class DualTrackRecorder {
   /** Reference to the real AndroidCtrlProxyClient when not in test mode */
   private activeA11y: AndroidCtrlProxyClient | null = null;
   private stopped = false;
+  private firstTouchTrackFailure?: TouchTrackFailure;
+
+  get touchTrackFailure(): TouchTrackFailure | undefined {
+    return this.firstTouchTrackFailure;
+  }
 
   get stepCount(): number {
     return this.steps.length;
@@ -95,7 +106,13 @@ export class DualTrackRecorder {
     this.activeEmitter = emitter;
     emitter.start(
       (e) => this.handleGestureEvent(e),
-      (e) => logger.warn(`[DualTrackRecorder] GetEventReader error: ${e.message}`),
+      (error) => {
+        if (this.stopped || this.firstTouchTrackFailure) {
+          return;
+        }
+        this.firstTouchTrackFailure = { error, failedAt: this.timer.now() };
+        logger.warn(`[DualTrackRecorder] Touch track (getevent) failed: ${error.message}`);
+      },
     );
 
     this.unsubscribeA11y = a11y.onInteraction((e) => this.handleInteractionEvent(e));
@@ -103,9 +120,17 @@ export class DualTrackRecorder {
     logger.debug("[DualTrackRecorder] Started dual-track recording");
   }
 
-  async stop(): Promise<{ steps: PlanStep[]; stepCount: number }> {
+  async stop(): Promise<{
+    steps: PlanStep[];
+    stepCount: number;
+    touchTrackFailure?: TouchTrackFailure;
+  }> {
     if (this.stopped) {
-      return { steps: this.steps, stepCount: this.steps.length };
+      return {
+        steps: this.steps,
+        stepCount: this.steps.length,
+        ...(this.touchTrackFailure ? { touchTrackFailure: this.touchTrackFailure } : {}),
+      };
     }
     this.stopped = true;
 
@@ -128,7 +153,11 @@ export class DualTrackRecorder {
 
     logger.debug(`[DualTrackRecorder] Stopped with ${this.steps.length} steps`);
 
-    return { steps: this.steps, stepCount: this.steps.length };
+    return {
+      steps: this.steps,
+      stepCount: this.steps.length,
+      ...(this.touchTrackFailure ? { touchTrackFailure: this.touchTrackFailure } : {}),
+    };
   }
 
   // -------------------------------------------------------------------------

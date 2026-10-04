@@ -263,6 +263,28 @@ extension ElementLocator {
         return textInputSnapshotCount > 0
     }
 
+    /// Collect usable text-input nodes in pre-order, visiting children even when their parent is skipped.
+    nonisolated static func collectTextInputNodes<Node>(
+        _ root: Node,
+        isTextInput: (Node) -> Bool,
+        frame: (Node) -> CGRect,
+        children: (Node) -> [Node]
+    )
+        -> [Node]
+    {
+        func collect(_ node: Node, into nodes: inout [Node]) {
+            if isTextInput(node), !frame(node).isEmpty {
+                nodes.append(node)
+            }
+            for child in children(node) {
+                collect(child, into: &nodes)
+            }
+        }
+        var nodes: [Node] = []
+        collect(root, into: &nodes)
+        return nodes
+    }
+
     /// Detect a usable keyboard by reading the captured nodes directly, without copying the tree.
     nonisolated static func keyboardVisibleInSnapshot<Node>(
         _ snapshot: Node,
@@ -438,5 +460,10 @@ extension ElementLocator {
             pixelWidth: Int((Double(pointWidth) * nativeScale).rounded()),
             pixelHeight: Int((Double(pointHeight) * nativeScale).rounded())
         )
+    }
+
+    /// A leaf at the raw depth cap is complete; only withheld children make the walk partial.
+    nonisolated static func depthCapTruncationReason(depth: Int, maxDepth: Int, hasChildren: Bool) -> String? {
+        depth >= maxDepth && hasChildren ? "max_depth" : nil
     }
 }

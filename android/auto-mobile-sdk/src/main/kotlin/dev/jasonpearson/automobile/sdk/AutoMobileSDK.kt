@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.sdk.session.SessionTracker
 import dev.jasonpearson.automobile.sdk.storage.DataStoreInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -124,7 +125,8 @@ object AutoMobileSDK {
    * Initialize the SDK with application context. Required for broadcasting navigation events across
    * processes.
    *
-   * @param context Application context (use applicationContext, not activity context)
+   * @param context Application context, or the current Activity context to catch up late tap
+   *   tracking. Only the application context is retained.
    */
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
   fun initialize(context: Context) {
@@ -134,7 +136,8 @@ object AutoMobileSDK {
   /**
    * Initialize the SDK with application context and custom configuration.
    *
-   * @param context Application context (use applicationContext, not activity context)
+   * @param context Application context, or the current Activity context to catch up late tap
+   *   tracking. Only the application context is retained.
    * @param configuration SDK configuration built via [AutoMobileConfiguration.Builder]
    */
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
@@ -254,6 +257,7 @@ object AutoMobileSDK {
         // thread
         val handler = Handler(Looper.getMainLooper())
         mainHandler = handler
+        val initializationActivity = WeakReference(AutoMobileClickTracker.findActivity(context))
         val initializeOnMain: () -> Unit = initializeOnMain@{
           try {
             // Guard: if shutdown() was called before this posted block runs, no-op.
@@ -282,7 +286,10 @@ object AutoMobileSDK {
             FrameMetricsCollector.setEnabled(_isEnabled)
             AutoMobileNotifications.initialize(appContext)
             if (appContext is Application) {
-              AutoMobileClickTracker.initialize(appContext, appContext.packageName)
+              AutoMobileClickTracker.initialize(
+                initializationActivity.get() ?: appContext,
+                appContext.packageName,
+              )
             }
           } catch (error: Exception) {
             logger.e(TAG, error) { "AutoMobileSDK main-thread initialization failed; rolling back" }

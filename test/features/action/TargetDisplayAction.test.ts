@@ -34,6 +34,20 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
+import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
+import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
+import { FakeFileSystem } from "../../fakes/FakeFileSystem";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { runSessionDisplayPin } from "../../../src/server/sessionDisplayPin";
+import {
+  ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV,
+  OBSERVE_SETTLED_SCREENSHOT_ENV,
+} from "../../../src/features/observe/automaticScreenshotPolicy";
+import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
+import { FakeScreenshotBackoffScheduler } from "../../fakes/FakeScreenshotBackoffScheduler";
+import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 const android = {
   deviceId: "target-display-android",
@@ -1506,9 +1520,9 @@ describe("CtrlProxy display-targeted action routing", () => {
         expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
         const requests = [...tap.mock.calls, ...swipe.mock.calls, ...drag.mock.calls];
         expect(requests).toHaveLength(1);
-        expect(requests[0].at(-3)).toBe(controller.signal);
-        expect(requests[0].at(-2)).toBe(2);
-        expect(requests[0].at(-1)).toBeFunction();
+        expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
+        expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
+        expect(requests[0].at(kind === "dragAndDrop" ? -2 : -1)).toBeFunction();
         expect(
           executor.getExecutedCommands().filter((cmd) => cmd.startsWith("shell input")),
         ).toEqual([]);
@@ -1679,10 +1693,12 @@ describe("CtrlProxy display-targeted action routing", () => {
                   expect(result.error).toContain(response.error!);
                 }
                 expect(calls).toHaveLength(gesture === "doubleTapOn" && !failure ? 2 : 1);
-                expect(calls[0].at(-2)).toBe(panel === "external" ? 2 : undefined);
-                expect(calls[0].at(-1)).toBeFunction();
+                expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
+                  panel === "external" ? 2 : undefined,
+                );
+                expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
                 if (panel === "external") {
-                  expect(calls[0].at(-3)).toBe(controller.signal);
+                  expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
                 }
                 expect(inputs).toEqual([]);
                 if (gesture === "longPressAt") {
@@ -2008,4 +2024,174 @@ describe("display gesture dispatch boundary race", () => {
       });
     }
   }
+});
+
+describe("post-action screenshot resolved display", () => {
+  test.each(["explicit", "pinned", "legacy", "unmappable", "pinnedCtrlProxy"] as const)(
+    "%s display reaches the automatic capture command",
+    async (route) => {
+      const oldPolicy = process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
+      const oldMode = process.env[OBSERVE_SETTLED_SCREENSHOT_ENV];
+      const oldAudit = serverConfig.getAccessibilityAuditConfig();
+      process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "0";
+      process.env[OBSERVE_SETTLED_SCREENSHOT_ENV] = "0";
+      serverConfig.setAccessibilityAuditConfig(null);
+      displayTransitions.reset(android.deviceId);
+      const executor = adb();
+      executor.setCommandResponse("dumpsys SurfaceFlinger", { stdout: "", stderr: "" });
+      executor.setCommandResponse("screencap", {
+        stdout: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"),
+        stderr: "",
+      });
+      const timer = autoTimer();
+      const screenshot = new TakeScreenshot(
+        android,
+        new FakeAdbClientFactory(executor),
+        timer,
+        new FakeIdGenerator(["capture", "command"]),
+        new FakeScreenshotFileWriter(),
+        new FakeFileSystem(),
+        () => "/fake/screenshots",
+        undefined,
+        false,
+        { pathProtection: new FakeScreenshotPathProtection(timer) },
+      );
+      const ids: Array<number | undefined> = [];
+      // Forward production display selection to the real screenshot transport.
+      class CaptureRecorder extends FakeScreenshotRecorder {
+        override async captureFresh(
+          _id?: string,
+          _perf?: PerformanceTracker,
+          signal?: AbortSignal,
+          displayId?: number,
+        ): Promise<void> {
+          ids.push(displayId);
+          expect(
+            (
+              await screenshot.execute(
+                { format: route === "pinnedCtrlProxy" ? "jpeg" : "png", displayId },
+                signal,
+              )
+            ).success,
+          ).toBe(true);
+        }
+      }
+      const realObserve = new RealObserveScreen(
+        android,
+        new FakeAdbClientFactory(executor),
+        { screenshotRecorder: new CaptureRecorder() },
+        timer,
+      );
+      const fakeObserve = new FakeObserveScreen();
+      fakeObserve.setObserveResult(
+        screen(route === "unmappable" ? "missing" : route === "legacy" ? "internal" : "external"),
+      );
+      const execute = spyOn(realObserve, "execute").mockImplementation((options) =>
+        fakeObserve.execute(options),
+      );
+      const capability = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "supportsCommand",
+      ).mockResolvedValue(false);
+      const action = new TapAtCoordinate(android, executor, {
+        timer,
+        lastRenderedObservation: () => screen("external"),
+      });
+      action.observeScreen = realObserve;
+      const wireMessages: Array<{ type: string; requestId: string; displayId?: number }> = [];
+      let wireClient: AndroidCtrlProxyClient | undefined;
+      let instanceSpy: ReturnType<typeof spyOn> | undefined;
+      if (route === "pinnedCtrlProxy") {
+        const wireTimer = new FakeTimer();
+        const socket = new FakeWebSocket("ws://fake", "none", 0, wireTimer);
+        socket.readyState = WebSocketState.OPEN;
+        const client = AndroidCtrlProxyClient.createForTesting(
+          android,
+          executor,
+          () => socket as WebSocket,
+          wireTimer,
+        );
+        client["ws"] = socket as WebSocket;
+        client["connectWebSocket"] = async () => true;
+        client["screenshotBackoffScheduler"] = new FakeScreenshotBackoffScheduler();
+        socket.send = (data: string) => {
+          const message = JSON.parse(data) as {
+            type: string;
+            requestId: string;
+            displayId?: number;
+          };
+          wireMessages.push(message);
+          client["requestManager"].resolve(message.requestId, {
+            success: true,
+            data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+            format: "jpeg",
+          });
+        };
+        wireClient = client;
+        instanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+      }
+      try {
+        const response = await runSessionDisplayPin({
+          name: "tapAt",
+          acceptsDisplay: true,
+          device: android,
+          args: route === "explicit" ? { display: "external" } : {},
+          sessionUuid: "capture-session",
+          store: {
+            getDeviceForSession: () => android.deviceId,
+            getDisplayPin: () =>
+              route === "pinned" || route === "pinnedCtrlProxy" ? "external" : undefined,
+          },
+          invoke: (args) =>
+            action.execute({
+              x: 50,
+              y: 60,
+              display: typeof args.display === "string" ? args.display : undefined,
+            }),
+        });
+        expect(response).toMatchObject({ success: true });
+        const commands = executor
+          .getExecutedCommands()
+          .filter((command) => command.includes("screencap"));
+        const targeted = route === "explicit" || route === "pinned" || route === "pinnedCtrlProxy";
+        console.log(
+          `${route}: screenshot displayId=${String(ids[0])}; capture=${commands[0] ?? JSON.stringify(wireMessages[0])}`,
+        );
+        if (targeted) {
+          expect(executor.getExecutedCommands()).toContain(
+            "shell input touchscreen -d 2 tap 50 60",
+          );
+        }
+        expect(ids).toEqual([targeted ? 2 : undefined]);
+        if (route === "pinnedCtrlProxy") {
+          expect(commands).toEqual([]);
+          expect(wireMessages).toEqual([
+            { type: "request_screenshot", requestId: expect.any(String), displayId: 2 },
+          ]);
+          expect(wireClient?.["requestManager"].getPendingCount()).toBe(0);
+        } else {
+          expect(commands).toEqual([
+            `shell "screencap ${targeted ? "-d 2 " : ""}-p /data/local/tmp/am-shot-command-5d347fd948b6.png && base64 /data/local/tmp/am-shot-command-5d347fd948b6.png && rm /data/local/tmp/am-shot-command-5d347fd948b6.png"`,
+          ]);
+        }
+      } finally {
+        instanceSpy?.mockRestore();
+        await wireClient?.close();
+        serverConfig.setAccessibilityAuditConfig(oldAudit);
+        execute.mockRestore();
+        capability.mockRestore();
+        if (oldPolicy === undefined) {
+          delete process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
+        } else {
+          process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = oldPolicy;
+        }
+        if (oldMode === undefined) {
+          delete process.env[OBSERVE_SETTLED_SCREENSHOT_ENV];
+        } else {
+          process.env[OBSERVE_SETTLED_SCREENSHOT_ENV] = oldMode;
+        }
+        displayTransitions.reset(android.deviceId);
+      }
+    },
+  );
 });

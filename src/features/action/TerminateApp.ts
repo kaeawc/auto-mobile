@@ -1,3 +1,7 @@
+import { toActionableError } from "../../models/ActionableError";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
@@ -106,7 +110,10 @@ export class TerminateApp extends BaseVisualChange {
       skipUiStability?: boolean;
       userId?: number;
     },
+    signal?: AbortSignal,
   ): Promise<TerminateAppResult> {
+    signal = combineWithAmbientAbort(signal);
+    throwIfAborted(signal);
     if (this.device.platform === "ios") {
       return this.executeiOS(packageName, options);
     }
@@ -122,20 +129,32 @@ export class TerminateApp extends BaseVisualChange {
             await new AndroidUserTargetResolver(this.adb).resolve({
               packageName,
               explicitUserId: options?.userId,
+              signal,
             })
           ).userId;
         });
+
+        throwIfAborted(signal);
 
         // Check if app is installed
         const isInstalled = await perf.track("checkInstalled", async () => {
           try {
             const a11y = AndroidCtrlProxyClient.getInstance(this.device);
             const result = await a11y.requestInstalledPackages(true, targetUserId, 3000);
+            throwIfAborted(signal);
             if (result.success && result.userId === targetUserId) {
               return result.packages.some((p) => p.packageName === packageName);
             }
           } catch (error) {
-            logger.debug(`[TerminateApp] CtrlProxy install check failed: ${error}`, error);
+            throwIfAborted(signal);
+            if (
+              error instanceof Error &&
+              (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE)
+            ) {
+              throw error;
+            }
+            // CtrlProxy is optional; a successful shell listing can still establish install state.
+            logger.debug("[TerminateApp] CtrlProxy install check failed", error);
           }
           try {
             const isInstalledCmd = `shell pm list packages --user ${targetUserId}`;
@@ -144,16 +163,23 @@ export class TerminateApp extends BaseVisualChange {
               undefined,
               undefined,
               true,
+              signal,
             );
+            throwIfAborted(signal);
             return packageListingContains(isInstalledOutput.stdout, packageName);
           } catch (error) {
-            // Both the CtrlProxy call and this shell fallback failed; treating the
-            // app as not installed is the safe default for a terminate/uninstall flow.
-            logger.debug(
-              `src/features/action/TerminateApp.ts install check failed: ${error}`,
+            throwIfAborted(signal);
+            if (
+              error instanceof Error &&
+              (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE)
+            ) {
+              throw error;
+            }
+            logger.warn("[TerminateApp] Android install check failed", error);
+            throw toActionableError(
               error,
+              `Could not determine whether ${packageName} is installed for Android user ${targetUserId}`,
             );
-            return false;
           }
         });
 
@@ -276,6 +302,9 @@ export class TerminateApp extends BaseVisualChange {
       const terminateLogic = async (): Promise<TerminateAppResult> => {
         const result = await terminateTransport();
         if (result.success) {
+          if (result.wasInstalled !== false) {
+            this.cacheInvalidator.invalidate(this.device);
+          }
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
             bundleId,
           );

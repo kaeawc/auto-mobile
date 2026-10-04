@@ -86,9 +86,9 @@ export class AndroidWakeAndUnlock {
       };
     }
 
-    // wm dismiss-keyguard fully dismisses a swipe lock and raises the bouncer on
-    // a secure lock (verified #4360). Do it first, then branch on the credential
-    // requirement.
+    // wm dismiss-keyguard dismisses a swipe lock and can raise a secure bouncer
+    // (#4360), but trust/biometrics may clear a secure keyguard too. Re-check
+    // before credential input rather than assuming the bouncer is still there.
     throwIfAborted(signal);
     await awaitWhileRequestIsLive(this.adb.executeCommand("shell wm dismiss-keyguard"), signal);
 
@@ -162,12 +162,15 @@ export class AndroidWakeAndUnlock {
       );
     }
 
-    const commands = await this.buildCredentialCommands(effectivePin, signal);
+    // Preserve cancellation during the API probe before the bouncer wait. The
+    // command builder below reuses this cached capability without another read.
+    await this.supportsKeyCombination(signal);
+    const preEntryResult = await this.checkCredentialTarget(wasAsleep, signal);
+    if (preEntryResult) {
+      return preEntryResult;
+    }
 
-    // The bouncer was raised by dismiss-keyguard; let it settle, type the
-    // credential, and submit.
-    throwIfAborted(signal);
-    await awaitWhileRequestIsLive(this.timer.sleep(BOUNCER_SETTLE_MS), signal);
+    const commands = await this.buildCredentialCommands(effectivePin, signal);
     for (const command of commands) {
       throwIfAborted(signal);
       await awaitWhileRequestIsLive(this.adb.executeCommand(command), signal);
@@ -215,6 +218,50 @@ export class AndroidWakeAndUnlock {
       unlocked: true,
       usedRecordedCredential,
     };
+  }
+
+  /** Return a result if credential input is unsafe or dismissal already unlocked it. */
+  private async checkCredentialTarget(
+    wasAsleep: boolean,
+    signal?: AbortSignal,
+  ): Promise<WakeAndUnlockResult | undefined> {
+    // Let dismiss-keyguard settle, then read the existing lock signals once
+    // before any credential input. `secure` only says a credential is set;
+    // it does not prove the keyguard still needs it (#9489).
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(this.timer.sleep(BOUNCER_SETTLE_MS), signal);
+    throwIfAborted(signal);
+    const lock = await awaitWhileRequestIsLive(this.adb.getDeviceLock(signal), signal);
+    if (lock && !lock.keyguardShowing) {
+      // Dismissal already unlocked it: no credential was used or verified.
+      return {
+        success: true,
+        platform: "android",
+        wasAsleep,
+        wasLocked: true,
+        secure: lock.secure,
+        unlocked: true,
+        usedRecordedCredential: false,
+      };
+    }
+    if (!lock || !lock.locked || lock.secure === false) {
+      // An unknown/occluded/non-secure keyguard is not a safe credential target.
+      logger.warn("[WakeAndUnlock] credential input skipped after keyguard re-check");
+      return {
+        success: false,
+        platform: "android",
+        wasAsleep,
+        wasLocked: true,
+        secure: lock?.secure,
+        unlocked: false,
+        usedRecordedCredential: false,
+        error: !lock
+          ? "Device lock state is unknown after dismiss-keyguard; credential input skipped"
+          : "Keyguard is not awaiting credential input after dismiss-keyguard; unlock not verified",
+      };
+    }
+
+    return undefined;
   }
 
   /** Expand a credential into its key-event commands, or throw if unmappable. */

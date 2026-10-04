@@ -87,6 +87,18 @@ class CtrlProxyHierarchyRequestTest {
       server.handleClientMessage(command, owner)
     }
 
+    fun cancelServiceScope() = scope.cancel()
+
+    fun markServerStopped() {
+      ReflectionHelpers.setField(server, "server", null)
+    }
+
+    fun assertNoReply(id: String) {
+      assertTrue(requester.messages.isEmpty())
+      assertTrue(peer.messages.isEmpty())
+      assertFalse(server.hasRequestOwner(id))
+    }
+
     fun assertError(id: String, message: String) {
       assertEquals(1, requester.messages.size)
       val frame = json.decodeFromString<ErrorResponse>(requester.messages.single())
@@ -158,15 +170,23 @@ class CtrlProxyHierarchyRequestTest {
   }
 
   @Test
-  fun `correlated stale request replies even when a newer event exists`() = runTest {
-    val fixture = Fixture(this) { null }
-    fixture.dispatch("stale_event", stale = true, since = -1)
-    runCurrent()
-    fixture.assertError("stale_event", HierarchyExtractErrorFrames.NULL_HIERARCHY_ERROR)
-  }
+  fun `correlated stale request skips extraction and releases owner when a newer event exists`() =
+    runTest {
+      var extractions = 0
+      val fixture =
+        Fixture(this) {
+          extractions++
+          null
+        }
+      // The initial last-event timestamp is zero, newer than this caller's timestamp.
+      fixture.dispatch("stale_event", stale = true, since = -1)
+      runCurrent()
+      assertEquals(0, extractions)
+      fixture.assertNoReply("stale_event")
+    }
 
   @Test
-  fun `successful extraction replies once only to the requester`() = runTest {
+  fun `successful correlated extraction broadcasts to both clients and releases owner`() = runTest {
     val fixture = Fixture(this) { ViewHierarchy(updatedAt = 0, packageName = "fixture") }
     fixture.dispatch("req_success")
     runCurrent()
@@ -176,25 +196,26 @@ class CtrlProxyHierarchyRequestTest {
       WebSocketServer.extractRequestId(fixture.requester.messages.single()),
     )
     assertTrue(fixture.requester.messages.single().contains("\"type\":\"hierarchy_update\""))
-    assertTrue(fixture.peer.messages.isEmpty())
+    assertEquals(fixture.requester.messages, fixture.peer.messages)
     assertFalse(fixture.server.hasRequestOwner("req_success"))
     assertTrue(fixture.debouncer.hierarchyFlow.replayCache.isEmpty())
   }
 
   @Test
-  fun `successful stale extraction replies once only to its requester`() = runTest {
-    val fixture = Fixture(this) { ViewHierarchy(updatedAt = 0, packageName = "fixture") }
-    fixture.dispatch("stale_success", stale = true)
-    runCurrent()
-    assertEquals(1, fixture.requester.messages.size)
-    assertEquals(
-      "stale_success",
-      WebSocketServer.extractRequestId(fixture.requester.messages.single()),
-    )
-    assertTrue(fixture.requester.messages.single().contains("\"type\":\"hierarchy_update\""))
-    assertTrue(fixture.peer.messages.isEmpty())
-    assertFalse(fixture.server.hasRequestOwner("stale_success"))
-  }
+  fun `successful correlated stale extraction broadcasts to both clients and releases owner`() =
+    runTest {
+      val fixture = Fixture(this) { ViewHierarchy(updatedAt = 0, packageName = "fixture") }
+      fixture.dispatch("stale_success", stale = true)
+      runCurrent()
+      assertEquals(1, fixture.requester.messages.size)
+      assertEquals(
+        "stale_success",
+        WebSocketServer.extractRequestId(fixture.requester.messages.single()),
+      )
+      assertTrue(fixture.requester.messages.single().contains("\"type\":\"hierarchy_update\""))
+      assertEquals(fixture.requester.messages, fixture.peer.messages)
+      assertFalse(fixture.server.hasRequestOwner("stale_success"))
+    }
 
   @Test
   fun `uncorrelated successful extraction retains broadcast routing`() = runTest {
@@ -207,41 +228,88 @@ class CtrlProxyHierarchyRequestTest {
   }
 
   @Test
-  fun `stale extraction cancellation produces no error reply`() = runTest {
+  fun `stale extraction cancellation releases owner without a reply`() = runTest {
     val fixture = Fixture(this) { throw CancellationException("cancelled") }
     fixture.dispatch("stale_cancel", stale = true)
     runCurrent()
-    assertTrue(fixture.requester.messages.isEmpty())
-    assertTrue(fixture.peer.messages.isEmpty())
+    fixture.assertNoReply("stale_cancel")
   }
 
   @Test
-  fun `cooperative extraction cancellation propagates without a reply`() = runTest {
-    val cancellation = CancellationException("command cancelled")
-    val fixture = Fixture(this) { throw cancellation }
-    try {
-      fixture.proxy.requestHierarchy(false, "req_cancel")
-      error("expected cancellation")
-    } catch (actual: CancellationException) {
-      assertSame(cancellation, actual)
+  fun `cooperative extraction cancellation propagates and releases owner without a reply`() =
+    runTest {
+      val cancellation = CancellationException("command cancelled")
+      val fixture = Fixture(this) { throw cancellation }
+      fixture.server.registerRequestOwner("req_cancel", fixture.owner)
+      try {
+        fixture.proxy.requestHierarchy(false, "req_cancel")
+        error("expected cancellation")
+      } catch (actual: CancellationException) {
+        assertSame(cancellation, actual)
+      }
+      runCurrent()
+      fixture.assertNoReply("req_cancel")
     }
-    runCurrent()
-    assertTrue(fixture.requester.messages.isEmpty())
-    assertTrue(fixture.peer.messages.isEmpty())
-  }
 
   @Test
-  fun `command cancelled during a null extraction sends no error`() = runTest {
+  fun `command cancelled during a null extraction releases owner without a reply`() = runTest {
     lateinit var command: Job
     val fixture =
       Fixture(this) {
         command.cancel()
         null
       }
+    fixture.server.registerRequestOwner("req_cancel_null", fixture.owner)
     command = launch { fixture.proxy.requestHierarchy(false, "req_cancel_null") }
     runCurrent()
     assertTrue(command.isCancelled)
-    assertTrue(fixture.requester.messages.isEmpty())
-    assertTrue(fixture.peer.messages.isEmpty())
+    fixture.assertNoReply("req_cancel_null")
+  }
+
+  @Test
+  fun `stale launch cancelled before extraction starts releases owner without a reply`() = runTest {
+    var extractions = 0
+    val fixture =
+      Fixture(this) {
+        extractions++
+        null
+      }
+    fixture.server.registerRequestOwner("stale_cancel_launch", fixture.owner)
+    fixture.proxy.requestHierarchyIfStale(Long.MAX_VALUE, "stale_cancel_launch")
+    fixture.cancelServiceScope()
+    runCurrent()
+    assertEquals(0, extractions)
+    fixture.assertNoReply("stale_cancel_launch")
+  }
+
+  @Test
+  fun `successful extraction releases owner when the server is not running`() = runTest {
+    val fixture = Fixture(this) { ViewHierarchy(updatedAt = 0, packageName = "fixture") }
+    // Model an admitted request: the queue skips new commands once the server is stopped.
+    fixture.server.registerRequestOwner("req_stopped_success", fixture.owner)
+    fixture.markServerStopped()
+    fixture.proxy.requestHierarchy(false, "req_stopped_success")
+    runCurrent()
+    fixture.assertNoReply("req_stopped_success")
+  }
+
+  @Test
+  fun `null extraction releases owner when the server is not running`() = runTest {
+    val fixture = Fixture(this) { null }
+    fixture.server.registerRequestOwner("req_stopped_null", fixture.owner)
+    fixture.markServerStopped()
+    fixture.proxy.requestHierarchy(false, "req_stopped_null")
+    runCurrent()
+    fixture.assertNoReply("req_stopped_null")
+  }
+
+  @Test
+  fun `thrown extraction releases owner when the server is not running`() = runTest {
+    val fixture = Fixture(this) { error("tree unavailable") }
+    fixture.server.registerRequestOwner("req_stopped_throw", fixture.owner)
+    fixture.markServerStopped()
+    fixture.proxy.requestHierarchy(false, "req_stopped_throw")
+    runCurrent()
+    fixture.assertNoReply("req_stopped_throw")
   }
 }

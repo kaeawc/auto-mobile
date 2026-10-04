@@ -708,6 +708,13 @@ class WebSocketServer(
   internal fun hasRequestOwner(requestId: String): Boolean =
     synchronized(connections) { requestConnections.containsKey(requestId) }
 
+  /** Releases a hierarchy owner after a broadcast success, stale skip, or cancellation. */
+  internal fun releaseRequestOwner(requestId: String?) {
+    if (requestId != null) {
+      synchronized(connections) { requestConnections.remove(requestId) }
+    }
+  }
+
   /**
    * Sends a correlated response only to its originating client.
    *
@@ -866,10 +873,11 @@ class WebSocketServer(
   }
 
   /**
-   * True when [request]'s normal completion echoes its `requestId` back over the wire so the owner
-   * mapping recorded for it can later be cleared. Hierarchy requests and fire-and-forget settings /
-   * recording commands are uncorrelated on success, so recording them would leak until disconnect.
-   * See [handleClientMessage], #3190, and #6621.
+   * True when [request] retains an owner for terminal response routing. Hierarchy errors route to
+   * the owner; hierarchy successes broadcast to all clients and explicitly release the owner, as do
+   * stale skips and cancellations. Fire-and-forget settings / recording commands have no terminal
+   * response, so recording them would leak until disconnect. See [handleClientMessage], #3190,
+   * and #6621.
    */
   internal fun recordsRequestOwner(request: ProtocolRequest): Boolean =
     when (request) {
@@ -967,13 +975,10 @@ class WebSocketServer(
       }
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
-    // Only record owner mappings for request types whose normal completion carries the same
-    // requestId back over the wire (raw or typed responses route to and clear the entry).
-    // Hierarchy requests and the fire-and-forget settings / recording commands do not echo it, so
-    // their entries would remain until disconnect and leave a stale id available for later
-    // same-id error misrouting (#3190, #6621; follow-up to #3159). Their correlated error path (a
-    // handler throw or queue-full rejection) uses the origin context to call `sendErrorResponse`
-    // directly, preserving targeted delivery without retaining an owner mapping.
+    // Owned terminal replies route to and clear the entry. Hierarchy errors use that routing;
+    // hierarchy successes broadcast to all clients and explicitly release the entry, as do stale
+    // skips and cancellations. Fire-and-forget settings / recording commands retain no owner
+    // (#3190, #6621); their handler errors and queue-full rejections target the origin directly.
     val recordsOwner = recordsRequestOwner(request)
     if (recordsOwner) {
       request.requestId?.let { requestId ->
@@ -982,7 +987,7 @@ class WebSocketServer(
     }
     // The read loop enqueues; one per-client FIFO worker executes commands in wire order.
     // Owned replies retain atomic owner routing; unowned errors target this origin directly and
-    // successful unowned responses retain ordinary broadcasting (including hierarchy frames).
+    // successful hierarchy frames and unowned responses retain ordinary broadcasting.
     val readLoopLifetime = currentCoroutineContext().job
     val origin =
       object : QueuedCommandOrigin {

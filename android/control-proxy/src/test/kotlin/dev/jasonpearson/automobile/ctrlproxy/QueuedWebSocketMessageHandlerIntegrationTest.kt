@@ -557,6 +557,42 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
     }
   }
 
+  @Test
+  fun `owned hierarchy queue full rejection targets requester and releases owner`() = runTest {
+    val held = CompletableDeferred<Unit>()
+    val fixture =
+      RoutingFixture(
+        this,
+        handler { request ->
+          if (request.requestId == "held") held.await()
+          CorrelatedErrorReporter.frame(request.requestId, "reply")
+        },
+        capacity = 1,
+      )
+    try {
+      fixture.dispatch(RequestHierarchy(requestId = "held"))
+      runCurrent()
+      fixture.dispatch(RequestHierarchy(requestId = "pending"))
+      fixture.dispatch(RequestHierarchy(requestId = "rejected"))
+      runCurrent()
+      assertEquals(1, fixture.first.frames.size)
+      assertEquals("rejected", WebSocketServer.extractRequestId(fixture.first.frames.single()))
+      assertTrue(fixture.first.frames.single().contains("ctrlproxy_busy"))
+      assertTrue(fixture.second.frames.isEmpty())
+      assertFalse(fixture.server.hasRequestOwner("rejected"))
+      assertTrue(fixture.server.hasRequestOwner("held"))
+      assertTrue(fixture.server.hasRequestOwner("pending"))
+      held.complete(Unit)
+      runCurrent()
+      assertFalse(fixture.server.hasRequestOwner("held"))
+      assertFalse(fixture.server.hasRequestOwner("pending"))
+      assertTrue(fixture.second.frames.isEmpty())
+    } finally {
+      held.complete(Unit)
+      fixture.close()
+    }
+  }
+
   // Fails on base: yes (EXTERNAL_ERROR broadcasts the unowned busy rejection to the peer).
   @Test
   fun `loopback unowned queue full rejection targets origin only`() = runTest {
@@ -575,12 +611,12 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         },
         capacity = 1,
       ) { fixture ->
-        send(fixture.first, RequestHierarchy(requestId = "held"))
+        send(fixture.first, SetHierarchyInterval(requestId = "held"))
         started.await()
         assertEquals("held", fixture.accepted.receive())
-        send(fixture.first, RequestHierarchy(requestId = "pending"))
+        send(fixture.first, SetHierarchyInterval(requestId = "pending"))
         assertEquals("pending", fixture.accepted.receive())
-        send(fixture.first, RequestHierarchy(requestId = "rejected"))
+        send(fixture.first, SetHierarchyInterval(requestId = "rejected"))
         val rejection = fixture.first.incoming.receive() as Frame.Text
         assertEquals("rejected", requestId(rejection))
         assertTrue(rejection.readText().contains("ctrlproxy_busy"))

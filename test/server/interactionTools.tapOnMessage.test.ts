@@ -1,3 +1,11 @@
+import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
+import { TapOnElement } from "../../src/features/action/TapOnElement";
+import { DefaultElementParser } from "../../src/features/utility/ElementParser";
+import { FakeElementSelector } from "../fakes/FakeElementSelector";
+import { imeOcclusionHierarchy } from "../fixtures/observe/imeOcclusion";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import type { ObserveResult } from "../../src/models";
 import { warmedTests } from "../helpers/interactionCancellation";
 import { afterEach, describe, expect } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -212,6 +220,53 @@ describe("tapOnHandler (registered handler wiring)", () => {
     ToolRegistry.clearTools();
     registerInteractionTools();
     expect(ToolRegistry.getTool("tapOn")?.deviceAwareHandler).toBe(tapOnHandler);
+  });
+
+  test("IME-occluded Android focus keeps the tapOn MCP failure payload", async () => {
+    const device: BootedDevice = { name: "Pixel", deviceId: "fake", platform: "android" };
+    const hierarchy = imeOcclusionHierarchy();
+    const element = new DefaultElementParser()
+      .flattenViewHierarchy(hierarchy, { includeWindows: true })
+      .find(({ element }) => element.text === "Continue as Guest")!.element;
+    element.class = "android.widget.EditText";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const tap = new TapOnElement(device, adb, {
+      timer,
+      elementSelector: new FakeElementSelector(element),
+      tapStrategy: new FakeTapStrategy(),
+      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+    });
+    const observation: ObserveResult = {
+      observationId: "occluded-focus",
+      updatedAt: 1,
+      screenSize: { width: 400, height: 240 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: hierarchy,
+    };
+    tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
+    const error =
+      'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';
+    setTapOnElementFactory(() => tap);
+    const response = await tapOnHandler(device, {
+      selector: { text: "Continue as Guest" },
+      action: "focus",
+      platform: "android",
+    });
+    expect(response.isError).toBe(true);
+    const payload = {
+      message: `Failed to tap: ${error}`,
+      observation: undefined,
+      success: false,
+      action: "tap",
+      error,
+      searchUntil: { durationMs: 0, requestCount: 0, changeCount: 0 },
+      element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+    };
+    expect(response.structuredContent).toEqual(payload);
+    expect(JSON.parse(response.content[0].text)).toEqual(JSON.parse(JSON.stringify(payload)));
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   const fakeResult = (overrides: Partial<TapOnElementResult>): TapOnElementResult =>

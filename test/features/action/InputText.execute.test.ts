@@ -1,3 +1,8 @@
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
+import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { FakeElementSelector } from "../../fakes/FakeElementSelector";
+import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -148,6 +153,52 @@ describe("InputText.execute", () => {
       { text: "hello", resourceId: undefined },
     ]);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("IME-occluded Android selector focus keeps the InputText failure shape", async () => {
+    const device = androidDevice;
+    const hierarchy = imeOcclusionHierarchy();
+    const element = new DefaultElementParser()
+      .flattenViewHierarchy(hierarchy, { includeWindows: true })
+      .find(({ element }) => element.text === "Continue as Guest")!.element;
+    element.class = "android.widget.EditText";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const tap = new TapOnElement(device, adb, {
+      timer,
+      elementSelector: new FakeElementSelector(element),
+      tapStrategy: new FakeTapStrategy(),
+      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+    });
+    const observation: ObserveResult = {
+      observationId: "occluded-focus",
+      updatedAt: 1,
+      screenSize: { width: 400, height: 240 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: hierarchy,
+    };
+    tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
+    const error =
+      'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';
+    const input = new InputText(device, adb, undefined, timer, () => ({
+      focus: async (selector, signal) => {
+        const result = await tap.execute({ ...selector, action: "focus" }, undefined, signal);
+        return {
+          success: result.success,
+          error: result.error,
+          focusVerified: result.focusVerified === true,
+          matchedId: result.selectedElement?.resourceId,
+          matchedText: result.selectedElement?.text,
+        };
+      },
+    }));
+    expect(
+      await input.execute("secret", undefined, false, "a11y", undefined, {
+        text: "Continue as Guest",
+      }),
+    ).toEqual({ success: false, text: "secret", error, method: "a11y" });
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   // A `selector` focuses the field first, collapsing the mandatory focus-then-type

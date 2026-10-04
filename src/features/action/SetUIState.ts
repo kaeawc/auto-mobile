@@ -7,12 +7,16 @@ import { SetUIStateOptions, FieldSpec, ElementSelector } from "../../models/SetU
 import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { InputTextMode } from "./InputText";
+import type { Keyboard } from "./Keyboard";
+import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
+import { ActionableError } from "../../models/ActionableError";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 
@@ -36,6 +40,7 @@ interface TapOnElementLike {
     },
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<{
     success: boolean;
     element?: Element;
@@ -92,6 +97,7 @@ interface SwipeOnLike {
  * Dependencies that can be injected for testing
  */
 interface SetUIStateDependencies {
+  keyboard?: Pick<Keyboard, "execute">;
   tapOnElement?: TapOnElementLike;
   inputText?: InputTextLike;
   clearText?: ClearTextLike;
@@ -116,6 +122,10 @@ interface FieldVerificationOutcome {
   observation?: ObserveResult;
   error?: string;
   stopRetrying?: boolean;
+}
+
+interface TextFocusRecovery {
+  occlusionError?: KeyboardOcclusionError;
 }
 
 const DEFAULT_MAX_RETRIES = 3;
@@ -610,7 +620,7 @@ export class SetUIState extends BaseVisualChange {
 
         // Fail fast on failure
         if (!result.success) {
-          logger.warn(
+          logger.debug(
             `[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`,
           );
           const notAttemptedReason = `Not attempted: setUIState stopped after field ${this.describeSelector(fieldSpec.selector)} failed`;
@@ -1060,6 +1070,7 @@ export class SetUIState extends BaseVisualChange {
     let lastError: string | undefined;
     let fieldType: FieldType | undefined;
     let element = initialElement;
+    const focusRecovery: TextFocusRecovery = {};
 
     while (attempts < DEFAULT_MAX_RETRIES) {
       signal?.throwIfAborted();
@@ -1098,12 +1109,12 @@ export class SetUIState extends BaseVisualChange {
           fieldType,
           progress,
           signal,
+          focusRecovery,
         );
 
-        // Retrying cannot reclassify an element that is not an editable field --
-        // the type comes from the element itself, so the remaining attempts would
-        // fail identically and only cost round trips (#4242).
-        if (!applyResult.success && applyResult.unclassifiable) {
+        // An unclassified field or exhausted IME recovery cannot benefit from
+        // repeating the same operation (#4242, #9258).
+        if (applyResult.unclassifiable || applyResult.stopRetrying) {
           lastError = applyResult.error;
           break;
         }
@@ -1361,6 +1372,63 @@ export class SetUIState extends BaseVisualChange {
   }
 
   /**
+   * Make one Android IME recovery attempt per field, preserving the original refusal.
+   */
+  private async focusTextField(
+    element: Element,
+    fieldSpec: FieldSpec,
+    recovery: TextFocusRecovery,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): ReturnType<TapOnElementLike["execute"]> {
+    const focus = (target: Element) =>
+      this.getTapOnElement().execute(
+        target["resource-id"]
+          ? { elementId: target["resource-id"], action: "focus" }
+          : this.buildTapOptions(fieldSpec.selector, "focus"),
+        progress,
+        signal,
+        { throwOnKeyboardOcclusion: true },
+      );
+    try {
+      return await focus(element);
+    } catch (error) {
+      throwIfAborted(signal);
+      if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
+        // Preserve the field-error contract while keeping thrown errors structured.
+        throw error instanceof ActionableError
+          ? error
+          : new ActionableError(errorMessage(error), { cause: error });
+      }
+      if (recovery.occlusionError) {
+        logger.warn("[SetUIState] IME recovery failed", error);
+        throw recovery.occlusionError;
+      }
+      recovery.occlusionError = error;
+      logger.debug("[SetUIState] Text field is covered by the IME; closing the keyboard", error);
+      try {
+        const dismissal = await this.getKeyboard().execute("close", signal);
+        throwIfAborted(signal);
+        if (!dismissal.success) {
+          throw error;
+        }
+        const refreshed = await this.refreshFieldElement(fieldSpec, element, signal);
+        throwIfAborted(signal);
+        const result = await focus(refreshed);
+        throwIfAborted(signal);
+        if (!result.success || result.focusVerified !== true) {
+          throw error;
+        }
+        return result;
+      } catch (recoveryError) {
+        throwIfAborted(signal);
+        logger.warn("[SetUIState] IME recovery failed", recoveryError);
+        throw error;
+      }
+    }
+  }
+
+  /**
    * Apply value to field based on type
    */
   private async applyFieldValue(
@@ -1369,7 +1437,13 @@ export class SetUIState extends BaseVisualChange {
     fieldType: FieldType,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; unclassifiable?: boolean }> {
+    focusRecovery: TextFocusRecovery = {},
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    unclassifiable?: boolean;
+    stopRetrying?: boolean;
+  }> {
     const tapOnElement = this.getTapOnElement();
     const inputText = this.getInputText();
     const clearText = this.getClearText();
@@ -1387,10 +1461,13 @@ export class SetUIState extends BaseVisualChange {
           // previously focused field, owns input before ClearText can mutate it.
           logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
           const tapStart = Date.now();
-          const focusOptions = element["resource-id"]
-            ? { elementId: element["resource-id"], action: "focus" }
-            : this.buildTapOptions(fieldSpec.selector, "focus");
-          const tapResult = await tapOnElement.execute(focusOptions, progress, signal);
+          const tapResult = await this.focusTextField(
+            element,
+            fieldSpec,
+            focusRecovery,
+            progress,
+            signal,
+          );
           signal?.throwIfAborted();
           logger.debug(
             `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
@@ -1518,6 +1595,7 @@ export class SetUIState extends BaseVisualChange {
       return {
         success: false,
         error: errorMessage(error),
+        stopRetrying: error instanceof KeyboardOcclusionError,
       };
     }
   }
@@ -1636,6 +1714,14 @@ export class SetUIState extends BaseVisualChange {
   }
 
   // Dependency getters with lazy initialization
+
+  private getKeyboard(): Pick<Keyboard, "execute"> {
+    if (this.dependencies.keyboard) {
+      return this.dependencies.keyboard;
+    }
+    const { Keyboard } = require("./Keyboard");
+    return new Keyboard(this.device, { create: () => this.adb }, undefined, this.timer);
+  }
 
   private getTapOnElement(): TapOnElementLike {
     if (this.dependencies.tapOnElement) {

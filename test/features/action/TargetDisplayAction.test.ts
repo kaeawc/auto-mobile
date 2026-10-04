@@ -49,6 +49,10 @@ import {
 import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
 import { FakeScreenshotBackoffScheduler } from "../../fakes/FakeScreenshotBackoffScheduler";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
+import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { runWithSelectedDisplayPin } from "../../../src/features/observe/SessionDisplayContext";
 
 const android = {
   deviceId: "target-display-android",
@@ -1086,6 +1090,102 @@ describe("explicit action display", () => {
       executor.getExecutedCommands().filter((command) => command.includes("touchscreen")),
     ).toEqual([]);
   });
+
+  for (const extra of [
+    { focusFirst: true },
+    { subtext: { text: "Link" } },
+    { accessibilityLink: "Link" },
+  ] satisfies Array<Partial<TapOnElementOptions>>) {
+    for (const route of [
+      "sole pin",
+      "other panel pin",
+      "explicit display",
+      "nested explicit display",
+      "no pin",
+    ] as const) {
+      test(`session pin options: tapOn ${Object.keys(extra)[0]} with ${route}`, async () => {
+        const target: BootedDevice =
+          route === "sole pin"
+            ? {
+                ...android,
+                displays: { panels: android.displays!.panels.slice(0, 1), postures: [] },
+              }
+            : android;
+        const observation = screen("internal");
+        observation.viewHierarchy!.hierarchy = {
+          node: {
+            text: "Settings",
+            "resource-id": "owner",
+            clickable: true,
+            bounds: "[20,30][80,90]",
+          },
+        };
+        const ctrl = new FakeCtrlProxy();
+        const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+          // @ts-expect-error -- Fake supplies the client methods exercised by this test.
+          ctrl,
+        );
+        const action = new TapOnElement(target, adb(), {
+          timer: autoTimer(),
+          tapStrategy: new FakeTapStrategy(),
+          accessibilityDetector: new FakeAccessibilityDetector(),
+          selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+          hierarchyCapture: new FakeHierarchyCapture(() => observation.viewHierarchy!),
+        });
+        const observe = new FakeObserveScreen();
+        observe.setObserveResult(observation);
+        action.observeScreen = observe;
+        const tap = spyOn(action, "executeAndroidTap").mockResolvedValue(undefined);
+        const capture = spyOn(action, "prepareSelectionCapture").mockResolvedValue(null);
+        const link = spyOn(ctrl, "requestActivateAccessibilityLink");
+        action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
+        const explicit = route.includes("explicit");
+        const pin = route === "sole pin" ? "internal" : "external";
+        try {
+          const run = () =>
+            runSessionDisplayPin({
+              name: "tapOn",
+              acceptsDisplay: true,
+              device: target,
+              sessionUuid: "s1",
+              store: {
+                getDeviceForSession: () => target.deviceId,
+                getDisplayPin: () => (route === "no pin" ? undefined : pin),
+              },
+              args: explicit ? { display: "external" } : {},
+              invoke: (args) =>
+                action.execute({
+                  action: "tap",
+                  ...(extra.accessibilityLink ? {} : { text: "Settings" }),
+                  ...extra,
+                  display: typeof args.display === "string" ? args.display : undefined,
+                }),
+            });
+          const result = await (route === "nested explicit display"
+            ? runWithSelectedDisplayPin({ pin, inventory: target.displays }, run)
+            : run());
+          if (route === "sole pin" || route === "no pin") {
+            expect(result).toMatchObject({ success: true });
+            expect(extra.focusFirst ? tap : link).toHaveBeenCalledTimes(1);
+          } else {
+            expect(result).toMatchObject({
+              success: false,
+              error: explicit
+                ? `${Object.keys(extra)[0]} is not supported with \`display\` yet`
+                : `${Object.keys(extra)[0]} is not supported while the session is pinned to display "external". Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), then retry.`,
+            });
+            expect(tap).not.toHaveBeenCalled();
+            expect(link).not.toHaveBeenCalled();
+          }
+        } finally {
+          tap.mockRestore();
+          capture.mockRestore();
+          link.mockRestore();
+          client.mockRestore();
+        }
+      });
+    }
+  }
 
   test("tapOn rejects display options it cannot honor before dispatch", async () => {
     const unsupported: Array<Partial<TapOnElementOptions>> = [

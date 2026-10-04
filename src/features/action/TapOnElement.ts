@@ -1,5 +1,6 @@
 import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
+import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
@@ -3661,7 +3662,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           ["subtext", "accessibilityLink", "focusFirst", "screenReaderNavigation"] as const
         ).find((key) => options[key] !== undefined);
         if (unsupported) {
-          throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
+          throw new ActionableError(unsupportedDisplayOptionMessage(unsupported));
         }
         if (options.ensureTap) {
           options = { ...options, preTapStability: true, retryIfNoChange: true };

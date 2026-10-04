@@ -27,17 +27,25 @@ final class FileEventPersistence: EventPersisting, Sendable {
     private let directory: URL
     private let lock = OSAllocatedUnfairLock<Void>()
     private let dateProvider: DateProvider
+    private let maxPendingBatches: Int
     private let readData: @Sendable (URL) throws -> Data
 
+    /// The pending batch count defaults to 100 and is clamped to at least one.
     init(
         directory: URL,
         dateProvider: DateProvider = SystemDateProvider(),
+        maxPendingBatches: Int = 100,
         readData: @escaping @Sendable (URL) throws -> Data = { try Data(contentsOf: $0) }
     ) {
         self.directory = directory
         self.dateProvider = dateProvider
         self.readData = readData
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        self.maxPendingBatches = max(1, maxPendingBatches)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            InternalLogger.warning("Event persistence directory creation failed: \(error.localizedDescription)")
+        }
     }
 
     func persist(_ events: [any SdkEvent]) -> String? {
@@ -56,8 +64,10 @@ final class FileEventPersistence: EventPersisting, Sendable {
             guard let data = try? JSONEncoder().encode(persisted) else { return nil }
             do {
                 try data.write(to: fileURL, options: .atomic)
+                trimPending(keeping: fileURL.lastPathComponent)
                 return batchId
             } catch {
+                InternalLogger.warning("Event batch persistence failed: \(error.localizedDescription)")
                 return nil
             }
         }
@@ -65,18 +75,9 @@ final class FileEventPersistence: EventPersisting, Sendable {
 
     func loadPending() -> [(batchId: String, events: [any SdkEvent])] {
         lock.withLock {
-            guard let files = try? FileManager.default.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil
-            )
-            .filter({ $0.lastPathComponent.hasPrefix("events_") && $0.pathExtension == "json" })
-            .sorted(by: { file1, file2 in
-                let ts1 = Self.extractTimestamp(from: file1.lastPathComponent) ?? 0
-                let ts2 = Self.extractTimestamp(from: file2.lastPathComponent) ?? 0
-                if ts1 != ts2 { return ts1 < ts2 }
-                return file1.lastPathComponent < file2.lastPathComponent
-            })
-            else { return [] }
+            // Apply the cap before replay, including backlogs written by older SDKs.
+            trimPending(keeping: nil)
+            let files = orderedPendingFiles().suffix(maxPendingBatches)
 
             let decoder = JSONDecoder()
             return files.compactMap { fileURL in
@@ -135,6 +136,37 @@ final class FileEventPersistence: EventPersisting, Sendable {
     }
 
     // MARK: - Private
+
+    /// Must be called under lock; shared ordering keeps eviction and replay consistent.
+    private func orderedPendingFiles() -> [URL] {
+        do {
+            return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.hasPrefix("events_") && $0.pathExtension == "json" }
+                .sorted { first, second in
+                    let firstTimestamp = Self.extractTimestamp(from: first.lastPathComponent) ?? 0
+                    let secondTimestamp = Self.extractTimestamp(from: second.lastPathComponent) ?? 0
+                    if firstTimestamp != secondTimestamp { return firstTimestamp < secondTimestamp }
+                    return first.lastPathComponent < second.lastPathComponent
+                }
+        } catch {
+            InternalLogger.warning("Pending event batch listing failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    private func trimPending(keeping justWrittenName: String?) {
+        let files = orderedPendingFiles()
+        var excess = files.count - maxPendingBatches
+        for file in files where file.lastPathComponent != justWrittenName {
+            guard excess > 0 else { break }
+            do {
+                try FileManager.default.removeItem(at: file)
+                excess -= 1
+            } catch {
+                InternalLogger.warning("Pending event batch eviction failed: \(error.localizedDescription)")
+            }
+        }
+    }
 
     private static func extractTimestamp(from filename: String) -> Double? {
         let batchId = extractBatchId(from: filename)

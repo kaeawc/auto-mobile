@@ -1,12 +1,13 @@
-import Foundation
 @testable import AutoMobileSDK
+import Foundation
+import os
 
 // MARK: - FakeTimer
 
 final class FakeTimer: TimerScheduling, @unchecked Sendable {
     private let lock = NSLock()
     private var _block: (@Sendable () -> Void)?
-    private var _intervalMs: Int = 0
+    private var _intervalMs = 0
     private var _cancelled = false
 
     var intervalMs: Int {
@@ -288,15 +289,15 @@ final class FakeDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     func getDatabases() -> [DatabaseDescriptor] { databases }
     func getTables(databasePath: String) -> [String] { tables[databasePath] ?? [] }
 
-    func getTableData(databasePath: String, table: String, limit: Int, offset: Int) -> TableDataResult {
+    func getTableData(databasePath _: String, table _: String, limit _: Int, offset _: Int) -> TableDataResult {
         TableDataResult(columns: [], rows: [], totalRows: 0)
     }
 
-    func getTableStructure(databasePath: String, table: String) -> TableStructureResult {
+    func getTableStructure(databasePath _: String, table _: String) -> TableStructureResult {
         TableStructureResult(columns: [])
     }
 
-    func executeSQL(databasePath: String, query: String) -> SQLExecutionResult {
+    func executeSQL(databasePath _: String, query _: String) -> SQLExecutionResult {
         SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0)
     }
 }
@@ -390,7 +391,7 @@ final class FakeEventPersistence: EventPersisting, @unchecked Sendable {
         lock.unlock()
     }
 
-    func cleanup(maxAgeDays: Int) {
+    func cleanup(maxAgeDays _: Int) {
         lock.lock()
         _cleanupCallCount += 1
         lock.unlock()
@@ -413,5 +414,107 @@ final class FakeEventBroadcaster: EventBroadcasting, @unchecked Sendable {
         lock.lock()
         _batches.append((bundleId: bundleId, events: events))
         lock.unlock()
+    }
+}
+
+// MARK: - Event delivery fakes
+
+final class ResolverResult: Sendable {
+    private struct State: Sendable {
+        var url: URL?
+        var completed = false
+    }
+
+    private let lock = OSAllocatedUnfairLock(initialState: State())
+    var url: URL? { lock.withLock { $0.url } }
+    var completed: Bool { lock.withLock { $0.completed } }
+
+    func set(_ url: URL?) {
+        lock.withLock {
+            $0.url = url
+            $0.completed = true
+        }
+    }
+}
+
+final class FakeCtrlProxyHealthProbe: CtrlProxyHealthProbing, Sendable {
+    private struct State: Sendable {
+        var responses: [Int: CtrlProxyHealthResponse] = [:]
+        var ports: [Int] = []
+        var deferred = false
+        var pending: [@Sendable () -> Void] = []
+    }
+
+    private let lock = OSAllocatedUnfairLock(initialState: State())
+    var ports: [Int] { lock.withLock { $0.ports } }
+
+    init(deferred: Bool = false) {
+        lock.withLock { $0.deferred = deferred }
+    }
+
+    func completeNext() {
+        let work = lock.withLock { $0.pending.isEmpty ? nil : $0.pending.removeFirst() }
+        work?()
+    }
+
+    func respond(port: Int, deviceId: String?, statusCode: Int = 200) {
+        let identity = deviceId.map { ",\"deviceId\":\"\($0)\"" } ?? ""
+        let data = Data("{\"status\":\"ok\",\"port\":\(port)\(identity)}".utf8)
+        setResponse(port: port, response: CtrlProxyHealthResponse(statusCode: statusCode, data: data))
+    }
+
+    func setResponse(port: Int, response: CtrlProxyHealthResponse?) {
+        lock.withLock { $0.responses[port] = response }
+    }
+
+    func health(at url: URL, completion: @escaping @Sendable (CtrlProxyHealthResponse?) -> Void) {
+        let work = lock.withLock { state -> (@Sendable () -> Void)? in
+            let port = url.port ?? 0
+            state.ports.append(port)
+            let response = state.responses[port]
+            let work: @Sendable () -> Void = { completion(response) }
+            if state.deferred {
+                state.pending.append(work)
+                return nil
+            }
+            return work
+        }
+        work?()
+    }
+}
+
+final class FakeEventDeliveryExecutor: Sendable {
+    private let lock = OSAllocatedUnfairLock(initialState: [@Sendable () -> Void]())
+    var count: Int { lock.withLock { $0.count } }
+
+    func enqueue(_ work: @escaping @Sendable () -> Void) {
+        lock.withLock { $0.append(work) }
+    }
+
+    func runNext() {
+        let work = lock.withLock { $0.isEmpty ? nil : $0.removeFirst() }
+        work?()
+    }
+}
+
+final class FakeSdkEventTransport: SdkEventPosting, Sendable {
+    private struct State: Sendable {
+        var urls: [URL] = []
+        var completions: [@Sendable (Int) -> Void] = []
+    }
+
+    private let lock = OSAllocatedUnfairLock(initialState: State())
+    var urls: [URL] { lock.withLock { $0.urls } }
+
+    func post(url: URL, data _: Data, completion: @escaping @Sendable (Int) -> Void) {
+        lock.withLock {
+            $0.urls.append(url)
+            $0.completions.append(completion)
+        }
+    }
+
+    func completeNext(statusCode: Int) {
+        let completion = lock.withLock { $0.completions.isEmpty ? nil : $0.completions.removeFirst() }
+        completion?(statusCode)
     }
 }

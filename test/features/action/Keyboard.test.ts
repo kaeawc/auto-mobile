@@ -70,12 +70,12 @@ describe("Keyboard", () => {
 
   // The a11y service reports window metadata, but none of it is an IME window —
   // yet an app control exposes a content-desc the heuristic matches ("Delete").
-  // The IME is genuinely closed; close() must not send Back (#5899).
-  const heuristicFalsePositiveHierarchy = (): ViewHierarchyResult => ({
+  // The IME is genuinely closed; detect/open must agree and close must not send Back.
+  const heuristicFalsePositiveHierarchy = (contentDesc = "Delete"): ViewHierarchyResult => ({
     hierarchy: {
       node: {
         $: {
-          "content-desc": "Delete",
+          "content-desc": contentDesc,
         },
       },
     },
@@ -127,15 +127,87 @@ describe("Keyboard", () => {
     expect(result.bounds).toEqual([{ left: 0, top: 1200, right: 1080, bottom: 1920 }]);
   });
 
-  test("detect falls back to hierarchy when window info is missing", async () => {
-    fakeHierarchy.setResults([keyboardNodeHierarchy()]);
+  test.each(["missing", "empty"])(
+    "detect falls back to hierarchy when window info is missing (%s)",
+    async (windowInfo) => {
+      const hierarchy = {
+        ...keyboardNodeHierarchy(),
+        windows: windowInfo === "missing" ? undefined : [],
+      };
+      fakeHierarchy.setResults([hierarchy]);
+      const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+      const result = await keyboard.execute("detect");
+
+      expect(result.success).toBe(true);
+      expect(result.open).toBe(true);
+      expect(result.bounds).toBeUndefined();
+      expect(result.message).toBe("Keyboard is open");
+      expect(keyboard["resolveKeyboardState"](hierarchy)).toMatchObject({
+        open: true,
+        source: "heuristic",
+        windowInfoAvailable: false,
+        imeWindowPresent: false,
+      });
+    },
+  );
+
+  test.each(["Delete", "Enter code"])(
+    "detect rejects app label %s when window info has no IME",
+    async (contentDesc) => {
+      fakeHierarchy.setResults([heuristicFalsePositiveHierarchy(contentDesc)]);
+      const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+      const result = await keyboard.execute("detect");
+
+      expect(result).toMatchObject({ success: true, open: false, message: "Keyboard is closed" });
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test("detect accepts a bounds-less IME window corroborated by the heuristic", async () => {
+    const hierarchy = boundlessImeWindowHierarchy();
+    fakeHierarchy.setResults([hierarchy]);
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
 
     const result = await keyboard.execute("detect");
 
-    expect(result.success).toBe(true);
-    expect(result.open).toBe(true);
+    expect(result).toMatchObject({ success: true, open: true, message: "Keyboard is open" });
     expect(result.bounds).toBeUndefined();
+    expect(keyboard["resolveKeyboardState"](hierarchy)).toMatchObject({
+      open: true,
+      source: "heuristic",
+      windowInfoAvailable: true,
+      imeWindowPresent: true,
+    });
+  });
+
+  test("open taps focused input and polls past an app label without an IME window", async () => {
+    const closedHierarchy = {
+      ...heuristicFalsePositiveHierarchy("Enter code"),
+      hierarchy: {
+        node: {
+          $: {},
+          node: [
+            focusedInputHierarchy().hierarchy.node,
+            heuristicFalsePositiveHierarchy("Enter code").hierarchy.node,
+          ],
+        },
+      },
+    };
+    fakeHierarchy.setResults([closedHierarchy, closedHierarchy, keyboardWindowHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("open");
+
+    expect(result).toMatchObject({ success: true, open: true, message: "Keyboard opened" });
+    expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+    expect(fakeHierarchy.getCallCount()).toBe(3);
+    expect(fakeHierarchy.getReadOptions().slice(1)).toEqual([
+      { timeoutMs: 2000, forceFresh: true },
+      { timeoutMs: 1900, forceFresh: true },
+    ]);
+    expect(fakeTimer.getSleepHistory()).toEqual([100]);
   });
 
   test("open taps focused input when keyboard is closed", async () => {
@@ -157,6 +229,8 @@ describe("Keyboard", () => {
 
     expect(result.success).toBe(true);
     expect(result.open).toBe(true);
+    expect(result.message).toBe("Keyboard already open");
+    expect(fakeHierarchy.getCallCount()).toBe(1);
     expect(fakeAdb.getExecutedCommands().length).toBe(0);
   });
 
@@ -168,6 +242,7 @@ describe("Keyboard", () => {
 
     expect(result.success).toBe(true);
     expect(result.open).toBe(false);
+    expect(result.message).toBe("Keyboard closed");
     expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_BACK")).toBe(true);
   });
 

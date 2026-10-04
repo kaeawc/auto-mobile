@@ -2041,10 +2041,10 @@ function buildTapOnSearchSummary(
     return undefined;
   }
   const freshness = result.observation?.freshness;
-  const hasFreshnessTimestamp =
-    typeof freshness?.requestedAfter === "number" && typeof freshness?.actualTimestamp === "number";
   const hasConfirmedFreshObservation =
-    hasFreshnessTimestamp && freshness.actualTimestamp >= freshness.requestedAfter;
+    typeof freshness?.requestedAfter === "number" &&
+    typeof freshness?.actualTimestamp === "number" &&
+    freshness.actualTimestamp >= freshness.requestedAfter;
   const shouldIncludeSearchSummary =
     searchStats.requestCount > 0 ||
     searchStats.changeCount > 0 ||

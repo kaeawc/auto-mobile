@@ -360,6 +360,16 @@ export interface EncoderSize {
   height: number;
 }
 
+export function validateIosSourceFrameSize(size: EncoderSize): ActionableError | null {
+  const { width, height } = size;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return new ActionableError(
+      `iOS capture reported an invalid frame size ${width}x${height}; cannot configure the H.264 encoder.`,
+    );
+  }
+  return null;
+}
+
 export interface IosH264FrameMetrics extends H264CaptureSourceMetrics {}
 
 type IosH264SourcePhase = "idle" | "starting" | "running" | "reconnecting" | "stopping";
@@ -1070,9 +1080,11 @@ export class IosH264Source implements H264CaptureSource {
       await this.startEncodedCaptureAttempt(helper, target);
       return;
     }
-    this.wireHelperFrames(helper);
     const firstAudio = this.options.audioEnabled ? this.waitForFirstAudio(helper) : null;
     const firstFrame = this.waitForFirstFrame(helper, target);
+    // Enter the running phase before processing the first frame so invalid
+    // geometry follows the same source-failure contract as later frames.
+    this.wireHelperFrames(helper);
     await helper.start();
     await Promise.all([firstFrame, firstAudio]);
   }
@@ -1471,6 +1483,12 @@ export class IosH264Source implements H264CaptureSource {
     if (!this.isActive()) {
       return;
     }
+    const size = { width: frame.header.width, height: frame.header.height };
+    const error = validateIosSourceFrameSize(size);
+    if (error) {
+      this.failIfRunning(error);
+      return;
+    }
     if (!frame.replayed) {
       this.reportLegacyIdleSupport();
       this.options.onSourceFrame?.();
@@ -1481,7 +1499,6 @@ export class IosH264Source implements H264CaptureSource {
         this.latestLegacyFrame = frame;
       }
     }
-    const size = { width: frame.header.width, height: frame.header.height };
     if (!this.encoder) {
       this.startEncoder(size);
     } else if (this.encoderBackpressured) {

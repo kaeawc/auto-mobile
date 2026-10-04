@@ -680,7 +680,7 @@ export class SwipeOn extends BaseVisualChange {
         if (unsupported) {
           throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
         }
-        const validationError = validateSwipeTimingOptions(options);
+        const validationError = validateSwipeTimingOptions(options, this.getDuration(options));
         if (validationError) {
           throw new ActionableError(validationError);
         }
@@ -1001,7 +1001,7 @@ export class SwipeOn extends BaseVisualChange {
       }
     }
 
-    return validateSwipeTimingOptions(options);
+    return validateSwipeTimingOptions(options, this.getDuration(options));
   }
 
   private buildPredictionArgs(options: SwipeOnOptions): Record<string, unknown> {

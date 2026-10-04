@@ -33,6 +33,7 @@ import {
   hasFocusedTextInput,
 } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
+import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
@@ -2271,6 +2272,7 @@ export class SendKeys {
         );
       }
       result.index = index;
+      this.addImeFailureGuidance(command, result, results);
       routing.onCommandResult?.(result);
       results.push(result);
       if (!result.success) {
@@ -2284,6 +2286,22 @@ export class SendKeys {
       }
     }
     return { results };
+  }
+
+  private addImeFailureGuidance(
+    command: SendKeysCommand,
+    result: SendKeysCommandResult,
+    completed: readonly SendKeysCommandResult[],
+  ): void {
+    if (
+      !result.success &&
+      command.action === "key" &&
+      isSemanticKey(command.key) &&
+      completed.some((previous) => previous.action === "type" && previous.success)
+    ) {
+      result.error = imeActionFailedAfterTextEntered(command.key, result.error || "unknown error");
+      logger.warn(`[SendKeys] ${result.error}`);
+    }
   }
 
   private buildResult(

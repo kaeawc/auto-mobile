@@ -4,6 +4,9 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteReadOnlyDatabaseException
+import android.system.ErrnoException
+import android.system.Os
+import android.util.Log
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -16,7 +19,11 @@ import java.util.concurrent.ConcurrentHashMap
 class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
   private val databaseLock = Any()
-  private val openDatabases = ConcurrentHashMap<String, SQLiteDatabase>()
+  private val openDatabases = ConcurrentHashMap<String, CachedDatabase>()
+
+  private data class FileIdentity(val device: Long, val inode: Long)
+
+  private data class CachedDatabase(val database: SQLiteDatabase, val identity: FileIdentity)
 
   override fun getDatabases(): List<DatabaseDescriptor> {
     val declared =
@@ -732,22 +739,30 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   ): SQLiteDatabase {
     validatePath(path)
 
-    // Check if we have a cached connection with compatible mode
+    // Stat before opening: a replacement during open must not give an old handle a newer identity.
+    // Only the main file identifies the database; WAL/journal changes do not invalidate the cache.
+    val identity = fileIdentity(path)
     val cached = openDatabases[path]
-    if (cached != null && cached.isOpen) {
-      val needsWritableConnection = !readOnly && cached.isReadOnly
-      val needsExactReadOnlyConnection = readOnly && requireExactReadOnly && !cached.isReadOnly
-      if (needsWritableConnection || needsExactReadOnlyConnection) {
-        cached.close()
+    if (cached != null && cached.database.isOpen) {
+      val db = cached.database
+      val needsWritableConnection = !readOnly && db.isReadOnly
+      val needsExactReadOnlyConnection = readOnly && requireExactReadOnly && !db.isReadOnly
+      if (
+        identity == null ||
+          identity != cached.identity ||
+          needsWritableConnection ||
+          needsExactReadOnlyConnection
+      ) {
+        closeDatabase(db)
         openDatabases.remove(path)
       } else {
-        return cached
+        return db
       }
     }
 
     // Open the database
     val file = File(path)
-    if (!file.exists()) {
+    if (!file.exists() || identity == null) {
       throw DatabaseError.NotFound(path)
     }
 
@@ -758,10 +773,29 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       if (!readOnly) {
         setBusyTimeout(db)
       }
-      openDatabases[path] = db
+      openDatabases[path] = CachedDatabase(db, identity)
       return db
     } catch (e: Exception) {
       throw DatabaseError.SqlError("Failed to open database: ${e.message}")
+    }
+  }
+
+  private fun fileIdentity(path: String): FileIdentity? =
+    try {
+      val stat = Os.stat(path)
+      FileIdentity(stat.st_dev, stat.st_ino)
+    } catch (error: ErrnoException) {
+      // Missing or inaccessible files invalidate the cache; openDatabase reports NotFound.
+      Log.d("SQLiteDatabaseDriver", "Cannot stat database: $path", error)
+      null
+    }
+
+  private fun closeDatabase(db: SQLiteDatabase) {
+    try {
+      if (db.isOpen) db.close()
+    } catch (error: Exception) {
+      // Cleanup failure must not prevent eviction or closing the remaining handles.
+      Log.w("SQLiteDatabaseDriver", "Failed to close database", error)
     }
   }
 
@@ -825,15 +859,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   /** Close all open database connections. */
   fun closeAll() {
     synchronized(databaseLock) {
-      openDatabases.values.forEach { db ->
-        try {
-          if (db.isOpen) {
-            db.close()
-          }
-        } catch (_: Exception) {
-          // Ignore close errors
-        }
-      }
+      openDatabases.values.forEach { closeDatabase(it.database) }
       openDatabases.clear()
     }
   }

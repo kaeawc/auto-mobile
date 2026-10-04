@@ -1,4 +1,4 @@
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
@@ -15,6 +15,7 @@ import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/rea
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
@@ -361,7 +362,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
   private readonly timer: Timer;
-  private androidKeyCombinationSupported: boolean | undefined;
+  private androidKeyCombinationSupported: Promise<boolean> | undefined;
   private androidCaretUnsafe = false;
 
   // IME-mode typing captures the prior IME and profile, then restores both. The shared
@@ -1320,7 +1321,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?: AbortSignal,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const chars = Array.from(text);
-    const split = await this.findLastKeyEvent(chars);
+    const split = await this.findLastKeyEvent(chars, signal);
     if (!split) {
       const result =
         operation === "replace" ? await this.textClient.replace(text) : await this.insertText(text);
@@ -1382,13 +1383,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private async findLastKeyEvent(
     chars: string[],
+    signal?: AbortSignal,
   ): Promise<{ index: number; plan: KeyEventPlan } | undefined> {
     for (let index = chars.length - 1; index >= 0; index--) {
       const char = chars[index];
       if (!char || /\s/.test(char)) {
         continue;
       }
-      const plan = await this.getKeyEventPlan(char);
+      const plan = await this.getKeyEventPlan(char, signal);
       if (plan) {
         return { index, plan };
       }
@@ -1698,7 +1700,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const chars = Array.from(text);
     for (let index = 0; index < chars.length; index++) {
       const char = chars[index] ?? "";
-      const plan = await this.getKeyEventPlan(char);
+      const plan = await this.getKeyEventPlan(char, signal);
       if (!plan) {
         return {
           success: false,
@@ -1751,9 +1753,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   ): Promise<TextActionResult> {
     let deleted = false;
     try {
-      await clearTextWithKeyEvents(this.adb, count, signal, () => {
-        deleted = true;
-      });
+      const supportsKeyCombination = await this.supportsAndroidKeyCombination(signal);
+      await clearTextWithKeyEvents(
+        this.adb,
+        count,
+        signal,
+        () => {
+          deleted = true;
+        },
+        supportsKeyCombination,
+      );
       const verification = await verifyKeyEventClear(
         () => this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 }),
         signal,
@@ -1784,22 +1793,23 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return { success: true, hierarchy };
   }
 
-  private async getKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
+  private async getKeyEventPlan(char: string, signal?: AbortSignal): Promise<KeyEventPlan | null> {
     let supportsKeyCombination = false;
     if (asciiKeyEventNeedsKeyCombination(char)) {
-      supportsKeyCombination = await this.supportsAndroidKeyCombination();
+      supportsKeyCombination = await this.supportsAndroidKeyCombination(signal);
     }
     return buildAsciiKeyEventPlan(char, supportsKeyCombination);
   }
 
-  private async supportsAndroidKeyCombination(): Promise<boolean> {
-    if (this.androidKeyCombinationSupported !== undefined) {
-      return this.androidKeyCombinationSupported;
-    }
-    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
-    this.androidKeyCombinationSupported =
-      apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
-    return this.androidKeyCombinationSupported;
+  private async supportsAndroidKeyCombination(signal?: AbortSignal): Promise<boolean> {
+    this.androidKeyCombinationSupported ??= readAndroidDeviceApiLevel(this.adb, 1000, this.timer)
+      .then((apiLevel) => apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL)
+      .catch((error) => {
+        // Unexpected probe rejection must allow the next request to retry.
+        this.androidKeyCombinationSupported = undefined;
+        throw toActionableError(error, "Failed to read Android key-combination capability");
+      });
+    return awaitWhileRequestIsLive(this.androidKeyCombinationSupported, signal);
   }
 
   private async executeKeyEventPlan(plan: KeyEventPlan, signal?: AbortSignal): Promise<void> {

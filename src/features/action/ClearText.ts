@@ -1,5 +1,8 @@
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
+import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -16,7 +19,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toSearchable } from "../utility/SearchableNode";
 import { ANDROID_INPUT_CLASSES } from "../utility/elementProperties";
 
@@ -167,9 +170,14 @@ export async function clearTextWithKeyEvents(
   count: number,
   signal?: AbortSignal,
   onDelete?: () => void,
+  supportsKeyCombination = false,
 ): Promise<void> {
   signal?.throwIfAborted();
-  await adb.executeCommand("shell input keyevent KEYCODE_MOVE_END");
+  await adb.executeCommand(
+    supportsKeyCombination
+      ? "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END"
+      : "shell input keyevent KEYCODE_MOVE_END",
+  );
   signal?.throwIfAborted();
 
   for (let index = 0; index < count; index += DELETE_KEYEVENT_CHUNK_SIZE) {
@@ -226,13 +234,15 @@ export async function verifyKeyEventClear(
 
 export class ClearText extends BaseVisualChange {
   private parser: ElementParser;
+  private androidKeyCombinationSupported: Promise<boolean> | undefined;
 
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
     parser: ElementParser = new DefaultElementParser(),
+    timer: Timer = defaultTimer,
   ) {
-    super(device, adb);
+    super(device, adb, timer);
     this.parser = parser;
   }
 
@@ -454,6 +464,18 @@ export class ClearText extends BaseVisualChange {
   }
 
   private async clearWithDeletes(count: number, signal?: AbortSignal): Promise<void> {
-    await clearTextWithKeyEvents(this.adb, count, signal);
+    // Resolve this optional capability once, before moving the caret or deleting.
+    this.androidKeyCombinationSupported ??= readAndroidDeviceApiLevel(this.adb, 1000, this.timer)
+      .then((apiLevel) => apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL)
+      .catch((error) => {
+        // Unexpected probe rejection must allow the next request to retry.
+        this.androidKeyCombinationSupported = undefined;
+        throw toActionableError(error, "Failed to read Android key-combination capability");
+      });
+    const supportsKeyCombination = await awaitWhileRequestIsLive(
+      this.androidKeyCombinationSupported,
+      signal,
+    );
+    await clearTextWithKeyEvents(this.adb, count, signal, undefined, supportsKeyCombination);
   }
 }

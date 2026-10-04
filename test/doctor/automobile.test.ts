@@ -599,13 +599,10 @@ describe("checkCtrlProxy", () => {
           name: "Pixel",
         },
       ]);
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
         stderr: "",
@@ -632,8 +629,8 @@ describe("checkCtrlProxy", () => {
   });
 
   function configureInstalled(adb: FakeAdbExecutor, sha = "different-sha", enabled = true) {
-    adb.setCommandResponse("shell pm list packages", {
-      stdout: AndroidCtrlProxyManager.PACKAGE,
+    adb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+      stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
       stderr: "",
     });
     adb.setCommandResponse("shell pm path", { stdout: "package:/data/app/base.apk", stderr: "" });
@@ -1071,13 +1068,10 @@ describe("checkCtrlProxy", () => {
           name: "Pixel",
         },
       ]);
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
+      fakeAdb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
         stderr: "",

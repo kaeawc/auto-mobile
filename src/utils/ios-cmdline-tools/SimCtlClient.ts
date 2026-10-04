@@ -3024,9 +3024,12 @@ export class SimCtlClient implements SimCtl {
       }
       return { success: true };
     } catch (error) {
+      logger.warn(`[iOS] Failed to push simulator notification: ${errorMessage(error)}`);
       return { success: false, error: errorMessage(error) };
     } finally {
-      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch(() => {});
+      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch((error) => {
+        logger.warn(`[iOS] Failed to clean up simulator notification file: ${errorMessage(error)}`);
+      });
     }
   }
 

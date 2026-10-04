@@ -2276,13 +2276,9 @@ export class SessionManager {
         this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
       );
     });
-    try {
-      await this.restoreKeepScreenAwake(existing);
-    } catch (error) {
-      logger.warn(
-        `Failed to restore keep-awake state for rebound session ${existing.sessionId}: ${error}`,
-      );
-    }
+    const pendingKeepScreenAwakeRestoration = (
+      await this.restoreKeepScreenAwakeBestEffort(existing)
+    ).pending;
     // Same contract as release: a failed restore must not hand the old
     // simulator back to the pool clean. Any outstanding retry is registered
     // against that device below, so DevicePool.releaseDevice defers idling it.
@@ -2304,6 +2300,7 @@ export class SessionManager {
       : null;
     const previousDevice = existing.assignedDevice;
     const pendingRebindCleanup = [
+      pendingKeepScreenAwakeRestoration,
       pendingBiometricRestoration,
       pendingNetworkRestoration,
       pendingClockRestoration,

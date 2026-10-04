@@ -5984,6 +5984,11 @@ export class DevicePool {
     return this.shutdownReservationCoordinator.isShutdownReserved(deviceId);
   }
 
+  /** Read only the active shutdown reservation under the assignment lock. */
+  isShutdownReservationHeld(deviceId: string): Promise<boolean> {
+    return this.shutdownReservationCoordinator.isShutdownReservationHeld(deviceId);
+  }
+
   /**
    * Get all idle devices (available for assignment)
    */

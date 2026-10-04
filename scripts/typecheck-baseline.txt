@@ -26,7 +26,6 @@ src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphM
 src/features/navigation/NavigateTo.ts: error TS2740: Type 'NavigationGraphService' is missing the following properties from type 'NavigationGraphManager': repository, testCoverageRepository, timer, currentAppId, and 42 more.
 src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 src/features/observe/DeviceServiceUtils.ts: error TS2694: Namespace '"src/features/observe/DeviceService"' has no exported member 'ImeActionResult'.
-src/features/observe/Idle.ts: error TS2741: Property 'updatedPrevTotalFrames' is missing in type '{ isStable: false; shouldUpdateLastNonIdleTime: true; updatedPrevMissedVsync: null; updatedPrevSlowUiThread: null; updatedPrevFrameDeadlineMissed: null; updatedFirstGfxInfoLog: false; }' but required in type 'UiStabilityResult'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'null | number'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
@@ -103,7 +102,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 59 :: src/server/interactionTools.ts: error TS18048: 'freshness.requestedAfter' is possibly 'undefined'.
 # swap-fp: 67,73 :: src/features/utility/ElementFinder.ts: error TS4104: The type 'readonly string[]' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
 # swap-fp: 7 :: src/features/action/swipeon/SwipeOn.ts: error TS2322: Type 'AndroidCtrlProxyClient' is not assignable to type 'ScrollAccessibilityService'.
-# swap-fp: 7 :: src/features/observe/Idle.ts: error TS2741: Property 'updatedPrevTotalFrames' is missing in type '{ isStable: false; shouldUpdateLastNonIdleTime: true; updatedPrevMissedVsync: null; updatedPrevSlowUiThread: null; updatedPrevFrameDeadlineMissed: null; updatedFirstGfxInfoLog: false; }' but required in type 'UiStabilityResult'.
 # swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
 # swap-fp: 7,11 :: src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.

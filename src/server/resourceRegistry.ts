@@ -210,12 +210,12 @@ class ResourceRegistryClass {
   private resources: Map<string, RegisteredResource> = new Map();
   private templates: Map<string, RegisteredResourceTemplate> = new Map();
   // Every live MCP server this registry has been registered with. In daemon
-  // mode `registerWithServer` runs once per HTTP session, so notifications must
-  // fan out to ALL live sessions — a single retained server would be
-  // last-writer-wins (issue #3223). Entries are pruned via the underlying
-  // server's onclose hook when a session's transport closes.
+  // mode `registerWithServer` runs once per HTTP session: list changes reach
+  // all live sessions, resource updates reach subscribed sessions. A single
+  // retained server would be last-writer-wins (issue #3223). Entries and their
+  // subscriptions are pruned when a session's transport closes.
   private servers: Set<McpServer> = new Set();
-  private subscriptions: Set<string> = new Set();
+  private subscriptions: Map<McpServer, Set<string>> = new Map();
 
   // Register a new resource
   register(
@@ -344,6 +344,7 @@ class ResourceRegistryClass {
     const existingOnClose = underlying.onclose;
     underlying.onclose = () => {
       this.servers.delete(server);
+      this.subscriptions.delete(server);
       existingOnClose?.();
     };
   }
@@ -430,7 +431,12 @@ class ResourceRegistryClass {
     // Set handler for subscribe
     server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
       const { uri } = request.params;
-      this.subscriptions.add(uri);
+      if (!this.servers.has(server)) {
+        return {};
+      }
+      const subscriptions = this.subscriptions.get(server) ?? new Set<string>();
+      subscriptions.add(uri);
+      this.subscriptions.set(server, subscriptions);
       logger.info(`[ResourceRegistry] Client subscribed to: ${uri}`);
       return {};
     });
@@ -438,20 +444,22 @@ class ResourceRegistryClass {
     // Set handler for unsubscribe
     server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
       const { uri } = request.params;
-      this.subscriptions.delete(uri);
+      this.subscriptions.get(server)?.delete(uri);
       logger.info(`[ResourceRegistry] Client unsubscribed from: ${uri}`);
       return {};
     });
   }
 
-  // Check if a URI is subscribed
+  // Check the union of active connections' subscriptions for a URI.
   isSubscribed(uri: string): boolean {
-    return this.subscriptions.has(uri);
+    return Array.from(this.subscriptions.values()).some((subscriptions) => subscriptions.has(uri));
   }
 
-  // Get all active subscriptions
+  // Return a copy of the union of active connections' subscriptions.
   getSubscriptions(): Set<string> {
-    return new Set(this.subscriptions);
+    return new Set(
+      Array.from(this.subscriptions.values()).flatMap((subscriptions) => [...subscriptions]),
+    );
   }
 
   // Resolve which subscribed URIs a change to `uri` should notify. Each
@@ -468,17 +476,18 @@ class ResourceRegistryClass {
     uri: string,
     resource: RegisteredResource | undefined,
     templateMatch: { template: RegisteredResourceTemplate } | undefined,
+    subscriptions: Set<string>,
   ): string[] {
     const paginationParamNames = resource
       ? []
       : (templateMatch?.template.paginationParamNames ?? []);
     if (paginationParamNames.length === 0) {
-      return this.subscriptions.has(uri) ? [uri] : [];
+      return subscriptions.has(uri) ? [uri] : [];
     }
 
     const changedIdentity = computeSubscriptionIdentity(uri, paginationParamNames);
     const targets: string[] = [];
-    for (const subscribedUri of this.subscriptions) {
+    for (const subscribedUri of subscriptions) {
       if (computeSubscriptionIdentity(subscribedUri, paginationParamNames) === changedIdentity) {
         targets.push(subscribedUri);
       }
@@ -494,29 +503,37 @@ class ResourceRegistryClass {
       return;
     }
 
-    const targetUris = this.resolveNotificationTargets(uri, resource, templateMatch);
-    if (targetUris.length === 0) {
-      return;
-    }
-
-    // Subscriptions are tracked registry-wide, so every live session's server
-    // gets the update (issue #3223) — best-effort per server.
+    // Retain every live session (issue #3223), but resolve its own subscriptions.
     for (const server of this.servers) {
-      for (const targetUri of targetUris) {
-        try {
-          // Send notification to clients that resource has changed
-          await server.server.notification({
-            method: "notifications/resources/updated",
-            params: {
-              uri: targetUri,
-            },
-          });
-        } catch (error) {
-          // Silently ignore notification errors (e.g., when transport is not connected during tests)
-          logger.debug(
-            `[ResourceRegistry] Failed to notify resource update for ${targetUri}: ${error}`,
-          );
-        }
+      const subscriptions = this.subscriptions.get(server);
+      if (!subscriptions) {
+        continue;
+      }
+      const targetUris = this.resolveNotificationTargets(
+        uri,
+        resource,
+        templateMatch,
+        subscriptions,
+      );
+      await this.notifySubscribedServer(server, targetUris);
+    }
+  }
+
+  private async notifySubscribedServer(server: McpServer, targetUris: string[]): Promise<void> {
+    for (const targetUri of targetUris) {
+      if (!this.servers.has(server)) {
+        return;
+      }
+      try {
+        await server.server.notification({
+          method: "notifications/resources/updated",
+          params: { uri: targetUri },
+        });
+      } catch (error) {
+        // Transport disconnects are expected; best-effort delivery must not block sibling sessions.
+        logger.debug(
+          `[ResourceRegistry] Failed to notify resource update for ${targetUri}: ${error}`,
+        );
       }
     }
   }
@@ -552,6 +569,7 @@ class ResourceRegistryClass {
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+    this.subscriptions.clear();
   }
 
   // Clear all registered resources, templates, and subscriptions (for testing)

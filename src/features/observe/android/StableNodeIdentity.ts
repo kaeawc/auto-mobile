@@ -170,6 +170,17 @@ function attributesOf(node: Record<string, unknown>): Record<string, unknown> {
     : node;
 }
 
+/** iOS keeps SDK extras beside $, rather than inside the attribute slot. */
+function isSdkInjectedNode(node: Record<string, unknown>): boolean {
+  const extras = node.extras ?? attributesOf(node).extras;
+  return (
+    !!extras &&
+    typeof extras === "object" &&
+    !Array.isArray(extras) &&
+    (extras as Record<string, unknown>)["sdk.source"] === "sdkWalker"
+  );
+}
+
 /** Whether this node is in the IME window subtree identified at Android ingest. */
 function isInImeWindow(node: Record<string, unknown>, parentIsInImeWindow: boolean): boolean {
   if (parentIsInImeWindow) {
@@ -240,6 +251,11 @@ function applyOcclusionViewIdRewrite(
   }
 }
 
+export interface StableViewIdOptions {
+  /** iOS only: SDK walker nodes have no XCUITest counterpart (issue #9260). */
+  excludeSdkInjectedNodes?: boolean;
+}
+
 /**
  * Rewrite every generated (UUID-shaped) `view-id` under `root` — in place —
  * into a content-derived stable id: `s2-<hash16>` for a node whose content hash
@@ -254,7 +270,10 @@ function applyOcclusionViewIdRewrite(
  * converted hierarchy root (or any node-like object); a non-object input is
  * ignored.
  */
-export function assignStableViewIds(root: unknown): Map<string, string> {
+export function assignStableViewIds(
+  root: unknown,
+  options: StableViewIdOptions = {},
+): Map<string, string> {
   if (!root || typeof root !== "object") {
     return new Map();
   }
@@ -263,7 +282,7 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
     // are still suffixed per tree here (roots are processed independently) —
     // acceptable because the Android converter emits a single root object.
     for (const item of root) {
-      assignStableViewIds(item);
+      assignStableViewIds(item, options);
     }
     return new Map();
   }
@@ -290,11 +309,17 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   // therefore distinct ids.
   const contentHash = new Map<Record<string, unknown>, string>();
   const descendantTextHash = new Map<Record<string, unknown>, string>();
+  const sdkInjectedNodes = new Set<Record<string, unknown>>();
+  const identityChildrenOf = (node: Record<string, unknown>): Record<string, unknown>[] =>
+    toChildArray(node).filter(
+      (child) => sdkInjectedNodes.has(node) || !sdkInjectedNodes.has(child),
+    );
   const hashCanonical = (
     fields: readonly string[],
     node: Record<string, unknown>,
     kids: string[],
     normalizeDescendantDigits = false,
+    sdkIdentity = false,
   ): string => {
     const attributes = attributesOf(node);
     return (
@@ -303,6 +328,10 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
         // boundaries (text can contain any delimiter we might pick by hand).
         .update(
           JSON.stringify([
+            // Injected nodes still get ids when the runner supplies a UUID, but
+            // cannot compete with accessibility-backed nodes for duplicate ids.
+            // The empty spread preserves every existing Android hash byte.
+            ...(sdkIdentity ? ["sdkWalker"] : []),
             attributes["class"] ?? attributes.className ?? "",
             ...fields.map((field) => {
               let value = attributeValue(attributes, field) ?? "";
@@ -317,7 +346,7 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
                   if (hint !== undefined && hint !== null) {
                     value = hint;
                   } else {
-                    const label = toChildArray(node)
+                    const label = identityChildrenOf(node)
                       .map(attributesOf)
                       .find(
                         (child) =>
@@ -341,11 +370,28 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
         .slice(0, STABLE_VIEW_ID_HASH_LENGTH)
     );
   };
-  const compute = (node: Record<string, unknown>): [structural: string, subtreeText: string] => {
-    const children = toChildArray(node).map(compute);
+  const compute = (
+    node: Record<string, unknown>,
+    parentIsSdkInjected = false,
+  ): [structural: string, subtreeText: string] => {
+    const nodeIsSdkInjected =
+      options.excludeSdkInjectedNodes === true && (parentIsSdkInjected || isSdkInjectedNode(node));
+    if (nodeIsSdkInjected) {
+      sdkInjectedNodes.add(node);
+    }
+    // Compute every node so injection never removes nodes or their own ids.
+    // An injected node keeps its full subtree rollup; an accessibility-backed
+    // parent excludes the entire injected subtree from both identity tiers.
+    const children = toChildArray(node)
+      .map((child) => ({ child, hashes: compute(child, nodeIsSdkInjected) }))
+      .filter(({ child }) => nodeIsSdkInjected || !sdkInjectedNodes.has(child))
+      .map(({ hashes }) => hashes);
     const childStructuralHashes = children.map(([structural]) => structural);
     const childTextHashes = children.map(([, subtreeText]) => subtreeText);
-    contentHash.set(node, hashCanonical(CONTENT_FIELDS, node, childStructuralHashes));
+    contentHash.set(
+      node,
+      hashCanonical(CONTENT_FIELDS, node, childStructuralHashes, false, nodeIsSdkInjected),
+    );
     // The base identity above remains structural. Tree/class framing is the
     // same for peers of that base, so this hash distinguishes only descendant
     // text/content-desc within such a group. Own text never enters it.

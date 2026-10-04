@@ -119,6 +119,24 @@ function markNodes(root: AndroidNode): void {
 }
 
 describe("assignStableViewIds properties", () => {
+  test("disabling SDK exclusion is byte-identical to Android's default", () => {
+    fc.assert(
+      fc.property(treeArbitrary, (tree) => {
+        stampUniqueGeneratedIds(tree);
+        visit(tree, (current) => {
+          current.extras = { "sdk.source": "sdkWalker" };
+        });
+        const defaultTree = structuredClone(tree);
+        const disabledTree = structuredClone(tree);
+        const defaultMap = assignStableViewIds(defaultTree);
+        const disabledMap = assignStableViewIds(disabledTree, { excludeSdkInjectedNodes: false });
+        expect(JSON.stringify(disabledTree)).toBe(JSON.stringify(defaultTree));
+        expect(disabledMap).toEqual(defaultMap);
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
   test("rewritten view-ids are unique within each tree", () => {
     fc.assert(
       fc.property(treeArbitrary, (tree) => {

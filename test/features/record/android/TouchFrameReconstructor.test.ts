@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
+import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { RawTouchFrame, GestureEvent } from "../../../../src/features/record/android/types";
 
 // Helper: feed multiple lines and collect all non-null results
@@ -64,6 +66,116 @@ describe("TouchFrameReconstructor", () => {
 
   beforeEach(() => {
     r = new TouchFrameReconstructor();
+  });
+
+  test("in-repo fully observed captures preserve origin/main gestures exactly", () => {
+    const directory = `${import.meta.dir}/../../../fixtures/android-getevent`;
+    expect(
+      readdirSync(directory)
+        .filter((name) => name.endsWith(".txt"))
+        .sort(),
+    ).toEqual(["repeated-axes-no-position-api36.txt", "same-coordinate-taps-api36.txt"]);
+    // origin/main reconstructor + classifier, identity scaler and captured timing.
+    // The other capture deliberately reports neither axis, so has no known-coordinate baseline.
+    const expected: Record<string, GestureEvent[]> = {
+      "same-coordinate-taps-api36.txt": [
+        { type: "tap", arrivedAt: 125, screenX: 27852, screenY: 16165 },
+        { type: "tap", arrivedAt: 2813, screenX: 27852, screenY: 16165 },
+      ],
+    };
+    for (const [name, baseline] of Object.entries(expected)) {
+      const reconstructor = new TouchFrameReconstructor();
+      const classifier = new GestureClassifier(
+        {
+          toScreenPoint: (x, y) => {
+            expect(Number.isFinite(x) && Number.isFinite(y)).toBe(true);
+            return { x, y };
+          },
+        },
+        1,
+      );
+      const timer = new FakeTimer();
+      const lines = readFileSync(`${directory}/${name}`, "utf8").trim().split("\n");
+      const firstTimestamp = Number(lines[0].split("]")[0].slice(1));
+      const gestures: GestureEvent[] = [];
+      for (const line of lines) {
+        const timestamp = Number(line.split("]")[0].slice(1));
+        const arrivedAt = Math.round((timestamp - firstTimestamp) * 1000);
+        timer.advanceTime(arrivedAt - timer.now());
+        const result = reconstructor.feedLine(line, timer.now());
+        if (result && isFrame(result)) {
+          const gesture = classifier.feedFrame(result);
+          if (gesture) {
+            gestures.push(gesture);
+          }
+        }
+      }
+      expect(gestures).toEqual(baseline);
+      for (const gesture of gestures) {
+        expect(gesture.unknownAxes).toBeUndefined();
+      }
+    }
+  });
+
+  test("captured pre-recording axes are unknown on both contacts until observed", () => {
+    const unknownCapture = readFileSync(
+      `${import.meta.dir}/../../../fixtures/android-getevent/repeated-axes-no-position-api36.txt`,
+      "utf8",
+    );
+    const knownCapture = readFileSync(
+      `${import.meta.dir}/../../../fixtures/android-getevent/same-coordinate-taps-api36.txt`,
+      "utf8",
+    );
+    const frames = feedLines(r, (unknownCapture + knownCapture).split("\n")).filter(isFrame);
+    expect(frames).toHaveLength(8);
+    for (const index of [0, 2]) {
+      const slot = frames[index].activeSlots[0];
+      expect(slot.unknownAxes).toEqual(["x", "y"]);
+      expect(slot.x).toBeNaN();
+      expect(slot.y).toBeNaN();
+    }
+    for (const index of [4, 6]) {
+      expect(frames[index].activeSlots[0]).toEqual({
+        slotId: 0,
+        trackingId: index === 4 ? 0x321 : 0x322,
+        x: 27852,
+        y: 16165,
+        pressure: 0,
+      });
+    }
+  });
+
+  test("only Y observed flags X and later updates do not mutate earlier snapshots", () => {
+    const frames = feedLines(r, [
+      "[  1.0] EV_ABS ABS_MT_POSITION_Y 000000c8",
+      "[  1.0] EV_ABS ABS_MT_TRACKING_ID 00000001",
+      "[  1.0] EV_SYN SYN_REPORT 00000000",
+      ...SINGLE_FINGER_UP,
+      ...SINGLE_FINGER_DOWN,
+    ]).filter(isFrame);
+    expect(frames[0].activeSlots[0].unknownAxes).toEqual(["x"]);
+    expect(frames[0].activeSlots[0].x).toBeNaN();
+    expect(frames[0].activeSlots[0].y).toBe(200);
+    expect(frames[2].activeSlots[0].unknownAxes).toBeUndefined();
+  });
+
+  test("observed zero is known and knowledge stays local to each slot across release", () => {
+    const frames = feedLines(r, [
+      "[  1.0] EV_ABS ABS_MT_TRACKING_ID 00000001",
+      "[  1.0] EV_ABS ABS_MT_POSITION_X 00000000",
+      "[  1.0] EV_SYN SYN_REPORT 00000000",
+      ...SINGLE_FINGER_UP,
+      "[  2.0] EV_ABS ABS_MT_TRACKING_ID 00000002",
+      "[  2.0] EV_ABS ABS_MT_SLOT 00000001",
+      "[  2.0] EV_ABS ABS_MT_TRACKING_ID 00000003",
+      "[  2.0] EV_SYN SYN_REPORT 00000000",
+    ]).filter(isFrame);
+    expect(frames[0].activeSlots[0].x).toBe(0);
+    expect(frames[0].activeSlots[0].unknownAxes).toEqual(["y"]);
+    expect(frames[2].activeSlots[0].x).toBe(0);
+    expect(frames[2].activeSlots[0].unknownAxes).toEqual(["y"]);
+    expect(frames[2].activeSlots[1].unknownAxes).toEqual(["x", "y"]);
+    expect(frames[2].activeSlots[1].x).toBeNaN();
   });
 
   test("captured API 36 repeated taps retain coordinates without position updates", () => {

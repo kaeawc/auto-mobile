@@ -22,6 +22,8 @@ interface PendingGesture extends OrderedStep {
   timeout?: NodeJS.Timeout;
 }
 
+type BufferedInteraction = ReceivedInteraction & { receivedAt: number };
+
 /**
  * How long to wait for a CtrlProxy event to pair with a getevent gesture.
  * Issue #9142 measured 222–361 ms from touch-up to host receipt, including the
@@ -47,7 +49,7 @@ export class DualTrackRecorder {
   private orderedSteps: OrderedStep[] = [];
   private latestEntry: OrderedStep | null = null;
   private pendingGestures: PendingGesture[] = [];
-  private bufferedInteractions: (ReceivedInteraction & { receivedAt: number })[] = [];
+  private bufferedInteractions: BufferedInteraction[] = [];
   private lastInputText: { elementKey: string; entry: OrderedStep } | null = null;
   private activeEmitter: GestureEmitter | null = null;
   private unsubscribeA11y: (() => void) | null = null;
@@ -144,7 +146,7 @@ export class DualTrackRecorder {
     }
 
     if (gesture.type === "pinch") {
-      this.enqueueStep({ resolved: true, step: buildPinchStep(gesture) });
+      this.enqueueStep({ resolved: true, step: buildPinchStep(gesture) ?? undefined });
       return;
     }
 
@@ -152,52 +154,15 @@ export class DualTrackRecorder {
       (pending) =>
         !pending.resolved ||
         (pending.step !== undefined && pending.stepIndex === undefined) ||
+        // Retain unknown contacts as ambiguity witnesses across serial timeouts.
+        (hasUnknownAxes(pending.gesture) &&
+          this.timer.now() - pending.arrivedAt <= MERGE_WINDOW_MS * 2) ||
         (pending.gesture.type === "tap" &&
           gesture.arrivedAt - pending.gesture.arrivedAt <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS),
     );
 
-    if (gesture.type === "doubleTap") {
-      const priorTap = [...this.pendingGestures].reverse().find((pending) => {
-        const prior = pending.gesture;
-        if (prior.type !== "tap" || prior.screenX === undefined || prior.screenY === undefined) {
-          return false;
-        }
-        const elapsed = gesture.arrivedAt - prior.arrivedAt;
-        if (gesture.firstTapArrivedAt !== undefined) {
-          return (
-            prior.arrivedAt === gesture.firstTapArrivedAt &&
-            elapsed >= 0 &&
-            elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS
-          );
-        }
-        // Direct emitter events lack the classifier's correlation time.
-        const dx = (gesture.screenX ?? Infinity) - prior.screenX;
-        const dy = (gesture.screenY ?? Infinity) - prior.screenY;
-        return (
-          elapsed >= 0 &&
-          elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
-          Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
-        );
-      });
-      const step = priorTap?.step;
-      if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
-        step.params.action = "doubleTap";
-        return;
-      }
-      if (priorTap && !priorTap.resolved) {
-        // Keep the first tap's position, but allow the pair's delayed click a
-        // fresh merge window, as when recording an uncorrelated double tap.
-        if (priorTap.timeout) {
-          this.timer.clearTimeout(priorTap.timeout);
-        }
-        priorTap.gesture = gesture;
-        priorTap.arrivedAt = this.timer.now();
-        priorTap.timeout = this.timer.setTimeout(
-          () => this.resolveGesture(priorTap),
-          MERGE_WINDOW_MS,
-        );
-        return;
-      }
+    if (this.upgradeDoubleTap(gesture)) {
+      return;
     }
 
     // tap / doubleTap / longPress / swipe → hold for merge window
@@ -210,6 +175,59 @@ export class DualTrackRecorder {
     this.enqueueStep(pending);
 
     pending.timeout = this.timer.setTimeout(() => this.resolveGesture(pending), MERGE_WINDOW_MS);
+  }
+
+  private upgradeDoubleTap(gesture: GestureEvent): boolean {
+    if (gesture.type !== "doubleTap" || hasUnknownAxes(gesture)) {
+      return false;
+    }
+    const priorTap = [...this.pendingGestures].reverse().find((pending) => {
+      const prior = pending.gesture;
+      if (
+        prior.type !== "tap" ||
+        hasUnknownAxes(prior) ||
+        prior.screenX === undefined ||
+        prior.screenY === undefined
+      ) {
+        return false;
+      }
+      const elapsed = gesture.arrivedAt - prior.arrivedAt;
+      if (gesture.firstTapArrivedAt !== undefined) {
+        return (
+          prior.arrivedAt === gesture.firstTapArrivedAt &&
+          elapsed >= 0 &&
+          elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS
+        );
+      }
+      // Direct emitter events lack the classifier's correlation time.
+      const dx = (gesture.screenX ?? Infinity) - prior.screenX;
+      const dy = (gesture.screenY ?? Infinity) - prior.screenY;
+      return (
+        elapsed >= 0 &&
+        elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
+        Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
+      );
+    });
+    const step = priorTap?.step;
+    if (step && ["tapOn", "tapAt"].includes(step.tool) && step.params.action === "tap") {
+      step.params.action = "doubleTap";
+      return true;
+    }
+    if (priorTap && !priorTap.resolved) {
+      // Keep the first tap's position, but allow the pair's delayed click a
+      // fresh merge window, as when recording an uncorrelated double tap.
+      if (priorTap.timeout) {
+        this.timer.clearTimeout(priorTap.timeout);
+      }
+      priorTap.gesture = gesture;
+      priorTap.arrivedAt = this.timer.now();
+      priorTap.timeout = this.timer.setTimeout(
+        () => this.resolveGesture(priorTap),
+        MERGE_WINDOW_MS,
+      );
+      return true;
+    }
+    return false;
   }
 
   private enqueueStep(entry: OrderedStep): void {
@@ -246,11 +264,9 @@ export class DualTrackRecorder {
     }
 
     // tap / longPress / swipe — try to match a pending gesture
+    const received = { ...event, receivedAt: this.timer.now() };
     const matched = this.pendingGestures.find(
-      (p) =>
-        !p.resolved &&
-        isCompatibleType(p.gesture.type, event.type) &&
-        gestureHitsElement(p.gesture, event.element),
+      (p) => !p.resolved && !hasUnknownAxes(p.gesture) && this.isPairCandidate(p, received),
     );
 
     if (matched) {
@@ -260,12 +276,14 @@ export class DualTrackRecorder {
       !this.pendingGestures.some(
         (p) =>
           p.resolved &&
+          !hasUnknownAxes(p.gesture) &&
           isCompatibleType(p.gesture.type, event.type) &&
           gestureHitsElement(p.gesture, event.element),
       )
     ) {
       // A late event for an already resolved touch must not seed the next touch.
-      this.bufferedInteractions.push({ ...event, receivedAt: this.timer.now() });
+      // Unknown contacts wait for the full window so later competitors count.
+      this.bufferedInteractions.push(received);
     }
   }
 
@@ -282,6 +300,10 @@ export class DualTrackRecorder {
     const step = buildMergedStep(pending.gesture, event);
     pending.step = step ?? undefined;
     this.flushResolvedSteps();
+    if (!step && hasUnknownAxes(pending.gesture)) {
+      warnUnknownGesture(pending.gesture);
+      return;
+    }
     if (!event || !buildSelector(event.element) || !step) {
       const gesture = pending.gesture;
       const [x, y] =
@@ -313,29 +335,64 @@ export class DualTrackRecorder {
     if (interaction) {
       candidates.push({ event: { ...interaction, receivedAt: now }, index: -1 });
     }
-    const selected = candidates
-      .filter(
-        ({ event }) =>
-          Math.abs(event.receivedAt - pending.arrivedAt) <= MERGE_WINDOW_MS &&
-          isCompatibleType(pending.gesture.type, event.type) &&
-          gestureHitsElement(pending.gesture, event.element),
+    const matching = candidates.filter(({ event }) => this.isPairCandidate(pending, event));
+    if (
+      hasUnknownAxes(pending.gesture) &&
+      !this.isUnambiguousUnknownPair(
+        pending,
+        matching.map(({ event }) => event),
       )
-      .sort((a, b) => {
-        // Genuine clicks beat stateChange. Within that priority, prefer events
-        // following the touch, then proximity. Stable ties retain buffer order
-        // (the incoming event is appended after buffered candidates).
-        const aDelta = a.event.receivedAt - pending.arrivedAt;
-        const bDelta = b.event.receivedAt - pending.arrivedAt;
-        return (
-          Number(b.event.type === "tap") - Number(a.event.type === "tap") ||
-          Number(aDelta < 0) - Number(bDelta < 0) ||
-          Math.abs(aDelta) - Math.abs(bDelta)
-        );
-      })[0];
+    ) {
+      return undefined;
+    }
+    const selected = matching.sort((a, b) => {
+      // Genuine clicks beat stateChange. Within that priority, prefer events
+      // following the touch, then proximity. Stable ties retain buffer order
+      // (the incoming event is appended after buffered candidates).
+      const aDelta = a.event.receivedAt - pending.arrivedAt;
+      const bDelta = b.event.receivedAt - pending.arrivedAt;
+      return (
+        Number(b.event.type === "tap") - Number(a.event.type === "tap") ||
+        Number(aDelta < 0) - Number(bDelta < 0) ||
+        Math.abs(aDelta) - Math.abs(bDelta)
+      );
+    })[0];
     if (selected && selected.index >= 0) {
       this.bufferedInteractions.splice(selected.index, 1);
     }
     return selected?.event;
+  }
+
+  private isPairCandidate(pending: PendingGesture, event: BufferedInteraction): boolean {
+    const gesture = pending.gesture;
+    if (
+      Math.abs(event.receivedAt - pending.arrivedAt) > MERGE_WINDOW_MS ||
+      !isCompatibleType(gesture.type, event.type, !hasUnknownAxes(gesture))
+    ) {
+      return false;
+    }
+    if (hasUnknownAxes(gesture)) {
+      return Boolean(event.element?.bounds && buildSelector(event.element));
+    }
+    return gestureHitsElement(gesture, event.element);
+  }
+
+  private isUnambiguousUnknownPair(
+    pending: PendingGesture,
+    candidates: BufferedInteraction[],
+  ): boolean {
+    if (candidates.length !== 1) {
+      return false;
+    }
+    const event = candidates[0];
+    // Known points claim their targets first. Resolved unknown contacts remain
+    // witnesses so flushing an earlier ambiguous contact cannot free its event.
+    return !this.pendingGestures.some(
+      (other) =>
+        other !== pending &&
+        (hasUnknownAxes(other.gesture) || !other.resolved) &&
+        this.isPairCandidate(other, event),
+    );
   }
 
   private handleInputText(event: ReceivedInteraction): void {
@@ -421,12 +478,16 @@ export class DualTrackRecorder {
 // Pure helper functions
 // -------------------------------------------------------------------------
 
-function isCompatibleType(gestureType: string, eventType: string): boolean {
+function isCompatibleType(
+  gestureType: string,
+  eventType: string,
+  allowStateChange = true,
+): boolean {
   return (
     // Compose Playground clicks emitted stateChange/scroll, never tap (#9142).
     // Only tap/doubleTap may use this signal, and callers still require the hit-test.
     ((gestureType === "tap" || gestureType === "doubleTap") &&
-      (eventType === "tap" || eventType === "stateChange")) ||
+      (eventType === "tap" || (allowStateChange && eventType === "stateChange"))) ||
     (gestureType === "longPress" && eventType === "longPress") ||
     (gestureType === "swipe" && (eventType === "scroll" || eventType === "swipe"))
   );
@@ -437,10 +498,19 @@ function gestureHitsElement(gesture: GestureEvent, element?: Partial<Element>): 
   if (!bounds) {
     return false;
   }
+  // Unknown raw axes cannot prove a spatial hit (rotation may swap them).
+  if (hasUnknownAxes(gesture)) {
+    return false;
+  }
   // Swipes use startX/startY; taps/longPress/doubleTap use screenX/screenY
   const x = gesture.screenX ?? gesture.startX;
   const y = gesture.screenY ?? gesture.startY;
-  if (x === null || x === undefined || y === null || y === undefined) {
+  if (
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y)
+  ) {
     return false;
   }
   const PAD = 20;
@@ -514,30 +584,39 @@ function buildMergedStep(
       return buildCoordinateTapStep(gesture);
     }
 
-    case "swipe": {
-      const direction =
-        gesture.direction ?? resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY);
-      if (!direction) {
-        return null;
-      }
-      const params: Record<string, unknown> = { direction };
-      if (selector) {
-        params.container =
-          "elementId" in selector ? { elementId: selector.elementId } : { text: selector.text };
-      }
-      if (gesture.speed === "fast") {
-        params.speed = "fast";
-      }
-      return { tool: "swipeOn", params };
-    }
+    case "swipe":
+      return buildSwipeStep(gesture, event);
 
     default:
       return null;
   }
 }
 
+function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
+  const selector = buildSelector(event.element);
+  const direction = hasUnknownAxes(gesture)
+    ? selector && resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY)
+    : (gesture.direction ?? resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY));
+  if (!direction) {
+    return null;
+  }
+  const params: Record<string, unknown> = { direction };
+  if (selector) {
+    params.container =
+      "elementId" in selector ? { elementId: selector.elementId } : { text: selector.text };
+  }
+  if (!hasUnknownAxes(gesture) && gesture.speed === "fast") {
+    params.speed = "fast";
+  }
+  return { tool: "swipeOn", params };
+}
+
+function hasUnknownAxes(gesture: GestureEvent): boolean {
+  return Boolean(gesture.unknownAxes?.length);
+}
+
 function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
-  if (gesture.screenX === undefined || gesture.screenY === undefined) {
+  if (hasUnknownAxes(gesture) || gesture.screenX === undefined || gesture.screenY === undefined) {
     return null;
   }
   // The scaler already supplies native Android display pixels (rotation applied).
@@ -557,11 +636,21 @@ function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
   return { tool: "tapAt", params };
 }
 
+function warnUnknownGesture(gesture: GestureEvent): void {
+  logger.warn(
+    `[DualTrackRecorder] ${gesture.type} has unknown axes: ${gesture.unknownAxes?.join(", ")} — no resolved element gesture; step skipped`,
+  );
+}
+
 function buildPressButtonStep(gesture: GestureEvent): PlanStep {
   return { tool: "pressButton", params: { button: gesture.button } };
 }
 
-function buildPinchStep(gesture: GestureEvent): PlanStep {
+function buildPinchStep(gesture: GestureEvent): PlanStep | null {
+  if (hasUnknownAxes(gesture)) {
+    warnUnknownGesture(gesture);
+    return null;
+  }
   return {
     tool: "pinchOn",
     params: {

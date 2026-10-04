@@ -3,13 +3,14 @@ import { GESTURE_THRESHOLDS } from "./types";
 import type { CoordScaler } from "./AxisRanges";
 
 interface ContactInfo {
-  /** Raw sensor position when the finger first touched */
+  /** First observed raw position per axis; unknownAxes retains missing START axes. */
   startX: number;
   startY: number;
   arrivedAt: number;
   /** Last known raw sensor position (updated on each active frame) */
   lastX: number;
   lastY: number;
+  unknownAxes?: GestureEvent["unknownAxes"];
 }
 
 interface LastTap {
@@ -19,9 +20,10 @@ interface LastTap {
 }
 
 interface PinchState {
-  initialDist: number;
+  initialDist?: number;
   /** Updated each frame while both fingers are active */
-  finalDist: number;
+  finalDist?: number;
+  unknownAxes?: GestureEvent["unknownAxes"];
 }
 
 /**
@@ -61,8 +63,17 @@ export class GestureClassifier {
     for (const slot of frame.activeSlots) {
       const existing = this.contacts.get(slot.slotId);
       if (existing) {
+        // A later axis report proves movement only from its first seen value.
+        // It cannot recover the missing contact-start coordinate.
+        if (!Number.isFinite(existing.startX)) {
+          existing.startX = slot.x;
+        }
+        if (!Number.isFinite(existing.startY)) {
+          existing.startY = slot.y;
+        }
         existing.lastX = slot.x;
         existing.lastY = slot.y;
+        existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
       } else {
         this.contacts.set(slot.slotId, {
           startX: slot.x,
@@ -70,6 +81,7 @@ export class GestureClassifier {
           arrivedAt: frame.arrivedAt,
           lastX: slot.x,
           lastY: slot.y,
+          unknownAxes: slot.unknownAxes,
         });
       }
     }
@@ -79,11 +91,16 @@ export class GestureClassifier {
     if (activeCount === 2) {
       this.inTwoFingerMode = true;
       const [a, b] = frame.activeSlots;
-      const dist = this.screenDist(a.x, a.y, b.x, b.y);
+      const unknownAxes = mergeUnknownAxes(
+        this.contacts.get(a.slotId)?.unknownAxes,
+        this.contacts.get(b.slotId)?.unknownAxes,
+      );
+      const dist = unknownAxes?.length ? undefined : this.screenDist(a.x, a.y, b.x, b.y);
       if (!this.pinchState) {
-        this.pinchState = { initialDist: dist, finalDist: dist };
+        this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
       } else {
         this.pinchState.finalDist = dist;
+        this.pinchState.unknownAxes = mergeUnknownAxes(this.pinchState.unknownAxes, unknownAxes);
       }
     }
 
@@ -118,6 +135,10 @@ export class GestureClassifier {
         return null;
       }
 
+      if (contact.unknownAxes?.length) {
+        return this.evaluateUnknownContact(contact, frame.arrivedAt);
+      }
+
       const { x: downX, y: downY } = this.scaler.toScreenPoint(contact.startX, contact.startY);
       const { x: upX, y: upY } = this.scaler.toScreenPoint(contact.lastX, contact.lastY);
       const durationMs = frame.arrivedAt - contact.arrivedAt;
@@ -141,6 +162,26 @@ export class GestureClassifier {
   // Private helpers
   // -------------------------------------------------------------------------
 
+  private evaluateUnknownContact(contact: ContactInfo, arrivedAt: number): GestureEvent {
+    this.lastTap = null;
+    const durationMs = arrivedAt - contact.arrivedAt;
+    // An axis never observed contributes no displacement. Use the same finite
+    // anchor at both ends solely for distance scaling (including rotation),
+    // never as an exported coordinate or a reconstructed starting point.
+    const firstX = Number.isFinite(contact.startX) ? contact.startX : 0;
+    const firstY = Number.isFinite(contact.startY) ? contact.startY : 0;
+    const lastX = Number.isFinite(contact.lastX) ? contact.lastX : firstX;
+    const lastY = Number.isFinite(contact.lastY) ? contact.lastY : firstY;
+    const displacement = this.screenDist(firstX, firstY, lastX, lastY);
+    const type =
+      displacement >= GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp
+        ? "swipe"
+        : durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS
+          ? "longPress"
+          : "tap";
+    return { type, arrivedAt, durationMs, unknownAxes: contact.unknownAxes };
+  }
+
   private screenDist(rawX1: number, rawY1: number, rawX2: number, rawY2: number): number {
     const first = this.scaler.toScreenPoint(rawX1, rawY1);
     const second = this.scaler.toScreenPoint(rawX2, rawY2);
@@ -149,7 +190,16 @@ export class GestureClassifier {
 
   private maybeEmitPinch(arrivedAt: number): GestureEvent | null {
     const pinch = this.pinchState;
-    if (!pinch || pinch.initialDist === 0) {
+    if (pinch?.unknownAxes?.length) {
+      this.lastTap = null;
+      return null;
+    }
+    if (
+      !pinch ||
+      pinch.initialDist === undefined ||
+      pinch.finalDist === undefined ||
+      pinch.initialDist === 0
+    ) {
       return null;
     }
 
@@ -227,4 +277,14 @@ export class GestureClassifier {
 
 function dist(x1: number, y1: number, x2: number, y2: number): number {
   return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+}
+
+function mergeUnknownAxes(
+  first: GestureEvent["unknownAxes"],
+  second: GestureEvent["unknownAxes"],
+): GestureEvent["unknownAxes"] {
+  if (!first?.length && !second?.length) {
+    return undefined;
+  }
+  return [...new Set([...(first ?? []), ...(second ?? [])])];
 }

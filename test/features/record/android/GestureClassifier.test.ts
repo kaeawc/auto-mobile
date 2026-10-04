@@ -31,6 +31,102 @@ describe("GestureClassifier", () => {
     c = new GestureClassifier(identityScaler, DENSITY);
   });
 
+  test.each([50, 500])("unknown axes propagate without screen coordinates (%d ms)", (duration) => {
+    c.feedFrame({
+      arrivedAt: 0,
+      activeSlots: [{ slotId: 0, trackingId: 1, x: NaN, y: 800, pressure: 0, unknownAxes: ["x"] }],
+      releasedSlots: [],
+    });
+    const gesture = c.feedFrame(makeFrame(duration, [], [0]));
+    expect(gesture?.type).toBe(duration < 400 ? "tap" : "longPress");
+    expect(gesture?.unknownAxes).toEqual(["x"]);
+    expect(gesture?.screenX).toBeUndefined();
+    expect(gesture?.screenY).toBeUndefined();
+    expect(gesture?.startX).toBeUndefined();
+  });
+
+  test("axes first observed mid-contact cannot recover its unknown starting point", () => {
+    c.feedFrame({
+      arrivedAt: 0,
+      activeSlots: [
+        { slotId: 0, trackingId: 1, x: NaN, y: NaN, pressure: 0, unknownAxes: ["x", "y"] },
+      ],
+      releasedSlots: [],
+    });
+    c.feedFrame(makeFrame(20, [{ slotId: 0, trackingId: 1, x: 500, y: 800 }]));
+    const gesture = c.feedFrame(makeFrame(50, [], [0]));
+    expect(gesture?.unknownAxes).toEqual(["x", "y"]);
+    expect(gesture?.screenX).toBeUndefined();
+    c.feedFrame(makeFrame(100, [{ slotId: 0, trackingId: 2, x: 500, y: 800 }]));
+    const known = c.feedFrame(makeFrame(150, [], [0]));
+    expect(known?.type).toBe("tap");
+    expect(known?.unknownAxes).toBeUndefined();
+    expect(known?.screenX).toBe(500);
+  });
+
+  test("two-finger tap with unknown axes returns null without deriving scale", () => {
+    const frame = makeFrame(0, [
+      { slotId: 0, trackingId: 1, x: 100, y: 200 },
+      { slotId: 1, trackingId: 2, x: 300, y: 200 },
+    ]);
+    c.feedFrame(frame);
+    c.feedFrame({
+      ...frame,
+      arrivedAt: 20,
+      activeSlots: frame.activeSlots.map((slot) => ({ ...slot, unknownAxes: ["y"] })),
+    });
+    expect(
+      c.feedFrame(makeFrame(30, [{ slotId: 0, trackingId: 1, x: 100, y: 200 }], [1])),
+    ).toBeNull();
+    expect(c.feedFrame(makeFrame(50, [], [0]))).toBeNull();
+    c.feedFrame(makeFrame(100, [{ slotId: 0, trackingId: 3, x: 100, y: 200 }]));
+    expect(c.feedFrame(makeFrame(150, [], [0]))?.type).toBe("tap");
+  });
+
+  test.each([0, 1, 2, 3])(
+    "known-axis movement proves unknown-start swipe at rotation %d",
+    (rotation) => {
+      const scaler = buildScaler({
+        xMin: 0,
+        xMax: 999,
+        yMin: 0,
+        yMax: 999,
+        displayWidth: 1000,
+        displayHeight: 1000,
+        rotation,
+      });
+      const classifier = new GestureClassifier(
+        {
+          toScreenPoint: (x, y) => {
+            expect(Number.isFinite(x) && Number.isFinite(y)).toBe(true);
+            return scaler.toScreenPoint(x, y);
+          },
+        },
+        1,
+      );
+      classifier.feedFrame({
+        arrivedAt: 0,
+        activeSlots: [
+          { slotId: 0, trackingId: 1, x: 100, y: NaN, pressure: 0, unknownAxes: ["y"] },
+        ],
+        releasedSlots: [],
+      });
+      classifier.feedFrame({
+        arrivedAt: 20,
+        activeSlots: [
+          { slotId: 0, trackingId: 1, x: 500, y: NaN, pressure: 0, unknownAxes: ["y"] },
+        ],
+        releasedSlots: [],
+      });
+      expect(classifier.feedFrame(makeFrame(50, [], [0]))).toEqual({
+        type: "swipe",
+        arrivedAt: 50,
+        durationMs: 50,
+        unknownAxes: ["y"],
+      });
+    },
+  );
+
   // -------------------------------------------------------------------------
   // tap
   // -------------------------------------------------------------------------

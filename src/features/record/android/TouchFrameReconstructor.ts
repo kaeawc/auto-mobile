@@ -80,27 +80,16 @@ export class TouchFrameReconstructor {
           }
         } else {
           // New or continuing contact
-          const existing = this.slots.get(this.currentSlot);
-          if (existing) {
-            existing.trackingId = value;
-          } else {
-            this.slots.set(this.currentSlot, {
-              slotId: this.currentSlot,
-              trackingId: value,
-              x: 0,
-              y: 0,
-              pressure: 0,
-            });
-          }
+          this.getOrCreateSlot().trackingId = value;
         }
         break;
 
       case "ABS_MT_POSITION_X":
-        this.getOrCreateSlot().x = value;
+        this.observeAxis("x", value);
         break;
 
       case "ABS_MT_POSITION_Y":
-        this.getOrCreateSlot().y = value;
+        this.observeAxis("y", value);
         break;
 
       case "ABS_MT_PRESSURE":
@@ -148,11 +137,21 @@ export class TouchFrameReconstructor {
       this.slots.set(this.currentSlot, {
         slotId: this.currentSlot,
         trackingId: -1,
-        x: 0,
-        y: 0,
+        x: NaN,
+        y: NaN,
         pressure: 0,
+        unknownAxes: ["x", "y"],
       });
     }
     return this.slots.get(this.currentSlot)!;
+  }
+
+  private observeAxis(axis: "x" | "y", value: number): void {
+    const slot = this.getOrCreateSlot();
+    slot[axis] = value;
+    slot.unknownAxes = slot.unknownAxes?.filter((unknown) => unknown !== axis);
+    if (!slot.unknownAxes?.length) {
+      delete slot.unknownAxes;
+    }
   }
 }

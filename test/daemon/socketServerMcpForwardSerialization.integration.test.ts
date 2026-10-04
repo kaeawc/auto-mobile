@@ -2748,7 +2748,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         listResources: async () => ({ resources: [] }),
         readResource: async (...args: unknown[]) => {
           readCount += 1;
-          const signal = (args[2] as { signal?: AbortSignal } | undefined)?.signal;
+          const signal = (args[1] as { signal?: AbortSignal } | undefined)?.signal;
           expect(signal).toBeDefined();
           forwardedSignals.push(signal!);
           if (readCount === 1) {

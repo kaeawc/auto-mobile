@@ -84,6 +84,64 @@ describe("NavigateTo", () => {
   });
 
   describe("execute", () => {
+    for (const hasBudget of [true, false]) {
+      test(`replays legacy edges with current request metadata (budget: ${hasBudget})`, async () => {
+        const args = {
+          text: "Settings",
+          action: "tap",
+          sessionUuid: "old-session",
+          __mcpRequestTimeoutMs: 2,
+          __mcpRequestDeadlineMs: 1,
+          __futureInternal: true,
+          _foo: "keep",
+          sessionUuidX: "keep",
+          session: "keep",
+        };
+        fakeGraph.recordToolCall("tapOn", args);
+        for (const [destination, timestamp] of [
+          ["HomeScreen", 100],
+          ["SettingsScreen", 200],
+          ["HomeScreen", 300],
+        ] as const) {
+          await fakeGraph.recordNavigationEvent({ destination, timestamp });
+        }
+        navigationMap.set("Settings", "SettingsScreen");
+        navigateTo = new NavigateTo(
+          device,
+          fakeAdbFactory,
+          { setupUIState: async () => [], setupScrollPosition: async () => null },
+          { waitForScreen: async () => true },
+          fakeGraph,
+          new FakeTimer(),
+        );
+        const call = spyOn(ToolRegistry, "callInternal");
+        try {
+          const result = await navigateTo.execute({
+            targetScreen: "SettingsScreen",
+            platform: "android",
+            sessionUuid: "current-session",
+            ...(hasBudget ? { __mcpRequestTimeoutMs: 500, __mcpRequestDeadlineMs: 1500 } : {}),
+          });
+          expect(result.success).toBe(true);
+          const replay = call.mock.calls[0][1];
+          expect(replay).toMatchObject({
+            _foo: "keep",
+            sessionUuidX: "keep",
+            session: "keep",
+            sessionUuid: "current-session",
+          });
+          expect(replay.__futureInternal).toBeUndefined();
+          expect(replay.__mcpRequestTimeoutMs).toBe(hasBudget ? 500 : undefined);
+          expect(replay.__mcpRequestDeadlineMs).toBe(hasBudget ? 1500 : undefined);
+          expect(JSON.stringify(result.path)).not.toContain("__");
+          expect(JSON.stringify(result.path)).not.toContain("old-session");
+          expect(args.sessionUuid).toBe("old-session");
+        } finally {
+          call.mockRestore();
+        }
+      });
+    }
+
     test("creates the default UI-state setup after resolving an options session", async () => {
       navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
 

@@ -1,3 +1,7 @@
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+} from "../daemon/constants";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
@@ -61,6 +65,8 @@ export const exploreSchema = addDeviceTargetingToSchema(
 
 // Export interfaces for type safety
 export interface NavigateToArgs {
+  [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]?: number;
+  [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]?: number;
   targetScreen: string;
   platform?: Platform;
   sessionUuid?: string;
@@ -126,6 +132,8 @@ export const navigateToHandler = async (
   try {
     const navigateTo = navigateToFactory(device, args);
     const options: NavigateToOptions = {
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM],
+      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM],
       targetScreen: args.targetScreen,
       platform: args.platform || device.platform,
       sessionUuid: args.sessionUuid,

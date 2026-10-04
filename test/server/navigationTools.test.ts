@@ -1,3 +1,10 @@
+import { z } from "zod/v4";
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+} from "../../src/daemon/constants";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
@@ -37,6 +44,71 @@ describe("navigation tool session graph selection", () => {
     ToolRegistry.clearTools();
     setDebugModeEnabled(false);
     resetNavigateToFactory();
+  });
+
+  test("forwards the running request budget through NavigateTo into edge replay", async () => {
+    const graph = new FakeNavigationGraphManager();
+    const timer = new FakeTimer();
+    await graph.setCurrentApp("com.test.app");
+    graph.recordToolCall("budgetReplay", {
+      text: "Settings",
+      sessionUuid: "past-session",
+      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 2,
+      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1,
+    });
+    for (const [destination, timestamp] of [
+      ["Home", 100],
+      ["Settings", 200],
+      ["Home", 300],
+    ] as const) {
+      await graph.recordNavigationEvent({ destination, timestamp });
+    }
+    ToolRegistry.register(
+      "budgetReplay",
+      "Fake replay",
+      z.object({ text: z.string() }),
+      async () => {
+        await graph.recordNavigationEvent({ destination: "Settings", timestamp: timer.now() });
+        return { success: true };
+      },
+    );
+    setNavigateToFactory(
+      (selectedDevice) =>
+        new NavigateTo(
+          selectedDevice,
+          new FakeAdbClientFactory(),
+          { setupUIState: async () => [], setupScrollPosition: async () => null },
+          { waitForScreen: async () => true },
+          graph,
+          timer,
+        ),
+    );
+    const call = spyOn(ToolRegistry, "callInternal");
+    try {
+      const args = Object.freeze({
+        targetScreen: "Settings",
+        sessionUuid: "running-session",
+        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 500,
+        [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
+      });
+      const response = await navigateToHandler(device, args);
+      expect(response.isError).toBeUndefined();
+      expect(call).toHaveBeenCalledTimes(1);
+      expect(call.mock.calls[0]).toEqual([
+        "budgetReplay",
+        {
+          text: "Settings",
+          platform: "ios",
+          deviceId: device.deviceId,
+          sessionUuid: "running-session",
+          [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 500,
+          [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
+        },
+      ]);
+      expect(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM]).toBe(1500);
+    } finally {
+      call.mockRestore();
+    }
   });
 
   test("omitted platform leaves iOS device resolution open for every navigation tool", async () => {

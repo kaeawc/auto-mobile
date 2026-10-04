@@ -4,7 +4,7 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import { logger, LogLevel } from "../../utils/logger";
 import { parseBounds } from "../../utils/bounds";
 import { cleanupIosXCTestHierarchy } from "./ios/cleanupIosHierarchy";
-import { assignStableViewIds } from "./android/StableNodeIdentity";
+import { assignIosStableViewIds } from "./android/StableNodeIdentity";
 import { extractHierarchyScreenSize } from "./hierarchyScreenSize";
 import type { ScreenSize } from "../../models/ScreenSize";
 
@@ -41,7 +41,7 @@ export function normalizeIosHierarchy(
   // Match the Android ingest invariant: generated path UUIDs must never be
   // published as selector ids. This is the canonical iOS conversion used by
   // observe and iOS action refreshes.
-  assignStableViewIds(cleanedHierarchy.hierarchy);
+  assignIosStableViewIds(cleanedHierarchy.hierarchy);
   if (cleanedHierarchy.windows) {
     cleanedHierarchy.windows = cleanedHierarchy.windows.map(
       (window: NonNullable<ViewHierarchyResult["windows"]>[number]) => {
@@ -49,7 +49,7 @@ export function normalizeIosHierarchy(
           return window;
         }
         const cleaned = cleanupIosXCTestHierarchy({ hierarchy: window.hierarchy });
-        assignStableViewIds(cleaned.hierarchy);
+        assignIosStableViewIds(cleaned.hierarchy);
         return { ...window, hierarchy: cleaned.hierarchy };
       },
     );

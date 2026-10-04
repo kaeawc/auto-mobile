@@ -1,8 +1,24 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { assignStableViewIds } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
-import type { HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
+import type {
+  HierarchyDelegateContext,
+  XCTestHierarchy,
+} from "../../../../src/features/observe/ios/types";
+import { normalizeIosHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
+import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
+import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
+import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
+import {
+  nodeAttributes,
+  type ViewHierarchyNode,
+  type ViewHierarchyResult,
+} from "../../../../src/models/ViewHierarchyResult";
+import { FakeIOSCtrlProxy } from "../../../fakes/FakeIOSCtrlProxy";
+import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
+import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -47,6 +63,46 @@ function formsRow(root: CaptureNode): CaptureNode {
   return row;
 }
 
+function runnerHierarchy(root: CaptureNode): XCTestHierarchy {
+  return {
+    packageName: "test.app",
+    updatedAt: 0,
+    // Captured wire nodes use dashed ids and tuple bounds; the converter accepts
+    // both spellings even though XCTestHierarchy declares camel-case/object bounds.
+    hierarchy: structuredClone(root) as unknown as XCTestHierarchy["hierarchy"],
+  };
+}
+
+function normalizedFormsId(result: ViewHierarchyResult): string {
+  const parser = new DefaultElementParser();
+  const ids: string[] = [];
+  for (const root of parser.extractRootNodes(result)) {
+    parser.traverseNode(root, (node: ViewHierarchyNode) => {
+      const attributes = nodeAttributes(node);
+      if (attributes.text === formsText && typeof attributes["view-id"] === "string") {
+        ids.push(attributes["view-id"]);
+      }
+    });
+  }
+  expect(ids).toHaveLength(1);
+  return ids[0];
+}
+
+function converter(): CtrlProxyHierarchy {
+  const timer = new FakeTimer();
+  const context: HierarchyDelegateContext = {
+    timer,
+    requestManager: new RequestManager(timer),
+    getWebSocket: () => null,
+    ensureConnected: async () => false,
+    cancelScreenshotBackoff: () => {},
+    cacheFreshTtlMs: 1000,
+    getCachedHierarchy: () => null,
+    setCachedHierarchy: () => {},
+  };
+  return new CtrlProxyHierarchy(context);
+}
+
 beforeAll(() => {
   function load(suffix: string): CaptureNode {
     const capture: Capture = JSON.parse(
@@ -77,6 +133,66 @@ beforeAll(() => {
 });
 
 describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () => {
+  test("normalization keeps one Forms & Input id across both real captures", () => {
+    const ids = [injected, notInjected].map((root) =>
+      normalizedFormsId(normalizeIosHierarchy(runnerHierarchy(root))),
+    );
+    expect(ids).toEqual(["s2-792852e3b847bb51", "s2-792852e3b847bb51"]);
+  });
+
+  test("normalization also excludes SDK children in raw XCUITest windows", () => {
+    const ids = [injected, notInjected].map((root) => {
+      const source = runnerHierarchy(root);
+      const result = normalizeIosHierarchy({
+        ...source,
+        windows: [{ windowLayer: 2, hierarchy: structuredClone(source.hierarchy) }],
+      });
+      const window = result.windows?.[0];
+      if (!window?.hierarchy) {
+        throw new Error("Normalized capture has no window hierarchy");
+      }
+      return normalizedFormsId({ hierarchy: window.hierarchy });
+    });
+    expect(ids).toEqual(["s2-792852e3b847bb51", "s2-792852e3b847bb51"]);
+  });
+
+  test("getiOSViewHierarchy publishes one id using the fake client's raw captures", async () => {
+    const timer = new FakeTimer();
+    const client = new FakeIOSCtrlProxy(timer);
+    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    try {
+      const reader = new ViewHierarchy(
+        { deviceId: "sdk-identity-ios-test", platform: "ios", name: "Test iPhone" },
+        new FakeAdbClientFactory(),
+        new FakeCtrlProxy(timer) as unknown as AndroidCtrlProxyClient,
+        timer,
+      );
+      const ids: string[] = [];
+      for (const root of [injected, notInjected]) {
+        client.setHierarchyData(runnerHierarchy(root));
+        ids.push(normalizedFormsId(await reader.getiOSViewHierarchy()));
+      }
+      expect(ids).toEqual(["s2-792852e3b847bb51", "s2-792852e3b847bb51"]);
+    } finally {
+      getInstance.mockRestore();
+    }
+  });
+
+  test.each(["injected", "not-injected"])(
+    "observe and convert-then-normalize action ids agree for the %s capture",
+    (suffix) => {
+      const root = suffix === "injected" ? injected : notInjected;
+      const observed = normalizeIosHierarchy(runnerHierarchy(root));
+      const action = normalizeIosHierarchy(
+        converter().convertToViewHierarchyResult(runnerHierarchy(root)),
+      );
+      expect(normalizedFormsId(observed)).toBe(normalizedFormsId(action));
+      expect(normalizedFormsId(action)).toBe("s2-792852e3b847bb51");
+    },
+  );
+
   test("keeps the Forms & Input row id across SDK-only child placement", () => {
     const a = structuredClone(injected);
     const b = structuredClone(notInjected);
@@ -178,18 +294,7 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
   });
 
   test("iOS conversion passes the gate and preserves sibling extras outside $", () => {
-    const timer = new FakeTimer();
-    const context: HierarchyDelegateContext = {
-      timer,
-      requestManager: new RequestManager(timer),
-      getWebSocket: () => null,
-      ensureConnected: async () => false,
-      cancelScreenshotBackoff: () => {},
-      cacheFreshTtlMs: 1000,
-      getCachedHierarchy: () => null,
-      setCachedHierarchy: () => {},
-    };
-    const subject = new CtrlProxyHierarchy(context);
+    const subject = converter();
     const sdkLabel = {
       className: "UILabel",
       text: "SDK-only content",

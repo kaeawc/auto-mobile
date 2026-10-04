@@ -119,6 +119,24 @@ describe("releaseSessionAndDevice", () => {
     },
   );
 
+  test("a retrying caller defers only failure fallback and preserves the error identity", async () => {
+    const manager = new FakeReleaseManager();
+    const pool = new FakeReleasePool(manager);
+    manager.failure = new Error("persistence failed");
+    await expect(
+      releaseSessionAndDevice(manager, pool, "device", "session", "reason", {
+        deferFailureFallback: true,
+      }),
+    ).rejects.toBe(manager.failure);
+    expect(manager.hasSession()).toBe(false);
+    expect(pool.calls).toEqual([]);
+    manager.failure = undefined;
+    await releaseSessionAndDevice(manager, pool, "device", "session", "reason", {
+      deferFailureFallback: true,
+    });
+    expect(pool.calls).toEqual([["device", "session"]]);
+  });
+
   test("successful release preserves ordering and the supplied reason", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
@@ -130,7 +148,9 @@ describe("releaseSessionAndDevice", () => {
   test("a conditional release returning no device retains ownership", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
-    await releaseSessionAndDevice(manager, pool, "device", "session", "reason", async () => null);
+    await releaseSessionAndDevice(manager, pool, "device", "session", "reason", {
+      release: async () => null,
+    });
     expect(manager.hasSession()).toBe(true);
     expect(manager.calls).toEqual([]);
     expect(pool.calls).toEqual([]);
@@ -139,9 +159,9 @@ describe("releaseSessionAndDevice", () => {
   test("a custom release uses its returned device even without a known failure fallback", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
-    await releaseSessionAndDevice(manager, pool, null, "session", "reason", () =>
-      manager.releaseSession("session", "reason"),
-    );
+    await releaseSessionAndDevice(manager, pool, null, "session", "reason", {
+      release: () => manager.releaseSession("session", "reason"),
+    });
     expect(pool.calls).toEqual([["device", "session"]]);
   });
 

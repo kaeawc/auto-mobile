@@ -19,14 +19,14 @@ export async function releaseSessionAndDevice(
   deviceId: string | null,
   sessionId: string,
   reason?: string,
-  release?: () => Promise<string | null>,
+  options: { release?: () => Promise<string | null>; deferFailureFallback?: boolean } = {},
 ): Promise<void> {
   let releasedDeviceId = deviceId;
   try {
-    if (release) {
+    if (options.release) {
       // Conditional/ownership-fenced callers only free a device on success
       // when their release actually returns one. Legacy callers keep theirs.
-      releasedDeviceId = await release();
+      releasedDeviceId = await options.release();
     } else if (reason === undefined) {
       await manager.releaseSession(sessionId);
     } else {
@@ -35,7 +35,7 @@ export async function releaseSessionAndDevice(
   } catch (releaseError) {
     // Routing lookup can hide a terminally fenced session before removal commits.
     // Any same-UUID incarnation still in the map must retain device ownership.
-    if (deviceId && !manager.hasSession(sessionId)) {
+    if (!options.deferFailureFallback && deviceId && !manager.hasSession(sessionId)) {
       try {
         await pool.releaseDevice(deviceId, sessionId);
       } catch (poolError) {

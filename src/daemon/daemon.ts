@@ -604,7 +604,9 @@ export class Daemon {
       installedAppsRepository: this.installedAppsRepository,
       deviceSessionRepository: this.deviceSessionRepository,
       releaseSessionForDisconnectedDevice: (sessionId, _deviceId, releaseReason, shouldCommit) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit),
+        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
+          deferFailureFallback: true,
+        }),
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryConfiguration.policy,
       onDeviceFramesInvalidated: (deviceId) => {
@@ -2987,6 +2989,7 @@ export class Daemon {
     allowExpired: boolean = false,
     expectedSession?: Session,
     shouldCommit?: () => boolean,
+    options?: { deferFailureFallback?: boolean },
   ): Promise<boolean> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
     // Early identity fence: discovery can replace a same-serial runtime while
@@ -3010,47 +3013,65 @@ export class Daemon {
       assignedDeviceId,
       sessionId,
       releaseReason,
-      async () => {
-        if (expectedSession) {
-          deviceId = await this.sessionManager.releaseSessionIfOwned(
-            sessionId,
-            expectedSession,
-            expectedSession.assignedDevice,
-            releaseReason,
-          );
-        } else if (shouldCommit) {
-          const release = await this.sessionManager.releaseSessionUnlessSuperseded(
-            sessionId,
-            releaseReason,
-            shouldCommit,
-            allowExpired,
-          );
-          if (release.superseded) {
-            logger.info(
-              `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+      {
+        ...options,
+        release: async () => {
+          if (expectedSession) {
+            deviceId = await this.sessionManager.releaseSessionIfOwned(
+              sessionId,
+              expectedSession,
+              expectedSession.assignedDevice,
+              releaseReason,
             );
-            superseded = true;
-            return null;
+          } else if (shouldCommit) {
+            const release = await this.sessionManager.releaseSessionUnlessSuperseded(
+              sessionId,
+              releaseReason,
+              shouldCommit,
+              allowExpired,
+            );
+            if (release.superseded) {
+              logger.info(
+                `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+              );
+              superseded = true;
+              return null;
+            }
+            deviceId = release.deviceId;
+          } else {
+            deviceId = await this.sessionManager.releaseSession(
+              sessionId,
+              releaseReason,
+              allowExpired,
+            );
           }
-          deviceId = release.deviceId;
-        } else {
-          deviceId = await this.sessionManager.releaseSession(
-            sessionId,
-            releaseReason,
-            allowExpired,
-          );
-        }
-        return deviceId;
+          // A completed persistence retry may return a device already idle or
+          // reassigned. Do not issue a stale pool release or report it as freed.
+          if (!this.isSessionDeviceAssigned(deviceId, sessionId)) {
+            deviceId = null;
+          }
+          return deviceId;
+        },
       },
     );
     if (superseded) {
       return false;
     }
+    if (!deviceId || this.isSessionDeviceAssigned(deviceId, sessionId)) {
+      logger.info(
+        `Cancelled session ${sessionId} (${cancelled} executions); no device freed (reason=${releaseReason})`,
+      );
+      return false;
+    }
     logger.info(
-      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
+      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId} ` +
         `(reason=${releaseReason})`,
     );
     return true;
+  }
+
+  private isSessionDeviceAssigned(deviceId: string | null, sessionId: string): boolean {
+    return deviceId !== null && this.devicePool.getDevice(deviceId)?.sessionId === sessionId;
   }
 
   private async cancelAndDrainDeviceExecutions(

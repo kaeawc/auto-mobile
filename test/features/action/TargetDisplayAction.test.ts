@@ -1506,9 +1506,9 @@ describe("CtrlProxy display-targeted action routing", () => {
         expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
         const requests = [...tap.mock.calls, ...swipe.mock.calls, ...drag.mock.calls];
         expect(requests).toHaveLength(1);
-        expect(requests[0].at(-3)).toBe(controller.signal);
-        expect(requests[0].at(-2)).toBe(2);
-        expect(requests[0].at(-1)).toBeFunction();
+        expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
+        expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
+        expect(requests[0].at(kind === "dragAndDrop" ? -2 : -1)).toBeFunction();
         expect(
           executor.getExecutedCommands().filter((cmd) => cmd.startsWith("shell input")),
         ).toEqual([]);
@@ -1679,10 +1679,12 @@ describe("CtrlProxy display-targeted action routing", () => {
                   expect(result.error).toContain(response.error!);
                 }
                 expect(calls).toHaveLength(gesture === "doubleTapOn" && !failure ? 2 : 1);
-                expect(calls[0].at(-2)).toBe(panel === "external" ? 2 : undefined);
-                expect(calls[0].at(-1)).toBeFunction();
+                expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
+                  panel === "external" ? 2 : undefined,
+                );
+                expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
                 if (panel === "external") {
-                  expect(calls[0].at(-3)).toBe(controller.signal);
+                  expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
                 }
                 expect(inputs).toEqual([]);
                 if (gesture === "longPressAt") {

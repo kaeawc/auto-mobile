@@ -40,6 +40,7 @@ import {
 } from "../../src/daemon/emulatorLossIncident";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeEmulatorConsoleBusyRegistry } from "../fakes/FakeEmulatorConsoleBusyRegistry";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
@@ -2889,6 +2890,132 @@ describe("DevicePool", () => {
 
       await devicePool.refreshDevices();
       expect(devicePool.getDevice(captured.id)).toBeNull();
+    });
+
+    describe("System UI ANR replacement execution cancellation", () => {
+      let tracker: ExecutionTracker;
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      const branches = ["remove and add", "adopt existing"] as const;
+
+      beforeEach(async () => {
+        tracker = new ExecutionTracker(fakeTimer, new FakeIdGenerator(["ambient-execution"]));
+        devicePool = new DevicePool(
+          createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+            timer: fakeTimer,
+            installedAppsRepository: fakeAppsRepo,
+            deviceManager: fakeDeviceManager,
+            retryExecutor: new DefaultRetryExecutor(fakeTimer),
+            ambientExecutionIdReader: { getExecutionId: () => "ambient-execution" },
+            cancelDeviceSessionExecutions: Object.assign(
+              tracker.cancelDeviceSessionExecutions.bind(tracker),
+              { cancelDeviceExecutions: tracker.cancelDeviceExecutions.bind(tracker) },
+            ),
+            releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason) => {
+              await tracker.cancelSessionUuidExecutions(sessionId, reason);
+              await sessionManager.releaseSession(sessionId, reason);
+              return true;
+            },
+          }),
+        );
+        await initializeLiveDevices([device]);
+        await devicePool.bindOrReuseDeviceSession(
+          "owner-session",
+          device.deviceId,
+          "android",
+          sourceImage,
+        );
+      });
+
+      async function replaceDevice(branch: (typeof branches)[number], excludeExecutionId?: string) {
+        const reservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
+        if (!reservation) {
+          throw new Error("expected shutdown reservation");
+        }
+        try {
+          if (branch === "adopt existing") {
+            await devicePool.addDevice(replacement, sourceImage);
+          }
+          return await devicePool.replaceDeviceForSystemUiAnrRecovery(
+            reservation.device,
+            replacement,
+            sourceImage,
+            undefined,
+            undefined,
+            excludeExecutionId,
+          );
+        } finally {
+          await reservation.release();
+        }
+      }
+
+      test.each(branches)(
+        "cancels old-device work and preserves the explicitly excluded recovery during %s",
+        async (branch) => {
+          const oldDeviceWork = tracker.startExecution("observe");
+          const dualBoundWork = tracker.startExecution("tapOn", undefined, "owner-session");
+          const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
+          tracker.bindDeviceExecution(oldDeviceWork.id, device.deviceId);
+          tracker.bindDeviceExecution(dualBoundWork.id, device.deviceId);
+          tracker.bindDeviceExecution(recovery.id, device.deviceId);
+
+          const handoff = await replaceDevice(branch, recovery.id);
+
+          expect(oldDeviceWork.abortController.signal.aborted).toBe(true);
+          expect(dualBoundWork.abortController.signal.aborted).toBe(true);
+          expect(oldDeviceWork.cancelReason).toMatchObject({ deviceId: device.deviceId });
+          expect(recovery.abortController.signal.aborted).toBe(false);
+          expect(handoff.preservedSessionId).toBe("owner-session");
+          expect(sessionManager.getSession("owner-session")?.assignedDevice).toBe(
+            replacement.deviceId,
+          );
+        },
+      );
+
+      test.each(branches)(
+        "preserves session-only and other-device work during %s",
+        async (branch) => {
+          const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
+          const otherDeviceWork = tracker.startExecution("observe");
+          tracker.bindDeviceExecution(otherDeviceWork.id, "emulator-5558");
+
+          await replaceDevice(branch);
+
+          expect(sessionOnlyWork.abortController.signal.aborted).toBe(false);
+          expect(otherDeviceWork.abortController.signal.aborted).toBe(false);
+        },
+      );
+
+      test("failure retirement cancels session work including recovery and retains sessionless device work", async () => {
+        const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
+        const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
+        const sessionlessWork = tracker.startExecution("observe");
+        const otherDeviceWork = tracker.startExecution("observe");
+        tracker.bindDeviceExecution(recovery.id, device.deviceId);
+        tracker.bindDeviceExecution(sessionlessWork.id, device.deviceId);
+        tracker.bindDeviceExecution(otherDeviceWork.id, "emulator-5558");
+        const captured = devicePool.getDevice(device.deviceId);
+        if (!captured) {
+          throw new Error("expected recovery device to be pooled");
+        }
+
+        const retired = await devicePool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured);
+
+        expect(retired).toBe(true);
+        expect(sessionManager.getSession("owner-session")).toBeNull();
+        expect(devicePool.getDevice(device.deviceId)).toBeNull();
+        expect(sessionOnlyWork.abortController.signal.aborted).toBe(true);
+        expect(recovery.abortController.signal.aborted).toBe(true);
+        expect(sessionOnlyWork.cancelReason).toMatchObject({ deviceId: device.deviceId });
+        expect(sessionlessWork.abortController.signal.aborted).toBe(false);
+        expect(otherDeviceWork.abortController.signal.aborted).toBe(false);
+      });
     });
 
     test("keeps the existing session through a System UI recovery handoff", async () => {

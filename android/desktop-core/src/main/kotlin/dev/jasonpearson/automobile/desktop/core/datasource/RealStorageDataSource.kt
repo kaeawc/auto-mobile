@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.desktop.core.storage.QueryResult
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.storage.TableInfo
 import dev.jasonpearson.automobile.desktop.core.storage.parseKeyValue
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -151,6 +152,7 @@ class RealStorageDataSource(
       LOG.warn("getDatabases: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       LOG.warn("getDatabases: Exception: ${e.message}", e)
       Result.Error(e, "Failed to load databases: ${e.message}")
     }
@@ -197,6 +199,7 @@ class RealStorageDataSource(
       LOG.warn("getTableData: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       LOG.warn("getTableData: Exception: ${e.message}", e)
       Result.Error(e, "Failed to load table data: ${e.message}")
     }
@@ -249,6 +252,7 @@ class RealStorageDataSource(
       LOG.warn("executeSQL: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       LOG.warn("executeSQL: Exception: ${e.message}", e)
       Result.Error(e, "Failed to execute SQL: ${e.message}")
     }
@@ -364,6 +368,7 @@ class RealStorageDataSource(
       LOG.warn("getKeyValueFiles: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       LOG.warn("getKeyValueFiles: Exception during fetch: ${e.message}", e)
       Result.Error(e, "Failed to load storage data: ${e.message}")
     }
@@ -399,6 +404,7 @@ class RealStorageDataSource(
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       Result.Error(e, "Failed to set key value: ${e.message}")
     }
   }
@@ -422,6 +428,7 @@ class RealStorageDataSource(
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       Result.Error(e, "Failed to remove key value: ${e.message}")
     }
   }
@@ -442,6 +449,7 @@ class RealStorageDataSource(
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       Result.Error(e, "Failed to clear key value file: ${e.message}")
     }
   }

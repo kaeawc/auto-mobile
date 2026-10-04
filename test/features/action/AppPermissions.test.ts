@@ -250,7 +250,7 @@ describe("AppPermissions", () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
     client.setCommandResult(
-      "shell dumpsys package com.example.app",
+      "shell dumpsys package 'com.example.app'",
       [
         "runtime permissions:",
         "  android.permission.CAMERA: granted=true, flags=[ USER_SET ]",
@@ -287,6 +287,25 @@ describe("AppPermissions", () => {
         source: "androidRuntime",
       },
     ]);
+  });
+
+  test("quotes package names when querying permissions through the device shell", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    const appId = "com.example.app; id #";
+    const command = "shell dumpsys package 'com.example.app; id #'";
+    client.setCommandResult(command, "android.permission.CAMERA: granted=true, flags=[ USER_SET ]");
+
+    const permissions = new AppPermissions(androidDevice, { adbFactory });
+    const result = await permissions.getPermissions(appId, {
+      permissions: ["android.permission.CAMERA"],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.permissions[0].state).toBe("granted");
+    expect(client.getAllCommands()).toEqual([command]);
+    expect(client.wasCommandExecuted(command)).toBe(true);
+    expect(client.wasCommandExecuted(`shell dumpsys package ${appId}`)).toBe(false);
   });
 
   test("sets and queries iOS simulator permissions through the same facade", async () => {

@@ -1,0 +1,381 @@
+import Foundation
+#if canImport(XCTest) && os(iOS)
+    import UIKit
+    import XCTest
+#endif
+
+extension ElementLocator {
+    #if canImport(XCTest) && os(iOS)
+        /// Collect text-input element snapshots by walking the already-captured
+        /// application snapshot tree (issue #5474).
+        ///
+        /// This replaces the previous live-query approach
+        /// (`descendants(matching:).allElementsBoundByIndex` + per-candidate
+        /// `snapshot()`), which forced the app to re-serialize its accessibility
+        /// tree over IPC once per element type plus once per candidate. Because the
+        /// root snapshot is already in hand, the same text-input nodes are read
+        /// locally with no further IPC. Zero-area nodes are skipped to mirror the
+        /// old `!frame.isEmpty` visibility filter.
+        static func collectTextInputSnapshots(from snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            var snapshots: [XCUIElementSnapshot] = []
+            collectTextInputSnapshots(from: snapshot, into: &snapshots)
+            return snapshots
+        }
+
+        private static func collectTextInputSnapshots(
+            from snapshot: XCUIElementSnapshot,
+            into snapshots: inout [XCUIElementSnapshot]
+        ) {
+            if textInputElementTypes.contains(snapshot.elementType), !snapshot.frame.isEmpty {
+                snapshots.append(snapshot)
+            }
+            for child in snapshot.children {
+                collectTextInputSnapshots(from: child, into: &snapshots)
+            }
+        }
+
+        /// Get system alerts from the app snapshot and springboard.
+        /// Checks two sources because system permission dialogs may appear in either:
+        /// 1. The foreground app's accessibility tree (common on modern iOS)
+        /// 2. SpringBoard's accessibility tree (for some system-level dialogs)
+        /// Alert elements are extracted separately from the main hierarchy tree to ensure
+        /// they are always visible as top-level children and never lost to optimization.
+        /// Deduplicates by alert label text to avoid showing the same alert twice.
+        func getSystemAlerts(
+            appSnapshot: XCUIElementSnapshot,
+            keyboardFocusFrame: CGRect? = nil
+        )
+            throws -> (alerts: [UIElementInfo], rotation: Int?)
+        {
+            // Check for alerts in the app's own snapshot tree
+            let appAlertSnapshots = collectAlertElements(from: appSnapshot)
+            let appAlerts = appAlertSnapshots.map { snapshot in
+                buildElementInfoFromSnapshot(
+                    snapshot,
+                    depth: 0,
+                    screenBounds: snapshot.frame,
+                    keyboardFocusFrame: keyboardFocusFrame
+                )
+            }
+
+            // Also check SpringBoard for alerts not in the app's tree. A system-owned
+            // sheet can cover a still-foreground app without appearing anywhere in the
+            // app snapshot (for example, iOS's "Open in <app>?" confirmation). In that
+            // state the app provides no precondition that can safely prove SpringBoard
+            // has no alert, so every non-SpringBoard capture must inspect both windows.
+            // When the foreground app IS SpringBoard, `appSnapshot` already is
+            // SpringBoard's tree and a second snapshot would be redundant.
+            let foregroundIsSpringboard = (foregroundBundleId ?? "com.apple.springboard") == "com.apple.springboard"
+            let runSpringboardSnapshot = Self.shouldSnapshotSpringboardForAlerts(
+                foregroundIsSpringboard: foregroundIsSpringboard
+            )
+            let springboardCapture = try getAlertsFromSpringboard(
+                runSnapshot: runSpringboardSnapshot,
+                keyboardFocusFrame: keyboardFocusFrame
+            )
+
+            // Deduplicate by alert label text
+            var seenLabels: Set<String> = []
+            var combined: [UIElementInfo] = []
+
+            for alert in appAlerts {
+                let label = alert.text ?? ""
+                if !seenLabels.contains(label) {
+                    seenLabels.insert(label)
+                    combined.append(alert)
+                }
+            }
+
+            for alert in springboardCapture.alerts {
+                let label = alert.text ?? ""
+                if !seenLabels.contains(label) {
+                    seenLabels.insert(label)
+                    combined.append(alert)
+                }
+            }
+
+            if !combined.isEmpty {
+                print(
+                    "[ElementLocator] Found \(combined.count) system alert(s): appAlerts=\(appAlerts.count), springboardAlerts=\(springboardCapture.alerts.count)"
+                )
+            }
+
+            return (combined, springboardCapture.rotation)
+        }
+
+        /// Get alerts from a fresh springboard snapshot.
+        /// Uses single snapshot() + tree traversal instead of .alerts query which can hang
+        /// indefinitely on system permission dialogs, blocking the main thread.
+        /// IMPORTANT: Creates a new XCUIApplication each call to avoid stale cached state.
+        ///
+        /// When `runSnapshot` is false the expensive `springboard.snapshot()` IPC is
+        /// skipped and no alerts are returned, but the (cheap, local) rotation sample
+        /// is still captured so the caller's rotation-agreement check is unaffected
+        /// (issue #5474).
+        private func getAlertsFromSpringboard(
+            runSnapshot: Bool,
+            keyboardFocusFrame: CGRect? = nil
+        )
+            throws -> (alerts: [UIElementInfo], rotation: Int?)
+        {
+            let capture: (alertSnapshots: [XCUIElementSnapshot], rotation: Int?) =
+                try catchingObjCException {
+                    let capture = DeviceRotation.capture { () -> [XCUIElementSnapshot] in
+                        guard runSnapshot else {
+                            return []
+                        }
+                        let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                        guard let snapshot = try? freshSpringboard.snapshot() else {
+                            return []
+                        }
+                        return self.collectAlertElements(from: snapshot)
+                    }
+                    return (alertSnapshots: capture.value, rotation: capture.rotation)
+                }
+
+            let alerts = capture.alertSnapshots.map { snapshot in
+                buildElementInfoFromSnapshot(
+                    snapshot,
+                    depth: 0,
+                    screenBounds: snapshot.frame,
+                    keyboardFocusFrame: keyboardFocusFrame
+                )
+            }
+            return (alerts, capture.rotation)
+        }
+
+        /// Recursively collect system-dialog snapshots from a snapshot tree.
+        ///
+        /// iOS exposes classic permission dialogs as `.alert`, but newer
+        /// SpringBoard confirmations such as "Open in <app>?" as `.sheet`.
+        /// Used instead of live `.alerts` / `.sheets` queries, which can hang on
+        /// system-owned dialogs.
+        func collectAlertElements(from snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            if snapshot.elementType == .alert || snapshot.elementType == .sheet {
+                // Found a dialog - return it without recursing into children
+                // (buildElementInfoFromSnapshot will handle its children).
+                return [snapshot]
+            }
+            var alerts: [XCUIElementSnapshot] = []
+            for child in snapshot.children {
+                alerts.append(contentsOf: collectAlertElements(from: child))
+            }
+            return alerts
+        }
+
+        /// Check whether a zero-area wrapper contains an element with a usable frame.
+        private func hasNonZeroAreaDescendant(_ snapshot: XCUIElementSnapshot) -> Bool {
+            snapshot.children.contains { child in
+                let frame = child.frame
+                return !Self.hasZeroArea(frame) || hasNonZeroAreaDescendant(child)
+            }
+        }
+
+        /// Build element info from XCUIElementSnapshot - all data is already captured, no IPC calls
+        /// Applies early filtering: offscreen elements, empty zero-area subtrees
+        /// Only sets boolean fields when true (nil = false) to reduce JSON size
+        func buildElementInfoFromSnapshot(
+            _ snapshot: XCUIElementSnapshot,
+            depth: Int,
+            screenBounds: CGRect,
+            parentPath: String = "",
+            childIndex: Int = 0,
+            keyboardFocusFrame: CGRect? = nil,
+            disableAllFiltering: Bool = false,
+            enclosingFrame: CGRect? = nil,
+            coordinateOffset: CGPoint = .zero
+        )
+            -> UIElementInfo
+        {
+            let resolved = Self.screenFrame(
+                snapshot.frame,
+                enclosingFrame: enclosingFrame,
+                coordinateOffset: coordinateOffset
+            )
+            let frame = resolved.frame
+
+            // Skip zero-area elements
+            let hasZeroArea = Self.hasZeroArea(frame)
+
+            let bounds = ElementBounds(clamping: frame)
+
+            // Get identifier
+            let identifier = snapshot.identifier
+
+            // Build deterministic path for viewId generation
+            let resId = identifier.isEmpty ? nil : identifier
+            let segment: String
+            if let rid = resId {
+                segment = "\(childIndex):\(rid)"
+            } else {
+                segment = "\(childIndex)"
+            }
+            let currentPath = parentPath.isEmpty ? segment : "\(parentPath)/\(segment)"
+            let viewId = resId ?? generateDeterministicUuid(from: currentPath)
+
+            // Get children from snapshot (already captured - fast!)
+            // Filter out offscreen children and zero-area subtrees without usable frames
+            // Alert/sheet elements are SKIPPED here because they are extracted separately
+            // by collectAlertElements() and added as top-level system dialogs. This ensures
+            // system confirmations are always visible and never lost to hierarchy optimization.
+            let parentClassName = mapElementType(snapshot.elementType)
+            var childNodes: [UIElementInfo]?
+            if depth < ElementLocator.maxDepth {
+                let children = snapshot.children
+                if !children.isEmpty {
+                    var filteredChildren = children.enumerated().compactMap { idx, child -> UIElementInfo? in
+                        // Skip dialog elements - they are extracted separately to ensure
+                        // they're always visible as top-level children.
+                        if child.elementType == .alert || child.elementType == .sheet {
+                            return nil
+                        }
+
+                        let childFrame = Self.screenFrame(
+                            child.frame,
+                            enclosingFrame: frame,
+                            coordinateOffset: resolved.offset
+                        ).frame
+
+                        if Self.hasZeroArea(childFrame) {
+                            // A zero-area wrapper can still contain on-screen descendants.
+                            guard Self.shouldKeepZeroAreaChild(
+                                hasNonZeroAreaDescendant: hasNonZeroAreaDescendant(child)
+                            ) else {
+                                return nil
+                            }
+                        } else {
+                            // Skip completely offscreen children (with margin)
+                            let margin: CGFloat = 50
+                            let expandedScreen = screenBounds.insetBy(dx: -margin, dy: -margin)
+                            if !expandedScreen.intersects(childFrame) {
+                                return nil
+                            }
+                        }
+
+                        return buildElementInfoFromSnapshot(
+                            child,
+                            depth: depth + 1,
+                            screenBounds: screenBounds,
+                            parentPath: currentPath,
+                            childIndex: idx,
+                            keyboardFocusFrame: keyboardFocusFrame,
+                            disableAllFiltering: disableAllFiltering,
+                            enclosingFrame: frame,
+                            coordinateOffset: resolved.offset
+                        )
+                    }
+
+                    if !disableAllFiltering {
+                        // Collapse same-type text-input children (e.g. UITextField inside UITextField)
+                        // that are internal UIKit subviews with no unique identifying properties.
+                        filteredChildren = ElementLocator.collapseSameTypeTextInputChildren(
+                            parentClassName: parentClassName,
+                            children: filteredChildren
+                        )
+
+                        // Deduplicate siblings with identical type + bounds + no unique properties.
+                        filteredChildren = ElementLocator.deduplicateSiblings(filteredChildren)
+                    }
+
+                    childNodes = filteredChildren.isEmpty ? nil : filteredChildren
+                }
+            }
+
+            // Determine boolean properties - only set to "true", leave nil for false
+            // This significantly reduces JSON size
+            let isEnabled = snapshot.isEnabled
+
+            // Only mark specific element types as clickable (not generic UIViews)
+            let isClickableType = isActuallyClickableType(snapshot.elementType)
+            let isClickable = isEnabled && isClickableType
+
+            let isScrollable = isScrollableType(snapshot.elementType)
+            let isCheckable = isCheckableType(snapshot.elementType)
+            let isSelected = snapshot.isSelected
+            // UISwitch reports toggle state via value ("0"/"1"), not isSelected
+            let isChecked: Bool
+            if isCheckable, let value = snapshot.value as? String {
+                isChecked = value == "1"
+            } else {
+                isChecked = isCheckable && isSelected
+            }
+            // Prefer the focus frame from the captured text inputs or predicate fallback;
+            // some iPhone UIKit fields do not report keyboard input focus via snapshot.hasFocus.
+            let hasFocus: Bool
+            if let focusFrame = keyboardFocusFrame, !frame.isEmpty, !focusFrame.isEmpty {
+                let epsilon: CGFloat = 0.5
+                let framesMatch = abs(frame.origin.x - focusFrame.origin.x) < epsilon
+                    && abs(frame.origin.y - focusFrame.origin.y) < epsilon
+                    && abs(frame.width - focusFrame.width) < epsilon
+                    && abs(frame.height - focusFrame.height) < epsilon
+                let isTextInput = snapshot.elementType == .textField
+                    || snapshot.elementType == .textView
+                    || snapshot.elementType == .secureTextField
+                    || snapshot.elementType == .searchField
+                hasFocus = framesMatch && isTextInput
+            } else {
+                hasFocus = snapshot.hasFocus
+            }
+            let isPassword = snapshot.elementType == .secureTextField
+
+            // Only include actions for text input elements (click is implied by clickable)
+            var actions: [String]?
+            if isEnabled && (
+                snapshot.elementType == .textField || snapshot.elementType == .textView ||
+                    snapshot.elementType == .secureTextField || snapshot.elementType == .searchField
+            ) {
+                actions = ["set_text", "clear_text"]
+            }
+
+            // Get label - use for text (don't duplicate in content-desc)
+            let label = snapshot.label.isEmpty ? nil : snapshot.label
+
+            // For text inputs, surface the entered value separately from the
+            // accessibility label (which is typically the placeholder for
+            // UISearchBar / UITextField). Mask password content to avoid
+            // leaking secrets through the hierarchy.
+            let isTextInput = snapshot.elementType == .textField
+                || snapshot.elementType == .textView
+                || snapshot.elementType == .secureTextField
+                || snapshot.elementType == .searchField
+            var enteredValue: String?
+            if isTextInput, let raw = snapshot.value as? String, !raw.isEmpty {
+                enteredValue = isPassword ? String(repeating: "•", count: raw.count) : raw
+            }
+
+            return UIElementInfo(
+                text: label,
+                value: enteredValue,
+                textSize: nil,
+                contentDesc: nil, // Don't duplicate - label is in text
+                resourceId: resId,
+                className: parentClassName,
+                bounds: hasZeroArea ? nil : bounds, // Don't include bounds for zero-area elements
+                // Only include boolean fields when true (nil = false)
+                clickable: isClickable ? "true" : nil,
+                enabled: nil, // Don't include enabled - it's almost always true and implied by clickable
+                focusable: nil, // Don't include - almost all elements are focusable on iOS
+                focused: hasFocus ? "true" : nil,
+                accessibilityFocused: nil,
+                scrollable: isScrollable ? "true" : nil,
+                password: isPassword ? "true" : nil,
+                checkable: isCheckable ? "true" : nil,
+                checked: isChecked ? "true" : nil,
+                selected: isSelected ? "true" : nil,
+                longClickable: nil, // Don't include - same as clickable on iOS
+                semanticLinks: snapshot.elementType == .link
+                    ? label.map { [SemanticLink(text: $0, occurrence: 0)] }
+                    : nil,
+                testTag: nil, // Don't duplicate - identifier is in resourceId
+                role: mapRole(snapshot.elementType),
+                stateDescription: nil,
+                errorMessage: nil,
+                hintText: snapshot.placeholderValue,
+                viewId: viewId,
+                extras: nil,
+                actions: actions,
+                node: childNodes
+            )
+        }
+    #endif
+}

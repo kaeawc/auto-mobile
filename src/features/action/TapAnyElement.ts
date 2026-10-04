@@ -75,6 +75,7 @@ import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxy
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import { androidDisplayTapDispatch, dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
+import { assertTouchscreenInputSucceeded } from "./touchscreenInput";
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
@@ -533,13 +534,16 @@ export class TapAnyElement extends BaseVisualChange {
       try {
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         fence.assertCurrent();
-        await this.adb.executeCommand(
-          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+        const command = `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`;
+        const result = await this.adb.executeCommand(
+          command,
           resolveTapAnyCtrlProxyTimeoutMs(durationMs),
           undefined,
           undefined,
           signal,
         );
+        assertTouchscreenInputSucceeded(command, result);
+        return;
       } catch (error) {
         if (error instanceof StaleDisplayError) {
           throw error;
@@ -548,16 +552,18 @@ export class TapAnyElement extends BaseVisualChange {
         logger.warn(
           `[TapAnyElement] touch input swipe failed, falling back to input swipe: ${error}`,
         );
-        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-        fence.assertCurrent();
-        await this.adb.executeCommand(
-          `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-          resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-          undefined,
-          undefined,
-          signal,
-        );
       }
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence.assertCurrent();
+      const command = `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`;
+      const result = await this.adb.executeCommand(
+        command,
+        resolveTapAnyCtrlProxyTimeoutMs(durationMs),
+        undefined,
+        undefined,
+        signal,
+      );
+      assertTouchscreenInputSucceeded(command, result);
       return;
     }
 
@@ -684,7 +690,7 @@ export class TapAnyElement extends BaseVisualChange {
     } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
-    if (!preTapHash) {
+    if (action !== "tap" || !preTapHash) {
       return;
     }
     const probe = await checkAndroidTapHierarchyChange(

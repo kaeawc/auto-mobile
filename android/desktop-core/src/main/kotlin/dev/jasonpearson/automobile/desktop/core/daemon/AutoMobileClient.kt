@@ -507,6 +507,16 @@ internal fun negotiateProtocolVersion(result: JsonObject): String {
   return negotiated
 }
 
+internal fun decodeObserveResponse(json: Json, element: JsonElement): ObserveResult {
+  return try {
+    decodeToolResponse(json, element, serializer<ObserveResult>())
+  } catch (e: IllegalArgumentException) {
+    // SerializationException is an IllegalArgumentException; connection errors and cancellation
+    // propagate unchanged.
+    throw McpConnectionException("Failed to decode observe response: ${e.message}", cause = e)
+  }
+}
+
 internal fun <T> decodeToolResponse(
   json: Json,
   element: JsonElement,

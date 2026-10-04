@@ -8,9 +8,101 @@ import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeWindow } from "../../fakes/FakeWindow";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const SIMULATOR_UDID = "ABCDEF01-1234-1234-1234-1234567890AB";
 const PHYSICAL_UDID = "00008110-000A4D8E1234567E";
+
+describe("OpenURL Android command output", () => {
+  test.each(["stdout", "stderr"] as const)(
+    "returns failure when am start reports an unresolved intent on %s",
+    async (stream) => {
+      const fakeAdb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      // Output from test/features/action/LaunchApp.test.ts: every fallback fails.
+      const output = "Error: Activity not started, unable to resolve Intent";
+      fakeAdb.setCommandResponse("am start -a android.intent.action.VIEW", {
+        stdout: stream === "stdout" ? output : "",
+        stderr: stream === "stderr" ? output : "",
+      });
+      const openURL = new OpenURL(
+        { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+        fakeAdb,
+        null,
+        null,
+        timer,
+      );
+      const observeScreen = new FakeObserveScreen();
+      observeScreen.setObserveResult({
+        observationId: "open-url-test",
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+        updatedAt: timer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: {} },
+      });
+      Object.assign(openURL, {
+        observeScreen,
+        window: new FakeWindow(),
+        awaitIdle: new FakeAwaitIdle(),
+      });
+      const url = "myapp://order/123";
+
+      const result = await openURL.execute(url);
+
+      expect(result.success).toBe(false);
+      expect(result.url).toBe(url);
+      expect(result.error).toContain(url);
+      expect(result.error).toContain(output);
+      expect(fakeAdb.getExecutedArgv()).toContainEqual([
+        "shell",
+        `am start -a android.intent.action.VIEW -d '${url}'`,
+      ]);
+    },
+  );
+
+  test("keeps success when am start brings the current task to the front", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    // Output from test/features/action/LaunchApp.test.ts: accepted final launcher intent.
+    fakeAdb.setCommandResponse("am start -a android.intent.action.VIEW", {
+      stdout: "Warning: Activity not started, its current task has been brought to the front",
+      stderr: "",
+    });
+    const openURL = new OpenURL(
+      { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+      fakeAdb,
+      null,
+      null,
+      timer,
+    );
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult({
+      observationId: "open-url-test",
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      updatedAt: timer.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: {} },
+    });
+    Object.assign(openURL, {
+      observeScreen,
+      window: new FakeWindow(),
+      awaitIdle: new FakeAwaitIdle(),
+    });
+
+    const result = await openURL.execute("https://example.com/x");
+
+    expect(result.success).toBe(true);
+    expect(result.url).toBe("https://example.com/x");
+    expect(result.error).toBeUndefined();
+  });
+});
 
 const iosDevice = (deviceId: string): BootedDevice => ({
   name: "iPhone",

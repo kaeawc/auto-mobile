@@ -26,6 +26,8 @@ import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import { parseResumedActivityForDisplay } from "./parseResumedActivity";
 import {
   AdbExecutor,
+  type ForegroundApp,
+  type ForegroundAppReadResult,
   type AdbExecuteOptions,
   type AdbDeviceState,
   type AdbProcess,
@@ -1845,12 +1847,20 @@ export class AdbClient implements AdbExecutor {
   async getForegroundApp(
     signal?: AbortSignal,
     timeout?: number | { timeoutMs?: number; displayId?: number },
-  ): Promise<{
-    packageName: string;
-    userId: number;
-    activityName?: string;
-    displayCount?: number;
-  } | null> {
+  ): Promise<ForegroundApp | null> {
+    const result = await this.getForegroundAppChecked(signal, timeout);
+    return result.state === "known" ? result.app : null;
+  }
+
+  /**
+   * Read the resumed app for the requested display, reporting unparseable output as unreadable.
+   * Known with app: null requires positive evidence of no foreground app; this dumpsys
+   * reader currently has no such evidence and reports unreadable when no activity parses.
+   */
+  async getForegroundAppChecked(
+    signal?: AbortSignal,
+    timeout?: number | { timeoutMs?: number; displayId?: number },
+  ): Promise<ForegroundAppReadResult> {
     const { timeoutMs, displayId = 0 } =
       typeof timeout === "number" ? { timeoutMs: timeout } : (timeout ?? {});
     try {
@@ -1868,19 +1878,23 @@ export class AdbClient implements AdbExecutor {
         const { userId, packageName } = foreground;
         logger.info(`[ADB] Foreground app: ${packageName} (user ${userId})`);
         return {
-          packageName,
-          userId,
-          activityName: foreground.activityName,
-          displayCount: parsed.displayCount,
+          state: "known",
+          app: {
+            packageName,
+            userId,
+            activityName: foreground.activityName,
+            displayCount: parsed.displayCount,
+          },
         };
       }
 
-      logger.debug("[ADB] No foreground app detected");
-      return null;
+      const error = `No resumed activity could be parsed from the dumpsys activity activities output for display ${displayId} (display sections: ${parsed.displayCount}, stdout length: ${result.stdout.length})`;
+      logger.warn(`[ADB] ${error}`);
+      return { state: "unreadable", error };
     } catch (error) {
       signal?.throwIfAborted();
-      logger.debug(`[ADB] Failed to get foreground app: ${(error as Error).message}`);
-      return null;
+      logger.warn("[ADB] Failed to get foreground app", error);
+      return { state: "unreadable", error: errorMessage(error) };
     }
   }
 }

@@ -197,6 +197,7 @@ export class AndroidRebootCoordinator {
       if (
         !this.pool.detachSessionForAndroidRecovery(device, preservedSessionId, preservedSession)
       ) {
+        await this.pool.completeEmulatorLossRecovery(incidentId, "not-attempted");
         return false;
       }
       await this.pool.removeDevice(device.id, true, device);

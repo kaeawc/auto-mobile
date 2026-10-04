@@ -1,3 +1,7 @@
+import { isAppearanceSyncEnabled } from "../utils/appearance/appearanceSyncPolicy";
+
+export { isAppearanceSyncEnabled } from "../utils/appearance/appearanceSyncPolicy";
+
 export type PassiveWorkPlatform = "android" | "ios";
 export type PassiveWorkKind = "appearance-sync" | "startup-warmup" | "observation-stream";
 
@@ -16,10 +20,6 @@ function parseDeviceIds(value: string | undefined): ReadonlySet<string> {
       .map((id) => id.trim())
       .filter(Boolean),
   );
-}
-
-export function isAppearanceSyncEnabled(value: string | undefined): boolean {
-  return !["0", "false", "off", "no"].includes(value?.trim().toLowerCase() ?? "");
 }
 
 export function parsePassiveWorkSettings(

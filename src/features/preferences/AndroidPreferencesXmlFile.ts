@@ -1,6 +1,6 @@
 import { Builder, parseStringPromise } from "xml2js";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { ActionableError } from "../../models";
+import { ActionableError, toActionableError } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 
@@ -49,7 +49,8 @@ export async function readAndroidPreferencesXml(
       return "<map/>";
     }
     throw new ActionableError(
-      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${error}`,
+      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${errorMessage(error)}`,
+      { cause: error },
     );
   }
 }
@@ -75,7 +76,8 @@ export async function readAndroidPreferencesXmlIfExists(
       return { xml: "<map/>", exists: false };
     }
     throw new ActionableError(
-      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${error}`,
+      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${errorMessage(error)}`,
+      { cause: error },
     );
   }
 }
@@ -97,7 +99,8 @@ export async function writeAndroidPreferencesXml(
     );
   } catch (error) {
     throw new ActionableError(
-      `Failed to write Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${error}`,
+      `Failed to write Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${errorMessage(error)}`,
+      { cause: error },
     );
   }
 }
@@ -117,7 +120,7 @@ export async function parseAndroidPreferencesXml(
     });
     return normalizeAndroidPreferencesDocument(parsed);
   } catch (error) {
-    throw new ActionableError(`Failed to parse Android SharedPreferences XML: ${error}`);
+    throw toActionableError(error, "Failed to parse Android SharedPreferences XML");
   }
 }
 

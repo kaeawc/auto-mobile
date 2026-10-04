@@ -89,18 +89,19 @@ export class GrantAndroidPermissions {
       };
     }
 
-    const targetUserId = await perf.track("detectTargetUser", async () => {
-      return (
-        await new AndroidUserTargetResolver(this.adb).resolve({
-          packageName,
-          explicitUserId: userId,
-        })
-      ).userId;
-    });
-
+    let targetUserId: number;
     const results: GrantAndroidPermissionItemResult[] = [];
 
     try {
+      targetUserId = await perf.track("detectTargetUser", async () => {
+        return (
+          await new AndroidUserTargetResolver(this.adb).resolve({
+            packageName,
+            explicitUserId: userId,
+          })
+        ).userId;
+      });
+
       for (const permission of permissions) {
         const trimmed = permission.trim();
         if (!trimmed) {

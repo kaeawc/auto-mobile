@@ -30,16 +30,25 @@ export function capToQualityPreset(
   if (!quality) {
     return size;
   }
+  // Invalid dimensions have no meaningful aspect ratio; preserve them rather than invent a size.
+  if (
+    !Number.isFinite(size.width) ||
+    !Number.isFinite(size.height) ||
+    size.width <= 0 ||
+    size.height <= 0
+  ) {
+    return size;
+  }
   const maxLongSide = QUALITY_PRESET_MAX_LONG_SIDE[quality];
   const longSide = Math.max(size.width, size.height);
   if (longSide <= maxLongSide) {
-    return { width: size.width & ~1, height: size.height & ~1 };
+    return { width: Math.max(2, size.width & ~1), height: Math.max(2, size.height & ~1) };
   }
   const scale = maxLongSide / longSide;
   if (size.height >= size.width) {
-    return { width: Math.trunc(size.width * scale) & ~1, height: maxLongSide };
+    return { width: Math.max(2, Math.trunc(size.width * scale) & ~1), height: maxLongSide };
   }
-  return { width: maxLongSide, height: Math.trunc(size.height * scale) & ~1 };
+  return { width: maxLongSide, height: Math.max(2, Math.trunc(size.height * scale) & ~1) };
 }
 
 /** The preset's default bitrate, or undefined when no preset was requested. */

@@ -2227,7 +2227,7 @@ export class SimCtlClient implements SimCtl {
     try {
       return await this.getBootedSimulatorsChecked(timeoutMs, signal);
     } catch (error) {
-      signal?.throwIfAborted();
+      (signal ?? getAbortSignal())?.throwIfAborted();
       logger.debug(`Failed to get booted iOS devices: ${error}`);
       return [];
     }
@@ -2323,6 +2323,7 @@ export class SimCtlClient implements SimCtl {
 
       return null;
     } catch (error) {
+      getAbortSignal()?.throwIfAborted();
       logger.warn(`Failed to get iOS device info for ${udid}: ${error}`);
       return null;
     }

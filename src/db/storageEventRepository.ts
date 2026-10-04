@@ -82,7 +82,8 @@ export async function recordStorageEvent(
     await insertStorageEventWithPreviousValue(input, d, shouldLookupPreviousValue);
   }
 
-  cleanupIfNeeded(db);
+  // Retention failures are logged inside pruneEventTableByCount.
+  void cleanupIfNeeded(db);
 }
 
 async function insertStorageEventWithPreviousValue(

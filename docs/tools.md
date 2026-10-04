@@ -1482,6 +1482,13 @@ durable absence. `cancellationPolicy: "cancel-on-request-abort"` cancels accepte
 the MCP request is aborted; use it for deadline-critical, caller-owned cleanup
 that must stop when its caller stops waiting.
 
+`startDevice.screenSize` requires positive, finite width and height in pixels.
+Matching allows a 10% difference in each dimension.
+
+`deviceSnapshot.vmSnapshotTimeoutMs` accepts a positive integer up to 1800000 ms
+(30 minutes) for capture and restore. When omitted, the configured timeout applies
+(default 30000 ms).
+
 `deviceSnapshot.useVmSnapshot` uses an emulator VM snapshot;
 `vmSnapshotTimeoutMs` sets the VM snapshot timeout in milliseconds.
 `strictBackupMode` is iOS-only and fails the whole snapshot unless every

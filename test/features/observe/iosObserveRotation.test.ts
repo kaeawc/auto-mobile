@@ -34,3 +34,11 @@ test("does not invent rotation without usable screen dimensions", () => {
     expect(resolveIosObserveRotation(3, screenSize)).toBe(3);
   }
 });
+
+test("returns unknown without runner rotation or screen size", () => {
+  expect(resolveIosObserveRotation(undefined, undefined)).toBeUndefined();
+});
+
+test.each([0, 1, 2, 3])("preserves runner rotation %s without screen size", (rotation) => {
+  expect(resolveIosObserveRotation(rotation, undefined)).toBe(rotation);
+});

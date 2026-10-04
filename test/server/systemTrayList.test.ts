@@ -13,7 +13,11 @@ import {
   type SystemTrayDependencies,
 } from "../../src/server/systemTrayHelpers";
 import { registerInteractionTools, systemTraySchema } from "../../src/server/interactionTools";
-import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
+import {
+  ListInstalledApps,
+  type IosInstalledAppsDetailedResult,
+} from "../../src/features/observe/ListInstalledApps";
+import { getIosInstalledAppBundleId } from "../../src/utils/ios-cmdline-tools/iosInstalledApp";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -152,6 +156,134 @@ beforeAll(() => {
 afterEach(() => {
   resetSystemTrayDependencies();
   ToolRegistry.clearTools();
+});
+
+describe("systemTray iOS app inventory", () => {
+  const iosDevice: BootedDevice = { ...device, platform: "ios" };
+  const appId = "com.example.messages";
+  let restoreLegacyInventory: (() => void) | undefined;
+
+  afterEach(() => {
+    restoreLegacyInventory?.();
+    restoreLegacyInventory = undefined;
+  });
+
+  const installInventory = (result: IosInstalledAppsDetailedResult, onRead?: () => void) => {
+    const apps = new FakeTrayApps();
+    const inventoryCalls: string[] = [];
+    // Keep the pre-fix path local too; it collapses failed listings to [].
+    const legacySpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue(
+      result.apps.map(getIosInstalledAppBundleId).filter((id): id is string => id !== undefined),
+    );
+    restoreLegacyInventory = () => legacySpy.mockRestore();
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      appInventoryFactory: (target) => ({
+        ...apps.inventory(target),
+        executeIosDetailedResult: async () => {
+          inventoryCalls.push("ios");
+          onRead?.();
+          return result;
+        },
+      }),
+      appLabelResolver: async (target, id, signal) => {
+        await apps.resolve(target, id, signal);
+        throw new Error("label resolver reached");
+      },
+    });
+    registerInteractionTools();
+    return { apps, inventoryCalls, legacySpy };
+  };
+  const invoke = (action: "find" | "tap", signal?: AbortSignal) =>
+    ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(
+      iosDevice,
+      { action, notification: { appId } },
+      undefined,
+      signal,
+    );
+
+  for (const action of ["find", "tap"] as const) {
+    test(`${action} reports a failed iOS app listing with its underlying reason`, async () => {
+      const { apps, inventoryCalls, legacySpy } = installInventory({
+        apps: [],
+        successful: false,
+        error: new Error("simctl timed out"),
+      });
+      const failure = invoke(action);
+      await expect(failure).rejects.toThrow("installed apps could not be listed");
+      await expect(failure).rejects.toThrow("inventory is incomplete");
+      await expect(failure).rejects.toThrow("simctl timed out");
+      await expect(failure).rejects.not.toThrow("is not installed");
+      expect(inventoryCalls).toEqual(["ios"]);
+      expect(legacySpy).not.toHaveBeenCalled();
+      expect(apps.calls).toEqual([]);
+    });
+  }
+
+  test("reports an incomplete iOS inventory without an underlying error", async () => {
+    installInventory({ apps: [], successful: false });
+    await expect(invoke("find")).rejects.toThrow("installed-app inventory is incomplete.");
+  });
+
+  test("fails closed when an injected inventory has no iOS listing method", async () => {
+    const { apps } = installInventory({ apps: [], successful: true });
+    setSystemTrayDependencies({ appInventoryFactory: apps.inventory });
+    await expect(invoke("find")).rejects.toThrow("installed apps could not be listed");
+    expect(apps.calls).toEqual([]);
+  });
+
+  test("keeps the not-installed error after a successful empty listing", async () => {
+    const { apps } = installInventory({ apps: [], successful: true });
+    await expect(invoke("find")).rejects.toThrow(`App ${appId} is not installed.`);
+    expect(apps.calls).toEqual([]);
+  });
+
+  for (const key of ["CFBundleIdentifier", "bundleIdentifier"] as const) {
+    test(`resolves the label after a successful listing with ${key}`, async () => {
+      const { apps } = installInventory({ apps: [{ [key]: appId }], successful: true });
+      await expect(invoke("find")).rejects.toThrow("label resolver reached");
+      expect(apps.calls).toEqual([appId]);
+    });
+  }
+
+  test("cancels an already-aborted request before reading the iOS inventory", async () => {
+    const { apps, inventoryCalls, legacySpy } = installInventory({
+      apps: [],
+      successful: false,
+      error: new Error("simctl timed out"),
+    });
+    await expect(invoke("find", AbortSignal.abort())).rejects.toThrow("cancelled");
+    expect(inventoryCalls).toEqual([]);
+    expect(legacySpy).not.toHaveBeenCalled();
+    expect(apps.calls).toEqual([]);
+  });
+
+  test("cancellation during a failed iOS listing takes precedence over inventory failure", async () => {
+    const controller = new AbortController();
+    const { apps, inventoryCalls } = installInventory(
+      { apps: [], successful: false, error: new Error("simctl timed out") },
+      () => controller.abort(),
+    );
+    await expect(invoke("find", controller.signal)).rejects.toThrow("cancelled");
+    expect(inventoryCalls).toEqual(["ios"]);
+    expect(apps.calls).toEqual([]);
+  });
+
+  test("cancels while waiting for an iOS listing that has not settled", async () => {
+    const controller = new AbortController();
+    const { apps } = installInventory({ apps: [], successful: true });
+    const pendingInventory = new Promise<IosInstalledAppsDetailedResult>(() => {});
+    setSystemTrayDependencies({
+      appInventoryFactory: (target) => ({
+        ...apps.inventory(target),
+        executeIosDetailedResult: () => pendingInventory,
+      }),
+    });
+    const operation = invoke("find", controller.signal);
+    controller.abort();
+    await expect(operation).rejects.toThrow("cancelled");
+    expect(apps.calls).toEqual([]);
+  });
 });
 
 describe("systemTray list", () => {

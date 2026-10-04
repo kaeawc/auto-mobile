@@ -769,7 +769,7 @@ describe("UnixSocketServer input/tap", () => {
     expect(nonNumeric.error).toBe("input/tap requires numeric x and y params");
   });
 
-  test("parseInputTapParams rejects non-finite x/y/duration, matching swipe (#3615)", () => {
+  test("parseInputTapParams rejects non-finite x/y and non-integer duration (#3615)", () => {
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -792,9 +792,11 @@ describe("UnixSocketServer input/tap", () => {
         "input/tap requires numeric x and y params",
       );
     }
-    expect(() => parseTap({ platform: "android", x: 5, y: 10, duration: Infinity })).toThrow(
-      "input/tap duration must be numeric when provided",
-    );
+    for (const duration of [Infinity, NaN, 1.5]) {
+      expect(() => parseTap({ platform: "android", x: 5, y: 10, duration })).toThrow(
+        "input/tap duration must be an integer number of milliseconds when provided",
+      );
+    }
 
     // Finite values still parse successfully (no over-rejection regression).
     expect(parseTap({ platform: "android", x: 5, y: 10, duration: 200 })).toMatchObject({

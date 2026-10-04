@@ -25,11 +25,15 @@ struct AutoMobileEnvironment: Sendable {
         return nil
     }
 
+    /// Parse only the first non-empty key. Non-finite values (NaN or either infinity) return nil
+    /// so callers can use their defaults; finite negative values remain valid.
     func doubleValue(_ keys: [String]) -> Double? {
-        if let stringValue = firstNonEmpty(keys) {
-            return Double(stringValue)
+        guard let stringValue = firstNonEmpty(keys),
+              let value = Double(stringValue), value.isFinite
+        else {
+            return nil
         }
-        return nil
+        return value
     }
 
     func boolValue(_ keys: [String]) -> Bool? {

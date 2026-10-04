@@ -15,6 +15,12 @@ import {
 import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { ViewHierarchy } from "../observe/ViewHierarchy";
+import type { KeyboardHierarchyProvider } from "./Keyboard";
+import { getFocusedTextField, type FocusedTextField } from "./ClearText";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 type ClipboardCtrlProxy = {
   requestClipboard(
@@ -31,20 +37,42 @@ type ClipboardCtrlProxyFactory = (
 ) => ClipboardCtrlProxy;
 
 export class Clipboard {
+  // iOS keyboard minimization animations can lag paste delivery by roughly 1.5 seconds (#9078).
+  private static readonly PASTE_VERIFICATION_TIMEOUT_MS = 1_500;
+  private static readonly PASTE_VERIFICATION_POLL_MS = 250;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private ctrlProxyFactory: ClipboardCtrlProxyFactory | undefined;
+  private hierarchyProvider: KeyboardHierarchyProvider;
+  private timer: Timer;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     ctrlProxyFactory?: ClipboardCtrlProxyFactory,
+    hierarchyProvider?: KeyboardHierarchyProvider,
+    timer: Timer = defaultTimer,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.ctrlProxyFactory = ctrlProxyFactory;
+    this.timer = timer;
+    this.hierarchyProvider = hierarchyProvider ?? {
+      getViewHierarchy: (signal, options) => {
+        // Every verification sample must bypass the iOS cache, including the pre-paste sample.
+        IOSCtrlProxyClient.getInstance(device).invalidateCache();
+        return new ViewHierarchy(device, adbFactory).getViewHierarchy(
+          undefined,
+          new NoOpPerformanceTracker(),
+          false,
+          0,
+          signal,
+          options?.timeoutMs,
+        );
+      },
+    };
   }
 
   async execute(
@@ -100,6 +128,9 @@ export class Clipboard {
 
     throwIfAborted(signal);
     const client = this.getIOSCtrlProxy();
+    const before =
+      action === "paste" ? await this.readIOSPasteValueBefore(client, signal) : undefined;
+    throwIfAborted(signal);
     const result = await awaitWhileRequestIsLive(
       client.requestClipboard(action, text, undefined, undefined, signal),
       signal,
@@ -109,6 +140,16 @@ export class Clipboard {
       return { success: false, action, error: result.error };
     }
 
+    if (before !== undefined && !(await this.verifyIOSPaste(before, signal))) {
+      return {
+        success: false,
+        action,
+        method: "a11y",
+        error:
+          "Paste was sent but the focused field's value did not change; nothing appears to have been pasted (outcome unconfirmed). The simulator may have minimized the software keyboard for a hardware keyboard. Try pasting again.",
+      };
+    }
+
     logger.info(`[Clipboard] ${action} via iOS CtrlProxy: ${result.totalTimeMs}ms`);
     return {
       success: true,
@@ -116,6 +157,84 @@ export class Clipboard {
       text: result.text,
       method: "a11y",
     };
+  }
+
+  private async readIOSPasteValueBefore(
+    client: ClipboardCtrlProxy,
+    signal?: AbortSignal,
+  ): Promise<FocusedTextField | undefined> {
+    try {
+      const clipboard = await awaitWhileRequestIsLive(
+        client.requestClipboard("get", undefined, undefined, undefined, signal),
+        signal,
+      );
+      if (!clipboard.success || !clipboard.text) {
+        logger.info("[Clipboard] iOS paste verification skipped: clipboard empty or unreadable");
+        return undefined;
+      }
+      return await this.readIOSFocusedValue(Clipboard.PASTE_VERIFICATION_TIMEOUT_MS, signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("[Clipboard] iOS clipboard pre-read failed; paste verification skipped", error);
+      return undefined;
+    }
+  }
+
+  private async readIOSFocusedValue(
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<FocusedTextField | undefined> {
+    try {
+      const hierarchy = await raceWithDeadline(
+        () => this.hierarchyProvider.getViewHierarchy(signal, { timeoutMs }),
+        { timer: this.timer, timeoutMs, signal, label: "iOS paste verification hierarchy" },
+      );
+      const field =
+        hierarchy && !hierarchy.hierarchy?.error ? getFocusedTextField(hierarchy) : undefined;
+      if (field?.value === undefined && !field?.secure) {
+        logger.info(
+          "[Clipboard] iOS paste verification unavailable: no readable focused field value",
+        );
+        return undefined;
+      }
+      return field;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(
+        "[Clipboard] iOS paste verification hierarchy failed; outcome cannot be checked",
+        error,
+      );
+      return undefined;
+    }
+  }
+
+  private async verifyIOSPaste(before: FocusedTextField, signal?: AbortSignal): Promise<boolean> {
+    if (before.secure) {
+      logger.info("[Clipboard] iOS paste verification skipped for a secure field");
+      return true;
+    }
+    const deadline = this.timer.now() + Clipboard.PASTE_VERIFICATION_TIMEOUT_MS;
+    for (;;) {
+      throwIfAborted(signal);
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0) {
+        return false;
+      }
+      const after = await this.readIOSFocusedValue(remaining, signal);
+      if (after?.secure) {
+        logger.info("[Clipboard] iOS paste verification skipped for a secure field");
+        return true;
+      }
+      // Missing hierarchy/value makes the outcome indeterminate, not a proven dropped paste.
+      if (after === undefined || after.value !== before.value) {
+        return true;
+      }
+      const delay = Math.min(Clipboard.PASTE_VERIFICATION_POLL_MS, deadline - this.timer.now());
+      if (delay <= 0) {
+        return false;
+      }
+      await awaitWhileRequestIsLive(this.timer.sleep(delay), signal);
+    }
   }
 
   /**

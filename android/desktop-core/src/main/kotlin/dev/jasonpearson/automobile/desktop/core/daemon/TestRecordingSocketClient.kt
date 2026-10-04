@@ -1,14 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import java.io.BufferedReader
-import java.io.BufferedWriter
 import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
-import java.nio.channels.SocketChannel
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -24,10 +16,24 @@ interface TestRecordingClient {
   ): TestRecordingStopResult
 }
 
-class TestRecordingSocketClient(
+class TestRecordingSocketClient
+internal constructor(
   private val socketPathValue: String = TestRecordingSocketPaths.socketPath(),
   private val json: Json = DaemonJson,
+  private val requestTimeoutMs: Long = TEST_RECORDING_REQUEST_TIMEOUT_MS,
+  private val watchdog: SocketRequestWatchdog,
 ) : TestRecordingClient {
+  constructor(
+    socketPathValue: String = TestRecordingSocketPaths.socketPath(),
+    json: Json = DaemonJson,
+    requestTimeoutMs: Long = TEST_RECORDING_REQUEST_TIMEOUT_MS,
+  ) : this(
+    socketPathValue,
+    json,
+    requestTimeoutMs,
+    SharedSocketRequestWatchdog,
+  )
+
   override fun startTestRecording(platform: String?): TestRecordingStartResult {
     val response = sendRequest(TestRecordingSocketCommand(command = "start", platform = platform))
     ensureSuccess(response)
@@ -68,22 +74,16 @@ class TestRecordingSocketClient(
   private fun sendRequest(request: TestRecordingSocketCommand): TestRecordingSocketResponse {
     ensureSocketExists()
 
-    val address = UnixDomainSocketAddress.of(socketPathValue)
-    SocketChannel.open(address).use { channel ->
-      val reader =
-        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
-      val writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-        )
+    val line =
+      oneShotSocketRequest(
+        socketPath = socketPathValue,
+        requestLine = json.encodeToString(request),
+        timeoutMs = requestTimeoutMs,
+        label = "Test recording",
+        watchdog = watchdog,
+      )
 
-      writer.write(json.encodeToString(request))
-      writer.newLine()
-      writer.flush()
-
-      val line = reader.readLine() ?: throw McpConnectionException("Test recording socket closed")
-      return json.decodeFromString(line)
-    }
+    return json.decodeFromString(line)
   }
 
   private fun ensureSocketExists() {

@@ -7,6 +7,10 @@ import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.storage.KeyValueType
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -430,6 +434,58 @@ class RealStorageDataSourceTest {
   }
 
   // --- setKeyValue tests ---
+
+  @Test
+  fun `setKeyValue propagates caller cancellation`() {
+    assertMutationCancellation { setKeyValue("prefs", "key", "value", KeyValueType.String) }
+  }
+
+  @Test
+  fun `removeKeyValue propagates caller cancellation`() {
+    assertMutationCancellation { removeKeyValue("prefs", "key") }
+  }
+
+  @Test
+  fun `clearKeyValueFile propagates caller cancellation`() {
+    assertMutationCancellation { clearKeyValueFile("prefs") }
+  }
+
+  private fun assertMutationCancellation(
+    mutation: suspend RealStorageDataSource.() -> Result<StorageMutationResult>
+  ) = runBlocking {
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val client = FakeAutoMobileClient()
+    client.onKeyValueMutation = {
+      entered.countDown()
+      assertTrue("Blocking call was not released", release.await(5, TimeUnit.SECONDS))
+    }
+    val source = RealStorageDataSource({ client }, "emulator-5554", "com.example.app")
+    var result: Result<StorageMutationResult>? = null
+    val job = launch(Dispatchers.Default) { result = source.mutation() }
+    try {
+      assertTrue("Blocking call was not entered", entered.await(5, TimeUnit.SECONDS))
+    } finally {
+      job.cancel()
+      release.countDown()
+    }
+    job.join()
+
+    assertTrue(job.isCancelled)
+    assertNull(result)
+  }
+
+  @Test
+  fun `setKeyValue normal unsuccessful response still returns error`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setKeyValueResult = SetKeyValueResult(success = false, message = "x")
+    val source = RealStorageDataSource({ client }, "emulator-5554", "com.example.app")
+
+    val result = source.setKeyValue("prefs", "key", "value", KeyValueType.String)
+
+    assertTrue(result is Result.Error)
+    assertEquals("x", (result as Result.Error).message)
+  }
 
   @Test
   fun `setKeyValue returns error when no clientProvider`() = runBlocking {

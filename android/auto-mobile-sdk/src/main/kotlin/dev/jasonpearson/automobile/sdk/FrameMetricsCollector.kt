@@ -11,6 +11,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.view.FrameMetrics
 import android.view.Window
+import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -26,6 +27,12 @@ import org.json.JSONObject
  * `dumpsys gfxinfo` scrape — the whole point of #5076. It attaches to each foreground Activity
  * window through [Application.ActivityLifecycleCallbacks] and delivers frame callbacks on a
  * dedicated background thread (the API forbids the main thread).
+ *
+ * Lifecycle tracking begins at [initialize], including while collection is disabled: one
+ * lightweight main-thread callback per lifecycle event maintains a weak set of started Activities.
+ * While disabled, only that set is updated (window detach is an idempotent no-op). Activities
+ * started before initialization are unknown until their next `onActivityStarted`; the public
+ * Android API cannot enumerate them.
  */
 internal object FrameMetricsCollector {
   private const val WINDOW_MS = 1000L
@@ -64,6 +71,9 @@ internal object FrameMetricsCollector {
   private val attachedWindows =
     Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<Window, Boolean>()))
 
+  private val startedActivities =
+    Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<Activity, Boolean>()))
+
   internal data class FrameSample(val t: Long, val durationMs: Double)
 
   fun initialize(context: Context) {
@@ -72,6 +82,7 @@ internal object FrameMetricsCollector {
     this.context = app
     if (app is Application) {
       this.application = app
+      app.registerActivityLifecycleCallbacks(activityCallbacks)
     }
     registerControlReceiver(app)
   }
@@ -83,6 +94,8 @@ internal object FrameMetricsCollector {
     if (ctx != null) {
       controlReceiverRegistrar.unregister(ctx)
     }
+    application?.unregisterActivityLifecycleCallbacks(activityCallbacks)
+    startedActivities.clear()
     context = null
     application = null
   }
@@ -95,14 +108,30 @@ internal object FrameMetricsCollector {
     }
     if (isEnabled) {
       startMetricsThread()
-      application?.registerActivityLifecycleCallbacks(activityCallbacks)
       scheduleBroadcast()
+      attachStartedWindows()
     } else {
       mainHandler.removeCallbacksAndMessages(null)
-      application?.unregisterActivityLifecycleCallbacks(activityCallbacks)
       detachAllWindows()
       samples.clear()
       stopMetricsThread()
+    }
+  }
+
+  private fun attachStartedWindows() {
+    val activities = synchronized(startedActivities) { startedActivities.toList() }
+    for (activity in activities) {
+      if (Looper.myLooper() == Looper.getMainLooper()) {
+        if (enabled.get() && activity in startedActivities) attachWindow(activity.window)
+      } else {
+        val reference = WeakReference(activity)
+        mainHandler.post {
+          val startedActivity = reference.get() ?: return@post
+          if (enabled.get() && startedActivity in startedActivities) {
+            attachWindow(startedActivity.window)
+          }
+        }
+      }
     }
   }
 
@@ -226,20 +255,32 @@ internal object FrameMetricsCollector {
   }
 
   private val activityCallbacks =
-    object : Application.ActivityLifecycleCallbacks {
-      override fun onActivityStarted(activity: Activity) = attachWindow(activity.window)
+    // Capture the set locally so this anonymous class needs no new outer synthetic accessor.
+    startedActivities.let { started ->
+      object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityStarted(activity: Activity) {
+          started.add(activity)
+          if (enabled.get()) attachWindow(activity.window)
+        }
 
-      override fun onActivityStopped(activity: Activity) = detachWindow(activity.window)
+        override fun onActivityStopped(activity: Activity) {
+          started.remove(activity)
+          detachWindow(activity.window)
+        }
 
-      override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
 
-      override fun onActivityResumed(activity: Activity) = Unit
+        override fun onActivityResumed(activity: Activity) = Unit
 
-      override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
 
-      override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
-      override fun onActivityDestroyed(activity: Activity) = Unit
+        override fun onActivityDestroyed(activity: Activity) {
+          started.remove(activity)
+          detachWindow(activity.window)
+        }
+      }
     }
 
   // ---- remote enable/disable control --------------------------------------

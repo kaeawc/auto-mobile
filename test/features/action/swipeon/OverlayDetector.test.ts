@@ -33,7 +33,6 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
 
     overlayDetector.collectOverlayCandidates(
       containerFixture.viewHierarchy as ViewHierarchyResult,
-      { elementId: "example.app:id/left" },
       containerElement,
     );
 
@@ -83,11 +82,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
 
     expect(overlays).toEqual([]);
   });
@@ -106,11 +101,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     expect(overlays).toEqual([]);
   });
@@ -129,11 +120,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(fabBounds);
@@ -169,11 +156,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(popupBounds);
@@ -213,7 +196,6 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     for (const lookAlike of [{}, { bounds: "not-a-rect" }]) {
       const overlays = detector().collectOverlayCandidates(
         makeHierarchy(lookAlike) as any,
-        { elementId: "list" },
         listElement,
       );
 
@@ -252,11 +234,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(LIST_BOUNDS);
@@ -301,11 +279,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       scrollable: true,
     } as unknown as Element;
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      selectedListElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, selectedListElement);
 
     // cardB truly contains listB and must be exempted as its ancestor, not
     // reported as a full-cover overlay that would block the swipe outright.
@@ -334,11 +308,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(b(0, 0, 1000, 2000));
@@ -361,11 +331,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(b(0, 0, 1000, 2000));
@@ -400,11 +366,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list" },
-      listElement,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
 
     // appRoot (the real, main-hierarchy ancestor) must be exempted; only the
     // genuine, unrelated window overlay (the toast) is reported.
@@ -438,11 +400,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
-      { elementId: "list", text: "Groceries" },
-      selected,
-    );
+    const overlays = detector().collectOverlayCandidates(hierarchy as any, selected);
 
     // root is the real, uniquely-identified target's genuine ancestor and
     // must be exempted — not reported as a full-cover overlay.
@@ -578,7 +536,8 @@ describe("SwipeOn container overlays", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.warning).toBeUndefined();
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("No unobstructed swipe area");
     const [call] = fakeGesture.getSwipeCalls();
     expect(call).toBeDefined();
     expect(call.x1).toBe(500);
@@ -605,7 +564,8 @@ describe("SwipeOn container overlays", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.warning).toBeUndefined();
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("No unobstructed swipe area");
     const [call] = fakeGesture.getSwipeCalls();
     expect(call).toBeDefined();
     // Same coordinates as an unobstructed container: center x, default start y.
@@ -634,7 +594,8 @@ describe("SwipeOn container overlays", () => {
 
     expect(result.success).toBe(true);
     // Overlay avoidance must not have been abandoned via the fallback.
-    expect(result.warning).toBeUndefined();
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("No unobstructed swipe area");
     const [call] = fakeGesture.getSwipeCalls();
     expect(call).toBeDefined();
     expect(call.x1).toBe(call.x2);
@@ -662,7 +623,8 @@ describe("SwipeOn container overlays", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.warning).toBeUndefined();
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("No unobstructed swipe area");
     const [call] = fakeGesture.getSwipeCalls();
     expect(call).toBeDefined();
     expect(call.x1).toBe(500);
@@ -810,7 +772,8 @@ describe("SwipeOn container overlays", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.warning).toBeUndefined();
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("No unobstructed swipe area");
     const [call] = fakeGesture.getSwipeCalls();
     expect(call).toBeDefined();
     // Should use center x coordinate (500) since no overlays
@@ -863,7 +826,8 @@ describe("SwipeOn container overlays", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.warning).toBeUndefined();
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("No unobstructed swipe area");
     const [call] = fakeGesture.getSwipeCalls();
     expect(call).toBeDefined();
     // Should not avoid non-clickable overlay, so y1 can be anywhere
@@ -912,7 +876,8 @@ describe("SwipeOn container overlays", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.warning).toBeUndefined();
+    expect(result.warning).toContain("Swipe did not change the screen");
+    expect(result.warning).not.toContain("No unobstructed swipe area");
     const [call] = fakeGesture.getSwipeCalls();
     expect(call).toBeDefined();
     // Should use container center (500) since overlay doesn't overlap

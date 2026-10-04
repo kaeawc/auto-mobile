@@ -3305,6 +3305,122 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("resource operations", () => {
+    test("readResource forwards the caller's signal unchanged", async () => {
+      const fakeClient = new FakeDaemonClient();
+      const proxy = new DaemonMcpProxy({
+        timer: new FakeTimer(),
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      });
+      const controller = new AbortController();
+      try {
+        await proxy.readResource("automobile:devices/booted", { signal: controller.signal });
+        expect(fakeClient.readResourceSignals).toEqual([controller.signal]);
+        expect(fakeClient.readResourceSignals[0]).toBe(controller.signal);
+        expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
+      } finally {
+        await proxy.close();
+      }
+    });
+
+    test("readResource abort settles while the fake read remains blocked", async () => {
+      const started = Promise.withResolvers<void>();
+      const gate = Promise.withResolvers<void>();
+      const fakeClient = new FakeDaemonClient();
+      const read = fakeClient.readResource.bind(fakeClient);
+      fakeClient.readResource = async (...args) => {
+        const result = await read(...args);
+        started.resolve();
+        await gate.promise;
+        return result;
+      };
+      const proxy = new DaemonMcpProxy({
+        timer: new FakeTimer(),
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      });
+      const controller = new AbortController();
+      let settled = false;
+      const result = proxy
+        .readResource("automobile:devices/booted", { signal: controller.signal })
+        .then(
+          (value: unknown) => {
+            settled = true;
+            return value;
+          },
+          (error: unknown) => {
+            settled = true;
+            return error;
+          },
+        );
+      try {
+        await started.promise;
+        controller.abort(new Error("cancel resource read"));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(true);
+        expect(await result).toBe(controller.signal.reason);
+      } finally {
+        gate.resolve();
+        await result;
+        await proxy.close();
+      }
+    });
+
+    test("readResource abort during reconnect settles and prevents replay", async () => {
+      const started = Promise.withResolvers<void>();
+      const gate = Promise.withResolvers<void>();
+      const stale = new FakeDaemonClient();
+      stale.readResource = async () => {
+        throw new DaemonRequestNotDeliveredError("not delivered");
+      };
+      const fresh = new FakeDaemonClient();
+      fresh.connect = async () => {
+        started.resolve();
+        await gate.promise;
+      };
+      const clients = [stale, fresh];
+      const proxy = new DaemonMcpProxy({
+        timer: new FakeTimer(),
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      });
+      const controller = new AbortController();
+      let settled = false;
+      const result = proxy
+        .readResource("automobile:devices/booted", { signal: controller.signal })
+        .then(
+          (value: unknown) => {
+            settled = true;
+            return value;
+          },
+          (error: unknown) => {
+            settled = true;
+            return error;
+          },
+        );
+      try {
+        await started.promise;
+        controller.abort(new Error("cancel resource reconnect"));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(true);
+        expect(await result).toBe(controller.signal.reason);
+        gate.resolve();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(fresh.readResourceCalls).toEqual([]);
+      } finally {
+        gate.resolve();
+        await result;
+        await proxy.close();
+      }
+    });
+
     test("listResources returns resources from daemon", async () => {
       const expectedResources = [{ uri: "automobile:devices/booted", name: "Booted devices" }];
       const fakeClient = new FakeDaemonClient({
@@ -3345,6 +3461,7 @@ describe("DaemonMcpProxy", () => {
 
         expect(result).toEqual(expectedResult);
         expect(fakeClient.readResourceCalls).toContain("automobile:devices/booted");
+        expect(fakeClient.readResourceSignals).toEqual([undefined]);
         expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
       } finally {
         isAvailableSpy.mockRestore();

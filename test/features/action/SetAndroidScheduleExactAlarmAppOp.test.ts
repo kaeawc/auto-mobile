@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { BootedDevice } from "../../../src/models";
+import { BootedDevice, type ExecResult } from "../../../src/models";
 import { SetAndroidScheduleExactAlarmAppOp } from "../../../src/features/action/SetAndroidScheduleExactAlarmAppOp";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 const androidDevice: BootedDevice = {
@@ -92,6 +95,115 @@ describe("SetAndroidScheduleExactAlarmAppOp", () => {
     const result = await action.execute("com.example.app", { mode: "allow" });
 
     expect(result.success).toBe(false);
+  });
+
+  test.each(["deny", "allow"] as const)(
+    "adb rejection returns failure for mode %s",
+    async (mode) => {
+      const client = new FakeAdbExecutor();
+      client.setAndroidApiLevel(34);
+      client.setCommandError(`SCHEDULE_EXACT_ALARM ${mode}`, new Error("device offline"));
+      const action = new SetAndroidScheduleExactAlarmAppOp(
+        androidDevice,
+        new FakeAdbClientFactory(client),
+      );
+
+      const result = await action.execute("com.example.app", { mode });
+
+      expect(result).toEqual({ success: false, appId: "com.example.app", error: "device offline" });
+    },
+  );
+
+  test.each(["deny", "allow"] as const)(
+    "already cancelled request rejects for mode %s",
+    async (mode) => {
+      const client = new FakeAdbExecutor();
+      client.setAndroidApiLevel(34);
+      const action = new SetAndroidScheduleExactAlarmAppOp(
+        androidDevice,
+        new FakeAdbClientFactory(client),
+      );
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        runWithAbortSignal(controller.signal, () => action.execute("com.example.app", { mode })),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      expect(client.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test.each(["deny", "allow"] as const)(
+    "cancellation as the command completes rejects for mode %s",
+    async (mode) => {
+      const client = new FakeAdbExecutor();
+      client.setAndroidApiLevel(34);
+      const controller = new AbortController();
+      client.abortAfterCommand(`SCHEDULE_EXACT_ALARM ${mode}`, controller);
+      const action = new SetAndroidScheduleExactAlarmAppOp(
+        androidDevice,
+        new FakeAdbClientFactory(client),
+      );
+
+      await expect(
+        runWithAbortSignal(controller.signal, () => action.execute("com.example.app", { mode })),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    },
+  );
+
+  test("deny tolerates SecurityException output", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult("shell getprop ro.build.version.sdk", "34\n");
+    client.setCommandResult(
+      "SCHEDULE_EXACT_ALARM deny",
+      "",
+      "java.lang.SecurityException: ignored",
+    );
+    const action = new SetAndroidScheduleExactAlarmAppOp(androidDevice, factory);
+
+    expect((await action.execute("com.example.app", { mode: "deny" })).success).toBe(true);
+  });
+
+  test.each(["deny", "allow"] as const)(
+    "cancellation during an adb rejection propagates for mode %s",
+    async (mode) => {
+      const controller = new AbortController();
+      class CancellingAdbExecutor extends FakeAdbExecutor {
+        override async executeCommand(command: string): Promise<ExecResult> {
+          controller.abort();
+          return super.executeCommand(command);
+        }
+      }
+      const client = new CancellingAdbExecutor();
+      client.setAndroidApiLevel(34);
+      client.setCommandError(`SCHEDULE_EXACT_ALARM ${mode}`, new Error("device offline"));
+      const action = new SetAndroidScheduleExactAlarmAppOp(
+        androidDevice,
+        new FakeAdbClientFactory(client),
+      );
+
+      await expect(
+        runWithAbortSignal(controller.signal, () => action.execute("com.example.app", { mode })),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    },
+  );
+
+  test("cancellation during API discovery cannot become a skipped deny", async () => {
+    const client = new FakeAdbExecutor();
+    const controller = new AbortController();
+    client.abortAfterApiLevel(controller);
+    const action = new SetAndroidScheduleExactAlarmAppOp(
+      androidDevice,
+      new FakeAdbClientFactory(client),
+    );
+
+    await expect(
+      runWithAbortSignal(controller.signal, () =>
+        action.execute("com.example.app", { mode: "deny" }),
+      ),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(client.getExecutedCommands()).toEqual([]);
   });
 
   test("non-Android returns error", async () => {

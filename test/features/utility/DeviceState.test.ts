@@ -1,3 +1,7 @@
+import { logger } from "../../../src/utils/logger";
+import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -838,6 +842,162 @@ describe("DeviceState", () => {
     expect(result.networkCondition?.verified).not.toBe(true);
     expect(result.networkCondition?.error).toContain("no change to apply");
     expect(client.getAllCommands()).toEqual([]);
+  });
+
+  test("detached network rollback survives ambient cancellation and preserves the typed failure", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const accepted: string[] = [];
+    const execute = adb.executeCommand.bind(adb);
+    spyOnOutputSchema(adb, "executeCommand").mockImplementation(async (...args) => {
+      const [command, timeoutMs, , , signal] = args;
+      const effectiveSignal = signal ?? getAbortSignal();
+      effectiveSignal?.throwIfAborted();
+      accepted.push(command);
+      const result = await execute(...args);
+      if (command === "emu network speed umts") {
+        controller.abort(new Error("request cancelled"));
+        controller.signal.throwIfAborted();
+      }
+      if (controller.signal.aborted) {
+        expect(getAbortSignal()).toBeUndefined();
+        expect(effectiveSignal?.aborted).toBe(false);
+        expect(timeoutMs).toBe(2000);
+      }
+      return result;
+    });
+    const deviceState = new DeviceState(androidDevice, {
+      adbFactory: { create: () => adb },
+      timer,
+    });
+    const result = await runWithAbortSignal(controller.signal, () =>
+      deviceState.setState({ networkCondition: { profile: "3g" } }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({
+      supported: true,
+      capability: "partial",
+      verified: false,
+      error: "request cancelled",
+    });
+    expect(accepted.slice(accepted.indexOf("emu network speed umts") + 1)).toEqual([
+      "emu network delay none",
+      "emu network speed full",
+      "emu gsm data on",
+      "shell svc wifi enable",
+    ]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("network rollback attempts every command taking 400ms without masking cancellation", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    const accepted: string[] = [];
+    const execute = adb.executeCommand.bind(adb);
+    spyOnOutputSchema(adb, "executeCommand").mockImplementation(async (...args) => {
+      const [command, timeoutMs, , , signal] = args;
+      (signal ?? getAbortSignal())?.throwIfAborted();
+      if (command === "emu network speed umts") {
+        controller.abort(new Error("request cancelled"));
+        controller.signal.throwIfAborted();
+      }
+      if (controller.signal.aborted) {
+        expect(getAbortSignal()).toBeUndefined();
+        expect(signal?.aborted).toBe(false);
+        accepted.push(command);
+        await timer.sleep(400);
+        expect(timeoutMs).toBe(2000);
+      }
+      return execute(...args);
+    });
+    const deviceState = new DeviceState(androidDevice, {
+      adbFactory: { create: () => adb },
+      timer,
+    });
+    const result = await runWithAbortSignal(controller.signal, () =>
+      deviceState.setState({ networkCondition: { profile: "3g" } }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.networkCondition?.error).toBe("request cancelled");
+    expect(accepted).toEqual([
+      "emu network delay none",
+      "emu network speed full",
+      "emu gsm data on",
+      "shell svc wifi enable",
+    ]);
+    expect(timer.now()).toBe(1600);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("network rollback limits each command to remaining total time and preserves cancellation", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const started = Array.from({ length: 4 }, () => Promise.withResolvers<void>());
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof adb.executeCommand>>>();
+    const accepted: string[] = [];
+    const cleanupSignals: AbortSignal[] = [];
+    const timeouts: Array<number | undefined> = [];
+    const execute = adb.executeCommand.bind(adb);
+    spyOnOutputSchema(adb, "executeCommand").mockImplementation(async (...args) => {
+      const [command, timeoutMs, , , signal] = args;
+      (signal ?? getAbortSignal())?.throwIfAborted();
+      if (command === "emu network speed umts") {
+        controller.abort(new Error("request cancelled"));
+        controller.signal.throwIfAborted();
+      }
+      if (controller.signal.aborted) {
+        expect(getAbortSignal()).toBeUndefined();
+        expect(signal?.aborted).toBe(false);
+        if (signal) {
+          cleanupSignals.push(signal);
+        }
+        accepted.push(command);
+        timeouts.push(timeoutMs);
+        started[accepted.length - 1]?.resolve();
+        if (accepted.length > 1) {
+          return pending.promise;
+        }
+        await timer.sleep(1500);
+      }
+      return execute(...args);
+    });
+    const warn = spyOnOutputSchema(logger, "warn").mockImplementation(() => {});
+    try {
+      const deviceState = new DeviceState(androidDevice, {
+        adbFactory: { create: () => adb },
+        timer,
+      });
+      const operation = runWithAbortSignal(controller.signal, () =>
+        deviceState.setState({ networkCondition: { profile: "3g" } }),
+      );
+      const durations = [1500, 2000, 2000, 500];
+      for (const [index, commandStarted] of started.entries()) {
+        await commandStarted.promise;
+        timer.advanceTime(durations[index] ?? 0);
+      }
+      const result = await operation;
+      expect(result.success).toBe(false);
+      expect(result.networkCondition?.error).toBe("request cancelled");
+      expect(accepted).toEqual([
+        "emu network delay none",
+        "emu network speed full",
+        "emu gsm data on",
+        "shell svc wifi enable",
+      ]);
+      expect(timeouts).toEqual([2000, 2000, 2000, 500]);
+      expect(cleanupSignals.map((signal) => signal.aborted)).toEqual([false, true, true, true]);
+      expect(new Set(cleanupSignals).size).toBe(4);
+      expect(timer.now()).toBe(6000);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(warn).toHaveBeenCalledTimes(3);
+      pending.reject(new Error("late rollback failure"));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("rolls back to normal connectivity when a mid-degrade command fails", async () => {

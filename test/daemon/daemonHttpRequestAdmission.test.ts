@@ -7,6 +7,7 @@ import type {
   Server as HttpServer,
   ServerResponse,
 } from "node:http";
+import { logger } from "../../src/utils/logger";
 import { describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
@@ -303,5 +304,24 @@ test("HTTP heartbeat accepts an unregistered non-releasing object", async () => 
   } finally {
     heartbeat.mockRestore();
     h.dispose();
+  }
+});
+
+test("HTTP request callback handles unexpected rejection before transport dispatch", async () => {
+  const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const { server, transport } = await harness();
+    const response = await server.dispatch({ host: `127.0.0.1:${port}` }, "GET", "http://[");
+    expect(response.statusCode).toBe(500);
+    expect(response.writableEnded).toBeTrue();
+    expect(transport.handled).toBe(0);
+    expect(
+      warnings.mock.calls.some(
+        ([message, error]) =>
+          String(message).startsWith("HTTP request callback failed:") && error instanceof Error,
+      ),
+    ).toBeTrue();
+  } finally {
+    warnings.mockRestore();
   }
 });

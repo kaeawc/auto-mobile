@@ -11,6 +11,7 @@ import {
   type AvdDirectoryResolver,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import { AvdSnapshotService } from "../../../src/utils/android-cmdline-tools/AvdSnapshotService";
+import { InMemoryEmulatorConsoleBusyRegistry } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 import {
   buildVmSnapshotCommand,
   evaluateVmSnapshotResult,
@@ -258,6 +259,31 @@ describe("AvdSnapshotService (#6490)", () => {
       { timeoutMs: 30000, waitForProcessSettlementAfterAbort: true },
     ]);
   });
+
+  for (const { name, quotedName } of [
+    { name: "a b", quotedName: '"a b"' },
+    { name: "a\nb", quotedName: '"a\\nb"' },
+  ]) {
+    test(`deleteVmSnapshot returns a typed failure without dispatch for ${quotedName}`, async () => {
+      const adb = recordingAdbFactory(execResult("OK"));
+      const consoleBusyRegistry = new InMemoryEmulatorConsoleBusyRegistry();
+      const sut = new AvdSnapshotService(
+        new FakeDirectories({}, {}),
+        new FakeAvdDirectories(new Set()),
+        stubEmulator([]),
+        adb.factory,
+        consoleBusyRegistry,
+      );
+
+      await expect(sut.deleteVmSnapshot("emulator-5556", name, 30000)).resolves.toEqual({
+        reclaimed: false,
+        reason: `VM snapshot name ${quotedName} is not valid: it must not contain whitespace or control characters. Use letters, numbers, dots, underscores and hyphens.`,
+      });
+      expect(adb.commands).toEqual([]);
+      expect(adb.executeOptions).toEqual([]);
+      expect(consoleBusyRegistry.getGeneration("emulator-5556")).toBe(0);
+    });
+  }
 
   test("deleteVmSnapshot skips the console delete when its serial has been reassigned", async () => {
     const adb = recordingAdbFactory(execResult("OK"));

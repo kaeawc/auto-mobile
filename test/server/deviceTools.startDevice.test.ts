@@ -43,7 +43,6 @@ import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
-import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";

@@ -115,7 +115,11 @@ import {
   type MissingDeviceEvictionOptions,
   type MissingDeviceLivenessPoolPort,
 } from "./missingDeviceLiveness";
-import { DeviceRuntimeIdentity, type DeviceRuntimeIdentityPoolPort } from "./deviceRuntimeIdentity";
+import {
+  DeviceRuntimeIdentity,
+  type DeviceRuntimeIdentityPoolPort,
+  type DeviceRetirementOptions,
+} from "./deviceRuntimeIdentity";
 import {
   DeviceShutdownReservations,
   type DeviceShutdownReservationsPoolPort,
@@ -4781,7 +4785,7 @@ export class DevicePool {
    */
   async retireDeviceForShutdown(
     expectedDevice: PooledDevice,
-    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
+    options: DeviceRetirementOptions = {},
   ): Promise<boolean> {
     return await this.assignmentMutex.runExclusive(async () => {
       if (this.devices.get(expectedDevice.id) !== expectedDevice) {
@@ -4821,7 +4825,9 @@ export class DevicePool {
         releaseError = error;
       }
     }
-    const retired = await this.retireDeviceForShutdown(expectedDevice);
+    const retired = await this.retireDeviceForShutdown(expectedDevice, {
+      cancelDeviceBoundExecutions: false,
+    });
     if (releaseError) {
       throw releaseError;
     }
@@ -5040,11 +5046,7 @@ export class DevicePool {
     if (existingReplacement && existingReplacement !== expectedDevice) {
       this.assertPooledSystemUiAnrReplacement(existingReplacement, sourceImage);
       if (this.devices.get(expectedDevice.id) === expectedDevice) {
-        await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
-          expectedDevice.id,
-          deviceLossCancellationReason(expectedDevice.id),
-          { excludeExecutionId },
-        );
+        await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
         this.releaseCapturedDeviceForShutdown(expectedDevice);
         await this.removeDevice(expectedDevice.id, false, expectedDevice);
       }
@@ -5059,11 +5061,7 @@ export class DevicePool {
     // removeDevice rejects busy entries, so detach pool ownership only after
     // capturing any session that must be rebound below. The replacement remains
     // unavailable through the caller's readiness reservation while this runs.
-    await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
-      expectedDevice.id,
-      deviceLossCancellationReason(expectedDevice.id),
-      { excludeExecutionId },
-    );
+    await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
     this.releaseCapturedDeviceForShutdown(expectedDevice);
     await this.removeDevice(expectedDevice.id, false, expectedDevice);
     if (this.devices.has(replacement.deviceId)) {
@@ -5087,6 +5085,23 @@ export class DevicePool {
     replacementDevice.assignmentCount = priorAssignmentCount;
     replacementDevice.lastUsedAt = priorLastUsedAt;
     return replacementDevice;
+  }
+
+  private async cancelOldDeviceWorkForSystemUiAnr(
+    deviceId: string,
+    excludeExecutionId?: string,
+  ): Promise<void> {
+    if (excludeExecutionId === undefined) {
+      logger.warn(
+        `[DevicePool] Left old-device work running for ${deviceId} because the System UI ANR recovery execution is unknown`,
+      );
+      return;
+    }
+    await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
+      deviceId,
+      deviceLossCancellationReason(deviceId),
+      { excludeExecutionId },
+    );
   }
 
   private assertPooledSystemUiAnrReplacement(

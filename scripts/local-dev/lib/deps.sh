@@ -263,7 +263,8 @@ ensure_dev_tools() {
   fi
 
   # --- Java 21 (needed for Gradle / Android builds) -----------------------
-  if ! java -version 2>&1 | grep -q 'version "21'; then
+  local java_output
+  if ! java_output=$(java -version 2>&1) || [[ "${java_output}" != *'version "21'* ]]; then
     log_info "Java 21 not detected"
     brew_cask_install_if_missing java zulu-jdk21 || ((missing++)) || true
   fi

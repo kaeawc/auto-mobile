@@ -739,10 +739,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
       for (let i = startStep; i < plan.steps.length; i++) {
         throwIfAborted(signal);
         if (executionOptions?.onBeforePlanStep) {
-          await executionOptions.onBeforePlanStep({
+          const beforeStep = executionOptions.onBeforePlanStep({
             stepIndex: i,
             totalSteps: plan.steps.length,
+            ...(signal ? { signal } : {}),
           });
+          await beforeStep.finally(() => throwIfAborted(signal));
         }
         const step = plan.steps[i];
         const stepStartTime = debugMode ? this.timer.now() : 0;

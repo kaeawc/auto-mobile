@@ -303,7 +303,7 @@ describe("authoritative iOS local builds", () => {
     async (platform) => {
       const failure = builder.verifyRunnerBinaryBeforeLaunch(platform);
       await expect(failure).rejects.toBeInstanceOf(ActionableError);
-      const quotedPath = `'${tempDir}/Derived Data'\\''s'`;
+      const quotedPath = `'${derivedDataPath.replace(/'/g, "'\\''")}'`;
       if (platform === "simulator") {
         await expect(failure).rejects.toThrow(
           `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=${quotedPath} bash scripts/ios/ctrl-proxy-build-for-testing.sh`,

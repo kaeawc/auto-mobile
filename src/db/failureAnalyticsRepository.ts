@@ -1,4 +1,4 @@
-import { sql, type Kysely } from "kysely";
+import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
 import type {
   Database,
@@ -192,6 +192,30 @@ export class FailureAnalyticsRepository {
     return getDatabase();
   }
 
+  private buildOccurrence(
+    input: RecordFailureInput,
+    occurrenceId: string,
+    groupId: string,
+    now: number,
+  ): NewFailureOccurrence {
+    return {
+      id: occurrenceId,
+      group_id: groupId,
+      timestamp: now,
+      device_id: input.occurrence.deviceId ?? null,
+      device_model: input.occurrence.deviceModel,
+      os: input.occurrence.os,
+      app_version: input.occurrence.appVersion,
+      session_id: input.occurrence.sessionId,
+      screen_at_failure: input.occurrence.screenAtFailure ?? null,
+      test_name: input.occurrence.testName ?? null,
+      test_execution_id: input.occurrence.testExecutionId ?? null,
+      error_code: input.occurrence.errorCode ?? null,
+      duration_ms: input.occurrence.durationMs ?? null,
+      tool_args_json: input.occurrence.toolArgs ? JSON.stringify(input.occurrence.toolArgs) : null,
+    };
+  }
+
   /**
    * Record a new failure occurrence, creating or updating the group as needed
    */
@@ -245,24 +269,7 @@ export class FailureAnalyticsRepository {
         const isNewGroup = groupId === candidateGroupId;
 
         // Insert occurrence
-        const occurrence: NewFailureOccurrence = {
-          id: occurrenceId,
-          group_id: groupId,
-          timestamp: now,
-          device_id: input.occurrence.deviceId ?? null,
-          device_model: input.occurrence.deviceModel,
-          os: input.occurrence.os,
-          app_version: input.occurrence.appVersion,
-          session_id: input.occurrence.sessionId,
-          screen_at_failure: input.occurrence.screenAtFailure ?? null,
-          test_name: input.occurrence.testName ?? null,
-          test_execution_id: input.occurrence.testExecutionId ?? null,
-          error_code: input.occurrence.errorCode ?? null,
-          duration_ms: input.occurrence.durationMs ?? null,
-          tool_args_json: input.occurrence.toolArgs
-            ? JSON.stringify(input.occurrence.toolArgs)
-            : null,
-        };
+        const occurrence = this.buildOccurrence(input, occurrenceId, groupId, now);
 
         await trx.insertInto("failure_occurrences").values(occurrence).execute();
 
@@ -566,6 +573,22 @@ export class FailureAnalyticsRepository {
     }
   }
 
+  private applyNotificationCursor<O>(
+    builder: SelectQueryBuilder<Database, "failure_notifications", O>,
+    query: FailuresStreamQuery,
+  ): SelectQueryBuilder<Database, "failure_notifications", O> {
+    if (query.sinceTimestamp !== undefined) {
+      const sinceId = query.sinceId ?? 0;
+      builder = builder.where((eb) =>
+        eb.or([
+          eb("timestamp", ">", query.sinceTimestamp!),
+          eb.and([eb("timestamp", "=", query.sinceTimestamp!), eb("id", ">", sinceId)]),
+        ]),
+      );
+    }
+    return builder;
+  }
+
   /**
    * Get new failure notifications since a cursor (for streaming)
    */
@@ -587,15 +610,7 @@ export class FailureAnalyticsRepository {
     if (query.endTime) {
       builder = builder.where("timestamp", "<=", query.endTime);
     }
-    if (query.sinceTimestamp !== undefined) {
-      const sinceId = query.sinceId ?? 0;
-      builder = builder.where((eb) =>
-        eb.or([
-          eb("timestamp", ">", query.sinceTimestamp!),
-          eb.and([eb("timestamp", "=", query.sinceTimestamp!), eb("id", ">", sinceId)]),
-        ]),
-      );
-    }
+    builder = this.applyNotificationCursor(builder, query);
 
     const rows = await builder
       .orderBy("timestamp", "asc")

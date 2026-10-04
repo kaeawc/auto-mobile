@@ -1455,11 +1455,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     // accept an unverifiable APK for an unknown explicit pin (#2746).
     this.assertPinnedVersionVerifiable();
 
-    if (!options.bypassVersionCheckCache && !options.allowDownloadWhenInstalled) {
-      const cachedResult = this.getCachedVersionCheckResult();
-      if (cachedResult) {
-        return cachedResult;
-      }
+    const cachedResult = this.getCachedCompatibilityResult(options);
+    if (cachedResult) {
+      return cachedResult;
     }
 
     this.clearServiceAvailabilityCache();
@@ -1506,72 +1504,49 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     let needsReinstallDueToUnknownSha = false;
 
     if (isInstalled) {
-      perf.startOperation("getChecksum");
-      const installedShaResult = await this.getInstalledApkSha256WithDetails();
-      perf.endOperation("getChecksum");
-      result.installedSha256 = installedShaResult.sha256;
-      result.installedShaSource = installedShaResult.source;
-      result.installedApkPath = installedShaResult.apkPath;
-
-      const installedSha = installedShaResult.sha256;
-      needsReinstallDueToUnknownSha = expectedSha.length > 0 && !installedSha;
-
-      if (expectedSha.length > 0 && !installedSha && installedShaResult.error) {
-        logger.warn("[CTRL_PROXY] Unable to determine installed APK checksum, forcing reinstall", {
-          error: installedShaResult.error,
-        });
-      }
-
-      if (
-        expectedSha.length > 0 &&
-        installedSha &&
-        installedSha.toLowerCase() === expectedSha.toLowerCase()
-      ) {
-        return this.cacheVersionCheckResult(result);
-      }
-
-      if (
-        expectedSha.length > 0 &&
-        !options.allowDownloadWhenInstalled &&
-        !this.getApkPathOverride()
-      ) {
-        const prefetchedUpgradeResult = await this.tryUpgradeFromCompletedPrefetch(result, perf);
-        if (prefetchedUpgradeResult) {
-          return this.cacheVersionCheckResult(prefetchedUpgradeResult);
-        }
-
-        if (AndroidCtrlProxyManager.isKnownExplicitPinConfigured()) {
-          throw AndroidCtrlProxyManager.createKnownPinMismatchError(expectedSha, installedSha);
-        }
-
-        logger.warn(
-          "[CTRL_PROXY] Installed APK SHA differs from expected release; accepting preinstalled CtrlProxy for nonblocking readiness",
-          {
-            expected: expectedSha,
-            actual: installedSha,
-          },
-        );
-        this.queueBackgroundApkRefresh();
-        return this.cacheVersionCheckResult({
-          ...result,
-          status: "skipped",
-          attemptedDownload: false,
-          acceptedPreinstalled: true,
-        });
-      }
-
-      if (needsReinstallDueToUnknownSha) {
-        logger.warn("[CTRL_PROXY] Installed APK checksum unavailable, forcing reinstall");
-      } else {
-        logger.info("[CTRL_PROXY] Installed APK SHA mismatch, attempting upgrade", {
-          expected: expectedSha,
-          actual: installedSha,
-        });
+      const installedCheck = await this.checkInstalledCompatibility(
+        result,
+        expectedSha,
+        options,
+        perf,
+      );
+      needsReinstallDueToUnknownSha = installedCheck.needsReinstallDueToUnknownSha;
+      if (installedCheck.completed) {
+        return installedCheck.completed;
       }
     } else {
       logger.info("[CTRL_PROXY] Service not installed, downloading and installing");
     }
 
+    return this.downloadCompatibleApk(
+      result,
+      isInstalled,
+      needsReinstallDueToUnknownSha,
+      perf,
+      options,
+    );
+  }
+
+  private getCachedCompatibilityResult(
+    options: AccessibilityVersionCheckOptions,
+  ): AccessibilityVersionCheckResult | null {
+    if (!options.bypassVersionCheckCache && !options.allowDownloadWhenInstalled) {
+      const cachedResult = this.getCachedVersionCheckResult();
+      if (cachedResult) {
+        return cachedResult;
+      }
+    }
+
+    return null;
+  }
+
+  private async downloadCompatibleApk(
+    result: AccessibilityVersionCheckResult,
+    isInstalled: boolean,
+    needsReinstallDueToUnknownSha: boolean,
+    perf: PerformanceTracker,
+    options: AccessibilityVersionCheckOptions,
+  ): Promise<AccessibilityVersionCheckResult> {
     let apkPath: string | null = null;
     try {
       result.attemptedDownload = true;
@@ -1610,6 +1585,106 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         await this.cleanupApk(apkPath);
       }
     }
+  }
+
+  private warnMissingInstalledChecksum(
+    expectedSha: string,
+    installedSha: string | null,
+    error: string | undefined,
+  ): void {
+    if (expectedSha.length > 0 && !installedSha && error) {
+      logger.warn("[CTRL_PROXY] Unable to determine installed APK checksum, forcing reinstall", {
+        error: error,
+      });
+    }
+  }
+
+  private async acceptPreinstalledOrPrefetched(
+    result: AccessibilityVersionCheckResult,
+    perf: PerformanceTracker,
+    expectedSha: string,
+    installedSha: string | null,
+  ): Promise<AccessibilityVersionCheckResult> {
+    const prefetchedUpgradeResult = await this.tryUpgradeFromCompletedPrefetch(result, perf);
+    if (prefetchedUpgradeResult) {
+      return this.cacheVersionCheckResult(prefetchedUpgradeResult);
+    }
+
+    if (AndroidCtrlProxyManager.isKnownExplicitPinConfigured()) {
+      throw AndroidCtrlProxyManager.createKnownPinMismatchError(expectedSha, installedSha);
+    }
+
+    logger.warn(
+      "[CTRL_PROXY] Installed APK SHA differs from expected release; accepting preinstalled CtrlProxy for nonblocking readiness",
+      {
+        expected: expectedSha,
+        actual: installedSha,
+      },
+    );
+    this.queueBackgroundApkRefresh();
+    return this.cacheVersionCheckResult({
+      ...result,
+      status: "skipped",
+      attemptedDownload: false,
+      acceptedPreinstalled: true,
+    });
+  }
+
+  private async checkInstalledCompatibility(
+    result: AccessibilityVersionCheckResult,
+    expectedSha: string,
+    options: AccessibilityVersionCheckOptions,
+    perf: PerformanceTracker,
+  ): Promise<{
+    completed?: AccessibilityVersionCheckResult;
+    needsReinstallDueToUnknownSha: boolean;
+  }> {
+    perf.startOperation("getChecksum");
+    const installedShaResult = await this.getInstalledApkSha256WithDetails();
+    perf.endOperation("getChecksum");
+    result.installedSha256 = installedShaResult.sha256;
+    result.installedShaSource = installedShaResult.source;
+    result.installedApkPath = installedShaResult.apkPath;
+
+    const installedSha = installedShaResult.sha256;
+    const needsReinstallDueToUnknownSha = expectedSha.length > 0 && !installedSha;
+
+    this.warnMissingInstalledChecksum(expectedSha, installedSha, installedShaResult.error);
+
+    if (
+      expectedSha.length > 0 &&
+      installedSha &&
+      installedSha.toLowerCase() === expectedSha.toLowerCase()
+    ) {
+      return { completed: this.cacheVersionCheckResult(result), needsReinstallDueToUnknownSha };
+    }
+
+    if (
+      expectedSha.length > 0 &&
+      !options.allowDownloadWhenInstalled &&
+      !this.getApkPathOverride()
+    ) {
+      return {
+        completed: await this.acceptPreinstalledOrPrefetched(
+          result,
+          perf,
+          expectedSha,
+          installedSha,
+        ),
+        needsReinstallDueToUnknownSha,
+      };
+    }
+
+    if (needsReinstallDueToUnknownSha) {
+      logger.warn("[CTRL_PROXY] Installed APK checksum unavailable, forcing reinstall");
+    } else {
+      logger.info("[CTRL_PROXY] Installed APK SHA mismatch, attempting upgrade", {
+        expected: expectedSha,
+        actual: installedSha,
+      });
+    }
+
+    return { needsReinstallDueToUnknownSha };
   }
 
   private async tryUpgradeFromCompletedPrefetch(
@@ -1919,6 +1994,38 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Enable Accessibility Service via adb settings commands
    */
+  private throwEnableSettingsError(error: unknown): never {
+    const deviceError = this.statusInspectionDeviceError(error);
+    if (deviceError) {
+      throw deviceError;
+    }
+    const errorMsg = errorMessage(error);
+    const errorLower = errorMsg.toLowerCase();
+
+    // Categorize error types for clearer feedback
+    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
+      throw new Error(
+        `Permission denied while enabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+      );
+    } else if (
+      errorLower.includes("device not found") ||
+      errorLower.includes("no devices") ||
+      errorLower.includes("offline")
+    ) {
+      throw new Error(
+        `Device connection lost while enabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+      );
+    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
+      throw new Error(
+        `Timeout while enabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
+      );
+    } else {
+      throw new Error(
+        `Failed to enable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+      );
+    }
+  }
+
   async enableViaSettings(): Promise<void> {
     // Check if settings toggle is supported
     const capabilities = await this.getToggleCapabilities();
@@ -1970,35 +2077,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       perf.endOperation("writeServiceEnabled");
       logger.info("Accessibility Service enabled successfully via settings");
     } catch (error) {
-      const deviceError = this.statusInspectionDeviceError(error);
-      if (deviceError) {
-        throw deviceError;
-      }
-      const errorMsg = errorMessage(error);
-      const errorLower = errorMsg.toLowerCase();
-
-      // Categorize error types for clearer feedback
-      if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-        throw new Error(
-          `Permission denied while enabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
-        );
-      } else if (
-        errorLower.includes("device not found") ||
-        errorLower.includes("no devices") ||
-        errorLower.includes("offline")
-      ) {
-        throw new Error(
-          `Device connection lost while enabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
-        );
-      } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-        throw new Error(
-          `Timeout while enabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
-        );
-      } else {
-        throw new Error(
-          `Failed to enable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
-        );
-      }
+      this.throwEnableSettingsError(error);
     } finally {
       // Issue #4192: clear in `finally` so success, early return, and a partial
       // failure all reconcile our cached view. clearAvailabilityCache also
@@ -2011,6 +2090,38 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Disable Accessibility Service via adb settings commands
    */
+  private throwDisableSettingsError(error: unknown): never {
+    const deviceError = this.statusInspectionDeviceError(error);
+    if (deviceError) {
+      throw deviceError;
+    }
+    const errorMsg = errorMessage(error);
+    const errorLower = errorMsg.toLowerCase();
+
+    // Categorize error types for clearer feedback
+    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
+      throw new Error(
+        `Permission denied while disabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+      );
+    } else if (
+      errorLower.includes("device not found") ||
+      errorLower.includes("no devices") ||
+      errorLower.includes("offline")
+    ) {
+      throw new Error(
+        `Device connection lost while disabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+      );
+    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
+      throw new Error(
+        `Timeout while disabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
+      );
+    } else {
+      throw new Error(
+        `Failed to disable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+      );
+    }
+  }
+
   async disableViaSettings(): Promise<void> {
     // Check if settings toggle is supported
     const capabilities = await this.getToggleCapabilities();
@@ -2068,35 +2179,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       logger.info("Accessibility Service disabled successfully via settings");
     } catch (error) {
-      const deviceError = this.statusInspectionDeviceError(error);
-      if (deviceError) {
-        throw deviceError;
-      }
-      const errorMsg = errorMessage(error);
-      const errorLower = errorMsg.toLowerCase();
-
-      // Categorize error types for clearer feedback
-      if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-        throw new Error(
-          `Permission denied while disabling Accessibility Service. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
-        );
-      } else if (
-        errorLower.includes("device not found") ||
-        errorLower.includes("no devices") ||
-        errorLower.includes("offline")
-      ) {
-        throw new Error(
-          `Device connection lost while disabling Accessibility Service. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
-        );
-      } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-        throw new Error(
-          `Timeout while disabling Accessibility Service. The device may be unresponsive. Original error: ${errorMsg}`,
-        );
-      } else {
-        throw new Error(
-          `Failed to disable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
-        );
-      }
+      this.throwDisableSettingsError(error);
     } finally {
       // Issue #4192: the disable path previously invalidated nothing, so observe
       // kept reporting accessibility as available after the service was torn down.
@@ -2117,6 +2200,38 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Enable Accessibility Service for a specific user profile via adb settings commands
    * @param userId - The Android user ID to enable for (e.g., 10 for work profile)
    */
+  private throwEnableUserError(error: unknown, userId: number): never {
+    const deviceError = this.statusInspectionDeviceError(error);
+    if (deviceError) {
+      throw deviceError;
+    }
+    const errorMsg = errorMessage(error);
+    const errorLower = errorMsg.toLowerCase();
+
+    // Categorize error types for clearer feedback
+    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
+      throw new Error(
+        `Permission denied while enabling Accessibility Service for user ${userId}. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
+      );
+    } else if (
+      errorLower.includes("device not found") ||
+      errorLower.includes("no devices") ||
+      errorLower.includes("offline")
+    ) {
+      throw new Error(
+        `Device connection lost while enabling Accessibility Service for user ${userId}. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
+      );
+    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
+      throw new Error(
+        `Timeout while enabling Accessibility Service for user ${userId}. The device may be unresponsive. Original error: ${errorMsg}`,
+      );
+    } else {
+      throw new Error(
+        `Failed to enable Accessibility Service via settings for user ${userId}. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
+      );
+    }
+  }
+
   async enableForUser(userId: number): Promise<void> {
     // Check if settings toggle is supported
     const capabilities = await this.getToggleCapabilities();
@@ -2171,35 +2286,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         `[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`,
       );
     } catch (error) {
-      const deviceError = this.statusInspectionDeviceError(error);
-      if (deviceError) {
-        throw deviceError;
-      }
-      const errorMsg = errorMessage(error);
-      const errorLower = errorMsg.toLowerCase();
-
-      // Categorize error types for clearer feedback
-      if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-        throw new Error(
-          `Permission denied while enabling Accessibility Service for user ${userId}. The device may require root access, device owner status, or special shell permissions. Original error: ${errorMsg}`,
-        );
-      } else if (
-        errorLower.includes("device not found") ||
-        errorLower.includes("no devices") ||
-        errorLower.includes("offline")
-      ) {
-        throw new Error(
-          `Device connection lost while enabling Accessibility Service for user ${userId}. Ensure the device is connected and adb is responsive. Original error: ${errorMsg}`,
-        );
-      } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-        throw new Error(
-          `Timeout while enabling Accessibility Service for user ${userId}. The device may be unresponsive. Original error: ${errorMsg}`,
-        );
-      } else {
-        throw new Error(
-          `Failed to enable Accessibility Service via settings for user ${userId}. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`,
-        );
-      }
+      this.throwEnableUserError(error, userId);
     } finally {
       // Issue #4192: main-user cache only (per-user caching not implemented);
       // `finally` also covers the partial-failure path.
@@ -2237,6 +2324,94 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
+  private async recheckSetup(perf: PerformanceTracker): Promise<ProxySetupResult> {
+    try {
+      const [installed, enabled] = await perf.track("recheckStatus", async () => {
+        return Promise.all([this.isInstalled(), this.isEnabled()]);
+      });
+      if (installed && enabled) {
+        perf.end();
+        return {
+          success: true,
+          message: "Accessibility Service was already installed and has been activated",
+          perfTiming: perf.getTimings(),
+        };
+      }
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] Failed to re-check service status: ${error}`);
+      const errorMsg = errorMessage(error);
+      const { message, category } = AndroidCtrlProxyManager.classifySetupError(errorMsg);
+      perf.end();
+      return {
+        success: false,
+        message,
+        error: errorMsg,
+        cause: error,
+        category,
+        perfTiming: perf.getTimings(),
+      };
+    }
+    perf.end();
+    return {
+      success: false,
+      message: "Setup already attempted",
+      perfTiming: perf.getTimings(),
+    };
+  }
+
+  private setupCompatibilityResult(
+    compatibilityResult: AccessibilityVersionCheckResult,
+    perf: PerformanceTracker,
+  ): ProxySetupResult | null {
+    if (compatibilityResult.status === "failed") {
+      perf.end();
+      const error =
+        compatibilityResult.error ||
+        compatibilityResult.upgradeError ||
+        compatibilityResult.reinstallError;
+      return {
+        success: false,
+        message: "Failed to ensure compatible Accessibility Service version",
+        error,
+        cause: compatibilityResult.cause,
+        category: AndroidCtrlProxyManager.classifySetupError(error ?? "").category,
+        perfTiming: perf.getTimings(),
+      };
+    }
+    if (
+      compatibilityResult.status === "upgraded" ||
+      compatibilityResult.status === "installed" ||
+      compatibilityResult.status === "reinstalled"
+    ) {
+      perf.end();
+      return {
+        success: true,
+        message: "Accessibility Service upgraded to a compatible version",
+        perfTiming: perf.getTimings(),
+      };
+    }
+
+    return null;
+  }
+
+  private alreadyActiveSetupResult(
+    force: boolean,
+    isAlreadyInstalled: boolean,
+    isAlreadyEnabled: boolean,
+    perf: PerformanceTracker,
+  ): ProxySetupResult | null {
+    if (!force && isAlreadyInstalled && isAlreadyEnabled) {
+      perf.end();
+      return {
+        success: true,
+        message: "Accessibility Service was already installed and has been activated",
+        perfTiming: perf.getTimings(),
+      };
+    }
+
+    return null;
+  }
+
   /**
    * Complete setup process for Accessibility Service
    */
@@ -2248,82 +2423,29 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     let apkPath: string | null = null;
 
     if (this.attemptedAutomatedSetup) {
-      try {
-        const [installed, enabled] = await perf.track("recheckStatus", async () => {
-          return Promise.all([this.isInstalled(), this.isEnabled()]);
-        });
-        if (installed && enabled) {
-          perf.end();
-          return {
-            success: true,
-            message: "Accessibility Service was already installed and has been activated",
-            perfTiming: perf.getTimings(),
-          };
-        }
-      } catch (error) {
-        logger.warn(`[CTRL_PROXY] Failed to re-check service status: ${error}`);
-        const errorMsg = errorMessage(error);
-        const { message, category } = AndroidCtrlProxyManager.classifySetupError(errorMsg);
-        perf.end();
-        return {
-          success: false,
-          message,
-          error: errorMsg,
-          cause: error,
-          category,
-          perfTiming: perf.getTimings(),
-        };
-      }
-      perf.end();
-      return {
-        success: false,
-        message: "Setup already attempted",
-        perfTiming: perf.getTimings(),
-      };
+      return this.recheckSetup(perf);
     }
 
     try {
       const compatibilityResult = await perf.track("ensureCompatibleVersion", () =>
         this.ensureCompatibleVersion(),
       );
-      if (compatibilityResult.status === "failed") {
-        perf.end();
-        const error =
-          compatibilityResult.error ||
-          compatibilityResult.upgradeError ||
-          compatibilityResult.reinstallError;
-        return {
-          success: false,
-          message: "Failed to ensure compatible Accessibility Service version",
-          error,
-          cause: compatibilityResult.cause,
-          category: AndroidCtrlProxyManager.classifySetupError(error ?? "").category,
-          perfTiming: perf.getTimings(),
-        };
-      }
-      if (
-        compatibilityResult.status === "upgraded" ||
-        compatibilityResult.status === "installed" ||
-        compatibilityResult.status === "reinstalled"
-      ) {
-        perf.end();
-        return {
-          success: true,
-          message: "Accessibility Service upgraded to a compatible version",
-          perfTiming: perf.getTimings(),
-        };
+      const completed = this.setupCompatibilityResult(compatibilityResult, perf);
+      if (completed) {
+        return completed;
       }
 
       // Check if already installed and setup (unless force is true)
       const isAlreadyInstalled = await perf.track("checkInstalled", () => this.isInstalled());
       const isAlreadyEnabled = await perf.track("checkEnabled", () => this.isEnabled());
-      if (!force && isAlreadyInstalled && isAlreadyEnabled) {
-        perf.end();
-        return {
-          success: true,
-          message: "Accessibility Service was already installed and has been activated",
-          perfTiming: perf.getTimings(),
-        };
+      const activated = this.alreadyActiveSetupResult(
+        force,
+        isAlreadyInstalled,
+        isAlreadyEnabled,
+        perf,
+      );
+      if (activated) {
+        return activated;
       }
 
       this.attemptedAutomatedSetup = true;

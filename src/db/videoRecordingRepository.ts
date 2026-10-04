@@ -135,6 +135,16 @@ function applyOwnerScope<O>(
 function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordingUpdate {
   const payload: VideoRecordingUpdate = {};
 
+  applyRecordingFileUpdate(payload, update);
+  applyRecordingTimestampUpdate(payload, update);
+  applyRecordingMetadataUpdate(payload, update);
+  return payload;
+}
+
+function applyRecordingIdentityUpdate(
+  payload: VideoRecordingUpdate,
+  update: Partial<VideoRecordingRecord>,
+): void {
   if (update.deviceId !== undefined) {
     payload.device_id = update.deviceId;
   }
@@ -147,6 +157,13 @@ function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordi
   if (update.outputName !== undefined) {
     payload.output_name = update.outputName ?? null;
   }
+}
+
+function applyRecordingFileUpdate(
+  payload: VideoRecordingUpdate,
+  update: Partial<VideoRecordingRecord>,
+): void {
+  applyRecordingIdentityUpdate(payload, update);
   if (update.fileName !== undefined) {
     payload.file_name = update.fileName;
   }
@@ -165,6 +182,12 @@ function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordi
   if (update.codec !== undefined) {
     payload.codec = update.codec ?? null;
   }
+}
+
+function applyRecordingTimestampUpdate(
+  payload: VideoRecordingUpdate,
+  update: Partial<VideoRecordingRecord>,
+): void {
   if (update.createdAt !== undefined) {
     payload.created_at = update.createdAt;
   }
@@ -177,6 +200,12 @@ function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordi
   if (update.lastAccessedAt !== undefined) {
     payload.last_accessed_at = update.lastAccessedAt;
   }
+}
+
+function applyRecordingMetadataUpdate(
+  payload: VideoRecordingUpdate,
+  update: Partial<VideoRecordingRecord>,
+): void {
   if (update.config !== undefined) {
     payload.config_json = JSON.stringify(update.config);
   }
@@ -192,8 +221,6 @@ function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordi
   if (update.ownerSessionUuid !== undefined) {
     payload.owner_session_uuid = update.ownerSessionUuid ?? null;
   }
-
-  return payload;
 }
 
 export class VideoRecordingRepository {

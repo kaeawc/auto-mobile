@@ -37,6 +37,10 @@ export function parseClaudeResponse(response: Anthropic.Message): ClaudeVisionAn
     throw new Error(`Failed to parse JSON from Claude response: ${(error as Error).message}`);
   }
 
+  return normalizeClaudeAnalysis(parsed);
+}
+
+function normalizeClaudeAnalysis(parsed: any): ClaudeVisionAnalysis {
   return {
     elementFound: parsed.elementFound || false,
     elementLocation: parsed.elementLocation || undefined,

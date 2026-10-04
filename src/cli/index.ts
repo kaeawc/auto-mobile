@@ -493,24 +493,28 @@ function handleToolResult(result: any, toolName: string): void {
       console.error(result.content[0].text);
     }
 
-    // Plan progress is only available in structured executePlan failures.
-    if (
-      toolName === "executePlan" &&
-      actualResult &&
-      typeof actualResult === "object" &&
-      typeof actualResult.executedSteps === "number" &&
-      typeof actualResult.totalSteps === "number"
-    ) {
-      console.error(`Executed ${actualResult.executedSteps} of ${actualResult.totalSteps} steps`);
-      if (actualResult.failedStep) {
-        console.error(
-          `Failed at step ${actualResult.failedStep.stepIndex + 1}: ${actualResult.failedStep.tool}`,
-        );
-        console.error(`Step error: ${actualResult.failedStep.error}`);
-      }
-    }
+    printPlanFailureProgress(actualResult, toolName);
 
     process.exit(1);
+  }
+}
+
+function printPlanFailureProgress(actualResult: any, toolName: string): void {
+  // Plan progress is only available in structured executePlan failures.
+  if (
+    toolName === "executePlan" &&
+    actualResult &&
+    typeof actualResult === "object" &&
+    typeof actualResult.executedSteps === "number" &&
+    typeof actualResult.totalSteps === "number"
+  ) {
+    console.error(`Executed ${actualResult.executedSteps} of ${actualResult.totalSteps} steps`);
+    if (actualResult.failedStep) {
+      console.error(
+        `Failed at step ${actualResult.failedStep.stepIndex + 1}: ${actualResult.failedStep.tool}`,
+      );
+      console.error(`Step error: ${actualResult.failedStep.error}`);
+    }
   }
 }
 
@@ -755,10 +759,7 @@ export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {
 
 /** Describe accepted input values, including nested fields and schema alternatives. */
 export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
-  const isOptional =
-    typeof schema?.isOptional === "function"
-      ? schema.isOptional()
-      : schema?._def?.typeName === "ZodOptional";
+  const isOptional = isOptionalCliHelpParameter(schema);
   const actualType = isOptional ? (schema?._def?.innerType ?? schema) : schema;
   const rawTypeName = actualType?._def?.typeName ?? actualType?._def?.type ?? "unknown";
   const normalizedType = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
@@ -778,8 +779,18 @@ export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
   return {
     isOptional,
     typeName,
-    description: schema?.description ?? actualType?.description ?? actualType?._def?.description,
+    description: getCliHelpParameterDescription(schema, actualType),
   };
+}
+
+function isOptionalCliHelpParameter(schema: any): boolean {
+  return typeof schema?.isOptional === "function"
+    ? schema.isOptional()
+    : schema?._def?.typeName === "ZodOptional";
+}
+
+function getCliHelpParameterDescription(schema: any, actualType: any): string | undefined {
+  return schema?.description ?? actualType?.description ?? actualType?._def?.description;
 }
 
 /** Render JSON schema structure without losing union alternatives or nested keys. */

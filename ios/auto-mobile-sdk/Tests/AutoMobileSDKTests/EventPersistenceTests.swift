@@ -333,4 +333,81 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(pending[0].events[0].eventType, .interaction)
         XCTAssertEqual(pending[0].events[1].eventType, .navigation)
     }
+
+    func testPendingCapEvictsOldestAndKeepsNewest() {
+        persistence = FileEventPersistence(directory: tempDir, dateProvider: fakeDateProvider, maxPendingBatches: 2)
+        let event = SdkInteractionEvent(interactionType: "cap")
+        let oldest = persistence.persist([event])!
+        fakeDateProvider.advance(by: 1)
+        let second = persistence.persist([event])!
+        fakeDateProvider.advance(by: 1)
+        let newest = persistence.persist([event])!
+        XCTAssertFalse(
+            FileManager.default
+                .fileExists(atPath: tempDir.appendingPathComponent("events_\(oldest).json").path)
+        )
+        XCTAssertEqual(persistence.loadPending().map { $0.batchId }, [second, newest])
+    }
+
+    func testPendingCapNeverEvictsJustWrittenBatchWhenClockMovesBackward() throws {
+        persistence = FileEventPersistence(directory: tempDir, dateProvider: fakeDateProvider, maxPendingBatches: 2)
+        let event = SdkInteractionEvent(interactionType: "clock")
+        _ = persistence.persist([event])
+        fakeDateProvider.advance(by: 1)
+        _ = persistence.persist([event])
+        fakeDateProvider.advance(by: -10)
+        let justWritten = persistence.persist([event])!
+        XCTAssertTrue(
+            FileManager.default
+                .fileExists(atPath: tempDir.appendingPathComponent("events_\(justWritten).json").path)
+        )
+        let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+        let pendingFiles = files.filter {
+            $0.lastPathComponent.hasPrefix("events_") && $0.pathExtension == "json"
+        }
+        XCTAssertEqual(pendingFiles.count, 2)
+    }
+
+    func testPendingCapOneAndNonPositiveCapsKeepJustWrittenBatch() {
+        for cap in [1, 0, -1] {
+            persistence = FileEventPersistence(
+                directory: tempDir,
+                dateProvider: fakeDateProvider,
+                maxPendingBatches: cap
+            )
+            let event = SdkInteractionEvent(interactionType: "single")
+            _ = persistence.persist([event])
+            fakeDateProvider.advance(by: 1)
+            let newest = persistence.persist([event])!
+            let files = try! FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+            XCTAssertEqual(files.map { $0.lastPathComponent }, ["events_\(newest).json"])
+            XCTAssertEqual(persistence.loadPending().map { $0.batchId }, [newest])
+        }
+    }
+
+    func testPendingCapUsesFilenameToBreakTimestampTies() throws {
+        persistence = FileEventPersistence(directory: tempDir, dateProvider: fakeDateProvider, maxPendingBatches: 2)
+        let event = SdkInteractionEvent(interactionType: "tie")
+        let envelope = try SdkEventEnvelope(event)
+        let data = try JSONEncoder().encode([PersistedEvent(eventType: envelope.eventType, payload: envelope.payload)])
+        for id in ["100_A", "100_B"] {
+            try data.write(to: tempDir.appendingPathComponent("events_\(id).json"))
+        }
+        let justWritten = persistence.persist([event])!
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("events_100_A.json").path))
+        XCTAssertEqual(persistence.loadPending().map { $0.batchId }, ["100_B", justWritten])
+    }
+
+    func testDefaultPendingCapBoundsExistingBacklogOnLoad() throws {
+        let event = SdkInteractionEvent(interactionType: "legacy")
+        let envelope = try SdkEventEnvelope(event)
+        let data = try JSONEncoder().encode([PersistedEvent(eventType: envelope.eventType, payload: envelope.payload)])
+        for timestamp in 1 ... 101 {
+            try data.write(to: tempDir.appendingPathComponent("events_\(timestamp)_legacy.json"))
+        }
+        let pending = persistence.loadPending()
+        XCTAssertEqual(pending.count, 100)
+        XCTAssertEqual(pending.first?.batchId, "2_legacy")
+        XCTAssertEqual(pending.last?.batchId, "101_legacy")
+    }
 }

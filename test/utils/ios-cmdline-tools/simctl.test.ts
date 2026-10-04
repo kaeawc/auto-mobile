@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
@@ -1114,6 +1114,34 @@ describe("Simctl", function () {
       expect(secondDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
     });
 
+    test("settled shutdown never reads with an exhausted timeout budget", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      mockExecAsync = async (): Promise<ExecResult> =>
+        createExecResult(
+          simulatorListPayload([
+            {
+              udid: mockDevice.deviceId,
+              name: mockDevice.name,
+              state: "Shutdown",
+              isAvailable: true,
+            },
+          ]),
+          "",
+        );
+      simctl = new Simctl(null, mockExecAsync, timer);
+      const reads = spyOn(simctl, "listSimulatorImages");
+      try {
+        await expect(simctl.killSimulator(mockDevice)).resolves.toBeUndefined();
+        expect(reads.mock.calls.map(([timeoutMs]) => timeoutMs)).toEqual([
+          10_000, 9_000, 8_000, 7_000, 6_000, 5_000, 4_000, 3_000, 2_000, 1_000,
+        ]);
+        expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
+      } finally {
+        reads.mockRestore();
+      }
+    });
+
     test("successful shutdown invalidates the cached boot state", async function () {
       const timer = new FakeTimer();
       let running = true;
@@ -1147,7 +1175,7 @@ describe("Simctl", function () {
         name: "iPhone 17",
       });
       expect(await simctl.getBootedSimulatorsChecked()).toEqual([]);
-      expect(reads).toBe(12);
+      expect(reads).toBe(11);
       expect(timer.now()).toBe(10_000);
     });
 

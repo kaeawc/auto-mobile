@@ -4,6 +4,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "
 import { EventEmitter } from "node:events";
 import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
+import { logger } from "../../src/utils/logger";
+import { Daemon } from "../../src/daemon/daemon";
+import type { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -2732,6 +2736,109 @@ describe("killDevice handler", () => {
 
     expect(transientManager.shutdownDiscoveryCalls).toBe(5);
     expect(pool.getDevice(device.deviceId)).toBeNull();
+  });
+
+  test("iOS shutdown succeeds when the disconnect monitor fires during settlement", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const device: BootedDevice = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "ios-monitor-kill",
+    };
+    successfulManager.setDeviceImages("ios", [{ ...device, isRunning: false, source: "local" }]);
+    const { pool, registry } = createRegistryWiredDevicePool(
+      sessionManager,
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+    const controller = new AbortController();
+    const cancellations: string[] = [];
+    // Run the real monitor without constructing unrelated daemon socket/process services.
+    const daemon = Object.assign(Object.create(Daemon.prototype), {
+      timer,
+      devicePool: pool,
+      sessionManager,
+      deviceSessionRegistry: registry,
+      deviceDisconnectMonitor: null,
+      deviceDisconnectMisses: new Map(),
+      deviceDisconnectMissIncarnations: new Map(),
+      confirmedDisconnectedDeviceIds: new Set(),
+      forceDisconnectedDeviceIds: new Set(),
+      forceDisconnectedDeviceGenerations: new Map(),
+      offlineRecoveryAttemptedDeviceIds: new Set(),
+      offlineRecoveryAttemptedIncarnations: new Map(),
+      deferredSessionRecoverySweeps: new Set(),
+      cancelAndReleaseSession: async (_sessionId: string, reason: string) => {
+        cancellations.push(reason);
+        controller.abort(new Error(reason));
+        return true;
+      },
+    }) as {
+      deviceDisconnectMonitor: SingleFlightInterval;
+      startDeviceDisconnectMonitor(
+        manager: Pick<
+          MultiPlatformDeviceManager,
+          "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
+        >,
+        listRecordings: () => Promise<[]>,
+      ): void;
+    };
+    const mark = spyOn(pool, "markIntentionalShutdown");
+    const warnings = spyOn(logger, "warn");
+    const discovery = spyOn(successfulManager, "getBootedDevicesDetailed");
+    const kill = spyOn(successfulManager, "killDevice").mockImplementation(async () => {
+      successfulManager.setBootedDevices("ios", []);
+      const settle = timer.sleep(10_000);
+      daemon.startDeviceDisconnectMonitor(successfulManager, async () => []);
+      for (let tick = 0; tick < 3; tick++) {
+        const readsBeforeTick = discovery.mock.calls.length;
+        await daemon.deviceDisconnectMonitor.run();
+        expect(discovery.mock.calls.length).toBeGreaterThan(readsBeforeTick);
+      }
+      timer.advanceTime(10_000);
+      await settle;
+      controller.signal.throwIfAborted();
+    });
+    try {
+      const result = await ToolRegistry.getTool("killDevice")!.handler(
+        { device },
+        undefined,
+        controller.signal,
+      );
+      expect(mark).toHaveBeenCalledWith(device.deviceId);
+      expect(
+        warnings.mock.calls.some(([message]) =>
+          String(message).includes("Device disconnect monitor failed"),
+        ),
+      ).toBe(false);
+      expect(cancellations).toEqual([]);
+      expect(result).toMatchObject({
+        content: [{ type: "text", text: expect.stringContaining("shutdown successfully") }],
+      });
+      expect(timer.getSleepHistory()).toContain(10_000);
+    } finally {
+      await daemon.deviceDisconnectMonitor?.stop();
+      kill.mockRestore();
+      mark.mockRestore();
+      warnings.mockRestore();
+      discovery.mockRestore();
+    }
   });
 
   test("awaits iOS pool removal before retiring its device-session epoch", async () => {

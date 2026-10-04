@@ -1283,36 +1283,68 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testKeyboardFocusDecision_skipsWhenNoInputsPresent() {
-        XCTAssertEqual(ElementLocator.keyboardFocusDecision(textInputCandidates: []), .skip)
+        for keyboardVisible in [false, true] {
+            XCTAssertEqual(
+                ElementLocator.keyboardFocusDecision(
+                    textInputCandidates: [], keyboardVisibleInSnapshot: keyboardVisible
+                ),
+                .skip
+            )
+        }
+    }
+
+    func testKeyboardFocusDecision_skipsWhenNoInputReportsFocusAndKeyboardIsHidden() {
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(
+                textInputCandidates: [
+                    (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
+                    (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: false),
+                ],
+                keyboardVisibleInSnapshot: false
+            ),
+            .skip
+        )
     }
 
     func testKeyboardFocusDecision_queriesWhenNoInputReportsFocus() {
+        // React Native-style fields can omit focus while the keyboard is up.
         XCTAssertEqual(
-            ElementLocator.keyboardFocusDecision(textInputCandidates: [
-                (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
-                (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: false),
-            ]),
+            ElementLocator.keyboardFocusDecision(
+                textInputCandidates: [
+                    (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
+                    (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: false),
+                ],
+                keyboardVisibleInSnapshot: true
+            ),
             .liveQuery
         )
     }
 
     func testKeyboardFocusDecision_usesFocusedSnapshotFrame() {
         let focusedFrame = CGRect(x: 10, y: 80, width: 100, height: 40)
-        XCTAssertEqual(
-            ElementLocator.keyboardFocusDecision(textInputCandidates: [
-                (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
-                (frame: focusedFrame, hasFocus: true),
-            ]),
-            .useSnapshotFrame(focusedFrame)
-        )
+        for keyboardVisible in [false, true] {
+            XCTAssertEqual(
+                ElementLocator.keyboardFocusDecision(
+                    textInputCandidates: [
+                        (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
+                        (frame: focusedFrame, hasFocus: true),
+                    ],
+                    keyboardVisibleInSnapshot: keyboardVisible
+                ),
+                .useSnapshotFrame(focusedFrame)
+            )
+        }
     }
 
     func testKeyboardFocusDecision_ignoresEmptyFocusedFrame() {
         XCTAssertEqual(
-            ElementLocator.keyboardFocusDecision(textInputCandidates: [
-                (frame: .zero, hasFocus: true),
-                (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
-            ]),
+            ElementLocator.keyboardFocusDecision(
+                textInputCandidates: [
+                    (frame: .zero, hasFocus: true),
+                    (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
+                ],
+                keyboardVisibleInSnapshot: true
+            ),
             .liveQuery
         )
     }
@@ -1329,13 +1361,18 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testKeyboardFocusDecision_skipsWhenAllFramesAreEmpty() {
-        XCTAssertEqual(
-            ElementLocator.keyboardFocusDecision(textInputCandidates: [
-                (frame: .zero, hasFocus: true),
-                (frame: CGRect(x: 10, y: 20, width: 0, height: 40), hasFocus: false),
-            ]),
-            .skip
-        )
+        for keyboardVisible in [false, true] {
+            XCTAssertEqual(
+                ElementLocator.keyboardFocusDecision(
+                    textInputCandidates: [
+                        (frame: .zero, hasFocus: true),
+                        (frame: CGRect(x: 10, y: 20, width: 0, height: 40), hasFocus: false),
+                    ],
+                    keyboardVisibleInSnapshot: keyboardVisible
+                ),
+                .skip
+            )
+        }
     }
 
     func testKeyboardFocusDecision_usesUsableFocusAfterEmptyFocusedFrame() {

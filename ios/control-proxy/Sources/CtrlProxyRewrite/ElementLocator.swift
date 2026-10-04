@@ -217,6 +217,14 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         // MARK: - View Hierarchy
 
+        /// Detect a usable keyboard in the captured tree without additional IPC.
+        private static func keyboardVisibleInSnapshot(_ snapshot: XCUIElementSnapshot) -> Bool {
+            if snapshot.elementType == .keyboard, !snapshot.frame.isEmpty {
+                return true
+            }
+            return snapshot.children.contains { keyboardVisibleInSnapshot($0) }
+        }
+
         public func getViewHierarchy(disableAllFiltering: Bool = false) throws -> ViewHierarchy {
             perf.serial("getViewHierarchy")
             defer { perf.end() }
@@ -256,10 +264,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         let typedInputs = Self.collectTextInputSnapshots(from: snap)
 
                         // Prefer focus from the captured tree; keep the predicate fallback
-                        // for fields whose snapshots do not report keyboard input focus.
+                        // only when a captured keyboard is visible but no usable input reports focus.
                         let focus: KeyboardFocus?
                         switch Self.keyboardFocusDecision(
-                            textInputCandidates: typedInputs.map { (frame: $0.frame, hasFocus: $0.hasFocus) }
+                            textInputCandidates: typedInputs.map { (frame: $0.frame, hasFocus: $0.hasFocus) },
+                            keyboardVisibleInSnapshot: Self.keyboardVisibleInSnapshot(snap)
                         ) {
                         case .skip:
                             focus = nil
@@ -267,11 +276,14 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                             focus = KeyboardFocus(frame: frame, source: .snapshot)
                         case .liveQuery:
                             do {
-                                focus = try catchingObjCException {
+                                focus = try catchingObjCException { () -> KeyboardFocus? in
+                                    guard freshApp.state == .runningForeground else { return nil }
                                     let focused = freshApp.descendants(matching: .any)
                                         .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                                         .firstMatch
-                                    // Resolve once: separate exists/frame reads race app backgrounding.
+                                    // A missing firstMatch snapshot can wait for ~60 s after backgrounding.
+                                    guard focused.exists else { return nil }
+                                    // Resolve the frame once after the no-wait existence check.
                                     return try KeyboardFocus(frame: focused.snapshot().frame, source: .liveQuery)
                                 }
                             } catch {

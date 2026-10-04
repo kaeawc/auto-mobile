@@ -255,7 +255,7 @@ export function registerNavigationTools() {
       };
       const result = await explore.execute(options, progress, signal);
 
-      if ("dryRun" in result && result.dryRun) {
+      if ("dryRun" in result) {
         return createJSONToolResponse({
           message: `Exploration dry run completed: ${result.plannedInteractions.length} planned interactions`,
           ...result,

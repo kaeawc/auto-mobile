@@ -252,8 +252,21 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
    * survive pay for comment stripping. The result is memoized because all three
    * assertions below read the same inventory.
    */
+  // The inventory and routed-file assertions overlap. Reuse each stripped
+  // source within this suite's setup, independently of other files/run order.
+  const strippedSources = new Map<string, string>();
+  function sourceWithoutComments(file: string): string {
+    const cached = strippedSources.get(file);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const source = blankComments(readFileSync(join(ROOT, file), "utf8"));
+    strippedSources.set(file, source);
+    return source;
+  }
+
   let cachedCounts: Map<string, number> | undefined;
-  let routedSources: string[] = [];
+  let routedSources: { file: string; source: string }[] = [];
   let devicePoolSource = "";
   let discoveryReconcileSource = "";
 
@@ -277,11 +290,9 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/daemon/testRecordingSocketServer.ts",
       "src/server/resourceDeviceResolver.ts",
     ];
-    routedSources = routed.map((file) => blankComments(readFileSync(join(ROOT, file), "utf8")));
-    devicePoolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
-    discoveryReconcileSource = blankComments(
-      readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8"),
-    );
+    routedSources = routed.map((file) => ({ file, source: sourceWithoutComments(file) }));
+    devicePoolSource = sourceWithoutComments("src/daemon/devicePool.ts");
+    discoveryReconcileSource = sourceWithoutComments("src/daemon/discoveryReconcile.ts");
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   function discoveryCallCounts(): Map<string, number> {
@@ -294,9 +305,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       if (!source.includes(DISCOVERY_PREFIX)) {
         continue;
       }
-      const matches = blankComments(source).match(DISCOVERY_CALL);
+      const repoPath = relative(ROOT, file).split(sep).join("/");
+      const stripped = blankComments(source);
+      strippedSources.set(repoPath, stripped);
+      const matches = stripped.match(DISCOVERY_CALL);
       if (matches && matches.length > 0) {
-        counts.set(relative(ROOT, file).split(sep).join("/"), matches.length);
+        counts.set(repoPath, matches.length);
       }
     }
     cachedCounts = counts;
@@ -313,7 +327,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     const source = blankComments(
       readFileSync(join(ROOT, "src/server/deviceToolsSystemUiAnr.ts"), "utf8"),
     );
-    expect(source).not.toMatch(DISCOVERY_CALL);
+    expect(source, "src/server/deviceToolsSystemUiAnr.ts").not.toMatch(DISCOVERY_CALL);
   });
 
   test("no discovery call site was added to an inventoried file", () => {
@@ -334,17 +348,18 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   });
 
   test("the funnel is reached from the routed files by its single name", () => {
-    for (const source of routedSources) {
-      expect(source).toMatch(/reconcileDiscoveryObservation\s*[?]?\.?\s*\(/);
+    for (const { file, source } of routedSources) {
+      expect(source, file).toMatch(/reconcileDiscoveryObservation\s*[?]?\.?\s*\(/);
     }
   });
 
   test("the funnel and its wrapper exist under their canonical names", () => {
-    expect(devicePoolSource).toMatch(/reconcileDiscoveryObservation\(/);
+    expect(devicePoolSource, "src/daemon/devicePool.ts").toMatch(/reconcileDiscoveryObservation\(/);
     expect(
-      blankComments(readFileSync(join(ROOT, "src/daemon/deviceRuntimeIdentity.ts"), "utf8")),
+      sourceWithoutComments("src/daemon/deviceRuntimeIdentity.ts"),
+      "src/daemon/deviceRuntimeIdentity.ts",
     ).toMatch(/async reconcileDiscoveryObservation\(/);
-    expect(discoveryReconcileSource).toMatch(
+    expect(discoveryReconcileSource, "src/daemon/discoveryReconcile.ts").toMatch(
       /export async function reconcileDiscoveryObservation\(/,
     );
   });

@@ -1,3 +1,5 @@
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
 import type { Session, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { DevicePool } from "../daemon/devicePool";
@@ -840,7 +842,9 @@ async function ensureKeepScreenAwake(
     platform: session.platform,
     deviceId: session.assignedDevice,
   };
-  const manager = new KeepScreenAwakeManager(device);
+  const manager = new KeepScreenAwakeManager(device, defaultAdbClientFactory, (device) =>
+    AndroidCtrlProxyClient.getInstance(device),
+  );
 
   let state: KeepScreenAwakeState;
   try {

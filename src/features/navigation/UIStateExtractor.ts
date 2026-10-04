@@ -174,11 +174,12 @@ export class UIStateExtractor {
         if (text) {
           return text;
         }
-        if (child.node) {
-          const result = this.findTextInChildren(child.node);
-          if (result) {
-            return result;
-          }
+        if (!child.node) {
+          continue;
+        }
+        const result = this.findTextInChildren(child.node);
+        if (result) {
+          return result;
         }
       }
     } else if (node && typeof node === "object") {

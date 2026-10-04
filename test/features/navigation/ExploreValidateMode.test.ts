@@ -434,6 +434,55 @@ describe("ExploreValidateMode", () => {
   });
 
   describe("findElementMatchingEdge", () => {
+    test("keeps the first element on equal selected and scroll match scores", () => {
+      const first = createMockElement({ text: "Shared", "resource-id": "id/first" });
+      const second = createMockElement({ text: "Shared", "resource-id": "id/second" });
+      const edge = createMockEdge("A", "B", {
+        uiState: {
+          selectedElements: [{ text: "unrelated" }, { text: "Shared" }],
+          scrollPosition: { targetElement: { text: "Shared" }, direction: "up" },
+        },
+      });
+      expect(findElementMatchingEdge([first, second], edge)).toEqual({
+        element: first,
+        confidence: 0.9,
+      });
+    });
+
+    test("a later scroll match can beat earlier selected matches", () => {
+      const selected = createMockElement({ text: "Shared suffix", "resource-id": "id/first" });
+      const scrollTarget = createMockElement({ text: "Other", "resource-id": "id/target" });
+      const edge = createMockEdge("A", "B", {
+        uiState: {
+          selectedElements: [{ text: "Shared" }],
+          scrollPosition: { targetElement: { resourceId: "id/target" }, direction: "down" },
+        },
+      });
+      expect(findElementMatchingEdge([selected, scrollTarget], edge)).toEqual({
+        element: scrollTarget,
+        confidence: 0.8,
+      });
+    });
+
+    test("scroll-only UI state is matched and empty explicit state takes precedence over interaction state", () => {
+      const element = createMockElement({ text: "Target" });
+      const edge = createMockEdge("A", "B", {
+        uiState: {
+          selectedElements: [],
+          scrollPosition: { targetElement: { text: "Target" }, direction: "up" },
+        },
+        interaction: {
+          toolName: "tapOn",
+          args: {},
+          timestamp: 0,
+          uiState: { selectedElements: [{ text: "Target" }] },
+        },
+      });
+      expect(findElementMatchingEdge([element], edge)).toEqual({ element, confidence: 0.75 });
+      edge.uiState = { selectedElements: [] };
+      expect(findElementMatchingEdge([element], edge)).toBeNull();
+    });
+
     test("should return null for edge without uiState", () => {
       const elements = [createMockElement({ text: "Button" })];
       const edge = createMockEdge("A", "B");

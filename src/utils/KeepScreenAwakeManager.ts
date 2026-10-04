@@ -5,7 +5,19 @@ import {
 } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
-import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+
+export interface KeepScreenAwakeSettingsClient {
+  requestSettingsGet(
+    namespace: "global" | "system",
+    key: string,
+  ): Promise<{ success: boolean; found: boolean; value?: string }>;
+  requestSettingsPut(
+    namespace: "global" | "system",
+    key: string,
+    value: string | null,
+    valueType?: "string" | "int" | "long" | "float",
+  ): Promise<{ success: boolean }>;
+}
 
 export type KeepScreenAwakeState = {
   applied: boolean;
@@ -29,7 +41,13 @@ export class KeepScreenAwakeManager {
   private device: BootedDevice;
   private adb: AdbExecutor;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    private readonly settingsClientProvider: (
+      device: BootedDevice,
+    ) => KeepScreenAwakeSettingsClient,
+  ) {
     this.device = device;
     this.adb = adbFactory.create(device);
   }
@@ -307,7 +325,7 @@ export class KeepScreenAwakeManager {
     key: string,
   ): Promise<string | null | undefined> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11y = this.settingsClientProvider(this.device);
       const a11yResult = await a11y.requestSettingsGet(scope, key);
       if (a11yResult.success) {
         const value = a11yResult.found ? (a11yResult.value ?? null) : null;
@@ -347,7 +365,7 @@ export class KeepScreenAwakeManager {
     valueType: "string" | "int" | "long" | "float" = "string",
   ): Promise<void> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11y = this.settingsClientProvider(this.device);
       const a11yResult = await a11y.requestSettingsPut(scope, key, value, valueType);
       if (a11yResult.success) {
         return;
@@ -360,7 +378,7 @@ export class KeepScreenAwakeManager {
 
   private async deleteSetting(scope: "global" | "system", key: string): Promise<void> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11y = this.settingsClientProvider(this.device);
       const a11yResult = await a11y.requestSettingsPut(scope, key, null);
       if (a11yResult.success) {
         return;

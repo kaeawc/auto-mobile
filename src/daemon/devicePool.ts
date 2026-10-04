@@ -3615,13 +3615,8 @@ export class DevicePool {
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string> {
-    const { requestWaitDeadline, requestController, assignmentSignal } = recoveryTarget
-      ? this.recoveryAssignmentRequest(recoveryTarget)
-      : {};
-    const recoveryDeadline =
-      requestWaitDeadline === undefined
-        ? recoveryTarget?.restartRecoveryDeadlineMs
-        : Math.min(recoveryTarget?.restartRecoveryDeadlineMs ?? Infinity, requestWaitDeadline);
+    const assignmentSignal = recoveryTarget ? getAbortSignal() : undefined;
+    const recoveryDeadline = recoveryTarget?.restartRecoveryDeadlineMs;
     const timeoutMs =
       recoveryDeadline === undefined
         ? this.DEVICE_WAIT_TIMEOUT_MS
@@ -3641,36 +3636,8 @@ export class DevicePool {
       timeoutError: () => this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident),
     });
 
-    // Select synchronously: the ordinary path calls the original executor directly,
-    // with no deadline wrapper or additional promise hop before candidate capture.
-    const executeAssignment: RetryExecutor["execute"] =
-      requestWaitDeadline === undefined
-        ? this.retryExecutor.execute.bind(this.retryExecutor)
-        : (operation, options) =>
-            raceWithDeadline(
-              () =>
-                runWithAbortSignal(assignmentSignal, () =>
-                  this.retryExecutor.execute(operation, options),
-                ),
-              {
-                timer: this.timer,
-                timeoutMs: this.remainingStartDeadline(requestWaitDeadline),
-                label: "Session restart recovery",
-                timeoutError: () =>
-                  recoveryTarget
-                    ? this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident)
-                    : new ActionableError("Device assignment request budget exhausted"),
-                onTimeout: () =>
-                  requestController?.abort(
-                    new DevicePoolError("Recovery request budget exhausted", false),
-                  ),
-              },
-            );
-    const result = await executeAssignment(
+    const result = await this.retryExecutor.execute(
       async (attempt) => {
-        if (requestWaitDeadline !== undefined && this.timer.now() >= requestWaitDeadline) {
-          throw new DevicePoolError("Recovery request budget exhausted", false);
-        }
         // Ordinary allocation must capture candidates before yielding to release/readiness.
         if (recoveryTarget) {
           lossIncident = await this.checkRecoveryAssignmentLoss(sessionId, recoveryTarget);
@@ -3812,35 +3779,6 @@ export class DevicePool {
         `  - Start additional emulators or connect more physical devices\n` +
         `  - Check if tests are properly releasing devices after completion`,
     );
-  }
-
-  private recoveryAssignmentRequest(target?: SessionRecoveryTarget): {
-    requestWaitDeadline?: number;
-    requestController?: AbortController;
-    assignmentSignal?: AbortSignal;
-  } {
-    const deadline = target?.requestDeadlineMs;
-    const restartDeadline = target?.restartRecoveryDeadlineMs;
-    // Once the restart window closes, preserve the original identity-recovery
-    // attempt and terminalization, including when this request has no budget left.
-    if (
-      deadline === undefined ||
-      !Number.isFinite(deadline) ||
-      restartDeadline === undefined ||
-      this.timer.now() >= restartDeadline ||
-      deadline - this.RECOVERY_RESPONSE_MARGIN_MS >= restartDeadline
-    ) {
-      return { assignmentSignal: getAbortSignal() };
-    }
-    const requestController = new AbortController();
-    const callerSignal = getAbortSignal();
-    return {
-      requestWaitDeadline: deadline - this.RECOVERY_RESPONSE_MARGIN_MS,
-      requestController,
-      assignmentSignal: callerSignal
-        ? AbortSignal.any([callerSignal, requestController.signal])
-        : requestController.signal,
-    };
   }
 
   private async checkRecoveryAssignmentLoss(

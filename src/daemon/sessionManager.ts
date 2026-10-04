@@ -478,8 +478,6 @@ export interface SessionRecoveryTarget {
   androidEmulator?: boolean;
   /** Only device-restart releases may wait, bounded by session expiry and restart grace. */
   restartRecoveryDeadlineMs?: number;
-  /** Current assignment call's deadline only; never persisted or reused for another call. */
-  requestDeadlineMs?: number;
   /** Shared acquisitions bound their callers separately using the pool's recovery error. */
   onRecoveryWait?: (wait: RecoveryAssignmentWait) => void;
   /** Liveness contract recorded before the daemon restart. */
@@ -1646,6 +1644,18 @@ export class SessionManager {
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
+      const shared = this.sharedSessionAssignments.get(sessionId);
+      if (shared?.controller.signal.aborted) {
+        await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs);
+        return await this.getOrCreateSession(
+          sessionId,
+          devicePool,
+          platform,
+          undefined,
+          requireIssuedSession,
+          { access, requestDeadlineMs },
+        );
+      }
       const joined = await this.waitForSharedAssignment(
         sessionId,
         pendingAssignment,
@@ -1690,6 +1700,33 @@ export class SessionManager {
     };
     this.sharedSessionAssignments.set(sessionId, shared);
     return shared;
+  }
+
+  /** Drain the old attempt before its successor can publish or clean up shared state. */
+  private async waitForAbortedAssignment(
+    assignment: Promise<Session>,
+    shared: SharedSessionAssignment,
+    requestDeadlineMs?: number,
+  ): Promise<void> {
+    const settled = assignment.then(
+      () => {},
+      (error: unknown) => {
+        // No callers remain on this cancelled attempt; its rejection is internal.
+        logger.debug("[SessionManager] Aborted session assignment settled", error);
+      },
+    );
+    // A restart waiter learns this configuration before it can abort the assignment.
+    const wait = await shared.recoveryWait.promise;
+    await raceWithDeadline(settled, {
+      timer: this.timer,
+      timeoutMs:
+        requestDeadlineMs !== undefined && Number.isFinite(requestDeadlineMs)
+          ? Math.max(0, requestDeadlineMs - (wait?.responseMarginMs ?? 0) - this.timer.now())
+          : undefined,
+      signal: getAbortSignal(),
+      label: "Session restart recovery",
+      timeoutError: wait?.timeoutError,
+    });
   }
 
   private async waitForSharedAssignment(

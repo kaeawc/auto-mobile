@@ -21,6 +21,7 @@ import {
   type Session,
 } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -972,33 +973,147 @@ test("single restart acquisition retains its deadline and fences late availabili
   expect(timer.getPendingTimeouts()).toEqual([]);
 });
 
-test("restart assignment reserves a response margin before a nearer request deadline", async () => {
-  const { timer, sessions, pool } = await setupPassiveRestart();
-  sessions.stopCleanupTimer();
-  const target = {
-    platform: original.platform,
-    stableDeviceId: original.name,
-    deviceId: original.deviceId,
-    androidEmulator: true,
-    restartRecoveryDeadlineMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
-    requestDeadlineMs: 3_500,
-  };
-  const assignment = pool.assignDeviceToSession("session", "android", target).then(
-    () => undefined,
-    (error: unknown) => error,
-  );
-  await drainUntilQuiescent(timer);
-  timer.advanceTime(1_000);
-  await drainUntilQuiescent(timer);
-  timer.advanceTime(1_000);
-  await drainUntilQuiescent(timer);
-  timer.advanceTime(500);
-  const error = await assignment;
-  expect(error).toBeInstanceOf(Error);
-  expect(String(error)).toContain("Cannot safely recover session");
-  expect(timer.now()).toBe(2_500);
-  expect(timer.getPendingTimeouts()).toEqual([]);
-});
+test.each([
+  [60_000, false],
+  [undefined, false],
+  [60_000, true],
+  [undefined, true],
+] as const)(
+  "join-after-abort recovers after a held incident read settles (deadline %s, rehydration %s)",
+  async (requestDeadlineMs, rehydration) => {
+    const { timer, sessions, pool, manager, incidents } = await setupPassiveRestart();
+    sessions.stopCleanupTimer();
+    const read = Promise.withResolvers<Awaited<ReturnType<typeof incidents.list>>>();
+    const list = incidents.list.bind(incidents);
+    let reads = 0;
+    incidents.list = () => (++reads === 1 ? read.promise : list());
+    const state = sessions as unknown as {
+      pendingSessionAssignments: Map<string, Promise<Session>>;
+      sharedSessionAssignments: Map<string, { controller: AbortController; waiters: number }>;
+      pendingPersistedRecoveries: Map<string, unknown>;
+    };
+    const acquire = (deadline: number | undefined) =>
+      sessions
+        .getOrCreateSession("session", pool, "android", undefined, true, {
+          requestDeadlineMs: deadline,
+        })
+        .then(
+          (session) => session,
+          (error: unknown) => error,
+        );
+    const startupCaller = new AbortController();
+    const first = rehydration
+      ? runWithAbortSignal(startupCaller.signal, () => sessions.rehydratePersistedSessions(pool))
+      : acquire(3_500);
+    await drainUntilQuiescent(timer);
+    expect(reads).toBe(1);
+    const deadAssignment = state.pendingSessionAssignments.get("session");
+    const deadShared = state.sharedSessionAssignments.get("session")!;
+    timer.advanceTime(2_500);
+    if (rehydration) {
+      startupCaller.abort(new Error("startup caller cancelled"));
+      expect(await first).toMatchObject({ skipped: [{ reason: "startup caller cancelled" }] });
+    } else {
+      expect(String(await first)).toContain("Cannot safely recover session");
+    }
+    expect(deadShared.controller.signal.aborted).toBe(true);
+    expect(deadShared.waiters).toBe(0);
+    expect(state.pendingSessionAssignments.get("session")).toBe(deadAssignment);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    const second = acquire(requestDeadlineMs);
+    await drainUntilQuiescent(timer);
+    expect(deadShared.waiters).toBe(0);
+    expect(state.pendingSessionAssignments.get("session")).toBe(deadAssignment);
+    expect(pool.getDevice(original.deviceId)?.sessionId).toBeNull();
+    read.resolve(await list());
+    const result = await second;
+    await drainUntilQuiescent(timer);
+    expect(String(result)).not.toContain("no remaining callers");
+    expect(reads).toBe(2);
+    expect(result).toMatchObject({ sessionId: "session", assignedDevice: original.deviceId });
+    expect(pool.getDevice(original.deviceId)).toMatchObject({
+      sessionId: "session",
+      assignmentCount: 1,
+    });
+    expect(state.pendingSessionAssignments.size).toBe(0);
+    expect(state.sharedSessionAssignments.size).toBe(0);
+    expect(state.pendingPersistedRecoveries.size).toBe(0);
+    expect(timer.getPendingTimeouts()).toEqual([]);
+  },
+);
+
+test.each(["deadline", "abort"] as const)(
+  "join-after-abort keeps the new caller's %s while draining the old assignment",
+  async (cancellation) => {
+    const { timer, sessions, pool, manager, incidents } = await setupPassiveRestart();
+    sessions.stopCleanupTimer();
+    const read = Promise.withResolvers<Awaited<ReturnType<typeof incidents.list>>>();
+    const list = incidents.list.bind(incidents);
+    incidents.list = () => read.promise;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (error: unknown) => unhandled.push(error);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const acquire = (requestDeadlineMs: number | undefined) =>
+        sessions
+          .getOrCreateSession("session", pool, "android", undefined, true, {
+            requestDeadlineMs,
+          })
+          .then(
+            (session) => session,
+            (error: unknown) => error,
+          );
+      const first = acquire(3_500);
+      await drainUntilQuiescent(timer);
+      timer.advanceTime(2_500);
+      expect(String(await first)).toContain("Cannot safely recover session");
+      manager.bootedDevices = [original];
+      await pool.addDevice(original, image);
+      const caller = new AbortController();
+      let settled = false;
+      const second = runWithAbortSignal(caller.signal, () =>
+        acquire(cancellation === "deadline" ? 5_000 : undefined),
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+      await drainUntilQuiescent(timer);
+      timer.advanceTime(1_499);
+      await drainUntilQuiescent(timer);
+      expect(settled).toBe(false);
+      expect(timer.getPendingTimeouts()).toEqual(cancellation === "deadline" ? [1_500] : []);
+      if (cancellation === "deadline") {
+        timer.advanceTime(1);
+      } else {
+        caller.abort(new Error("replacement caller cancelled"));
+      }
+      const error = await second;
+      expect(String(error)).toContain(
+        cancellation === "deadline"
+          ? "Cannot safely recover session"
+          : "replacement caller cancelled",
+      );
+      expect(String(error)).not.toContain("no remaining callers");
+      expect(pool.getDevice(original.deviceId)?.assignmentCount).toBe(0);
+      incidents.list = list;
+      read.resolve(await list());
+      await drainUntilQuiescent(timer);
+      expect(await acquire(60_000)).toMatchObject({ assignedDevice: original.deviceId });
+      expect(pool.getDevice(original.deviceId)).toMatchObject({
+        sessionId: "session",
+        assignmentCount: 1,
+      });
+      await drainUntilQuiescent(timer);
+      expect(unhandled).toEqual([]);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      read.resolve([]);
+      process.removeListener("unhandledRejection", onUnhandled);
+      sessions.stopCleanupTimer();
+    }
+  },
+);
 
 test("restart assignment waits until a recorded outcome's cleanup is settled", async () => {
   const { timer, sessions, pool, captured, incidents } = await setupPassiveRestart(false);
@@ -1042,17 +1157,14 @@ test("restart assignment bounds slow discovery and fences its late device claim"
     Promise.withResolvers<Awaited<ReturnType<typeof manager.getBootedDevicesDetailed>>>();
   const originalDiscovery = manager.getBootedDevicesDetailed.bind(manager);
   manager.getBootedDevicesDetailed = () => discovery.promise;
-  const target = {
-    platform: original.platform,
-    stableDeviceId: original.name,
-    deviceId: original.deviceId,
-    restartRecoveryDeadlineMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
-    requestDeadlineMs: 2_500,
-  };
-  const assignment = pool.assignDeviceToSession("session", "android", target).then(
-    () => undefined,
-    (error: unknown) => error,
-  );
+  const assignment = sessions
+    .getOrCreateSession("session", pool, "android", undefined, true, {
+      requestDeadlineMs: 2_500,
+    })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
   await drainUntilQuiescent(timer);
   timer.advanceTime(1_500);
   expect(String(await assignment)).toContain("Cannot safely recover session");

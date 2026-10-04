@@ -1,6 +1,7 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { InputKey } from "../../../src/features/action/InputKey";
-import type { BootedDevice } from "../../../src/models";
+import { ActionableError, type BootedDevice } from "../../../src/models";
+import { DeviceLostError } from "../../../src/models/DeviceLostError";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -24,6 +25,126 @@ function createAdbFactory(fakeAdb: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("InputKey", () => {
+  test.each(["cancelled", "timed out", "device offline"])(
+    "reports an indeterminate outcome when ADB fails after dispatch: %s",
+    async (reason) => {
+      const fakeAdb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const onDispatch = mock(() => {});
+      spyOn(fakeAdb, "execute").mockImplementation(async (_args, options) => {
+        await options?.beforeDispatch?.(options.timeoutMs);
+        if (reason === "cancelled") {
+          controller.abort();
+        }
+        throw new Error(`ADB keyevent ${reason}`);
+      });
+      const inputKey = new InputKey(
+        androidDevice,
+        createAdbFactory(fakeAdb),
+        undefined,
+        new FakeTimer(),
+      );
+      const result = inputKey.press("enter", 500, undefined, [], {
+        signal: controller.signal,
+        onDispatch,
+      });
+
+      await expect(result).rejects.toBeInstanceOf(ActionableError);
+      await expect(result).rejects.toThrow(
+        `Key outcome is indeterminate: the request was dispatched but no result was confirmed (ADB keyevent ${reason}). The key may have been delivered. Do not retry automatically.`,
+      );
+      expect(onDispatch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("tracks dispatch even when the direct caller supplies no onDispatch", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setCommandError("KEYCODE_ENTER", new Error("ADB reply timed out"));
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      undefined,
+      new FakeTimer(),
+    );
+
+    await expect(inputKey.press("enter", 500)).rejects.toThrow("Key outcome is indeterminate");
+    expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_ENTER"]);
+  });
+
+  test.each([undefined, new DeviceLostError(androidDevice.deviceId, "device disconnected")])(
+    "preserves pre-dispatch cancellation without invoking ADB: %s",
+    async (reason) => {
+      const fakeAdb = new FakeAdbExecutor();
+      const execute = spyOn(fakeAdb, "execute");
+      const controller = new AbortController();
+      controller.abort(reason);
+      const onDispatch = mock(() => {});
+      const inputKey = new InputKey(
+        androidDevice,
+        createAdbFactory(fakeAdb),
+        undefined,
+        new FakeTimer(),
+      );
+      const result = inputKey.press("enter", 500, undefined, [], {
+        signal: controller.signal,
+        onDispatch,
+      });
+
+      if (reason) {
+        await expect(result).rejects.toBe(reason);
+      } else {
+        await expect(result).rejects.toThrow("Operation cancelled");
+      }
+      expect(execute).not.toHaveBeenCalled();
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      expect(onDispatch).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([false, true])(
+    "does not dispatch when cancellation arrives during frame validation: %s",
+    async (success) => {
+      const fakeAdb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const onDispatch = mock(() => {});
+      const validator = {
+        validateFrameContext: async () => {
+          controller.abort();
+          return { success, error: success ? undefined : "Stale frame context" };
+        },
+      };
+      const inputKey = new InputKey(
+        androidDevice,
+        createAdbFactory(fakeAdb),
+        validator,
+        new FakeTimer(),
+      );
+
+      await expect(
+        inputKey.press("enter", 500, "frame-1", [], { signal: controller.signal, onDispatch }),
+      ).rejects.toThrow("Operation cancelled");
+      expect(onDispatch).not.toHaveBeenCalled();
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test("reports an indeterminate outcome if ADB resolves after cancellation", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    fakeAdb.abortAfterCommand("KEYCODE_ENTER", controller);
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      undefined,
+      new FakeTimer(),
+    );
+
+    await expect(
+      inputKey.press("enter", 500, undefined, [], { signal: controller.signal }),
+    ).rejects.toThrow("Key outcome is indeterminate");
+    expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_ENTER"]);
+  });
+
   test("throws Operation cancelled when the ADB keyevent is cancelled", async () => {
     const fakeAdb = new FakeAdbExecutor();
     const controller = new AbortController();
@@ -280,7 +401,8 @@ describe("InputKey", () => {
 
   test("wraps an ADB keyevent failure in a stable error envelope", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandError("KEYCODE_TAB", new Error("device offline"));
+    // Fail before beforeDispatch runs: no key event could have been sent.
+    spyOn(fakeAdb, "execute").mockRejectedValue(new Error("device offline"));
     const inputKey = new InputKey(
       androidDevice,
       createAdbFactory(fakeAdb),

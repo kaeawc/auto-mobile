@@ -1,5 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import type { BootedDevice } from "../../models";
+import { ActionableError, type BootedDevice } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -93,6 +93,13 @@ export class InputKey {
   private readonly device: BootedDevice;
   private readonly adb: AdbExecutor;
 
+  static indeterminateError(error: unknown): ActionableError {
+    return new ActionableError(
+      `Key outcome is indeterminate: the request was dispatched but no result was confirmed (${errorMessage(error)}). The key may have been delivered. Do not retry automatically.`,
+      { cause: error },
+    );
+  }
+
   constructor(
     device: BootedDevice,
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
@@ -125,7 +132,9 @@ export class InputKey {
     { displayId, signal, onDispatch }: InputKeyRouting = {},
   ): Promise<InputKeyResult> {
     const keyCode = INPUT_KEY_CODE_MAP[key];
+    let dispatched = false;
     try {
+      throwIfAborted(signal);
       const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
       const uniqueModifiers = [...new Set(modifiers)];
       const inputArgsResult = await this.resolveAndroidInputArgs(
@@ -134,6 +143,7 @@ export class InputKey {
         uniqueModifiers,
         deadlineMs,
       );
+      throwIfAborted(signal);
       if ("failure" in inputArgsResult) {
         return inputArgsResult.failure;
       }
@@ -155,36 +165,41 @@ export class InputKey {
           timeoutMs: adbTimeoutMs,
           noRetry: true,
           signal,
-          beforeDispatch:
-            frameContext === undefined && !onDispatch
-              ? undefined
-              : async () => {
-                  if (frameContext !== undefined) {
-                    validationFailure = await this.validateBeforeDispatch(
-                      key,
-                      keyCode,
-                      frameContext,
-                      deadlineMs,
-                    );
-                    if (validationFailure) {
-                      throw new Error(validationFailure.error);
-                    }
-                  }
-                  onDispatch?.();
-                },
+          beforeDispatch: async () => {
+            throwIfAborted(signal);
+            if (frameContext !== undefined) {
+              validationFailure = await this.validateBeforeDispatch(
+                key,
+                keyCode,
+                frameContext,
+                deadlineMs,
+              );
+              if (validationFailure) {
+                throw new Error(validationFailure.error);
+              }
+            }
+            throwIfAborted(signal);
+            dispatched = true;
+            onDispatch?.();
+          },
         });
       } catch (error) {
         if (validationFailure) {
+          throwIfAborted(signal);
           return validationFailure;
         }
         throw error;
       }
+      throwIfAborted(signal);
       return {
         success: true,
         key,
         keyCode,
       };
     } catch (error) {
+      if (dispatched) {
+        throw InputKey.indeterminateError(error);
+      }
       throwIfAborted(signal);
       const message = errorMessage(error);
       logger.warn(`input/key failed for ${key}: ${message}`, error);

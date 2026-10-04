@@ -13,6 +13,73 @@ setup() {
 teardown() { rm -rf "$FIX"; }
 write() { printf '#!/usr/bin/env bash\n%s\n' "$1" > "$FIX/scripts/example.sh"; }
 
+# Only the validator subprocess uses this PATH and HOME, keeping host tools out
+# even after it prepends ~/.local/bin. Resolve symlinks before restricting PATH.
+restricted_path() {
+  local tool
+  mkdir -p "$FIX/bin" "$FIX/home/.local/bin"
+  for tool in bash find grep awk sort mktemp rm diff dirname cat tr chmod; do
+    ln -s "$(command -v "$tool")" "$FIX/bin/$tool"
+  done
+}
+
+# Exercise the real ensure_tool against a fake adjacent installer, never a
+# download. Keep the fixture ROOT separate to catch root-relative resolution.
+stub_installer() {
+  mkdir -p "$FIX/validator/scripts/shellcheck" "$FIX/validator/scripts/lib"
+  cp "$ABS" "$FIX/validator/scripts/shellcheck/"
+  cp "$(dirname "$ABS")/../lib/"{file-selection,vcs-diff}.sh "$FIX/validator/scripts/lib/"
+  ABS="$FIX/validator/scripts/shellcheck/validate_shell_pipefail_grepq.sh"
+  printf '#!/usr/bin/env bash\n%s\n' "$1" > "$(dirname "$ABS")/install_shfmt.sh"
+}
+
+@test "missing shfmt defaults to no install outside CI" {
+  restricted_path
+  ln -s "$(command -v jq)" "$FIX/bin/jq"
+  run env -u INSTALL_SHFMT_WHEN_MISSING CI=false HOME="$FIX/home" PATH="$FIX/bin" bash "$ABS"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shfmt"* && "$output" == *"INSTALL_SHFMT_WHEN_MISSING=true"* ]]
+  [[ "$output" != *"Scanner failed"* && "$output" != *"Installing shfmt"* ]]
+}
+
+@test "missing shfmt honors explicit no install in CI" {
+  restricted_path
+  ln -s "$(command -v jq)" "$FIX/bin/jq"
+  run env CI=true INSTALL_SHFMT_WHEN_MISSING=false HOME="$FIX/home" PATH="$FIX/bin" bash "$ABS"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shfmt"* && "$output" == *"INSTALL_SHFMT_WHEN_MISSING=true"* ]]
+  [[ "$output" != *"Scanner failed"* && "$output" != *"Installing shfmt"* ]]
+}
+
+@test "missing jq fails before attempting to install shfmt" {
+  restricted_path
+  run env CI=true INSTALL_SHFMT_WHEN_MISSING=true HOME="$FIX/home" PATH="$FIX/bin" bash "$ABS"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"jq is required"* && "$output" == *"install jq"* ]]
+  [[ "$output" != *"Scanner failed"* && "$output" != *"Installing shfmt"* ]]
+}
+
+@test "CI defaults to installing missing shfmt beside the validator and rechecks local bin" {
+  restricted_path
+  ln -s "$(command -v jq)" "$FIX/bin/jq"
+  stub_installer 'printf "#!/usr/bin/env bash\nexit 99\n" > "$HOME/.local/bin/shfmt"
+chmod +x "$HOME/.local/bin/shfmt"'
+  run env -u INSTALL_SHFMT_WHEN_MISSING CI=true HOME="$FIX/home" PATH="$FIX/bin" bash "$ABS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Installing shfmt"* && "$output" == *"No new quiet grep pipeline findings."* ]]
+  [ -x "$FIX/home/.local/bin/shfmt" ]
+}
+
+@test "shfmt install failure exits two with actionable diagnostics" {
+  restricted_path
+  ln -s "$(command -v jq)" "$FIX/bin/jq"
+  stub_installer 'exit 1'
+  run env CI=false INSTALL_SHFMT_WHEN_MISSING=true HOME="$FIX/home" PATH="$FIX/bin" bash "$ABS"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Failed to install shfmt"* && "$output" == *"INSTALL_SHFMT_WHEN_MISSING=true"* ]]
+  [[ "$output" != *"Scanner failed"* ]]
+}
+
 @test "clean script passes; here-string and fully draining grep are safe" {
   write 'set -euo pipefail
 v=$(producer)

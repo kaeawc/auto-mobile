@@ -50,6 +50,7 @@ export async function dispatchAndroidCoordinateTap(
   frameContext?: string,
   signal?: AbortSignal,
   assertCurrent?: () => void,
+  onTapDelivered?: () => void,
 ): Promise<void> {
   throwIfAborted(signal);
   let dispatched = false;
@@ -87,6 +88,9 @@ export async function dispatchAndroidCoordinateTap(
           undefined,
           assertCurrent,
         );
+  if (result.success) {
+    onTapDelivered?.();
+  }
   throwIfAborted(signal);
   if (result.success) {
     return;
@@ -116,6 +120,8 @@ export async function dispatchAndroidCoordinateTap(
         durationMs >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
     },
   );
+  onTapDelivered?.();
+  throwIfAborted(signal);
 }
 
 /** Dispatch one iOS coordinate tap and preserve CtrlProxy's actionable failure. */

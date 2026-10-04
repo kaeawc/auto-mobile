@@ -28,6 +28,8 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import {
   loadAndroidHomeObserve,
   loadIosFractionalObserve,
@@ -54,8 +56,9 @@ function createAndroidTapAtWithClient(
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveSequence(observations);
   const adb = new FakeAdbExecutor();
+  const timer = new FakeTimer();
   const tapAt = new TapAtCoordinate(androidDevice, adb, {
-    timer: new FakeTimer(),
+    timer,
     androidClient,
     iosClient: androidClient,
     snapshotReferences,
@@ -63,7 +66,7 @@ function createAndroidTapAtWithClient(
   });
   setFakeTapAtWindow(tapAt);
   tapAt.observeScreen = observeScreen;
-  return { tapAt, observeScreen, adb };
+  return { tapAt, observeScreen, adb, timer };
 }
 
 describe("TapAtCoordinate", () => {
@@ -275,6 +278,210 @@ describe("TapAtCoordinate", () => {
     }
   });
 
+  test.each([false, true])("second Android tap falls back to ADB (failure %s)", async (fails) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const command = "shell input touchscreen tap 10 20";
+    if (fails) {
+      adb.setCommandError(command, new Error("Synthetic fallback failure"));
+    }
+    let runnerDelivered = 0;
+    const frames: Array<string | undefined> = [];
+    const client: CoordinateTapClient<() => void> = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+        frames.push(frame);
+        if (frames.length === 2) {
+          // No onDispatch: the runner proves this tap was never sent, so fallback is safe.
+          return { success: false, error: "Not connected" };
+        }
+        onDispatch?.();
+        runnerDelivered++;
+        return { success: true };
+      },
+    };
+    const tapAt = new TapAtCoordinate(androidDevice, adb, { timer, androidClient: client });
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation(100, 200));
+    tapAt.observeScreen = observe;
+
+    const result = await tapAt.execute({ x: 10, y: 20, action: "doubleTap" });
+
+    expect(frames).toEqual(["frame-123", undefined]);
+    expect(runnerDelivered).toBe(1);
+    expect(adb.getExecutedCommands()).toEqual([command]);
+    expect(result.success).toBe(!fails);
+    if (fails) {
+      expect(result.error).toContain("Synthetic fallback failure");
+      expect(result.error).toContain("one tap was delivered");
+      expect(result.error).toContain("Do not retry automatically");
+    } else {
+      // One confirmed runner tap plus the one successful ADB tap completes the gesture.
+      expect(runnerDelivered + adb.getExecutedCommands().length).toBe(2);
+      expect(result.error).toBeUndefined();
+    }
+  });
+
+  test("stale first frame retries once before delivering exactly two Android taps", async () => {
+    let current = "epoch:2";
+    let delivered = 0;
+    const frames: Array<string | undefined> = [];
+    const client: CoordinateTapClient<() => void> = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+        frames.push(frame);
+        onDispatch?.();
+        if (frame !== undefined && frame !== current) {
+          return { success: false, error: "Stale frame context for input/tap" };
+        }
+        delivered++;
+        current = `epoch:${2 + delivered}`;
+        return { success: true };
+      },
+    };
+    const { tapAt, observeScreen, adb, timer } = createAndroidTapAtWithClient(
+      [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2")],
+      client,
+    );
+    timer.enableAutoAdvance();
+
+    const result = await tapAt.execute({ x: 10, y: 20, action: "doubleTap" });
+
+    expect(result).toMatchObject({ success: true, action: "doubleTap" });
+    expect(delivered).toBe(2);
+    expect(frames).toEqual(["epoch:1", "epoch:2", undefined]);
+    expect(observeScreen.getExecuteCallCount()).toBe(3);
+    expect(
+      observeScreen
+        .getExecuteOptions()
+        .slice(0, 2)
+        .map((options) => options.freshness),
+    ).toEqual(["cached-ok", "cached-ok"]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test.each(
+    [
+      { device: androidDevice, display: undefined, route: "Android default" },
+      { device: androidDevice, display: "active", route: "Android explicit" },
+      { device: iosDevice, display: undefined, route: "iOS default" },
+      { device: iosDevice, display: "active", route: "iOS explicit" },
+    ].flatMap((route) => [
+      ...[1, 2].map((abortAfter) => ({ ...route, abortAfter, action: "doubleTap" as const })),
+      ...(["tap", "longPress"] as const).map((action) => ({ ...route, abortAfter: 1, action })),
+    ]),
+  )(
+    "$route $action cancellation immediately after confirmed tap $abortAfter",
+    async ({ device, display, abortAfter, action }) => {
+      const controller = new AbortController();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = new FakeAdbExecutor();
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult({
+        ...observation(100, 200),
+        display: { key: "0", role: "unknown", generation: 0 },
+      });
+      let delivered = 0;
+      let invalidations = 0;
+      const frames: Array<string | undefined> = [];
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame) => {
+          frames.push(frame);
+          delivered++;
+          if (delivered === abortAfter) {
+            controller.abort();
+          }
+          return { success: true };
+        },
+      };
+      const tapAt = new TapAtCoordinate(device, adb, {
+        timer,
+        androidClient: client,
+        iosClient: client,
+        lastRenderedObservation: () => ({ display: { key: "0" }, displayRevision: 0 }),
+        invalidateIosCache: () => {
+          invalidations++;
+        },
+      });
+      tapAt.observeScreen = observe;
+
+      const result = await tapAt.execute(
+        { x: 10, y: 20, action, display },
+        undefined,
+        controller.signal,
+      );
+
+      expect(result).toMatchObject({ success: false, x: 10, y: 20, action });
+      expect(result.error).toBe(
+        `Failed to tap at coordinates: ${OPERATION_CANCELLED_MESSAGE}${
+          action === "doubleTap" && abortAfter === 1
+            ? " Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically."
+            : ""
+        }`,
+      );
+      expect(delivered).toBe(abortAfter);
+      expect(frames).toEqual(
+        abortAfter === 1
+          ? [display && device.platform === "android" ? undefined : "frame-123"]
+          : [display && device.platform === "android" ? undefined : "frame-123", undefined],
+      );
+      expect(adb.getExecutedCommands()).toEqual([]);
+      expect(invalidations).toBe(device.platform === "ios" ? 1 : 0);
+    },
+  );
+
+  test("explicit Android display change in the double-tap gap prevents the second dispatch", async () => {
+    const timer = new FakeTimer();
+    const transitions = new FakeDisplayTransitionReader();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult({
+      ...observation(100, 200),
+      display: { key: "0", role: "unknown", generation: 7 },
+    });
+    let delivered = 0;
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async () => {
+        delivered++;
+        return { success: true };
+      },
+    };
+    const tapAt = new TapAtCoordinate(androidDevice, adb, {
+      timer,
+      androidClient: client,
+      displayTransitions: transitions,
+      lastRenderedObservation: () => ({
+        display: { key: "0", generation: 7 },
+        displayRevision: 41,
+      }),
+    });
+    tapAt.observeScreen = observe;
+    const sleep = spyOn(timer, "sleep").mockImplementation(async (ms) => {
+      expect(ms).toBe(DOUBLE_TAP_GAP_MS);
+      expect(delivered).toBe(1);
+      timer.advanceTime(ms);
+      transitions.transition();
+    });
+    try {
+      const result = await tapAt.execute({ x: 10, y: 20, action: "doubleTap", display: "active" });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("one tap was delivered");
+      expect(result.error).toContain("Do not retry automatically");
+      expect(result.error).toContain('Re-observe display "cover"');
+      expect(result.staleDisplay).toEqual({
+        observedGeneration: 7,
+        currentGeneration: 8,
+        currentDisplayKey: "cover",
+        retry: "observe",
+      });
+      expect(delivered).toBe(1);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    } finally {
+      sleep.mockRestore();
+    }
+  });
+
   test.each([androidDevice, iosDevice])(
     "schema and implementation share duration bounds on %s",
     async (device) => {
@@ -319,11 +526,14 @@ describe("TapAtCoordinate", () => {
         await started;
         gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
         controller.abort();
-        expect(await pending).toMatchObject({
+        const result = await pending;
+        expect(result).toMatchObject({
           success: false,
           action: "doubleTap",
-          error: expect.stringContaining("cancel"),
         });
+        expect(result.error).toBe(
+          `Failed to tap at coordinates: ${OPERATION_CANCELLED_MESSAGE} Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically.`,
+        );
         const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
         expect(dispatches).toHaveLength(1);
         expect(iosCacheInvalidations()).toBe(device.platform === "ios" ? 1 : 0);
@@ -337,16 +547,26 @@ describe("TapAtCoordinate", () => {
     },
   );
 
-  test.each([androidDevice, iosDevice])(
-    "pre-aborted gestures dispatch nothing on %s",
-    async (device) => {
+  test.each(
+    [androidDevice, iosDevice].flatMap((device) =>
+      [undefined, "active"].map((display) => ({ device, display })),
+    ),
+  )(
+    "pre-aborted gestures dispatch nothing on $device.platform display $display",
+    async ({ device, display }) => {
       const { tapAt, androidDispatches, iosDispatches } = createTapAt(device);
       const controller = new AbortController();
       controller.abort();
-      for (const action of ["longPress", "doubleTap"] as const) {
+      for (const action of ["tap", "longPress", "doubleTap"] as const) {
         expect(
-          await tapAt.execute({ x: 1, y: 2, action }, undefined, controller.signal),
-        ).toMatchObject({ success: false, action });
+          await tapAt.execute({ x: 1, y: 2, action, display }, undefined, controller.signal),
+        ).toMatchObject({
+          success: false,
+          x: 1,
+          y: 2,
+          action,
+          error: `Failed to tap at coordinates: ${OPERATION_CANCELLED_MESSAGE}`,
+        });
       }
       expect(androidDispatches).toHaveLength(0);
       expect(iosDispatches).toHaveLength(0);
@@ -1263,7 +1483,11 @@ describe("TapAtCoordinate", () => {
       );
       await started;
       controller.abort();
-      expect(await pending).toMatchObject({ success: false, action: "doubleTap" });
+      const result = await pending;
+      expect(result).toMatchObject({ success: false, action: "doubleTap" });
+      expect(result.error).toBe(
+        `Failed to tap at coordinates: ${OPERATION_CANCELLED_MESSAGE} Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically.`,
+      );
       expect(aborted.iosDispatches).toHaveLength(1);
       expect(aborted.iosCacheInvalidations()).toBe(1);
     } finally {

@@ -53,8 +53,6 @@ src/server/navigationTools.ts: error TS2339: Property 'coverage' does not exist 
 src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
 src/server/navigationTools.ts: error TS2339: Property 'screensDiscovered' does not exist on type 'ExploreExecutionResult'.
 src/server/networkTools.ts: error TS2459: Module '"../devices/deviceUtils"' declares 'BootedDevice' locally, but it is not exported.
-src/server/observeTools.ts: error TS2322: Type 'TimingData' is not assignable to type 'TimingEntry'.
-src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
 src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"appVersion" | "deviceId" | "deviceName" | "devicePlatform" | "deviceType" | "gitCommit" | "gradleVersion" | "isCi" | "jdkVersion" | "jvmTarget" | "limit" | "lookbackDays" | ... 6 more ... | "testMethod"'.
 src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
 src/utils/filesystem/DefaultFileSystem.ts: error TS2339: Property 'toString' does not exist on type 'never'.
@@ -86,7 +84,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 30 :: src/features/action/IosSimulatorPermissions.ts: error TS2352: Conversion of type 'TccPermissionRow' to type 'Record<string, null | number | string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 # swap-fp: 30 :: src/features/observe/DeviceServiceUtils.ts: error TS2694: Namespace '"src/features/observe/DeviceService"' has no exported member 'ImeActionResult'.
 # swap-fp: 30 :: src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
-# swap-fp: 30 :: src/server/observeTools.ts: error TS2322: Type 'TimingData' is not assignable to type 'TimingEntry'.
 # swap-fp: 32 :: src/features/observe/ios/CtrlProxyGestures.ts: error TS2459: Module '"./types"' declares 'GestureTimingResult' locally, but it is not exported.
 # swap-fp: 33 :: src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
 # swap-fp: 39,45 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
@@ -94,7 +91,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 42 :: src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
 # swap-fp: 44 :: src/features/utility/ElementParser.ts: error TS2345: Argument of type 'ViewHierarchyWindowInfo[]' is not assignable to parameter of type '{ windowLayer: number; }[]'.
 # swap-fp: 46 :: src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
-# swap-fp: 46 :: src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
 # swap-fp: 51 :: src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
 # swap-fp: 52 :: src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
 # swap-fp: 54 :: src/features/observe/android/CtrlProxyHierarchy.ts: error TS2554: Expected 0 arguments, but got 1.

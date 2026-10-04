@@ -188,17 +188,31 @@ public final class CustomNavigationAdapter: NavigationFrameworkAdapter, Sendable
             completed: Bool = true
         ) {
             let destination = String(describing: type(of: viewController))
+            let resolvedSceneIdentifier: String?
+            if let sceneIdentifier {
+                resolvedSceneIdentifier = sceneIdentifier
+            } else if Thread.isMainThread {
+                resolvedSceneIdentifier = MainActor.assumeIsolated { Self.sceneIdentifier(for: viewController) }
+            } else {
+                resolvedSceneIdentifier = DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { Self.sceneIdentifier(for: viewController) }
+                }
+            }
             NavigationAdapterHub.shared.record(
                 owner: "uikit",
                 destination: destination,
                 source: .uiKitNavigation,
                 identity: NavigationScreenIdentity(route: destination),
-                sceneIdentifier: sceneIdentifier ?? viewController.viewIfLoaded?.window?.windowScene?.session
-                    .persistentIdentifier,
+                sceneIdentifier: resolvedSceneIdentifier,
                 transitionIdentifier: UUID().uuidString,
                 transitionCompleted: completed,
                 metadata: metadata
             )
+        }
+
+        @MainActor
+        private static func sceneIdentifier(for viewController: UIViewController) -> String? {
+            viewController.viewIfLoaded?.window?.windowScene?.session.persistentIdentifier
         }
     }
 #endif

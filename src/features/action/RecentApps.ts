@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -262,22 +263,36 @@ export class RecentApps extends BaseVisualChange {
    * @returns Recent apps result
    */
   private async executeHardwareNavigation(signal?: AbortSignal): Promise<RecentAppsResult> {
+    let dispatched = false;
+    const indeterminateResult = (reason: string | undefined): RecentAppsResult => ({
+      success: false,
+      method: "hardware",
+      error: `Recent apps press outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
+    });
     // Try accessibility service global action first
     try {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
       throwIfAborted(signal);
       const result = await awaitWhileRequestIsLive(
-        client.requestGlobalAction("recent", 3000, undefined, undefined, signal),
+        client.requestGlobalAction("recent", 3000, undefined, undefined, signal, () => {
+          dispatched = true;
+        }),
         signal,
       );
       if (result.success) {
         logger.debug("[RECENT_APPS] Used accessibility service global action");
         return { success: true, method: "hardware" };
       }
+      if (dispatched && !result.acknowledged) {
+        return indeterminateResult(result.error);
+      }
       logger.debug(`[RECENT_APPS] Global action failed (${result.error}), falling back to ADB`);
     } catch (error) {
       throwIfAborted(signal);
-      logger.warn("[RECENT_APPS] Global action unavailable; falling back to ADB", error);
+      logger.warn("[RECENT_APPS] Global action unavailable", error);
+      if (dispatched) {
+        return indeterminateResult(errorMessage(error));
+      }
     }
 
     throwIfAborted(signal);

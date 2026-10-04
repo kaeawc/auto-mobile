@@ -72,6 +72,8 @@ export interface ActionTimingResult extends BaseResult {
  * Provides access to shared state and functionality from the main client.
  */
 export interface DelegateContext {
+  /** Platform-specific serialization at the request construction boundary. */
+  serializeRequest?(message: Record<string, unknown>): string;
   /** Get the current WebSocket connection (may be null if not connected) */
   getWebSocket(): WebSocket | null;
   /** RequestManager for correlating requests and responses */

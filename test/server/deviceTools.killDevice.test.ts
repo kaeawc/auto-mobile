@@ -1997,10 +1997,11 @@ describe("killDevice handler", () => {
           ),
       );
 
-      // The observation that quarantined the serial is this kill's own, so the
-      // kill survives it while the unrelated work on the session does not.
-      expect(cancelledSessions).toContain("session-1");
+      // Identity quarantine cannot cancel work while this incarnation's
+      // shutdown reservation is held, whichever discovery observes it first.
+      expect(cancelledSessions).toEqual([]);
       expect(initiatingKill.abortController.signal.aborted).toBe(false);
+      // Normal successful-shutdown retirement still cancels competing work.
       expect(competingExecution.abortController.signal.aborted).toBe(true);
       expect(placeholderManager.killedDeviceIds).toEqual(["emulator-5554"]);
     } finally {

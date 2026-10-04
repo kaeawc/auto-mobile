@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "bottomSheet",
+      "child": {
+        "type": "spacer"
+      },
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "detents": []
+    }
+  },
+  "expectedPath": "root.detents"
+}

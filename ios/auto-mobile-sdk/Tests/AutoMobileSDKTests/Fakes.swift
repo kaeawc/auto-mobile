@@ -518,3 +518,35 @@ final class FakeSdkEventTransport: SdkEventPosting, Sendable {
         completion?(statusCode)
     }
 }
+
+// MARK: - FakeMainThreadExecutor
+
+/// Models a background caller: work is recorded, never run until explicitly drained.
+final class FakeMainThreadExecutor: MainThreadExecuting, Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: [@MainActor @Sendable () -> Void]())
+    var pendingCount: Int { state.withLock { $0.count } }
+
+    func execute(_ work: @escaping @MainActor @Sendable () -> Void) {
+        state.withLock { $0.append(work) }
+    }
+
+    @MainActor
+    func runNext() {
+        let work = state.withLock { $0.isEmpty ? nil : $0.removeFirst() }
+        work?()
+    }
+
+    /// Model an inline main-thread restart overtaking queued background teardown.
+    @MainActor
+    func runLast() {
+        let work = state.withLock { $0.popLast() }
+        work?()
+    }
+
+    @MainActor
+    func runAll() {
+        while pendingCount > 0 {
+            runNext()
+        }
+    }
+}

@@ -1,0 +1,14 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "__proto__"
+    }
+  },
+  "expectedPath": "root.type"
+}

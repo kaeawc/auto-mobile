@@ -15,7 +15,7 @@ import type {
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -199,64 +199,178 @@ describe("handleDaemonRequest", () => {
     expect(sessionManager.getSession(sessionId)?.lastHeartbeat).toBeGreaterThan(initialHeartbeat);
   });
 
-  test("makes stale and tokenless heartbeats no-ops after owner B claims liveness", async () => {
-    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
-    const state = new FakeDaemonState(sessionManager, devicePool);
-    const sessionId = "liveness-owner-session";
-    await sessionManager.createSession(sessionId, "emulator-5554", "android", 10_000);
+  test.each([
+    { first: "keeper", second: "proxy", firstPolicy: "cli", secondPolicy: "heartbeat" },
+    { first: "proxy", second: "keeper", firstPolicy: "heartbeat", secondPolicy: "cli" },
+  ])(
+    "reports $first superseded after $second claims without refreshing liveness",
+    async ({ first, second, firstPolicy, secondPolicy }) => {
+      const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+      const state = new FakeDaemonState(sessionManager, devicePool);
+      const sessionId = "liveness-owner-session";
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", 10_000);
 
-    await handleDaemonRequest(
-      buildRequest("daemon/heartbeat", {
-        sessionId,
-        livenessPolicy: "heartbeat",
-        livenessOwnerToken: "mcp-owner",
-        claimLivenessOwnership: true,
-      }),
-      state,
-    );
-    fakeTimer.advanceTime(1_000);
-    await handleDaemonRequest(
-      buildRequest("daemon/heartbeat", {
-        sessionId,
-        livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
-        livenessOwnerToken: "cli-owner",
-        claimLivenessOwnership: true,
-      }),
-      state,
-    );
-    const cliOwned = sessionManager.getSession(sessionId)!;
-    expect(cliOwned).toMatchObject({
-      livenessPolicy: "cli-idle",
-      livenessOwnerToken: "cli-owner",
-      lastHeartbeat: fakeTimer.now(),
-      lastUsedAt: fakeTimer.now(),
-    });
-    const beforeStaleKeeper = {
-      livenessPolicy: cliOwned.livenessPolicy,
-      livenessOwnerToken: cliOwned.livenessOwnerToken,
-      lastUsedAt: cliOwned.lastUsedAt,
-      lastHeartbeat: cliOwned.lastHeartbeat,
-      expiresAt: cliOwned.expiresAt,
-    };
-
-    fakeTimer.advanceTime(1_000);
-    await expect(
-      handleDaemonRequest(
+      await handleDaemonRequest(
         buildRequest("daemon/heartbeat", {
           sessionId,
-          livenessPolicy: "heartbeat",
-          livenessOwnerToken: "mcp-owner",
+          livenessPolicy: firstPolicy,
+          livenessOwnerToken: first,
+          claimLivenessOwnership: true,
         }),
         state,
-      ),
-    ).resolves.toEqual({ success: true, result: { sessionId } });
-    expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
+      );
+      fakeTimer.advanceTime(1_000);
+      const claim = await handleDaemonRequest(
+        buildRequest("daemon/heartbeat", {
+          sessionId,
+          livenessPolicy: secondPolicy,
+          livenessOwnerToken: second,
+          claimLivenessOwnership: true,
+        }),
+        state,
+      );
+      expect(claim.success).toBe(true);
+      const cliOwned = sessionManager.getSession(sessionId)!;
+      expect(cliOwned).toMatchObject({
+        livenessPolicy: secondPolicy === "cli" ? "cli-idle" : "heartbeat",
+        livenessOwnerToken: second,
+        lastHeartbeat: fakeTimer.now(),
+        lastUsedAt: fakeTimer.now(),
+      });
+      const beforeStaleKeeper = {
+        livenessPolicy: cliOwned.livenessPolicy,
+        livenessOwnerToken: cliOwned.livenessOwnerToken,
+        lastUsedAt: cliOwned.lastUsedAt,
+        lastHeartbeat: cliOwned.lastHeartbeat,
+        expiresAt: cliOwned.expiresAt,
+        heartbeatTimeoutMs: cliOwned.heartbeatTimeoutMs,
+        sessionTimeoutMs: cliOwned.sessionTimeoutMs,
+      };
 
-    await handleDaemonRequest(
-      buildRequest("daemon/heartbeat", { sessionId, livenessPolicy: "heartbeat" }),
-      state,
+      fakeTimer.advanceTime(1_000);
+      await expect(
+        handleDaemonRequest(
+          buildRequest("daemon/heartbeat", {
+            sessionId,
+            livenessPolicy: firstPolicy,
+            livenessOwnerToken: first,
+          }),
+          state,
+        ),
+      ).resolves.toEqual({
+        success: false,
+        code: "liveness_owner_superseded",
+        error: expect.stringContaining("no longer owns"),
+      });
+      expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
+
+      expect(
+        await handleDaemonRequest(
+          buildRequest("daemon/heartbeat", { sessionId, livenessPolicy: "heartbeat" }),
+          state,
+        ),
+      ).toEqual({ success: true, result: { sessionId } });
+      expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
+
+      // Replaying a displaced claim remains the existing successful no-op.
+      expect(
+        (
+          await handleDaemonRequest(
+            buildRequest("daemon/heartbeat", {
+              sessionId,
+              livenessOwnerToken: first,
+              claimLivenessOwnership: true,
+              livenessPolicy: firstPolicy,
+            }),
+            state,
+          )
+        ).success,
+      ).toBe(true);
+      expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
+
+      expect(
+        await handleDaemonRequest(
+          buildRequest("daemon/heartbeat", {
+            sessionId,
+            livenessOwnerToken: second,
+            livenessPolicy: firstPolicy,
+          }),
+          state,
+        ),
+      ).toEqual({ success: true, result: { sessionId } });
+      expect(sessionManager.getSession(sessionId)).toMatchObject({
+        ...beforeStaleKeeper,
+        lastUsedAt: fakeTimer.now(),
+        lastHeartbeat: fakeTimer.now(),
+        expiresAt: fakeTimer.now() + cliOwned.sessionTimeoutMs,
+      });
+    },
+  );
+
+  test("reports every displaced keeper tick while a stalled proxy times out", async () => {
+    const sessionId = "stalled-proxy";
+    const state = new FakeDaemonState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
     );
-    expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
+    const session = await sessionManager.createSession(
+      sessionId,
+      "emulator-5554",
+      "android",
+      60_000,
+    );
+    for (const [token, policy] of [
+      ["keeper", "cli"],
+      ["proxy", "heartbeat"],
+    ]) {
+      expect(
+        (
+          await handleDaemonRequest(
+            buildRequest("daemon/heartbeat", {
+              sessionId,
+              livenessOwnerToken: token,
+              livenessPolicy: policy,
+              claimLivenessOwnership: true,
+            }),
+            state,
+          )
+        ).success,
+      ).toBe(true);
+    }
+    const lastHeartbeat = session.lastHeartbeat;
+    const timeoutMs = session.heartbeatTimeoutMs;
+    const reaped: Array<{ sessionId: string; reason: string }> = [];
+    const monitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      () => false,
+      async (id, reason) => {
+        reaped.push({ sessionId: id, reason });
+        await sessionManager.releaseSession(id, reason);
+      },
+      fakeTimer,
+      { heartbeatTimeoutMs: timeoutMs },
+    );
+    try {
+      for (let tick = 0; tick < 6; tick++) {
+        fakeTimer.advanceTime(Math.floor(timeoutMs / 5));
+        expect(
+          await handleDaemonRequest(
+            buildRequest("daemon/heartbeat", {
+              sessionId,
+              livenessOwnerToken: "keeper",
+              livenessPolicy: "cli",
+            }),
+            state,
+          ),
+        ).toMatchObject({ success: false, code: "liveness_owner_superseded" });
+        expect(session.lastHeartbeat).toBe(lastHeartbeat);
+        await monitor.tick();
+      }
+      expect(reaped).toEqual([{ sessionId, reason: "heartbeat-timeout" }]);
+      expect(sessionManager.getSession(sessionId)).toBeNull();
+    } finally {
+      await monitor.stop();
+    }
   });
 
   test("lets a surviving token keeper refresh a recovered session with no daemon-local owner", async () => {

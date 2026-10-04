@@ -20,6 +20,7 @@ import type { DaemonClientFactory } from "../client";
 import type { DaemonStateLike } from "../daemonState";
 import type { DaemonManager } from "../manager";
 import type { DaemonOptions, DaemonStatus } from "../types";
+import { DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE } from "../types";
 import type { AcceptanceSessionRestartScope } from "../daemonRestartAdmission";
 import { parseDaemonArgs } from "./daemonArgs";
 
@@ -470,7 +471,16 @@ export async function runDaemonCommand(
               ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
             });
           } catch (error) {
-            throw new ActionableError(`Failed to record session heartbeat: ${errorMessage(error)}`);
+            const superseded =
+              error !== null &&
+              typeof error === "object" &&
+              "code" in error &&
+              error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE;
+            throw new ActionableError(
+              superseded
+                ? `The token no longer owns session ${sessionId}'s liveness. Re-claim with a fresh --liveness-owner-token and --claim-liveness-ownership, or stop the keeper.`
+                : `Failed to record session heartbeat: ${errorMessage(error)}`,
+            );
           } finally {
             await client.close();
           }

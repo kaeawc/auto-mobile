@@ -34,6 +34,76 @@ function managerForCliRelease(callDaemonMethod: DaemonClientLike["callDaemonMeth
   };
 }
 
+describe("CLI heartbeat ownership results", () => {
+  test("superseded heartbeat uses the ActionableError non-zero exit path with re-claim guidance", async () => {
+    const Manager = managerForCliRelease(async () => {
+      throw Object.assign(new ActionableError("Displaced owner"), {
+        code: "liveness_owner_superseded",
+      });
+    });
+    const exited = new Error("fake exit");
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    const report = spyOn(console, "error").mockImplementation(() => {});
+    const exit = spyOn(process, "exit").mockImplementation(() => {
+      throw exited;
+    });
+    try {
+      await expect(
+        runDaemonCommand("heartbeat", ["fake-session", "--liveness-owner-token", "A"], {}, Manager),
+      ).rejects.toBe(exited);
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(report).toHaveBeenCalledWith(
+        expect.stringMatching(/^Error: .*no longer owns.*--claim-liveness-ownership.*stop/),
+      );
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      exit.mockRestore();
+      report.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  test.each([false, true])(
+    "successful heartbeat still reports recorded (claim=%s)",
+    async (claim) => {
+      const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+      const Manager = managerForCliRelease(async (method, params) => {
+        calls.push({ method, params });
+        return { sessionId: "fake-session" };
+      });
+      const log = spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await runDaemonCommand(
+          "heartbeat",
+          [
+            "fake-session",
+            "--liveness-owner-token",
+            "A",
+            ...(claim ? ["--claim-liveness-ownership"] : []),
+          ],
+          {},
+          Manager,
+        );
+        expect(log).toHaveBeenCalledWith("Session fake-session heartbeat recorded");
+        expect(calls).toEqual([
+          {
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "fake-session",
+              livenessPolicy: "cli",
+              idleTimeoutMs: expect.any(Number),
+              livenessOwnerToken: "A",
+              ...(claim ? { claimLivenessOwnership: true } : {}),
+            },
+          },
+        ]);
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
+});
+
 describe("CLI release-session daemon results", () => {
   test.each([
     {

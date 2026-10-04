@@ -37,6 +37,7 @@ import {
 } from "./constants";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   type DaemonNotification,
   type DaemonOptions,
@@ -788,6 +789,8 @@ export class DaemonMcpProxy {
    * response is lost; reconnects must then verify the same token, not reclaim.
    */
   private livenessOwnershipClaimSent = false;
+  /** Supersession is informational; report it at most once per proxy instance. */
+  private livenessSupersessionLogged = false;
   /** Stable for this proxy instance, including all transport reconnects. */
   private readonly livenessOwnerToken: string;
   private readonly buildIdentity: BuildIdentity;
@@ -3370,6 +3373,21 @@ export class DaemonMcpProxy {
       );
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership, isCurrent);
     } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+      ) {
+        // Another claimant owns liveness now. Preserve the old successful no-op's
+        // local acknowledgement without fencing, reconnecting or re-claiming.
+        if (!this.livenessSupersessionLogged) {
+          this.livenessSupersessionLogged = true;
+          logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded`);
+        }
+        this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);
+        return;
+      }
       if (error instanceof DaemonBoundSessionExpiredError) {
         // Terminal fencing already stopped the keeper; this tick has no further work.
         logger.debug(`[DaemonMcpProxy] Bound-session heartbeat stopped: ${error.message}`);

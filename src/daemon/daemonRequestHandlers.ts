@@ -7,7 +7,11 @@ import {
   MAX_OBSERVER_SESSION_ID_LENGTH,
   type ObserverSessionStore,
 } from "./observerSessionRegistry";
-import { DAEMON_SESSION_NOT_FOUND_CODE, DaemonRequest } from "./types";
+import {
+  DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+  DAEMON_SESSION_NOT_FOUND_CODE,
+  DaemonRequest,
+} from "./types";
 import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
@@ -112,7 +116,7 @@ export type DaemonMethodResult = {
   success: boolean;
   result?: Record<string, unknown>;
   error?: string;
-  code?: typeof DAEMON_SESSION_NOT_FOUND_CODE;
+  code?: typeof DAEMON_SESSION_NOT_FOUND_CODE | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -269,7 +273,13 @@ export async function handleDaemonRequest(
         if (!ownsLiveness) {
           // A stale reconnect must be a complete liveness no-op: it cannot
           // restore a policy or extend lastUsedAt/lastHeartbeat/expiresAt.
-          return { success: true, result: { sessionId } };
+          return claimsLivenessOwnership
+            ? { success: true, result: { sessionId } }
+            : {
+                success: false,
+                code: DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+                error: `The token no longer owns session ${sessionId}'s liveness. Re-claim with a fresh token and --claim-liveness-ownership, or stop the keeper.`,
+              };
         }
         if (!claimsLivenessOwnership) {
           // A verified keeper proves only that its current owner is still

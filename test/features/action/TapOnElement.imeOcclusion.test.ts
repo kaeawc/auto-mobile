@@ -12,6 +12,7 @@ import {
 } from "../../fixtures/observe/imeOcclusion";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { KeyboardOcclusionError } from "../../../src/models/KeyboardOcclusionError";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import {
   capturedBounds,
@@ -30,6 +31,7 @@ async function executeAt(
     screenSize,
     matchedBounds,
     elementId,
+    action = "tap",
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -39,6 +41,7 @@ async function executeAt(
     screenSize?: ObserveResult["screenSize"];
     matchedBounds?: ElementBounds;
     elementId?: string;
+    action?: "tap" | "focus";
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -62,6 +65,9 @@ async function executeAt(
     throw new Error(`Missing fixture node ${label}`);
   }
   const element = source;
+  if (action === "focus") {
+    element.class = "android.widget.EditText";
+  }
   if (anonymous) {
     delete element.text;
     delete element["content-desc"];
@@ -120,7 +126,7 @@ async function executeAt(
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({
     ...(elementId ? { elementId } : { text: label }),
-    action: "tap",
+    action,
   });
   return { result, points, actionError };
 }
@@ -142,10 +148,17 @@ describe("tapOn Android IME occlusion", () => {
   });
 
   test("fully covered app element fails without dispatching a tap", async () => {
-    const { result, points } = await executeAt("Continue as Guest");
+    const { result, points, actionError } = await executeAt("Continue as Guest");
+    expect(actionError).toBeInstanceOf(KeyboardOcclusionError);
     expect(points).toEqual([]);
     expect(result.success).toBe(false);
     expect(result.error).toContain("covered by the soft keyboard");
+  });
+
+  test("Android focus preserves the typed IME refusal for orchestrators", async () => {
+    await expect(executeAt("Continue as Guest", { action: "focus" })).rejects.toBeInstanceOf(
+      KeyboardOcclusionError,
+    );
   });
 
   test("uses the caller text selector when the matched element has no label", async () => {

@@ -8,6 +8,7 @@ import {
 } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
+import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import {
   ElementResolver,
   isFocusEditableElement,
@@ -638,7 +639,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             options.elementId ?? options.testTag ?? options.accessibilityLink ?? "element",
           );
     const label = JSON.stringify(elementLabel) ?? selectorLabel;
-    throw new ActionableError(
+    throw new KeyboardOcclusionError(
       `Target ${label} is covered by the soft keyboard; dismiss the keyboard first.`,
     );
   }
@@ -4031,6 +4032,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       perf.end();
 
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
+      // Android form orchestration must recover before this refusal becomes prose.
+      if (
+        this.device.platform === "android" &&
+        requestedAction === "focus" &&
+        error instanceof KeyboardOcclusionError
+      ) {
+        throw error;
+      }
       if (error instanceof StaleDisplayError) {
         return withStaleDisplay(this.createErrorResult(options.action, error.message), error);
       }

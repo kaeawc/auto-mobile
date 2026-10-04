@@ -1,3 +1,5 @@
+import { getAbortSignal } from "../../utils/AbortContext";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
@@ -37,6 +39,8 @@ export class SetAndroidScheduleExactAlarmAppOp {
     packageName: string,
     input: SetAndroidScheduleExactAlarmAppOpInput,
   ): Promise<AndroidDeviceShellToolResult> {
+    const signal = getAbortSignal();
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("setAndroidScheduleExactAlarmAppOp");
 
@@ -51,8 +55,9 @@ export class SetAndroidScheduleExactAlarmAppOp {
 
     if (input.mode === "deny") {
       const apiLevel = await perf.track("readDeviceApiLevel", async () =>
-        readAndroidDeviceApiLevel(this.adb),
+        readAndroidDeviceApiLevel(this.adb, undefined, undefined, signal),
       );
+      throwIfAborted(signal);
       if (apiLevel === null || apiLevel < API_LEVEL_SCHEDULE_EXACT_ALARM) {
         perf.end();
         return {
@@ -72,6 +77,7 @@ export class SetAndroidScheduleExactAlarmAppOp {
     try {
       await perf.track(`appops.${input.mode}`, async () => {
         const execResult = await this.adb.executeCommand(cmd, undefined, undefined, true);
+        throwIfAborted(signal);
         const stdout = execResult.stdout;
         const stderr = execResult.stderr ?? "";
         const bad = outputLooksLikeShellFailure(stdout, stderr);
@@ -102,14 +108,10 @@ export class SetAndroidScheduleExactAlarmAppOp {
     } catch (cause) {
       perf.end();
       const message = errorMessage(cause);
-      if (input.mode === "allow") {
-        logger.warn(
-          `[SetAndroidScheduleExactAlarmAppOp] allow failed for ${packageName}: ${message}`,
-        );
-        return { success: false, appId: packageName, error: message };
-      }
-      logger.warn(`[SetAndroidScheduleExactAlarmAppOp] deny threw for ${packageName}: ${message}`);
-      return { success: true, appId: packageName };
+      const label = input.mode === "allow" ? "allow failed" : "deny threw";
+      logger.warn(`[SetAndroidScheduleExactAlarmAppOp] ${label} for ${packageName}: ${message}`);
+      throwIfAborted(signal);
+      return { success: false, appId: packageName, error: message };
     }
   }
 }

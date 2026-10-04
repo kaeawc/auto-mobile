@@ -30,7 +30,9 @@ import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -45,7 +47,13 @@ class ConnectionCommandQueueTest {
     }
   }
 
-  private companion object {
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun warmScheduler() {
+      runTest {} // Keep coroutine scheduler initialization outside per-test timing.
+    }
+
     private fun client() =
       WebSocketServer.ConnectedClient(
         1,
@@ -132,6 +140,33 @@ class ConnectionCommandQueueTest {
     val handler = QueuedWebSocketMessageHandler(delegate, queue)
 
     fun connection() = ReadLoop(scope, handler, client()) { replies += it }
+  }
+
+  @Test
+  fun `queued delegate sees its own origin across suspension and restores the thread`() = runTest {
+    val held = CompletableDeferred<Unit>()
+    val clients = mutableListOf<WebSocketServer.ConnectedClient?>()
+    val delegate = FakeHandler { request ->
+      clients.add(CommandOriginContext.currentClient())
+      assertSame(
+        currentCoroutineContext()[CommandOriginContext]?.origin?.client,
+        CommandOriginContext.currentClient(),
+      )
+      if (request.requestId == "first") held.await()
+      clients.add(CommandOriginContext.currentClient())
+      null
+    }
+    val fixture = Fixture(this, delegate)
+    val first = fixture.connection()
+    val second = fixture.connection()
+    first.send(RequestHierarchy(requestId = "first"))
+    second.send(RequestHierarchy(requestId = "second"))
+    runCurrent()
+    assertNull(CommandOriginContext.currentClient())
+    held.complete(Unit)
+    runCurrent()
+    assertEquals(listOf(first.client, second.client, second.client, first.client), clients)
+    assertNull(CommandOriginContext.currentClient())
   }
 
   @Test

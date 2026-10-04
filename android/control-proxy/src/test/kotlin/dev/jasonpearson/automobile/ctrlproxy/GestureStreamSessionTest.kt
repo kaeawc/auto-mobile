@@ -1,11 +1,26 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
+import dev.jasonpearson.automobile.protocol.WebSocketRequest
+import dev.jasonpearson.automobile.protocol.WebSocketResponse
+import io.ktor.websocket.CloseReason
 import java.util.ArrayDeque
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 /**
@@ -13,7 +28,16 @@ import org.junit.Test
  * coordinator's segments through the stroke dispatcher — one fresh initial stroke, the rest
  * continuations — and finishes exactly once, on both the lift and the dispatch-failure path.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class GestureStreamSessionTest {
+
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun warmScheduler() {
+      runTest {} // Keep coroutine scheduler initialization outside per-test timing.
+    }
+  }
 
   @Test
   fun `router forwards the start display through queued continuations`() {
@@ -169,6 +193,7 @@ class GestureStreamSessionTest {
     var acceptPosts = true
     val dispatchers = mutableListOf<FakeStrokeDispatcher>()
     val acks = mutableListOf<Ack>()
+    val warnings = mutableListOf<String>()
     val router =
       GestureStreamRouter(
         runOnGestureThread = {
@@ -186,6 +211,7 @@ class GestureStreamSessionTest {
           )
         },
         onResult = { requestId, success, error -> acks.add(Ack(requestId, success, error)) },
+        logWarning = { warnings.add(it) },
       )
 
     fun drain() {
@@ -205,6 +231,260 @@ class GestureStreamSessionTest {
       drain()
       return count
     }
+  }
+
+  private fun owner() =
+    WebSocketServer.ConnectedClient(
+      1,
+      object : WebSocketServer.ClientTransport {
+        override suspend fun send(message: String) = Unit
+
+        override suspend fun close(reason: CloseReason) = Unit
+      },
+      Channel(1),
+      Channel(1),
+    )
+
+  @Test
+  fun `owner disconnect lifts a parked gesture once on the gesture thread and clears state`() {
+    val h = RouterHarness()
+    val owner = owner()
+    h.router.start("start", "g", 1f, 2f, 7, owner)
+    h.drain()
+    val dispatcher = h.dispatchers.single()
+    dispatcher.completeLast() // press -> Wait
+    h.router.cancelOwnedBy(owner)
+    h.router.cancelOwnedBy(owner)
+    assertEquals(1, dispatcher.dispatched.size) // IO caller must only post.
+    h.drain()
+
+    assertEquals(2, dispatcher.dispatched.size)
+    val lift = dispatcher.calls.last().stroke
+    assertSame(dispatcher.calls.first().stroke, lift.parent)
+    assertFalse(lift.segment.willContinue)
+    assertEquals(GesturePoint(1f, 2f), lift.segment.from)
+    assertEquals(lift.segment.from, lift.segment.to)
+    assertEquals(listOf(7, 7), dispatcher.displays)
+    assertEquals(listOf(Ack("start", true, null)), h.acks)
+    assertEquals(0, h.pendingEndCount())
+
+    // Removal is immediate, without depending on a framework callback. An old callback must not
+    // remove a replacement stream that reuses the wire id.
+    h.router.start("replacement", "g", 3f, 4f, owner = owner())
+    h.drain()
+    assertEquals(2, h.dispatchers.size)
+    dispatcher.completeLast()
+    h.router.end("replacement-end", "g", 3f, 4f, false)
+    h.drain()
+    assertEquals(1, h.pendingEndCount())
+    assertEquals(0, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `disconnect without a gesture dispatches nothing`() {
+    val h = RouterHarness()
+    h.router.cancelOwnedBy(owner())
+    h.drain()
+    assertTrue(h.dispatchers.isEmpty())
+    assertTrue(h.acks.isEmpty())
+    assertTrue(h.warnings.isEmpty())
+  }
+
+  @Test
+  fun `disconnect leaves another owner's parked gesture untouched`() {
+    val h = RouterHarness()
+    h.router.start("start", "g", 1f, 2f, owner = owner())
+    h.drain()
+    val dispatcher = h.dispatchers.single()
+    dispatcher.completeLast()
+    h.router.cancelOwnedBy(owner())
+    h.drain()
+    assertEquals(1, dispatcher.dispatched.size)
+    h.router.move("move", "g", 3f, 4f)
+    h.drain()
+    assertTrue(dispatcher.dispatched.last().willContinue)
+    assertEquals(GesturePoint(3f, 4f), dispatcher.dispatched.last().to)
+  }
+
+  @Test
+  fun `disconnect racing a posted end drops its reply and dispatches one lift`() {
+    for (endDispatched in listOf(false, true)) {
+      val h = RouterHarness()
+      val owner = owner()
+      h.router.start("start", "g", 1f, 2f, owner = owner)
+      h.drain()
+      val dispatcher = h.dispatchers.single()
+      dispatcher.completeLast()
+      h.router.end("end", "g", 3f, 4f, false)
+      if (endDispatched) h.drain()
+      h.router.cancelOwnedBy(owner)
+      h.drain()
+      dispatcher.completeLast()
+      h.router.cancelOwnedBy(owner)
+      h.drain()
+
+      assertEquals(1, dispatcher.dispatched.count { !it.willContinue })
+      assertEquals(listOf(Ack("start", true, null)), h.acks)
+      assertEquals(0, h.pendingEndCount())
+      assertEquals(0, h.terminalFailureCount())
+    }
+  }
+
+  @Test
+  fun `disconnect release failure warns clears state and never retries the lift`() {
+    for (failure in listOf("failure", "rejection", "exception", "build")) {
+      val h = RouterHarness()
+      val owner = owner()
+      h.router.start("start", "g", 1f, 2f, owner = owner)
+      h.drain()
+      val dispatcher = h.dispatchers.single()
+      dispatcher.completeLast()
+      if (failure == "exception")
+        dispatcher.nextDispatchError = IllegalStateException("release failed")
+      if (failure == "build") dispatcher.nextContinueError = IllegalStateException("release failed")
+      h.router.cancelOwnedBy(owner)
+      h.drain()
+      if (failure == "failure") dispatcher.failLast("release failed")
+      if (failure == "rejection") dispatcher.rejectLast("release failed")
+      h.router.cancelOwnedBy(owner)
+      h.drain()
+
+      assertEquals(
+        if (failure == "build") 0 else 1,
+        dispatcher.dispatched.count { !it.willContinue },
+      )
+      assertEquals(1, h.warnings.size)
+      assertTrue(h.warnings.single().contains("release failed"))
+      assertEquals(listOf(Ack("start", true, null)), h.acks)
+      assertEquals(0, h.terminalFailureCount())
+      h.router.start("replacement", "g", 3f, 4f, owner = owner())
+      h.drain()
+      assertEquals(2, h.dispatchers.size)
+    }
+  }
+
+  @Test
+  fun `disconnect during a stroke ignores its stale callbacks and warns if the lift fails`() {
+    val h = RouterHarness()
+    val client = owner()
+    h.router.start("start", "g", 1f, 2f, owner = client)
+    h.drain()
+    val dispatcher = h.dispatchers.single()
+    val press = dispatcher.calls.single()
+    h.router.cancelOwnedBy(client)
+    h.drain()
+    press.complete()
+    press.fail("old press cancelled")
+    press.reject("old press rejected")
+    assertTrue(h.warnings.isEmpty())
+    dispatcher.failLast("release failed")
+    dispatcher.calls.last().complete()
+    dispatcher.calls.last().fail("duplicate release failure")
+    assertEquals(1, h.warnings.size)
+    assertTrue(h.warnings.single().contains("release failed"))
+    assertEquals(1, dispatcher.dispatched.count { !it.willContinue })
+    assertEquals(listOf(Ack("start", true, null)), h.acks)
+  }
+
+  @Test
+  fun `a start posted after disconnect cannot recreate an orphaned gesture`() {
+    val h = RouterHarness()
+    val owner = owner()
+    owner.isConnected = false
+    h.router.cancelOwnedBy(owner)
+    h.router.start("start", "g", 1f, 2f, owner = owner)
+    h.drain()
+    assertTrue(h.dispatchers.isEmpty())
+    assertTrue(h.acks.isEmpty())
+  }
+
+  @Test
+  fun `disconnect releases a gesture when its queued end is discarded`() = runTest {
+    for (cancel in listOf(false, true)) {
+      val h = RouterHarness()
+      val client = owner()
+      val origin =
+        object : QueuedCommandOrigin {
+          override val client = client
+          override val lifetime: Job = backgroundScope.coroutineContext[Job]!!
+          override val ownerRecorded = false
+
+          override suspend fun sendError(response: ErrorResponse) = error("Unexpected error")
+        }
+      val calls = mutableListOf<String?>()
+      val delegate =
+        object : WebSocketMessageHandler {
+          override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+            calls.add(request.requestId)
+            when (request) {
+              is RequestGestureStart ->
+                h.router.start(
+                  request.requestId,
+                  request.gestureId,
+                  request.x.toFloat(),
+                  request.y.toFloat(),
+                  owner = CommandOriginContext.currentClient(),
+                )
+              is RequestGestureEnd ->
+                h.router.end(
+                  request.requestId,
+                  request.gestureId,
+                  request.x.toFloat(),
+                  request.y.toFloat(),
+                  request.cancel,
+                )
+              else -> error("Unexpected request")
+            }
+            return null
+          }
+        }
+      val dispatcher = StandardTestDispatcher(testScheduler)
+      val commands =
+        ConnectionCommandQueue(
+          scope = CoroutineScope(backgroundScope.coroutineContext + dispatcher),
+          dispatcher = dispatcher,
+          delegate = delegate,
+          reply = { _, _, _ -> error("Unexpected reply") },
+          hasRequestOwner = { false },
+          logError = { _, error -> throw AssertionError(error) },
+          logWarning = { error(it) },
+          logDebug = {},
+        )
+      commands.enqueue(origin, RequestGestureStart("start", "g", 1.0, 2.0))
+      runCurrent()
+      h.drain()
+      val strokes = h.dispatchers.single()
+      strokes.completeLast() // press -> Wait
+      commands.enqueue(origin, RequestGestureEnd("end", "g", 3.0, 4.0, cancel))
+      commands.disconnect(client)
+      h.router.cancelOwnedBy(client)
+      runCurrent()
+      h.drain()
+      strokes.completeLast()
+
+      assertEquals(listOf("start"), calls)
+      assertEquals(0, commands.connectionCount)
+      assertEquals(1, strokes.dispatched.count { !it.willContinue })
+      assertEquals(strokes.dispatched.last().from, strokes.dispatched.last().to)
+      assertEquals(listOf(Ack("start", true, null)), h.acks)
+      assertEquals(0, h.pendingEndCount())
+      h.router.start("replacement", "g", 3f, 4f, owner = owner())
+      h.drain()
+      assertEquals(2, h.dispatchers.size)
+    }
+  }
+
+  @Test
+  fun `disconnect before the posted session start dispatches no pointer`() {
+    val h = RouterHarness()
+    val client = owner()
+    h.router.start("start", "g", 1f, 2f, owner = client)
+    h.router.cancelOwnedBy(client)
+    h.drain()
+    assertTrue(h.dispatchers.single().dispatched.isEmpty())
+    h.router.start("replacement", "g", 3f, 4f, owner = owner())
+    h.drain()
+    assertEquals(2, h.dispatchers.size)
   }
 
   @Test

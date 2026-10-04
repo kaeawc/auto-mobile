@@ -708,6 +708,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       },
       onResult = ::broadcastGestureResult,
+      logWarning = { Log.w(TAG, it) },
     )
 
   private class ImeCommitState {
@@ -1653,7 +1654,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             port = 8765,
             scope = serviceScope,
             messageHandler = queuedHandler,
-            onClientDisconnected = queuedHandler::disconnect,
+            onClientDisconnected = { client ->
+              queuedHandler.disconnect(client)
+              gestureStreamRouter.cancelOwnedBy(client)
+            },
             onPermanentStartFailure = { disableSelf() },
           )
         webSocketLifecycle.replace(webSocketServer)
@@ -2044,7 +2048,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return
     }
-    gestureStreamRouter.start(requestId, gestureId, x.toFloat(), y.toFloat(), displayId)
+    gestureStreamRouter.start(
+      requestId,
+      gestureId,
+      x.toFloat(),
+      y.toFloat(),
+      displayId,
+      CommandOriginContext.currentClient(),
+    )
   }
 
   override fun requestSwipe(
@@ -2142,7 +2153,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return
     }
-    gestureStreamRouter.start(requestId, gestureId, x.toFloat(), y.toFloat())
+    gestureStreamRouter.start(
+      requestId,
+      gestureId,
+      x.toFloat(),
+      y.toFloat(),
+      owner = CommandOriginContext.currentClient(),
+    )
   }
 
   override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {

@@ -75,7 +75,7 @@ describe("TapAtCoordinate", () => {
       try {
         process.env.AUTOMOBILE_DATA_DIR = dataDir;
         const windowDir = getTempDir(TEMP_SUBDIRS.WINDOW);
-        mkdirSync(windowDir, { recursive: true });
+        mkdirSync(windowDir, { recursive: true, mode: 0o700 });
         writeFileSync(
           path.join(windowDir, NodeCryptoService.generateCacheKey(androidDevice.deviceId)),
           JSON.stringify({
@@ -83,6 +83,7 @@ describe("TapAtCoordinate", () => {
             activityName: "com.example.app.MainActivity",
             layoutSeqSum: 1,
           }),
+          { mode: 0o600 },
         );
         const { tapAt, adb, androidDispatches } = createTapAt(androidDevice);
         expect(await tapAt.execute({ x: 1, y: 2, action })).toMatchObject({ success: true });

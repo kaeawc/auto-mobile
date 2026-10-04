@@ -121,6 +121,26 @@ describe("setPosture hinge angle contract", () => {
       error,
     );
   });
+  test("schema omits and strictly rejects obsolete observation controls", () => {
+    const json = z.toJSONSchema(setPostureSchema);
+    expect(json.properties).not.toHaveProperty("raw");
+    expect(json.properties).not.toHaveProperty("project");
+    expect(setPostureSchema.parse({ posture: "opened", displayPreset: "tablet" })).toMatchObject({
+      posture: "opened",
+      displayPreset: "tablet",
+    });
+    const parsed = setPostureSchema.safeParse({ posture: "opened", raw: true, project: "full" });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toMatchObject([
+        {
+          code: "unrecognized_keys",
+          keys: ["raw", "project"],
+          message: 'Unrecognized keys: "raw", "project"',
+        },
+      ]);
+    }
+  });
   test("schema bounds use the action's exported constants", () => {
     const json = z.toJSONSchema(setPostureSchema.shape.hingeAngle);
     expect(json.minimum).toBe(HINGE_ANGLE_MIN_DEGREES);

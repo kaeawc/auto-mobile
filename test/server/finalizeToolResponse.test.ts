@@ -532,22 +532,25 @@ describe("finalizeToolResponse", () => {
       },
     );
 
-    test("an action observation defaults to the compact skeleton (no viewHierarchy)", () => {
-      const response = createStructuredToolResponse({
-        success: true,
-        observation: makeObserveResult(),
-      });
-      const finalized = finalizeToolResponse(response, { name: "tapOn" });
-      const observation = structuredPayload(finalized).observation;
-      expect(Array.isArray(observation.skeleton)).toBe(true);
-      expect(observation.viewHierarchy).toBeUndefined();
-      expect(observation.elements).toBeUndefined();
-      // The compact form is under the SAME `skeleton` key `observe` uses (#5872 AC2).
-      const parsed = JSON.parse(finalized.content[0].text);
-      expect(Array.isArray(parsed.observation.skeleton)).toBe(true);
-      expect(parsed.observation.viewHierarchy).toBeUndefined();
-      expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
-    });
+    test.each(["tapOn", "tapAt"])(
+      "%s observation defaults to the compact skeleton (no viewHierarchy)",
+      (name) => {
+        const response = createStructuredToolResponse({
+          success: true,
+          observation: makeObserveResult(),
+        });
+        const finalized = finalizeToolResponse(response, { name });
+        const observation = structuredPayload(finalized).observation;
+        expect(Array.isArray(observation.skeleton)).toBe(true);
+        expect(observation.viewHierarchy).toBeUndefined();
+        expect(observation.elements).toBeUndefined();
+        // The compact form is under the SAME `skeleton` key `observe` uses (#5872 AC2).
+        const parsed = JSON.parse(finalized.content[0].text);
+        expect(Array.isArray(parsed.observation.skeleton)).toBe(true);
+        expect(parsed.observation.viewHierarchy).toBeUndefined();
+        expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
+      },
+    );
 
     test('project:"full" opts an action observation back into the raw viewHierarchy', () => {
       const response = createStructuredToolResponse({

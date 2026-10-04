@@ -50,8 +50,8 @@ active daemon session. Not every listed tool exposes every routing field.
 These tools accept `raw` to return the raw hierarchy and `project` to choose
 `"skeleton"` (default) or `"full"` observation output:
 
-`biometricAuth`, `dragAndDrop`, `hitTest`, `homeScreen`, `launchApp`, `observe`, `openLink`,
-`pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`, `setPosture`,
+`biometricAuth`, `dragAndDrop`, `homeScreen`, `launchApp`, `observe`, `openLink`,
+`pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
 `shake`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
 
 Skeleton output contains actionable entries; the collapsed keyboard marker `<ime>` is not a

@@ -1,0 +1,577 @@
+{
+  "displayId": 0,
+  "hierarchy": {
+    "node": [
+      {
+        "windowId": 24,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-e2b1edfb82a9de75",
+        "occlusionState": "partial",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-1492589a82915c9d",
+        "bounds": [
+          0,
+          0,
+          2076,
+          2152
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-14c79023f52a41b7",
+          "class": "android.widget.LinearLayout",
+          "className": "android.widget.LinearLayout",
+          "occlusionState": "partial",
+          "occludedBy": "unlabeled view",
+          "occludedByViewId": "s2-1492589a82915c9d",
+          "bounds": [
+            0,
+            0,
+            2076,
+            2152
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "occlusionState": "partial",
+            "occludedBy": "unlabeled view",
+            "occludedByViewId": "s2-1492589a82915c9d",
+            "bounds": [
+              0,
+              0,
+              2076,
+              2152
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "visible-to-user": true,
+              "view-id": "s2-c0845c5ec1ee4d83",
+              "class": "androidx.compose.ui.platform.ComposeView",
+              "className": "androidx.compose.ui.platform.ComposeView",
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": "s2-1492589a82915c9d",
+              "bounds": [
+                0,
+                0,
+                2076,
+                2152
+              ],
+              "node": {
+                "actions": [
+                  "accessibility_focus"
+                ],
+                "visible-to-user": true,
+                "view-id": "s2-95b279b4833ce306",
+                "occlusionState": "partial",
+                "occludedBy": "unlabeled view",
+                "occludedByViewId": "s2-1492589a82915c9d",
+                "extras": {
+                  "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                },
+                "bounds": [
+                  0,
+                  0,
+                  2076,
+                  2152
+                ],
+                "node": {
+                  "actions": [
+                    "accessibility_focus"
+                  ],
+                  "visible-to-user": true,
+                  "view-id": "s2-f33066220e169986",
+                  "occlusionState": "partial",
+                  "occludedBy": "unlabeled view",
+                  "occludedByViewId": "s2-1492589a82915c9d",
+                  "extras": {
+                    "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                  },
+                  "bounds": [
+                    0,
+                    0,
+                    2076,
+                    2152
+                  ],
+                  "node": {
+                    "actions": [
+                      "accessibility_focus"
+                    ],
+                    "visible-to-user": true,
+                    "view-id": "s2-f609047d918ee333",
+                    "occlusionState": "partial",
+                    "occludedBy": "unlabeled view",
+                    "occludedByViewId": "s2-1492589a82915c9d",
+                    "extras": {
+                      "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                    },
+                    "bounds": [
+                      0,
+                      0,
+                      2076,
+                      2152
+                    ],
+                    "node": {
+                      "actions": [
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "navigation.HomeDestination",
+                      "visible-to-user": true,
+                      "occlusionState": "partial",
+                      "occludedBy": "unlabeled view",
+                      "occludedByViewId": "s2-1492589a82915c9d",
+                      "extras": {
+                        "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                      },
+                      "bounds": [
+                        0,
+                        0,
+                        2076,
+                        2152
+                      ],
+                      "node": {
+                        "actions": [
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "navigation.HomeDestination",
+                        "visible-to-user": true,
+                        "occlusionState": "partial",
+                        "occludedBy": "unlabeled view",
+                        "occludedByViewId": "s2-1492589a82915c9d",
+                        "extras": {
+                          "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                        },
+                        "bounds": [
+                          0,
+                          0,
+                          2076,
+                          2152
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "accessibility_focus"
+                            ],
+                            "visible-to-user": true,
+                            "view-id": "s2-815743448a6cfc2c",
+                            "extras": {
+                              "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                            },
+                            "bounds": [
+                              0,
+                              88,
+                              2076,
+                              1879
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "accessibility_focus",
+                                  "scroll_forward"
+                                ],
+                                "visible-to-user": true,
+                                "view-id": "s2-30cb165b05d411a9",
+                                "scrollable": "true",
+                                "extras": {
+                                  "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                                },
+                                "bounds": [
+                                  0,
+                                  497,
+                                  2076,
+                                  1801
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "accessibility_focus",
+                                    "scroll_forward",
+                                    "scroll_backward"
+                                  ],
+                                  "resource-id": "tap_screen_content",
+                                  "visible-to-user": true,
+                                  "scrollable": "true",
+                                  "extras": {
+                                    "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                                  },
+                                  "bounds": [
+                                    0,
+                                    497,
+                                    2076,
+                                    1801
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "packageName": "dev.jasonpearson.automobile.playground",
+  "windows": [
+    {
+      "id": 24,
+      "displayId": 0,
+      "type": 1,
+      "windowLayer": 0,
+      "isActive": true,
+      "isFocused": true,
+      "bounds": [
+        0,
+        0,
+        2076,
+        2152
+      ],
+      "hierarchy": {
+        "windowId": 24,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-e2b1edfb82a9de75",
+        "occlusionState": "partial",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-1492589a82915c9d",
+        "bounds": [
+          0,
+          0,
+          2076,
+          2152
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-14c79023f52a41b7",
+          "class": "android.widget.LinearLayout",
+          "className": "android.widget.LinearLayout",
+          "occlusionState": "partial",
+          "occludedBy": "unlabeled view",
+          "occludedByViewId": "s2-1492589a82915c9d",
+          "bounds": [
+            0,
+            0,
+            2076,
+            2152
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "occlusionState": "partial",
+            "occludedBy": "unlabeled view",
+            "occludedByViewId": "s2-1492589a82915c9d",
+            "bounds": [
+              0,
+              0,
+              2076,
+              2152
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "visible-to-user": true,
+              "view-id": "s2-c0845c5ec1ee4d83",
+              "class": "androidx.compose.ui.platform.ComposeView",
+              "className": "androidx.compose.ui.platform.ComposeView",
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": "s2-1492589a82915c9d",
+              "bounds": [
+                0,
+                0,
+                2076,
+                2152
+              ],
+              "node": {
+                "actions": [
+                  "accessibility_focus"
+                ],
+                "visible-to-user": true,
+                "view-id": "s2-95b279b4833ce306",
+                "occlusionState": "partial",
+                "occludedBy": "unlabeled view",
+                "occludedByViewId": "s2-1492589a82915c9d",
+                "extras": {
+                  "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                },
+                "bounds": [
+                  0,
+                  0,
+                  2076,
+                  2152
+                ],
+                "node": {
+                  "actions": [
+                    "accessibility_focus"
+                  ],
+                  "visible-to-user": true,
+                  "view-id": "s2-f33066220e169986",
+                  "occlusionState": "partial",
+                  "occludedBy": "unlabeled view",
+                  "occludedByViewId": "s2-1492589a82915c9d",
+                  "extras": {
+                    "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                  },
+                  "bounds": [
+                    0,
+                    0,
+                    2076,
+                    2152
+                  ],
+                  "node": {
+                    "actions": [
+                      "accessibility_focus"
+                    ],
+                    "visible-to-user": true,
+                    "view-id": "s2-f609047d918ee333",
+                    "occlusionState": "partial",
+                    "occludedBy": "unlabeled view",
+                    "occludedByViewId": "s2-1492589a82915c9d",
+                    "extras": {
+                      "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                    },
+                    "bounds": [
+                      0,
+                      0,
+                      2076,
+                      2152
+                    ],
+                    "node": {
+                      "actions": [
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "navigation.HomeDestination",
+                      "visible-to-user": true,
+                      "view-id": "navigation.HomeDestination",
+                      "occlusionState": "partial",
+                      "occludedBy": "unlabeled view",
+                      "occludedByViewId": "s2-1492589a82915c9d",
+                      "extras": {
+                        "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                      },
+                      "bounds": [
+                        0,
+                        0,
+                        2076,
+                        2152
+                      ],
+                      "node": {
+                        "actions": [
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "navigation.HomeDestination",
+                        "visible-to-user": true,
+                        "view-id": "navigation.HomeDestination",
+                        "occlusionState": "partial",
+                        "occludedBy": "unlabeled view",
+                        "occludedByViewId": "s2-1492589a82915c9d",
+                        "extras": {
+                          "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                        },
+                        "bounds": [
+                          0,
+                          0,
+                          2076,
+                          2152
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "accessibility_focus"
+                            ],
+                            "visible-to-user": true,
+                            "view-id": "s2-815743448a6cfc2c",
+                            "extras": {
+                              "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                            },
+                            "bounds": [
+                              0,
+                              88,
+                              2076,
+                              1879
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "accessibility_focus",
+                                  "scroll_forward"
+                                ],
+                                "visible-to-user": true,
+                                "view-id": "s2-30cb165b05d411a9",
+                                "scrollable": "true",
+                                "extras": {
+                                  "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                                },
+                                "bounds": [
+                                  0,
+                                  497,
+                                  2076,
+                                  1801
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "accessibility_focus",
+                                    "scroll_forward",
+                                    "scroll_backward"
+                                  ],
+                                  "resource-id": "tap_screen_content",
+                                  "visible-to-user": true,
+                                  "view-id": "tap_screen_content",
+                                  "scrollable": "true",
+                                  "extras": {
+                                    "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+                                  },
+                                  "bounds": [
+                                    0,
+                                    497,
+                                    2076,
+                                    1801
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "contentHiddenRegions": null,
+  "intentChooserDetected": false,
+  "notificationPermissionDetected": false,
+  "ctrlProxyIncomplete": null,
+  "sources": [
+    "control-proxy"
+  ],
+  "screenWidth": 2076,
+  "screenHeight": 2152,
+  "rotation": 0,
+  "systemInsets": {
+    "top": 165,
+    "bottom": 78,
+    "left": 73,
+    "right": 73
+  },
+  "insets": {
+    "available": true,
+    "source": "android-window-metrics",
+    "units": "physical-pixels",
+    "systemBars": {
+      "visible": {
+        "top": 88,
+        "bottom": 78,
+        "left": 0,
+        "right": 0
+      },
+      "stable": {
+        "top": 88,
+        "bottom": 78,
+        "left": 0,
+        "right": 0
+      }
+    },
+    "displayCutout": {
+      "top": 136,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "displayCutoutInfo": {
+      "classification": "unknown",
+      "bounds": [
+        [
+          1940,
+          0,
+          2076,
+          136
+        ]
+      ]
+    },
+    "systemGestures": {
+      "top": 165,
+      "bottom": 78,
+      "left": 73,
+      "right": 73
+    },
+    "mandatorySystemGestures": {
+      "top": 165,
+      "bottom": 78,
+      "left": 0,
+      "right": 0
+    },
+    "tappableElement": {
+      "top": 88,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "systemChrome": {
+      "visibility": "visible",
+      "statusBar": "visible",
+      "navigationBar": "visible",
+      "homeIndicatorAutoHideRequested": null,
+      "source": "android-window-insets"
+    }
+  },
+  "wakefulness": "Awake",
+  "foregroundActivity": null,
+  "density": 390,
+  "sdkInt": 36,
+  "deviceModel": "sdk_gphone64_arm64",
+  "isEmulator": true,
+  "truncationReasons": null,
+  "nativeScale": 1,
+  "pixelWidth": 2076,
+  "pixelHeight": 2152,
+  "updatedAt": 1791080663160,
+  "receivedAt": 1791080663589,
+  "frameContext": "3ee16402-b6a0-40a6-aa8f-cd017e7c6a27:221",
+  "fresh": true
+}

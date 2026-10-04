@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "accessibility_focus",
+    "scroll_forward"
+  ],
+  "visible-to-user": true,
+  "view-id": "s2-b224aad2a33bfdae",
+  "scrollable": "true",
+  "bounds": {
+    "left": 0,
+    "top": 652,
+    "right": 1080,
+    "bottom": 2064
+  }
+}

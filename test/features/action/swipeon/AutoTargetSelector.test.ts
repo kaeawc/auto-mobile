@@ -105,7 +105,13 @@ describe("SwipeOn autoTarget", () => {
 
   test("falls back to screen swipe when single scrollable does not match direction", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode({ left: 0, top: 0, right: 800, bottom: 200 }, "horizontal-scroll"),
+      {
+        $: {
+          ...createScrollableNode({ left: 0, top: 0, right: 800, bottom: 200 }, "horizontal-scroll")
+            .$,
+          orientation: "horizontal",
+        },
+      },
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 

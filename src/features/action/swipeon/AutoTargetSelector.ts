@@ -43,6 +43,23 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
         );
       }
     }
+    // Shape is only a preference once centre/innermost selection cannot decide.
+    // Keep known-axis matches regardless of shape, and never discard every
+    // unknown-axis candidate just because a landscape list is wider than tall.
+    if (candidates.length > 1) {
+      const vertical = direction === "up" || direction === "down";
+      const preferred = candidates.filter((element) => {
+        if (this.knownScrollAxis(element)) {
+          return true;
+        }
+        const width = Math.abs(element.bounds.right - element.bounds.left);
+        const height = Math.abs(element.bounds.bottom - element.bounds.top);
+        return vertical ? height >= width : width >= height;
+      });
+      if (preferred.length > 0) {
+        return this.pickLargestScrollable(preferred);
+      }
+    }
     return this.pickLargestScrollable(candidates);
   }
 
@@ -59,37 +76,36 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
   }
 
   matchesDirection(element: Element, direction: SwipeDirection): boolean {
-    const vertical = direction === "up" || direction === "down";
+    const axis = this.knownScrollAxis(element);
+    return (
+      axis === undefined || (direction === "up" || direction === "down") === (axis === "vertical")
+    );
+  }
+
+  private knownScrollAxis(element: Element): "horizontal" | "vertical" | undefined {
     const orientation =
       typeof element.orientation === "string" ? element.orientation.toLowerCase() : undefined;
     if (orientation === "horizontal" || orientation === "vertical") {
-      return vertical === (orientation === "vertical");
+      return orientation;
     }
 
     const className = element.class ?? element.className;
     const simpleClassName =
       typeof className === "string" ? (className.split(".").at(-1) ?? "") : "";
     if (["HorizontalScrollView", "ViewPager", "ViewPager2", "LazyRow"].includes(simpleClassName)) {
-      return !vertical;
+      return "horizontal";
     }
     if (
       ["ScrollView", "NestedScrollView", "ListView", "ExpandableListView", "LazyColumn"].includes(
         simpleClassName,
       )
     ) {
-      return vertical;
+      return "vertical";
     }
 
     // RecyclerView and generic Compose nodes do not expose their axis in every
     // capture. scroll_forward/backward actions alone also do not identify it.
-    const width = Math.abs(element.bounds.right - element.bounds.left);
-    const height = Math.abs(element.bounds.bottom - element.bounds.top);
-
-    if (vertical) {
-      return height >= width;
-    }
-
-    return width >= height;
+    return undefined;
   }
 
   getScreenBounds(

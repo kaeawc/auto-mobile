@@ -11,6 +11,9 @@ test/fixtures/android-getevent/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
+test/fixtures/swipeon-auto-target/foldable.json text eol=lf
+test/fixtures/swipeon-auto-target/landscape.json text eol=lf
+test/fixtures/swipeon-auto-target/portrait-element.json text eol=lf
 # Pin byte-exact captured plutil output to LF across Windows checkouts.
 test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
 test/features/observe/windowDumps/*.txt text eol=lf

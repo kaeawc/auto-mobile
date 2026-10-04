@@ -687,7 +687,7 @@ export class ScrollUntilVisible {
       await this.deps.timer.sleep(delayNextAttempt);
       throwIfAborted(signal);
 
-      let latestViewHierarchy: ViewHierarchyResult | null = null;
+      let latestViewHierarchy: ViewHierarchyResult | null | undefined = null;
 
       switch (this.deps.device.platform) {
         case "android":

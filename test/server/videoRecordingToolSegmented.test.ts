@@ -167,6 +167,58 @@ describe("videoRecording tool segmentation branch", () => {
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
 
+  test("all-device start preserves partial failures and bare-stop discovery order", async () => {
+    const second: BootedDevice = { ...androidDevice, deviceId: "second" };
+    const third: BootedDevice = { ...androidDevice, deviceId: "third" };
+    fakeDeviceSessionManager.setConnectedDevices([androidDevice, second, third]);
+    const calls: string[] = [];
+    const originalStart = fakeBackend.start.bind(fakeBackend);
+    fakeBackend.start = async (config) => {
+      calls.push(config.device?.deviceId ?? "missing");
+      if (config.device?.deviceId === second.deviceId) {
+        throw new Error("second unavailable");
+      }
+      return originalStart(config);
+    };
+    const start = parse(await handler()(androidDevice, { action: "start" }));
+    expect(calls).toEqual([androidDevice.deviceId, second.deviceId, third.deviceId]);
+    expect(start.count).toBe(2);
+    expect(start.failures).toEqual([
+      { deviceId: "second", platform: "android", error: "Error: second unavailable" },
+    ]);
+    expect(
+      (start.recordings as Array<{ deviceId: string }>).map((recording) => recording.deviceId),
+    ).toEqual([androidDevice.deviceId, third.deviceId]);
+    const stop = parse(await handler()(androidDevice, { action: "stop" }));
+    expect(stop.count).toBe(2);
+    expect(stop.failures).toEqual([
+      {
+        deviceId: "second",
+        platform: "android",
+        error: "No active video recording found for device.",
+      },
+    ]);
+    expect(fakeBackend.stopCalls.map((recording) => recording.recordingId)).toEqual(
+      (start.recordings as Array<{ recordingId: string }>).map(
+        (recording) => recording.recordingId,
+      ),
+    );
+  });
+
+  test("start and stop failures preserve aggregate error wording", async () => {
+    fakeBackend.start = async () => {
+      throw new Error("capture unavailable");
+    };
+    await expect(
+      handler()(androidDevice, { action: "start", deviceId: androidDevice.deviceId }),
+    ).rejects.toThrow("Failed to start video recordings: Error: capture unavailable");
+    await expect(
+      handler()(androidDevice, { action: "stop", deviceId: androidDevice.deviceId }),
+    ).rejects.toThrow(
+      "Failed to stop video recordings: No active video recording found for device.",
+    );
+  });
+
   test("request abort rolls back every device that already started during fanout", async () => {
     const secondDevice: BootedDevice = {
       deviceId: "test-device-2",

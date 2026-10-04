@@ -187,6 +187,7 @@ export class IosScreenCaptureHelper extends EventEmitter {
   private readonly frameQueue: LatestFrameQueue;
   private readonly frameDeliveryScheduler: FrameDeliveryScheduler;
   private process: HelperProcess | null = null;
+  private controlChannelErrored = false;
   private readonly helperCapabilities = new Set<string>();
   private stderrBuffer = "";
   private exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | null =
@@ -244,6 +245,7 @@ export class IosScreenCaptureHelper extends EventEmitter {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.process = proc;
+    this.controlChannelErrored = false;
     this.emitReadiness("helper-process-spawned", `pid=${proc.pid ?? "?"}`);
 
     proc.stdout.on("data", (chunk) => {
@@ -267,11 +269,18 @@ export class IosScreenCaptureHelper extends EventEmitter {
       this.appendStderr(text);
     });
 
-    proc.once("error", (error) => {
-      this.emit("error", error instanceof Error ? error : new Error(String(error)));
+    proc.stdin.on("error", (error) => {
+      this.controlChannelErrored = true;
+      logger.warn("[IOSScreenCaptureHelper] stdin control channel failed", error);
     });
 
     this.exitPromise = new Promise((resolve) => {
+      proc.once("error", (error) => {
+        // Failed spawns emit error without exit; settle before notifying callers
+        // so their cleanup does not hold the pool transition for the grace period.
+        resolve({ code: proc.exitCode, signal: proc.signalCode });
+        this.emit("error", error instanceof Error ? error : new Error(String(error)));
+      });
       proc.once("exit", (code, signal) => {
         if (this.stderrBuffer.length > 0) {
           this.handleStderrLine(this.stderrBuffer);
@@ -433,7 +442,14 @@ export class IosScreenCaptureHelper extends EventEmitter {
    */
   requestKeyFrame(): boolean {
     const proc = this.process;
-    if (proc === null || !this.isRunning) {
+    if (
+      proc === null ||
+      !this.isRunning ||
+      this.controlChannelErrored ||
+      proc.stdin.destroyed ||
+      proc.stdin.writableEnded ||
+      proc.stdin.errored
+    ) {
       return false;
     }
     try {

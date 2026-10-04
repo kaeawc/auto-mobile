@@ -125,14 +125,20 @@ export class ScreenCaptureHelperProvider {
   }
 
   private async tryCache(expected: string): Promise<string | null> {
-    let metadata: ScreenCaptureHelperMetadata;
+    let metadata: unknown;
     try {
-      metadata = JSON.parse(
-        await fs.readFile(this.metadataPath, "utf8"),
-      ) as ScreenCaptureHelperMetadata;
+      metadata = JSON.parse(await fs.readFile(this.metadataPath, "utf8"));
     } catch (error) {
+      // Missing or stale cache entries are expected after upgrades; download repairs them.
       logger.debug("[SCREEN_CAPTURE_HELPER] No usable cached helper metadata", {
         error: errorMessage(error),
+      });
+      return null;
+    }
+    if (!isCacheMetadata(metadata)) {
+      // Stale metadata schemas are expected after upgrades; download rewrites them.
+      logger.debug("[SCREEN_CAPTURE_HELPER] No usable cached helper metadata", {
+        reason: "Expected an object with a string sha256 and numeric size",
       });
       return null;
     }
@@ -227,6 +233,19 @@ export class ScreenCaptureHelperProvider {
       this.timer.clearTimeout(timeout);
     }
   }
+}
+
+function isCacheMetadata(
+  value: unknown,
+): value is Pick<ScreenCaptureHelperMetadata, "sha256" | "size"> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "sha256" in value &&
+    typeof value.sha256 === "string" &&
+    "size" in value &&
+    typeof value.size === "number"
+  );
 }
 
 function extractHelper(archivePath: string): Buffer {

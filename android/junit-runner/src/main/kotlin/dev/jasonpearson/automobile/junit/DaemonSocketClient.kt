@@ -4,6 +4,7 @@ import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.Closeable
 import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.UnixDomainSocketAddress
@@ -996,6 +997,12 @@ internal class DaemonSocketClient(
     return !closed && channel.isOpen
   }
 
+  internal fun shutdownOutputForTest() {
+    channel.shutdownOutput()
+  }
+
+  internal fun pendingRequestCount(): Int = pending.size
+
   override fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse {
     if (!isConnected()) {
       throw DaemonUnavailableException("Daemon socket connection is not available")
@@ -1015,9 +1022,7 @@ internal class DaemonSocketClient(
       )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
-    pending[requestId] = responseFuture
-
-    sendRequest(request)
+    registerAndSend(requestId, responseFuture, request, timeoutMs)
 
     return awaitResponse(requestId, responseFuture, timeoutMs)
   }
@@ -1041,9 +1046,7 @@ internal class DaemonSocketClient(
       )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
-    pending[requestId] = responseFuture
-
-    sendRequest(request)
+    registerAndSend(requestId, responseFuture, request, timeoutMs)
 
     return awaitResponse(requestId, responseFuture, timeoutMs)
   }
@@ -1070,9 +1073,7 @@ internal class DaemonSocketClient(
       )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
-    pending[requestId] = responseFuture
-
-    sendRequest(request)
+    registerAndSend(requestId, responseFuture, request, timeoutMs)
 
     return awaitResponse(requestId, responseFuture, timeoutMs)
   }
@@ -1123,6 +1124,21 @@ internal class DaemonSocketClient(
     }
 
     return SocketChannel.open(UnixDomainSocketAddress.of(socketPath))
+  }
+
+  private fun registerAndSend(
+    requestId: String,
+    responseFuture: CompletableFuture<DaemonResponse>,
+    request: DaemonRequest,
+    timeoutMs: Long,
+  ) {
+    pending[requestId] = responseFuture
+    try {
+      sendRequest(request)
+    } catch (e: IOException) {
+      pending.remove(requestId)
+      throw mapAwaitFailure(e, timeoutMs)
+    }
   }
 
   private fun sendRequest(request: DaemonRequest) {

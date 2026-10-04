@@ -8,7 +8,6 @@ import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
 import type { PidFileData } from "../../src/daemon/types";
 import { readPidFileDataSync } from "../../src/daemon/daemonFiles";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
 import {
   FakeDaemonProcessTable,
@@ -154,16 +153,19 @@ describe("daemon peer rejoin through injected process discovery", () => {
       }
       return call >= 2;
     };
-    // No injected formatter seam exists. Preserve the private method's inferred
-    // signature and real log I/O while delaying delivery on this instance only.
+    // Delay exit formatting on a separate clock from the readiness deadline.
+    const formattingTimer = new FakeTimer();
+    formattingTimer.enableAutoAdvance();
     const formatExitFailure = h.manager["createDaemonExitFailure"];
     h.manager["createDaemonExitFailure"] = async (...args) => {
-      await defaultTimer.sleep(20);
+      await formattingTimer.sleep(20);
       return formatExitFailure.call(h.manager, ...args);
     };
     try {
       await expect(h.manager.start()).resolves.toBe("joined");
+      expect(formattingTimer.getSleepHistory()).toEqual([20]);
     } finally {
+      formattingTimer.reset();
       h.manager["createDaemonExitFailure"] = formatExitFailure;
     }
     expect(h.table.scanCalls).toBe(2);

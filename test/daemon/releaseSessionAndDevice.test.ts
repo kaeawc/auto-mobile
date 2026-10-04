@@ -127,6 +127,24 @@ describe("releaseSessionAndDevice", () => {
     expect(pool.calls).toEqual([["device", "session"]]);
   });
 
+  test("a conditional release returning no device retains ownership", async () => {
+    const manager = new FakeReleaseManager();
+    const pool = new FakeReleasePool(manager);
+    await releaseSessionAndDevice(manager, pool, "device", "session", "reason", async () => null);
+    expect(manager.hasSession()).toBe(true);
+    expect(manager.calls).toEqual([]);
+    expect(pool.calls).toEqual([]);
+  });
+
+  test("a custom release uses its returned device even without a known failure fallback", async () => {
+    const manager = new FakeReleaseManager();
+    const pool = new FakeReleasePool(manager);
+    await releaseSessionAndDevice(manager, pool, null, "session", "reason", () =>
+      manager.releaseSession("session", "reason"),
+    );
+    expect(pool.calls).toEqual([["device", "session"]]);
+  });
+
   test("a pool failure after successful release still propagates", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);

@@ -302,9 +302,9 @@ export class PlanExecutionOrchestrator {
       // Enable the plan-execution guard BEFORE allocation. Allocation can
       // auto-boot a simulator, and the device-disconnect monitor must not prune
       // a just-booted device out from under it (otherwise allocation fails with
-      // "no devices match criteria"). The finally always clears the guard, even
+      // "no devices match criteria"). The finally always releases this lease, even
       // if allocation or video startup throws.
-      serverConfig.setPlanExecutionActive(true);
+      const planExecutionLease = serverConfig.acquirePlanExecutionLease();
 
       let deviceMapping: Record<string, string> | undefined;
       let video: VideoState | undefined;
@@ -316,7 +316,7 @@ export class PlanExecutionOrchestrator {
         video = await this.startVideoRecording(plan);
         result = await this.runPlan(plan, video);
       } finally {
-        serverConfig.setPlanExecutionActive(false);
+        planExecutionLease.release();
         if (video !== undefined) {
           finalizedVideo = await this.finalizeVideo(video);
         }

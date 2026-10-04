@@ -1,5 +1,9 @@
 import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
-import { POSTURE_PANEL_ROLES, type Posture } from "../../models/DisplayPanel";
+import {
+  buildDisconnectedPanelMessage,
+  POSTURE_PANEL_ROLES,
+  type Posture,
+} from "../../models/DisplayPanel";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
@@ -15,6 +19,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { DisplaySelectionError } from "./DisplaySelection";
+import { selectedDisplayPin } from "./SessionDisplayContext";
 import type { Timer } from "../../utils/SystemTimer";
 
 export interface ObservedAndroidDisplay {
@@ -158,8 +163,29 @@ export class ObservedAndroidDisplayCache {
     }
     const id = logicalDisplayIdForPanel(result.infos, key);
     if (id === undefined) {
+      const panel = device.displays?.panels.find((candidate) => candidate.key === key) ?? {
+        key,
+        role: "unknown" as const,
+      };
+      const connectedPanels = result.infos.map((info) => {
+        const key = physicalPanelKey(info.uniqueId ?? "") || info.logicalId;
+        return {
+          key,
+          role:
+            device.displays?.panels.find((candidate) => candidate.key === key)?.role ??
+            ("unknown" as const),
+        };
+      });
+      const hasPostures = (device.displays?.postures.length ?? 0) > 0;
       throw new DisplaySelectionError(
-        `Display panel "${key}" is not currently connected. Choose an active panel and retry.`,
+        buildDisconnectedPanelMessage(
+          panel.key,
+          panel.role,
+          connectedPanels,
+          hasPostures,
+          selectedDisplayPin() !== undefined,
+        ),
+        { disconnectedPanel: { panel, connectedPanels, hasPostures } },
       );
     }
     return id;

@@ -45,6 +45,96 @@ import {
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "simulator" };
 
+describe("Android observe disconnected fold panels", () => {
+  const inner = "4619827259835644672";
+  const cover = "4619827551948147201";
+  const device: BootedDevice = {
+    ...android,
+    deviceId: "observe-disconnected-fold",
+    displays: {
+      panels: [
+        { key: inner, role: "inner", sizePx: { width: 2076, height: 2152 } },
+        { key: cover, role: "cover", sizePx: { width: 1080, height: 2364 } },
+      ],
+      postures: ["closed", "opened"],
+    },
+  };
+  const captures = {
+    opened: readFileSync(
+      new URL("../../fixtures/android-fold-displays/fold-open-get-displays.txt", import.meta.url),
+      "utf8",
+    ),
+    closed: readFileSync(
+      new URL("../../fixtures/android-fold-displays/fold-closed-get-displays.txt", import.meta.url),
+      "utf8",
+    ),
+  };
+  const message = (
+    key: string,
+    role: string,
+    connectedKey: string,
+    connectedRole: string,
+    posture: string,
+  ) =>
+    `Display "${key}" (${role}) is not connected in the current posture. Connected panels: ${connectedKey} (${connectedRole}). Target a connected panel, omit display, or use display: "active"; to make this panel available, change the device posture with setPosture {posture: "${posture}"}.`;
+  async function observe(posture: keyof typeof captures, display: string) {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: captures[posture], stderr: "" });
+    const screen = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(adb),
+      { viewHierarchy: new FakeViewHierarchy(), cacheStore: new FakeObserveCacheStore(timer) },
+      timer,
+    );
+    try {
+      return await screen.execute({ display, skipScreenshot: true, skipBackStack: true });
+    } finally {
+      ObservedAndroidDisplayCache.release(device.deviceId);
+      displayTransitions.reset(device.deviceId);
+      resetObserveCacheStore();
+    }
+  }
+
+  test("opened observe cover uses the action message and only the connected inner", async () => {
+    await expect(observe("opened", "cover")).rejects.toThrow(
+      message(cover, "cover", inner, "inner", "closed"),
+    );
+  });
+
+  test("closed pinned inner carries the connected cover and posture and pin remedies", async () => {
+    const error = await runWithSelectedDisplayPin(
+      { pin: "inner", inventory: device.displays },
+      () => observe("closed", "inner"),
+    ).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(PinnedDisplayUnavailableError);
+    expect(error).toHaveProperty(
+      "message",
+      message(inner, "inner", cover, "cover", "opened") +
+        " Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly.",
+    );
+    expect(error).toHaveProperty("details", {
+      pin: "inner",
+      availablePanels: [{ key: cover, role: "cover" }],
+    });
+  });
+
+  test.each(["opened", "closed"] as const)(
+    "connected %s panel resolves to logical zero",
+    async (posture) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cmd display get-displays", { stdout: captures[posture], stderr: "" });
+      expect(
+        await new ObservedAndroidDisplayCache(new FakeTimer()).logicalIdForPanel(
+          device,
+          adb,
+          posture === "opened" ? inner : cover,
+        ),
+      ).toBe(0);
+    },
+  );
+});
+
 describe("Android display-list read failures", () => {
   const device: BootedDevice = {
     ...android,
@@ -95,7 +185,9 @@ describe("Android display-list read failures", () => {
       expect(error).toBeInstanceOf(DisplaySelectionError);
       expect(error).toHaveProperty(
         "message",
-        'Display panel "inner" is not currently connected. Choose an active panel and retry.',
+        expect.stringContaining(
+          'Display "inner" (inner) is not connected in the current posture. Connected panels:',
+        ),
       );
     },
   );

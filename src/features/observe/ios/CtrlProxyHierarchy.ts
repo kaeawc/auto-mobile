@@ -55,9 +55,42 @@ export class CtrlProxyHierarchy {
 
   // Track the last known foreground app to detect stale cache from a different app
   private lastKnownPackageName: string | null = null;
+  private lastFallbackToSpringboard = false;
+  private observedHierarchies = new WeakSet<XCTestHierarchy>();
 
   constructor(context: HierarchyDelegateContext) {
     this.context = context;
+  }
+
+  /** Forget per-device observation state when the client discards its cache. */
+  resetState(): void {
+    this.lastKnownPackageName = null;
+    this.lastFallbackToSpringboard = false;
+    this.observedHierarchies = new WeakSet<XCTestHierarchy>();
+  }
+
+  /** Shared receipt hook for sync responses and streamed hierarchy conversions. */
+  observeReceivedHierarchy(hierarchy: XCTestHierarchy): void {
+    // A response can be converted by the stream before the sync request resumes,
+    // and cached captures can be converted again after newer captures arrive.
+    if (this.observedHierarchies.has(hierarchy)) {
+      return;
+    }
+    this.observedHierarchies.add(hierarchy);
+    if (hierarchy.packageName) {
+      this.lastKnownPackageName = hierarchy.packageName;
+    }
+    const fallback = hierarchy.fallbackToSpringboard === true;
+    if (fallback === this.lastFallbackToSpringboard) {
+      return;
+    }
+    this.lastFallbackToSpringboard = fallback;
+    const deviceId = this.context.getDeviceId?.() ?? "unknown";
+    logger.debug(
+      fallback
+        ? `[CTRL_PROXY] Device ${deviceId}, reported package ${hierarchy.packageName}: SpringBoard fallback: runner fell back to SpringBoard; the observed tree may not be the foreground app; this is also the expected state when the device is on the home screen`
+        : `[CTRL_PROXY] Device ${deviceId}, reported package ${hierarchy.packageName}: SpringBoard fallback cleared`,
+    );
   }
 
   /**
@@ -525,6 +558,7 @@ export class CtrlProxyHierarchy {
       throwIfAborted(signal);
 
       if (result.hierarchy) {
+        this.observeReceivedHierarchy(result.hierarchy);
         if (requestOptions?.observerMode) {
           return {
             hierarchy: result.hierarchy,

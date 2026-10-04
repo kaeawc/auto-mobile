@@ -1764,6 +1764,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return {
       ...this.createDelegateContext(),
       getLastConnectFailure: () => this.lastConnectFailure,
+      getDeviceId: () => this.device.deviceId,
       cacheFreshTtlMs: IOSCtrlProxyClient.CACHE_FRESH_TTL_MS,
       getCachedHierarchy: () => this.cachedHierarchy,
       setCachedHierarchy: (h) => {
@@ -2295,6 +2296,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   protected override onClientClosedWithoutConnection(): void {
+    this._hierarchy?.resetState();
     this.stopSdkEventPolling();
     this.sdkEventPollGeneration++;
     this.sdkEventPollAbortController?.abort();
@@ -3461,6 +3463,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult {
+    this.hierarchy.observeReceivedHierarchy(hierarchy);
     const result = this.hierarchy.convertToViewHierarchyResult(hierarchy);
     const captureSequence = this.streamedCaptureSequences.get(hierarchy);
     if (captureSequence !== undefined) {
@@ -3478,6 +3481,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   clearCache(): void {
+    this._hierarchy?.resetState();
     this.cachedHierarchy = null;
     this.resetOlderHierarchyPushRun();
   }

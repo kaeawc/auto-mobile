@@ -1,3 +1,5 @@
+import { runWithAbortSignal } from "../../utils/AbortContext";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { invalidateDisplayCaches } from "../observe/DisplayTransition";
 import {
   AndroidDeviceClockAdapter,
@@ -830,6 +832,8 @@ const NETWORK_CONDITION_OFFLINE_OVERRIDE_ERROR =
   "Use 'offline' alone, or a connected profile with the override.";
 
 /** Best-effort reset that undoes any shaping — used to roll back a failed degrade. */
+const NETWORK_CONDITION_ROLLBACK_COMMAND_TIMEOUT_MS = 2000;
+const NETWORK_CONDITION_ROLLBACK_TOTAL_TIMEOUT_MS = 6000;
 const NETWORK_CONDITION_ROLLBACK_COMMANDS = [
   "emu network delay none",
   "emu network speed full",
@@ -2442,14 +2446,32 @@ export class DeviceState {
 
   /** Best-effort rollback to normal connectivity after a failed degrade sequence. */
   private async rollbackNetworkConditionToNone(adb: AdbExecutor): Promise<void> {
-    for (const command of NETWORK_CONDITION_ROLLBACK_COMMANDS) {
-      try {
-        await adb.executeCommand(command, undefined, undefined, true);
-      } catch (error) {
-        // Rollback is best-effort — the primary error is already being returned.
-        logger.debug(`[DeviceState] network rollback '${command}' failed: ${error}`);
+    await runWithAbortSignal(undefined, async () => {
+      const deadline = this.timer.now() + NETWORK_CONDITION_ROLLBACK_TOTAL_TIMEOUT_MS;
+      for (const command of NETWORK_CONDITION_ROLLBACK_COMMANDS) {
+        const remainingMs = Math.max(0, deadline - this.timer.now());
+        if (remainingMs === 0) {
+          break;
+        }
+        const timeoutMs = Math.min(NETWORK_CONDITION_ROLLBACK_COMMAND_TIMEOUT_MS, remainingMs);
+        const cleanup = new AbortController();
+        try {
+          await raceWithDeadline(
+            () => adb.executeCommand(command, timeoutMs, undefined, true, cleanup.signal),
+            {
+              timer: this.timer,
+              timeoutMs,
+              signal: cleanup.signal,
+              label: "Emulator network-condition rollback",
+              onTimeout: () => cleanup.abort(),
+            },
+          );
+        } catch (error) {
+          // The original typed failure must survive a failed connectivity restore.
+          logger.warn(`[DeviceState] network rollback '${command}' failed`, error);
+        }
       }
-    }
+    });
   }
 
   /**

@@ -1,3 +1,4 @@
+import { notifyDeviceIncarnationRemoved } from "../utils/deviceIncarnation";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
@@ -1603,6 +1604,16 @@ interface ShutdownResult {
 
 const deviceShutdownService = new DeviceShutdownService();
 
+function notifyUnpooledDeviceRemoval(
+  deviceId: string,
+  capturedDevice: PooledDevice | null,
+  pool: Pick<DevicePool, "getDevice"> | undefined,
+): void {
+  if (!capturedDevice && !pool?.getDevice(deviceId)) {
+    notifyDeviceIncarnationRemoved(deviceId);
+  }
+}
+
 export async function shutdownDevice(
   context: ShutdownEntryContext,
   dependencies: DeviceToolsDependencies,
@@ -1733,6 +1744,11 @@ export async function shutdownDevice(
           );
           perf.endOperation("retireOwnership");
         }
+
+        // Pooled teardown already notified at its guarded removal. Direct/unpooled
+        // shutdown has no removal hook; notify only after confirmed retirement and
+        // never for a captured pooled epoch that may already have a successor.
+        notifyUnpooledDeviceRemoval(device.deviceId, expectedPooledDevice, devicePool);
 
         // Retire the installed-apps cache incarnation BEFORE the shutdown
         // reservation is released, i.e. before a same-ID replacement can boot

@@ -1,3 +1,8 @@
+import {
+  clearAndroidImeQuarantine,
+  quarantineAndroidIme,
+  withAndroidImeLock,
+} from "../../src/features/action/androidImeLock";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -712,6 +717,24 @@ describe("killDevice handler", () => {
   beforeEach(reset);
   afterEach(cleanup);
   afterAll(cleanup);
+
+  test("confirmed direct-mode kill clears IME quarantine without a pool", async () => {
+    const device: BootedDevice = {
+      deviceId: "ime-direct-kill",
+      name: "Pixel",
+      platform: "android",
+    };
+    manager = new SuccessfulKillDeviceManager();
+    manager.setBootedDevices("android", [device]);
+    setDeviceToolsDependencies({ deviceManagerFactory: () => manager, timer: new FakeTimer() });
+    quarantineAndroidIme(device.deviceId);
+    try {
+      await ToolRegistry.getTool("killDevice")!.handler({ device });
+      expect(await withAndroidImeLock(device.deviceId, async () => true)).toBe(true);
+    } finally {
+      clearAndroidImeQuarantine(device.deviceId);
+    }
+  });
 
   /**
    * The pooled AVD name is a host-side label, not proof of identity: a different
@@ -4708,6 +4731,7 @@ describe("killDevice handler", () => {
             },
             assertDeviceActionable: () => {},
             reserveDeviceForShutdown: async () => undefined,
+            getDevice: () => null,
           } as never,
         );
       }

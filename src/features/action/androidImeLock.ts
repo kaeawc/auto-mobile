@@ -1,4 +1,5 @@
 import { Mutex } from "async-mutex";
+import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 
 type ImeLockRelease = Awaited<ReturnType<Mutex["acquire"]>>;
 
@@ -11,10 +12,17 @@ export function quarantineAndroidIme(deviceId: string): void {
   unsafeImeDevices.add(deviceId);
 }
 
-/** Call only after verified explicit IME selection, runner restart, or device reset. */
+/** Call only after verified explicit IME selection, runner restart, or device teardown/reset. */
 export function clearAndroidImeQuarantine(deviceId: string): void {
   unsafeImeDevices.delete(deviceId);
 }
+
+registerDeviceIncarnationListener({
+  name: "android-ime-quarantine",
+  onDeviceRemoved: clearAndroidImeQuarantine,
+  // A snapshot restore can retain unsafe guest IME state; only teardown clears it here.
+  onDeviceIncarnationChanged: () => {},
+});
 
 async function acquireImeLock(lock: Mutex, signal?: AbortSignal): Promise<ImeLockRelease> {
   signal?.throwIfAborted();

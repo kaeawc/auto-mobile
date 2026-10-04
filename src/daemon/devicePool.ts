@@ -1,3 +1,4 @@
+import { notifyDeviceIncarnationRemoved } from "../utils/deviceIncarnation";
 import { isSessionReleasing } from "./sessionReleaseState";
 import {
   InMemoryDeviceHealthMarkers,
@@ -1672,6 +1673,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    notifyDeviceIncarnationRemoved(deviceId);
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);

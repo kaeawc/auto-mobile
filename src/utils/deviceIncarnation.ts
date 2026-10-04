@@ -1,3 +1,5 @@
+import { logger } from "./logger";
+
 /**
  * Process-local access to the device pool's connection-epoch counter.
  *
@@ -27,6 +29,8 @@ export interface DeviceIncarnationAdvanceResult {
 /** One owner of state keyed by a device serial. */
 export interface DeviceIncarnationListener {
   readonly name: string;
+  /** Synchronous cleanup after a guarded removal, before the serial can be reused. */
+  onDeviceRemoved?(deviceId: string): void;
   /**
    * Quiesce host state while the current guest is still alive. VM snapshot
    * loading rewinds guest processes, so owners such as screen recording must
@@ -82,6 +86,18 @@ export function registerDeviceIncarnationListener(listener: DeviceIncarnationLis
       listeners.delete(listener.name);
     }
   };
+}
+
+/** Retire serial-scoped state without waiting for cache persistence or touching a successor. */
+export function notifyDeviceIncarnationRemoved(deviceId: string): void {
+  for (const listener of getDeviceIncarnationListeners()) {
+    try {
+      listener.onDeviceRemoved?.(deviceId);
+    } catch (error) {
+      // Removal already committed; an observer cannot prevent other owners from cleaning up.
+      logger.warn(`[DeviceIncarnation] Failed to remove ${listener.name} for ${deviceId}`, error);
+    }
+  }
 }
 
 /** Snapshot the module-init listener inventory for the restore invalidation funnel. */

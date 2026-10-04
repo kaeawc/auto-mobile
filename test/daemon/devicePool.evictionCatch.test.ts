@@ -8,6 +8,12 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { logger } from "../../src/utils/logger";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import {
+  clearAndroidImeQuarantine,
+  quarantineAndroidIme,
+  withAndroidImeLock,
+} from "../../src/features/action/androidImeLock";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 // Regression for #3593: the emulator-exit eviction was a fire-and-forget
@@ -144,5 +150,94 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       },
     });
     expect(incident.outputTail).not.toContain("should-not-leak");
+  });
+});
+
+describe("device removal IME quarantine", () => {
+  const device = { deviceId: "ime-removal-serial", name: "Pixel", platform: "android" as const };
+  const otherId = "ime-unrelated-serial";
+  let manager: SessionManager;
+  let pool: DevicePool;
+  let devices: FakeDeviceUtils;
+
+  beforeEach(async () => {
+    const timer = new FakeTimer();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    devices = new FakeDeviceUtils();
+    devices.setBootedDevices("android", [device]);
+    pool = new DevicePool(
+      createDevicePoolDependencies(manager, "ime-removal", {
+        timer,
+        deviceManager: devices,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        recoveryPolicy: { onLoss: false, maxAttempts: 0 },
+      }),
+    );
+    await pool.initializeWithDevices([device]);
+    quarantineAndroidIme(device.deviceId);
+    quarantineAndroidIme(otherId);
+  });
+
+  afterEach(() => {
+    manager.stopCleanupTimer();
+    clearAndroidImeQuarantine(device.deviceId);
+    clearAndroidImeQuarantine(otherId);
+  });
+
+  it.each(["remove", "disconnect", "refresh", "shutdown", "replacement"] as const)(
+    "%s clears only the removed device's IME quarantine",
+    async (route) => {
+      const captured = pool.getDevice(device.deviceId)!;
+      if (route === "remove") {
+        await pool.removeDevice(device.deviceId);
+      } else if (route === "disconnect") {
+        devices.setBootedDevices("android", []);
+        await pool.removeDisconnectedDevice(device.deviceId, false);
+      } else if (route === "refresh") {
+        devices.setBootedDevices("android", []);
+        for (let miss = 0; miss < 3; miss++) {
+          await pool.refreshDevices();
+        }
+        expect(pool.getDevice(device.deviceId)).toBeNull();
+      } else if (route === "shutdown") {
+        await pool.retireDeviceForShutdown(captured);
+      } else {
+        await pool.replaceDeviceForShutdown(captured, { ...device, name: "Fresh Pixel" });
+        expect(pool.getDevice(device.deviceId)?.incarnation).not.toBe(captured.incarnation);
+      }
+      expect(await withAndroidImeLock(device.deviceId, async () => "allowed")).toBe("allowed");
+      await expect(withAndroidImeLock(otherId, async () => true)).rejects.toThrow(
+        "IME state is unknown",
+      );
+    },
+  );
+
+  it("removing one serial leaves another serial quarantined", async () => {
+    await pool.removeDevice(device.deviceId);
+    await expect(withAndroidImeLock(otherId, async () => true)).rejects.toThrow(
+      "IME state is unknown",
+    );
+  });
+
+  it("session release keeps quarantine on the same pooled incarnation", async () => {
+    await pool.bindOrReuseDeviceSession("ime-owner", device.deviceId, "android");
+    const captured = pool.getDevice(device.deviceId);
+    await manager.releaseSession("ime-owner");
+    await pool.releaseDevice(device.deviceId, "ime-owner");
+    expect(pool.getDevice(device.deviceId)).toBe(captured);
+    expect(pool.getDevice(device.deviceId)?.status).toBe("idle");
+    await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
+      "IME state is unknown",
+    );
+  });
+
+  it("stale removal cannot clear a replacement's new quarantine", async () => {
+    const captured = pool.getDevice(device.deviceId)!;
+    await pool.replaceDeviceForShutdown(captured, device);
+    quarantineAndroidIme(device.deviceId);
+    await pool.removeDevice(device.deviceId, true, captured);
+    await expect(withAndroidImeLock(device.deviceId, async () => true)).rejects.toThrow(
+      "IME state is unknown",
+    );
   });
 });

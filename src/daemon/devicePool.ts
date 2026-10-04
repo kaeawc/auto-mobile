@@ -3635,6 +3635,11 @@ export class DevicePool {
     let firstAttemptLogged = false;
     let refreshFailure: string | undefined;
     let lossIncident: EmulatorLossIncident | undefined;
+    recoveryTarget?.onRecoveryWait?.({
+      responseMarginMs: this.RECOVERY_RESPONSE_MARGIN_MS,
+      restartDeadlineMs: recoveryTarget.restartRecoveryDeadlineMs,
+      timeoutError: () => this.recoveryAssignmentError(sessionId, recoveryTarget, lossIncident),
+    });
 
     // Select synchronously: the ordinary path calls the original executor directly,
     // with no deadline wrapper or additional promise hop before candidate capture.
@@ -3825,7 +3830,7 @@ export class DevicePool {
       this.timer.now() >= restartDeadline ||
       deadline - this.RECOVERY_RESPONSE_MARGIN_MS >= restartDeadline
     ) {
-      return {};
+      return { assignmentSignal: getAbortSignal() };
     }
     const requestController = new AbortController();
     const callerSignal = getAbortSignal();

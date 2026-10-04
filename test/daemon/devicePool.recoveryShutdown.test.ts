@@ -788,7 +788,7 @@ test.each(["not-attempted", "exhausted"] as const)(
       },
     );
     await flush();
-    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    expect(timer.getPendingTimeouts()).toEqual([1_000]);
     await incidents.completeRecovery(incident.id, outcome, { sessionState: "awaiting-device" });
     timer.advanceTime(1_000);
     await drainUntilQuiescent(timer);
@@ -833,11 +833,143 @@ test("restart assignment keeps waiting while the loss incident has no recovery o
   timer.advanceTime(1_000);
   await flush();
   expect(settled).toBe(false);
-  expect(timer.getPendingSleeps()).toEqual([1_000]);
+  expect(timer.getPendingTimeouts()).toEqual([1_000]);
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   timer.advanceTime(1_000);
   await expect(resume).resolves.toMatchObject({ assignedDevice: original.deviceId });
+});
+
+test.each([
+  [3_500, 60_000],
+  [undefined, 3_500],
+  [3_500, undefined],
+  [60_000, 3_500],
+] as const)(
+  "joined restart acquisition keeps caller deadlines separate (%s, %s)",
+  async (firstDeadline, secondDeadline) => {
+    const { timer, sessions, pool, manager } = await setupPassiveRestart();
+    sessions.stopCleanupTimer();
+    try {
+      const acquire = (requestDeadlineMs: number | undefined) =>
+        sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+          requestDeadlineMs,
+        });
+      let firstResult: unknown;
+      let secondResult: unknown;
+      let firstSettled = false;
+      let secondSettled = false;
+      const first = acquire(firstDeadline).then(
+        (session) => {
+          firstResult = session;
+          firstSettled = true;
+        },
+        (error: unknown) => {
+          firstResult = error;
+          firstSettled = true;
+        },
+      );
+      await drainUntilQuiescent(timer);
+      const second = acquire(secondDeadline).then(
+        (session) => {
+          secondResult = session;
+          secondSettled = true;
+        },
+        (error: unknown) => {
+          secondResult = error;
+          secondSettled = true;
+        },
+      );
+      await drainUntilQuiescent(timer);
+      for (const step of [1_000, 1_000, 499]) {
+        timer.advanceTime(step);
+        await drainUntilQuiescent(timer);
+      }
+      expect(firstSettled).toBe(false);
+      expect(secondSettled).toBe(false);
+      timer.advanceTime(1);
+      await drainUntilQuiescent(timer);
+      expect(firstSettled).toBe(firstDeadline === 3_500);
+      expect(secondSettled).toBe(secondDeadline === 3_500);
+      expect(String(firstDeadline === 3_500 ? firstResult : secondResult)).toContain(
+        "Cannot safely recover session",
+      );
+      manager.bootedDevices = [original];
+      timer.advanceTime(500);
+      await drainUntilQuiescent(timer);
+      timer.advanceTime(1_000);
+      await Promise.all([first, second]);
+      expect(firstDeadline === 3_500 ? secondResult : firstResult).toMatchObject({
+        assignedDevice: original.deviceId,
+      });
+      expect(pool.getDevice(original.deviceId)?.sessionId).toBe("session");
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      sessions.stopCleanupTimer();
+    }
+  },
+);
+
+test("last joined restart waiter aborts slow discovery and fences its late device claim", async () => {
+  const { timer, sessions, pool, manager } = await setupPassiveRestart();
+  sessions.stopCleanupTimer();
+  const discovery =
+    Promise.withResolvers<Awaited<ReturnType<typeof manager.getBootedDevicesDetailed>>>();
+  const originalDiscovery = manager.getBootedDevicesDetailed.bind(manager);
+  manager.getBootedDevicesDetailed = () => discovery.promise;
+  const acquire = (requestDeadlineMs: number) =>
+    sessions
+      .getOrCreateSession("session", pool, "android", undefined, true, { requestDeadlineMs })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+  const first = acquire(3_500);
+  await drainUntilQuiescent(timer);
+  let secondSettled = false;
+  const second = acquire(4_500).then((result) => {
+    secondSettled = true;
+    return result;
+  });
+  await drainUntilQuiescent(timer);
+  timer.advanceTime(2_500);
+  await drainUntilQuiescent(timer);
+  expect(String(await first)).toContain("Cannot safely recover session");
+  expect(secondSettled).toBe(false);
+  manager.bootedDevices = [original];
+  const lateDiscovery = await originalDiscovery();
+  timer.advanceTime(1_000);
+  // Resolve in the same turn as the final deadline, before rejection cleanup runs.
+  discovery.resolve(lateDiscovery);
+  expect(String(await second)).toContain("Cannot safely recover session");
+  await drainUntilQuiescent(timer);
+  timer.advanceTime(1_000);
+  await drainUntilQuiescent(timer);
+  expect(sessions.getSession("session")).toBeNull();
+  expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
+  expect(timer.getPendingTimeouts()).toEqual([]);
+});
+
+test("single restart acquisition retains its deadline and fences late availability", async () => {
+  const { timer, sessions, pool, manager } = await setupPassiveRestart();
+  sessions.stopCleanupTimer();
+  const acquisition = sessions
+    .getOrCreateSession("session", pool, "android", undefined, true, {
+      requestDeadlineMs: 3_500,
+    })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  await drainUntilQuiescent(timer);
+  timer.advanceTime(2_500);
+  expect(String(await acquisition)).toContain("Cannot safely recover session");
+  manager.bootedDevices = [original];
+  timer.advanceTime(1_000);
+  await drainUntilQuiescent(timer);
+  expect(sessions.getSession("session")).toBeNull();
+  expect(pool.getDevice(original.deviceId)?.sessionId ?? null).toBeNull();
+  expect(timer.getPendingTimeouts()).toEqual([]);
 });
 
 test("restart assignment reserves a response margin before a nearer request deadline", async () => {
@@ -1255,7 +1387,7 @@ test("device-restart resume waits for the same serial and preserves its session 
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    expect(timer.getPendingTimeouts()).toEqual([1_000]);
     expect(await persistence.getSession?.("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
@@ -1283,8 +1415,8 @@ test("device-restart resume waits through an unknown new serial and binds by AVD
     manager.bootedDevices = [unknown];
     await pool.refreshDevices();
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
-    await flush();
-    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    await drainUntilQuiescent(timer);
+    expect(timer.getPendingTimeouts()).toEqual([1_000]);
     expect(await persistence.getSession?.("session")).toMatchObject({
       release_reason: `device-restart:${original.name}`,
     });
@@ -1377,7 +1509,7 @@ test("device-restart resume terminalizes absence at the persisted restart deadli
   try {
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    expect(timer.getPendingTimeouts()).toEqual([1_000]);
     timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     await expect(resume).rejects.toThrow("recovery reason: target-absent");
     expect(await persistence.getSession?.("session")).toMatchObject({
@@ -1399,7 +1531,7 @@ test("device-restart resume stops at the earlier session expiry", async () => {
     persisted.expires_at_ms = 5_000;
     const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
     await flush();
-    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    expect(timer.getPendingTimeouts()).toEqual([1_000]);
     timer.advanceTime(5_000);
     await expect(resume).rejects.toThrow("recovery reason: target-absent");
     expect(await persistence.getSession?.("session")).toMatchObject({

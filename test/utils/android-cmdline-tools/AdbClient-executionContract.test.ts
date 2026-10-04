@@ -37,6 +37,53 @@ function autoRetrySeam(): [DefaultRetryExecutor, FakeTimer] {
   return [new DefaultRetryExecutor(timer), timer];
 }
 
+describe("AdbClient constructor test execution selection", () => {
+  test.each([undefined, "", "false", "0", "true", "1", "FALSE", " "])(
+    "preserves the test-mode interpretation of %s",
+    (value) => {
+      const previous = process.env.AUTOMOBILE_TEST_MODE;
+      try {
+        if (value === undefined) {
+          delete process.env.AUTOMOBILE_TEST_MODE;
+        } else {
+          process.env.AUTOMOBILE_TEST_MODE = value;
+        }
+        const expected = value !== undefined && value !== "" && value !== "false" && value !== "0";
+        const client = new AdbClient(null, null, null, ...autoRetrySeam());
+        expect(Reflect.get(client, "isTestMode")).toBe(expected);
+        const injected = new AdbClient(null, async () => ok("injected"), null, ...autoRetrySeam());
+        expect(Reflect.get(injected, "isTestMode")).toBe(true);
+      } finally {
+        if (previous === undefined) {
+          delete process.env.AUTOMOBILE_TEST_MODE;
+        } else {
+          process.env.AUTOMOBILE_TEST_MODE = previous;
+        }
+      }
+    },
+  );
+
+  test("the test-mode stub returns the same empty ExecResult", async () => {
+    const previous = process.env.AUTOMOBILE_TEST_MODE;
+    try {
+      process.env.AUTOMOBILE_TEST_MODE = "true";
+      const client = new AdbClient(null, null, null, ...autoRetrySeam());
+      const result = await client.execAsync("unused", []);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("");
+      expect(result.toString()).toBe("");
+      expect(result.trim()).toBe("");
+      expect(result.includes("")).toBe(false);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_TEST_MODE;
+      } else {
+        process.env.AUTOMOBILE_TEST_MODE = previous;
+      }
+    }
+  });
+});
+
 describe("AdbClient retry contract", () => {
   test("runs beforeDispatch after path resolution and before the ADB subprocess", async () => {
     const events: string[] = [];
@@ -1013,6 +1060,38 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
     };
     return { argvs, exec };
   }
+
+  test.each([
+    { command: 'install "" "/tmp/my app.apk"', expected: ["install", "/tmp/my app.apk"] },
+    { command: 'install "/tmp/my app.apk', expected: ["install", "/tmp/my app.apk"] },
+    { command: "install '/tmp/my app.apk'", expected: ["install", "/tmp/my app.apk"] },
+    { command: "shell 'echo a | cat", expected: ["shell", "'echo a | cat"] },
+    { command: "shell\t'echo a | cat'", expected: ["shell", "echo a | cat"] },
+    { command: 'install "/tmp/my \'app.apk"', expected: ["install", "/tmp/my 'app.apk"] },
+    { command: "install '/tmp/my \"app.apk'", expected: ["install", '/tmp/my "app.apk'] },
+  ])("preserves tolerant tokenization for $command", async ({ command, expected }) => {
+    const { argvs, exec } = recorder();
+    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    await client.executeCommand(command);
+    expect(argvs).toEqual([["-s", "emulator-5554", ...expected]]);
+  });
+
+  test("preserves platform-specific escapes and drops a trailing escape only on POSIX", async () => {
+    const { argvs, exec } = recorder();
+    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    await client.executeCommand("push local\\.txt /sdcard/remote.txt\\");
+    await client.executeCommand("push 'local\\.txt' /sdcard/remote.txt");
+    expect(argvs).toEqual([
+      [
+        "-s",
+        "emulator-5554",
+        "push",
+        process.platform === "win32" ? "local\\.txt" : "local.txt",
+        process.platform === "win32" ? "/sdcard/remote.txt\\" : "/sdcard/remote.txt",
+      ],
+      ["-s", "emulator-5554", "push", "local\\.txt", "/sdcard/remote.txt"],
+    ]);
+  });
 
   test("prefixes the target serial with -s and keeps a quoted shell command as one argument", async () => {
     const { argvs, exec } = recorder();

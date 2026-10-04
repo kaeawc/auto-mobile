@@ -168,7 +168,17 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
       waitForScreen: async () => true,
     };
 
-    const navigateTo = new NavigateTo(androidA, undefined, uiStateSetup, screenWaiter, navManager);
+    // Authorize replay with the running session that holds the device lock, as production does.
+    const navigateTo = new NavigateTo(
+      androidA,
+      undefined,
+      uiStateSetup,
+      screenWaiter,
+      navManager,
+      undefined,
+      undefined,
+      sessionId,
+    );
     const result = await navigateTo.execute({ targetScreen: "Detail", platform: "android" });
     expect(result.success).toBe(true);
 

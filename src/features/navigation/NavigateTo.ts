@@ -1,3 +1,8 @@
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  stripNavigationToolParams,
+} from "../../daemon/constants";
 import { BootedDevice, NavigateToResult } from "../../models";
 import {
   AdbClientFactory,
@@ -33,6 +38,8 @@ export interface NavigateToOptions {
   platform: "android" | "ios";
   /** Session that selected the outer device, retained by internal replays. */
   sessionUuid?: string;
+  [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]?: number;
+  [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]?: number;
 }
 
 /**
@@ -262,10 +269,12 @@ export class NavigateTo {
             }
 
             // Replay the tool call
-            await this.executeToolCall(edge.interaction);
-            executedPath.push(
-              `${edge.interaction.toolName}(${JSON.stringify(edge.interaction.args)})`,
-            );
+            const interaction = {
+              ...edge.interaction,
+              args: stripNavigationToolParams(edge.interaction.args),
+            };
+            await this.executeToolCall(interaction, options);
+            executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(interaction.args)})`);
           } else {
             // No known interaction - try back button
             logger.info(`[NAVIGATE_TO] No known interaction for edge, using back button`);
@@ -338,7 +347,10 @@ export class NavigateTo {
   /**
    * Execute a tool call by looking up the tool in the registry.
    */
-  private async executeToolCall(interaction: ToolCallInteraction): Promise<void> {
+  private async executeToolCall(
+    interaction: ToolCallInteraction,
+    options: NavigateToOptions,
+  ): Promise<void> {
     logger.info(`[NAVIGATE_TO] Replaying tool call: ${interaction.toolName}`);
 
     // Replay through the internal-call seam (#3108): it resolves the tool,
@@ -348,10 +360,16 @@ export class NavigateTo {
     // replay neither diffs its observation nor advances the agent-facing diff
     // baseline. Throws ActionableError if the tool is not registered.
     const response = await ToolRegistry.callInternal(interaction.toolName, {
-      ...(interaction.args as Record<string, unknown>),
+      ...stripNavigationToolParams(interaction.args),
       platform: this.device.platform,
       deviceId: this.device.deviceId,
       ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+      ...(options[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
+        ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: options[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
+        : {}),
+      ...(options[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
+        ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: options[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
+        : {}),
     });
     throwIfInternalToolFailed(response, interaction.toolName, this.device.platform);
   }

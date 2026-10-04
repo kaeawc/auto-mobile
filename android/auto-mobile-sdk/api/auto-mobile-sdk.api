@@ -1030,10 +1030,12 @@ Compiled from "AutoMobileClickTracker.kt"
 public final class dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker {
   public static final dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker INSTANCE;
   public static final int $stable;
-  public final void initialize$auto_mobile_sdk(android.app.Application, java.lang.String);
+  public final void initialize$auto_mobile_sdk(android.content.Context, java.lang.String);
+  public final android.app.Activity findActivity$auto_mobile_sdk(android.content.Context);
   public final void shutdown(android.content.Context);
-  public static final java.util.WeakHashMap access$getWrappedActivities$p();
   public static final void access$wrapWindowCallback(dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker, android.app.Activity);
+  public static final void access$restoreWindowCallback(dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker, android.app.Activity);
+  public static final java.util.WeakHashMap access$getWrappedActivities$p();
   public static final android.os.Handler access$getHandler$p();
   public static final boolean access$isInitialized$p();
   public static final long access$getLastTapProcessedAt$p();

@@ -9,6 +9,11 @@ import {
 } from "../../src/server/networkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { logger } from "../../src/utils/logger";
+import * as networkEventRepository from "../../src/db/networkEventRepository";
+import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
+import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -30,6 +35,8 @@ describe("network tool schema", () => {
   let iosMockRuleSyncCalls: number;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
   let androidGetInstanceSpy: ReturnType<typeof spyOn>;
+  let warnSpy: ReturnType<typeof spyOn>;
+  let androidSendResult: boolean | Error;
   let originalIosBundlePath: string | undefined;
   let originalIosIpaPath: string | undefined;
   let originalSkipDownload: string | undefined;
@@ -61,6 +68,8 @@ describe("network tool schema", () => {
     iosErrorSimulations = [];
     iosMockRuleSyncCalls = 0;
     androidMessages = [];
+    androidSendResult = true;
+    warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       sendMessage: (message: string) => {
         iosMessages.push(message);
@@ -77,7 +86,10 @@ describe("network tool schema", () => {
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       sendMessage: (message: string) => {
         androidMessages.push(message);
-        return true;
+        if (androidSendResult instanceof Error) {
+          throw androidSendResult;
+        }
+        return androidSendResult;
       },
     } as AndroidCtrlProxyClient);
     registerNetworkTools();
@@ -90,6 +102,7 @@ describe("network tool schema", () => {
     serverConfig.setNetworkMockableEnabled(false);
     iosGetInstanceSpy.mockRestore();
     androidGetInstanceSpy.mockRestore();
+    warnSpy.mockRestore();
     if (localRunnerIpa) {
       await fs
         .rm(path.dirname(localRunnerIpa), { recursive: true, force: true })
@@ -501,6 +514,161 @@ describe("network tool schema", () => {
     expect(androidGetInstanceSpy).not.toHaveBeenCalled();
     expect(iosMockRuleSyncCalls).toBe(1);
   });
+
+  for (const outcome of ["disconnected", "throws", "connected"] as const) {
+    function setSendOutcome(): void {
+      androidSendResult =
+        outcome === "throws" ? new Error("socket send failed") : outcome === "connected";
+    }
+
+    function expectSyncStatus(payload: Record<string, unknown>): void {
+      if (outcome === "connected") {
+        expect(payload).not.toHaveProperty("deviceSynced");
+        expect(payload).not.toHaveProperty("warning");
+      } else {
+        expect(payload.deviceSynced).toBe(false);
+        expect(payload.warning).toEqual(expect.stringContaining("connection is restored"));
+        if (outcome === "throws") {
+          expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining("socket send failed"),
+            androidSendResult,
+          );
+        }
+      }
+    }
+
+    test(`mockNetwork retains rule and reports Android sync when sendMessage ${outcome}`, async () => {
+      setSendOutcome();
+      const response = await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(
+        androidDevice,
+        { host: "api.example.com", path: "/items", limit: 2 },
+      );
+      const payload = parseToolJson(response);
+      expectSyncStatus(payload);
+      expect(payload.mockId).toBe("mock-1");
+      expect(payload.mocked).toEqual({ "* api.example.com/items": 2 });
+      expect(NetworkState.getInstance().getMocks().has(payload.mockId)).toBe(true);
+    });
+
+    test(`clearMockNetwork retains remaining rules and reports Android sync when sendMessage ${outcome}`, async () => {
+      const mockTool = ToolRegistry.getTool("mockNetwork")!;
+      await mockTool.deviceAwareHandler!(androidDevice, { host: "api.example.com", path: "/one" });
+      await mockTool.deviceAwareHandler!(androidDevice, { host: "api.example.com", path: "/two" });
+      setSendOutcome();
+      const response = await ToolRegistry.getTool("clearMockNetwork")!.deviceAwareHandler!(
+        androidDevice,
+        { mockId: "mock-1" },
+      );
+      const payload = parseToolJson(response);
+      expectSyncStatus(payload);
+      expect(payload.cleared).toBe(1);
+      expect(payload.remaining).toEqual({ "* api.example.com/two": -1 });
+      expect(NetworkState.getInstance().getMockSummary()).toEqual(payload.remaining);
+    });
+
+    test(`network retains simulation and reports Android sync when sendMessage ${outcome}`, async () => {
+      setSendOutcome();
+      const response = await ToolRegistry.getTool("network")!.deviceAwareHandler!(androidDevice, {
+        simulateErrors: { errorType: "timeout", durationSeconds: 30, limit: 2 },
+      });
+      const payload = parseToolJson(response);
+      expectSyncStatus(payload);
+      expect(payload.simulatingErrors).toMatchObject({ errorType: "timeout", limit: 2 });
+      expect(NetworkState.getInstance().simulation).toMatchObject({
+        errorType: "timeout",
+        limit: 2,
+      });
+    });
+  }
+
+  test("network retains cancellation when Android sync fails", async () => {
+    const tool = ToolRegistry.getTool("network")!;
+    await tool.deviceAwareHandler!(androidDevice, {
+      simulateErrors: { durationSeconds: 30 },
+    });
+    androidSendResult = false;
+    const payload = parseToolJson(
+      await tool.deviceAwareHandler!(androidDevice, {
+        simulateErrors: { cancel: true },
+      }),
+    );
+    expect(payload.deviceSynced).toBe(false);
+    expect(payload.simulatingErrors).toBeUndefined();
+    expect(NetworkState.getInstance().simulation).toBeNull();
+    expect(JSON.parse(androidMessages.at(-1)!)).toMatchObject({
+      type: "set_network_error_simulation",
+      enabled: false,
+    });
+  });
+
+  for (const eventCount of [10_001, 10_000]) {
+    test(`getNetworkGraph reports truncation only above cap with ${eventCount} events`, async () => {
+      const events: NetworkEventWithId[] = Array.from({ length: eventCount }, (_, index) => ({
+        id: index + 1,
+        deviceId: androidDevice.deviceId,
+        timestamp: eventCount - index,
+        applicationId: null,
+        sessionId: null,
+        url: "https://api.example.com/items",
+        host: "api.example.com",
+        path: "/items",
+        method: "GET",
+        statusCode: index === 10_000 ? 500 : 200,
+        durationMs: index + 1,
+        requestBodySize: 0,
+        responseBodySize: 0,
+        protocol: null,
+        error: null,
+      }));
+      const repositorySpy = spyOn(networkEventRepository, "getNetworkEvents").mockResolvedValue(
+        events,
+      );
+      try {
+        const response = await ToolRegistry.getTool("getNetworkGraph")!.deviceAwareHandler!(
+          androidDevice,
+          {},
+        );
+        const payload = parseToolJson(response);
+        expect(repositorySpy).toHaveBeenCalledWith({
+          deviceId: androidDevice.deviceId,
+          sinceTimestamp: undefined,
+          method: undefined,
+          limit: 10_001,
+        });
+        expect(payload.graph[0].paths["items[GET]"]).toMatchObject({
+          success: 10_000,
+          errors: 0,
+          p50: 5001,
+          p95: 9500,
+        });
+        if (eventCount > 10_000) {
+          expect(payload).toMatchObject({ truncated: true, maxEvents: 10_000 });
+          const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+            name: "getNetworkGraph",
+            artifactWriter: {
+              writeJsonArtifact: () => ({
+                artifact: {
+                  path: "/tmp/network-graph.json",
+                  format: "json",
+                  payload: "NetworkGraph",
+                  bytes: 1,
+                  tool: "getNetworkGraph",
+                  resourceUri: "automobile:tool-output/network-graph",
+                },
+              }),
+            },
+          });
+          expect(parseToolJson(finalized)).toMatchObject({ truncated: true, maxEvents: 10_000 });
+          expect(parseToolJson(finalized).graph).toHaveProperty("artifact");
+        } else {
+          expect(payload).not.toHaveProperty("truncated");
+          expect(payload).not.toHaveProperty("maxEvents");
+        }
+      } finally {
+        repositorySpy.mockRestore();
+      }
+    });
+  }
 
   test("mockNetwork keeps the network-mockable gate for iOS", async () => {
     serverConfig.setNetworkMockableEnabled(false);

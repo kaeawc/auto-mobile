@@ -1,6 +1,11 @@
 import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
-import { createTapAt, observation } from "../../helpers/tapAtCoordinate";
+import { createTapAt, observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { NodeCryptoService } from "../../../src/utils/crypto";
+import { getTempDir, TEMP_SUBDIRS } from "../../../src/utils/tempDir";
 import { issue8379Hierarchy, issue8379SyntheticOutlier } from "../../fixtures/issue8379Hierarchy";
 import {
   DOUBLE_TAP_GAP_MS,
@@ -56,11 +61,44 @@ function createAndroidTapAtWithClient(
     snapshotReferences,
     lastRenderedObservation,
   });
+  setFakeTapAtWindow(tapAt);
   tapAt.observeScreen = observeScreen;
   return { tapAt, observeScreen, adb };
 }
 
 describe("TapAtCoordinate", () => {
+  test.each(["tap", "doubleTap"] as const)(
+    "%s ignores a poisoned persistent Android window cache",
+    async (action) => {
+      const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+      const dataDir = mkdtempSync(path.join(tmpdir(), "tap-at-window-cache-"));
+      try {
+        process.env.AUTOMOBILE_DATA_DIR = dataDir;
+        const windowDir = getTempDir(TEMP_SUBDIRS.WINDOW);
+        mkdirSync(windowDir, { recursive: true });
+        writeFileSync(
+          path.join(windowDir, NodeCryptoService.generateCacheKey(androidDevice.deviceId)),
+          JSON.stringify({
+            appId: "com.example.app",
+            activityName: "com.example.app.MainActivity",
+            layoutSeqSum: 1,
+          }),
+        );
+        const { tapAt, adb, androidDispatches } = createTapAt(androidDevice);
+        expect(await tapAt.execute({ x: 1, y: 2, action })).toMatchObject({ success: true });
+        expect(androidDispatches).toHaveLength(action === "doubleTap" ? 2 : 1);
+        expect(adb.getExecutedCommands()).toEqual([]);
+      } finally {
+        if (previousDataDir === undefined) {
+          delete process.env.AUTOMOBILE_DATA_DIR;
+        } else {
+          process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+        }
+        rmSync(dataDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("Duo landscape bounds dispatch x=700 and reject exclusive edges", async () => {
     const { tapAt, iosDispatches } = createTapAt(iosDevice, 951, 669);
     expect((await tapAt.execute({ x: 700, y: 48 })).success).toBe(true);
@@ -188,6 +226,7 @@ describe("TapAtCoordinate", () => {
       invalidateIosCache: () => {},
       lastRenderedObservation: () => ({ display: { key: "0" }, displayRevision: 0 }),
     });
+    setFakeTapAtWindow(tapAt);
     tapAt.observeScreen = observeScreen;
     // Cancel in the gap, after the first transport has confirmed success.
     const sleep = spyOn(timer, "sleep").mockImplementation(async (ms) => {
@@ -753,6 +792,7 @@ describe("TapAtCoordinate", () => {
           lastRenderedObservation: () => ({ display: { key: "inner" } }),
         },
       );
+      setFakeTapAtWindow(tapAt);
       tapAt.observeScreen = observeScreen;
       const displayId = spyOn(
         ObservedAndroidDisplayCache.prototype,
@@ -1263,6 +1303,7 @@ describe("TapAtCoordinate", () => {
         invalidations++;
       },
     });
+    setFakeTapAtWindow(tapAt);
     tapAt.observeScreen = observeScreen;
 
     const result = await tapAt.execute({ x: 1, y: 2 });

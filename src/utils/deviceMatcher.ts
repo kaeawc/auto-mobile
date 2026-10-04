@@ -459,7 +459,14 @@ function matchesScreenSize(
   if (!criteria.screenSize) {
     return true;
   }
-  if (item.screenWidth === undefined || item.screenHeight === undefined) {
+  if (
+    !Number.isFinite(criteria.screenSize.width) ||
+    !Number.isFinite(criteria.screenSize.height) ||
+    criteria.screenSize.width <= 0 ||
+    criteria.screenSize.height <= 0 ||
+    item.screenWidth === undefined ||
+    item.screenHeight === undefined
+  ) {
     return false;
   }
   const widthRatio =

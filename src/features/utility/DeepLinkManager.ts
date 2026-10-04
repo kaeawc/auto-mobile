@@ -1,3 +1,4 @@
+import { getAbortSignal } from "../../utils/AbortContext";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -80,6 +81,9 @@ export const createDefaultHostExec =
       });
 
 const defaultHostExec = createDefaultHostExec();
+
+const outputReportsMissingIosApp = (message: string): boolean =>
+  message.includes("No such file or directory");
 
 /**
  * Interface for deep link management and intent chooser handling
@@ -279,7 +283,7 @@ export class DeepLinkManager implements DeepLinkManager {
   private adbFactory: AdbClientFactory;
   private parser: ElementParser;
   private geometry: ElementGeometry;
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "executeCommandArgs">;
   private hostExec: HostExec;
   private plist: PlistReader;
   private appBundleMetadata: AppBundleMetadata;
@@ -306,7 +310,7 @@ export class DeepLinkManager implements DeepLinkManager {
   constructor(
     device: BootedDevice | null = null,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    simctl: SimCtlClient | null = null,
+    simctl: Pick<SimCtlClient, "executeCommandArgs"> | null = null,
     hostExec: HostExec | null = null,
     plist: PlistReader = new PlistClient(),
     appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
@@ -434,7 +438,9 @@ export class DeepLinkManager implements DeepLinkManager {
    * @returns Promise with deep link information
    */
   private async getDeepLinksIos(bundleId: string): Promise<DeepLinkResult> {
+    const signal = getAbortSignal();
     try {
+      throwIfAborted(signal);
       const udid = this.device!.deviceId;
       logger.info(`[DeepLinkManager] Querying iOS deep links for bundle: ${bundleId}`);
 
@@ -456,9 +462,22 @@ export class DeepLinkManager implements DeepLinkManager {
           bundleId,
           "app",
         ]);
+        throwIfAborted(signal);
         appPath = container.stdout.trim();
       } catch (error) {
-        logger.debug(`[DeepLinkManager] get_app_container failed for ${bundleId}: ${error}`);
+        const message = errorMessage(error);
+        if (outputReportsMissingIosApp(message)) {
+          // Missing apps are an expected lookup outcome; the empty path reports not installed below.
+          logger.debug(`[DeepLinkManager] get_app_container missing app ${bundleId}: ${message}`);
+          throwIfAborted(signal);
+        } else {
+          logger.warn(
+            `[DeepLinkManager] get_app_container failed for ${bundleId}: ${message}`,
+            error,
+          );
+          throwIfAborted(signal);
+          return this.emptyIosResult(bundleId, message);
+        }
       }
       if (!appPath) {
         return this.emptyIosResult(bundleId, `App ${bundleId} is not installed on ${udid}`);
@@ -468,9 +487,11 @@ export class DeepLinkManager implements DeepLinkManager {
       //    bundle path is a literal argument, so a crafted `.app` name cannot
       //    inject host commands.
       const info = (await this.plist.readJsonFile(`${appPath}/Info.plist`)) as IosInfoPlist;
+      throwIfAborted(signal);
 
       const schemes = this.parseCFBundleURLSchemes(info);
       const associatedDomains = await this.parseAssociatedDomains(appPath, bundleId);
+      throwIfAborted(signal);
       const hosts = associatedDomains.hosts;
       const supportedMimeTypes = this.parseDocumentTypes(info);
 
@@ -487,7 +508,11 @@ export class DeepLinkManager implements DeepLinkManager {
         note: associatedDomains.note,
       };
     } catch (error) {
-      logger.error(`[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${error}`);
+      logger.warn(
+        `[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${errorMessage(error)}`,
+        error,
+      );
+      throwIfAborted(signal);
       return this.emptyIosResult(bundleId, errorMessage(error));
     }
   }

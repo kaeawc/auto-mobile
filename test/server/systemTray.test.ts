@@ -349,7 +349,8 @@ describe("systemTray post-tap observation", () => {
       });
       const result = await observeSystemTrayAfterTap(device, baseline);
       expect(result.settled).toBe(!alternating);
-      expect(timer.now()).toBe(alternating ? 2550 : 1050);
+      // The final sleep is capped at the remaining timeout budget.
+      expect(timer.now()).toBe(alternating ? 2500 : 1050);
     });
   }
 
@@ -414,7 +415,8 @@ describe("systemTray post-tap observation", () => {
       expect(payload.message).toContain("effect not yet settled");
       expect(payload.observation).toBeUndefined();
       expect(payload.observationDiff).toBeUndefined();
-      expect(fakeTimer.now()).toBe(2550);
+      // The final sleep is capped at the remaining timeout budget.
+      expect(fakeTimer.now()).toBe(2500);
     });
   }
 });

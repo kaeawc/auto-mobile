@@ -13,6 +13,47 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `serialize crash and ANR timestamps on the envelope`() {
+    val deviceInfo = DeviceInfo("Pixel 7", "Google", "14", 34)
+    val crash: WebSocketResponse =
+      CrashEvent(
+        timestamp = 1700000000000L,
+        event =
+          CrashData(
+            exceptionClass = "java.lang.NullPointerException",
+            message = null,
+            stackTrace = "at com.example.Main.run(Main.java:42)",
+            threadName = "main",
+            packageName = "com.example.app",
+            deviceInfo = deviceInfo,
+          ),
+      )
+    val anr: WebSocketResponse =
+      AnrEvent(
+        timestamp = 1700000000500L,
+        event =
+          AnrData(
+            pid = 12345,
+            processName = "com.example.app",
+            importance = "FOREGROUND",
+            trace = null,
+            reason = "Input dispatching timed out",
+            packageName = "com.example.app",
+            deviceInfo = deviceInfo,
+          ),
+      )
+
+    assertEquals(
+      """{"type":"crash_event","timestamp":1700000000000,"event":{"exceptionClass":"java.lang.NullPointerException","message":null,"stackTrace":"at com.example.Main.run(Main.java:42)","threadName":"main","currentScreen":null,"packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34},"applicationId":null}}""",
+      json.encodeToString(WebSocketResponse.serializer(), crash),
+    )
+    assertEquals(
+      """{"type":"anr_event","timestamp":1700000000500,"event":{"pid":12345,"processName":"com.example.app","importance":"FOREGROUND","trace":null,"reason":"Input dispatching timed out","packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34}}}""",
+      json.encodeToString(WebSocketResponse.serializer(), anr),
+    )
+  }
+
+  @Test
   fun `serialize swipe_result`() {
     val response: WebSocketResponse =
       SwipeResult(

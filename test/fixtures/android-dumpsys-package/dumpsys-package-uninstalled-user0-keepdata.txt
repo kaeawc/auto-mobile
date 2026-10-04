@@ -1,0 +1,88 @@
+Domain verification status:
+Failure printing domain verification information
+
+Permissions:
+  Permission [dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION] (e339575):
+    sourcePackage=dev.jasonpearson.automobile.playground
+    uid=10216 gids=[] type=0 prot=signature
+    perm=PermissionInfo{1652761 dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION}
+    flags=0x0
+
+Key Set Manager:
+  [dev.jasonpearson.automobile.playground]
+      Signing KeySets: 62
+
+Packages:
+  Package [dev.jasonpearson.automobile.playground] (5b513f1):
+    appId=10216
+    pkg=null
+    codePath=/data/app/~~wOAySU8ufJtVigtbafObbQ==/dev.jasonpearson.automobile.playground-EcdGAItZwN743immpJXtvw==
+    resourcePath=/data/app/~~wOAySU8ufJtVigtbafObbQ==/dev.jasonpearson.automobile.playground-EcdGAItZwN743immpJXtvw==
+    legacyNativeLibraryDir=/data/app/~~wOAySU8ufJtVigtbafObbQ==/dev.jasonpearson.automobile.playground-EcdGAItZwN743immpJXtvw==/lib
+    extractNativeLibs=false
+    primaryCpuAbi=arm64-v8a
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=1 targetSdk=36
+
+    timeStamp=2026-10-03 17:28:08
+    lastUpdateTime=2026-10-03 17:28:08
+    installerPackageName=null
+    installerPackageUid=-1
+    initiatingPackageName=com.android.shell
+    originatingPackageName=null
+    packageSource=1
+    appMetadataFilePath=null
+    appMetadataSource=0
+    signatures=PackageSignatures{4850c version:2, signatures:[5470e9a7], past signatures:[]}
+    installPermissionsFixed=false
+    pkgFlags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    install permissions:
+      android.permission.INTERNET: granted=true
+      dev.jasonpearson.automobile.playground.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: ceDataInode=573975 deDataInode=402044 installed=false hidden=false suspended=false distractionFlags=0 stopped=true notLaunched=true enabled=0 instant=false virtual=false quarantined=false
+      installReason=0
+      dataDir=/data/user/0/dev.jasonpearson.automobile.playground
+      firstInstallTime=2026-10-03 16:07:01
+      uninstallReason=0
+      overlay paths:
+        /product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      legacy overlay paths:
+        /product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      gids=[3003]
+      runtime permissions:
+
+Queries:
+  system apps queryable: false
+  queries via forceQueryable:
+  queries via package name:
+  queries via component:
+    com.google.android.settings.intelligence:
+      [app id 10216 not installed]
+    com.google.android.as:
+      [app id 10216 not installed]
+    com.google.android.apps.messaging:
+      [app id 10216 not installed]
+    com.google.android.apps.accessibility.voiceaccess:
+      [app id 10216 not installed]
+  queryable via interaction:
+    User 0:
+      [com.android.providers.settings,com.android.settings,com.android.keychain,android,com.android.emulator.multidisplay,com.android.DeviceAsWebcam,com.android.localtransport,com.android.location.fused,com.android.server.telecom,com.android.inputdevices,com.android.dynsystem]:
+        [app id 10216 not installed]
+      com.google.android.gms:
+        [app id 10216 not installed]
+      com.google.android.inputmethod.latin:
+        [app id 10216 not installed]
+      dev.jasonpearson.automobile.ctrlproxy:
+        [app id 10216 not installed]
+  queryable via uses-library:
+
+Dexopt state:
+
+Compiler stats:

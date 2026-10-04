@@ -31,6 +31,49 @@ class DeviceSnapshotSocketClientTest {
     """
 
   @Test
+  fun `a hung peer times out with the client label`() {
+    HungSocketServer().use { server ->
+      SocketRequestTask {
+        DeviceSnapshotSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            requestTimeoutMs = 30,
+          )
+          .getConfig()
+      }
+        .use { task ->
+          server.awaitRequest()
+          val error = assertFailsWith<McpConnectionException> { task.result() }
+          assertTrue(error.message!!.contains("Device snapshot"))
+          assertTrue(error.message!!.contains("timed out"))
+        }
+    }
+  }
+
+  @Test
+  fun `a normal reply with a custom timeout cancels the watchdog`() {
+    val watchdog = FakeSocketRequestWatchdog()
+    TestConfigSocketServer(
+        responseType = RESPONSE_TYPE,
+        resultJson = """{"config": ${configJson()}}""",
+      )
+      .use { server ->
+        SocketRequestTask {
+          DeviceSnapshotSocketClient(
+              socketPathValue = server.socketPath.toString(),
+              requestTimeoutMs = 1_000,
+              watchdog = watchdog,
+            )
+            .getConfig()
+        }
+          .use { task ->
+            val result = task.result()
+            assertEquals(512L, result.config.maxArchiveSizeMb)
+          }
+      }
+    watchdog.assertCancelled(1_000)
+  }
+
+  @Test
   fun `config get sends the documented envelope`() {
     TestConfigSocketServer(
         responseType = RESPONSE_TYPE,

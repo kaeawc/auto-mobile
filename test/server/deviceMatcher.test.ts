@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
-import { describeDisplayRequirements } from "../../src/utils/deviceMatcher";
+import { matchesDeviceCriteria, describeDisplayRequirements } from "../../src/utils/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import {
   canonicalReleaseVersionsByApiLevel,
@@ -978,5 +978,26 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
         "LATEST",
       ),
     ).toBeNull();
+  });
+});
+
+describe("screenSize criteria validation", () => {
+  const device = bootedDevice({ deviceId: "screen", screenWidth: 1080, screenHeight: 2400 });
+
+  it.each([
+    { width: -1, height: -1 },
+    ...[-1, 0, NaN, Infinity, -Infinity].flatMap((dimension) => [
+      { width: dimension, height: 2400 },
+      { width: 1080, height: dimension },
+    ]),
+  ])("rejects invalid dimensions %j", (screenSize) => {
+    expect(matchesDeviceCriteria(device, { platform: "android", screenSize })).toBe(false);
+  });
+
+  it.each([
+    { width: 1080, height: 2400 },
+    { width: 1080, height: 2340 },
+  ])("matches valid dimensions within tolerance %j", (screenSize) => {
+    expect(matchesDeviceCriteria(device, { platform: "android", screenSize })).toBe(true);
   });
 });

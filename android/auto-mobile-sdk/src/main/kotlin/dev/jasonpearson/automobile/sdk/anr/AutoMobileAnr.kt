@@ -13,6 +13,7 @@ import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.SdkConstants
+import java.io.InputStream
 
 /**
  * SDK API for detecting ANRs (Application Not Responding) from previous sessions.
@@ -46,6 +47,10 @@ object AutoMobileAnr {
 
   /** Maximum number of historical exit reasons to query */
   private const val MAX_EXIT_REASONS = 5
+
+  // Cap total size to avoid exceeding Android's 1MB Binder transaction limit
+  // when sending the broadcast (the trace is also carried in the intent's JSON payload).
+  private const val MAX_ANR_TRACE_CHARS = 200_000
 
   private var context: Context? = null
 
@@ -95,26 +100,12 @@ object AutoMobileAnr {
 
       val lastReportedTimestamp = getLastReportedTimestamp(ctx)
       AutoMobileSDK.logger.d(TAG) { "Last reported ANR timestamp: $lastReportedTimestamp" }
-      var newestReportedTimestamp = lastReportedTimestamp
-      var anrCount = 0
-
       for (exitInfo in exitInfos) {
         AutoMobileSDK.logger.d(TAG) {
           "Exit reason: ${exitInfo.reason} (ANR=${ApplicationExitInfo.REASON_ANR}), pid=${exitInfo.pid}, timestamp=${exitInfo.timestamp}"
         }
         if (exitInfo.reason == ApplicationExitInfo.REASON_ANR) {
-          anrCount++
-          // Only report ANRs we haven't seen before
-          if (exitInfo.timestamp > lastReportedTimestamp) {
-            AutoMobileSDK.logger.d(TAG) {
-              "Detected NEW previous ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
-            }
-            broadcastAnr(ctx, exitInfo)
-
-            if (exitInfo.timestamp > newestReportedTimestamp) {
-              newestReportedTimestamp = exitInfo.timestamp
-            }
-          } else {
+          if (exitInfo.timestamp <= lastReportedTimestamp) {
             AutoMobileSDK.logger.d(TAG) {
               "Skipping already reported ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
             }
@@ -122,7 +113,15 @@ object AutoMobileAnr {
         }
       }
 
-      AutoMobileSDK.logger.d(TAG) { "Found $anrCount ANR(s) in exit history" }
+      val anrInfos = exitInfos.filter { it.reason == ApplicationExitInfo.REASON_ANR }
+      AutoMobileSDK.logger.d(TAG) { "Found ${anrInfos.size} ANR(s) in exit history" }
+      val newestReportedTimestamp =
+        reportNewAnrs(anrInfos, { it.timestamp }, lastReportedTimestamp) { exitInfo ->
+          AutoMobileSDK.logger.d(TAG) {
+            "Detected NEW previous ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
+          }
+          broadcastAnr(ctx, exitInfo)
+        }
 
       // Update the last reported timestamp
       if (newestReportedTimestamp > lastReportedTimestamp) {
@@ -136,13 +135,53 @@ object AutoMobileAnr {
     }
   }
 
+  // Private pure seams keep the javap-based public API signature unchanged.
+  private fun readCappedAnrTrace(stream: InputStream?, maxChars: Int): String? {
+    if (stream == null) return null
+    return stream.reader(Charsets.UTF_8).use { reader ->
+      require(maxChars >= 0) { "maxChars must not be negative" }
+      val trace = StringBuilder()
+      val buffer = CharArray(8192)
+      while (trace.length < maxChars) {
+        val count = reader.read(buffer, 0, minOf(buffer.size, maxChars - trace.length))
+        if (count == -1) break
+        trace.append(buffer, 0, count)
+      }
+      if (trace.length == maxChars && reader.read() != -1) {
+        trace.append("\n(truncated — trace capped at $maxChars chars)\n")
+      }
+      trace.toString()
+    }
+  }
+
+  /**
+   * Report oldest first, stopping at the first failure so the watermark cannot skip an ANR. With
+   * the trace cap, sends are expected to succeed. Any failure is retried on the next app launch
+   * through initialize; there is no in-process retry loop. Inlining send also avoids adding a
+   * public JVM accessor for the private broadcast method.
+   */
+  private inline fun <T> reportNewAnrs(
+    items: List<T>,
+    noinline timestampOf: (T) -> Long,
+    lastReported: Long,
+    send: (T) -> Boolean,
+  ): Long {
+    var watermark = lastReported
+    val newItems = items.filter { timestampOf(it) > lastReported }.sortedBy(timestampOf)
+    for (item in newItems) {
+      if (!send(item)) break
+      watermark = timestampOf(item)
+    }
+    return watermark
+  }
+
   @RequiresApi(Build.VERSION_CODES.R)
-  private fun broadcastAnr(context: Context, exitInfo: ApplicationExitInfo) {
-    try {
+  private fun broadcastAnr(context: Context, exitInfo: ApplicationExitInfo): Boolean {
+    return try {
       // Read the trace from the input stream
       val trace =
         try {
-          exitInfo.traceInputStream?.bufferedReader()?.use { it.readText() }
+          readCappedAnrTrace(exitInfo.traceInputStream, MAX_ANR_TRACE_CHARS)
         } catch (e: Exception) {
           AutoMobileSDK.logger.w(TAG, e) { "Failed to read ANR trace" }
           null
@@ -181,8 +220,10 @@ object AutoMobileAnr {
       AutoMobileSDK.logger.i(TAG) {
         "Broadcasted ANR: pid=${exitInfo.pid}, process=${exitInfo.processName}"
       }
+      true
     } catch (e: Exception) {
       AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast ANR" }
+      false
     }
   }
 

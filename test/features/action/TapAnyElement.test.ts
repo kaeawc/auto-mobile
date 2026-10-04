@@ -371,6 +371,34 @@ describe("TapAnyElement Android gesture dispatch", () => {
     expect(calls).toHaveLength(2);
   });
 
+  test("unchanged hierarchy never retries a double tap or probes for a change", async () => {
+    const { tapAny, calls } = setup();
+    let probes = 0;
+    tapAny.setRefreshViewHierarchyForTesting(async () => {
+      probes++;
+      return hierarchy;
+    });
+    const result = await tapAny.execute({ action: "doubleTap" });
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(probes).toBe(0);
+  });
+
+  test("unchanged hierarchy never retries a long press or probes for a change", async () => {
+    const { tapAny, adb } = setup();
+    let probes = 0;
+    tapAny.setRefreshViewHierarchyForTesting(async () => {
+      probes++;
+      return hierarchy;
+    });
+    const result = await tapAny.execute({ action: "longPress", duration: 1200 });
+    expect(result.success).toBe(true);
+    expect(adb.getCommandCalls().map((call) => call.command)).toEqual([
+      "shell input touchscreen swipe 60 45 60 45 1200",
+    ]);
+    expect(probes).toBe(0);
+  });
+
   test("rejects a changed capture before dispatching the selected target", async () => {
     const { tapAny, adb, calls, timer, observedHierarchy } = setup();
     tapAny.setBeforeAndroidTapForTesting(() => {
@@ -546,6 +574,48 @@ describe("TapAnyElement node long press fallbacks", () => {
     expect((await tapAny.execute({ action: "longPress", duration: 1200 })).success).toBe(true);
     expect(proxy.getNodeActionHistory()).toEqual([]);
     expect(adb.getAllCommands()).toEqual(["shell input touchscreen swipe 60 45 60 45 1200"]);
+  });
+
+  test("rejected touchscreen long press falls back to generic input swipe", async () => {
+    const { proxy, adb, tapAny } = setup();
+    proxy.setSupportsNodeActionSelectors(false);
+    adb.setCommandResult(
+      "shell input touchscreen swipe 60 45 60 45 1200",
+      "Unknown command: touchscreen",
+    );
+
+    const result = await tapAny.execute({ action: "longPress", duration: 1200 });
+
+    expect(result.success).toBe(true);
+    expect(adb.getAllCommands()).toEqual([
+      "shell input touchscreen swipe 60 45 60 45 1200",
+      "shell input swipe 60 45 60 45 1200",
+    ]);
+  });
+
+  test("rejected touchscreen and fallback long presses report failure", async () => {
+    const { proxy, adb, tapAny } = setup();
+    proxy.setSupportsNodeActionSelectors(false);
+    adb.setCommandResult(
+      "shell input touchscreen swipe 60 45 60 45 1200",
+      "Unknown command: touchscreen",
+    );
+    adb.setCommandResult(
+      "shell input swipe 60 45 60 45 1200",
+      "",
+      "Usage: input [<source>] [-d DISPLAY_ID] <command>",
+    );
+
+    const result = await tapAny.execute({ action: "longPress", duration: 1200 });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      "Android command failed: shell input swipe 60 45 60 45 1200: Usage: input [<source>] [-d DISPLAY_ID] <command>",
+    );
+    expect(adb.getAllCommands()).toEqual([
+      "shell input touchscreen swipe 60 45 60 45 1200",
+      "shell input swipe 60 45 60 45 1200",
+    ]);
   });
 
   test("reports failed advertised long_click without coordinate fallback", async () => {

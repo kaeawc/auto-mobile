@@ -24,6 +24,24 @@ export interface SdkAnrPayload {
   deviceInfo: CrashDeviceInfo;
 }
 
+// Android sends timestamps on the envelope; accept event timestamps from future SDKs too.
+export type SdkCrashWirePayload = Omit<SdkCrashPayload, "timestamp"> & { timestamp?: number };
+export type SdkAnrWirePayload = Omit<SdkAnrPayload, "timestamp"> & { timestamp?: number };
+
+export function withResolvedTimestamp<T extends { timestamp?: unknown }>(
+  event: T,
+  envelopeTimestamp: unknown,
+  nowMs: number,
+): Omit<T, "timestamp"> & { timestamp: number } {
+  const timestamp =
+    typeof event.timestamp === "number" && Number.isFinite(event.timestamp)
+      ? event.timestamp
+      : typeof envelopeTimestamp === "number" && Number.isFinite(envelopeTimestamp)
+        ? envelopeTimestamp
+        : nowMs;
+  return { ...event, timestamp };
+}
+
 export function normalizeCrash(payload: SdkCrashPayload, deviceId: string): CrashEvent {
   return {
     deviceId,

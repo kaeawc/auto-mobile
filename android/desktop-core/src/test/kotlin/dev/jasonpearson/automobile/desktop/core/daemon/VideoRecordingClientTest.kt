@@ -54,6 +54,45 @@ class VideoRecordingClientTest {
   // -- config socket --
 
   @Test
+  fun `a hung peer times out with the client label`() {
+    HungSocketServer().use { server ->
+      SocketRequestTask {
+        VideoRecordingSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            requestTimeoutMs = 30,
+          )
+          .getConfig()
+      }
+        .use { task ->
+          server.awaitRequest()
+          val error = assertFailsWith<McpConnectionException> { task.result() }
+          assertTrue(error.message!!.contains("Video recording"))
+          assertTrue(error.message!!.contains("timed out"))
+        }
+    }
+  }
+
+  @Test
+  fun `a normal reply with a custom timeout cancels the watchdog`() {
+    val watchdog = FakeSocketRequestWatchdog()
+    server(resultJson = """{"config": $configJson}""").use { server ->
+      SocketRequestTask {
+        VideoRecordingSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            requestTimeoutMs = 1_000,
+            watchdog = watchdog,
+          )
+          .getConfig()
+      }
+        .use { task ->
+          val result = task.result()
+          assertEquals("high", result.config.qualityPreset)
+        }
+    }
+    watchdog.assertCancelled(1_000)
+  }
+
+  @Test
   fun `config get decodes the full config including resolution`() {
     server(resultJson = """{"config": $configJson}""").use { s ->
       val result = VideoRecordingSocketClient(socketPathValue = s.socketPath.toString()).getConfig()

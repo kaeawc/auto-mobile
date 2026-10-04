@@ -182,6 +182,26 @@ final class PerfProviderTests: XCTestCase {
         XCTAssertEqual(roots[0].durationMs, 2)
     }
 
+    /// Idle-client background polling retains only the newest completed roots in completion order.
+    func testCompletedRootsPoolKeepsNewestRootsAtMaximumSize() throws {
+        let clock = FakeTimeProvider()
+        let provider = PerfProvider(timeProvider: clock)
+
+        for i in 0 ..< 1000 {
+            provider.withScope {
+                provider.serial("root\(i)")
+                clock.advance(by: 1)
+                provider.end()
+            }
+        }
+
+        let roots = try XCTUnwrap(provider.flush())
+        let names = roots.map(\.name)
+        XCTAssertEqual(roots.count, PerfProvider.maximumCompletedRoots)
+        XCTAssertEqual(names, ((1000 - PerfProvider.maximumCompletedRoots) ..< 1000).map { "root\($0)" })
+        XCTAssertFalse(names.contains("root0"))
+    }
+
     /// A handler snapshot leaves its enclosing request open and does not consume roots completed
     /// by another scope before the server performs its top-level flush.
     func testNamedSnapshotPreservesOuterRequestAndSharedCompletedRoots() throws {

@@ -22,6 +22,7 @@ import changedTextCapture from "../../../fixtures/android-focus/playground-text-
 import scrollBefore from "../../../fixtures/observe/diff/scroll-before.json";
 import scrollAfter from "../../../fixtures/observe/diff/scroll-after.json";
 import noScrollCapture from "../../../fixtures/observe/android-playground-raw-trim-candidates.json";
+import { harness as displayHarness } from "./displaySwipeHarness";
 
 const textObservation: ObserveResult = {
   ...textCapture,
@@ -39,18 +40,21 @@ function harness({
   selector = new AutoTargetSelector(),
   geometry = new DefaultElementGeometry(),
   elementFinder,
+  accessibilityDetector = new FakeAccessibilityDetector(),
 }: {
   before?: ObserveResult;
   after?: ObserveResult;
   selector?: AutoTargetSelectorService;
   geometry?: DefaultElementGeometry;
   elementFinder?: FakeElementFinder;
+  accessibilityDetector?: FakeAccessibilityDetector;
 } = {}) {
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
-  );
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
+  const ctrl = new FakeCtrlProxy(timer);
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+    ctrl as unknown as AndroidCtrlProxyClient,
+  );
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();
   observe.setObserveResult(() => (gesture.getSwipeCalls().length ? after : before));
@@ -61,7 +65,7 @@ function harness({
       timer,
       observeScreen: observe,
       executeGesture: gesture,
-      accessibilityDetector: new FakeAccessibilityDetector(),
+      accessibilityDetector,
       autoTargetSelector: selector,
       geometry,
       finder: elementFinder,
@@ -69,10 +73,94 @@ function harness({
   );
   action.awaitIdle = new FakeAwaitIdle() as unknown as typeof action.awaitIdle;
   action.window = new FakeWindow() as unknown as typeof action.window;
-  return { action, gesture };
+  return { action, gesture, ctrl };
 }
 
 afterEach(() => mock.restore());
+
+describe("Android unchanged swipe warning", () => {
+  for (const target of ["screen", "element", "display-ctrlproxy", "display-adb"] as const) {
+    test.each([true, false])(`${target} unchanged swipe with boomerang=%s`, async (boomerang) => {
+      const options: SwipeOnOptions = { direction: "up", boomerang };
+      const h =
+        target === "screen" || target === "element"
+          ? harness()
+          : displayHarness({
+              route: target === "display-adb" ? "adb" : "ctrlproxy",
+              unchanged: true,
+              foundAfter: Infinity,
+            });
+      if (target === "screen") {
+        options.autoTarget = false;
+      } else if (target !== "element") {
+        options.display = "external";
+      }
+      const result = await h.action.execute(options);
+      expect(result.success).toBe(true);
+      expect(result.effect).toEqual({ screenChanged: false, basis: "viewHierarchy unchanged" });
+      if (boomerang) {
+        expect(result.warning ?? "").not.toContain("Swipe did not change the screen");
+      } else {
+        expect(result.warning).toContain("Swipe did not change the screen");
+      }
+      if (target === "element") {
+        expect(result.warning).toContain("lacks a usable identifier; swiping within its bounds");
+      }
+    });
+  }
+
+  test.each([false, true])(
+    "changed boomerang swipe with autoTarget=%s keeps its effect",
+    async (autoTarget) => {
+      const after = { ...textObservation, ...changedTextCapture, timestamp: 1 };
+      const result = await harness({ after }).action.execute({
+        direction: "up",
+        boomerang: true,
+        autoTarget,
+      });
+      expect(result.success).toBe(true);
+      expect(result.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
+      expect(result.warning ?? "").not.toContain("Swipe did not change the screen");
+    },
+  );
+
+  test.each([true, false])("TalkBack named container with boomerang=%s", async (boomerang) => {
+    const accessibilityDetector = new FakeAccessibilityDetector();
+    accessibilityDetector.setTalkBackEnabled(true);
+    const before = { ...scrollBefore, timestamp: 0 } as ObserveResult;
+    const h = harness({ before, accessibilityDetector });
+    const result = await h.action.execute({
+      direction: "up",
+      container: { elementId: "tap_screen_content" },
+      boomerang,
+    });
+    expect(result.success).toBe(true);
+    expect(result.effect).toEqual({ screenChanged: false, basis: "activeWindow unchanged" });
+    expect(h.ctrl.getActionHistory()).toMatchObject([
+      { action: boomerang ? "focus" : "scroll_forward", resourceId: "tap_screen_content" },
+    ]);
+    expect(h.gesture.getSwipeCalls()).toHaveLength(0);
+    expect(h.ctrl.getTwoFingerSwipeHistory()).toHaveLength(0);
+    if (boomerang) {
+      expect(result.warning ?? "").not.toContain("Swipe did not change the screen");
+    } else {
+      expect(result.warning).toContain("Swipe did not change the screen");
+    }
+  });
+
+  test("TalkBack two-finger scroll retains the unchanged warning", async () => {
+    const accessibilityDetector = new FakeAccessibilityDetector();
+    accessibilityDetector.setTalkBackEnabled(true);
+    const h = harness({ accessibilityDetector });
+    const result = await h.action.execute({ direction: "up", autoTarget: false });
+    expect(result.success).toBe(true);
+    expect(result.effect?.screenChanged).toBe(false);
+    expect(h.ctrl.getTwoFingerSwipeHistory()).toHaveLength(1);
+    expect(h.ctrl.getActionHistory()).toHaveLength(0);
+    expect(h.gesture.getSwipeCalls()).toHaveLength(0);
+    expect(result.warning).toContain("Swipe did not change the screen");
+  });
+});
 
 function expectEndpointsInside(
   result: { x1: number; y1: number; x2: number; y2: number },

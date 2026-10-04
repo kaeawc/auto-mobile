@@ -162,7 +162,7 @@ describe("detached promise rejection ownership", () => {
     await nav.manager.recordNavigationEvent({ destination: "Home", timestamp: 1 });
     observation.backStack = { depth: 2, capturedAt: 1 } as ObserveResult["backStack"];
     const record = spyOn(nav.manager, "recordBackStack").mockRejectedValue(error);
-    const fake = new FakeObserveScreen(device, new FakeAdbClientFactory(), timer);
+    const fake = new FakeObserveScreen();
     fake.setObserveResult(observation);
     registerObserveTools({
       timer,
@@ -177,7 +177,7 @@ describe("detached promise rejection ownership", () => {
       const result = await ToolRegistry.getTool("observe")!.deviceAwareHandler!(device, {
         screenshot: "none",
       });
-      expect(result).toBeDefined();
+      expect(result).toMatchObject({ structuredContent: observation });
       expect(record).toHaveBeenCalledWith(observation.backStack);
       expect(warnings).toHaveBeenCalledWith(
         "Failed to record observation back stack: back-stack write rejected",

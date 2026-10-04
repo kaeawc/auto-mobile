@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.video
 
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
@@ -179,6 +180,232 @@ class RotationMonitorTest {
     } finally {
       monitor.stop()
       park.countDown()
+    }
+  }
+
+  @Test
+  fun pollLoopBoundsLogsAcrossFiftyConsecutiveReaderFailures() {
+    val reads = AtomicInteger()
+    val failures = AtomicInteger()
+    val ticks = Semaphore(0)
+    val parked = Semaphore(0)
+    val pollThread = AtomicReference<Thread>()
+    val logs = CopyOnWriteArrayList<String>()
+    val loggedFailures = CopyOnWriteArrayList<Int>()
+    val monitor =
+      RotationMonitor(
+        reader = {
+          if (reads.getAndIncrement() == 0) {
+            0
+          } else {
+            failures.incrementAndGet()
+            throw IllegalStateException("display unavailable")
+          }
+        },
+        sleeper = {
+          pollThread.set(Thread.currentThread())
+          parked.release()
+          ticks.acquire()
+        },
+        log = {
+          logs.add(it)
+          loggedFailures.add(failures.get())
+        },
+      )
+
+    try {
+      monitor.start { throw AssertionError("failed reads must not dispatch") }
+      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+      repeat(50) {
+        ticks.release()
+        // Parking after each tick proves that its read and logging have both completed.
+        assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+      }
+      assertEquals(50, failures.get())
+      assertEquals(listOf(1, 11, 21, 31, 41), loggedFailures.toList())
+      assertEquals(5, logs.size)
+      assertEquals("RotationMonitor reader failed: display unavailable", logs.first())
+      logs.drop(1).forEach {
+        assertEquals(
+          "RotationMonitor reader failed: display unavailable (9 failures suppressed)",
+          it,
+        )
+      }
+    } finally {
+      monitor.stop()
+      pollThread.get()?.let {
+        it.join(TimeUnit.SECONDS.toMillis(2))
+        assertFalse("the interrupted poll thread must unwind", it.isAlive)
+      }
+    }
+  }
+
+  @Test
+  fun recoveryDispatchesNewRotationAndNextFailureRunLogsImmediately() {
+    var failing = false
+    var rotation = 0
+    var listenerCallback: (() -> Unit)? = null
+    val park = CountDownLatch(1)
+    val logs = CopyOnWriteArrayList<String>()
+    val observed = CopyOnWriteArrayList<Int>()
+    val monitor =
+      RotationMonitor(
+        reader = {
+          if (failing) throw IllegalStateException("display unavailable")
+          rotation
+        },
+        registrar = { onChanged ->
+          listenerCallback = onChanged
+          {}
+        },
+        sleeper = { park.await() },
+        log = { logs.add(it) },
+      )
+
+    try {
+      monitor.start { observed.add(it) }
+      val listener = requireNotNull(listenerCallback)
+      failing = true
+      repeat(3) { listener() }
+      assertEquals(listOf("RotationMonitor reader failed: display unavailable"), logs.toList())
+
+      failing = false
+      rotation = 1
+      listener()
+      listener()
+      assertEquals(listOf(1), observed.toList())
+      assertEquals(
+        "RotationMonitor reader recovered after 3 consecutive failures",
+        logs.last(),
+      )
+      assertEquals(2, logs.size)
+
+      failing = true
+      listener()
+      assertEquals(3, logs.size)
+      assertEquals("RotationMonitor reader failed: display unavailable", logs.last())
+    } finally {
+      monitor.stop()
+    }
+  }
+
+  @Test
+  fun singleFailureLogsOnceAndUnchangedReadLogsOneRecovery() {
+    var failing = false
+    var listenerCallback: (() -> Unit)? = null
+    val park = CountDownLatch(1)
+    val logs = CopyOnWriteArrayList<String>()
+    val monitor =
+      RotationMonitor(
+        reader = {
+          if (failing) throw IllegalStateException("display unavailable")
+          0
+        },
+        registrar = { onChanged ->
+          listenerCallback = onChanged
+          {}
+        },
+        sleeper = { park.await() },
+        log = { logs.add(it) },
+      )
+
+    try {
+      monitor.start { throw AssertionError("unchanged rotation must not dispatch") }
+      val listener = requireNotNull(listenerCallback)
+      listener()
+      assertTrue("success without a prior failure must not log recovery", logs.isEmpty())
+      failing = true
+      listener()
+      assertEquals(listOf("RotationMonitor reader failed: display unavailable"), logs.toList())
+      failing = false
+      listener()
+      listener()
+      assertEquals(
+        listOf(
+          "RotationMonitor reader failed: display unavailable",
+          "RotationMonitor reader recovered after 1 consecutive failures",
+        ),
+        logs.toList(),
+      )
+    } finally {
+      monitor.stop()
+    }
+  }
+
+  @Test
+  fun throwingCallbackDoesNotRetryRotationOrResetNestedReaderFailures() {
+    var failing = false
+    var rotation = 0
+    var listenerCallback: (() -> Unit)? = null
+    val ticks = Semaphore(0)
+    val parked = Semaphore(0)
+    val pollThread = AtomicReference<Thread>()
+    val logs = CopyOnWriteArrayList<String>()
+    val observed = CopyOnWriteArrayList<Int>()
+    val monitor =
+      RotationMonitor(
+        reader = {
+          if (failing) throw IllegalStateException("display unavailable")
+          rotation
+        },
+        registrar = { onChanged ->
+          listenerCallback = onChanged
+          {}
+        },
+        sleeper = {
+          pollThread.set(Thread.currentThread())
+          parked.release()
+          ticks.acquire()
+        },
+        log = { logs.add(it) },
+      )
+
+    try {
+      monitor.start {
+        observed.add(it)
+        if (it == 1) {
+          // A framework notification during the callback begins a new reader-failure run.
+          failing = true
+          requireNotNull(listenerCallback).invoke()
+          throw IllegalStateException("capture swap failed")
+        }
+      }
+      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+      rotation = 1
+      ticks.release()
+      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+      assertEquals(
+        listOf(
+          "RotationMonitor reader failed: display unavailable",
+          "RotationMonitor callback failed: capture swap failed",
+        ),
+        logs.toList(),
+      )
+
+      ticks.release()
+      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+      assertEquals("callback failure must not reset the reader-failure run", 2, logs.size)
+      failing = false
+      ticks.release()
+      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+      assertEquals(listOf(1), observed.toList())
+      assertEquals("RotationMonitor reader recovered after 2 consecutive failures", logs.last())
+
+      rotation = 2
+      ticks.release()
+      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+      assertEquals(
+        "the poll loop must still dispatch distinct changes",
+        listOf(1, 2),
+        observed.toList(),
+      )
+      assertEquals(3, logs.size)
+    } finally {
+      monitor.stop()
+      pollThread.get()?.let {
+        it.join(TimeUnit.SECONDS.toMillis(2))
+        assertFalse("the interrupted poll thread must unwind", it.isAlive)
+      }
     }
   }
 

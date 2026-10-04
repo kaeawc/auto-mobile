@@ -27,32 +27,48 @@
  * those contains `mDisplayFrozen=` and neither starts a line with
  * `mRotation=`. See issue #6199.
  *
+ * When `Display: mDisplayId=` headers are present, only the requested display's
+ * first authoritative rotation is returned (display 0 by default). Headerless
+ * legacy/filtered output retains the first-authoritative-match behavior.
+ *
  * @param dumpsysWindowOutput - stdout of `dumpsys window` (or a filtered subset)
  * @returns The parsed rotation value (0-3), or null if the authoritative
  *   field was not found
  */
-export function parseWindowManagerRotation(dumpsysWindowOutput: string): number | null {
+export function parseWindowManagerRotation(
+  dumpsysWindowOutput: string,
+  options: { displayId?: number } = {},
+): number | null {
+  let currentDisplay: number | undefined;
+  // The undefined key holds the legacy first match, ignored if any header appears.
+  const displayRotations = new Map<number | undefined, number>();
   for (const line of dumpsysWindowOutput.split("\n")) {
+    const display = line.match(/^\s*Display:\s*mDisplayId=(\d+)/);
+    if (display) {
+      currentDisplay = parseInt(display[1], 10);
+      continue;
+    }
     const trimmed = line.trim();
 
     // API ~25-28 and ~34+: WindowManagerService prints its own top-level
     // field as its own line.
     const standalone = trimmed.match(/^mRotation=(\d+)/);
-    if (standalone) {
-      return parseInt(standalone[1], 10);
-    }
-
     // API ~29-33: the same authoritative field is printed inline on the
     // display-status line instead of getting its own line. `mDisplayFrozen=`
     // is WindowManagerService's own field name (never present in a
     // TaskSnapshot or Configuration toString), so anchoring to it keeps
     // those unrelated `mRotation=` occurrences excluded.
-    if (trimmed.startsWith("mDisplayFrozen=")) {
-      const inline = trimmed.match(/\bmRotation=(\d+)\b/);
-      if (inline) {
-        return parseInt(inline[1], 10);
-      }
+    const authoritative =
+      standalone ??
+      (trimmed.startsWith("mDisplayFrozen=") ? trimmed.match(/\bmRotation=(\d+)\b/) : null);
+    if (!authoritative) {
+      continue;
+    }
+    const rotation = parseInt(authoritative[1], 10);
+    if (!displayRotations.has(currentDisplay)) {
+      displayRotations.set(currentDisplay, rotation);
     }
   }
-  return null;
+  const requestedDisplay = currentDisplay === undefined ? undefined : (options.displayId ?? 0);
+  return displayRotations.get(requestedDisplay) ?? null;
 }

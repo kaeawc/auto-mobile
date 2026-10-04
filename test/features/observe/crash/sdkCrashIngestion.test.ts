@@ -2,9 +2,47 @@ import { describe, expect, test } from "bun:test";
 import {
   normalizeAnr,
   normalizeCrash,
+  withResolvedTimestamp,
   type SdkAnrPayload,
+  type SdkAnrWirePayload,
   type SdkCrashPayload,
 } from "../../../../src/features/observe/crash/sdkCrashIngestion";
+
+describe("withResolvedTimestamp", () => {
+  test("prefers a finite event timestamp and preserves the event without mutation", () => {
+    const event = makeCrashPayload({ timestamp: 0 });
+    const resolved: SdkCrashPayload = withResolvedTimestamp(event, 20, 30);
+    expect(resolved).toEqual(event);
+    expect(resolved).not.toBe(event);
+    expect(event.timestamp).toBe(0);
+  });
+
+  test("uses the envelope timestamp when the wire event omits it", () => {
+    const event: SdkAnrWirePayload = makeAnrPayload();
+    delete event.timestamp;
+    const resolved: SdkAnrPayload = withResolvedTimestamp(event, 0, 30);
+    expect(resolved).toEqual({ ...event, timestamp: 0 });
+    expect(event).not.toHaveProperty("timestamp");
+  });
+
+  test("uses the injected current time when both timestamps are missing", () => {
+    expect(withResolvedTimestamp({}, undefined, 30)).toEqual({ timestamp: 30 });
+  });
+
+  test.each([NaN, Infinity, -Infinity, "10", null, true, undefined])(
+    "falls through an invalid event timestamp (%s) to the envelope",
+    (timestamp) => {
+      expect(withResolvedTimestamp({ timestamp }, 20, 30).timestamp).toBe(20);
+    },
+  );
+
+  test.each([NaN, Infinity, -Infinity, "20", null, true, undefined])(
+    "falls through an invalid envelope timestamp (%s) to injected current time",
+    (timestamp) => {
+      expect(withResolvedTimestamp({ timestamp: NaN }, timestamp, 30).timestamp).toBe(30);
+    },
+  );
+});
 
 function makeCrashPayload(overrides: Partial<SdkCrashPayload> = {}): SdkCrashPayload {
   return {

@@ -101,8 +101,11 @@ import {
 import {
   normalizeAnr,
   normalizeCrash,
+  withResolvedTimestamp,
   type SdkAnrPayload,
+  type SdkAnrWirePayload,
   type SdkCrashPayload,
+  type SdkCrashWirePayload,
 } from "../crash/sdkCrashIngestion";
 import { AndroidSdkEventIngestor, DefaultAndroidSdkEventIngestor } from "./AndroidSdkEventIngestor";
 import { FailureEventRepository } from "../../../db/failureEventRepository";
@@ -700,12 +703,12 @@ interface WsHandledExceptionEventMessage extends WsMessageBase {
 
 interface WsCrashEventMessage extends WsMessageBase {
   type: "crash_event";
-  event?: SdkCrashPayload;
+  event?: SdkCrashWirePayload;
 }
 
 interface WsAnrEventMessage extends WsMessageBase {
   type: "anr_event";
-  event?: SdkAnrPayload;
+  event?: SdkAnrWirePayload;
 }
 
 /** Real per-frame metrics from the in-app SDK FrameMetricsCollector (issue #5076). */
@@ -5583,14 +5586,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     crash_event: async (message) => {
       const event = message.event;
       if (event) {
-        await this.handleCrashEvent(event);
+        await this.handleCrashEvent(
+          withResolvedTimestamp(event, message.timestamp, this.timer.now()),
+        );
       }
     },
 
     anr_event: async (message) => {
       const event = message.event;
       if (event) {
-        await this.handleAnrEvent(event);
+        await this.handleAnrEvent(
+          withResolvedTimestamp(event, message.timestamp, this.timer.now()),
+        );
       }
     },
 

@@ -1,5 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
   elementSchema,
@@ -30,8 +30,100 @@ import { ToolRegistry, toolHasOutputSchema } from "../../src/server/toolRegistry
 import { registerObserveTools } from "../../src/server/observeTools";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObservationInsets } from "../../src/models/ObservationInsets";
+import { consumeSetupTiming, storeSetupTiming } from "../../src/server/ToolExecutionContext";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import type { TimingData, TimingEntry } from "../../src/utils/PerformanceTracker";
+import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 
 isolateToolRegistry();
+
+describe("observe setup timing composition", () => {
+  const setup: TimingEntry = { name: "setup", durationMs: 5 };
+  const connect: TimingEntry = { name: "connect", durationMs: 2 };
+  const observe: TimingEntry = { name: "observe", durationMs: 3 };
+  const cases: Array<{
+    name: string;
+    setupTiming?: TimingData;
+    observeTiming?: TimingData;
+    expected?: TimingData;
+  }> = [
+    {
+      name: "array setup and array observe produce flat entries",
+      setupTiming: [setup, connect],
+      observeTiming: [observe],
+      expected: [setup, connect, observe],
+    },
+    {
+      name: "record setup and array observe produce flat entries",
+      setupTiming: { setup, connect },
+      observeTiming: [observe],
+      expected: [setup, connect, observe],
+    },
+    {
+      name: "array setup and record observe do not throw",
+      setupTiming: [setup],
+      observeTiming: { observe },
+      expected: [setup, observe],
+    },
+    {
+      name: "record setup and record observe do not throw",
+      setupTiming: { setup },
+      observeTiming: { observe },
+      expected: [setup, observe],
+    },
+    { name: "setup alone stays flat", setupTiming: [setup], expected: [setup] },
+    { name: "no setup preserves observe timing", observeTiming: [observe], expected: [observe] },
+    { name: "no timing leaves the field absent" },
+  ];
+
+  test.each(cases)("$name", async ({ setupTiming, observeTiming, expected }) => {
+    const device = { deviceId: "observe-timing-unit", name: "Fake", platform: "ios" } as const;
+    const timer = new FakeTimer();
+    const screen = new FakeObserveScreen();
+    const result = structuredClone(loadIosFractionalObserve());
+    delete result.backStack;
+    delete result.perfTiming;
+    if (observeTiming) {
+      result.perfTiming = observeTiming;
+    }
+    screen.setObserveResult(result);
+    const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
+    try {
+      if (setupTiming) {
+        storeSetupTiming(device.deviceId, setupTiming);
+      }
+      registerObserveTools({
+        timer,
+        pathProtection: new FakeScreenshotPathProtection(timer),
+        createScreen: () => ({
+          execute: screen.execute.bind(screen),
+          executeDeviceRead: screen.execute.bind(screen),
+          captureScreenshot: screen.captureScreenshot.bind(screen),
+          appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
+          getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
+        }),
+      });
+      const tool = ToolRegistry.getTool("observe")!;
+      const response = await tool.deviceAwareHandler!(device, tool.schema.parse({}));
+      if (expected) {
+        expect(response.structuredContent).toHaveProperty("perfTiming", expected);
+      } else {
+        expect(response.structuredContent).not.toHaveProperty("perfTiming");
+      }
+      if (!setupTiming && observeTiming) {
+        expect(result.perfTiming).toBe(observeTiming);
+      }
+      expect(consumeSetupTiming(device.deviceId)).toBeNull();
+    } finally {
+      consumeSetupTiming(device.deviceId);
+      notify.mockRestore();
+      ToolRegistry.unregister("observe");
+      ToolRegistry.unregister("identifyInteractions");
+    }
+  });
+});
 
 describe("windowTruncations output schemas", () => {
   const windowTruncations = [

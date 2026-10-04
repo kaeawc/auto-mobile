@@ -1,6 +1,8 @@
 import { join } from "path";
 import { FileSystem, DefaultFileSystem } from "../filesystem/DefaultFileSystem";
 import { SystemDetection, DefaultSystemDetection } from "../system/SystemDetection";
+import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 import {
   getAndroidSdkFromEnvironment,
   getTypicalAndroidSdkPaths,
@@ -74,7 +76,17 @@ export class DefaultAndroidBuildToolsLocator implements AndroidBuildToolsLocator
       let versions: string[] = [];
       try {
         versions = await this.fileSystem.readdir(buildToolsDir);
-      } catch {
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+          // An optional SDK directory may disappear between the existence check and enumeration.
+          logger.debug(
+            `[AndroidBuildToolsLocator] Build-tools directory disappeared: ${errorMessage(error)}`,
+          );
+        } else {
+          logger.warn(
+            `[AndroidBuildToolsLocator] Failed to read build-tools directory: ${errorMessage(error)}`,
+          );
+        }
         continue;
       }
 

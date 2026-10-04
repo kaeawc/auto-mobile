@@ -420,4 +420,9 @@ extension ElementLocator {
             pixelHeight: Int((Double(pointHeight) * nativeScale).rounded())
         )
     }
+
+    /// A leaf at the raw depth cap is complete; only withheld children make the walk partial.
+    nonisolated static func depthCapTruncationReason(depth: Int, maxDepth: Int, hasChildren: Bool) -> String? {
+        depth >= maxDepth && hasChildren ? "max_depth" : nil
+    }
 }

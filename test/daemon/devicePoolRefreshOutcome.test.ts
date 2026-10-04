@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -26,36 +26,49 @@ describe("allocation after a partial refresh failure", () => {
     platform: "android",
   };
 
-  function failedRefreshPool(persistentFailure = true) {
+  function failedRefreshPool(
+    persistentFailure = true,
+    failure = "tracking persistence unavailable",
+    busy = false,
+  ) {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const deviceManager = new FakeDeviceUtils();
     deviceManager.setBootedDevices("android", [device]);
+    let trackingAttempts = 0;
+    let clearPool = () => {};
     const pool = new DevicePool(
       createDevicePoolDependencies(sessions, "allocation-refresh-failure", {
         timer,
         deviceManager,
         installedAppsRepository: new FakeInstalledAppsRepository(),
         retryExecutor: new DefaultRetryExecutor(timer),
-        devicePoolRefreshFactory: (port) =>
-          new DevicePoolRefresh({
+        devicePoolRefreshFactory: (port) => {
+          clearPool = () => port.getDevices().clear();
+          return new DevicePoolRefresh({
             ...port,
             setDeviceSessionTracking: async () => {
-              throw new Error("tracking persistence unavailable");
+              if (busy) {
+                port.getDevices().get(device.deviceId)!.status = "busy";
+              }
+              if (persistentFailure || trackingAttempts++ === 0) {
+                throw new Error(failure);
+              }
             },
             // Criteria allocation refreshes again when the target is absent.
             ...(persistentFailure
               ? {
                   foldObservationIntoPooledEntry: async () => {
-                    throw new Error("tracking persistence unavailable");
+                    throw new Error(failure);
                   },
                 }
               : {}),
-          }),
+          });
+        },
       }),
     );
-    return { pool, timer };
+    return { pool, timer, deviceManager, clearPool: () => clearPool() };
   }
 
   test.each(["single", "multiple", "criteria"] as const)(
@@ -80,7 +93,124 @@ describe("allocation after a partial refresh failure", () => {
     },
   );
 
-  test("a successful later refresh clears the earlier criteria allocation failure reason", async () => {
+  test.each(["single", "multiple"] as const)(
+    // Restores main's immediate failure; fails against the PR's original HEAD.
+    "%s allocation fails immediately when iOS liveness is unknown and refresh throws",
+    async (kind) => {
+      const { pool, timer, deviceManager } = failedRefreshPool();
+      const simulator: BootedDevice = {
+        deviceId: "SIM-UNKNOWN",
+        name: "Unknown simulator",
+        platform: "ios",
+      };
+      await pool.initializeWithDevices([simulator]);
+      deviceManager.failedPlatforms.add("ios");
+      const allocation =
+        kind === "single"
+          ? pool.assignDeviceToSession("allocation-session", "ios")
+          : pool.assignMultipleDevices(["allocation-session"], 60_000, "ios");
+      await expect(allocation).rejects.toMatchObject({
+        message:
+          "Unable to verify iOS simulator liveness for session allocation-session; iOS discovery failed.",
+      });
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(sessions.getSession("allocation-session")).toBeNull();
+      expect(pool.getDevice(simulator.deviceId)?.status).toBe("idle");
+    },
+  );
+
+  test.each(["single", "multiple", "criteria"] as const)(
+    "%s allocation retains the actual refresh failure through busy attempts without refresh",
+    async (kind) => {
+      const { pool, timer, deviceManager } = failedRefreshPool(
+        true,
+        "tracking persistence unavailable",
+        true,
+      );
+      const discovery = spyOn(deviceManager, "getBootedDevicesDetailed");
+      try {
+        const allocation =
+          kind === "single"
+            ? pool.assignDeviceToSession("allocation-session", "android")
+            : kind === "multiple"
+              ? pool.assignMultipleDevices(["allocation-session"], 3_000, "android")
+              : pool.assignMultipleDevicesByCriteria(
+                  [{ sessionId: "allocation-session", criteria: { platform: "android" } }],
+                  3_000,
+                );
+        await expect(allocation).rejects.toThrow("tracking persistence unavailable");
+        expect(timer.getSleepCallCount()).toBeGreaterThan(1);
+        // Exactly one real refresh; every subsequent attempt only sees a busy candidate.
+        expect(discovery.mock.calls.filter(([platform]) => platform === "either")).toHaveLength(1);
+      } finally {
+        discovery.mockRestore();
+      }
+    },
+  );
+
+  test.each(["single", "multiple", "criteria"] as const)(
+    "pin: %s allocation clears the retained reason when a later allocation refresh succeeds",
+    async (kind) => {
+      // Passes on main too; guards clearing without mistaking a busy-only attempt for refresh.
+      const { pool, timer, clearPool, deviceManager } = failedRefreshPool(
+        false,
+        "tracking persistence unavailable",
+        true,
+      );
+      const discovery = spyOn(deviceManager, "getBootedDevicesDetailed");
+      const sleep = timer.sleep.bind(timer);
+      const sleepSpy = spyOn(timer, "sleep").mockImplementation(async (ms) => {
+        if (timer.getSleepCallCount() === 0) {
+          // Model disappearance between attempts; the next allocation must refresh.
+          clearPool();
+        }
+        await sleep(ms);
+      });
+      try {
+        const allocation =
+          kind === "single"
+            ? pool.assignDeviceToSession("allocation-session", "android")
+            : kind === "multiple"
+              ? pool.assignMultipleDevices(["allocation-session"], 3_000, "android")
+              : pool.assignMultipleDevicesByCriteria(
+                  [{ sessionId: "allocation-session", criteria: { platform: "android" } }],
+                  3_000,
+                );
+        await expect(allocation).rejects.toThrow("Timed out");
+        await expect(allocation).rejects.not.toThrow("Could not refresh device list");
+        expect(timer.getSleepCallCount()).toBeGreaterThan(1);
+        expect(discovery.mock.calls.filter(([platform]) => platform === "either")).toHaveLength(2);
+      } finally {
+        sleepSpy.mockRestore();
+        discovery.mockRestore();
+      }
+    },
+  );
+
+  test.each(["single", "multiple", "criteria"] as const)(
+    "%s allocation caps a multi-line refresh failure at its first line",
+    async (kind) => {
+      const firstLine = "x".repeat(300);
+      const { pool } = failedRefreshPool(true, `${firstLine}\r\nsecond line must stay in logs`);
+      const allocation =
+        kind === "single"
+          ? pool.assignDeviceToSession("allocation-session", "ios")
+          : kind === "multiple"
+            ? pool.assignMultipleDevices(["allocation-session"], 1_000, "ios")
+            : pool.assignMultipleDevicesByCriteria(
+                [{ sessionId: "allocation-session", criteria: { platform: "ios" } }],
+                1_000,
+              );
+      await expect(allocation).rejects.toThrow(
+        `Could not refresh device list: ${"x".repeat(256)}.\n`,
+      );
+      await expect(allocation).rejects.not.toThrow("x".repeat(257));
+      await expect(allocation).rejects.not.toThrow("second line must stay in logs");
+    },
+  );
+
+  // Passes on main too; guards clearing after a successful preallocation refresh.
+  test("pin: a successful later refresh clears the earlier criteria allocation failure reason", async () => {
     const { pool } = failedRefreshPool(false);
     await expect(
       pool.assignMultipleDevicesByCriteria(
@@ -95,7 +225,8 @@ describe("allocation after a partial refresh failure", () => {
   });
 
   test.each(["single", "multiple", "criteria"] as const)(
-    "%s allocation can use the device added before the refresh failed",
+    // Passes on main too; guards use of partially discovered allocation candidates.
+    "pin: %s allocation can use the device added before the refresh failed",
     async (kind) => {
       const { pool, timer } = failedRefreshPool();
       const allocated =

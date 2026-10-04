@@ -146,7 +146,26 @@ test.each(["missing-device", device.deviceId])(
   },
 );
 
-test("setActiveDevice does not refresh when the requested device is already pooled", async () => {
+test("setActiveDevice caps a multi-line refresh failure at its first line", async () => {
+  const failure = `${"x".repeat(300)}\nsecond line must stay in logs`;
+  const refresh = spyOn(pool, "refreshDevicesWithOutcome").mockResolvedValue({
+    addedCount: 0,
+    failure,
+  });
+  try {
+    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    await expect(handler({ deviceId: "missing-device", sessionUuid: "one" })).rejects.toMatchObject(
+      {
+        message: `Could not refresh device list: ${"x".repeat(256)}. Resolve the cause and retry.`,
+      },
+    );
+  } finally {
+    refresh.mockRestore();
+  }
+});
+
+// Passes on main too; guards the existing pooled-device fast path.
+test("pin: setActiveDevice does not refresh when the requested device is already pooled", async () => {
   const refresh = spyOn(pool, "refreshDevicesWithOutcome");
   try {
     const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });

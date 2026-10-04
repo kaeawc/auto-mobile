@@ -8,6 +8,7 @@ import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { logger } from "../utils/logger";
+import { truncateBodyText } from "../utils/truncateBodyText";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import {
   registerDirectSessionDevice,
@@ -58,7 +59,7 @@ async function requestedPoolDevice(pool: DevicePool, deviceId: string): Promise<
     device = pool.getDevice(deviceId);
     if (!device && outcome.failure !== undefined) {
       throw new ActionableError(
-        `Could not refresh device list: ${outcome.failure}. Resolve the cause and retry.`,
+        `Could not refresh device list: ${truncateBodyText(outcome.failure.split(/[\r\n\u2028\u2029]/, 1)[0], 256)}. Resolve the cause and retry.`,
       );
     }
   }

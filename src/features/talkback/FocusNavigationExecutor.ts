@@ -45,6 +45,7 @@ interface NavigationVerification {
   currentFocus: Element | null;
   targetIndex: number | null;
   reachedTarget: boolean;
+  truncationReasons?: string[];
 }
 
 interface FocusNavigationExecutorDependencies {
@@ -178,7 +179,8 @@ export class FocusNavigationExecutor {
       if (initialVerification.targetIndex === null) {
         throw new ActionableError(
           `Target not found (${this.describeSelector(targetSelector)}). ` +
-            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures." +
+            this.describeTraversalTruncation(initialVerification),
         );
       }
 
@@ -190,7 +192,8 @@ export class FocusNavigationExecutor {
       if (!recalculated) {
         throw new ActionableError(
           `Target not found (${this.describeSelector(targetSelector)}). ` +
-            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures." +
+            this.describeTraversalTruncation(initialVerification),
         );
       }
       if (recalculated.swipeCount > maxSwipes) {
@@ -246,7 +249,8 @@ export class FocusNavigationExecutor {
       if (verification.targetIndex === null) {
         throw new ActionableError(
           `Target element disappeared during navigation (${this.describeSelector(targetSelector)}). ` +
-            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures." +
+            this.describeTraversalTruncation(verification),
         );
       }
 
@@ -258,7 +262,8 @@ export class FocusNavigationExecutor {
       if (!recalculated) {
         throw new ActionableError(
           `Target element disappeared during navigation (${this.describeSelector(targetSelector)}). ` +
-            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures." +
+            this.describeTraversalTruncation(verification),
         );
       }
 
@@ -389,7 +394,14 @@ export class FocusNavigationExecutor {
       currentFocus,
       targetIndex,
       reachedTarget,
+      truncationReasons: traversal.truncationReasons,
     };
+  }
+
+  private describeTraversalTruncation(verification: NavigationVerification): string {
+    return verification.truncationReasons?.includes("max_children")
+      ? " the accessibility traversal was truncated (max_children); the target may be beyond the cap."
+      : "";
   }
 
   private buildFocusSignature(element: Element | null): string | null {

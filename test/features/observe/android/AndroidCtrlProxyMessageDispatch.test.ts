@@ -9,6 +9,7 @@ import type {
 } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 import type { SdkEvent } from "../../../../src/features/observe/interfaces/SdkEventIngestor";
 import type { BootedDevice } from "../../../../src/models";
+import type { TraversalOrderResult } from "../../../../src/models/TraversalOrderResult";
 import { logger } from "../../../../src/utils/logger";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
@@ -151,6 +152,32 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       panelUniqueId: "panel-rear",
     });
   });
+
+  test.each([{ truncationReasons: undefined }, { truncationReasons: ["max_children"] }])(
+    "carries optional traversal truncation reasons %j through dispatch",
+    async ({ truncationReasons }) => {
+      const pending = client.requestManager.register<TraversalOrderResult>(
+        "traversal-1",
+        "get_traversal_order",
+        1000,
+        () => ({ elements: [], focusedIndex: null, totalCount: 0, totalTimeMs: 0 }),
+      );
+      await client.handleWebSocketMessage(
+        JSON.stringify({
+          type: "traversal_order_result",
+          requestId: "traversal-1",
+          totalTimeMs: 2,
+          result: { elements: [], focusedIndex: null, totalCount: 0, truncationReasons },
+        }),
+      );
+
+      const result = await pending;
+      expect(result.truncationReasons).toEqual(truncationReasons);
+      expect(result.elements).toEqual([]);
+      expect(client.requestManager.getPendingCount()).toBe(0);
+      expect(timer.getCurrentTime()).toBe(0);
+    },
+  );
 
   test("resolves a pending settings response through the shared helper", async () => {
     const pending = client.requestManager.register("settings-1", "settings_get", 1000, () => ({

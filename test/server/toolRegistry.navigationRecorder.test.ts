@@ -1,6 +1,12 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test, spyOn } from "bun:test";
+import { z } from "zod/v4";
 import { stripNavigationInternalParams, ToolRegistryClass } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  installInMemoryNavManager,
+  type InMemoryNavManagerHarness,
+} from "../helpers/navigationTestHarness";
 
 describe("navigation tool call recording", () => {
   test("does not persist internal execution metadata in navigation arguments", () => {
@@ -23,27 +29,38 @@ describe("navigation tool call recording", () => {
   });
 });
 
-test("recordToolCall receives only replayable caller arguments", async () => {
-  const { installInMemoryNavManager } = await import("../helpers/navigationTestHarness");
-  const { FakeTimer } = await import("../fakes/FakeTimer");
-  const { z } = await import("zod/v4");
-  const harness = await installInMemoryNavManager();
-  const registry = new ToolRegistryClass(new FakeTimer());
-  const record = spyOn(harness.manager, "recordToolCall");
-  const restore = registry.setPipelineOverridesForTesting({
-    executionTargetResolver: {
-      resolveExecutionTarget: async () => ({
-        shouldResolveDevice: true,
-        device: { deviceId: "fake", platform: "android" },
-      }),
-    },
-    afterToolCall: {
-      handle: async (input) => ({ finalizedResponse: input.response, durationMs: 0 }),
-    },
-    planLifecycleManager: { afterExecution: async () => {} },
-  });
-  try {
+describe("navigation recorder caller arguments", () => {
+  let harness: InMemoryNavManagerHarness;
+  let registry: ToolRegistryClass;
+  let record: ReturnType<typeof spyOn<InMemoryNavManagerHarness["manager"], "recordToolCall">>;
+  let restorePipelineOverrides: (() => void) | undefined;
+
+  beforeAll(async () => {
+    harness = await installInMemoryNavManager();
+    registry = new ToolRegistryClass(new FakeTimer());
+    record = spyOn(harness.manager, "recordToolCall");
+    restorePipelineOverrides = registry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async () => ({
+          shouldResolveDevice: true,
+          device: { deviceId: "fake", platform: "android" },
+        }),
+      },
+      afterToolCall: {
+        handle: async (input) => ({ finalizedResponse: input.response, durationMs: 0 }),
+      },
+      planLifecycleManager: { afterExecution: async () => {} },
+    });
     registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }));
+  });
+
+  afterAll(async () => {
+    record?.mockRestore();
+    restorePipelineOverrides?.();
+    await harness?.dispose();
+  });
+
+  test("recordToolCall receives only replayable caller arguments", async () => {
     await registry.getTool("tapOn")!.handler({
       text: "Continue",
       sessionUuid: "old",
@@ -61,9 +78,5 @@ test("recordToolCall receives only replayable caller arguments", async () => {
       sessionUuidX: "keep",
       session: "keep",
     });
-  } finally {
-    record.mockRestore();
-    restore();
-    await harness.dispose();
-  }
+  });
 });

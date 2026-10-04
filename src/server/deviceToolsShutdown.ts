@@ -1449,7 +1449,9 @@ async function killProcessAndRetireOwnership(
   } = options;
   const shutdownDeadlineMs = context.deadlineMs;
   const deviceManager = dependencies.deviceManagerFactory();
-  devicePool?.markIntentionalShutdown(device.deviceId);
+  if (device.platform === "android") {
+    devicePool?.markIntentionalShutdown(device.deviceId);
+  }
 
   let shutdownDevice = device;
   let alreadyStoppedMessage: string | undefined;

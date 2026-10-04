@@ -1398,7 +1398,21 @@ export class SimCtlClient implements SimCtl {
         }
         return;
       }
-      state = await this.readSimulatorState(device.deviceId, remainingMs);
+      try {
+        state = await this.readSimulatorState(device.deviceId, remainingMs);
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (
+          state !== "Shutdown" ||
+          deadlineMs - this.timer.now() > SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt)
+        ) {
+          throw error;
+        }
+        // The final probe may exhaust its budget; the last successful read already confirmed Shutdown.
+        logger.debug(
+          `[iOS] Keeping confirmed Shutdown for ${device.deviceId} after late state read failed: ${errorMessage(error)}`,
+        );
+      }
       if (state === "Booted") {
         throw await this.revivedSimulatorError(device, signal);
       }

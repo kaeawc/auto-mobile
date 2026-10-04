@@ -1,5 +1,5 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 /// Pure tests for the encoder control surface (issue #4788): the STDIN command
 /// parser, the force-keyframe latch, and the drop-policy decisions.
@@ -48,6 +48,32 @@ final class EncoderControlTests: XCTestCase {
         XCTAssertFalse(EncoderDropPolicy.shouldDropBeforeEncode(inFlightFrames: 2, maxInFlightFrames: 3))
         XCTAssertTrue(EncoderDropPolicy.shouldDropBeforeEncode(inFlightFrames: 3, maxInFlightFrames: 3))
         XCTAssertTrue(EncoderDropPolicy.shouldDropBeforeEncode(inFlightFrames: 9, maxInFlightFrames: 3))
+    }
+
+    // VideoToolbox call sites are glue and untested; pin their recovery policy here.
+    func testLostFrameRearmsConsumedKeyframeRequest() {
+        let latch = ForceKeyFrameLatch()
+        latch.request()
+        XCTAssertTrue(latch.consume(), "the failed encode consumed the request")
+        XCTAssertFalse(latch.isPending)
+
+        EncoderDropPolicy.recoverFromLostFrame(rearming: latch)
+
+        XCTAssertTrue(latch.isPending)
+        XCTAssertTrue(latch.consume())
+        XCTAssertFalse(latch.consume())
+    }
+
+    func testLostFrameRecoveryIsIdempotentWhenAlreadyArmed() {
+        let latch = ForceKeyFrameLatch()
+        latch.request()
+
+        EncoderDropPolicy.recoverFromLostFrame(rearming: latch)
+        EncoderDropPolicy.recoverFromLostFrame(rearming: latch)
+
+        XCTAssertTrue(latch.isPending)
+        XCTAssertTrue(latch.consume())
+        XCTAssertFalse(latch.consume())
     }
 
     func testOutputQueueOverflowDecision() {

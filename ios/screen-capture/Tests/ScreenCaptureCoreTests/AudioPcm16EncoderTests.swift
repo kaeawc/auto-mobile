@@ -1,5 +1,5 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 final class AudioPcm16EncoderTests: XCTestCase {
     func testEncodesFloat32LittleEndianAsPCM16LE() {
@@ -13,6 +13,15 @@ final class AudioPcm16EncoderTests: XCTestCase {
 
     func testRejectsTruncatedFloat32Input() {
         XCTAssertNil(AudioPcm16Encoder.encodeFloat32LE(Data([0, 0, 0])))
+    }
+
+    func testEncodesNaNAsSilenceAndClampsInfinities() {
+        let values: [Float] = [.nan, .infinity, -.infinity, 0.5, -Float.nan, .signalingNaN]
+        let input = values.withUnsafeBytes { Data($0) }
+        let expectedValues = [Int16(0), 32767, -32767, 16383, 0, 0].map { $0.littleEndian }
+        let expected = expectedValues.withUnsafeBytes { Data($0) }
+
+        XCTAssertEqual(AudioPcm16Encoder.encodeFloat32LE(input), expected)
     }
 
     func testSafeCopyByteCountReturnsRequestedWhenBufferIsLargeEnough() {

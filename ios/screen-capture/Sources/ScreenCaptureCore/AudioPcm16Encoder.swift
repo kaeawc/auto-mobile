@@ -15,7 +15,9 @@ public enum AudioPcm16Encoder {
         sampleCount: Int,
         bytesPerSample: Int,
         availableBytes: Int
-    ) -> Int? {
+    )
+        -> Int?
+    {
         guard sampleCount >= 0, bytesPerSample > 0, availableBytes >= 0 else { return nil }
         let (requested, overflow) = sampleCount.multipliedReportingOverflow(by: bytesPerSample)
         guard !overflow, availableBytes >= requested else { return nil }
@@ -29,9 +31,10 @@ public enum AudioPcm16Encoder {
         input.withUnsafeBytes { source in
             output.withUnsafeMutableBytes { destination in
                 guard let sourceBase = source.baseAddress, let destinationBase = destination.baseAddress else { return }
-                for index in 0..<(input.count / MemoryLayout<Float>.size) {
+                for index in 0 ..< (input.count / MemoryLayout<Float>.size) {
                     let float = sourceBase.advanced(by: index * 4).loadUnaligned(as: Float.self)
-                    let sample = Int16(max(-1, min(1, float)) * Float(Int16.max))
+                    // NaN is silence; infinities clamp to the existing signed full-scale values.
+                    let sample = Int16(max(-1, min(1, float.isNaN ? 0 : float)) * Float(Int16.max))
                     destinationBase.advanced(by: index * 2).storeBytes(of: sample.littleEndian, as: Int16.self)
                 }
             }

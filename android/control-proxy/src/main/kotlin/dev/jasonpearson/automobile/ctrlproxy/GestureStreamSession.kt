@@ -80,6 +80,8 @@ internal class GestureStreamSession<S>(
   private var liftFrom: Pair<S, GesturePoint>? = null
   private var terminal = false
   private var releasing = false
+  private var cancelling = false
+  private var lifting = false
   private var displayId: Int? = null
 
   // The pump loop parks here when the coordinator returns Wait (touch held, no fresh move). A later
@@ -108,9 +110,17 @@ internal class GestureStreamSession<S>(
     resumeIfWaiting()
   }
 
-  /** Called by the router on the gesture thread before its handler is stopped. */
+  /** Called by the router on the gesture thread for disconnect or service teardown. */
   fun cancel() {
-    if (terminal || releasing) return
+    if (terminal || releasing || cancelling) return
+    cancelling = true
+    // A final stroke already releases the pointer. Keep its callback so failure is observable.
+    if (lifting) return
+    // The router can cancel before the posted start runs; there is no pointer to release yet.
+    if (previousStroke == null) {
+      finish(true, null)
+      return
+    }
     coordinator.cancel()
     waiting = false
     pump()
@@ -136,6 +146,7 @@ internal class GestureStreamSession<S>(
       is GestureStreamAction.Wait -> waiting = true
       is GestureStreamAction.Dispatch -> {
         val segment = action.segment.clampedToNonNegative()
+        if (!segment.willContinue) lifting = true
         if (
           !segment.isInitial &&
             segment.willContinue &&
@@ -164,10 +175,10 @@ internal class GestureStreamSession<S>(
           dispatcher.dispatchContinuing(
             stroke = stroke,
             displayId = displayId,
-            onComplete = { pump() },
-            onFailed = ::fail,
+            onComplete = { if (previousStroke === stroke) pump() },
+            onFailed = { error -> if (previousStroke === stroke) fail(error) },
             onRejected = { error ->
-              if (!terminal && !releasing) {
+              if (!terminal && !releasing && previousStroke === stroke) {
                 liftFrom = precedingLift
                 fail(error)
               }
@@ -198,6 +209,11 @@ internal class GestureStreamSession<S>(
 
   private fun fail(error: String) {
     if (terminal || releasing) return
+    // Cancellation already attempted its lift. Report a rejected/failed lift without retrying it.
+    if (cancelling) {
+      finish(false, error)
+      return
+    }
     releasing = true
     waiting = false
     val anchor = liftFrom

@@ -446,3 +446,123 @@ test("a surviving device quarantines on the next discovery after a failed kill r
     await expectCleanedUp(h);
   });
 });
+
+for (const placeholderFirst of [false, true]) {
+  test(`successful retirement cancels sessionless device work, excluding the kill (placeholder=${placeholderFirst})`, async () => {
+    await withMonitor("android", async (h) => {
+      h.tracker.bindDeviceExecution(h.killExecution.id, h.device.id);
+      const unrelated = h.tracker.startExecution("observe");
+      h.tracker.bindDeviceExecution(unrelated.id, "emulator-5556");
+      const sessionOnly = h.tracker.startExecution("inputText", undefined, "kill-session");
+      const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+      try {
+        if (placeholderFirst) {
+          h.manager.bootedDevices = [{ ...h.booted, name: `Unknown (${h.device.id})` }];
+          await h.tick();
+          await expectShutdownDiscoveryProtected(h);
+          expect(sessionOnly.abortController.signal.aborted).toBe(false);
+        }
+        h.manager.bootedDevices = [];
+        expect(
+          await h.pool.retireDeviceForShutdown(h.device, {
+            excludeExecutionId: h.killExecution.id,
+          }),
+        ).toBe(true);
+        expect(h.deviceExecution.sessionUuid).toBeUndefined();
+        expect(h.deviceExecution.abortController.signal.aborted).toBe(true);
+        expect(h.deviceExecution.cancelReason).toMatchObject({
+          code: "device_lost",
+          deviceId: h.device.id,
+        });
+        expect(h.killExecution.abortController.signal.aborted).toBe(false);
+        expect(unrelated.abortController.signal.aborted).toBe(false);
+        // Only deferred quarantine adds session-only cancellation here. The
+        // kill handler owns ordinary session retirement.
+        expect(sessionOnly.abortController.signal.aborted).toBe(placeholderFirst);
+        expect(h.quarantineDeviceCancel).toHaveBeenCalledTimes(1);
+        await reservation?.release();
+        await h.reachThreshold();
+        expect(h.pool.getDevice(h.device.id)).toBeNull();
+        expect(await h.incidents.list()).toEqual([]);
+        expect(await h.pool.retireDeviceForShutdown(h.device)).toBe(false);
+        expect(h.quarantineDeviceCancel).toHaveBeenCalledTimes(1);
+      } finally {
+        h.tracker.endExecution(unrelated.id);
+        h.tracker.endExecution(sessionOnly.id);
+        await reservation?.release();
+        reservation?.releaseRecoveryRouteLease();
+      }
+    });
+  });
+}
+
+test("a failed kill followed by a resolved AVD clears deferred cancellation without aborting work", async () => {
+  await withMonitor("android", async (h) => {
+    const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+    h.manager.bootedDevices = [{ ...h.booted, name: `Unknown (${h.device.id})` }];
+    try {
+      await h.tick();
+      await expectShutdownDiscoveryProtected(h);
+      await reservation?.release();
+      h.pool.clearIntentionalShutdown(h.device.id);
+      h.manager.bootedDevices = [h.booted];
+      await h.tick();
+      expect(h.device.identityUnresolved).toBeUndefined();
+      expect(h.deviceExecution.abortController.signal.aborted).toBe(false);
+      expect(h.killExecution.abortController.signal.aborted).toBe(false);
+      expect(h.quarantineDeviceCancel).not.toHaveBeenCalled();
+      expect(h.quarantineSessionCancel).not.toHaveBeenCalled();
+      // A later plain retirement must not flush the old session cancellation.
+      expect(
+        await h.pool.retireDeviceForShutdown(h.device, {
+          excludeExecutionId: h.killExecution.id,
+        }),
+      ).toBe(true);
+      expect(h.quarantineSessionCancel).not.toHaveBeenCalled();
+      expect(h.killExecution.abortController.signal.aborted).toBe(false);
+    } finally {
+      await reservation?.release();
+      reservation?.releaseRecoveryRouteLease();
+    }
+  });
+});
+
+test("kill replacement cancels the retired serial's work and stale retirement preserves its successor", async () => {
+  await withMonitor("android", async (h) => {
+    h.tracker.bindDeviceExecution(h.killExecution.id, h.device.id);
+    const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+    const replacement = { ...h.booted, name: "Replacement AVD" };
+    let successorExecution: ReturnType<ExecutionTracker["startExecution"]> | undefined;
+    try {
+      h.manager.bootedDevices = [{ ...h.booted, name: `Unknown (${h.device.id})` }];
+      await h.tick();
+      h.manager.bootedDevices = [replacement];
+      const successor = await h.pool.replaceDeviceForShutdown(
+        h.device,
+        replacement,
+        () => {
+          expect(h.deviceExecution.abortController.signal.aborted).toBe(true);
+          expect(h.pool.getDevice(h.device.id)).toBeNull();
+        },
+        { excludeExecutionId: h.killExecution.id },
+      );
+      expect(successor).toBeDefined();
+      expect(successor).not.toBe(h.device);
+      expect(h.killExecution.abortController.signal.aborted).toBe(false);
+      successorExecution = h.tracker.startExecution("observe");
+      h.tracker.bindDeviceExecution(successorExecution.id, h.device.id);
+      expect(await h.pool.retireDeviceForShutdown(h.device)).toBe(false);
+      expect(await h.pool.replaceDeviceForShutdown(h.device, replacement)).toBeUndefined();
+      expect(successorExecution.abortController.signal.aborted).toBe(false);
+      expect(h.quarantineDeviceCancel).toHaveBeenCalledTimes(1);
+      expect(h.pool.getDevice(h.device.id)).toBe(successor!);
+      expect(await h.incidents.list()).toEqual([]);
+    } finally {
+      if (successorExecution) {
+        h.tracker.endExecution(successorExecution.id);
+      }
+      await reservation?.release();
+      reservation?.releaseRecoveryRouteLease();
+    }
+  });
+});

@@ -33,6 +33,8 @@ import {
   DaemonRequest,
   DaemonResponse,
   PROGRESS_NOTIFICATION_METHOD,
+  RESOURCE_SUBSCRIBE_METHOD,
+  RESOURCE_UNSUBSCRIBE_METHOD,
   SessionContext,
   type BoundSessionLoss,
   type DaemonRequestFailureCause,
@@ -76,6 +78,9 @@ import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../utils/fileLock";
 import {
   ListChangedBroadcaster,
+  ResourceUpdatedBroadcaster,
+  RESOURCE_UPDATED_NOTIFICATION_METHOD,
+  type ResourceUpdateTargets,
   LIST_CHANGED_NOTIFICATION_METHODS,
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
@@ -779,6 +784,8 @@ export class UnixSocketServer {
   private pendingSocketRequests = new Set<PendingSocketRequest>();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
+  private readonly resourceSubscriptions = new Map<string, Set<string>>();
+  private resourceUpdatedUnsubscribe: (() => void) | null = null;
   /** Session-release frames written but not yet flushed to their client sockets. */
   private pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
   private listChangedUnsubscribe: (() => void) | null = null;
@@ -1037,6 +1044,11 @@ export class UnixSocketServer {
       this.listChangedUnsubscribe?.();
       this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe((kind) => {
         this.broadcastListChanged(kind);
+      });
+
+      this.resourceUpdatedUnsubscribe?.();
+      this.resourceUpdatedUnsubscribe = ResourceUpdatedBroadcaster.subscribe((resolveTargets) => {
+        this.broadcastResourceUpdated(resolveTargets);
       });
 
       // Fan session-release events out to subscribed proxy clients (issue #4610),
@@ -1330,6 +1342,7 @@ export class UnixSocketServer {
     this.sessions.delete(sessionId);
     this.clientSockets.delete(sessionId);
     this.notificationSubscribers.delete(sessionId);
+    this.resourceSubscriptions.delete(sessionId);
     this.clearBoundMcpClientKey(sessionId);
     this.releaseDevicePoolMcpSessionBindings(sessionId);
     this.releaseMcpRecording(sessionId);
@@ -1432,6 +1445,46 @@ export class UnixSocketServer {
       }
       this.writeFrame(socket, sessionId, notification);
     }
+  }
+
+  private broadcastResourceUpdated(resolveTargets: ResourceUpdateTargets): void {
+    for (const [sessionId, subscriptions] of this.resourceSubscriptions) {
+      const socket = this.clientSockets.get(sessionId);
+      if (!socket) {
+        continue;
+      }
+      for (const uri of resolveTargets(subscriptions)) {
+        this.writeFrame(socket, sessionId, {
+          type: "daemon_notification",
+          method: RESOURCE_UPDATED_NOTIFICATION_METHOD,
+          uri,
+        });
+      }
+    }
+  }
+
+  private handleResourceSubscription(sessionId: string, request: DaemonRequest): DaemonResponse {
+    const uri = request.params?.uri;
+    if (typeof uri !== "string" || uri.length === 0) {
+      return {
+        id: request.id,
+        type: "mcp_response",
+        success: false,
+        error: "Resource subscription requires params.uri",
+      };
+    }
+    if (request.method === RESOURCE_SUBSCRIBE_METHOD) {
+      const subscriptions = this.resourceSubscriptions.get(sessionId) ?? new Set<string>();
+      subscriptions.add(uri);
+      this.resourceSubscriptions.set(sessionId, subscriptions);
+    } else {
+      const subscriptions = this.resourceSubscriptions.get(sessionId);
+      subscriptions?.delete(uri);
+      if (subscriptions?.size === 0) {
+        this.resourceSubscriptions.delete(sessionId);
+      }
+    }
+    return { id: request.id, type: "mcp_response", success: true, result: {} };
   }
 
   /**
@@ -1639,6 +1692,11 @@ export class UnixSocketServer {
         success: true,
         result: { subscribed: true },
       };
+    }
+
+    // Socket subscriptions must not attach to shared/idle-evicted loopback MCP clients.
+    if ([RESOURCE_SUBSCRIBE_METHOD, RESOURCE_UNSUBSCRIBE_METHOD].includes(request.method)) {
+      return this.handleResourceSubscription(sessionId, request);
     }
 
     // Bound-session keepalive must never wait behind an in-flight tools/call on the same
@@ -6903,6 +6961,8 @@ export class UnixSocketServer {
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();
     this.listChangedUnsubscribe = null;
+    this.resourceUpdatedUnsubscribe?.();
+    this.resourceUpdatedUnsubscribe = null;
 
     // Stop receiving session-release events (mirrors the subscribe in start()).
     this.sessionReleaseUnsubscribe?.();
@@ -6930,6 +6990,7 @@ export class UnixSocketServer {
     this.sessions.clear();
     this.clientSockets.clear();
     this.notificationSubscribers.clear();
+    this.resourceSubscriptions.clear();
     this.server = null;
 
     // Existing forwards may need their MCP clients throughout the drain. Close

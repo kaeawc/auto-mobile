@@ -34,6 +34,21 @@ function navigationBar(title: string): ViewHierarchyNode {
 }
 
 describe("deriveIosScreenIdentity", () => {
+  test("an empty selected tab skips its descendants but continues to later siblings", () => {
+    const identity = deriveIosScreenIdentity(
+      hierarchy([
+        node({ class: "UITabBar" }, [
+          node({ class: "UIButton", selected: true, text: " " }, [
+            node({ role: "tab", selected: true, text: "Skipped descendant" }),
+          ]),
+          node({ class: "UIButton", selected: "true", "resource-id": "later-tab" }),
+          node({ role: "tab", selected: true, text: "Skipped sibling" }),
+        ]),
+      ]),
+    );
+    expect(identity?.components.selectedTab).toBe("later-tab");
+  });
+
   test("distinguishes Reminders main list, new reminder sheet, discard action sheet, and keyboard editor", () => {
     const main = deriveIosScreenIdentity(
       hierarchy([

@@ -865,7 +865,7 @@ export class LaunchApp extends BaseVisualChange {
       this.assertLaunchNotAborted(signal);
 
       let didTerminateOrClear = false;
-      let alreadyForeground = false;
+      let alreadyForeground: boolean | null = false;
 
       if (isRunning) {
         if (clearAppData) {

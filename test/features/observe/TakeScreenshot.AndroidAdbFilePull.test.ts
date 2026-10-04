@@ -51,7 +51,7 @@ describe("Android file-pull screenshots", function () {
     const commands = fakeAdb.getExecutedCommands();
     expect(commands.some((command) => command.startsWith("pull "))).toBe(false);
     const tempFile = `/sdcard/screenshot_${screenshotTempIdToken("quiet-failure")}.png`;
-    expect(commands).toContain(`shell rm -f ${shellQuote(tempFile)}`);
+    expect(commands).toContain(`shell rm -f ${tempFile}`);
   });
 
   test("uses and removes a unique device-side file for every successful file pull", async function () {
@@ -86,10 +86,7 @@ describe("Android file-pull screenshots", function () {
     const secondTempFile = `/sdcard/screenshot_${screenshotTempIdToken("second")}.png`;
     expect(screencaps[0]).toContain(firstTempFile);
     expect(screencaps[1]).toContain(secondTempFile);
-    expect(removals).toEqual([
-      `shell rm -f ${shellQuote(firstTempFile)}`,
-      `shell rm -f ${shellQuote(secondTempFile)}`,
-    ]);
+    expect(removals).toEqual([`shell rm -f ${firstTempFile}`, `shell rm -f ${secondTempFile}`]);
     expect(pulls).toEqual([
       `pull ${firstTempFile} ${firstPath}.temp`,
       `pull ${secondTempFile} ${secondPath}.temp`,
@@ -131,7 +128,7 @@ describe("Android file-pull screenshots", function () {
     expect(fileSystem.existsSync(finalPath)).toBe(false);
     expect(fileSystem.existsSync(`${finalPath}.temp`)).toBe(false);
     expect(fakeAdb.getExecutedCommands()).toContain(
-      `shell rm -f ${shellQuote(`/sdcard/screenshot_${screenshotTempIdToken("cancelled")}.png`)}`,
+      `shell rm -f /sdcard/screenshot_${screenshotTempIdToken("cancelled")}.png`,
     );
   });
 
@@ -160,7 +157,7 @@ describe("Android file-pull screenshots", function () {
     expect(commands).toContain(
       `shell "screencap -p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
     );
-    expect(commands).toContain(`shell rm -f ${shellQuote(tempFile)}`);
+    expect(commands).toContain(`shell rm -f ${tempFile}`);
     expect(fakeAdb.getExecutedArgv()).toContainEqual(["pull", tempFile, `${finalPath}.temp`]);
     expect(fileSystem.existsSync(finalPath)).toBe(true);
     expect(fileSystem.existsSync(`${finalPath}.temp`)).toBe(false);

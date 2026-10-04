@@ -58,6 +58,7 @@ function harness() {
     getTimer: () => timer,
     getRefreshGeneration: () => generation,
     hasReusableSerial: (device) => device.id.startsWith("emulator-"),
+    isReservedForShutdown: () => false,
     cancelDeviceExecutions: async (deviceId, _reason, options) => {
       deviceCalls.push(`${deviceId}:${options.excludeExecutionId ?? "all"}`);
       return 1;

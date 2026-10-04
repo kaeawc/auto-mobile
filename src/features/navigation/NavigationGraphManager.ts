@@ -51,6 +51,67 @@ import type {
 // Re-export types for convenience
 export type { NavigationEvent, NavigationEdge, UIState };
 
+async function loadEdgeInteraction(
+  repository: NavigationRepository,
+  dbEdge: DBNavigationEdge,
+  toolName: string,
+): Promise<ToolCallInteraction> {
+  const interaction: ToolCallInteraction = {
+    toolName,
+    args: stripNavigationToolParams(dbEdge.tool_args ? JSON.parse(dbEdge.tool_args) : {}),
+    timestamp: dbEdge.timestamp,
+  };
+
+  // Load UI elements
+  const uiElements = await repository.getUIElementsForEdge(dbEdge.id);
+  if (uiElements.length > 0) {
+    interaction.uiState = {
+      selectedElements: uiElements.map((el) => ({
+        text: el.text || undefined,
+        resourceId: el.resource_id || undefined,
+        contentDesc: el.content_description || undefined,
+      })),
+    };
+  }
+
+  // Load scroll position
+  const scrollPos = await repository.getScrollPosition(dbEdge.id);
+  if (scrollPos) {
+    // Initialize uiState if not already present
+    if (!interaction.uiState) {
+      interaction.uiState = {
+        selectedElements: [],
+      };
+    }
+    interaction.uiState.scrollPosition = convertDBScrollPosition(scrollPos);
+  }
+  return interaction;
+}
+
+function convertDBScrollPosition(
+  scrollPos: NonNullable<Awaited<ReturnType<NavigationRepository["getScrollPosition"]>>>,
+): ScrollPosition {
+  const position: ScrollPosition = {
+    targetElement: {
+      text: scrollPos.targetElement.text || undefined,
+      resourceId: scrollPos.targetElement.resource_id || undefined,
+      contentDesc: scrollPos.targetElement.content_description || undefined,
+    },
+    direction: scrollPos.direction as "up" | "down" | "left" | "right",
+    speed: scrollPos.speed as "slow" | "normal" | "fast" | undefined,
+  };
+
+  // Add container if present
+  if (scrollPos.containerElement) {
+    position.container = {
+      text: scrollPos.containerElement.text || undefined,
+      resourceId: scrollPos.containerElement.resource_id || undefined,
+      contentDesc: scrollPos.containerElement.content_description || undefined,
+    };
+  }
+  return position;
+}
+
 /** Above SQLite's 5s busy timeout and normal loaded writes; callers only log failures, while 15s bounds a wedged tracking queue. */
 const NAVIGATION_WRITE_TIMEOUT_MS = 15_000;
 
@@ -89,7 +150,7 @@ export interface NavigationGraphService
   recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void>;
 
   // Tool call correlation
-  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): void;
+  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): () => void;
   updateScrollPosition(scrollPosition: ScrollPosition): void;
 
   // Pathfinding
@@ -867,6 +928,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Get modal stack from the most recent tool call (if any)
     const recentToolCall = this.findCorrelatedToolCall(receivedAt);
+    let edgeInteraction: ToolCallInteraction | undefined;
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
     // Snapshot provenance ONCE for this transition so the node and edge observations
@@ -906,6 +968,7 @@ export class NavigationGraphManager implements NavigationGraphService {
         // Create edge from previous screen to current screen
         if (previousScreen && previousScreen !== screenName) {
           const interaction = recentToolCall;
+          edgeInteraction = interaction;
 
           const toolName = interaction?.toolName || null;
           const toolArgs = interaction?.args || null;
@@ -974,6 +1037,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
 
     // ---- Post-commit side effects (never inside the transaction) ----
+
+    // Consume only a committed transition's match, not initial/same-screen events.
+    // A rolled-back write leaves the call eligible for the next edge.
+    this.toolCallHistory = this.toolCallHistory.filter((tc) => tc !== edgeInteraction);
 
     // Set active navigation state for fingerprint correlation. Fingerprints seen
     // within ACTIVE_NAVIGATION_WINDOW_MS will be correlated to this node.
@@ -1317,17 +1384,22 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
-   * Record a tool call for correlation with future navigation events.
+   * Record a tool call for one future edge; withdraw it if execution fails or is cancelled.
    */
-  public recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): void {
+  public recordToolCall(
+    toolName: string,
+    args: Record<string, any>,
+    uiState?: UIState,
+  ): () => void {
     const timestamp = this.timer.now();
 
-    this.toolCallHistory.push({
+    const interaction: ToolCallInteraction = {
       toolName,
       args,
       timestamp,
       uiState,
-    });
+    };
+    this.toolCallHistory.push(interaction);
 
     const uiStateInfo = uiState?.selectedElements.length
       ? ` (UI: ${uiState.selectedElements.map((e) => e.text || e.resourceId).join(", ")})`
@@ -1339,6 +1411,9 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Clean up old tool calls
     this.cleanupToolCallHistory();
+    return () => {
+      this.toolCallHistory = this.toolCallHistory.filter((tc) => tc !== interaction);
+    };
   }
 
   /**
@@ -1547,52 +1622,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
 
       if (dbEdge.tool_name) {
-        edge.interaction = {
-          toolName: dbEdge.tool_name,
-          args: stripNavigationToolParams(dbEdge.tool_args ? JSON.parse(dbEdge.tool_args) : {}),
-          timestamp: dbEdge.timestamp,
-        };
-
-        // Load UI elements
-        const uiElements = await this.repository.getUIElementsForEdge(dbEdge.id);
-        if (uiElements.length > 0) {
-          edge.interaction.uiState = {
-            selectedElements: uiElements.map((el) => ({
-              text: el.text || undefined,
-              resourceId: el.resource_id || undefined,
-              contentDesc: el.content_description || undefined,
-            })),
-          };
-        }
-
-        // Load scroll position
-        const scrollPos = await this.repository.getScrollPosition(dbEdge.id);
-        if (scrollPos) {
-          // Initialize uiState if not already present
-          if (!edge.interaction.uiState) {
-            edge.interaction.uiState = {
-              selectedElements: [],
-            };
-          }
-          edge.interaction.uiState.scrollPosition = {
-            targetElement: {
-              text: scrollPos.targetElement.text || undefined,
-              resourceId: scrollPos.targetElement.resource_id || undefined,
-              contentDesc: scrollPos.targetElement.content_description || undefined,
-            },
-            direction: scrollPos.direction as "up" | "down" | "left" | "right",
-            speed: scrollPos.speed as "slow" | "normal" | "fast" | undefined,
-          };
-
-          // Add container if present
-          if (scrollPos.containerElement) {
-            edge.interaction.uiState.scrollPosition.container = {
-              text: scrollPos.containerElement.text || undefined,
-              resourceId: scrollPos.containerElement.resource_id || undefined,
-              contentDesc: scrollPos.containerElement.content_description || undefined,
-            };
-          }
-        }
+        edge.interaction = await loadEdgeInteraction(this.repository, dbEdge, dbEdge.tool_name);
 
         // Copy interaction.uiState to edge.uiState for backward compatibility
         if (edge.interaction.uiState) {

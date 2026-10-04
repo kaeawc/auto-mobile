@@ -13,7 +13,7 @@ export interface UIStateSetup {
    * @param platform - Platform (android/ios)
    * @returns Array of setup actions that were performed
    */
-  setupUIState(edge: NavigationEdge, platform: string): Promise<string[]>;
+  setupUIState(edge: NavigationEdge, platform: string, signal?: AbortSignal): Promise<string[]>;
 
   /**
    * Set up scroll position to make a navigation element visible.
@@ -23,5 +23,9 @@ export interface UIStateSetup {
    * @param platform - Platform (android/ios)
    * @returns Description of the scroll action performed, or null if skipped
    */
-  setupScrollPosition(scrollPosition: ScrollPosition, platform: string): Promise<string | null>;
+  setupScrollPosition(
+    scrollPosition: ScrollPosition,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<string | null>;
 }

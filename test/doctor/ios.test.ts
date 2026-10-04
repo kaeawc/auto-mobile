@@ -2077,6 +2077,93 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
 });
 
 describe("createIosObserveRoundTripInspector lifecycle", () => {
+  test.each(["request", "convert", "collect", "close"])(
+    "preserves partial observations and cleanup when %s fails",
+    async (failure) => {
+      const calls: string[] = [];
+      const log = new FakeLogger();
+      const hooks: IosObserveRoundTripInspectorHooks = {
+        getManager: () => ({
+          getServicePort: () => 8790,
+          discoverRunnerPort: async () => {
+            calls.push("discover");
+            return 8790;
+          },
+          isInstalled: async () => {
+            calls.push("installed");
+            return true;
+          },
+        }),
+        getExistingClient: () => null,
+        createClient: () => ({
+          getConnectionPortForDiagnostics: () => 8791,
+          requestHierarchySyncForDiagnostics: async () => {
+            calls.push("request");
+            if (failure === "request") {
+              throw new Error("request failed");
+            }
+            return { hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } };
+          },
+          convertToViewHierarchyResult: () => {
+            calls.push("convert");
+            if (failure === "convert") {
+              throw new Error("convert failed");
+            }
+            return { hierarchy: {}, screenWidth: 390, screenHeight: 844 };
+          },
+          close: async () => {
+            calls.push("close");
+            if (failure === "close") {
+              throw new Error("close failed");
+            }
+          },
+        }),
+        elementsBuilder: new ObserveElementsBuilder({
+          collect: () => {
+            calls.push("collect");
+            if (failure === "collect") {
+              throw new Error("collect failed");
+            }
+            return undefined;
+          },
+        }),
+      };
+      const simctl = baseDependencies.createSimctlClient();
+      const booted = spyOn(simctl, "getBootedSimulators").mockResolvedValue([
+        { name: "iPhone", platform: "ios", deviceId: "SIM-1" },
+      ]);
+      try {
+        const inspections = await createIosObserveRoundTripInspector(
+          () => simctl,
+          log,
+          hooks,
+        ).inspectBootedObserveRoundTrips();
+        expect(calls).toEqual([
+          "discover",
+          "installed",
+          "request",
+          ...(failure === "request" ? [] : ["convert"]),
+          ...(failure === "request" || failure === "convert" ? [] : ["collect"]),
+          "close",
+        ]);
+        expect(inspections[0]).toMatchObject({
+          connected: failure !== "request",
+          runnerPort: 8790,
+          clientPort: 8791,
+          hierarchyError: `${failure} failed`,
+          elementCount: 0,
+          screenSize:
+            failure === "collect" || failure === "close"
+              ? { width: 390, height: 844 }
+              : { width: 0, height: 0 },
+        });
+        expect(log.at("warn")).toHaveLength(1);
+      } finally {
+        booted.mockRestore();
+      }
+    },
+  );
+
   test("reports zero elements and closes the probe when the collector returns undefined", async () => {
     let closes = 0;
     const hooks: IosObserveRoundTripInspectorHooks = {

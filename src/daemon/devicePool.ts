@@ -735,7 +735,6 @@ export class DevicePool {
   private readonly runtimeIdentity: DeviceRuntimeIdentity;
   private readonly shutdownReservationCoordinator: DeviceShutdownReservations;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
-  private readonly trackedProcessIncarnations = new WeakMap<ChildProcess, PooledDevice>();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
   private readonly androidRecoveryRecordLedger: AndroidRecoveryRecordLedger;
@@ -3507,18 +3506,6 @@ export class DevicePool {
     device: BootedDevice,
     childProcess: ChildProcess | null | undefined,
   ): Promise<void> {
-    // Startup and session binding may both associate the same child. Only one
-    // exit listener may own its loss incident and recovery cleanup.
-    const pooledDevice = this.devices.get(device.deviceId);
-    if (childProcess && pooledDevice) {
-      if (
-        this.trackedProcessIncarnations.get(childProcess) === pooledDevice &&
-        this.startedDeviceProcesses.get(device.deviceId) === childProcess
-      ) {
-        return;
-      }
-      this.trackedProcessIncarnations.set(childProcess, pooledDevice);
-    }
     return this.emulatorProcessLifecycle.trackStartedDeviceProcess(device, childProcess);
   }
 
@@ -3784,7 +3771,16 @@ export class DevicePool {
     assignmentSignal?: AbortSignal;
   } {
     const deadline = target?.requestDeadlineMs;
-    if (deadline === undefined || !Number.isFinite(deadline)) {
+    const restartDeadline = target?.restartRecoveryDeadlineMs;
+    // Once the restart window closes, preserve the original identity-recovery
+    // attempt and terminalization, including when this request has no budget left.
+    if (
+      deadline === undefined ||
+      !Number.isFinite(deadline) ||
+      restartDeadline === undefined ||
+      this.timer.now() >= restartDeadline ||
+      deadline - this.RECOVERY_RESPONSE_MARGIN_MS >= restartDeadline
+    ) {
       return {};
     }
     const requestController = new AbortController();
@@ -3802,8 +3798,20 @@ export class DevicePool {
     sessionId: string,
     target: SessionRecoveryTarget,
   ): Promise<EmulatorLossIncident | undefined> {
+    if (
+      target.restartRecoveryDeadlineMs === undefined ||
+      this.timer.now() >= target.restartRecoveryDeadlineMs
+    ) {
+      return undefined;
+    }
     const incident = await this.settledRecoveryLossIncident(sessionId, target);
-    if (incident && this.getDevicesMatchingRecoveryTarget(target).length === 0) {
+    // Reading diagnostics can cross the restart deadline. Only the existing
+    // recoveryFailure path may decide identity loss once that window closes.
+    if (
+      incident &&
+      this.timer.now() < target.restartRecoveryDeadlineMs &&
+      this.getDevicesMatchingRecoveryTarget(target).length === 0
+    ) {
       throw this.recoveryAssignmentError(sessionId, target, incident);
     }
     return incident;
@@ -3824,8 +3832,14 @@ export class DevicePool {
     return new ActionableError(
       `Cannot safely recover session ${sessionId}: ${target.platform} device ` +
         `'${target.stableDeviceId}' is unavailable or already in use. ` +
+        "Acquire a new device with getAndroid or getApple. " +
         context +
-        "Acquire a new device with getAndroid or getApple.",
+        (target.restartRecoveryDeadlineMs !== undefined &&
+        this.timer.now() < target.restartRecoveryDeadlineMs
+          ? "The session can still resume if the device returns before the recovery window ends " +
+            `(${Math.ceil((target.restartRecoveryDeadlineMs - this.timer.now()) / 1000)} seconds remaining); ` +
+            "otherwise acquire a new device with getAndroid or getApple."
+          : ""),
     );
   }
 

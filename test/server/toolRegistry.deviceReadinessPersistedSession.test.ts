@@ -8,7 +8,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { SessionManager, type SessionRecoveryTarget } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  TerminalSessionError,
+  type SessionRecoveryTarget,
+} from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 import type { DeviceSession } from "../../src/db/types";
@@ -114,18 +118,21 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       status: "released" as const,
       released_at_ms: 0,
       release_reason: deviceRestartReleaseReason(androidA.name),
-      expires_at_ms: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+      // Keep the issued session alive beyond its separate restart grace period.
+      expires_at_ms: 600_000,
     };
     persistence.seed(persisted);
     daemonSessionManager = new SessionManager(timer, persistence);
     daemonSessionManager.stopCleanupTimer();
+    const incidents = new InMemoryEmulatorLossIncidentStore(timer);
+    const manager = new FakeDeviceManager();
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "new-daemon", {
         timer,
-        deviceManager: new FakeDeviceManager(),
+        deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        emulatorLossIncidentStore: new InMemoryEmulatorLossIncidentStore(timer),
+        emulatorLossIncidentStore: incidents,
       }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -148,7 +155,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
         platform: "android",
         ...(deadline === undefined ? {} : { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadline }),
       });
-    return { timer, persistence, persisted, targets, call };
+    return { timer, persistence, persisted, targets, call, incidents, manager, pool };
   }
 
   beforeEach(() => {
@@ -176,6 +183,56 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     ctrlProxyStub.restore();
   });
 
+  test.each([undefined, 180_500, 241_000])(
+    "registry settled loss terminalizes after the restart window with request deadline %s",
+    async (deadline) => {
+      const { timer, call, persistence, persisted, incidents, manager, pool } =
+        await setupRestartRecovery();
+      const incident = await incidents.open({
+        deviceId: androidA.deviceId,
+        avdName: androidA.name,
+        detectionPath: "watched-process-exit",
+        processExit: { code: 1, signal: null },
+        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+        session: {
+          sessionUuid: persisted.session_uuid,
+          state: "recovering",
+          lastHeartbeatMs: 0,
+          hasReceivedHeartbeat: false,
+          heartbeatTimeoutMs: 60_000,
+        },
+      });
+      await incidents.completeRecovery(incident.id, "not-attempted");
+      const originalRow = { ...persisted };
+      await expect(call(120_000)).rejects.toThrow("180 seconds remaining");
+      expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);
+      timer.advanceTime(240_000);
+      await expect(call(deadline)).rejects.toThrow("recovery reason: target-absent");
+      expect(await persistence.getSession?.(persisted.session_uuid)).toMatchObject({
+        release_reason: "identity-recovery-target-absent",
+        released_at_ms: 240_000,
+      });
+      manager.bootedDevices = [androidA];
+      await pool.addDevice(androidA);
+      await expect(call(360_000)).rejects.toThrow(TerminalSessionError);
+    },
+  );
+
+  test.each([181_000, 240_000])(
+    "registry deadline %s does not interrupt terminalization at the restart deadline",
+    async (deadline) => {
+      const { timer, call, persistence, persisted } = await setupRestartRecovery();
+      const request = call(deadline).catch((error: unknown) => error);
+      await drainUntilQuiescent(timer);
+      timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+      expect(String(await request)).toContain("recovery reason: target-absent");
+      expect(await persistence.getSession?.(persisted.session_uuid)).toMatchObject({
+        release_reason: "identity-recovery-target-absent",
+      });
+      await expect(call(deadline)).rejects.toThrow(TerminalSessionError);
+    },
+  );
+
   test("registry restart recovery returns the actionable error before the request deadline", async () => {
     const { timer, call, targets, persisted, persistence } = await setupRestartRecovery();
     const originalRow = { ...persisted };
@@ -193,6 +250,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     await request;
     expect(String(failure)).toContain("Cannot safely recover session");
     expect(String(failure)).toContain("getAndroid or getApple");
+    expect(String(failure)).toContain("178 seconds remaining");
     expect(timer.now()).toBe(2_500);
     expect(timer.getPendingTimeouts()).toEqual([]);
     expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);

@@ -5706,12 +5706,16 @@ describe("DevicePool", () => {
         release_reason: deviceRestartReleaseReason("Pixel 8"),
         stable_device_id: "Pixel 8",
       });
-      fakeTimer.clearHistory();
+      // Exhaustion reports promptly while a returning runtime can still resume.
+      await expect(
+        sessionManager.getOrCreateSession("session-1", devicePool, "android"),
+      ).rejects.toThrow("watched-process-exit (code=1, signal=null); recovery outcome: exhausted");
+      fakeTimer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
       const resume = sessionManager.getOrCreateSession("session-1", devicePool, "android");
-      await expect(resume).rejects.toThrow(
-        "watched-process-exit (code=1, signal=null); recovery outcome: exhausted",
-      );
-      expect(fakeTimer.getSleepHistory()).toEqual([]);
+      await expect(resume).rejects.toThrow("recovery reason: target-absent");
+      expect(await persistence.getSession?.("session-1")).toMatchObject({
+        release_reason: "identity-recovery-target-absent",
+      });
     });
 
     test("does not recover an emulator intentionally shut down by the client", async () => {

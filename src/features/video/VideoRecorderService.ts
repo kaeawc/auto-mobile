@@ -671,12 +671,14 @@ function parseResolution(
   return { width, height };
 }
 
-function capBitrateKbps(targetBitrateKbps: number, maxThroughputMbps: number): number {
-  const maxBitrateKbps = Math.max(0, Math.floor(maxThroughputMbps * 1000));
-  if (!maxBitrateKbps) {
+export function capBitrateKbps(targetBitrateKbps: number, maxThroughputMbps: number): number {
+  if (!(maxThroughputMbps > 0)) {
     return targetBitrateKbps;
   }
 
+  // Throughput caps use whole Kbps: 1 Kbps is the minimum representable cap.
+  // A smaller positive budget must not round to zero and disable the cap.
+  const maxBitrateKbps = Math.max(1, Math.floor(maxThroughputMbps * 1000));
   return Math.min(targetBitrateKbps, maxBitrateKbps);
 }
 

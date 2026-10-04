@@ -21,7 +21,7 @@ import type {
   VideoCaptureBackend,
   VideoCaptureConfig,
 } from "./VideoRecorderService";
-import { VideoCaptureFinalizationError } from "./VideoRecorderService";
+import { capBitrateKbps, VideoCaptureFinalizationError } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 import {
@@ -110,12 +110,7 @@ async function startScreenrecordProcess(
 }
 
 export function clampBitrateKbps(config: VideoCaptureConfig): number {
-  const maxBitrateKbps = Math.max(0, Math.floor(config.maxThroughputMbps * 1000));
-  if (!maxBitrateKbps) {
-    return config.targetBitrateKbps;
-  }
-
-  return Math.min(config.targetBitrateKbps, maxBitrateKbps);
+  return capBitrateKbps(config.targetBitrateKbps, config.maxThroughputMbps);
 }
 
 /**

@@ -1346,7 +1346,10 @@ export class RunnerReadinessService {
       const diagnosticPromise = getDiagnostic(context.device, signal);
       // The timeout returns first if an ADB diagnostic command hangs. Its
       // rejection after abort is intentionally observed below.
-      void diagnosticPromise.catch(() => {});
+      void diagnosticPromise.catch((error) => {
+        // Supplemental diagnostics may reject after timeout abort; the readiness failure is preserved.
+        logger.debug(`Android readiness diagnostic rejection observed: ${errorMessage(error)}`);
+      });
       const timedOut = new Error(`${phase} diagnostic timed out`);
       let diagnostic: T | undefined;
       try {

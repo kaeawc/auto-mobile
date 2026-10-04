@@ -7,9 +7,7 @@ import {
   BootedDevice,
   ImeAction,
   KeyboardResult,
-  ObserveResult,
   SendTextResult,
-  ViewHierarchyResult,
 } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -24,12 +22,6 @@ import { resolveAutoInputMode } from "./resolveAutoInputMode";
 import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
 import { serverConfig } from "../../utils/ServerConfig";
 import {
-  clearTextWithKeyEvents,
-  DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS,
-  getFocusedTextLength,
-  hasFocusedTextInput,
-} from "./ClearText";
-import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
   buildAsciiKeyEventPlan,
@@ -38,7 +30,7 @@ import {
 import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
 
-export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
+export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "append";
 
 /** Selector variants that identify a field to focus before typing (issue #5872). */
 export interface TextInputTargetSelector {
@@ -222,7 +214,7 @@ export class InputText extends BaseVisualChange {
 
     assertInputNotAborted(signal);
     const result = await this.observedInteraction(
-      async (previousObserveResult) => {
+      async () => {
         try {
           assertInputNotAborted(signal);
           // Platform-specific text input execution
@@ -234,7 +226,6 @@ export class InputText extends BaseVisualChange {
                   imeAction,
                   dismissKeyboard,
                   resolvedMode,
-                  previousObserveResult,
                   signal,
                 ),
               );
@@ -286,7 +277,6 @@ export class InputText extends BaseVisualChange {
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode: InputTextMode = "a11y",
-    previousObserveResult?: ObserveResult,
     signal?: AbortSignal,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     assertInputNotAborted(signal);
@@ -305,16 +295,6 @@ export class InputText extends BaseVisualChange {
         dismissKeyboard,
         undefined,
         undefined,
-        signal,
-      );
-    }
-
-    if (mode === "eventOnly") {
-      return this.executeAndroidEventOnlyTextInput(
-        text,
-        imeAction,
-        dismissKeyboard,
-        previousObserveResult,
         signal,
       );
     }
@@ -341,7 +321,7 @@ export class InputText extends BaseVisualChange {
       }
 
       // Dismiss via the confirmed Keyboard.close() route (KEYCODE_BACK + state
-      // poll), the same path eventOnly/append use (issue #5887).
+      // poll), the same path eventLast/eventAll/append use (issue #5887).
       // Text (and any imeAction) already landed, so a dismissal failure is a
       // warning on a SUCCESSFUL result, never an error (issue #6868). imeAction is
       // carried so a consumer can tell a post-submit cleanup failure from an
@@ -386,7 +366,6 @@ export class InputText extends BaseVisualChange {
         imeAction,
         dismissKeyboard,
         "a11y",
-        undefined,
         signal,
       );
       return { ...result, method: "a11y" };
@@ -406,7 +385,6 @@ export class InputText extends BaseVisualChange {
         imeAction,
         dismissKeyboard,
         "a11y",
-        undefined,
         signal,
       );
       return { ...result, method: "a11y" };
@@ -476,7 +454,6 @@ export class InputText extends BaseVisualChange {
         imeAction,
         dismissKeyboard,
         "a11y",
-        undefined,
         signal,
       );
       return { ...result, method: "a11y" };
@@ -606,7 +583,7 @@ export class InputText extends BaseVisualChange {
    * Append `text` to the focused field using real key events only.
    *
    * Every other Android mode is REPLACE-shaped: `a11y` sends the whole string
-   * through `ACTION_SET_TEXT`, and `eventAll`/`eventOnly` clear the field before
+   * through `ACTION_SET_TEXT`, and `eventAll` clears the field before
    * typing. That is right for "make this field say X" automation, but wrong for
    * an interactive client mirroring one keystroke at a time — there, each
    * keystroke would wipe the field and leave only the last character
@@ -617,7 +594,7 @@ export class InputText extends BaseVisualChange {
    * would silently replace the field's contents, which is the exact destruction
    * this mode exists to avoid. The caller sees an actionable error instead.
    *
-   * Unlike `eventOnly` this needs no view hierarchy — it neither clears nor
+   * This needs no view hierarchy — it neither clears nor
    * measures the field — which also keeps a per-keystroke call to one round trip.
    *
    * Every device round trip — the API-level probe and each `adb shell input ...`
@@ -902,117 +879,6 @@ export class InputText extends BaseVisualChange {
       ...(charsSent !== undefined ? { charsSent } : {}),
       ...(failureSource !== undefined ? { failureSource } : {}),
     };
-  }
-
-  private async executeAndroidEventOnlyTextInput(
-    text: string,
-    imeAction: ImeAction | undefined,
-    dismissKeyboard: boolean,
-    previousObserveResult?: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<SendTextResult & { method?: InputTextMode }> {
-    assertInputNotAborted(signal);
-    const keyEventPlans: KeyEventPlan[] = [];
-    for (const char of Array.from(text)) {
-      const keyEventPlan = await this.getAsciiKeyEventPlan(char, undefined, signal);
-      if (!keyEventPlan) {
-        return {
-          success: false,
-          text,
-          error: `eventOnly cannot type ${JSON.stringify(char)} with Android key events`,
-          method: "eventOnly",
-        };
-      }
-      keyEventPlans.push(keyEventPlan);
-    }
-
-    const viewHierarchy = previousObserveResult?.viewHierarchy;
-    if (!viewHierarchy) {
-      return {
-        success: false,
-        text,
-        error: "eventOnly requires a current view hierarchy to clear the focused field",
-        method: "eventOnly",
-      };
-    }
-
-    const focusedViewHierarchy = await this.refreshFocusedTextInputHierarchy(viewHierarchy, signal);
-    if (!focusedViewHierarchy) {
-      return {
-        success: false,
-        text,
-        error: "eventOnly requires a focused editable field",
-        method: "eventOnly",
-      };
-    }
-
-    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusedViewHierarchy) ?? 0, signal);
-    for (const keyEventPlan of keyEventPlans) {
-      await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
-    }
-
-    // IME action before dismiss — see the a11y path for why (issue #5887).
-    if (imeAction) {
-      await this.executeImeAction(imeAction, signal);
-    }
-
-    // A dismissal failure degrades to a warning on this success (issue #6868);
-    // imeAction is carried so a dismiss-only failure is not mistaken for a no-op
-    // and retried (issue #5887 review).
-    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
-
-    return {
-      success: true,
-      text,
-      imeAction,
-      method: "eventOnly",
-      ...dismissal,
-    };
-  }
-
-  private async refreshFocusedTextInputHierarchy(
-    viewHierarchy: ViewHierarchyResult,
-    signal?: AbortSignal,
-  ): Promise<ViewHierarchyResult | undefined> {
-    assertInputNotAborted(signal);
-    if (hasFocusedTextInput(viewHierarchy)) {
-      return viewHierarchy;
-    }
-
-    // Android interprets `minTimestamp` in the device-authored hierarchy clock
-    // domain. When the failed hierarchy carries an `updatedAt` we derive the
-    // lower bound from it (device clock, +1 for strictly-newer). When it does
-    // NOT, we must still stay in the device domain: falling back to the host
-    // clock (`this.timer.now()`) lets a device clock running ahead of the host
-    // accept an older cached focused hierarchy as fresh, defeating the freshness
-    // guarantee (issue #4617). Derive the fallback from the device clock via
-    // `getDeviceTimestampMsWithSource`, and reject degraded host-clock results.
-    let minTimestamp: number;
-    if (typeof viewHierarchy.updatedAt === "number") {
-      minTimestamp = viewHierarchy.updatedAt + 1;
-    } else {
-      const timestampResult = await this.adb.getDeviceTimestampMsWithSource();
-      assertInputNotAborted(signal);
-      if (timestampResult.source === "host") {
-        return undefined;
-      }
-      minTimestamp =
-        timestampResult.source === "device-seconds"
-          ? timestampResult.timestampMs + DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS
-          : timestampResult.timestampMs;
-    }
-    const refreshedObserveResult = await this.observeScreen.execute({
-      freshness: "fresh",
-      minTimestamp,
-      signal,
-    });
-    assertInputNotAborted(signal);
-    const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
-    return refreshedObserveResult.freshness?.isFresh !== false &&
-      refreshedViewHierarchy &&
-      hasFocusedTextInput(refreshedViewHierarchy)
-      ? refreshedViewHierarchy
-      : undefined;
   }
 
   /**

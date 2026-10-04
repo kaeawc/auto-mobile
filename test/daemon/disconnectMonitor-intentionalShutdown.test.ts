@@ -7,6 +7,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -44,6 +45,9 @@ async function withMonitor(
     await h.daemon.deviceDisconnectMonitor.stop();
     h.tracker.endExecution(h.execution.id);
     h.tracker.endExecution(h.killExecution.id);
+    h.tracker.endExecution(h.deviceExecution.id);
+    h.quarantineSessionCancel.mockRestore();
+    h.quarantineDeviceCancel.mockRestore();
     h.cancel.mockRestore();
     h.warn.mockRestore();
   }
@@ -55,11 +59,26 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
   const incidents = new InMemoryEmulatorLossIncidentStore(timer, ids);
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new MissingDeviceManager();
+  const tracker = new ExecutionTracker(timer, ids);
+  const quarantineSessionCancel = spyOn(tracker, "cancelDeviceSessionExecutions");
+  const quarantineDeviceCancel = spyOn(tracker, "cancelDeviceExecutions");
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "daemon", {
       timer,
       idGenerator: ids,
       deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      cancelDeviceSessionExecutions: Object.assign(
+        (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
+          tracker.cancelDeviceSessionExecutions(sessionId, reason, options),
+        {
+          cancelDeviceExecutions: (
+            deviceId: string,
+            reason: string,
+            options?: { excludeExecutionId?: string },
+          ) => tracker.cancelDeviceExecutions(deviceId, reason, options),
+        },
+      ),
       installedAppsRepository: new FakeInstalledAppsRepository(),
       emulatorLossIncidentStore: incidents,
       recoveryPolicy: { onLoss: false, maxAttempts: 0 },
@@ -102,7 +121,8 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
     offlineRecoveryAttemptedIncarnations: new Map(),
     deferredSessionRecoverySweeps: new Set(),
   }) as DisconnectMonitorSurface;
-  const tracker = new ExecutionTracker(timer, ids);
+  const deviceExecution = tracker.startExecution("observe");
+  tracker.bindDeviceExecution(deviceExecution.id, device.id);
   const execution = tracker.startExecution(
     initiatingSessionId === "kill-session" ? "killDevice" : "inputText",
     undefined,
@@ -132,6 +152,12 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
   };
   return {
     daemon,
+    timer,
+    manager,
+    booted,
+    quarantineSessionCancel,
+    quarantineDeviceCancel,
+    deviceExecution,
     pool,
     sessions,
     device,
@@ -311,6 +337,111 @@ test("a stale Android shutdown marker does not suppress cancellation or mutate o
     h.device.incarnation = markedIncarnation;
     expect(await h.pool.isShutdownReserved(h.device.id)).toBe(true);
     h.device.incarnation++;
+    await h.reachThreshold();
+    await expectCleanedUp(h);
+  });
+});
+
+async function expectShutdownDiscoveryProtected(h: Awaited<ReturnType<typeof monitorHarness>>) {
+  expect(h.execution.abortController.signal.aborted).toBe(false);
+  expect(h.deviceExecution.abortController.signal.aborted).toBe(false);
+  expect(h.quarantineSessionCancel).not.toHaveBeenCalled();
+  expect(h.quarantineDeviceCancel).not.toHaveBeenCalled();
+  expect(h.cancel).not.toHaveBeenCalled();
+  expect(await h.incidents.list()).toEqual([]);
+  expect(h.sessions.getSession("kill-session")).not.toBeNull();
+  expect(h.pool.getDevice(h.device.id)).toBe(h.device);
+  expect(h.device.identityUnresolved).toBe(true);
+  expect(h.device.identityReconcileAttempts).toBeUndefined();
+}
+
+for (const source of ["disconnect-monitor", "shutdown-preflight"] as const) {
+  test(`${source} discovery first protects a reserved in-flight kill from identity quarantine`, async () => {
+    await withMonitor("android", async (h) => {
+      const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+      expect(reservation).toBeDefined();
+      const retryStarted = Promise.withResolvers<void>();
+      const releaseRetry = Promise.withResolvers<void>();
+      const discover = h.manager.getBootedDevicesDetailed.bind(h.manager);
+      let retryCalls = 0;
+      h.manager.bootedDevices = [{ ...h.booted, name: `Unknown (${h.device.id})` }];
+      h.manager.getBootedDevicesDetailed = async (platform) => {
+        if (platform === "android") {
+          retryCalls++;
+          retryStarted.resolve();
+          await releaseRetry.promise;
+        }
+        return discover(platform);
+      };
+      try {
+        const preflight = () =>
+          h.pool.reconcileDiscoveryObservation(h.manager.bootedDevices, "shutdown-preflight", {
+            excludeExecutionId: h.killExecution.id,
+          });
+        // Pause the first caller's retry so the other discovery joins its
+        // reconciliation. The monitor has no ambient kill execution to exclude.
+        const first = source === "disconnect-monitor" ? h.tick() : preflight();
+        await retryStarted.promise;
+        const second = source === "disconnect-monitor" ? preflight() : h.tick();
+        releaseRetry.resolve();
+        await Promise.all([first, second]);
+        expect(retryCalls).toBe(2);
+        expect(h.timer.getSleepHistory()).toEqual([]);
+        await expectShutdownDiscoveryProtected(h);
+        h.manager.bootedDevices = [];
+        await h.reachThreshold();
+        await expectDeferred(h);
+      } finally {
+        releaseRetry.resolve();
+        await reservation?.release();
+        reservation?.releaseRecoveryRouteLease();
+      }
+    });
+  });
+}
+
+test("unreserved unreadable identity quarantines and cancels work before the loss incident", async () => {
+  await withMonitor("android", async (h) => {
+    h.manager.bootedDevices = [{ ...h.booted, name: `Unknown (${h.device.id})` }];
+    await h.tick();
+    expect(h.timer.getSleepHistory()).toEqual([]);
+    expect(h.device.identityUnresolved).toBe(true);
+    expect(h.execution.abortController.signal.aborted).toBe(true);
+    expect(h.deviceExecution.abortController.signal.aborted).toBe(true);
+    expect(h.quarantineSessionCancel).toHaveBeenCalledTimes(1);
+    expect(h.quarantineDeviceCancel).toHaveBeenCalledTimes(1);
+    expect(h.execution.cancelReason).toMatchObject({ code: "device_lost", deviceId: h.device.id });
+    expect(await h.incidents.list()).toEqual([]);
+    h.manager.bootedDevices = [];
+    await h.reachThreshold();
+    await expectCleanedUp(h);
+  });
+});
+
+test("a surviving device quarantines on the next discovery after a failed kill releases its reservation", async () => {
+  await withMonitor("android", async (h) => {
+    const reservation = await h.pool.reserveDeviceForShutdown(h.device.id);
+    expect(reservation).toBeDefined();
+    h.pool.markIntentionalShutdown(h.device.id);
+    h.manager.bootedDevices = [{ ...h.booted, name: `Unknown (${h.device.id})` }];
+    try {
+      await h.tick();
+      await expectShutdownDiscoveryProtected(h);
+    } finally {
+      await reservation?.release();
+      reservation?.releaseRecoveryRouteLease();
+    }
+    expect(await h.pool.isShutdownReservationHeld(h.device.id)).toBe(false);
+    await h.tick();
+    expect(h.timer.getSleepHistory()).toEqual([]);
+    expect(h.device.identityUnresolved).toBe(true);
+    expect(h.execution.abortController.signal.aborted).toBe(true);
+    expect(h.deviceExecution.abortController.signal.aborted).toBe(true);
+    await h.tick();
+    // Once the deferred cancellation runs, ordinary quarantine stays idempotent.
+    expect(h.quarantineSessionCancel).toHaveBeenCalledTimes(1);
+    expect(h.quarantineDeviceCancel).toHaveBeenCalledTimes(1);
+    h.manager.bootedDevices = [];
     await h.reachThreshold();
     await expectCleanedUp(h);
   });

@@ -788,7 +788,7 @@ export class TakeScreenshot implements ScreenshotService {
       } finally {
         // Successful captures already remove the file in the unchanged chained command.
         if (captureDispatched && !readOnly && (!captureCompleted || signal?.aborted)) {
-          this.removeBase64TempScreenshot(tempFile);
+          this.removeDeviceTempScreenshot(tempFile, "base64");
         }
       }
     });
@@ -826,7 +826,7 @@ export class TakeScreenshot implements ScreenshotService {
     };
   }
 
-  private removeBase64TempScreenshot(path: string): void {
+  private removeDeviceTempScreenshot(path: string, captureMethod: "base64" | "file-pull"): void {
     const cleanup = this.adb
       .execute(["shell", "rm", "-f", path], {
         timeoutMs: SCREENSHOT_CLEANUP_TIMEOUT_MS,
@@ -836,7 +836,7 @@ export class TakeScreenshot implements ScreenshotService {
       })
       .catch((error: unknown) => {
         // Best-effort removal is idempotent and must not replace the capture error or cancellation.
-        logger.debug("[SCREENSHOT] Could not remove temporary base64 screenshot", error);
+        logger.warn(`[SCREENSHOT] Could not remove temporary ${captureMethod} screenshot`, error);
       });
     // Failed/cancelled captures must settle immediately, even if the cleanup executor stalls.
     void cleanup;
@@ -858,6 +858,7 @@ export class TakeScreenshot implements ScreenshotService {
     const tempFile = `/sdcard/screenshot_${this.sanitizeDeviceTempId(this.idGenerator.next())}.png`;
     const tempLocalFile = `${finalPath}.temp`;
     let result: ScreenshotResult;
+    let captureDispatched = false;
 
     try {
       // Use file pull approach instead of base64 to avoid stdout buffer issues
@@ -866,6 +867,7 @@ export class TakeScreenshot implements ScreenshotService {
       // Step 1: Take screenshot on device
       const displayArgument = await this.screencapDisplayArgument(options, signal);
       throwIfAborted(signal);
+      captureDispatched = true;
       const screencapResult = await this.adb.executeCommand(
         `shell "screencap ${displayArgument}-p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
         undefined,
@@ -930,7 +932,9 @@ export class TakeScreenshot implements ScreenshotService {
 
       throw err;
     } finally {
-      await this.removeDeviceTempScreenshot(tempFile);
+      if (captureDispatched) {
+        this.removeDeviceTempScreenshot(tempFile, "file-pull");
+      }
     }
 
     return await this.cancelSuccessfulFilePullIfAborted(result, finalPath, signal);
@@ -975,15 +979,6 @@ export class TakeScreenshot implements ScreenshotService {
       }
     } catch (cleanupErr) {
       logger.debug(`Failed to cleanup temp file: ${errorMessage(cleanupErr)}`);
-    }
-  }
-
-  private async removeDeviceTempScreenshot(tempFile: string): Promise<void> {
-    try {
-      // Cleanup cannot change the completed capture result, so it is safe to swallow its failure.
-      await this.adb.executeCommand(`shell rm -f ${shellQuote(tempFile)}`);
-    } catch (error) {
-      logger.debug(`[SCREENSHOT] Failed to remove device temp screenshot ${tempFile}: ${error}`);
     }
   }
 }

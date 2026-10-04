@@ -47,22 +47,9 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
       throw new Error(`Unsupported performance stream command: ${String(request.command)}`);
     }
 
-    const startTime = normalizeStreamTimestampIso(request.startTime, "startTime");
-    const endTime = normalizeStreamTimestampIso(request.endTime, "endTime");
-    const sinceTimestamp = normalizeStreamTimestampIso(request.sinceTimestamp, "sinceTimestamp");
-    const sinceId = normalizeStreamSinceId(request.sinceId);
-    const limit = normalizeStreamLimit(request.limit, DEFAULT_LIMIT);
-
-    const results = await this.auditRepository.listResultsSince({
-      startTime,
-      endTime,
-      limit,
-      deviceId: request.deviceId?.trim() || undefined,
-      sessionId: request.sessionId?.trim() || undefined,
-      packageName: request.packageName?.trim() || undefined,
-      sinceTimestamp,
-      sinceId,
-    });
+    const query = this.createPollQuery(request);
+    const { sinceTimestamp, sinceId } = query;
+    const results = await this.auditRepository.listResultsSince(query);
 
     const last = results.length > 0 ? results[results.length - 1] : undefined;
 
@@ -71,6 +58,27 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
       results,
       lastTimestamp: last?.timestamp ?? sinceTimestamp,
       lastId: last?.id ?? sinceId,
+    };
+  }
+
+  private createPollQuery(
+    request: PerformanceStreamSocketRequest,
+  ): Parameters<PerformanceStreamRepository["listResultsSince"]>[0] {
+    const startTime = normalizeStreamTimestampIso(request.startTime, "startTime");
+    const endTime = normalizeStreamTimestampIso(request.endTime, "endTime");
+    const sinceTimestamp = normalizeStreamTimestampIso(request.sinceTimestamp, "sinceTimestamp");
+    const sinceId = normalizeStreamSinceId(request.sinceId);
+    const limit = normalizeStreamLimit(request.limit, DEFAULT_LIMIT);
+
+    return {
+      startTime,
+      endTime,
+      limit,
+      deviceId: request.deviceId?.trim() || undefined,
+      sessionId: request.sessionId?.trim() || undefined,
+      packageName: request.packageName?.trim() || undefined,
+      sinceTimestamp,
+      sinceId,
     };
   }
 

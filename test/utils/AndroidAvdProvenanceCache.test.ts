@@ -135,27 +135,53 @@ describe("AndroidAvdProvenanceCache", () => {
     expect(manager.getListDeviceImagesCalls()).toHaveLength(1);
   });
 
-  test("six elapsed caller waits are debug only and a shared failure warns once", async () => {
-    const timer = new FakeTimer();
-    const manager = new FakeAvdManager();
-    manager.setListDeviceImagesHangs(true);
-    const cache = new AndroidAvdProvenanceCache();
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    const debug = spyOn(logger, "debug").mockImplementation(() => {});
-    try {
-      const reads = Array.from({ length: 6 }, () => cache.getByName(manager, timer));
-      await timer.advanceTimeAsync(2_000);
-      await Promise.all(reads);
-      const waitWarnings = warn.mock.calls.length;
-      const waitDebugs = debug.mock.calls.length;
-      await timer.advanceTimeAsync(28_000);
-      expect(waitWarnings).toBe(0);
-      expect(waitDebugs).toBe(6);
-      expect(warn).toHaveBeenCalledTimes(1);
-    } finally {
-      warn.mockRestore();
-      debug.mockRestore();
-      cache.invalidate();
-    }
-  });
+  test.each([false, true])(
+    "six elapsed caller waits are debug only and a shared failure warns once (unrelated logs: %p)",
+    async (unrelatedLogs) => {
+      const timer = new FakeTimer();
+      const manager = new FakeAvdManager();
+      manager.setListDeviceImagesHangs(true);
+      const cache = new AndroidAvdProvenanceCache();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      let unrelatedLog: NodeJS.Immediate | undefined;
+      try {
+        if (unrelatedLogs) {
+          // FakeTimer yields real event-loop turns while the shared logger spies are installed.
+          unrelatedLog = setImmediate(() => {
+            logger.warn("unrelated");
+            logger.debug("unrelated");
+          });
+        }
+        const reads = Array.from({ length: 6 }, () => cache.getByName(manager, timer));
+        await timer.advanceTimeAsync(2_000);
+        await Promise.all(reads);
+        if (unrelatedLogs) {
+          expect(warn).toHaveBeenCalledWith("unrelated");
+          expect(debug).toHaveBeenCalledWith("unrelated");
+        }
+        const waitWarnings = warn.mock.calls.filter(([message]) =>
+          message.startsWith("Android AVD provenance lookup failed"),
+        ).length;
+        const waitDebugs = debug.mock.calls.filter(([message]) =>
+          message.startsWith("Android AVD provenance caller wait elapsed"),
+        ).length;
+        await timer.advanceTimeAsync(28_000);
+        expect(waitWarnings).toBe(0);
+        expect(waitDebugs).toBe(6);
+        expect(
+          warn.mock.calls.filter(([message]) =>
+            message.startsWith("Android AVD provenance lookup failed"),
+          ),
+        ).toHaveLength(1);
+      } finally {
+        if (unrelatedLog !== undefined) {
+          clearImmediate(unrelatedLog);
+        }
+        warn.mockRestore();
+        debug.mockRestore();
+        cache.invalidate();
+      }
+    },
+  );
 });

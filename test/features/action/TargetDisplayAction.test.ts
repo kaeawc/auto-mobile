@@ -34,6 +34,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
@@ -553,6 +554,7 @@ describe("explicit action display", () => {
       androidClient: client,
       iosClient: client,
     });
+    setFakeTapAtWindow(action);
     action.observeScreen = observe;
     const result = await action.execute({ x: 40, y: 50 });
     expect(result.success).toBe(true);

@@ -1,4 +1,5 @@
-import { expect, describe, test, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { BootedDevice } from "../../../src/models";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -10,9 +11,8 @@ const PHYSICAL_UDID = "00008030001A2B3C4D5E6F7089ABCDEF01234567";
 
 describe("PostNotification - iOS Simulator", () => {
   let simctl: FakeSimCtlClient;
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  afterEach(() => warn.mockClear());
-  afterAll(() => warn.mockRestore());
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  afterEach(() => warn.mockRestore());
 
   const makeDevice = (deviceId: string): BootedDevice =>
     ({ deviceId, platform: "ios" }) as BootedDevice;
@@ -23,6 +23,7 @@ describe("PostNotification - iOS Simulator", () => {
   const pushCalls = () => simctl.getMethodCalls("pushNotification");
 
   beforeEach(() => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     simctl = new FakeSimCtlClient();
   });
 
@@ -40,7 +41,15 @@ describe("PostNotification - iOS Simulator", () => {
         supported: false,
         error: "Failed to post notification: simctl rejected",
       });
-      expect(warn).toHaveBeenCalledTimes(1);
+      expect(
+        loggerCallsWithPrefix(
+          warn.mock.calls,
+          "[PostNotification]",
+          "Failed to post notification:",
+          "Image file not found at ",
+          "Failed to push image to device:",
+        ),
+      ).toHaveLength(1);
       expect(warn).toHaveBeenCalledWith("Failed to post notification: simctl rejected", error);
     } finally {
       push.mockRestore();

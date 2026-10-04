@@ -4,6 +4,8 @@ import {
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
   ListResourceTemplatesRequestSchema,
   type CallToolResult,
   McpError,
@@ -19,7 +21,7 @@ import {
 import { DaemonShuttingDownError } from "../daemon/client";
 import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
-import { ActionableError } from "../models";
+import { ActionableError, toActionableError } from "../models";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
@@ -247,6 +249,17 @@ export function deviceControlTransportFailureResult(
   };
 }
 
+async function forwardResourceUpdate(server: McpServer, uri: string): Promise<void> {
+  try {
+    await server.server.notification({
+      method: "notifications/resources/updated",
+      params: { uri },
+    });
+  } catch (error) {
+    logger.warn("[ProxyServer] Failed to forward resource update notification", error);
+  }
+}
+
 /**
  * Create an MCP server that proxies all requests through the daemon
  *
@@ -287,7 +300,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         // post-lazy-connect tools reconciliation (issue #5879). Without the
         // capability a spec-strict client may ignore those notifications and keep
         // a stale (cold, over-broad) tool list for the session.
-        resources: { listChanged: true },
+        resources: { subscribe: true, listChanged: true },
         tools: { listChanged: true },
         prompts: {},
       },
@@ -314,6 +327,35 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       // Best-effort: a failed client notification must never break the proxy
       // connection; the client just keeps its stale list until the next fetch.
       logger.warn(`[ProxyServer] Failed to forward ${kind} list_changed notification: ${error}`);
+    }
+  });
+
+  const stopResourceUpdates = proxy.onResourceUpdated((uri) => {
+    void forwardResourceUpdate(server, uri);
+  });
+  const previousOnClose = server.server.onclose;
+  server.server.onclose = () => {
+    stopResourceUpdates();
+    previousOnClose?.();
+    void proxy.close().catch((error) => {
+      logger.warn("[ProxyServer] Failed to close daemon proxy", error);
+    });
+  };
+
+  server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    try {
+      await proxy.subscribeResource(request.params.uri);
+      return {};
+    } catch (error) {
+      throw toActionableError(error, "Failed to subscribe to daemon resource");
+    }
+  });
+  server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    try {
+      await proxy.unsubscribeResource(request.params.uri);
+      return {};
+    } catch (error) {
+      throw toActionableError(error, "Failed to unsubscribe from daemon resource");
     }
   });
 

@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
+import { readFileSync } from "node:fs";
+import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
+import type { ViewHierarchyResult } from "../../../../src/models";
 import type { Element, ElementBounds } from "../../../../src/models";
 
 // Direct unit tests for the AutoTargetSelector primitives. The SwipeOn autoTarget
@@ -21,7 +24,10 @@ describe("AutoTargetSelector", () => {
     });
 
     test("returns null when the single scrollable is on the wrong axis", () => {
-      const wide = elementWithBounds({ left: 0, top: 0, right: 500, bottom: 100 });
+      const wide: Element = {
+        bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+        orientation: "horizontal",
+      };
       expect(selector.selectAutoTargetScrollable([wide], null, "up")).toBeNull();
     });
 
@@ -114,6 +120,39 @@ describe("AutoTargetSelector", () => {
       expect(selector.selectAutoTargetScrollable([pager, list], screen, "down")).toBe(list);
     });
 
+    test("uses aspect ratio only after centre selection cannot decide", () => {
+      const screen = { left: 0, top: 0, right: 1000, bottom: 2000 };
+      const tall = elementWithBounds({ left: 0, top: 0, right: 100, bottom: 500 });
+      const wide = elementWithBounds({ left: 0, top: 0, right: 800, bottom: 200 });
+      expect(selector.selectAutoTargetScrollable([wide, tall], screen, "up")).toBe(tall);
+      expect(selector.selectAutoTargetScrollable([tall, wide], screen, "left")).toBe(wide);
+      // A centred wide list must win before shape preference is considered.
+      wide.bounds = { left: 0, top: 900, right: 1000, bottom: 1100 };
+      expect(selector.selectAutoTargetScrollable([tall, wide], screen, "up")).toBe(wide);
+    });
+
+    test("keeps the innermost centred wide candidate ahead of a tall outer list", () => {
+      const screen = { left: 0, top: 0, right: 1000, bottom: 2000 };
+      const outer = elementWithBounds({ left: 100, top: 100, right: 900, bottom: 1900 });
+      const inner = elementWithBounds({ left: 100, top: 900, right: 900, bottom: 1100 });
+      expect(selector.selectAutoTargetScrollable([outer, inner], screen, "up")).toBe(inner);
+    });
+
+    test("keeps known-axis candidates in the largest fallback regardless of shape", () => {
+      const known: Element = {
+        bounds: { left: 0, top: 0, right: 1000, bottom: 200 },
+        orientation: "vertical",
+      };
+      const tall = elementWithBounds({ left: 0, top: 0, right: 100, bottom: 500 });
+      expect(selector.selectAutoTargetScrollable([tall, known], null, "up")).toBe(known);
+    });
+
+    test("picks the largest when no unknown-axis shape fits the direction", () => {
+      const small = elementWithBounds({ left: 0, top: 0, right: 500, bottom: 100 });
+      const large = elementWithBounds({ left: 0, top: 0, right: 800, bottom: 200 });
+      expect(selector.selectAutoTargetScrollable([small, large], null, "up")).toBe(large);
+    });
+
     test("returns null when every candidate has the wrong capability", () => {
       const bounds = { left: 0, top: 0, right: 100, bottom: 1000 };
       expect(
@@ -194,26 +233,26 @@ describe("AutoTargetSelector", () => {
       expect(selector.matchesDirection(element, "left")).toBe(false);
     });
 
-    test("axis-neutral scroll actions retain aspect fallback for a generic node", () => {
+    test("axis-neutral scroll actions match either direction for a generic node", () => {
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 500 },
         class: "android.view.View",
         actions: ["scroll_forward", "scroll_backward"],
       };
       expect(selector.matchesDirection(element, "up")).toBe(true);
-      expect(selector.matchesDirection(element, "left")).toBe(false);
+      expect(selector.matchesDirection(element, "left")).toBe(true);
     });
 
-    test("treats a tall element as vertically scrollable", () => {
+    test("does not reject horizontal swipes on an unknown-axis tall element", () => {
       const tall = elementWithBounds({ left: 0, top: 0, right: 100, bottom: 500 });
       expect(selector.matchesDirection(tall, "up")).toBe(true);
-      expect(selector.matchesDirection(tall, "left")).toBe(false);
+      expect(selector.matchesDirection(tall, "left")).toBe(true);
     });
 
-    test("treats a wide element as horizontally scrollable", () => {
+    test("does not reject vertical swipes on an unknown-axis wide element", () => {
       const wide = elementWithBounds({ left: 0, top: 0, right: 500, bottom: 100 });
       expect(selector.matchesDirection(wide, "left")).toBe(true);
-      expect(selector.matchesDirection(wide, "down")).toBe(false);
+      expect(selector.matchesDirection(wide, "down")).toBe(true);
     });
   });
 
@@ -246,4 +285,64 @@ describe("AutoTargetSelector", () => {
       expect(selector.mergeWarnings("a", undefined, "b", "a")).toBe("a b");
     });
   });
+});
+
+// Real batch-15 captures: only unrelated node subtrees were removed. The
+// portrait swipe result already contains a production-parsed Element, not a hierarchy.
+describe("AutoTargetSelector batch-15 captures", () => {
+  const selector = new AutoTargetSelector();
+  const captures = new Map<string, { scrollables: Element[]; screen: ElementBounds }>();
+  let portrait: Element;
+
+  beforeAll(() => {
+    const finder = new DefaultElementFinder();
+    for (const name of ["foldable", "landscape"]) {
+      const hierarchy: ViewHierarchyResult = JSON.parse(
+        readFileSync(
+          new URL(`../../../fixtures/swipeon-auto-target/${name}.json`, import.meta.url),
+          "utf8",
+        ),
+      );
+      captures.set(name, {
+        scrollables: finder.findScrollableElements(hierarchy),
+        screen: { left: 0, top: 0, right: hierarchy.screenWidth!, bottom: hierarchy.screenHeight! },
+      });
+    }
+    portrait = JSON.parse(
+      readFileSync(
+        new URL("../../../fixtures/swipeon-auto-target/portrait-element.json", import.meta.url),
+        "utf8",
+      ),
+    );
+  });
+
+  for (const [name, bounds] of [
+    ["foldable", { left: 0, top: 497, right: 2076, bottom: 1801 }],
+    ["landscape", { left: 136, top: 442, right: 2400, bottom: 744 }],
+  ] as const) {
+    test.each(["up", "down"] as const)(
+      `${name} wide Compose list is selected for %s`,
+      (direction) => {
+        const capture = captures.get(name)!;
+        expect(
+          capture.scrollables.some((element) => element["resource-id"] === "tap_screen_content"),
+        ).toBe(true);
+        const selected = selector.selectAutoTargetScrollable(
+          capture.scrollables,
+          capture.screen,
+          direction,
+        );
+        expect(selected?.bounds).toEqual(bounds);
+        expect(selector.matchesDirection(capture.scrollables[0], direction)).toBe(true);
+      },
+    );
+  }
+
+  test.each(["up", "down"] as const)(
+    "portrait captured list is still selected for %s",
+    (direction) => {
+      expect(portrait.bounds).toEqual({ left: 0, top: 652, right: 1080, bottom: 2064 });
+      expect(selector.selectAutoTargetScrollable([portrait], null, direction)).toBe(portrait);
+    },
+  );
 });

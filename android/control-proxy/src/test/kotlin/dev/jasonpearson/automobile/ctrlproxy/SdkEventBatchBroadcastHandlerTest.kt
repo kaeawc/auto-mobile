@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.content.Intent
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
@@ -13,6 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 class SdkEventBatchBroadcastHandlerTest {
   @Test
@@ -110,6 +113,23 @@ class SdkEventBatchBroadcastHandlerTest {
       fixture.handler.handle(batchJson, result, batchId = id)
     }
     assertEquals(List(4) { batch }, fixture.batches)
+    assertEquals(List(5) { SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED }, result.codes)
+  }
+
+  @Test
+  fun `traffic from another sender evicts the oldest accepted id device wide`() {
+    val fixture = Fixture(accept = true, recentBatchCapacity = 2)
+    val result = FakeResultSink(isOrdered = true)
+    val first = batch.copy(applicationId = "com.first.app")
+    val second = batch.copy(applicationId = "com.second.app")
+    val firstJson = SdkEventSerializer.toJson(first)
+    val secondJson = SdkEventSerializer.toJson(second)
+    fixture.handler.handle(firstJson, result, batchId = "first-1")
+    fixture.handler.handle(secondJson, result, batchId = "second-1")
+    fixture.handler.handle(firstJson, result, batchId = "first-1")
+    fixture.handler.handle(secondJson, result, batchId = "second-2")
+    fixture.handler.handle(firstJson, result, batchId = "first-1")
+    assertEquals(listOf(first, second, second, first), fixture.batches)
     assertEquals(List(5) { SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED }, result.codes)
   }
 
@@ -279,5 +299,49 @@ class SdkEventBatchBroadcastHandlerTest {
       )
     val batchJson = SdkEventSerializer.toJson(batch)
     const val queueFullWarning = "Dropping SDK event batch with 1 events because the queue is full"
+  }
+}
+
+/** Intent extra type checking is an Android boundary; keep the other handler tests plain JVM. */
+@RunWith(RobolectricTestRunner::class)
+class SdkEventBatchBroadcastHandlerExtraTest {
+  @Test
+  fun `non string batch id extra is treated as no id and always enqueues`() {
+    val batches = mutableListOf<SdkEventBatch>()
+    val handler =
+      SdkEventBatchBroadcastHandler(
+        enqueue = {
+          batches.add(it)
+          true
+        },
+        log =
+          object : SdkEventBatchBroadcastHandler.LogSink {
+            override fun debug(message: String) {}
+
+            override fun warn(message: String) = error(message)
+          },
+      )
+    val codes = mutableListOf<Int>()
+    val result =
+      object : SdkEventBatchBroadcastHandler.ResultSink {
+        override val isOrdered = true
+
+        override fun setResultCode(code: Int) {
+          codes.add(code)
+        }
+      }
+    val batch = SdkEventBatch(timestamp = 0L, events = emptyList())
+    val intent =
+      Intent().apply {
+        putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(batch))
+        putExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID, 42)
+      }
+    repeat(2) {
+      val id = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID)
+      assertEquals(null, id)
+      handler.handle(intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON), result, id)
+    }
+    assertEquals(List(2) { batch }, batches)
+    assertEquals(List(2) { SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED }, codes)
   }
 }

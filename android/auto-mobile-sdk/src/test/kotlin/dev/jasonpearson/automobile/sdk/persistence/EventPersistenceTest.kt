@@ -162,6 +162,56 @@ class EventPersistenceTest {
   }
 
   @Test
+  fun `object file with null batch id loads and replays without an id`() {
+    val delivery = IdentityDeliveryFixture()
+    try {
+      val persistence = createPersistence()
+      val events = listOf(makeLifecycleEvent("no-id"))
+      File(tempFolder.root, "events_1000_null-id.json")
+        .writeText("""{"batchId":null,"events":${persistence.serializeEvents(events)}}""")
+      val loaded = persistence.loadPending().single()
+      assertEquals(events, loaded.events)
+      assertNull(loaded.deliveryId)
+      delivery.accepted = true
+      delivery.replay(persistence)
+      assertEquals(listOf<String?>(null), delivery.ids)
+      assertTrue(persistence.loadPending().isEmpty())
+    } finally {
+      SdkEventBroadcaster.reset()
+    }
+  }
+
+  @Test
+  fun `corrupt and partial object files are deleted counted and never replayed`() {
+    val delivery = IdentityDeliveryFixture()
+    try {
+      val counter = DefaultDropCounter()
+      val persistence =
+        FileEventPersistence(tempFolder.root, clock = { 1000L }, dropCounter = counter)
+      val invalidFiles =
+        listOf(
+            """{"batchId":"corrupt","events":{}}""",
+            """{"batchId":"partial","events":[""",
+            """{"batchId":"missing-events"}""",
+          )
+          .mapIndexed { index, json ->
+            File(tempFolder.root, "events_1000_invalid-$index.json").apply { writeText(json) }
+          }
+      val validId = persistence.persist(listOf(makeLifecycleEvent("valid")), "valid-id")
+      assertEquals(listOf(validId), persistence.loadPending().map { it.storageId })
+      assertTrue(invalidFiles.none { it.exists() })
+      assertEquals(3L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+      delivery.accepted = true
+      delivery.replay(persistence)
+      assertEquals(listOf<String?>("valid-id"), delivery.ids)
+      assertTrue(persistence.loadPending().isEmpty())
+      assertEquals(3L, counter.snapshot()[DropReason.DELIVERY_FAILED])
+    } finally {
+      SdkEventBroadcaster.reset()
+    }
+  }
+
+  @Test
   fun `retry rename preserves persisted delivery id`() {
     val persistence = createPersistence()
     val storageId = persistence.persist(listOf(makeLifecycleEvent("retry")), "delivery-id")!!

@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync, realpathSync } from "fs";
 import { basename, dirname, join } from "path";
 import { ActionableError } from "../models/ActionableError";
@@ -177,8 +178,9 @@ export function migrationLockPathFor(dbPath: string): string {
     canonical = existsSync(dbPath)
       ? realpathSync(dbPath)
       : join(realpathSync(dirname(dbPath)), basename(dbPath));
-  } catch {
-    // Path not resolvable yet — fall back to the raw path (best effort).
+  } catch (error) {
+    // A first-boot parent may not exist yet; the raw path still supplies the lock name.
+    logger.debug(`Migration lock realpath unavailable: ${errorMessage(error)}`);
   }
   return `${canonical}.migrate.lock`;
 }

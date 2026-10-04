@@ -117,6 +117,7 @@ describe("DragAndDrop - iOS", () => {
   });
 
   afterEach(() => {
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     iosSpy?.mockRestore();
     androidSpy?.mockRestore();
     managerSpy?.mockRestore();
@@ -269,6 +270,40 @@ describe("DragAndDrop - iOS", () => {
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(fakeTimer.now()).toBe(25);
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  test("abort clears the pending iOS drag deadline", async () => {
+    const timer = new FakeTimer();
+    const action = new DragAndDrop(IOS_DEVICE, null, timer);
+    Object.assign(action, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
+    const controller = new AbortController();
+    const ready = Promise.withResolvers<void>();
+    const runner = spyOn(iosDragClient, "requestDrag").mockImplementation((...args) => {
+      args[10]?.();
+      const pending = raceWithDeadline(new Promise<never>(() => {}), {
+        timer,
+        timeoutMs: args[7],
+        signal: args[9],
+        label: "Drag",
+      });
+      ready.resolve();
+      return pending;
+    });
+    const pending = action.execute(
+      { source: { elementId: "source-id" }, target: { elementId: "target-id" } },
+      undefined,
+      controller.signal,
+    );
+    await ready.promise;
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    controller.abort();
+    await expect(pending).rejects.toThrow("Operation cancelled");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(runner).toHaveBeenCalledTimes(1);
   });
 
@@ -544,6 +579,20 @@ describe("DragAndDrop - iOS", () => {
     } else {
       expect(result.error).toBe("Drag failed on runner");
     }
+  });
+
+  test("keeps iOS dispatched failure rules for Android no-op text", async () => {
+    spyOn(iosDragClient, "requestDrag").mockImplementation(async (...args) => {
+      args[10]?.();
+      return { success: false, totalTimeMs: 0, error: "Failed to dispatch gesture" };
+    });
+    const result = await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Drag outcome is indeterminate");
+    expect(result.error).toContain("Failed to dispatch gesture");
   });
 
   test.each([false, true])("maps a transport throw with dispatched=%s", async (dispatched) => {

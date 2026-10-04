@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "bad.key": 1
+    }
+  },
+  "expectedPath": "root[\"bad.key\"]"
+}

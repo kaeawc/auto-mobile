@@ -1,0 +1,148 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "row",
+      "children": [
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        },
+        {
+          "type": "image",
+          "asset": "a"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[32]"
+}

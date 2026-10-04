@@ -174,6 +174,20 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
     metrics: LivePerformanceData["metrics"],
     thresholds: PerformanceThresholds,
   ): HealthStatus {
+    const renderingHealth = PerformancePushSocketServer.calculateRenderingHealth(
+      metrics,
+      thresholds,
+    );
+    if (renderingHealth !== "healthy") {
+      return renderingHealth;
+    }
+    return PerformancePushSocketServer.calculateInteractionHealth(metrics, thresholds);
+  }
+
+  private static calculateRenderingHealth(
+    metrics: LivePerformanceData["metrics"],
+    thresholds: PerformanceThresholds,
+  ): HealthStatus {
     // Check FPS (lower is worse)
     if (metrics.fps !== null) {
       if (metrics.fps < thresholds.fpsCritical) {
@@ -204,6 +218,13 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
       }
     }
 
+    return "healthy";
+  }
+
+  private static calculateInteractionHealth(
+    metrics: LivePerformanceData["metrics"],
+    thresholds: PerformanceThresholds,
+  ): HealthStatus {
     // Check touch latency (higher is worse)
     if (metrics.touchLatencyMs !== null) {
       if (metrics.touchLatencyMs > thresholds.touchLatencyCritical) {

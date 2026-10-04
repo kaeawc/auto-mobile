@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "tabBar",
+      "stateKey": "x",
+      "items": [
+        {
+          "label": "x",
+          "icon": "made_up"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.items[0].icon"
+}

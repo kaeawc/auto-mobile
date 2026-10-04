@@ -32,6 +32,8 @@ export interface EmbeddedObservationSettleInput {
   actionClass: ObservationActionClass;
   /** The observation the action tool already captured. */
   observation: ObserveResult;
+  /** Selector presence only; the action observation owns the resolved panel key. */
+  args?: { display?: unknown };
   settleObserve: SettleObserve;
   signal?: AbortSignal;
 }
@@ -57,7 +59,8 @@ export interface EmbeddedObservationSettleOutcome {
  *
  * Only `"navigation"` is gated ({@link isSettleGatedActionClass}); every other
  * class keeps its single capture and reports `settled: false`, which is the
- * honest answer for a capture that never faced a stability check.
+ * honest answer for a capture that never faced a stability check. Rejected
+ * settle captures likewise retain the original observation with `settled: false`.
  */
 export async function settleEmbeddedObservation(
   input: EmbeddedObservationSettleInput,
@@ -73,11 +76,12 @@ export async function settleEmbeddedObservation(
   // observing immediately. Real-clock deliberately: it fences a real device
   // read, which no fake clock governs, and fake-backed unit tests resolve long
   // before it can fire.
+  const strictDisplay = input.args?.display !== undefined || !!input.observation.display?.pinned;
   const deadline = AbortSignal.timeout(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
   try {
     const result = await input.settleObserve.execute({
       // Keep post-action polls on the panel selected at the shared tool boundary.
-      display: input.observation.display?.pinned ? input.observation.display.key : undefined,
+      display: strictDisplay ? input.observation.display?.key : undefined,
       timeoutMs: EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
       pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
       signal: combineAbortSignals(input.signal, deadline),
@@ -97,10 +101,11 @@ export async function settleEmbeddedObservation(
       // adopted terminal capture is processed once inside the poll loop (#6932).
       skipRecompositionTracking: true,
     });
+    if (!isAdoptableCapture(input.observation, result.observation, strictDisplay)) {
+      return { observation: input.observation, settled: false };
+    }
     return {
-      observation: isAdoptableCapture(input.observation, result.observation)
-        ? mergeActionMetadata(input.observation, result.observation)
-        : input.observation,
+      observation: mergeActionMetadata(input.observation, result.observation),
       settled: result.settled,
     };
   } catch (error) {
@@ -248,8 +253,8 @@ function hasUsableHierarchy(observation: ObserveResult): boolean {
  * Whether the settle loop's capture may REPLACE the one the action already
  * holds.
  *
- * A settled capture always qualifies, and so does the newest capture of a screen
- * that simply never stopped moving: it is strictly later than the action's own
+ * A usable, trustworthy capture on the selected panel qualifies, even if the
+ * screen never stopped moving: it is at-or-after the action's own
  * frame, so handing it back is closer to the truth than the half-inflated tree
  * #6866 is about. What must never qualify is the loop's LAST-RESORT fallback.
  * `pollObserveUntil` returns `newestTrustworthyObservation ?? observation` on
@@ -259,7 +264,9 @@ function hasUsableHierarchy(observation: ObserveResult): boolean {
  * tree, #5867). Adopting one of those would move the client's view BACKWARDS
  * off a capture that is known-good and known-post-action.
  *
- * So: reject an explicitly-stale capture, and reject one that is not provably
+ * Explicit selection or a session pin requires the action's resolved panel key;
+ * default polling allows the panel identity to be resolved anew, as before.
+ * Reject an explicitly-stale capture, and reject one that is not provably
  * at-or-after the action's own device-clock timestamp. When the action's capture
  * carries no device timestamp the loop had no floor to enforce either, so there
  * is nothing to compare and a usable hierarchy is accepted as before.
@@ -267,11 +274,9 @@ function hasUsableHierarchy(observation: ObserveResult): boolean {
 function isAdoptableCapture(
   actionObservation: ObserveResult,
   settledObservation: ObserveResult,
+  strictDisplay: boolean,
 ): boolean {
-  if (
-    actionObservation.display?.pinned &&
-    settledObservation.display?.key !== actionObservation.display.key
-  ) {
+  if (strictDisplay && settledObservation.display?.key !== actionObservation.display?.key) {
     return false;
   }
   if (!hasUsableHierarchy(settledObservation)) {
@@ -420,6 +425,7 @@ export async function settleEmbeddedObservationInResponse(
     ? await settleEmbeddedObservation({
         actionClass,
         observation,
+        args: ctx.args,
         settleObserve,
         signal: ctx.signal,
       })

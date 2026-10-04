@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ListChangedBroadcaster,
+  ResourceUpdatedBroadcaster,
   LIST_CHANGED_NOTIFICATION_METHODS,
   listChangedKindForMethod,
 } from "../../src/server/listChangedBroadcast";
@@ -56,6 +57,35 @@ describe("ListChangedBroadcaster", () => {
     } finally {
       unsubscribeThrowing();
       unsubscribeHealthy();
+    }
+  });
+});
+
+describe("ResourceUpdatedBroadcaster", () => {
+  test("resolves each listener's subscriptions; unsubscribe, failures and clear are isolated", () => {
+    const received: string[][] = [];
+    const stopBroken = ResourceUpdatedBroadcaster.subscribe(() => {
+      throw new Error("broken sink");
+    });
+    const stopHealthy = ResourceUpdatedBroadcaster.subscribe((resolve) => {
+      received.push(resolve(new Set(["one"])));
+    });
+    try {
+      ResourceUpdatedBroadcaster.emit((subscriptions) => [...subscriptions]);
+      expect(received).toEqual([["one"]]);
+      stopHealthy();
+      ResourceUpdatedBroadcaster.emit(() => ["two"]);
+      expect(received).toEqual([["one"]]);
+      ResourceUpdatedBroadcaster.subscribe(() => {
+        received.push(["cleared"]);
+      });
+      ResourceUpdatedBroadcaster.clearForTesting();
+      ResourceUpdatedBroadcaster.emit(() => ["three"]);
+      expect(received).toEqual([["one"]]);
+    } finally {
+      stopBroken();
+      stopHealthy();
+      ResourceUpdatedBroadcaster.clearForTesting();
     }
   });
 });

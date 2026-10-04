@@ -1,4 +1,5 @@
-import { expect, describe, test, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -11,14 +12,14 @@ import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import { logger } from "../../../src/utils/logger";
 
 describe("PostNotification", () => {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  afterAll(() => warn.mockRestore());
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
   let device: BootedDevice;
   let fakeAdb: FakeAdbExecutor;
   let fakeWindow: FakeWindow;
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   beforeEach(() => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
     device = {
       deviceId: "test-device",
       platform: "android",
@@ -39,7 +40,7 @@ describe("PostNotification", () => {
   });
 
   afterEach(() => {
-    warn.mockClear();
+    warn.mockRestore();
     if (originalLaunchCwd === undefined) {
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
     } else {
@@ -75,7 +76,15 @@ describe("PostNotification", () => {
       supported: false,
       error: "Failed to post notification: action unavailable",
     });
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(
+      loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[PostNotification]",
+        "Failed to post notification:",
+        "Image file not found at ",
+        "Failed to push image to device:",
+      ),
+    ).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith("Failed to post notification: action unavailable", error);
   });
 
@@ -95,9 +104,24 @@ describe("PostNotification", () => {
         imageType: "bigPicture",
         error: `Image file not found at ${imagePath}`,
       });
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toStartWith(`Image file not found at ${imagePath}: `);
-      expect(warn.mock.calls[0][1]).toBeInstanceOf(Error);
+      expect(
+        loggerCallsWithPrefix(
+          warn.mock.calls,
+          "[PostNotification]",
+          "Failed to post notification:",
+          "Image file not found at ",
+          "Failed to push image to device:",
+        ),
+      ).toHaveLength(1);
+      const warnings = loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[PostNotification]",
+        "Failed to post notification:",
+        "Image file not found at ",
+        "Failed to push image to device:",
+      );
+      expect(warnings[0][0]).toStartWith(`Image file not found at ${imagePath}: `);
+      expect(warnings[0][1]).toBeInstanceOf(Error);
       expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -123,7 +147,15 @@ describe("PostNotification", () => {
         imageType: "bigPicture",
         error: "Failed to push image to device: push failed",
       });
-      expect(warn).toHaveBeenCalledTimes(1);
+      expect(
+        loggerCallsWithPrefix(
+          warn.mock.calls,
+          "[PostNotification]",
+          "Failed to post notification:",
+          "Image file not found at ",
+          "Failed to push image to device:",
+        ),
+      ).toHaveLength(1);
       expect(warn).toHaveBeenCalledWith("Failed to push image to device: push failed", error);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });

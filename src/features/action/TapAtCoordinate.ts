@@ -337,6 +337,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private async executeOnDisplay(
     options: TapAtOptions,
     display: string,
+    onTapDelivered: () => void,
     signal?: AbortSignal,
   ): Promise<TapAtResult> {
     const action = options.action ?? "tap";
@@ -372,14 +373,10 @@ export class TapAtCoordinate extends BaseVisualChange {
     return this.observedInteraction(
       async () => {
         assertCurrent();
-        await this.dispatchGesture(
-          options,
-          resolved,
-          observation,
-          signal,
-          displayId,
+        await this.dispatchGesture(options, resolved, observation, signal, displayId, {
           assertCurrent,
-        );
+          onTapDelivered,
+        });
         return { success: true, x: resolved.x, y: resolved.y, action };
       },
       {
@@ -401,6 +398,10 @@ export class TapAtCoordinate extends BaseVisualChange {
     perf.serial("tapAt");
     let dispatchedCoordinates: { x: number; y: number } | undefined;
     let iosDispatchTimestamp: number | undefined;
+    let tapsDelivered = 0;
+    const onTapDelivered = () => {
+      tapsDelivered++;
+    };
     const transitionRevision = {
       revision: this.currentActionRevision(),
       // With no caller stamp, in-flight fences report the action-start identity generation.
@@ -412,7 +413,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     try {
       throwIfAborted(signal);
       if (options.display !== undefined) {
-        return await this.executeOnDisplay(options, options.display, signal);
+        return await this.executeOnDisplay(options, options.display, onTapDelivered, signal);
       }
       if (
         this.hasStaleCallerRevision(this.displayTransitionReader.revision(this.device.deviceId))
@@ -464,7 +465,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           throwIfAborted(signal);
           switch (this.device.platform) {
             case "android":
-              const dispatchedFrameContext = await this.dispatchAndroidTapWithOneFreshRetry(
+              await this.dispatchAndroidTapWithOneFreshRetry(
                 options,
                 resolved,
                 observeResult,
@@ -472,13 +473,11 @@ export class TapAtCoordinate extends BaseVisualChange {
                 perf,
                 signal,
               );
-              await this.dispatchSecondAndroidTap(
-                options,
-                resolved,
-                dispatchedFrameContext,
-                transitionRevision,
-                signal,
-              );
+              onTapDelivered();
+              await this.dispatchSecondAndroidTap(options, resolved, transitionRevision, signal);
+              if (action === "doubleTap") {
+                onTapDelivered();
+              }
               break;
             case "ios":
               iosDispatchTimestamp = await this.dispatchIosTaps(
@@ -486,6 +485,7 @@ export class TapAtCoordinate extends BaseVisualChange {
                 resolved,
                 frameContext,
                 transitionRevision,
+                onTapDelivered,
                 signal,
               );
               break;
@@ -517,7 +517,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     } catch (error) {
       logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
       const point = dispatchedCoordinates ?? failurePoint(options, this.device.platform);
-      return withStaleDisplay(
+      const result = withStaleDisplay(
         {
           success: false,
           x: point.x,
@@ -527,6 +527,10 @@ export class TapAtCoordinate extends BaseVisualChange {
         },
         error,
       );
+      if (action === "doubleTap" && tapsDelivered === 1) {
+        result.error = `${result.error} Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically.`;
+      }
+      return result;
     } finally {
       perf.end();
     }
@@ -537,6 +541,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     point: { x: number; y: number },
     frameContext: string | undefined,
     transitionRevision: { revision: number; observedGeneration: number },
+    onTapDelivered: () => void,
     signal?: AbortSignal,
   ): Promise<number> {
     await this.iosCoordinateTap(
@@ -546,8 +551,12 @@ export class TapAtCoordinate extends BaseVisualChange {
       tapDurationMs(options, "ios"),
       frameContext,
     );
+    onTapDelivered();
     try {
-      await this.dispatchSecondIosTap(options, point, frameContext, transitionRevision, signal);
+      await this.dispatchSecondIosTap(options, point, transitionRevision, signal);
+      if (options.action === "doubleTap") {
+        onTapDelivered();
+      }
       return this.timer.now();
     } finally {
       this.invalidateIosCacheSafely();
@@ -569,7 +578,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     transitionRevision: { revision: number; observedGeneration: number },
     perf: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<string | undefined> {
+  ): Promise<void> {
     const frameContext = observeResult.viewHierarchy?.frameContext;
     try {
       await this.androidCoordinateTap(
@@ -582,7 +591,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         signal,
         () => this.assertDisplayRevisionCurrent(transitionRevision),
       );
-      return frameContext;
+      return;
     } catch (error) {
       const actionable = toActionableError(error, "Failed to dispatch Android coordinate tap");
       if (frameContext === undefined || !isStaleFrameContextRejection(actionable.message)) {
@@ -624,7 +633,6 @@ export class TapAtCoordinate extends BaseVisualChange {
         signal,
         () => this.assertDisplayRevisionCurrent(transitionRevision),
       );
-      return refreshedFrameContext;
     }
   }
 
@@ -684,7 +692,6 @@ export class TapAtCoordinate extends BaseVisualChange {
   private async dispatchSecondAndroidTap(
     options: TapAtOptions,
     point: { x: number; y: number },
-    frameContext: string | undefined,
     revision: { revision: number; observedGeneration: number },
     signal?: AbortSignal,
   ): Promise<void> {
@@ -700,7 +707,8 @@ export class TapAtCoordinate extends BaseVisualChange {
       point.x,
       point.y,
       tapDurationMs(options, "android"),
-      frameContext,
+      // The accepted first tap fixed the point for this gesture; it may have advanced the frame.
+      undefined,
       signal,
       () => this.assertDisplayRevisionCurrent(revision),
     );
@@ -709,7 +717,6 @@ export class TapAtCoordinate extends BaseVisualChange {
   private async dispatchSecondIosTap(
     options: TapAtOptions,
     point: { x: number; y: number },
-    frameContext: string | undefined,
     revision: { revision: number; observedGeneration: number },
     signal?: AbortSignal,
   ): Promise<void> {
@@ -724,7 +731,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       point.x,
       point.y,
       IOS_TAP_DURATION_MS,
-      frameContext,
+      undefined,
       "second tap",
     );
   }
@@ -788,15 +795,15 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     observation: ObserveResult,
-    signal?: AbortSignal,
-    displayId?: number,
-    assertCurrent?: () => void,
+    signal: AbortSignal | undefined,
+    displayId: number | undefined,
+    context: { assertCurrent: () => void; onTapDelivered: () => void },
   ): Promise<void> {
     const action = options.action ?? "tap";
     const duration = tapDurationMs(options, this.device.platform);
     const dispatch = async (second: boolean) => {
       throwIfAborted(signal);
-      assertCurrent?.();
+      context.assertCurrent();
       if (this.device.platform === "android") {
         const command =
           action === "longPress"
@@ -808,7 +815,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           command,
           displayId,
           signal,
-          assertCurrent,
+          context.assertCurrent,
         );
       } else if (this.device.platform === "ios") {
         await this.iosCoordinateTap(
@@ -816,12 +823,13 @@ export class TapAtCoordinate extends BaseVisualChange {
           point.x,
           point.y,
           duration,
-          observation.viewHierarchy?.frameContext,
+          second ? undefined : observation.viewHierarchy?.frameContext,
           second ? "second tap" : "tap",
         );
       } else {
         throw unsupportedPlatformError(this.device.platform, "tapAt gesture");
       }
+      context.onTapDelivered();
     };
     await dispatch(false);
     if (this.device.platform === "ios") {

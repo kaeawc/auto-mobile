@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, test, spyOn } from "bun:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { afterEach, beforeAll, describe, expect, test, spyOn } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
@@ -16,7 +19,7 @@ afterEach(() => {
 });
 
 function createHarness() {
-  isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  isAvailableSpy ??= spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   const fakeClient = new FakeDaemonClient({
     daemonMethodResults: new Map<string, any>([["tools/list", { tools: [] }]]),
   });
@@ -82,5 +85,98 @@ describe("createProxyMcpServer list-changed forwarding", () => {
     // No transport is connected in this test, so the SDK's isConnected() guard
     // makes the un-mocked send helpers no-ops — the emit must not throw.
     expect(() => fakeClient.emitNotification("notifications/tools/list_changed")).not.toThrow();
+  });
+});
+
+describe("proxy resource subscriptions", () => {
+  beforeAll(() => {
+    require("@modelcontextprotocol/sdk/types.js");
+  });
+
+  async function wireHarness() {
+    const harness = createHarness();
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "resource-subscriptions", version: "1" });
+    const received: string[] = [];
+    client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+      received.push(notification.params.uri);
+    });
+    await harness.server.connect(serverTransport);
+    await client.connect(clientTransport);
+    return { ...harness, client, received };
+  }
+
+  function update(fakeClient: FakeDaemonClient, uri: string) {
+    fakeClient.emitNotification(
+      "notifications/resources/updated",
+      undefined,
+      undefined,
+      undefined,
+      uri,
+    );
+  }
+
+  async function close(harness: Awaited<ReturnType<typeof wireHarness>>) {
+    await harness.client.close();
+    await harness.server.close();
+    await harness.proxy.close();
+  }
+
+  test("initialize advertises subscribe and listChanged", async () => {
+    const harness = await wireHarness();
+    try {
+      expect(harness.client.getServerCapabilities()?.resources).toEqual({
+        subscribe: true,
+        listChanged: true,
+      });
+    } finally {
+      await close(harness);
+    }
+  });
+
+  test("subscribe/unsubscribe return empty results and filter updates per connection", async () => {
+    const first = await wireHarness();
+    const second = await wireHarness();
+    try {
+      expect(await first.client.subscribeResource({ uri: "automobile:one" })).toEqual({});
+      expect(await second.client.subscribeResource({ uri: "automobile:two" })).toEqual({});
+      // A cold subscription is remembered without starting the daemon.
+      expect(first.fakeClient.callDaemonMethodCalls).toEqual([]);
+      await first.proxy.ensureConnected();
+      await second.proxy.ensureConnected();
+      for (const uri of ["automobile:one", "automobile:two", "automobile:other"]) {
+        update(first.fakeClient, uri);
+        update(second.fakeClient, uri);
+      }
+      await first.client.ping();
+      await second.client.ping();
+      expect(first.received).toEqual(["automobile:one"]);
+      expect(second.received).toEqual(["automobile:two"]);
+      expect(await first.client.unsubscribeResource({ uri: "automobile:one" })).toEqual({});
+      update(first.fakeClient, "automobile:one");
+      await first.client.ping();
+      expect(first.received).toEqual(["automobile:one"]);
+      expect(first.fakeClient.callDaemonMethodCalls).toEqual([
+        { method: "resources/subscribe", params: { uri: "automobile:one" } },
+        { method: "resources/unsubscribe", params: { uri: "automobile:one" } },
+      ]);
+    } finally {
+      await close(first);
+      await close(second);
+    }
+  });
+
+  test("external transport close clears the proxy's subscriptions and daemon connection", async () => {
+    const harness = await wireHarness();
+    try {
+      await harness.client.subscribeResource({ uri: "automobile:one" });
+      await harness.proxy.ensureConnected();
+      await harness.client.close();
+      update(harness.fakeClient, "automobile:one");
+      expect(harness.proxy.isConnected()).toBe(false);
+      expect(harness.received).toEqual([]);
+    } finally {
+      await close(harness);
+    }
   });
 });

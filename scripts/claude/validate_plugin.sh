@@ -59,7 +59,7 @@ for skill_file in "$PLUGIN_DIR/skills"/*.md; do
     skill_name=$(basename "$skill_file")
 
     # Check for YAML frontmatter
-    if ! head -1 "$skill_file" | grep -q '^---$'; then
+    if ! skill_header=$(head -1 "$skill_file") || ! grep -q '^---$' <<<"${skill_header}"; then
         echo "ERROR: Skill '$skill_name' missing YAML frontmatter"
         exit 1
     fi

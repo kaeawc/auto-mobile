@@ -45,6 +45,14 @@ function tags(value: unknown, found: Set<string>): void {
     tags(child, found);
   }
 }
+function parseDocumentExamples(document: string): { id?: string }[] {
+  return document
+    .replace(/\r\n/g, "\n")
+    .split("```json\n")
+    .slice(1)
+    .map((block) => JSON.parse(block.split("```")[0]) as { id?: string })
+    .filter((example) => example.id !== undefined);
+}
 
 describe("shared overlay contract", () => {
   test("fixtures are nonempty and cover every node, action, and placement", () => {
@@ -168,11 +176,7 @@ test("worked documentation examples match the shared fixture files", () => {
     join(import.meta.dir, "../../docs/design-docs/plat/android/overlay-ux.md"),
     "utf8",
   );
-  const examples = document
-    .split("```json\n")
-    .slice(1)
-    .map((block) => JSON.parse(block.split("```")[0]) as { id?: string })
-    .filter((example) => example.id !== undefined);
+  const examples = parseDocumentExamples(document);
   expect(examples.length).toBe(3);
   for (let index = 0; index < examples.length; index++) {
     const fixture = valid.find((entry) => entry.name === `doc-example-${index + 1}.json`);
@@ -182,6 +186,17 @@ test("worked documentation examples match the shared fixture files", () => {
     }
     expect(JSON.parse(fixture.json)).toEqual(examples[index]);
   }
+});
+test("worked documentation examples parse identically with LF and CRLF line endings", () => {
+  const document = readFileSync(
+    join(import.meta.dir, "../../docs/design-docs/plat/android/overlay-ux.md"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+  const lfExamples = parseDocumentExamples(document);
+  const crlfExamples = parseDocumentExamples(document.replace(/\n/g, "\r\n"));
+  expect(lfExamples.length).toBe(3);
+  expect(crlfExamples.length).toBe(3);
+  expect(crlfExamples).toEqual(lfExamples);
 });
 test("non JSON numeric tokens and literal string controls are rejected", () => {
   for (const input of ["NaN", "Infinity", "01", "+1", "1.", "1e", '"literal\nnewline"']) {

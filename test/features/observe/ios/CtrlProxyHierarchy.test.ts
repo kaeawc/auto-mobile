@@ -4,6 +4,7 @@ import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/
 import type {
   CtrlProxyNode,
   HierarchyDelegateContext,
+  XCTestHierarchy,
 } from "../../../../src/features/observe/ios/types";
 
 const stubContext = {} as HierarchyDelegateContext;
@@ -48,6 +49,29 @@ function makeHierarchy(root: CtrlProxyNode): any {
 
 describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
+
+  test("carries runner depth truncation to the shared hierarchy result", () => {
+    const hierarchy: XCTestHierarchy = {
+      updatedAt: 0,
+      packageName: "test.app",
+      hierarchy: { className: "XCUIApplication" },
+      truncationReasons: ["max_depth"],
+    };
+
+    expect(subject.convertToViewHierarchyResult(hierarchy).truncationReasons).toEqual([
+      "max_depth",
+    ]);
+  });
+
+  test("omits truncation metadata for a complete runner hierarchy", () => {
+    const hierarchy: XCTestHierarchy = {
+      updatedAt: 0,
+      packageName: "test.app",
+      hierarchy: { className: "XCUIApplication" },
+    };
+
+    expect(subject.convertToViewHierarchyResult(hierarchy)).not.toHaveProperty("truncationReasons");
+  });
 
   test("rewrites an identifier-less iOS control's generated view-id into a selectable stable id", () => {
     const result = subject.convertToViewHierarchyResult(

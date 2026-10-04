@@ -151,13 +151,58 @@ describe("RecentApps inner result", () => {
     expect(adb.getExecutedCommands().some((executed) => executed.includes(command))).toBe(true);
   });
 
-  test("failed hardware global action falls back to ADB successfully", async () => {
+  test("undelivered hardware global action falls back to ADB successfully", async () => {
     observe.setObserveResult(() => createObservation("hardware", timer));
     const result = await recentApps.execute();
     expect(globalActionSpy).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
     expect(result.method).toBe("hardware");
     expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");
+  });
+
+  test.each([
+    "timeout",
+    "socket closed",
+    "thrown after send",
+    "WebSocket not connected",
+    "send failed",
+    "device refused",
+    "unsupported",
+    "success",
+  ])("hardware global action delivery: %s", async (reason) => {
+    observe.setObserveResult(() => createObservation("hardware", timer));
+    const undelivered = reason === "WebSocket not connected" || reason === "send failed";
+    const acknowledged =
+      reason === "device refused" || reason === "unsupported" || reason === "success";
+    globalActionSpy!.mockImplementation(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>) => {
+        if (!undelivered) {
+          args[5]?.();
+        }
+        if (reason === "thrown after send") {
+          throw new Error(reason);
+        }
+        return {
+          success: reason === "success",
+          action: "recent",
+          totalTimeMs: 3000,
+          error: reason,
+          acknowledged,
+        };
+      },
+    );
+    const result = await recentApps.execute();
+    const indeterminate = !undelivered && !acknowledged;
+    expect(result.success).toBe(!indeterminate);
+    expect(result.method).toBe("hardware");
+    expect(result.observation).toBeDefined();
+    if (indeterminate) {
+      expect(result.error).toContain("may have been applied");
+      expect(result.error).toContain("Observe before retrying");
+    }
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input keyevent")),
+    ).toEqual(indeterminate || reason === "success" ? [] : ["shell input keyevent 187"]);
   });
 
   test("pre-aborted execute rejects without ADB commands", async () => {

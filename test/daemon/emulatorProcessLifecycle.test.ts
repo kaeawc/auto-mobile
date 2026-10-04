@@ -429,6 +429,80 @@ describe("EmulatorProcessLifecycle", () => {
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test.each(["throw", "survive"])(
+    "a failed tracked stop restores tracking and later unexpected loss (%s)",
+    async (failure) => {
+      const h = harness();
+      h.devices.set(deviceId, pooled());
+      const process = child();
+      process.pid = 42;
+      await h.lifecycle.trackStartedDeviceProcess(booted, process);
+      const output = h.outputs.get(deviceId);
+      const signals: Array<NodeJS.Signals | number | undefined> = [];
+      process.kill = (signal) => {
+        signals.push(signal);
+        if (failure === "throw") {
+          throw new Error("stop failed");
+        }
+        return true;
+      };
+      let retained: Promise<unknown> | undefined;
+      const stopping = h.lifecycle.stopTrackedEmulatorProcess(deviceId, (settlement) => {
+        retained = settlement;
+      });
+      if (failure === "survive") {
+        h.timer.advanceTime(1_000);
+        await flushUntil(() => signals.length === 2);
+        h.timer.advanceTime(1_000);
+      }
+      await expect(stopping).rejects.toThrow(
+        failure === "throw" ? "stop failed" : "did not exit after SIGKILL",
+      );
+      expect(h.lifecycle.hasStartedDeviceProcess(deviceId, process)).toBe(true);
+      expect(h.outputs.get(deviceId)).toBe(output);
+      expect(h.calls).toEqual([]);
+      expect(retained).toBeDefined();
+      process.exitCode = 1;
+      process.emit("exit", 1, null);
+      await retained;
+      await flushUntil(() => h.calls.includes("finish"));
+      expect(h.calls).toEqual(["prepare", "record", "evict", "finish"]);
+      expect(h.evictionIncidents).toEqual(["incident"]);
+    },
+  );
+
+  test.each([false, true])(
+    "tracked stop preserves a replacement process and its output (throws=%s)",
+    async (throws) => {
+      const h = harness();
+      h.devices.set(deviceId, pooled());
+      const original = child();
+      const replacement = child();
+      await h.lifecycle.trackStartedDeviceProcess(booted, original);
+      original.kill = () => {
+        void h.lifecycle.trackStartedDeviceProcess(booted, replacement);
+        if (throws) {
+          throw new Error("stop failed");
+        }
+        original.emit("exit", null, "SIGTERM");
+        return true;
+      };
+      const stopping = h.lifecycle.stopTrackedEmulatorProcess(deviceId);
+      const replacementOutput = h.outputs.get(deviceId);
+      if (throws) {
+        await expect(stopping).rejects.toThrow("stop failed");
+      } else {
+        await stopping;
+      }
+      expect(h.lifecycle.hasStartedDeviceProcess(deviceId, replacement)).toBe(true);
+      expect(h.outputs.get(deviceId)).toBe(replacementOutput);
+      expect(h.calls).toEqual([]);
+      replacement.emit("exit", 1, null);
+      await flushUntil(() => h.calls.includes("finish"));
+      expect(h.calls).toEqual(["prepare", "record", "evict", "finish"]);
+    },
+  );
+
   test("reports a process still alive after SIGKILL and retains its lease until exit", async () => {
     const h = harness();
     const process = child();

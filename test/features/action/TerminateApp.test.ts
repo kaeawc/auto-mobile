@@ -25,7 +25,116 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { setDebugPerfEnabled } from "../../../src/utils/PerformanceTracker";
 import type { TimingData, TimingEntry } from "../../../src/utils/PerformanceTracker";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+
+describe("TerminateApp (Android install listing)", () => {
+  const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
+  let adb: FakeAdbClient;
+  let app: TerminateApp;
+  let ctrlProxySpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+
+  beforeEach(() => {
+    adb = new FakeAdbClient();
+    adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    app = new TerminateApp(device, adb as unknown as AdbClient, { timer });
+    ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable");
+    });
+  });
+
+  afterEach(() => ctrlProxySpy.mockRestore());
+
+  test("rejects a failed listing with the adb reason and no force-stop", async () => {
+    const offline = new Error("device offline");
+    adb.setCommandError("shell pm list packages --user 0", offline);
+    const outcome = app.execute("com.example.app", { skipObservation: true });
+    await expect(outcome).rejects.toBeInstanceOf(ActionableError);
+    await expect(outcome).rejects.toThrow("device offline");
+    await expect(outcome).rejects.toMatchObject({ cause: offline });
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("preserves the exact not-installed result after a successful listing", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.other");
+    expect(await app.execute("com.example.app", { skipObservation: true })).toEqual({
+      success: true,
+      packageName: "com.example.app",
+      wasInstalled: false,
+      wasRunning: false,
+      wasForeground: false,
+      userId: 0,
+    });
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("force-stops an installed running package", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    const result = await app.execute("com.example.app", { skipObservation: true });
+    expect(result).toMatchObject({ success: true, wasInstalled: true, wasRunning: true });
+    expect(adb.wasCommandExecuted("shell am force-stop --user 0 'com.example.app'")).toBe(true);
+  });
+
+  test("propagates an aborted request as cancellation", async () => {
+    const signal = AbortSignal.abort();
+    await expect(
+      runWithAbortSignal(signal, () => app.execute("com.example.app", { skipObservation: true })),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("cancellation during CtrlProxy lookup prevents the shell fallback", async () => {
+    const controller = new AbortController();
+    ctrlProxySpy.mockImplementation(() => {
+      controller.abort();
+      throw new Error("CtrlProxy lookup interrupted");
+    });
+    await expect(
+      app.execute("com.example.app", { skipObservation: true }, controller.signal),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(adb.wasCommandExecuted("shell pm list packages")).toBe(false);
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
+  test("passes the signal to the shell listing and preserves cancellation during it", async () => {
+    const controller = new AbortController();
+    const executeCommand = adb.executeCommand.bind(adb);
+    const commandSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+      const result = await executeCommand(...args);
+      if (args[0] === "shell pm list packages --user 0") {
+        expect(args[4]).toBe(controller.signal);
+        controller.abort();
+        throw new Error("listing interrupted");
+      }
+      return result;
+    });
+    try {
+      await expect(
+        app.execute("com.example.app", { skipObservation: true }, controller.signal),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    } finally {
+      commandSpy.mockRestore();
+    }
+  });
+
+  test.each([new DOMException("Aborted", "AbortError"), new Error(OPERATION_CANCELLED_MESSAGE)])(
+    "propagates shell cancellation without wrapping it: %s",
+    async (cancelled) => {
+      adb.setCommandError("shell pm list packages --user 0", cancelled);
+      await expect(app.execute("com.example.app", { skipObservation: true })).rejects.toBe(
+        cancelled,
+      );
+      expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    },
+  );
+});
 
 describe("TerminateApp (iOS)", () => {
   // Simulator UDIDs are 8-4-4-4-12 UUIDs; isIosSimulatorUdid keys the simctl vs
@@ -549,23 +658,18 @@ describe("TerminateApp (Android)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
-  test("treats package-list query failure as not installed", async () => {
+  test("surfaces package-list query failure", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
-    // Query failures follow the existing safe not-installed fallback.
     fakeAdb.setCommandError(
       "shell pm list packages --user 0",
       new Error("Command failed with exit code 1"),
     );
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
-    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
-
-    expect(result.success).toBe(true);
-    expect(result.wasInstalled).toBe(false);
-    expect(result.wasRunning).toBe(false);
-    expect(result.wasForeground).toBe(false);
-    expect(result.userId).toBe(0);
+    await expect(
+      terminateApp.execute("com.example.app", { skipObservation: true }),
+    ).rejects.toThrow("Command failed with exit code 1");
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
 });

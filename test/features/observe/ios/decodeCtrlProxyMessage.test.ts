@@ -76,6 +76,54 @@ describe("decodeCtrlProxyMessage", () => {
     expect(decoded).toEqual({ requestId: REQ, result: { hierarchy: data, perfTiming } });
   });
 
+  test("hierarchy failure preserves the Swift runner error envelope", () => {
+    // Built from WebSocketResponse.error in
+    // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
+    const message = msg({
+      type: "hierarchy_update",
+      success: false,
+      totalTimeMs: 17,
+      error: "Command execution failed: Failed to get view hierarchy: boom",
+    });
+    expect(decodeCtrlProxyMessage(message)).toEqual({
+      requestId: REQ,
+      errorMessage: message.error,
+      totalTimeMs: 17,
+    });
+  });
+
+  test.each([undefined, ""])("hierarchy failure has a fallback for error %p", (error) => {
+    expect(
+      decodeCtrlProxyMessage(msg({ type: "hierarchy_update", success: false, error })),
+    ).toEqual({
+      requestId: REQ,
+      errorMessage: "iOS runner failed to produce a view hierarchy",
+      totalTimeMs: 0,
+    });
+  });
+
+  test("hierarchy error without success preserves timing and rewrites unknown commands", () => {
+    const perfTiming = { name: "hierarchy", durationMs: 5 };
+    const error = "Unknown command type: request_hierarchy_if_stale";
+    expect(decodeCtrlProxyMessage(msg({ type: "hierarchy_update", error, perfTiming }))).toEqual({
+      requestId: REQ,
+      errorMessage: rewriteUnknownCommandError(error),
+      totalTimeMs: 0,
+      perfTiming,
+    });
+  });
+
+  test.each([true, false])("hierarchy data keeps its exact shape with success=%p", (success) => {
+    const data = { hierarchy: {}, packageName: "com.x", updatedAt: 1 };
+    const perfTiming = { name: "hierarchy", durationMs: 5 };
+    const frameContext = "capture-1";
+    expect(
+      decodeCtrlProxyMessage(
+        msg({ type: "hierarchy_update", data, perfTiming, frameContext, success, error: "boom" }),
+      ),
+    ).toStrictEqual({ requestId: REQ, result: { hierarchy: data, perfTiming, frameContext } });
+  });
+
   test("screenshot forwards capture-time rotation", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({ type: "screenshot", data: "b64" as never, timestamp: 9, rotation: 1 }),

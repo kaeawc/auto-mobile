@@ -14,10 +14,9 @@ public enum EncoderControlCommand: Equatable {
     public static func parse(line: String) -> EncoderControlCommand? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return nil }
-        guard
-            let object = try? JSONSerialization.jsonObject(with: data),
-            let dictionary = object as? [String: Any],
-            let cmd = dictionary["cmd"] as? String
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any],
+              let cmd = dictionary["cmd"] as? String
         else {
             return nil
         }
@@ -69,6 +68,12 @@ public final class ForceKeyFrameLatch: @unchecked Sendable {
 /// output queue is fatal (the supervisor relaunches) rather than silently
 /// corrupting the stream.
 public enum EncoderDropPolicy {
+    /// A frame lost inside the encoder breaks the reference chain for following
+    /// P-frames. Re-arm even a consumed keyframe request so the next frame is an IDR.
+    public static func recoverFromLostFrame(rearming latch: ForceKeyFrameLatch) {
+        latch.request()
+    }
+
     /// Drop this capture frame before `encodeFrame` when the encoder already has
     /// `maxInFlightFrames` (or more) frames submitted but not yet emitted.
     /// Dropping the *input* leaves the already-committed reference chain intact.
@@ -84,7 +89,9 @@ public enum EncoderDropPolicy {
         queuedBytes: Int,
         recordBytes: Int,
         maxQueuedBytes: Int
-    ) -> Bool {
+    )
+        -> Bool
+    {
         queuedBytes + recordBytes > maxQueuedBytes
     }
 }

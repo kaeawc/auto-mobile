@@ -80,12 +80,16 @@ final class SimulatorHighlightHostTests: XCTestCase {
     private final class FakeOverlay: SimulatorOverlay {
         var closed = false
         var refreshes = 0
+        var refreshGate: FrameClock?
         func close() {
             closed = true
         }
 
         func refresh() async throws {
             refreshes += 1
+            if let refreshGate {
+                await refreshGate.wait()
+            }
         }
     }
 
@@ -177,6 +181,59 @@ final class SimulatorHighlightHostTests: XCTestCase {
         XCTAssertTrue(replies.allSatisfy(\.success))
         host.close()
         XCTAssertTrue(created[2].closed)
+    }
+
+    func testRefreshKeepsReplacementsWhenSnapshotEntriesExpireDuringSuspension() async {
+        let gate = FrameClock()
+        var now: TimeInterval = 0
+        var created: [FakeOverlay] = []
+        let host = SimulatorHighlightHost(deviceName: "iPhone", now: { now }, makeOverlay: { _ in
+            let overlay = FakeOverlay()
+            if created.count < 2 {
+                overlay.refreshGate = gate
+            }
+            created.append(overlay)
+            return overlay
+        }, waitForFrame: { throw CancellationError() }, replySink: { _ in })
+        defer { host.close() }
+        let commands = ["A", "B"].map { id in
+            Data("""
+            {"requestId":"\(id)","id":"\(id)","shape":{"type":"circle","bounds":{"x":0,"y":0,"width":10,"height":10}}}
+            """.utf8)
+        }
+        for command in commands {
+            await host.receive(command)
+        }
+        let oldOverlays = Array(created.prefix(2))
+        let refreshTask = Task { await host.refresh() }
+        for _ in 0 ..< 100 where gate.waits == 0 {
+            await Task.yield()
+        }
+        XCTAssertEqual(gate.waits, 1, "Either first-generation overlay must suspend before replacement")
+
+        now = 5
+        for command in commands {
+            await host.receive(command)
+        }
+        let newOverlays = Array(created.suffix(2))
+        // Only the first snapshot entry suspends; the other now takes the expired-deadline branch.
+        // Clearing gates also prevents a hang if the bounded start check above fails.
+        for overlay in oldOverlays {
+            overlay.refreshGate = nil
+        }
+        gate.advance()
+        await refreshTask.value
+
+        XCTAssertEqual(created.count, 4)
+        XCTAssertTrue(oldOverlays.allSatisfy { $0.closed })
+        XCTAssertTrue(newOverlays.allSatisfy { !$0.closed })
+        now = 5.5
+        await host.refresh()
+        for overlay in newOverlays {
+            XCTAssertEqual(overlay.refreshes, 1, "Both replacements must remain tracked regardless of iteration order")
+        }
+        host.close()
+        XCTAssertTrue(newOverlays.allSatisfy { $0.closed })
     }
 
     func testNativeDrawFailureIsAcknowledgedAsFailure() async {

@@ -275,7 +275,9 @@ final class SimulatorHighlightHost {
         for (id, entry) in overlays {
             if now() >= entry.deadline {
                 entry.overlay.close()
-                overlays.removeValue(forKey: id)
+                if overlays[id]?.overlay === entry.overlay {
+                    overlays.removeValue(forKey: id)
+                }
             } else {
                 do { try await entry.overlay.refresh() }
                 catch {

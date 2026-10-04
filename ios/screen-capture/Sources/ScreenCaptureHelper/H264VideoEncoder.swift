@@ -12,9 +12,9 @@ enum H264EncoderError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .sessionCreationFailed(let status):
+        case let .sessionCreationFailed(status):
             return "VTCompressionSessionCreate failed (status \(status))"
-        case .sessionPrepareFailed(let status):
+        case let .sessionPrepareFailed(status):
             return "VTCompressionSessionPrepareToEncodeFrames failed (status \(status))"
         }
     }
@@ -109,7 +109,7 @@ final class H264VideoEncoder: @unchecked Sendable {
         // `EnableHardware...` key without the matching `RequireHardware...` key
         // expresses exactly that preference.
         let encoderSpecification: [CFString: Any] = [
-            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: kCFBooleanTrue as Any
+            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: kCFBooleanTrue as Any,
         ]
         var created: VTCompressionSession?
         let status = VTCompressionSessionCreate(
@@ -227,6 +227,7 @@ final class H264VideoEncoder: @unchecked Sendable {
             self?.handleEncodedFrame(status: status, sampleBuffer: sampleBuffer)
         }
         if status != noErr {
+            EncoderDropPolicy.recoverFromLostFrame(rearming: forceKeyFrameLatch)
             lock.lock()
             inFlightFrames = max(0, inFlightFrames - 1)
             lock.unlock()
@@ -246,12 +247,20 @@ final class H264VideoEncoder: @unchecked Sendable {
 
         // A successful callback with a data buffer is sufficient; `contiguousData`
         // below rejects an empty payload, so no separate sample-count check.
-        guard status == noErr, let sampleBuffer = sampleBuffer else { return }
+        guard status == noErr, let sampleBuffer = sampleBuffer else {
+            EncoderDropPolicy.recoverFromLostFrame(rearming: forceKeyFrameLatch)
+            diagnosticSink("warn: VideoToolbox callback failed or missing sample buffer (status \(status))\n")
+            return
+        }
         let isKeyframe = H264VideoEncoder.isKeyframe(sampleBuffer)
         if isKeyframe {
             refreshParameterSets(from: sampleBuffer)
         }
-        guard let sample = H264VideoEncoder.contiguousData(from: sampleBuffer) else { return }
+        guard let sample = H264VideoEncoder.contiguousData(from: sampleBuffer) else {
+            EncoderDropPolicy.recoverFromLostFrame(rearming: forceKeyFrameLatch)
+            diagnosticSink("warn: VideoToolbox callback missing contiguous sample data\n")
+            return
+        }
 
         let record: Data
         do {
@@ -262,6 +271,7 @@ final class H264VideoEncoder: @unchecked Sendable {
                 isKeyframe: isKeyframe
             )
         } catch {
+            EncoderDropPolicy.recoverFromLostFrame(rearming: forceKeyFrameLatch)
             diagnosticSink("warn: avcC->Annex-B conversion failed: \(error)\n")
             return
         }
@@ -312,7 +322,7 @@ final class H264VideoEncoder: @unchecked Sendable {
         guard probe == noErr, parameterSetCount > 0 else { return }
 
         var sets: [Data] = []
-        for index in 0..<parameterSetCount {
+        for index in 0 ..< parameterSetCount {
             var pointer: UnsafePointer<UInt8>?
             var size = 0
             let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(

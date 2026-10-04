@@ -1,4 +1,3 @@
-src/utils/KeepScreenAwakeManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
 src/utils/WorkProfileMonitor.ts -> src/db/installedAppsRepository
 src/utils/configuredDeviceInventory.ts -> src/server/deviceDescription
 src/utils/interfaces/ElementSelector.ts -> src/features/utility/ElementResolver

@@ -1,10 +1,12 @@
+import { indeterminateTapError } from "../action/coordinateTapDispatch";
+import { ActionableError } from "../../models";
 import type { DisplayFence, DisplayFenceOption } from "../action/BaseVisualChange";
 import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import type { AccessibilityNodeSelector } from "../observe/android/types";
+import type { AccessibilityNodeSelector, A11yTapCoordinatesResult } from "../observe/android/types";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import {
   FocusNavigationExecutor,
@@ -268,7 +270,7 @@ export class TalkBackTapStrategy {
       const activationResult = await this.activateElement(element, driver, fence);
       return { ...activationResult, screenReaderNavigation: navigationResult };
     } catch (error) {
-      if (error instanceof StaleDisplayError) {
+      if (error instanceof StaleDisplayError || error instanceof ActionableError) {
         throw error;
       }
       const errorMsg = errorMessage(error);
@@ -323,7 +325,8 @@ export class TalkBackTapStrategy {
    * This is the default screen-reader activation model (#3936): deterministic,
    * a single accessibility action, and immune to the cursor-navigation failure
    * modes of {@link executeTap}. It uses the strongest stable selector observed
-   * for the target and callers fall back to a coordinate gesture when it fails.
+   * for the target. Callers may fall back when it was not sent or was refused;
+   * a sent request with no confirmed reply throws the existing indeterminate tap error.
    *
    * @param element - The target element (must have a stable accessibility selector)
    * @param driver - The TalkBack navigation driver
@@ -358,6 +361,9 @@ export class TalkBackTapStrategy {
       return { success: true, method: "accessibility-action" };
     }
 
+    if (result.dispatched && result.acknowledged !== true) {
+      throw indeterminateTapError(result.error);
+    }
     return {
       success: false,
       method: "accessibility-action",
@@ -390,7 +396,7 @@ export class TalkBackTapStrategy {
       // First tap
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      const firstResult = await driver.requestTapCoordinates(x, y, tapDuration);
+      const firstResult = await this.requestTapCoordinates(driver, x, y, tapDuration);
       if (!firstResult.success) {
         return {
           success: false,
@@ -406,7 +412,7 @@ export class TalkBackTapStrategy {
       // Second tap
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      const secondResult = await driver.requestTapCoordinates(x, y, tapDuration);
+      const secondResult = await this.requestTapCoordinates(driver, x, y, tapDuration);
       if (!secondResult.success) {
         return {
           success: false,
@@ -423,7 +429,7 @@ export class TalkBackTapStrategy {
     // activate the focused element. Let callers continue to their last resort.
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    const result = await driver.requestTapCoordinates(x, y, tapDuration);
+    const result = await this.requestTapCoordinates(driver, x, y, tapDuration);
     if (!result.success) {
       return {
         success: false,
@@ -456,7 +462,7 @@ export class TalkBackTapStrategy {
   ): Promise<TalkBackTapResult> {
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    const focusResult = await driver.requestTapCoordinates(x, y, 50);
+    const focusResult = await this.requestTapCoordinates(driver, x, y, 50);
     if (!focusResult.success) {
       return {
         success: false,
@@ -520,6 +526,9 @@ export class TalkBackTapStrategy {
         logger.info(`[TalkBackTapStrategy] Long press via ACTION_LONG_CLICK succeeded`);
         return { success: true, method: "accessibility-action" };
       }
+      if (longClickResult.dispatched && longClickResult.acknowledged !== true) {
+        throw indeterminateTapError(longClickResult.error);
+      }
       if (advertisesAction(element, "long_click")) {
         return {
           success: false,
@@ -561,7 +570,10 @@ export class TalkBackTapStrategy {
         logger.warn(
           "[TalkBackTapStrategy] Activation target has no bounds; using ACTION_CLICK fallback",
         );
-        const clickResult = await driver.requestAction("click", resourceId);
+        const clickResult = await this.executeDirectActivation(
+          { "resource-id": resourceId, bounds: element.bounds },
+          driver,
+        );
         if (clickResult.success) {
           return { success: true, method: "accessibility-action" };
         }
@@ -581,7 +593,7 @@ export class TalkBackTapStrategy {
     // First tap of double-tap activation
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence.assertCurrent();
-    const firstTap = await driver.requestTapCoordinates(center.x, center.y, tapDuration);
+    const firstTap = await this.requestTapCoordinates(driver, center.x, center.y, tapDuration);
 
     if (!firstTap.success) {
       if (resourceId) {
@@ -589,7 +601,10 @@ export class TalkBackTapStrategy {
         logger.warn(
           `[TalkBackTapStrategy] Double-tap activation failed, trying ACTION_CLICK fallback`,
         );
-        const clickResult = await driver.requestAction("click", resourceId);
+        const clickResult = await this.executeDirectActivation(
+          { "resource-id": resourceId, bounds: element.bounds },
+          driver,
+        );
         if (!clickResult.success) {
           return {
             success: false,
@@ -611,13 +626,16 @@ export class TalkBackTapStrategy {
     // Second tap
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence.assertCurrent();
-    const secondTap = await driver.requestTapCoordinates(center.x, center.y, tapDuration);
+    const secondTap = await this.requestTapCoordinates(driver, center.x, center.y, tapDuration);
 
     if (!secondTap.success) {
       if (resourceId) {
         // If second tap fails, try ACTION_CLICK as fallback
         logger.warn(`[TalkBackTapStrategy] Second tap failed, trying ACTION_CLICK fallback`);
-        const clickResult = await driver.requestAction("click", resourceId);
+        const clickResult = await this.executeDirectActivation(
+          { "resource-id": resourceId, bounds: element.bounds },
+          driver,
+        );
         if (!clickResult.success) {
           return {
             success: false,
@@ -636,6 +654,37 @@ export class TalkBackTapStrategy {
 
     logger.info(`[TalkBackTapStrategy] Element activated successfully via focus navigation`);
     return { success: true, method: "focus-navigation" };
+  }
+
+  private async requestTapCoordinates(
+    driver: TalkBackNavigationDriver,
+    x: number,
+    y: number,
+    durationMs: number,
+  ): Promise<A11yTapCoordinatesResult> {
+    let dispatched = false;
+    let result: A11yTapCoordinatesResult;
+    try {
+      result = await driver.requestTapCoordinates(x, y, durationMs, () => {
+        dispatched = true;
+      });
+    } catch (error) {
+      if (dispatched) {
+        throw indeterminateTapError(errorMessage(error));
+      }
+      if (error instanceof StaleDisplayError || error instanceof ActionableError) {
+        throw error;
+      }
+      logger.warn(
+        `[TalkBackTapStrategy] Coordinate tap failed before dispatch: ${errorMessage(error)}`,
+        error,
+      );
+      return { success: false, totalTimeMs: 0, error: errorMessage(error) };
+    }
+    if (!result.success && dispatched) {
+      throw indeterminateTapError(result.error);
+    }
+    return result;
   }
 
   /**

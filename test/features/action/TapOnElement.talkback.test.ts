@@ -1117,3 +1117,92 @@ describe("TapOnElement screen-reader navigation result", () => {
     expect(result.screenReaderNavigation).toEqual(failedJourney);
   });
 });
+
+describe("TapOnElement TalkBack dispatch uncertainty", () => {
+  test.each([0, 1, 2])(
+    "never sends ADB after coordinate tap %s loses its reply",
+    async (failedTap) => {
+      const detector = new FakeAccessibilityDetector();
+      detector.setTalkBackEnabled(true);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const driver = new FakeTalkBackNavigationDriver();
+      driver.tapDispatched = true;
+      for (let i = 0; i < failedTap; i++) {
+        driver.queueTapResult({ success: true, totalTimeMs: 1 });
+      }
+      driver.queueTapResult({ success: false, totalTimeMs: 5000, error: "Tap timed out" });
+      const adb = new FakeAdbClient();
+      const tap = new TapOnElement(
+        { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+        adb,
+        {
+          accessibilityDetector: detector,
+          timer,
+          talkBackStrategy: new TalkBackTapStrategy({ timer }),
+          talkBackDriverFactory: { createDriver: () => driver },
+        },
+      );
+      await expect(
+        tap.executeAndroidTap("tap", 50, 50, 500, {
+          text: "No semantic selector",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        }),
+      ).rejects.toThrow("outcome is indeterminate");
+      expect(driver.getTapCount()).toBe(failedTap + 1);
+      expect(driver.getActionCount()).toBe(0);
+      expect(adb.getCommandCalls()).toEqual([]);
+      expect(adb.getSpawnCalls()).toEqual([]);
+    },
+  );
+
+  test.each([
+    {
+      dispatched: true,
+      acknowledged: false,
+      success: false,
+      error: "Action timeout after 5000ms",
+      taps: 0,
+    },
+    {
+      dispatched: false,
+      acknowledged: false,
+      success: false,
+      error: "WebSocket not connected",
+      taps: 3,
+    },
+    { dispatched: true, acknowledged: true, success: false, error: "node not found", taps: 3 },
+    { dispatched: true, acknowledged: true, success: false, error: "Click not supported", taps: 3 },
+    { dispatched: true, acknowledged: true, success: true, error: undefined, taps: 0 },
+  ])("dispatches only one activation for %j", async ({ taps, ...actionResult }) => {
+    const detector = new FakeAccessibilityDetector();
+    detector.setTalkBackEnabled(true);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const driver = new FakeTalkBackNavigationDriver();
+    driver.setActionResult({ action: "click", totalTimeMs: 1, ...actionResult });
+    const adb = new FakeAdbClient();
+    const tap = new TapOnElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+      adb,
+      {
+        accessibilityDetector: detector,
+        timer,
+        talkBackStrategy: new TalkBackTapStrategy({ timer }),
+        talkBackDriverFactory: { createDriver: () => driver },
+      },
+    );
+    const attempt = tap.executeAndroidTap("tap", 50, 50, 500, {
+      "resource-id": "test:id/button",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    });
+    if (actionResult.dispatched && !actionResult.acknowledged) {
+      await expect(attempt).rejects.toThrow("outcome is indeterminate");
+    } else {
+      await attempt;
+    }
+    expect(driver.getActionCount()).toBe(1);
+    expect(driver.getTapCount()).toBe(taps);
+    expect(adb.getCommandCalls()).toEqual([]);
+  });
+});

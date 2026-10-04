@@ -1,6 +1,11 @@
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { describe, expect, test } from "bun:test";
 import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import {
+  sessionOwnershipLostPayload,
+  declaresDeviceSessionInvalid,
+} from "../../src/server/deviceSessionResult";
 
 describe("sessionOwnershipLostPayload", () => {
   const release: SessionReleaseSnapshot = {
@@ -91,4 +96,32 @@ describe("sessionOwnershipLostPayload", () => {
       },
     });
   });
+});
+
+test("pending recovery stays valid for current and future lost-code consumers", () => {
+  const error = new SessionRecoveryAssignmentError({
+    sessionUuid: "session-a",
+    platform: "android",
+    deviceId: "emulator-5554",
+    stableDeviceId: "Pixel_8_API_35",
+    recoveryWindowRemainingMs: 120_000,
+  });
+  const result = shapeToolCallError(error, { toolName: "observe", source: "MCP" });
+  expect(declaresDeviceSessionInvalid(result)).toBe(false);
+  const payload = JSON.parse(result.content[0].text);
+  expect(payload.error.retryable).toBe(true);
+  // A future consumer dispatching only on the established lost-session codes.
+  expect(
+    ["session_ownership_lost", "no_active_device_session", "daemon_session_not_found"].includes(
+      payload.error.code,
+    ),
+  ).toBe(false);
+  for (const code of ["session_ownership_lost", "no_active_device_session"]) {
+    expect(
+      declaresDeviceSessionInvalid({
+        isError: true,
+        content: [{ type: "text", text: JSON.stringify({ error: { code } }) }],
+      }),
+    ).toBe(true);
+  }
 });

@@ -1,3 +1,5 @@
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
   DaemonMcpProxy,
@@ -4099,6 +4101,56 @@ describe("DaemonMcpProxy", () => {
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await expect(proxy.callTool("tapOn", {})).resolves.toMatchObject({
           isError: true,
+        });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", {});
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: { sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("keeps and refreshes the bound session for retryable session_recovery_pending", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const pending = shapeToolCallError(
+        new SessionRecoveryAssignmentError({
+          sessionUuid: "session-a",
+          platform: "android",
+          deviceId: "emulator-5554",
+          stableDeviceId: "Pixel_8_API_35",
+          recoveryWindowRemainingMs: 120_000,
+        }),
+        { toolName: "tapOn", source: "MCP" },
+      );
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        await callTool(toolName, params);
+        return toolName === "tapOn" ? pending : { content: [{ type: "text", text: "ok" }] };
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("tapOn", {})).resolves.toMatchObject({
+          isError: true,
+          content: pending.content,
         });
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", {});

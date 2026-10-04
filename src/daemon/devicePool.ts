@@ -20,6 +20,10 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
+import {
+  SessionRecoveryAssignmentError,
+  formatSessionRecoveryIncidentContext,
+} from "../models/SessionRecoveryAssignmentError";
 import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
@@ -3866,24 +3870,39 @@ export class DevicePool {
     target: SessionRecoveryTarget,
     incident?: EmulatorLossIncident,
   ): ActionableError {
-    const context = incident
-      ? `Loss incident ${incident.id}: ${incident.detectionPath}` +
-        (incident.processExit
-          ? ` (code=${incident.processExit.code}, signal=${incident.processExit.signal})`
-          : "") +
-        `; recovery outcome: ${incident.recovery.outcome}. `
-      : "";
+    const now = this.timer.now();
+    if (target.restartRecoveryDeadlineMs !== undefined && now < target.restartRecoveryDeadlineMs) {
+      return new SessionRecoveryAssignmentError({
+        sessionUuid: sessionId,
+        platform: target.platform,
+        deviceId: target.deviceId,
+        stableDeviceId: target.stableDeviceId,
+        ...(incident
+          ? {
+              incidentId: incident.id,
+              detectionPath: incident.detectionPath,
+              ...(incident.processExit ? { processExit: { ...incident.processExit } } : {}),
+              recoveryOutcome: incident.recovery.outcome,
+            }
+          : {}),
+        recoveryWindowRemainingMs: target.restartRecoveryDeadlineMs - now,
+      });
+    }
+    const context = formatSessionRecoveryIncidentContext(
+      incident
+        ? {
+            incidentId: incident.id,
+            detectionPath: incident.detectionPath,
+            processExit: incident.processExit,
+            recoveryOutcome: incident.recovery.outcome,
+          }
+        : {},
+    );
     return new ActionableError(
       `Cannot safely recover session ${sessionId}: ${target.platform} device ` +
         `'${target.stableDeviceId}' is unavailable or already in use. ` +
         "Acquire a new device with getAndroid or getApple. " +
-        context +
-        (target.restartRecoveryDeadlineMs !== undefined &&
-        this.timer.now() < target.restartRecoveryDeadlineMs
-          ? "The session can still resume if the device returns before the recovery window ends " +
-            `(${Math.ceil((target.restartRecoveryDeadlineMs - this.timer.now()) / 1000)} seconds remaining); ` +
-            "otherwise acquire a new device with getAndroid or getApple."
-          : ""),
+        context,
     );
   }
 

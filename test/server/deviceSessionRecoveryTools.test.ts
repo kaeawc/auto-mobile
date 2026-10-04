@@ -1,3 +1,4 @@
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
@@ -22,6 +23,18 @@ describe("advertised device-session recovery tools", () => {
 
   afterEach(() => {
     ToolRegistry.clearTools();
+  });
+
+  test("pending recovery shares the discoverable recovery tools", () => {
+    const error = new SessionRecoveryAssignmentError({
+      sessionUuid: "session-a",
+      platform: "android",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      recoveryWindowRemainingMs: 120_000,
+    });
+    expect(error.details.recovery.tools).toBe(DEVICE_SESSION_RECOVERY_TOOLS);
+    expect(error.message).toContain(DEVICE_SESSION_RECOVERY_TOOLS.join(" or "));
   });
 
   test("matches the acquisition tools a client can discover", () => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   DeviceControlTransportError,
   type DeviceControlTransportFailure,
@@ -16,9 +17,12 @@ import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { DaemonRestartDeferredError } from "../../src/daemon/daemonMcpProxy";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ActionableError } from "../../src/models";
+import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
@@ -54,6 +58,85 @@ describe("proxy server device-control transport errors", () => {
       await server.close();
       await proxy.close();
       availabilitySpy.mockRestore();
+    }
+  });
+
+  test.each([
+    ["cancelled", new Error("client cancelled resource read"), true],
+    ["AbortError", new DOMException("client cancelled resource read", "AbortError"), true],
+    ["daemon failure", new Error("daemon read failed"), false],
+  ] as const)("resources/read preserves %s error handling", async (_name, failure, aborted) => {
+    // Invoke the registered handler directly: the SDK suppresses responses for
+    // aborted requests, so a transport round trip cannot expose the thrown value.
+    const registration = spyOn(Server.prototype, "setRequestHandler");
+    const fakeClient = new FakeDaemonClient();
+    const daemonManager = new FakeDaemonManager();
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        timer: new FakeTimer(),
+        clientFactory: () => fakeClient,
+        daemonManager,
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      },
+    });
+    const handler = registration.mock.calls.find(
+      ([schema]) => schema === ReadResourceRequestSchema,
+    )?.[1];
+    registration.mockRestore();
+    const daemonRead = spyOn(fakeClient, "readResource").mockRejectedValue(failure);
+    // Isolate the server catch from the proxy's own pre-abort check while
+    // retaining the existing fake daemon client's rejection seam.
+    const proxyRead = spyOn(proxy, "readResource").mockImplementation((uri, options) =>
+      fakeClient.readResource(uri, {}, options),
+    );
+    const errorLog = spyOn(logger, "error").mockImplementation(() => {});
+    const controller = new AbortController();
+    if (aborted) {
+      controller.abort(failure);
+    }
+    const uri = "automobile:devices/booted";
+    try {
+      expect(handler).toBeDefined();
+      if (!handler) {
+        throw new Error("resources/read handler was not registered");
+      }
+      const result = Promise.resolve(
+        handler(
+          { method: "resources/read", params: { uri } },
+          {
+            signal: controller.signal,
+            requestId: 1,
+            sendNotification: async () => {},
+            sendRequest: async () => {
+              throw new Error("unexpected server request");
+            },
+          },
+        ),
+      );
+      const error: unknown = await result.catch((caught: unknown) => caught);
+      expect(daemonRead).toHaveBeenCalledWith(uri, {}, { signal: controller.signal });
+      if (aborted) {
+        expect(errorLog).not.toHaveBeenCalled();
+        expect(error).toBe(failure);
+        expect(error).not.toBeInstanceOf(ActionableError);
+      } else {
+        expect(error).toBeInstanceOf(ActionableError);
+        expect(error).toMatchObject({
+          message: "Failed to read resource from daemon: daemon read failed",
+          cause: failure,
+        });
+        expect(errorLog).toHaveBeenCalledTimes(1);
+        expect(errorLog).toHaveBeenCalledWith(
+          `[ProxyServer] Resource read failed: ${uri} - ${failure}`,
+        );
+      }
+    } finally {
+      errorLog.mockRestore();
+      proxyRead.mockRestore();
+      daemonRead.mockRestore();
+      await server.close();
+      await proxy.close();
     }
   });
 

@@ -440,6 +440,309 @@ async function stopRecordingById(recordingId: string) {
   });
 }
 
+function createVideoStartResponse(output: {
+  recordings: Array<Record<string, unknown>>;
+  failures: Array<Record<string, unknown>>;
+}) {
+  const { recordings, failures } = output;
+  if (recordings.length === 0) {
+    const message =
+      failures.length > 0
+        ? `Failed to start video recordings: ${failures.map((failure) => failure.error).join("; ")}`
+        : "Failed to start video recordings.";
+    throw new ActionableError(message);
+  }
+
+  return createJSONToolResponse({
+    action: "start",
+    count: recordings.length,
+    recordings,
+    failures: failures.length > 0 ? failures : undefined,
+  });
+}
+
+async function startDeviceRecordings(
+  device: BootedDevice,
+  args: VideoRecordingArgs,
+  signal?: AbortSignal,
+) {
+  const targetDevices = await resolveTargetDevices(device, args, signal);
+  signal?.throwIfAborted();
+  const maxDurationSeconds = args.maxDuration ?? DEFAULT_MAX_DURATION_SECONDS;
+  const recordings: Array<Record<string, unknown>> = [];
+  const failures: Array<Record<string, unknown>> = [];
+  const finalizedBeforeFanoutCommit = new Set<AndroidSegmentedPlanVideoSession>();
+  let fanoutCommitted = !shouldTargetAllDevices(args);
+
+  for (const target of targetDevices) {
+    await throwIfVideoStartAborted(recordings, signal);
+    try {
+      // Android `screenrecord` is hard-capped at 180s. For longer Android
+      // recordings, transparently produce ordered segments (<outputName>,
+      // <outputName>-seg1, ...) via a timer-driven segmented session.
+      if (target.platform === "android" && maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS) {
+        const session: AndroidSegmentedPlanVideoSession = new AndroidSegmentedPlanVideoSession({
+          device: target,
+          outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
+          configOverrides: buildConfigOverrides(args),
+          highlights: args.highlights,
+          display: args.display,
+          ownerSessionUuid: args.sessionUuid,
+          timer: segmentedSessions.timer,
+          maxDurationSeconds,
+          startupAbortSignal: signal,
+          // Keep an auto-finalized session reachable until the all-device
+          // request commits: an abort still must roll back every segment.
+          onFinalized: () => {
+            if (fanoutCommitted) {
+              segmentedSessions.remove(session);
+              return;
+            }
+            finalizedBeforeFanoutCommit.add(session);
+          },
+          ...segmentedSessions.recordingDependencies,
+        });
+        const active = await session.start();
+        segmentedSessions.track(active.recordingId, session);
+
+        recordings.push({
+          recordingId: active.recordingId,
+          // Session handle grouping the segments; matches the stop response's sessionId.
+          sessionId: active.recordingId,
+          outputPath: active.outputPath,
+          startedAt: active.startedAt,
+          outputName: active.outputName,
+          deviceId: target.deviceId,
+          platform: target.platform,
+          segmented: true,
+          recordedPanel: active.recordedPanel,
+          warnings: active.warning ? [active.warning] : undefined,
+          settings: {
+            ...active.config,
+            maxDurationSeconds,
+          },
+        });
+        continue;
+      }
+
+      const active = await startVideoRecording({
+        device: target,
+        configOverrides: buildConfigOverrides(args),
+        outputName: args.outputName,
+        maxDurationSeconds: args.maxDuration,
+        highlights: args.highlights,
+        ownerSessionUuid: args.sessionUuid,
+        abortSignal: signal,
+        display: args.display,
+      });
+
+      recordings.push({
+        recordingId: active.recordingId,
+        outputPath: active.outputPath,
+        startedAt: active.startedAt,
+        outputName: active.outputName,
+        deviceId: target.deviceId,
+        platform: target.platform,
+        recordedPanel: active.recordedPanel,
+        warnings: active.warning ? [active.warning] : undefined,
+        settings: {
+          ...active.config,
+          resolution: active.config.resolution,
+          maxDurationSeconds,
+        },
+      });
+    } catch (error) {
+      await throwIfVideoStartAborted(recordings, signal);
+      failures.push({
+        deviceId: target.deviceId,
+        platform: target.platform,
+        error: String(error),
+      });
+    }
+  }
+  await throwIfVideoStartAborted(recordings, signal);
+  fanoutCommitted = true;
+  for (const session of finalizedBeforeFanoutCommit) {
+    segmentedSessions.remove(session);
+  }
+
+  return createVideoStartResponse({ recordings, failures });
+}
+
+interface StoppedRecordingResults {
+  results: Array<Record<string, unknown>>;
+  manifestPaths: string[];
+  highlights: SessionHighlight[];
+}
+
+function appendStoppedSegments(
+  output: StoppedRecordingResults,
+  target: BootedDevice,
+  stopped: StoppedSegmentedSession,
+): void {
+  const { results, manifestPaths, highlights } = output;
+  const { sessionId, segments, manifestPath, highlights: sessionHighlights } = stopped;
+  highlights.push(...(sessionHighlights ?? []).map((highlight) => ({ ...highlight, sessionId })));
+  if (manifestPath) {
+    manifestPaths.push(manifestPath);
+  }
+  for (const segment of segments) {
+    results.push({
+      recordingId: segment.recordingId,
+      filePath: segment.filePath,
+      segmentIndex: segment.segmentIndex,
+      sessionId,
+      recordedPanel: segment.recordedPanel,
+      transitions: segment.transitions,
+      warnings: segment.warnings,
+      deviceId: target.deviceId,
+      platform: target.platform,
+      segmented: true,
+    });
+  }
+}
+
+function appendEvictedRecordingIds(recordingIds: string[], evicted: string[]): void {
+  for (const evictedId of evicted) {
+    recordingIds.push(evictedId);
+  }
+}
+
+function createVideoStopResponse(output: {
+  results: Array<Record<string, unknown>>;
+  failures: Array<Record<string, unknown>>;
+  evictedRecordingIds: string[];
+  manifestPaths: string[];
+  highlights: SessionHighlight[];
+  stoppedAnySegmented: boolean;
+}) {
+  const { results, failures, evictedRecordingIds, manifestPaths, highlights, stoppedAnySegmented } =
+    output;
+  if (results.length === 0) {
+    const message =
+      failures.length > 0
+        ? `Failed to stop video recordings: ${failures.map((failure) => failure.error).join("; ")}`
+        : "Failed to stop video recordings.";
+    throw new ActionableError(message);
+  }
+
+  return createJSONToolResponse({
+    action: "stop",
+    count: results.length,
+    recordings: results,
+    segmented: stoppedAnySegmented ? true : undefined,
+    manifestPaths: manifestPaths.length > 0 ? manifestPaths : undefined,
+    highlights: highlights.length > 0 ? highlights : undefined,
+    failures: failures.length > 0 ? failures : undefined,
+    evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
+  });
+}
+
+async function stopDeviceRecordings(device: BootedDevice, args: VideoRecordingArgs) {
+  if (args.recordingId) {
+    return stopRecordingById(args.recordingId);
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  const failures: Array<Record<string, unknown>> = [];
+  const evictedRecordingIds: string[] = [];
+  const manifestPaths: string[] = [];
+  const highlights: SessionHighlight[] = [];
+  let stoppedAnySegmented = false;
+  const targetDevices = await resolveTargetDevices(device, args);
+  let activeRecords: VideoRecordingRecord[] | undefined;
+
+  for (const target of targetDevices) {
+    // A bare (by-device) stop must also finalize any timer-driven segmented
+    // session for this device; otherwise its rotation timer leaks and keeps
+    // producing segments. The session owns its segments' recording lifecycle,
+    // so finalizing it replaces the single-recording stop for this device.
+    const deviceSessions = segmentedSessions.forDevice(target);
+    if (deviceSessions.length === 0) {
+      activeRecords ??= await listActiveVideoRecordings({ platform: device.platform });
+      const matches = activeRecords.filter((record) => record.deviceId === target.deviceId);
+      if (matches.length === 0) {
+        failures.push({
+          deviceId: target.deviceId,
+          platform: target.platform,
+          error: "No active video recording found for device.",
+        });
+        continue;
+      }
+
+      const latest = selectLatestRecording(matches);
+      try {
+        const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(
+          latest.recordingId,
+        );
+        const codec = metadata.codec ?? "unknown";
+        const durationMs = metadata.durationMs ?? 0;
+        const sizeBytes = metadata.sizeBytes ?? 0;
+
+        results.push({
+          recordingId: metadata.recordingId,
+          filePath: metadata.filePath,
+          durationMs,
+          sizeBytes,
+          codec,
+          recordedPanel: metadata.recordedPanel,
+          transitions: metadata.transitions,
+          warnings: metadata.warnings,
+          metadata: { ...metadata, durationMs, sizeBytes, codec },
+          deviceId: target.deviceId,
+          platform: target.platform,
+        });
+
+        appendEvictedRecordingIds(evictedRecordingIds, evicted);
+      } catch (error) {
+        failures.push({
+          deviceId: target.deviceId,
+          platform: target.platform,
+          error: String(error),
+        });
+      }
+      continue;
+    }
+    stoppedAnySegmented = true;
+    for (const [handle, session] of deviceSessions) {
+      try {
+        const {
+          sessionId,
+          segments,
+          manifestPath,
+          highlights: sessionHighlights,
+        } = await segmentedSessions.stopAndRemove(handle, session);
+        appendStoppedSegments({ results, manifestPaths, highlights }, target, {
+          sessionId,
+          segments,
+          manifestPath,
+          highlights: sessionHighlights,
+        });
+      } catch (error) {
+        logger.warn(
+          `[VideoRecording] Failed to finalize segmented session ${handle} on ` +
+            `device ${target.deviceId}: ${errorMessage(error)}`,
+          error,
+        );
+        failures.push({
+          deviceId: target.deviceId,
+          platform: target.platform,
+          error: String(error),
+        });
+      }
+    }
+  }
+
+  return createVideoStopResponse({
+    results,
+    failures,
+    evictedRecordingIds,
+    manifestPaths,
+    highlights,
+    stoppedAnySegmented,
+  });
+}
+
 export function registerVideoRecordingTools(): void {
   const videoRecordingHandler = async (
     device: BootedDevice,
@@ -449,257 +752,11 @@ export function registerVideoRecordingTools(): void {
   ) => {
     signal?.throwIfAborted();
     if (args.action === "start") {
-      const targetDevices = await resolveTargetDevices(device, args, signal);
-      signal?.throwIfAborted();
-      const maxDurationSeconds = args.maxDuration ?? DEFAULT_MAX_DURATION_SECONDS;
-      const recordings: Array<Record<string, unknown>> = [];
-      const failures: Array<Record<string, unknown>> = [];
-      const finalizedBeforeFanoutCommit = new Set<AndroidSegmentedPlanVideoSession>();
-      let fanoutCommitted = !shouldTargetAllDevices(args);
-
-      for (const target of targetDevices) {
-        await throwIfVideoStartAborted(recordings, signal);
-        try {
-          // Android `screenrecord` is hard-capped at 180s. For longer Android
-          // recordings, transparently produce ordered segments (<outputName>,
-          // <outputName>-seg1, ...) via a timer-driven segmented session.
-          if (
-            target.platform === "android" &&
-            maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS
-          ) {
-            const session: AndroidSegmentedPlanVideoSession = new AndroidSegmentedPlanVideoSession({
-              device: target,
-              outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
-              configOverrides: buildConfigOverrides(args),
-              highlights: args.highlights,
-              display: args.display,
-              ownerSessionUuid: args.sessionUuid,
-              timer: segmentedSessions.timer,
-              maxDurationSeconds,
-              startupAbortSignal: signal,
-              // Keep an auto-finalized session reachable until the all-device
-              // request commits: an abort still must roll back every segment.
-              onFinalized: () => {
-                if (fanoutCommitted) {
-                  segmentedSessions.remove(session);
-                  return;
-                }
-                finalizedBeforeFanoutCommit.add(session);
-              },
-              ...segmentedSessions.recordingDependencies,
-            });
-            const active = await session.start();
-            segmentedSessions.track(active.recordingId, session);
-
-            recordings.push({
-              recordingId: active.recordingId,
-              // Session handle grouping the segments; matches the stop response's sessionId.
-              sessionId: active.recordingId,
-              outputPath: active.outputPath,
-              startedAt: active.startedAt,
-              outputName: active.outputName,
-              deviceId: target.deviceId,
-              platform: target.platform,
-              segmented: true,
-              recordedPanel: active.recordedPanel,
-              warnings: active.warning ? [active.warning] : undefined,
-              settings: {
-                ...active.config,
-                maxDurationSeconds,
-              },
-            });
-            continue;
-          }
-
-          const active = await startVideoRecording({
-            device: target,
-            configOverrides: buildConfigOverrides(args),
-            outputName: args.outputName,
-            maxDurationSeconds: args.maxDuration,
-            highlights: args.highlights,
-            ownerSessionUuid: args.sessionUuid,
-            abortSignal: signal,
-            display: args.display,
-          });
-
-          recordings.push({
-            recordingId: active.recordingId,
-            outputPath: active.outputPath,
-            startedAt: active.startedAt,
-            outputName: active.outputName,
-            deviceId: target.deviceId,
-            platform: target.platform,
-            recordedPanel: active.recordedPanel,
-            warnings: active.warning ? [active.warning] : undefined,
-            settings: {
-              ...active.config,
-              resolution: active.config.resolution,
-              maxDurationSeconds,
-            },
-          });
-        } catch (error) {
-          await throwIfVideoStartAborted(recordings, signal);
-          failures.push({
-            deviceId: target.deviceId,
-            platform: target.platform,
-            error: String(error),
-          });
-        }
-      }
-      await throwIfVideoStartAborted(recordings, signal);
-      fanoutCommitted = true;
-      for (const session of finalizedBeforeFanoutCommit) {
-        segmentedSessions.remove(session);
-      }
-
-      if (recordings.length === 0) {
-        const message =
-          failures.length > 0
-            ? `Failed to start video recordings: ${failures.map((failure) => failure.error).join("; ")}`
-            : "Failed to start video recordings.";
-        throw new ActionableError(message);
-      }
-
-      return createJSONToolResponse({
-        action: "start",
-        count: recordings.length,
-        recordings,
-        failures: failures.length > 0 ? failures : undefined,
-      });
+      return startDeviceRecordings(device, args, signal);
     }
-
     if (args.action === "stop") {
-      if (args.recordingId) {
-        return stopRecordingById(args.recordingId);
-      }
-
-      const results: Array<Record<string, unknown>> = [];
-      const failures: Array<Record<string, unknown>> = [];
-      const evictedRecordingIds: string[] = [];
-      const manifestPaths: string[] = [];
-      const highlights: SessionHighlight[] = [];
-      let stoppedAnySegmented = false;
-      const targetDevices = await resolveTargetDevices(device, args);
-      let activeRecords: VideoRecordingRecord[] | undefined;
-
-      for (const target of targetDevices) {
-        // A bare (by-device) stop must also finalize any timer-driven segmented
-        // session for this device; otherwise its rotation timer leaks and keeps
-        // producing segments. The session owns its segments' recording lifecycle,
-        // so finalizing it replaces the single-recording stop for this device.
-        const deviceSessions = segmentedSessions.forDevice(target);
-        if (deviceSessions.length > 0) {
-          stoppedAnySegmented = true;
-          for (const [handle, session] of deviceSessions) {
-            try {
-              const {
-                sessionId,
-                segments,
-                manifestPath,
-                highlights: sessionHighlights,
-              } = await segmentedSessions.stopAndRemove(handle, session);
-              highlights.push(
-                ...(sessionHighlights ?? []).map((highlight) => ({ ...highlight, sessionId })),
-              );
-              if (manifestPath) {
-                manifestPaths.push(manifestPath);
-              }
-              for (const segment of segments) {
-                results.push({
-                  recordingId: segment.recordingId,
-                  filePath: segment.filePath,
-                  segmentIndex: segment.segmentIndex,
-                  sessionId,
-                  recordedPanel: segment.recordedPanel,
-                  transitions: segment.transitions,
-                  warnings: segment.warnings,
-                  deviceId: target.deviceId,
-                  platform: target.platform,
-                  segmented: true,
-                });
-              }
-            } catch (error) {
-              logger.warn(
-                `[VideoRecording] Failed to finalize segmented session ${handle} on ` +
-                  `device ${target.deviceId}: ${errorMessage(error)}`,
-                error,
-              );
-              failures.push({
-                deviceId: target.deviceId,
-                platform: target.platform,
-                error: String(error),
-              });
-            }
-          }
-          continue;
-        }
-
-        activeRecords ??= await listActiveVideoRecordings({ platform: device.platform });
-        const matches = activeRecords.filter((record) => record.deviceId === target.deviceId);
-        if (matches.length === 0) {
-          failures.push({
-            deviceId: target.deviceId,
-            platform: target.platform,
-            error: "No active video recording found for device.",
-          });
-          continue;
-        }
-
-        const latest = selectLatestRecording(matches);
-        try {
-          const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(
-            latest.recordingId,
-          );
-          const codec = metadata.codec ?? "unknown";
-          const durationMs = metadata.durationMs ?? 0;
-          const sizeBytes = metadata.sizeBytes ?? 0;
-
-          results.push({
-            recordingId: metadata.recordingId,
-            filePath: metadata.filePath,
-            durationMs,
-            sizeBytes,
-            codec,
-            recordedPanel: metadata.recordedPanel,
-            transitions: metadata.transitions,
-            warnings: metadata.warnings,
-            metadata: { ...metadata, durationMs, sizeBytes, codec },
-            deviceId: target.deviceId,
-            platform: target.platform,
-          });
-
-          for (const evictedId of evicted) {
-            evictedRecordingIds.push(evictedId);
-          }
-        } catch (error) {
-          failures.push({
-            deviceId: target.deviceId,
-            platform: target.platform,
-            error: String(error),
-          });
-        }
-      }
-
-      if (results.length === 0) {
-        const message =
-          failures.length > 0
-            ? `Failed to stop video recordings: ${failures.map((failure) => failure.error).join("; ")}`
-            : "Failed to stop video recordings.";
-        throw new ActionableError(message);
-      }
-
-      return createJSONToolResponse({
-        action: "stop",
-        count: results.length,
-        recordings: results,
-        segmented: stoppedAnySegmented ? true : undefined,
-        manifestPaths: manifestPaths.length > 0 ? manifestPaths : undefined,
-        highlights: highlights.length > 0 ? highlights : undefined,
-        failures: failures.length > 0 ? failures : undefined,
-        evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
-      });
+      return stopDeviceRecordings(device, args);
     }
-
     throw new ActionableError(`Unsupported videoRecording action: ${args.action}`);
   };
 

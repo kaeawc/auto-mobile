@@ -71,6 +71,141 @@ const stringFlags: Partial<
   "--a11y-min-severity": "accessibilityMinSeverity",
 };
 
+type DaemonBooleanOption = {
+  [Key in keyof DaemonOptions]-?: DaemonOptions[Key] extends boolean | undefined ? Key : never;
+}[keyof DaemonOptions];
+
+const booleanFlags: Partial<Record<string, DaemonBooleanOption>> = {
+  "--strict-port": "strictPort",
+  "--debug": "debug",
+  "--debug-perf": "debugPerf",
+  "--ui-perf-debug": "debugPerf",
+  "--network-mockable": "networkMockable",
+  "--embedded-sdk": "embeddedSdk",
+  "--dismiss-keyboard-after-input": "dismissKeyboardAfterInput",
+  "--no-ui-perf-mode": "noUiPerfMode",
+  "--no-navigation-screenshots": "noNavigationScreenshots",
+  "--no-waitfor-polling-overhead": "noWaitForPollingOverhead",
+  "--no-occlusion": "noOcclusion",
+  "--no-include-not-important-views": "noA11yIncludeNotImportantViews",
+  "--no-report-view-ids": "noA11yReportViewIds",
+  "--no-retrieve-interactive-windows": "noA11yRetrieveInteractiveWindows",
+  "--mem-perf-audit": "memPerfAudit",
+  "--accessibility-audit": "accessibilityAudit",
+  "--accessibility-use-baseline": "accessibilityUseBaseline",
+  "--a11y-use-baseline": "accessibilityUseBaseline",
+  "--predictive-ui": "predictiveUi",
+  "--predictive": "predictiveUi",
+  "--raw-element-search": "rawElementSearch",
+  "--skip-ctrl-proxy-download": "skipCtrlProxyDownload",
+  "--skip-accessibility-download": "skipCtrlProxyDownload",
+  "--mcp-recording": "mcpRecording",
+  "--observe-result-include-elements": "observeResultIncludeElements",
+  "--tool-results-no-structured-content": "toolResultsNoStructuredContent",
+  "--actions-diff-observe": "actionsDiffObserve",
+  "--actions-no-observe": "actionsNoObserve",
+};
+
+function hasDaemonFlagValue(value: string | undefined): value is string {
+  return value !== undefined && !value.startsWith("--");
+}
+
+function setDaemonHost(options: DaemonOptions, value: string | undefined): boolean {
+  if (!value || value.startsWith("--")) {
+    return false;
+  }
+  options.host = value;
+  return true;
+}
+
+function setDaemonLockScope(options: DaemonOptions, value: string | undefined): boolean {
+  if (value !== "global" && value !== "session") {
+    return false;
+  }
+  options.planExecutionLockScope = value;
+  return true;
+}
+
+function setDaemonReadinessTimeout(options: DaemonOptions, value: string | undefined): boolean {
+  const timeoutMs = parseRunnerReadinessTimeout(value);
+  if (timeoutMs === undefined) {
+    return false;
+  }
+  options.runnerReadinessTimeoutMs = timeoutMs;
+  return true;
+}
+
+function setDaemonToolOutputsDir(options: DaemonOptions, value: string | undefined): boolean {
+  if (!value || value.startsWith("--")) {
+    return false;
+  }
+  options.toolOutputsDir = value;
+  return true;
+}
+
+function appendDaemonTool(
+  options: DaemonOptions,
+  value: string | undefined,
+  field: "enabledTools" | "disabledTools",
+): boolean {
+  if (!value || value.startsWith("--")) {
+    return false;
+  }
+  options[field] = [...(options[field] ?? []), value];
+  return true;
+}
+
+const valueFlags: Partial<
+  Record<string, (options: DaemonOptions, value: string | undefined) => boolean>
+> = {
+  "--host": setDaemonHost,
+  "--plan-execution-lock-scope": setDaemonLockScope,
+  [RUNNER_READINESS_TIMEOUT_FLAG]: setDaemonReadinessTimeout,
+  [TOOL_OUTPUTS_DIR_FLAG]: setDaemonToolOutputsDir,
+  [TOOL_OUTPUT_DIR_FLAG_ALIAS]: setDaemonToolOutputsDir,
+  "--enable-tool": (options, value) => appendDaemonTool(options, value, "enabledTools"),
+  "--disable-tool": (options, value) => appendDaemonTool(options, value, "disabledTools"),
+};
+
+function consumeDaemonFlag(
+  flag: string,
+  value: string | undefined,
+  options: DaemonOptions,
+  log: ParseLogger,
+): boolean {
+  const numericFlag = Object.hasOwn(numericFlags, flag) ? numericFlags[flag] : undefined;
+  if (numericFlag) {
+    options[numericFlag.field] = parsePositiveNumber(
+      value,
+      numericFlag.label,
+      numericFlag.allowFloat,
+      log,
+    );
+    return hasDaemonFlagValue(value);
+  }
+  const stringField = Object.hasOwn(stringFlags, flag) ? stringFlags[flag] : undefined;
+  if (stringField) {
+    if (!hasDaemonFlagValue(value)) {
+      return false;
+    }
+    options[stringField] = value;
+    return true;
+  }
+  if (flag === "--port") {
+    options.port = parsePort(value, log);
+    return hasDaemonFlagValue(value);
+  }
+  const valueFlag = Object.hasOwn(valueFlags, flag) ? valueFlags[flag] : undefined;
+  if (valueFlag) {
+    return valueFlag(options, value);
+  }
+  const booleanField = Object.hasOwn(booleanFlags, flag) ? booleanFlags[flag] : undefined;
+  if (booleanField) {
+    options[booleanField] = true;
+  }
+  return false;
+}
+
 export function parseDaemonArgs(
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
@@ -99,117 +234,8 @@ export function parseDaemonArgs(
   // --daemon-socket-path=<encoded path> is a discovery marker, intentionally
   // ignored here: the manager forwards the authoritative namespace through ENV.
   for (let i = 0; i < args.length; i++) {
-    const value = args[i + 1];
-    const hasValue = value !== undefined && !value.startsWith("--");
-    const numericFlag = Object.hasOwn(numericFlags, args[i]) ? numericFlags[args[i]] : undefined;
-    const stringField = Object.hasOwn(stringFlags, args[i]) ? stringFlags[args[i]] : undefined;
-    if (numericFlag) {
-      options[numericFlag.field] = parsePositiveNumber(
-        value,
-        numericFlag.label,
-        numericFlag.allowFloat,
-        log,
-      );
-      if (hasValue) {
-        i++;
-      }
-    } else if (stringField) {
-      if (hasValue) {
-        options[stringField] = value;
-        i++;
-      }
-    } else if (args[i] === "--port") {
-      options.port = parsePort(value, log);
-      if (hasValue) {
-        i++;
-      }
-    } else if (args[i] === "--host") {
-      const host = args[i + 1];
-      if (host && !host.startsWith("--")) {
-        options.host = host;
-        i++;
-      }
-    } else if (args[i] === "--strict-port") {
-      options.strictPort = true;
-    } else if (args[i] === "--debug") {
-      options.debug = true;
-    } else if (args[i] === "--debug-perf" || args[i] === "--ui-perf-debug") {
-      options.debugPerf = true;
-    } else if (args[i] === "--plan-execution-lock-scope") {
-      const scope = args[i + 1];
-      if (scope === "global" || scope === "session") {
-        options.planExecutionLockScope = scope;
-        i++;
-      }
-    } else if (args[i] === RUNNER_READINESS_TIMEOUT_FLAG) {
-      const timeoutMs = parseRunnerReadinessTimeout(args[i + 1]);
-      if (timeoutMs !== undefined) {
-        options.runnerReadinessTimeoutMs = timeoutMs;
-        i++;
-      }
-    } else if (args[i] === TOOL_OUTPUTS_DIR_FLAG || args[i] === TOOL_OUTPUT_DIR_FLAG_ALIAS) {
-      const toolOutputsDir = args[i + 1];
-      if (toolOutputsDir && !toolOutputsDir.startsWith("--")) {
-        options.toolOutputsDir = toolOutputsDir;
-        i++;
-      }
-    } else if (args[i] === "--network-mockable") {
-      options.networkMockable = true;
-    } else if (args[i] === "--embedded-sdk") {
-      options.embeddedSdk = true;
-    } else if (args[i] === "--enable-tool") {
-      const toolName = args[i + 1];
-      if (toolName && !toolName.startsWith("--")) {
-        options.enabledTools = [...(options.enabledTools ?? []), toolName];
-        i++;
-      }
-    } else if (args[i] === "--disable-tool") {
-      const toolName = args[i + 1];
-      if (toolName && !toolName.startsWith("--")) {
-        options.disabledTools = [...(options.disabledTools ?? []), toolName];
-        i++;
-      }
-    } else if (args[i] === "--dismiss-keyboard-after-input") {
-      options.dismissKeyboardAfterInput = true;
-    } else if (args[i] === "--no-ui-perf-mode") {
-      options.noUiPerfMode = true;
-    } else if (args[i] === "--no-navigation-screenshots") {
-      options.noNavigationScreenshots = true;
-    } else if (args[i] === "--no-waitfor-polling-overhead") {
-      options.noWaitForPollingOverhead = true;
-    } else if (args[i] === "--no-occlusion") {
-      options.noOcclusion = true;
-    } else if (args[i] === "--no-include-not-important-views") {
-      options.noA11yIncludeNotImportantViews = true;
-    } else if (args[i] === "--no-report-view-ids") {
-      options.noA11yReportViewIds = true;
-    } else if (args[i] === "--no-retrieve-interactive-windows") {
-      options.noA11yRetrieveInteractiveWindows = true;
-    } else if (args[i] === "--mem-perf-audit") {
-      options.memPerfAudit = true;
-    } else if (args[i] === "--accessibility-audit") {
-      options.accessibilityAudit = true;
-    } else if (args[i] === "--accessibility-use-baseline" || args[i] === "--a11y-use-baseline") {
-      options.accessibilityUseBaseline = true;
-    } else if (args[i] === "--predictive-ui" || args[i] === "--predictive") {
-      options.predictiveUi = true;
-    } else if (args[i] === "--raw-element-search") {
-      options.rawElementSearch = true;
-    } else if (
-      args[i] === "--skip-ctrl-proxy-download" ||
-      args[i] === "--skip-accessibility-download"
-    ) {
-      options.skipCtrlProxyDownload = true;
-    } else if (args[i] === "--mcp-recording") {
-      options.mcpRecording = true;
-    } else if (args[i] === "--observe-result-include-elements") {
-      options.observeResultIncludeElements = true;
-    } else if (args[i] === "--tool-results-no-structured-content") {
-      options.toolResultsNoStructuredContent = true;
-    } else if (args[i] === "--actions-diff-observe") {
-      options.actionsDiffObserve = true;
-    } else if (args[i] === "--actions-no-observe") {
-      options.actionsNoObserve = true;
+    if (consumeDaemonFlag(args[i], args[i + 1], options, log)) {
+      i++;
     }
   }
   return options;

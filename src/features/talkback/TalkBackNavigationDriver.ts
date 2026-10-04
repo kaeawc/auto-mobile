@@ -23,6 +23,7 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
     x: number,
     y: number,
     durationMs: number,
+    onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult>;
 
   /**
@@ -76,8 +77,17 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
     x: number,
     y: number,
     durationMs: number,
+    onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult> {
-    return this.accessibilityService.requestTapCoordinates(x, y, durationMs);
+    return this.accessibilityService.requestTapCoordinates(
+      x,
+      y,
+      durationMs,
+      undefined,
+      undefined,
+      undefined,
+      onDispatch,
+    );
   }
 
   async requestAction(action: string, resourceId?: string): Promise<A11yActionResult> {

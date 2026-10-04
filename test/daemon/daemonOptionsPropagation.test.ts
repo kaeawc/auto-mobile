@@ -65,6 +65,59 @@ const PROPAGATING_BOOLEAN_FLAGS: (keyof DaemonOptions)[] = [
 ];
 
 describe("daemon startup-option propagation", () => {
+  test("boolean aliases and repeated valued flags preserve parser consumption", () => {
+    const parsed = parseDaemonArgs(
+      [
+        "--ui-perf-debug",
+        "--a11y-use-baseline",
+        "--predictive",
+        "--skip-accessibility-download",
+        "--embedded-sdk",
+        "--network-mockable",
+        "--dismiss-keyboard-after-input",
+        "--no-ui-perf-mode",
+        "--no-navigation-screenshots",
+        "--no-waitfor-polling-overhead",
+        "--enable-tool",
+        "first",
+        "--disable-tool",
+        "old",
+        "--enable-tool",
+        "second",
+        "--plan-execution-lock-scope",
+        "invalid",
+        "--debug",
+        "--host",
+        "",
+        "--strict-port",
+        "--tool-output-dir",
+        "",
+        "--accessibility-audit",
+      ],
+      {},
+    );
+    expect(parsed).toMatchObject({
+      debugPerf: true,
+      accessibilityUseBaseline: true,
+      predictiveUi: true,
+      skipCtrlProxyDownload: true,
+      embeddedSdk: true,
+      networkMockable: true,
+      dismissKeyboardAfterInput: true,
+      noUiPerfMode: true,
+      noNavigationScreenshots: true,
+      noWaitForPollingOverhead: true,
+      enabledTools: ["first", "second"],
+      disabledTools: ["old"],
+      debug: true,
+      strictPort: true,
+      accessibilityAudit: true,
+    });
+    expect(parsed.planExecutionLockScope).toBeUndefined();
+    expect(parsed.host).toBeUndefined();
+    expect(parsed.toolOutputsDir).toBeUndefined();
+  });
+
   test.each<{ flag: string; field: keyof DaemonOptions; value: string; warning: string }>([
     { flag: "--port", field: "port", value: "abc", warning: "Invalid port: abc" },
     { flag: "--port", field: "port", value: "99999", warning: "Invalid port: 99999" },

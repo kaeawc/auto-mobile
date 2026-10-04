@@ -99,6 +99,39 @@ interface StepExecutionResult {
   warnings?: string[];
 }
 
+interface ParallelTrackFailure {
+  failedStep: NonNullable<PlanExecutionResult["failedStep"]>;
+  deviceOrder: number;
+  abortConsequence: boolean;
+}
+
+/** Choose a stable failure after all tracks settle, preserving the abort's cause. */
+export function selectParallelFailure(
+  failures: readonly ParallelTrackFailure[],
+): PlanExecutionResult["failedStep"] {
+  let selected: ParallelTrackFailure | undefined;
+  for (const candidate of failures) {
+    if (!selected || (selected.abortConsequence && !candidate.abortConsequence)) {
+      selected = candidate;
+      continue;
+    }
+    if (candidate.abortConsequence !== selected.abortConsequence) {
+      continue;
+    }
+    const candidateIndex =
+      candidate.failedStep.stepIndex === -1 ? Infinity : candidate.failedStep.stepIndex;
+    const selectedIndex =
+      selected.failedStep.stepIndex === -1 ? Infinity : selected.failedStep.stepIndex;
+    if (
+      candidateIndex < selectedIndex ||
+      (candidateIndex === selectedIndex && candidate.deviceOrder < selected.deviceOrder)
+    ) {
+      selected = candidate;
+    }
+  }
+  return selected?.failedStep;
+}
+
 /**
  * Interface for plan execution
  * Handles execution of plan steps sequentially or in parallel (multi-device)
@@ -915,18 +948,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
     // Track per-device results
     const perDeviceResults = new Map<string, DeviceExecutionResult>();
-    let firstFailure:
-      | {
-          device: string;
-          stepIndex: number;
-          tool: string;
-          error: string;
-          failureObservation?: FailureObservationSummary;
-        }
-      | undefined;
+    const failures: ParallelTrackFailure[] = [];
 
     // Execute each device track in parallel
-    const devicePromises = partitionedPlan.devices.map(async (device) => {
+    const devicePromises = partitionedPlan.devices.map(async (device, deviceOrder) => {
       const deviceStartTime = debugMode ? this.timer.now() : 0;
       const track = partitionedPlan.deviceTracks.get(device)!;
 
@@ -943,6 +968,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           combinedSignal,
           executionOptions,
         );
+        // An ordinary failing callback aborts synchronously below. Failures
+        // observed after that abort may be cancelled siblings, even at a lower
+        // real plan index. Keep them in perDeviceResults but prefer the cause.
+        const abortConsequence = internalAbortController.signal.aborted;
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -969,15 +998,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
             `[PARALLEL_EXEC][${device}] Device track failed at step ${result.failedStep?.stepIndex}`,
           );
 
-          // Record first failure
-          if (!firstFailure && result.failedStep) {
-            firstFailure = {
-              device,
-              stepIndex: result.failedStep.stepIndex,
-              tool: result.failedStep.tool,
-              error: result.failedStep.error,
-              failureObservation: result.failedStep.failureObservation,
-            };
+          if (result.failedStep) {
+            failures.push({
+              failedStep: {
+                device,
+                stepIndex: result.failedStep.stepIndex,
+                tool: result.failedStep.tool,
+                error: result.failedStep.error,
+                failureObservation: result.failedStep.failureObservation,
+              },
+              deviceOrder,
+              abortConsequence,
+            });
           }
 
           // Trigger abort based on strategy
@@ -1001,6 +1033,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           internalAbortController.abort(firstDeviceLoss);
           throw error;
         }
+        const abortConsequence = internalAbortController.signal.aborted;
         const errorMsg = errorMessage(error);
         logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMsg}`);
 
@@ -1020,14 +1053,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
         perDeviceResults.set(device, deviceResult);
 
-        if (!firstFailure) {
-          firstFailure = {
+        failures.push({
+          failedStep: {
             device,
             stepIndex: -1,
             tool: "unknown",
             error: errorMsg,
-          };
-        }
+          },
+          deviceOrder,
+          abortConsequence,
+        });
 
         if (abortStrategy === "immediate") {
           internalAbortController.abort();
@@ -1088,15 +1123,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       success: allSucceeded,
       executedSteps: totalExecutedSteps,
       totalSteps,
-      failedStep: firstFailure
-        ? {
-            stepIndex: firstFailure.stepIndex,
-            tool: firstFailure.tool,
-            error: firstFailure.error,
-            device: firstFailure.device,
-            failureObservation: firstFailure.failureObservation,
-          }
-        : undefined,
+      failedStep: selectParallelFailure(failures),
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
     };

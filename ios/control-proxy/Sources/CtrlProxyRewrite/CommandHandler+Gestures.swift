@@ -34,7 +34,7 @@ extension CommandHandler {
             return try await perf.withScope { try await MainActor.run { try operation() } }
         }
 
-        let hierarchy = (try? await elementLocator.getViewHierarchy(disableAllFiltering: false))
+        let hierarchy = (try? await captureHierarchy())
             .map(enrichWithCachedSdkHierarchy)
         try beforeOperation?()
 
@@ -62,7 +62,7 @@ extension CommandHandler {
     {
         let hierarchy: ViewHierarchy?
         if expected != nil {
-            hierarchy = (try? await elementLocator.getViewHierarchy(disableAllFiltering: false))
+            hierarchy = (try? await captureHierarchy())
                 .map(enrichWithCachedSdkHierarchy)
         } else {
             hierarchy = nil

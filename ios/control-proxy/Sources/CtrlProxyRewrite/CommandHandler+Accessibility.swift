@@ -49,7 +49,7 @@ extension CommandHandler {
         let hierarchy: ViewHierarchy
         do {
             hierarchy = try await trackedAsync("extraction") {
-                try await self.elementLocator.getViewHierarchy(disableAllFiltering: false)
+                try await self.captureHierarchy()
             }
         } catch {
             throw CommandError.executionFailed("Failed to get view hierarchy: \(error.localizedDescription)")

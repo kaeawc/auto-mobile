@@ -148,7 +148,17 @@ final class HierarchyDebouncer: HierarchyDebouncing {
         lastHierarchy
     }
 
+    func recordCommandCapture(_ hierarchy: ViewHierarchy) {
+        recordLatestHierarchy(hierarchy)
+    }
+
     // MARK: - Private
+
+    /// Keep SDK refreshes on the newest capture, independently of poll change detection.
+    private func recordLatestHierarchy(_ hierarchy: ViewHierarchy) {
+        if let lastHierarchy, hierarchy.updatedAt < lastHierarchy.updatedAt { return }
+        lastHierarchy = hierarchy
+    }
 
     private func scheduleNextPoll() {
         guard isRunning, !pollScheduled else { return }
@@ -184,7 +194,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
 
             lastStructuralHash = hash
             lastObservedStructuralHash = hash
-            lastHierarchy = hierarchy
+            recordLatestHierarchy(hierarchy)
             lastBroadcastTime = timer.now()
 
             // Broadcast initial state so the IDE receives hierarchy immediately.
@@ -244,7 +254,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
                 // Structure unchanged - likely animation.
                 inAnimationMode = true
                 animationModeEndTime = timer.now() + Self.animationSkipWindowMs
-                lastHierarchy = hierarchy
+                recordLatestHierarchy(hierarchy)
                 // Idle: nothing changed since the last broadcast, so back off the poll
                 // interval toward the cap to eliminate steady-state load.
                 effectivePollIntervalMs = min(
@@ -257,7 +267,7 @@ final class HierarchyDebouncer: HierarchyDebouncing {
                 // Structure changed - this is a real content change.
                 let now = timer.now()
                 inAnimationMode = false
-                lastHierarchy = hierarchy
+                recordLatestHierarchy(hierarchy)
                 skippedPollCount = 0
                 // A real change resets the cadence to the fast base interval so we stay
                 // responsive immediately after any content change.

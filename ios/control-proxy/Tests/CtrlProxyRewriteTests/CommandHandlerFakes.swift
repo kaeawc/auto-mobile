@@ -7,9 +7,10 @@ import Foundation
 // (timestamp / totalTimeMs / perfTiming / frameContext / updatedAt).
 
 @MainActor
-final class RewriteFakeElementLocator: ElementLocating {
+final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
     var foregroundBundleId: String?
     var appState: ObservedAppState = .notRunning
+    private(set) var filteringRequests: [Bool] = []
     private let hierarchy: ViewHierarchy
 
     init(hierarchy: ViewHierarchy = RewriteFakeElementLocator.defaultHierarchy) {
@@ -29,7 +30,11 @@ final class RewriteFakeElementLocator: ElementLocating {
         )
     }
 
-    func getViewHierarchy(disableAllFiltering _: Bool) throws -> ViewHierarchy { hierarchy }
+    func getViewHierarchy(disableAllFiltering: Bool) throws -> ViewHierarchy {
+        filteringRequests.append(disableAllFiltering)
+        return hierarchy
+    }
+
     func findElement(byResourceId _: String) -> Any? { nil }
     func findElement(byText _: String) -> Any? { nil }
     func findElement(byText _: String, bounds _: ElementBounds) -> Any? { nil }
@@ -38,6 +43,20 @@ final class RewriteFakeElementLocator: ElementLocating {
     func getAppState(bundleId _: String) -> ObservedAppState { appState }
     func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool { true }
     func refreshForegroundBundleId() -> String? { foregroundBundleId }
+}
+
+@MainActor
+final class RewriteFakeHierarchyDebouncer: HierarchyDebouncing {
+    private(set) var recordedCaptures: [ViewHierarchy] = []
+    private(set) var pollIntervals: [Int64] = []
+
+    func recordCommandCapture(_ hierarchy: ViewHierarchy) {
+        recordedCaptures.append(hierarchy)
+    }
+
+    func updatePollIntervalMs(_ pollIntervalMs: Int64) {
+        pollIntervals.append(pollIntervalMs)
+    }
 }
 
 @MainActor

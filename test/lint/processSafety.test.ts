@@ -4,7 +4,6 @@ import {
   checkProcessSafetyAllowlist,
   PROCESS_SAFETY_ALLOWLIST,
   checkProcessSafetySource,
-  checkProcessSafetyTree,
 } from "../../scripts/check-process-safety";
 
 const fixture = "scripts/fixture.sh";
@@ -257,7 +256,5 @@ STUB
     },
   );
 
-  test("real scripts and BATS tree satisfy the guard", () => {
-    expect(checkProcessSafetyTree()).toEqual([]);
-  });
+  // scripts/check-boundaries.sh enforces the full real-tree scan outside unit tests.
 });

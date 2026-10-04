@@ -442,7 +442,7 @@ interface NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): void;
+  ): (() => void) | undefined;
 }
 
 /** Removes routing and execution implementation details before persisting a navigation edge. */
@@ -1185,7 +1185,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): void {
+  ): (() => void) | undefined {
     // Record tool call for navigation graph correlation before the handler mutates UI state.
     if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
       return;
@@ -1198,7 +1198,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     const navManager = sessionUuid
       ? NavigationGraphManager.getInstanceForSession(sessionUuid)
       : NavigationGraphManager.getInstance();
-    navManager.recordToolCall(name, stripNavigationInternalParams(args), uiState);
+    return navManager.recordToolCall(name, stripNavigationInternalParams(args), uiState);
   }
 }
 
@@ -1589,8 +1589,30 @@ async function invokeResolvedDeviceHandler(input: {
   ) {
     return handler(target.device, args, progress, signal);
   }
-  input.navigationRecorder.record(name, args, target.device, target.sessionUuid);
-  return input.auditRunner.run({ name, args, device: target.device, handler, progress, signal });
+  const withdraw = input.navigationRecorder.record(name, args, target.device, target.sessionUuid);
+  const onAbort = () => withdraw?.();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  let succeeded = false;
+  try {
+    if (signal?.aborted) {
+      withdraw?.();
+    }
+    const response = await input.auditRunner.run({
+      name,
+      args,
+      device: target.device,
+      handler,
+      progress,
+      signal,
+    });
+    succeeded = !isToolResponseFailure(response);
+    return response;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    if (!succeeded) {
+      withdraw?.();
+    }
+  }
 }
 
 // The registry that holds all tools

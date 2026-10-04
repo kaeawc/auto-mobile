@@ -19,7 +19,10 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
-import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
+import {
+  SessionRecoveryAssignmentError,
+  formatSessionRecoveryIncidentContext,
+} from "../models/SessionRecoveryAssignmentError";
 import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
@@ -3855,18 +3858,19 @@ export class DevicePool {
               recoveryOutcome: incident.recovery.outcome,
             }
           : {}),
-        retry: { sameSession: true },
         recoveryWindowRemainingMs: target.restartRecoveryDeadlineMs - now,
-        fallback: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
       });
     }
-    const context = incident
-      ? `Loss incident ${incident.id}: ${incident.detectionPath}` +
-        (incident.processExit
-          ? ` (code=${incident.processExit.code}, signal=${incident.processExit.signal})`
-          : "") +
-        `; recovery outcome: ${incident.recovery.outcome}. `
-      : "";
+    const context = formatSessionRecoveryIncidentContext(
+      incident
+        ? {
+            incidentId: incident.id,
+            detectionPath: incident.detectionPath,
+            processExit: incident.processExit,
+            recoveryOutcome: incident.recovery.outcome,
+          }
+        : {},
+    );
     return new ActionableError(
       `Cannot safely recover session ${sessionId}: ${target.platform} device ` +
         `'${target.stableDeviceId}' is unavailable or already in use. ` +

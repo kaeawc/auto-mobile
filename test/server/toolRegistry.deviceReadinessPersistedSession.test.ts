@@ -265,9 +265,10 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       detectionPath: "watched-process-exit",
       processExit: { code: null, signal: "SIGKILL" },
       recoveryOutcome: "not-attempted",
-      retry: { sameSession: true },
+      code: "session_recovery_pending",
+      retryable: true,
       recoveryWindowRemainingMs: 119_999,
-      fallback: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+      recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
     };
     expect(error).toMatchObject({ details });
     const result = shapeToolCallError(error, { toolName: "restartDeadlineProbe", source: "MCP" });
@@ -304,9 +305,10 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       details: {
         deviceId: androidA.deviceId,
         stableDeviceId: androidA.name,
-        retry: { sameSession: true },
+        code: "session_recovery_pending",
+        retryable: true,
         recoveryWindowRemainingMs: 177_500,
-        fallback: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+        recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
       },
     });
     expect(failure).not.toHaveProperty("details.incidentId");

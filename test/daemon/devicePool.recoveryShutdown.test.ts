@@ -1210,9 +1210,10 @@ test.each(["not-attempted", "exhausted"] as const)(
         detectionPath: "watched-process-exit",
         processExit: { code: 1, signal: null },
         recoveryOutcome: outcome,
-        retry: { sameSession: true },
+        code: "session_recovery_pending",
+        retryable: true,
         recoveryWindowRemainingMs: 120_000,
-        fallback: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+        recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
       },
     });
     expect(
@@ -1224,7 +1225,7 @@ test.each(["not-attempted", "exhausted"] as const)(
       String(error).indexOf("acquire a new device"),
     );
     expect(String(error)).toBe(
-      "Error: Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
+      "SessionRecoveryAssignmentError: Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
         `Loss incident ${incident.id}: watched-process-exit (code=1, signal=null); recovery outcome: ${outcome}. ` +
         "The session can still resume if the device returns before the recovery window ends " +
         "(120 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
@@ -1262,14 +1263,15 @@ test("restart assignment without an incident exposes same-session retry details"
     details: {
       deviceId: original.deviceId,
       stableDeviceId: original.name,
-      retry: { sameSession: true },
+      code: "session_recovery_pending",
+      retryable: true,
       recoveryWindowRemainingMs: 177_500,
-      fallback: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+      recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
     },
   });
   expect(error).not.toHaveProperty("details.incidentId");
   expect(String(error)).toBe(
-    "Error: Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
+    "SessionRecoveryAssignmentError: Cannot safely recover session session: android device 'Pixel_8_API_35' is unavailable or already in use. " +
       "The session can still resume if the device returns before the recovery window ends " +
       "(178 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
   );

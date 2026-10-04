@@ -25,10 +25,11 @@ describe("DefaultAndroidBuildToolsLocator", () => {
   });
 
   test("warns on unreadable build-tools and still returns null", async () => {
+    const buildToolsDir = join("/sdk", "build-tools");
     systemDetection.setPlatform("darwin");
     systemDetection.setEnvVar("ANDROID_HOME", "/sdk");
     systemDetection.addExistingFile("/sdk");
-    fileSystem.setDirectory("/sdk/build-tools");
+    fileSystem.setDirectory(buildToolsDir);
     const failure = new Error("permission denied");
     fileSystem.readdir = async () => {
       throw failure;
@@ -39,7 +40,7 @@ describe("DefaultAndroidBuildToolsLocator", () => {
         await new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection).findAaptTool(),
       ).toBeNull();
       expect(warn).toHaveBeenCalledWith(
-        "Failed to read Android build-tools at /sdk/build-tools: permission denied",
+        `Failed to read Android build-tools at ${buildToolsDir}: permission denied`,
         failure,
       );
     } finally {

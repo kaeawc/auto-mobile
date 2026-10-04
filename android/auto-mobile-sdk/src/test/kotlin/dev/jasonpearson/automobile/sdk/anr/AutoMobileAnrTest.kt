@@ -327,16 +327,13 @@ class AutoMobileAnrTest {
 
   @Test
   @Config(sdk = [Build.VERSION_CODES.R])
-  fun `identities distinguish null empty and separator-containing process names`() {
-    val names = listOf(null, "", "null", "worker:3:pid")
+  fun `identities distinguish empty and separator-containing process names`() {
+    val names = listOf("", "null", "worker:3:pid")
     for (name in names) addAnr(timestamp = 20L, pid = 101, processName = name)
     val firstLaunch = BroadcastContext(context)
     AutoMobileAnr.initialize(firstLaunch)
-    assertEquals(4, firstLaunch.attempts)
-    assertEquals(
-      names.map { it.orEmpty() }.toSet(),
-      firstLaunch.events.map { it.processName }.toSet(),
-    )
+    assertEquals(3, firstLaunch.attempts)
+    assertEquals(names.toSet(), firstLaunch.events.map { it.processName }.toSet())
     assertEquals(names.map { identity(101, it) }.toSet(), storedIds())
     AutoMobileAnr.reset()
     val secondLaunch = BroadcastContext(context)
@@ -347,7 +344,7 @@ class AutoMobileAnrTest {
   private fun addAnr(
     timestamp: Long,
     pid: Int = 123,
-    processName: String? = context.packageName,
+    processName: String = context.packageName,
     traceStream: InputStream? = null,
   ) {
     val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -373,8 +370,8 @@ class AutoMobileAnrTest {
       .getStringSet("last_reported_anr_ids_at_timestamp", null)
       ?.toSet()
 
-  private fun identity(pid: Int, processName: String?): String =
-    "$pid:${processName?.length ?: -1}:${processName.orEmpty()}"
+  private fun identity(pid: Int, processName: String): String =
+    "$pid:${processName.length}:$processName"
 
   private class BroadcastContext(
     base: Context,

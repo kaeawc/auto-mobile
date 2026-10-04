@@ -112,8 +112,8 @@ object AutoMobileAnr {
         reportNewAnrs(
           anrInfos,
           { it.timestamp },
-          // Length-prefix the name to distinguish null, empty, and names containing separators.
-          { "${it.pid}:${it.processName?.length ?: -1}:${it.processName.orEmpty()}" },
+          // The name is never null; length-prefix it to distinguish empty names and separators.
+          { "${it.pid}:${it.processName.length}:${it.processName}" },
           lastReported,
         ) { exitInfo ->
           AutoMobileSDK.logger.d(TAG) {
@@ -189,7 +189,7 @@ object AutoMobileAnr {
     send: (T) -> Boolean,
   ): AnrCursor {
     var watermark = lastReported.timestamp
-    var reportedIds = lastReported.idsAtTimestamp?.toMutableSet()
+    var reportedIds: Set<String>? = lastReported.idsAtTimestamp
     for (item in items.sortedBy(timestampOf)) {
       val timestamp = timestampOf(item)
       val identity = identityOf(item)
@@ -198,11 +198,11 @@ object AutoMobileAnr {
       if (!send(item)) break
       if (timestamp > watermark) {
         watermark = timestamp
-        reportedIds = mutableSetOf()
+        reportedIds = emptySet()
       }
-      reportedIds?.add(identity)
+      reportedIds = reportedIds.orEmpty() + identity
     }
-    return AnrCursor(watermark, reportedIds?.toSet())
+    return AnrCursor(watermark, reportedIds)
   }
 
   @RequiresApi(Build.VERSION_CODES.R)

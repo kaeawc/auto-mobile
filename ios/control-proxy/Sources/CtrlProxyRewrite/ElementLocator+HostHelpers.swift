@@ -25,6 +25,47 @@ extension ElementLocator {
     // macOS. On this `@MainActor` class they must be `nonisolated static` so non-isolated
     // test code (and the iOS instance methods, synchronously) can call them without hopping.
 
+    /// Conservative reverse-DNS candidate shape for identifiers outside the legacy prefix gate.
+    /// A leading ASCII letter rejects numeric/version tokens; all labels must be non-empty
+    /// and contain only ASCII letters, digits or hyphens. Underscores are not bundle-ID characters.
+    /// A filename such as `icon.png` is indistinguishable here from a two-label bundle ID;
+    /// the caller's foreground-state probe must still confirm every candidate.
+    nonisolated static func isPotentialBundleId(_ identifier: String) -> Bool {
+        identifier.range(
+            of: "^[A-Za-z][A-Za-z0-9-]*(\\.[A-Za-z0-9-]+)+$",
+            options: .regularExpression
+        ) == identifier.startIndex ..< identifier.endIndex
+    }
+
+    /// Extract a bundle-ID candidate from a SpringBoard accessibility identifier.
+    /// Preserve the original cleaning and legacy accept path: its historical comments only
+    /// describe a bundle-ID heuristic, without documenting which non-bundle strings it filtered.
+    nonisolated static func bundleIdFromSpringboardIdentifier(_ identifier: String) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        var cleanId = identifier
+
+        // SpringBoard cards use `card:<bundleId>:sceneID:<sceneId>` (also `@card:`).
+        if identifier.hasPrefix("@card:") {
+            cleanId = String(identifier.dropFirst(6))
+        } else if identifier.hasPrefix("card:") {
+            cleanId = String(identifier.dropFirst(5))
+        }
+        if identifier.hasPrefix("@card:") || identifier.hasPrefix("card:") {
+            if let colonIndex = cleanId.firstIndex(of: ":") {
+                cleanId = String(cleanId[..<colonIndex])
+            }
+        }
+
+        // Keep the existing replacement semantics, including repeated/embedded suffixes.
+        cleanId = cleanId.replacingOccurrences(of: "-window", with: "")
+            .replacingOccurrences(of: "-sceneID", with: "")
+            .replacingOccurrences(of: "-SceneWindow", with: "")
+
+        let matchesLegacyGate = cleanId.contains(".") && !cleanId.contains(" ") &&
+            ["com.", "io.", "org.", "net.", "me.", "dev."].contains { cleanId.hasPrefix($0) }
+        return matchesLegacyGate || isPotentialBundleId(cleanId) ? cleanId : nil
+    }
+
     /// Resolve a snapshot frame using the offset inherited from its parent. When the
     /// candidate escapes a non-empty resolved parent but adding that parent's origin
     /// makes it fit, the node starts a local coordinate space. Return the composed

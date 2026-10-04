@@ -14,6 +14,66 @@ import XCTest
 /// (that fake arrives with the Phase 6 CommandHandler port). The `ForegroundTracker` tests use
 /// `var` because the reference's lock-guarded class became a `mutating`-method struct.
 final class ElementLocatorTests: XCTestCase {
+    // Plain identifier inputs, not invented SpringBoard hierarchy captures.
+    func testBundleIdCandidate_acceptsExistingAndOtherPrefixes() {
+        for bundleId in [
+            "com.apple.mobilesafari", "io.x.y", "org.mozilla.ios.Firefox", "net.x.y", "me.x.y", "dev.x.y",
+            "app.example.x", "co.hinge.mobile.ios", "de.x.y", "tv.twitch", "ai.x.y", "uk.co.example.app",
+            "ph.telegra.Telegraph", "us.zoom.videomeetings", "jp.naver.line", "xyz.example.App",
+            "app.example.App-2", "a.b", "app.example.123",
+        ] {
+            XCTAssertTrue(ElementLocator.isPotentialBundleId(bundleId), bundleId)
+            XCTAssertEqual(ElementLocator.bundleIdFromSpringboardIdentifier(bundleId), bundleId)
+        }
+    }
+
+    func testBundleIdCandidate_rejectsMalformedAndNumericIdentifiers() {
+        for identifier in [
+            "", "foo", "app.example.has space", "app.example.has\ttab", "app.example.has\nnewline",
+            "app.example.has/slash", "/app.example.path", "app.example:scene", "a..b", ".a.b", "a.b.",
+            "1.2.3", "123.456", "1example.app", "app.example.under_score", "app.example.café", "a.b\n",
+            "Dock", "label-view", "spotlight-pill",
+        ] {
+            XCTAssertFalse(ElementLocator.isPotentialBundleId(identifier), identifier)
+            XCTAssertNil(ElementLocator.bundleIdFromSpringboardIdentifier(identifier), identifier)
+        }
+    }
+
+    func testBundleIdCandidate_doesNotGuessFilenameSemantics() {
+        // No capture/history establishes a filename filter; `icon.png` has the same
+        // shape as `tv.twitch`. XCUIApplication.state must confirm either candidate.
+        XCTAssertTrue(ElementLocator.isPotentialBundleId("icon.png"))
+    }
+
+    func testBundleIdFromSpringboardIdentifier_unwrapsCardsAndPreservesCleaning() {
+        let cases = [
+            ("card:ph.telegra.Telegraph:sceneID:ph.telegra.Telegraph-default", "ph.telegra.Telegraph"),
+            ("@card:us.zoom.videomeetings:sceneID:...", "us.zoom.videomeetings"),
+            ("jp.naver.line-window", "jp.naver.line"),
+            ("card:com.tinyspeck.chatlyio:sceneID:com.tinyspeck.chatlyio-default", "com.tinyspeck.chatlyio"),
+            ("@card:io.x.y-window:sceneID:other", "io.x.y"),
+            ("card:tv.twitch", "tv.twitch"),
+            ("app.example.App-sceneID", "app.example.App"),
+            ("com.example.App-SceneWindow", "com.example.App"),
+            ("com.example.App-window-window-sceneID-SceneWindow", "com.example.App"),
+            ("com.example-window.App", "com.example.App"),
+        ]
+        for (identifier, expected) in cases {
+            XCTAssertEqual(ElementLocator.bundleIdFromSpringboardIdentifier(identifier), expected, identifier)
+        }
+        for identifier in ["card:", "@card:", "card:foo:sceneID:other", "@card:a..b:sceneID:other"] {
+            XCTAssertNil(ElementLocator.bundleIdFromSpringboardIdentifier(identifier), identifier)
+        }
+    }
+
+    func testBundleIdFromSpringboardIdentifier_preservesLegacyAcceptPath() {
+        // Unknown historical filtering intent: extend acceptance without narrowing the
+        // existing path, even for a legacy candidate outside Apple's character set.
+        let legacyIdentifier = "com.example.under_score"
+        XCTAssertFalse(ElementLocator.isPotentialBundleId(legacyIdentifier))
+        XCTAssertEqual(ElementLocator.bundleIdFromSpringboardIdentifier(legacyIdentifier), legacyIdentifier)
+    }
+
     func testForegroundBundleId_switcherOwnsForegroundOverAppCards() {
         XCTAssertEqual(
             ElementLocator.foregroundBundleId(

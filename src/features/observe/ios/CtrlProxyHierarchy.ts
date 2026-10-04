@@ -599,6 +599,9 @@ export class CtrlProxyHierarchy {
         node: filteredNode ?? undefined,
       },
       packageName: hierarchy.packageName,
+      ...(hierarchy.fallbackToSpringboard !== undefined
+        ? { fallbackToSpringboard: hierarchy.fallbackToSpringboard }
+        : {}),
       updatedAt: hierarchy.updatedAt,
       windows: hierarchy.windows,
       // iOS screen scale factor (e.g., 2.0 for @2x, 3.0 for @3x retina)

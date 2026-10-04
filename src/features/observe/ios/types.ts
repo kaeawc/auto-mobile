@@ -75,6 +75,8 @@ export interface XCTestHierarchy {
   captureSequence?: number;
   updatedAt: number;
   packageName: string;
+  /** Runner could not identify the foreground app and guessed SpringBoard instead. */
+  fallbackToSpringboard?: boolean;
   hierarchy: CtrlProxyNode;
   windows?: ViewHierarchyWindowInfo[];
   /** iOS screen scale factor (e.g., 2.0 for @2x, 3.0 for @3x retina) */

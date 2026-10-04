@@ -52,6 +52,13 @@ import {
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
+interface CommandArgState {
+  current: string;
+  inSingle: boolean;
+  inDouble: boolean;
+  escape: boolean;
+}
+
 const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
 
 // Route the default long-lived spawn through the shared host-process seam so the
@@ -215,17 +222,47 @@ export class AdbClient implements AdbExecutor {
     // Test mode if: custom execAsync provided OR global test mode flag is set
     // Check for any truthy value (not just exactly "true") to handle different env var formats
     const testModeEnv = process.env.AUTOMOBILE_TEST_MODE;
-    this.isTestMode =
+    this.isTestMode = this.hasTestExecution(execAsyncFn, testModeEnv);
+    this.execAsync = this.resolveExecAsync(execAsyncFn);
+    this.spawnFn = this.resolveSpawnFn(spawnFn);
+    this.retryExecutor = retryExecutor;
+    this.timer = timer;
+    // Initialize with fallback, will be updated lazily
+    this.adbPath = this.getFallbackAdbPath();
+
+    // Debug: Log when a real (non-test) AdbClient is created
+    if (process.env.DEBUG_ADB_EXEC && !this.isTestMode) {
+      logger.debug(`[DEBUG_ADB_EXEC] Real AdbClient created (not test mode)`);
+      logger.debug(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
+    }
+  }
+
+  private hasTestExecution(
+    execAsyncFn:
+      | ((command: string, maxBuffer?: number) => Promise<ExecResult>)
+      | ExecFileAsync
+      | null,
+    testModeEnv: string | undefined,
+  ): boolean {
+    return (
       execAsyncFn !== null ||
       (testModeEnv !== undefined &&
         testModeEnv !== "" &&
         testModeEnv !== "false" &&
-        testModeEnv !== "0");
+        testModeEnv !== "0")
+    );
+  }
 
+  private resolveExecAsync(
+    execAsyncFn:
+      | ((command: string, maxBuffer?: number) => Promise<ExecResult>)
+      | ExecFileAsync
+      | null,
+  ): ExecFileAsync {
     // In test mode without custom exec function, use a stub that returns empty results
     // This prevents any real adb commands from being executed
     if (this.isTestMode && execAsyncFn === null) {
-      this.execAsync = async (): Promise<ExecResult> => ({
+      return async (): Promise<ExecResult> => ({
         stdout: "",
         stderr: "",
         toString() {
@@ -238,21 +275,12 @@ export class AdbClient implements AdbExecutor {
           return false;
         },
       });
-    } else {
-      this.execAsync = execAsyncFn ? this.wrapExecAsync(execAsyncFn) : execFileAsync;
     }
-    this.spawnFn =
-      spawnFn || ((file, args, options) => adbHostProcessExecutor.spawn(file, args, options));
-    this.retryExecutor = retryExecutor;
-    this.timer = timer;
-    // Initialize with fallback, will be updated lazily
-    this.adbPath = this.getFallbackAdbPath();
+    return execAsyncFn ? this.wrapExecAsync(execAsyncFn) : execFileAsync;
+  }
 
-    // Debug: Log when a real (non-test) AdbClient is created
-    if (process.env.DEBUG_ADB_EXEC && !this.isTestMode) {
-      logger.debug(`[DEBUG_ADB_EXEC] Real AdbClient created (not test mode)`);
-      logger.debug(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
-    }
+  private resolveSpawnFn(spawnFn: SpawnFn | null): SpawnFn {
+    return spawnFn || ((file, args, options) => adbHostProcessExecutor.spawn(file, args, options));
   }
 
   private wrapExecAsync(
@@ -589,15 +617,14 @@ export class AdbClient implements AdbExecutor {
     // explicit timeout; long-lived spawn commands do not pass through here.
     const effectiveTimeoutMs = timeoutMs ?? this.defaultTimeoutMs;
     const startTime = this.timer.now();
-    const result = await this.executeArgsImpl(
-      args,
-      effectiveTimeoutMs,
+    const result = await this.executeArgsImpl(args, {
+      timeoutMs: effectiveTimeoutMs,
       maxBuffer,
       noRetry,
       signal,
       beforeDispatch,
       waitForProcessSettlementAfterAbort,
-    );
+    });
     AdbClient.resetMissingAdbProbeState();
     const duration = this.timer.now() - startTime;
     const command = args.join(" ");
@@ -1032,41 +1059,28 @@ export class AdbClient implements AdbExecutor {
    * @param noRetry - Optional flag to disable retry logic for commands expected to fail
    * @returns Promise with command output
    */
-  private executeArgsImpl(
-    commandArgs: string[],
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
-    waitForProcessSettlementAfterAbort = false,
-  ): Promise<ExecResult> {
+  private executeArgsImpl(commandArgs: string[], options: AdbExecuteOptions): Promise<ExecResult> {
     // One span per logical adb command (retries included), recorded against the
     // ambient device-lifecycle tracker when one is in scope (see PerfContext).
     // Name by the leading subcommand tokens so spans aggregate (e.g.
     // `adb shell getprop`) instead of exploding per argument set.
     return trackAmbient(`adb ${commandArgs.slice(0, 2).join(" ")}`.trimEnd(), () =>
-      this.executeArgsImplInner(
-        commandArgs,
-        timeoutMs,
-        maxBuffer,
-        noRetry,
-        signal,
-        beforeDispatch,
-        waitForProcessSettlementAfterAbort,
-      ),
+      this.executeArgsImplInner(commandArgs, options),
     );
   }
 
   private async executeArgsImplInner(
     commandArgs: string[],
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
-    waitForProcessSettlementAfterAbort = false,
+    options: AdbExecuteOptions,
   ): Promise<ExecResult> {
+    const {
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      beforeDispatch,
+      waitForProcessSettlementAfterAbort = false,
+    } = options;
     const startTime = this.timer.now();
     const resolvedSignal = signal ?? getAbortSignal();
     const { adbPath, baseArgs } = await this.getBaseCommandParts(timeoutMs, resolvedSignal);
@@ -1344,47 +1358,60 @@ export class AdbClient implements AdbExecutor {
       return ["shell", shellCommand];
     }
 
+    return this.parseNonShellCommandArgs(trimmed, isWindows);
+  }
+
+  private consumeCommandQuoteOrEscape(
+    char: string,
+    state: CommandArgState,
+    isWindows: boolean,
+  ): boolean {
+    if (state.escape) {
+      state.current += char;
+      state.escape = false;
+      return true;
+    }
+
+    if (!isWindows && char === "\\" && !state.inSingle) {
+      state.escape = true;
+      return true;
+    }
+
+    if (char === "'" && !state.inDouble) {
+      state.inSingle = !state.inSingle;
+      return true;
+    }
+
+    if (char === '"' && !state.inSingle) {
+      state.inDouble = !state.inDouble;
+      return true;
+    }
+
+    return false;
+  }
+
+  private parseNonShellCommandArgs(trimmed: string, isWindows: boolean): string[] {
     const args: string[] = [];
-    let current = "";
-    let inSingle = false;
-    let inDouble = false;
-    let escape = false;
+    const state: CommandArgState = { current: "", inSingle: false, inDouble: false, escape: false };
 
     for (const char of trimmed) {
-      if (escape) {
-        current += char;
-        escape = false;
+      if (this.consumeCommandQuoteOrEscape(char, state, isWindows)) {
         continue;
       }
 
-      if (!isWindows && char === "\\" && !inSingle) {
-        escape = true;
-        continue;
-      }
-
-      if (char === "'" && !inDouble) {
-        inSingle = !inSingle;
-        continue;
-      }
-
-      if (char === '"' && !inSingle) {
-        inDouble = !inDouble;
-        continue;
-      }
-
-      if (!inSingle && !inDouble && /\s/.test(char)) {
-        if (current.length > 0) {
-          args.push(current);
-          current = "";
+      if (!state.inSingle && !state.inDouble && /\s/.test(char)) {
+        if (state.current.length > 0) {
+          args.push(state.current);
+          state.current = "";
         }
         continue;
       }
 
-      current += char;
+      state.current += char;
     }
 
-    if (current.length > 0) {
-      args.push(current);
+    if (state.current.length > 0) {
+      args.push(state.current);
     }
 
     return args;
@@ -1731,53 +1758,56 @@ export class AdbClient implements AdbExecutor {
       // Match UserInfo line: UserInfo{userId:name:flags} ...
       // Note: name can be "null" in dumpsys output, and flags are hexadecimal
       const userMatch = line.match(/UserInfo\{(\d+):([^:]+):([0-9a-fA-F]+)\}/);
-      if (userMatch) {
-        const userId = parseInt(userMatch[1], 10);
-        let userName = userMatch[2];
-        const flags = parseInt(userMatch[3], 16); // Parse as hexadecimal
-
-        // Look for the State line in the next few lines
-        let running = false;
-        let startState: string | undefined;
-        for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
-          const stateLine = lines[j];
-
-          // If we hit another UserInfo, stop searching
-          if (stateLine.match(/UserInfo\{/)) {
-            break;
-          }
-
-          const stateMatch = stateLine.match(/State:\s+(\S+)/);
-          if (stateMatch) {
-            startState = stateMatch[1];
-            running = startState === "RUNNING_UNLOCKED" || startState === "RUNNING_LOCKED";
-            break;
-          }
-        }
-
-        // If name is "null" in dumpsys, try to get the real name from "Owner name:" line
-        if (userName === "null") {
-          // For user 0, look for "Owner name:" line
-          const ownerMatch = output.match(/Owner name:\s+(.+)/);
-          if (ownerMatch && userId === 0) {
-            userName = ownerMatch[1].trim();
-          } else {
-            userName = `User ${userId}`;
-          }
-        }
-
-        users.push({
-          userId,
-          name: userName,
-          flags,
-          profileType: classifyAndroidUser(flags),
-          running,
-          ...(startState ? { startState } : {}),
-        });
+      if (!userMatch) {
+        continue;
       }
+      const userId = parseInt(userMatch[1], 10);
+      let userName = userMatch[2];
+      const flags = parseInt(userMatch[3], 16); // Parse as hexadecimal
+
+      const startState = this.findUserStartState(lines, i);
+      const running = startState === "RUNNING_UNLOCKED" || startState === "RUNNING_LOCKED";
+
+      // If name is "null" in dumpsys, try to get the real name from "Owner name:" line
+      if (userName === "null") {
+        // For user 0, look for "Owner name:" line
+        const ownerMatch = output.match(/Owner name:\s+(.+)/);
+        if (ownerMatch && userId === 0) {
+          userName = ownerMatch[1].trim();
+        } else {
+          userName = `User ${userId}`;
+        }
+      }
+
+      users.push({
+        userId,
+        name: userName,
+        flags,
+        profileType: classifyAndroidUser(flags),
+        running,
+        ...(startState ? { startState } : {}),
+      });
     }
 
     return users;
+  }
+
+  private findUserStartState(lines: string[], userLineIndex: number): string | undefined {
+    // Look for the State line in the next few lines
+    for (let j = userLineIndex + 1; j < Math.min(userLineIndex + 10, lines.length); j++) {
+      const stateLine = lines[j];
+
+      // If we hit another UserInfo, stop searching
+      if (stateLine.match(/UserInfo\{/)) {
+        break;
+      }
+
+      const stateMatch = stateLine.match(/State:\s+(\S+)/);
+      if (stateMatch) {
+        return stateMatch[1];
+      }
+    }
+    return undefined;
   }
 
   /**

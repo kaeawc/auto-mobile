@@ -1,4 +1,5 @@
 import { afterEach, describe, it, expect } from "bun:test";
+import { dirname, join } from "node:path";
 import {
   parseAvdConfig,
   apiLevelToVersion,
@@ -570,24 +571,39 @@ describe("FileAvdConfigReader constructor precedence", () => {
     "ANDROID_EMULATOR_HOME",
   ] as const;
   it.each([
-    [{ HOME: "/home" }, undefined, "/home/.android/avd", "/home/.android"],
-    [{ USERPROFILE: "/profile" }, undefined, "/profile/.android/avd", "/profile/.android"],
+    [{ HOME: "/home" }, undefined, join("/home", ".android", "avd"), join("/home", ".android")],
+    [
+      { USERPROFILE: "/profile" },
+      undefined,
+      join("/profile", ".android", "avd"),
+      join("/profile", ".android"),
+    ],
     [
       { HOME: "", USERPROFILE: "/profile" },
       undefined,
-      "/profile/.android/avd",
-      "/profile/.android",
+      join("/profile", ".android", "avd"),
+      join("/profile", ".android"),
     ],
-    [{}, undefined, "avd", ""],
-    [{ ANDROID_SDK_HOME: "/sdk" }, undefined, "/sdk/.android/avd", "/sdk/.android"],
-    [{ ANDROID_USER_HOME: "/user", ANDROID_SDK_HOME: "/sdk" }, undefined, "/user/avd", "/user"],
+    [{}, undefined, join("", "avd"), ""],
+    [
+      { ANDROID_SDK_HOME: "/sdk" },
+      undefined,
+      join("/sdk", ".android", "avd"),
+      join("/sdk", ".android"),
+    ],
+    [
+      { ANDROID_USER_HOME: "/user", ANDROID_SDK_HOME: "/sdk" },
+      undefined,
+      join("/user", "avd"),
+      "/user",
+    ],
     [
       { ANDROID_EMULATOR_HOME: "/emulator", ANDROID_USER_HOME: "/user" },
       undefined,
-      "/emulator/avd",
+      join("/emulator", "avd"),
       "/emulator",
     ],
-    [{ ANDROID_AVD_HOME: "/custom/avd" }, undefined, "/custom/avd", "/custom"],
+    [{ ANDROID_AVD_HOME: "/custom/avd" }, undefined, "/custom/avd", dirname("/custom/avd")],
     [
       { ANDROID_AVD_HOME: "/custom/avd", ANDROID_USER_HOME: "/user" },
       undefined,
@@ -598,13 +614,13 @@ describe("FileAvdConfigReader constructor precedence", () => {
       { ANDROID_AVD_HOME: "/custom/avd", ANDROID_SDK_HOME: "/sdk" },
       undefined,
       "/custom/avd",
-      "/sdk/.android",
+      join("/sdk", ".android"),
     ],
     [
       { ANDROID_AVD_HOME: "/custom/avd", ANDROID_EMULATOR_HOME: "/emulator" },
       "/explicit/avd",
       "/explicit/avd",
-      "/explicit",
+      dirname("/explicit/avd"),
     ],
     [
       {
@@ -615,10 +631,10 @@ describe("FileAvdConfigReader constructor precedence", () => {
         ANDROID_SDK_HOME: "",
       },
       undefined,
-      "/home/.android/avd",
-      "/home/.android",
+      join("/home", ".android", "avd"),
+      join("/home", ".android"),
     ],
-    [{ ANDROID_AVD_HOME: "/custom/avd" }, "", "", "."],
+    [{ ANDROID_AVD_HOME: "/custom/avd" }, "", "", dirname("")],
   ] as const)(
     "preserves environment %j and override %s",
     (environment, override, avdHome, configHome) => {

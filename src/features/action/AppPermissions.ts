@@ -27,6 +27,7 @@ import {
 } from "./IosPhysicalPermissions";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { shellQuote } from "../../utils/shellQuote";
 
 /**
  * Map requested permission names onto the runner-reported grant map.
@@ -480,7 +481,7 @@ export class AppPermissions {
     try {
       const adb: AdbExecutor = this.adbFactory.create(this.device);
       const result = await adb.executeCommand(
-        `shell dumpsys package ${normalizedAppId}`,
+        `shell dumpsys package ${shellQuote(normalizedAppId)}`,
         undefined,
         undefined,
         true,

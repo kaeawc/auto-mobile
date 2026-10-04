@@ -678,6 +678,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   private cachedHierarchy: CtrlProxyCachedHierarchy | null = null;
   private cachedHierarchyDisplayRevision = -1;
+  // #9259 re-broadcasts lagged by ~3–10s; 30s leaves headroom while bounding
+  // the older-push guard when the device clock takes a larger backward step.
+  private static readonly MAX_HIERARCHY_REBROADCAST_GAP_MS = 30_000;
+  // Count only advancing-clock older pushes: #9259 re-broadcasts the same stale
+  // tree after navigation, so repeats must never accumulate toward recovery.
+  private static readonly MAX_CONSECUTIVE_OLDER_HIERARCHY_PUSHES = 5;
+  private consecutiveOlderHierarchyPushes = 0;
+  private lastDroppedOlderPushUpdatedAt: number | null = null;
   // Raised from 500ms toward maxObservationAgeMs so cache hits replace device
   // round-trips during multi-step sequences, leaning on unsolicited
   // `hierarchy_update` pushes to keep the cache warm (#5472). Still floored by
@@ -1765,6 +1773,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           h.hierarchy.updatedAt === this.cachedHierarchy.hierarchy.updatedAt;
         const previousRevision = this.cachedHierarchyDisplayRevision;
         this.cachedHierarchy = h;
+        if (h === null || h.fresh) {
+          this.resetOlderHierarchyPushRun();
+        }
         this.cachedHierarchyDisplayRevision = sameCapture
           ? previousRevision
           : displayTransitions.revision(this.device.deviceId);
@@ -2266,6 +2277,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cancelScreenshotBackoff();
     this.onClientClosedWithoutConnection();
     this.cachedHierarchy = null;
+    this.resetOlderHierarchyPushRun();
     this.observerHierarchyRequestIds.clear();
     this.clearSdkScreenIdentity();
     this.supportedCommands = null;
@@ -2981,18 +2993,45 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
+  private resetOlderHierarchyPushRun(): void {
+    this.consecutiveOlderHierarchyPushes = 0;
+    this.lastDroppedOlderPushUpdatedAt = null;
+  }
+
   private ignoreOlderHierarchyPush(message: WebSocketMessage): boolean {
+    if (message.type !== "hierarchy_update" || message.requestId || !message.data) {
+      return false;
+    }
     if (
-      message.type !== "hierarchy_update" ||
-      message.requestId ||
-      !message.data ||
       this.cachedHierarchy === null ||
       !(message.data.updatedAt < this.cachedHierarchy.hierarchy.updatedAt)
     ) {
+      this.resetOlderHierarchyPushRun();
       return false;
     }
+    const cachedTimestamp = this.cachedHierarchy.hierarchy.updatedAt;
+    const pushedTimestamp = message.data.updatedAt;
+    const clockStep =
+      cachedTimestamp - pushedTimestamp > IOSCtrlProxyClient.MAX_HIERARCHY_REBROADCAST_GAP_MS;
+    this.consecutiveOlderHierarchyPushes =
+      this.lastDroppedOlderPushUpdatedAt !== null &&
+      pushedTimestamp > this.lastDroppedOlderPushUpdatedAt
+        ? this.consecutiveOlderHierarchyPushes + 1
+        : 1;
+    if (
+      clockStep ||
+      this.consecutiveOlderHierarchyPushes >=
+        IOSCtrlProxyClient.MAX_CONSECUTIVE_OLDER_HIERARCHY_PUSHES
+    ) {
+      logger.warn(
+        `[IOSCtrlProxyClient] Resetting hierarchy push baseline (${clockStep ? "backward clock step" : "consecutive older push limit"}): pushed=${pushedTimestamp} cached=${cachedTimestamp}`,
+      );
+      this.resetOlderHierarchyPushRun();
+      return false;
+    }
+    this.lastDroppedOlderPushUpdatedAt = pushedTimestamp;
     logger.debug(
-      `[IOSCtrlProxyClient] Ignoring older hierarchy push: pushed=${message.data.updatedAt} cached=${this.cachedHierarchy.hierarchy.updatedAt}`,
+      `[IOSCtrlProxyClient] Ignoring older hierarchy push: pushed=${pushedTimestamp} cached=${cachedTimestamp}`,
     );
     return true;
   }
@@ -3136,6 +3175,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
         frameContext: message.frameContext,
       };
+      this.resetOlderHierarchyPushRun();
       this.cachedHierarchyDisplayRevision =
         previous?.hierarchy.updatedAt === message.data.updatedAt
           ? this.cachedHierarchyDisplayRevision
@@ -3439,6 +3479,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   clearCache(): void {
     this.cachedHierarchy = null;
+    this.resetOlderHierarchyPushRun();
   }
 
   /** Discard hierarchy and screenshot provenance when the physical panel changes. */

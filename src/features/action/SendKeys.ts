@@ -29,6 +29,7 @@ import {
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   clearTextWithKeyEvents,
+  verifyKeyEventClear,
   getFocusedTextField,
   getFocusedTextLength,
   hasFocusedTextInput,
@@ -1753,7 +1754,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       await clearTextWithKeyEvents(this.adb, count, signal, () => {
         deleted = true;
       });
-      return { success: true };
+      const verification = await verifyKeyEventClear(
+        () => this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 }),
+        signal,
+      );
+      return deleted ? markPartialAfterMutation(verification) : verification;
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn("[SendKeys] Android replacement clearing failed", error);

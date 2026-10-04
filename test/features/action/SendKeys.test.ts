@@ -1114,6 +1114,59 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(clearCalls).toBe(0);
   });
 
+  test.each(["replace", "clear"] as const)(
+    "verifies Android key-event %s before reporting success or typing",
+    async (operation) => {
+      for (const after of ["later\nlines", "", undefined]) {
+        const adb = new FakeAdbExecutor();
+        const { client, calls } = createTextClient();
+        client.clear = async () => ({ success: false, error: "accessibility unavailable" });
+        let reads = 0;
+        const options: Array<Parameters<SendKeysObserver["execute"]>[0]> = [];
+        const observer: SendKeysObserver = {
+          execute: async (request) => {
+            options.push(request);
+            if (++reads === 1) {
+              return focusedAndroidObservation("first\nlater\nlines", {}, 0);
+            }
+            return after === undefined ? { timestamp: 0 } : focusedAndroidObservation(after, {}, 0);
+          },
+        };
+        const executor = new DefaultSendKeysCommandExecutor(
+          androidDevice,
+          createAdbFactory(adb),
+          observer,
+          { textClient: client },
+        );
+        const result =
+          operation === "clear"
+            ? await executor.clear()
+            : await executor.type({
+                action: "type",
+                text: "a",
+                operation: "replace",
+                mode: "eventOnly",
+              });
+        expect(result.success).toBe(after === "");
+        if (after === "later\nlines") {
+          expect(result).toMatchObject({ success: false, partialApplication: true });
+          expect(result.error).toContain("not fully cleared");
+          expect(result.error).toContain("11 UTF-16 units remain");
+        }
+        if (after === undefined) {
+          expect(result).toMatchObject({ success: false, partialApplication: true });
+          expect(result.error).toContain("Cannot verify");
+        }
+        expect(options).toHaveLength(2);
+        expect(options[1]).toMatchObject({ freshness: "fresh" });
+        expect(adb.getExecutedCommands().includes("shell input keyevent KEYCODE_A")).toBe(
+          operation === "replace" && after === "",
+        );
+        expect(calls).toEqual([]);
+      }
+    },
+  );
+
   test("standalone Android clear falls back to ADB deletes after accessibility failure", async () => {
     const adb = new FakeAdbExecutor();
     const textClient = createTextClient().client;
@@ -1121,7 +1174,16 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
-      createObserver(focusedAndroidObservation("old", {}, 0)),
+      {
+        execute: async () =>
+          focusedAndroidObservation(
+            adb.getExecutedCommands().some((command) => command.includes("KEYCODE_DEL"))
+              ? ""
+              : "old",
+            {},
+            0,
+          ),
+      },
       { textClient },
     );
 
@@ -2548,7 +2610,14 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
-      createObserver(focusedAndroidObservation("old")),
+      {
+        execute: async () =>
+          focusedAndroidObservation(
+            adb.getExecutedCommands().some((command) => command.includes("KEYCODE_DEL"))
+              ? ""
+              : "old",
+          ),
+      },
       { textClient: createTextClient().client },
     );
 

@@ -139,6 +139,7 @@ describe("UnixSocketServer input/key", () => {
     });
     expect(press).toHaveBeenCalledWith("enter", 1234, undefined, [], {
       signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
     });
     expect(createMcpClient).not.toHaveBeenCalled();
   });
@@ -171,6 +172,7 @@ describe("UnixSocketServer input/key", () => {
     expect(response.success).toBe(true);
     expect(press).toHaveBeenCalledWith("enter", 30_000, "frame-1", [], {
       signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
     });
   });
 

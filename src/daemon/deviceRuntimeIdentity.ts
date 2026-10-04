@@ -728,6 +728,7 @@ export class DeviceRuntimeIdentity {
    * An active intentional-shutdown reservation defers cancellation, whichever
    * discovery enters quarantine. Quarantine still withholds identity trust; if
    * shutdown fails, a later unresolved observation cancels after release.
+   * A confirmed retirement flushes it before detaching the pooled session.
    *
    * Exclude the explicit {@link DiscoveryReconcileOptions.excludeExecutionId},
    * or the ambient execution whose own discovery produced this observation. It is the
@@ -764,17 +765,26 @@ export class DeviceRuntimeIdentity {
       return;
     }
     this.deferredQuarantineCancellations.delete(pooled);
-    await this.cancelQuarantinedDeviceExecutions(pooled, options);
+    await this.cancelPooledDeviceExecutions(pooled, options, pooled.sessionId);
   }
 
-  private async cancelQuarantinedDeviceExecutions(
+  /** A confirmed shutdown retires serial-bound work even without quarantine. */
+  async cancelRetiredDeviceExecutions(
     pooled: PooledDevice,
-    options: DiscoveryReconcileOptions,
+    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
+  ): Promise<void> {
+    const deferred = this.deferredQuarantineCancellations.delete(pooled);
+    await this.cancelPooledDeviceExecutions(pooled, options, deferred ? pooled.sessionId : null);
+  }
+
+  private async cancelPooledDeviceExecutions(
+    pooled: PooledDevice,
+    options: Pick<DiscoveryReconcileOptions, "excludeExecutionId">,
+    sessionId: PooledDevice["sessionId"],
   ): Promise<void> {
     const cancellationOptions = {
       excludeExecutionId: options.excludeExecutionId ?? this.pool.getAmbientExecutionId?.(),
     };
-    const sessionId = pooled.sessionId;
     // Invoke both cancellers before awaiting either drain: serial-bound work
     // exists without a session, and session-only work must also stop immediately.
     const counts = await Promise.all([
@@ -795,7 +805,7 @@ export class DeviceRuntimeIdentity {
     if (cancelled > 0) {
       logger.warn(
         `[DevicePool] Cancelled ${counts[0]} device-bound and ${counts[1]} session-bound ` +
-          `in-flight execution(s) while quarantining ${pooled.id}`,
+          `in-flight execution(s) for ${pooled.id}`,
       );
     }
   }

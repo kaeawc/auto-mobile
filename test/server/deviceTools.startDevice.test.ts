@@ -12,6 +12,7 @@ import {
 } from "../../src/server/deviceTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -987,10 +988,20 @@ describe("startDevice handler", () => {
     async (releaseRejects) => {
       const timer = new FakeTimer();
       daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const tracker = new ExecutionTracker(timer, new CountingIdGenerator());
+      const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
+      tracker.bindDeviceExecution(recovery.id, androidDevice.deviceId);
+      const sessionless = tracker.startExecution("observe");
+      tracker.bindDeviceExecution(sessionless.id, androidDevice.deviceId);
       const pool = new DevicePool(
         createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
           timer: timer,
           deviceManager: fakeDeviceUtils,
+          retryExecutor: new DefaultRetryExecutor(timer),
+          cancelDeviceSessionExecutions: Object.assign(
+            tracker.cancelDeviceSessionExecutions.bind(tracker),
+            { cancelDeviceExecutions: tracker.cancelDeviceExecutions.bind(tracker) },
+          ),
         }),
       );
       const recoveryImage = {
@@ -1016,6 +1027,19 @@ describe("startDevice handler", () => {
         if (!reservation) {
           return undefined;
         }
+        fakeDeviceUtils.setBootedDevices("android", [
+          {
+            ...pooledAnrDevice,
+            name: `Unknown (${pooledAnrDevice.deviceId})`,
+          },
+        ]);
+        await pool.reconcileDiscoveryObservation(
+          await fakeDeviceUtils.getBootedDevices("android"),
+          "disconnect-monitor",
+        );
+        expect(reservation.device.identityUnresolved).toBe(true);
+        expect(recovery.abortController.signal.aborted).toBe(false);
+        expect(sessionless.abortController.signal.aborted).toBe(false);
         return {
           ...reservation,
           release: async () => {
@@ -1048,23 +1072,30 @@ describe("startDevice handler", () => {
       });
       registerDeviceTools();
 
-      const result = await callStartDeviceWithEvidence({ platform: "android" }, 34, true);
+      try {
+        const result = await callStartDeviceWithEvidence({ platform: "android" }, 34, true);
+        expect(recovery.abortController.signal.aborted).toBe(false);
+        expect(sessionless.abortController.signal.aborted).toBe(false);
 
-      expect(result.runtime.deviceId).toBe("emulator-5556");
-      expect(result.runtime.session.sessionUuid).toBe("owner-session");
-      expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
-      expect(fakeDeviceUtils.getExecutedOperations()).toContain(
-        "startDevice:Pixel_7_API_34:359983",
-      );
-      expect(pool.getDevice("emulator-5556")).toMatchObject({
-        sessionId: "owner-session",
-        status: "busy",
-        avdName: "Pixel_7_API_34",
-      });
-      expect(pool.getIdleDevices()).toEqual([]);
-      expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
-        "emulator-5556",
-      );
+        expect(result.runtime.deviceId).toBe("emulator-5556");
+        expect(result.runtime.session.sessionUuid).toBe("owner-session");
+        expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
+        expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+          "startDevice:Pixel_7_API_34:359983",
+        );
+        expect(pool.getDevice("emulator-5556")).toMatchObject({
+          sessionId: "owner-session",
+          status: "busy",
+          avdName: "Pixel_7_API_34",
+        });
+        expect(pool.getIdleDevices()).toEqual([]);
+        expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
+          "emulator-5556",
+        );
+      } finally {
+        tracker.endExecution(recovery.id);
+        tracker.endExecution(sessionless.id);
+      }
     },
   );
 

@@ -9,6 +9,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "
 import { EventEmitter } from "node:events";
 import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
+import { Daemon } from "../../src/daemon/daemon";
+import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -45,6 +47,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type {
+  MultiPlatformDeviceManager,
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
   DeviceShutdownOptions,
@@ -298,9 +301,9 @@ class AddAfterRetireDevicePool extends DevicePool {
   }
 
   override async retireDeviceForShutdown(
-    expectedDevice: Parameters<DevicePool["retireDeviceForShutdown"]>[0],
+    ...args: Parameters<DevicePool["retireDeviceForShutdown"]>
   ): Promise<boolean> {
-    const retired = await super.retireDeviceForShutdown(expectedDevice);
+    const retired = await super.retireDeviceForShutdown(...args);
     if (retired) {
       // Release the queued add after the retire mutex, before killDevice resumes.
       this.releaseQueuedAdd?.();
@@ -1932,83 +1935,207 @@ describe("killDevice handler", () => {
   // awaiting that reconciliation: it loses the `runWithinShutdownDeadline`
   // signal race and reports failure for a shutdown that is in fact proceeding
   // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-  test("keeps a kill that discovers the placeholder alive through quarantine entry", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const cancelledSessions: string[] = [];
-    const placeholderManager = new PlaceholderThenGoneKillDeviceManager();
-    manager = placeholderManager;
-    const deviceSessionRepository = new FakeDeviceSessionRepository();
-    const image: DeviceInfo = {
-      name: "Pixel_8_Old",
-      platform: "android",
-      deviceId: "emulator-5554",
-      isRunning: false,
-      source: "local",
-    };
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => placeholderManager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    sessionManager = new SessionManager(timer, deviceSessionRepository);
-    placeholderManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: placeholderManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-        cancelDeviceSessionExecutions: async (sessionId, reason, options) => {
-          cancelledSessions.push(sessionId);
-          return await executionTracker.cancelDeviceSessionExecutions(sessionId, reason, options);
-        },
-      }),
-    );
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
-    const initiatingKill = executionTracker.startExecution("killDevice", undefined, "session-1");
-    const competingExecution = executionTracker.startExecution("tapOn", undefined, "session-1");
-    const tool = ToolRegistry.getTool("killDevice");
-    if (!tool) {
-      throw new Error("killDevice not registered");
-    }
-
-    try {
-      await runWithToolSelectionContext(
-        {
-          execution: {
-            executionId: initiatingKill.id,
-            startTime: initiatingKill.startTime,
-          },
-        },
-        async () =>
-          await runWithAbortSignal(
-            initiatingKill.abortController.signal,
-            async () =>
-              await tool.handler(
-                { device: { name: image.name, platform: "android", deviceId: image.deviceId! } },
-                undefined,
-                initiatingKill.abortController.signal,
-              ),
+  test.each(["kill-discovery", "disconnect-monitor", "failed-kill"] as const)(
+    "keeps initiating work alive and settles device work after %s placeholder discovery",
+    async (source) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const cancelledSessions: string[] = [];
+      const failedKill = source === "failed-kill";
+      const placeholderManager = failedKill
+        ? new FailingKillDeviceManager()
+        : new PlaceholderThenGoneKillDeviceManager();
+      manager = placeholderManager;
+      const deviceSessionRepository = new FakeDeviceSessionRepository();
+      const image: DeviceInfo = {
+        name: "Pixel_8_Old",
+        platform: "android",
+        deviceId: "emulator-5554",
+        isRunning: false,
+        source: "local",
+      };
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => placeholderManager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      sessionManager = new SessionManager(timer, deviceSessionRepository);
+      placeholderManager.setDeviceImages("android", [image]);
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer: timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: placeholderManager,
+          retryExecutor: new DefaultRetryExecutor(timer),
+          deviceSessionRepository: deviceSessionRepository,
+          cancelDeviceSessionExecutions: Object.assign(
+            async (
+              sessionId: string,
+              reason: string,
+              options?: { excludeExecutionId?: string },
+            ) => {
+              cancelledSessions.push(sessionId);
+              return await executionTracker.cancelDeviceSessionExecutions(
+                sessionId,
+                reason,
+                options,
+              );
+            },
+            {
+              cancelDeviceExecutions:
+                executionTracker.cancelDeviceExecutions.bind(executionTracker),
+            },
           ),
+        }),
       );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+      const initiatingKill = executionTracker.startExecution("killDevice", undefined, "session-1");
+      const competingExecution = executionTracker.startExecution("tapOn", undefined, "session-1");
+      const sessionlessExecution = executionTracker.startExecution("observe");
+      executionTracker.bindDeviceExecution(sessionlessExecution.id, image.deviceId!);
+      executionTracker.bindDeviceExecution(initiatingKill.id, image.deviceId!);
+      // Exercise the real daemon monitor tick without its socket/DB services.
+      const monitor = Object.assign(Object.create(Daemon.prototype), {
+        timer,
+        devicePool: pool,
+        sessionManager,
+        deviceDisconnectMonitor: null,
+        deviceDisconnectMisses: new Map(),
+        deviceDisconnectMissIncarnations: new Map(),
+        confirmedDisconnectedDeviceIds: new Set(),
+        forceDisconnectedDeviceIds: new Set(),
+        forceDisconnectedDeviceGenerations: new Map(),
+        offlineRecoveryAttemptedDeviceIds: new Set(),
+        offlineRecoveryAttemptedIncarnations: new Map(),
+        deferredSessionRecoverySweeps: new Set(),
+      }) as {
+        deviceDisconnectMonitor: SingleFlightInterval;
+        startDeviceDisconnectMonitor(
+          manager: Pick<
+            MultiPlatformDeviceManager,
+            | "getBootedDevicesDetailed"
+            | "getAndroidOfflineDeviceIds"
+            | "recoverAndroidOfflineDevices"
+          >,
+          listRecordings: () => Promise<[]>,
+        ): void;
+      };
+      const reserve = pool.reserveDeviceForShutdown.bind(pool);
+      if (source !== "kill-discovery") {
+        runtimeAvdNames.set(image.deviceId!, image.name);
+        monitor.startDeviceDisconnectMonitor(
+          {
+            getBootedDevicesDetailed: (platform, options) =>
+              placeholderManager.getBootedDevicesDetailed(platform, options),
+            getAndroidOfflineDeviceIds: async () => new Set(),
+            recoverAndroidOfflineDevices: async () => {},
+          },
+          async () => [],
+        );
+        pool.reserveDeviceForShutdown = async (...args) => {
+          const reservation = await reserve(...args);
+          placeholderManager.setBootedDevices("android", [
+            {
+              name: `Unknown (${image.deviceId})`,
+              platform: "android",
+              deviceId: image.deviceId!,
+            },
+          ]);
+          await monitor.deviceDisconnectMonitor.run();
+          expect(pool.getDevice(image.deviceId!)?.identityUnresolved).toBe(true);
+          expect(cancelledSessions).toEqual([]);
+          expect(initiatingKill.abortController.signal.aborted).toBe(false);
+          expect(sessionlessExecution.abortController.signal.aborted).toBe(false);
+          return reservation;
+        };
+      }
+      if (failedKill) {
+        const kill = placeholderManager.killDevice.bind(placeholderManager);
+        placeholderManager.killDevice = async (device, options) => {
+          // The command rejects but the original runtime answers again.
+          placeholderManager.setBootedDevices("android", [
+            {
+              name: image.name,
+              platform: "android",
+              deviceId: image.deviceId!,
+            },
+          ]);
+          await kill(device, options);
+        };
+      }
+      const tool = ToolRegistry.getTool("killDevice");
+      if (!tool) {
+        throw new Error("killDevice not registered");
+      }
 
-      // Identity quarantine cannot cancel work while this incarnation's
-      // shutdown reservation is held, whichever discovery observes it first.
-      expect(cancelledSessions).toEqual([]);
-      expect(initiatingKill.abortController.signal.aborted).toBe(false);
-      // Normal successful-shutdown retirement still cancels competing work.
-      expect(competingExecution.abortController.signal.aborted).toBe(true);
-      expect(placeholderManager.killedDeviceIds).toEqual(["emulator-5554"]);
-    } finally {
-      executionTracker.endExecution(initiatingKill.id);
-      executionTracker.endExecution(competingExecution.id);
-    }
-  });
+      try {
+        const outcome = runWithToolSelectionContext(
+          {
+            execution: {
+              executionId: initiatingKill.id,
+              startTime: initiatingKill.startTime,
+            },
+          },
+          async () =>
+            await runWithAbortSignal(
+              initiatingKill.abortController.signal,
+              async () =>
+                await tool.handler(
+                  { device: { name: image.name, platform: "android", deviceId: image.deviceId! } },
+                  undefined,
+                  initiatingKill.abortController.signal,
+                ),
+            ),
+        );
+
+        if (failedKill) {
+          await expect(outcome).rejects.toThrow("adb emu kill failed");
+          await pool.reconcileDiscoveryObservation(
+            await placeholderManager.getBootedDevices("android"),
+            "resolved-after-failed-kill",
+          );
+          const capture = pool.getDevice(image.deviceId!);
+          expect(capture?.identityUnresolved).toBeUndefined();
+          expect(await pool.isShutdownReservationHeld(image.deviceId!)).toBe(false);
+          expect(cancelledSessions).toEqual([]);
+          expect(initiatingKill.abortController.signal.aborted).toBe(false);
+          expect(competingExecution.abortController.signal.aborted).toBe(false);
+          expect(sessionlessExecution.abortController.signal.aborted).toBe(false);
+          // A subsequent plain retirement must not flush the old quarantine's
+          // session-only cancellation: resolved evidence already cleared it.
+          expect(
+            await pool.retireDeviceForShutdown(capture!, {
+              excludeExecutionId: initiatingKill.id,
+            }),
+          ).toBe(true);
+          expect(cancelledSessions).toEqual([]);
+          expect(competingExecution.abortController.signal.aborted).toBe(false);
+          expect(sessionlessExecution.abortController.signal.aborted).toBe(true);
+          return;
+        }
+        await outcome;
+
+        // Retirement flushes deferred cancellation after the kill is confirmed.
+        expect(cancelledSessions).toEqual(["session-1"]);
+        expect(initiatingKill.abortController.signal.aborted).toBe(false);
+        // Normal successful-shutdown retirement still cancels competing work.
+        expect(competingExecution.abortController.signal.aborted).toBe(true);
+        expect(sessionlessExecution.abortController.signal.aborted).toBe(true);
+        expect(pool.getDevice(image.deviceId!)).toBeNull();
+        expect(placeholderManager.killedDeviceIds).toEqual(["emulator-5554"]);
+      } finally {
+        executionTracker.endExecution(initiatingKill.id);
+        executionTracker.endExecution(competingExecution.id);
+        executionTracker.endExecution(sessionlessExecution.id);
+        if (source !== "kill-discovery") {
+          await monitor.deviceDisconnectMonitor.stop();
+        }
+      }
+    },
+  );
 
   test("bypasses the Android device-list cache while confirming shutdown", async () => {
     const timer = new FakeTimer();

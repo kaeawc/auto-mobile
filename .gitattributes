@@ -8,8 +8,8 @@ test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/release/*.md text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
-test/fixtures/observe/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
-test/fixtures/observe/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
+test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
+test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 # Pin byte-exact captured plutil output to LF across Windows checkouts.
 test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
 test/features/observe/windowDumps/*.txt text eol=lf

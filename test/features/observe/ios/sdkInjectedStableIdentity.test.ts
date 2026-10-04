@@ -52,7 +52,7 @@ beforeAll(() => {
     const capture: Capture = JSON.parse(
       readFileSync(
         new URL(
-          `../../../fixtures/observe/ios-demos-observe-full-sdk-nodes-${suffix}.json`,
+          `../../../fixtures/ios/ios-demos-observe-full-sdk-nodes-${suffix}.json`,
           import.meta.url,
         ),
         "utf8",

@@ -52,6 +52,8 @@ import kotlin.math.roundToInt
 
 data class GridImage(val id: String, val imageUrl: String, val description: String)
 
+internal val ReorderableGridSpacing = 8.dp
+
 @Composable
 fun ReorderableGrid(images: List<GridImage>, onReorder: (Int, Int) -> Unit) {
   var draggedItemId by remember { mutableStateOf<String?>(null) }
@@ -61,23 +63,24 @@ fun ReorderableGrid(images: List<GridImage>, onReorder: (Int, Int) -> Unit) {
   val columns = 3
 
   BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-    val rows = (images.size + columns - 1) / columns
-    // Round up to the widest measured column so pixel rounding cannot clip the last row.
     val contentHeight =
       with(density) {
-        val spacingPx = 8.dp.roundToPx()
-        val availableWidth = (constraints.maxWidth - spacingPx * (columns + 1)).coerceAtLeast(0)
-        val cellSizePx = (availableWidth + columns - 1) / columns
-        (cellSizePx * rows + spacingPx * (rows - 1).coerceAtLeast(0) + spacingPx * 2).toDp()
+        calculateGridHeightPx(
+            constraints.maxWidth,
+            images.size,
+            columns,
+            ReorderableGridSpacing.roundToPx(),
+          )
+          .toDp()
       }
 
     LazyVerticalGrid(
       columns = GridCells.Fixed(columns),
       state = gridState,
       userScrollEnabled = false,
-      contentPadding = PaddingValues(8.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+      contentPadding = PaddingValues(ReorderableGridSpacing),
+      horizontalArrangement = Arrangement.spacedBy(ReorderableGridSpacing),
+      verticalArrangement = Arrangement.spacedBy(ReorderableGridSpacing),
       modifier = Modifier.fillMaxWidth().height(contentHeight),
     ) {
       itemsIndexed(images, key = { _, image -> image.id }) { index, image ->

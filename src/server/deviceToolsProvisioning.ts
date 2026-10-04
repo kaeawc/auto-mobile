@@ -221,7 +221,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           // The replacement daemon may replay this operation immediately.
           // Wait until the fenced attempt has persisted its retryable terminal
           // state, so replay cannot observe a stale "running" row.
-          await operation.promise.catch(() => {});
+          await operation.promise.catch((error) => {
+            // Handoff already reports interruption; this wait only fences terminal persistence.
+            logger.debug(`Provision handoff settlement rejected: ${errorMessage(error)}`);
+          });
         }
         logger.warn(
           `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
@@ -465,7 +468,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       }
       return await runAdmittedOperation(operation);
     });
-    void lifecycle.catch(() => {});
+    void lifecycle.catch((error) => {
+      // The admission waiter reports failure; this observer handles a late retired attempt.
+      logger.debug(`Provision lifecycle rejection observed: ${errorMessage(error)}`);
+    });
 
     let admissionConfirmed = false;
     try {

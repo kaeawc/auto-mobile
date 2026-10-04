@@ -501,6 +501,46 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
 });
 
 describe("settleEmbeddedObservation adoption guard (#6866)", () => {
+  test.each([
+    "missing hierarchy",
+    "error hierarchy",
+    "stale",
+    "unverified",
+    "older timestamp",
+    "missing timestamp",
+  ])("a rejected %s capture cannot report the original observation settled", async (reason) => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    switch (reason) {
+      case "missing hierarchy":
+        delete settled.viewHierarchy;
+        break;
+      case "error hierarchy":
+        settled.viewHierarchy!.hierarchy = { error: "capture unavailable" };
+        break;
+      case "stale":
+        settled.freshness = { isFresh: false };
+        break;
+      case "unverified":
+        settled.freshness = { isFresh: true, verified: false };
+        break;
+      case "older timestamp":
+        settled.viewHierarchy!.updatedAt = 9;
+        break;
+      case "missing timestamp":
+        delete settled.viewHierarchy!.updatedAt;
+        break;
+    }
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: { execute: async () => ({ observation: settled, settled: true, polls: 2 }) },
+    });
+
+    expect(result.observation).toBe(action);
+    expect(result.settled).toBe(false);
+  });
+
   test("a fallback capture OLDER than the action's own is never adopted", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -722,6 +762,7 @@ describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
     });
 
     expect(outcome.observation).toBe(captured);
+    expect(outcome.settled).toBe(false);
     expect(outcome.observation.accessibilityAudit).toEqual(auditOfTheHalfInflatedTree as any);
     expect(outcome.observation.accessibilityAuditSkipped).toBeUndefined();
   });
@@ -838,6 +879,150 @@ describe("handler settle verdicts skip the generic gate (#6890 review)", () => {
   });
 });
 
+describe("explicit-display embedded observation", () => {
+  test("settle polls use the action's resolved panel instead of its role selector", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.display = { key: "external-key", role: "external", posture: "unknown", generation: 2 };
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.display = { ...action.display };
+    let requestedDisplay: string | undefined;
+    const response = createStructuredToolResponse({ success: true, observation: action });
+
+    await settleEmbeddedObservationInResponse(response, {
+      name: "tapOn",
+      args: { display: "external" },
+      internal: false,
+      createSettleObserve: () => ({
+        execute: async (options) => {
+          requestedDisplay = options?.display;
+          return { observation: settled, settled: true, polls: 2 };
+        },
+      }),
+    });
+
+    expect(requestedDisplay).toBe("external-key");
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.observation).toEqual({ ...settled, settled: true });
+    expect(payload.observation.display).not.toHaveProperty("pinned");
+  });
+
+  test.each(["internal-key", undefined])(
+    "an unpinned capture cannot be replaced by panel %s",
+    async (key) => {
+      const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+      action.display = { key: "external-key", role: "external", posture: "unknown", generation: 2 };
+      const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+      if (key !== undefined) {
+        settled.display = { key, role: "inner", posture: "unknown", generation: 2 };
+      }
+      let requestedDisplay: string | undefined;
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: action,
+        args: { display: "external" },
+        settleObserve: {
+          execute: async (options) => {
+            requestedDisplay = options?.display;
+            return { observation: settled, settled: true, polls: 2 };
+          },
+        },
+      });
+
+      expect(result.observation).toBe(action);
+      expect(result.settled).toBe(false);
+      expect(requestedDisplay).toBe("external-key");
+    },
+  );
+
+  test("a single-display action without a selector retains default polling and adopts its newer capture", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.display = { ...action.display };
+    let requestedDisplay: string | undefined = "unexpected";
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: {
+        execute: async (options) => {
+          requestedDisplay = options?.display;
+          return { observation: settled, settled: true, polls: 2 };
+        },
+      },
+    });
+
+    expect(requestedDisplay).toBeUndefined();
+    expect(result.observation).toEqual(settled);
+    expect(result.settled).toBe(true);
+  });
+
+  test("default polling adopts a focused panel capture after a posture-default action capture", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.platform = "android";
+    action.display = { key: "outside", role: "cover", posture: "closed", generation: 2 };
+    action.selectedElements = [];
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.platform = "android";
+    settled.display = { key: "inside", role: "inner", posture: "opened", generation: 2 };
+    let requestedDisplay: string | undefined = "unexpected";
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: {
+        execute: async (options) => {
+          requestedDisplay = options?.display;
+          return { observation: settled, settled: true, polls: 2 };
+        },
+      },
+    });
+
+    expect(requestedDisplay).toBeUndefined();
+    expect(result.observation).toEqual({ ...settled, selectedElements: [] });
+    expect(result.settled).toBe(true);
+  });
+
+  test.each([false, true])(
+    "default iOS polling adopts a capture with a changed fallback key (reverse: %s)",
+    async (reverse) => {
+      const action = obs({ class: "XCUIElementTypeStaticText", label: "Loading" }, 10);
+      action.platform = "ios";
+      action.activeWindow = { appId: "com.example.app" };
+      action.screenSize = reverse ? { width: 1170, height: 2532 } : { width: 0, height: 0 };
+      action.viewHierarchy!.packageName = "com.example.app";
+      action.display = {
+        key: reverse ? "main-panel" : "0",
+        role: "unknown",
+        posture: "unknown",
+        generation: 0,
+      };
+      const settled = obs({ class: "XCUIElementTypeStaticText", label: "Ready" }, 11);
+      settled.platform = "ios";
+      settled.activeWindow = { appId: "com.example.app" };
+      settled.screenSize = reverse ? { width: 0, height: 0 } : { width: 1170, height: 2532 };
+      settled.viewHierarchy!.packageName = "com.example.app";
+      settled.display = {
+        key: reverse ? "0" : "main-panel",
+        role: "unknown",
+        posture: "unknown",
+        generation: 0,
+      };
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: action,
+        settleObserve: {
+          execute: async (options) => {
+            expect(options?.display).toBeUndefined();
+            return { observation: settled, settled: true, polls: 2 };
+          },
+        },
+      });
+
+      expect(result.observation).toEqual(settled);
+      expect(result.settled).toBe(true);
+    },
+  );
+});
+
 describe("session-pinned embedded observation", () => {
   test("settle polls retain the pinned panel and additive selection marker", async () => {
     const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
@@ -883,5 +1068,6 @@ describe("session-pinned embedded observation", () => {
       settleObserve: { execute: async () => ({ observation: settled, settled: true, polls: 2 }) },
     });
     expect(result.observation).toBe(action);
+    expect(result.settled).toBe(false);
   });
 });

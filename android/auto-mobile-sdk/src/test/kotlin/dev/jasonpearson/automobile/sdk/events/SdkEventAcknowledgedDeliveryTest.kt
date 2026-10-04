@@ -110,6 +110,8 @@ class SdkEventAcknowledgedDeliveryTest {
     var response: Int? = null
     var throwsRemaining = 0
     var attempts = 0
+    var throwForBatchId: String? = null
+    val attemptedBatchIds = mutableListOf<String?>()
 
     override fun send(
       context: Context,
@@ -119,6 +121,8 @@ class SdkEventAcknowledgedDeliveryTest {
       onResult: (Int) -> Unit,
     ) {
       attempts++
+      attemptedBatchIds.add(batchId)
+      if (batchId != null && batchId == throwForBatchId) throw SecurityException("send refused")
       if (throwsRemaining-- > 0) throw IllegalStateException("broadcast failed")
       if (!ordered) {
         plainSends++
@@ -379,8 +383,13 @@ class SdkEventAcknowledgedDeliveryTest {
 
   /** Virtual executor: no workers or clock waits; shutdown observes only live delayed work. */
   private class FakeBufferExecutor : ScheduledThreadPoolExecutor(1) {
-    private class Task(command: Runnable, val at: Long) :
+    private class Task(command: Runnable, val at: Long, val onCancel: () -> Unit) :
       FutureTask<Unit>(command, Unit), ScheduledFuture<Unit> {
+      override fun cancel(mayInterruptIfRunning: Boolean): Boolean {
+        onCancel()
+        return super.cancel(mayInterruptIfRunning)
+      }
+
       override fun getDelay(unit: TimeUnit): Long = unit.convert(at, TimeUnit.MILLISECONDS)
 
       override fun compareTo(other: Delayed): Int =
@@ -393,6 +402,8 @@ class SdkEventAcknowledgedDeliveryTest {
     private var now = 0L
     var liveDelaysAtTermination = -1
     var rejectedSchedules = 0
+    var schedules = 0
+    var failCancellationAt: Int? = null
 
     override fun execute(command: Runnable) {
       check(!stopped)
@@ -404,7 +415,14 @@ class SdkEventAcknowledgedDeliveryTest {
         rejectedSchedules++
         throw RejectedExecutionException("shutdown")
       }
-      return Task(command, now + unit.toMillis(delay)).also { delayed.add(it) }
+      val scheduleIndex = ++schedules
+      return Task(command, now + unit.toMillis(delay)) {
+          if (scheduleIndex == failCancellationAt) {
+            failCancellationAt = null
+            throw IllegalStateException("timeout cancellation failed")
+          }
+        }
+        .also { delayed.add(it) }
     }
 
     override fun isShutdown(): Boolean = stopped
@@ -449,6 +467,134 @@ class SdkEventAcknowledgedDeliveryTest {
         override fun execute(task: Runnable) = buffer.executeDelivery(task)
       }
     return buffer
+  }
+
+  @Test
+  fun `second chunk send exception with exhausted retries retains only that chunk`() {
+    assertContainedSendFailure(failedChunk = 2, requireAck = true)
+  }
+
+  @Test
+  fun `first chunk send exception with exhausted retries retains only that chunk`() {
+    assertContainedSendFailure(failedChunk = 1, requireAck = true)
+  }
+
+  @Test
+  fun `gate off second chunk send exception retains only that chunk`() {
+    assertContainedSendFailure(failedChunk = 2, requireAck = false)
+  }
+
+  @Test
+  fun `gate off first chunk send exception retains only that chunk`() {
+    assertContainedSendFailure(failedChunk = 1, requireAck = false)
+  }
+
+  private fun assertContainedSendFailure(failedChunk: Int, requireAck: Boolean) {
+    SdkEventBroadcaster.capabilityGate =
+      SdkEventAckCapability(AckPackageInfoReader { requireAck }, { 0 })
+    // Ack retries use the virtual executor. The legacy pin exhausts retries immediately.
+    SdkEventBroadcaster.retryPolicy =
+      RetryPolicy(maxRetries = if (requireAck) 1 else 0, baseDelayMs = 0)
+    val executor = FakeBufferExecutor()
+    val buffer = realBuffer(executor)
+    val events = (1..3).map { event("chunk-$it-" + "x".repeat(60_000)) }
+    var allocations = 0
+    SdkEventBroadcaster.batchIdProvider = { "id-${++allocations}" }
+    sender.throwForBatchId = "id-$failedChunk"
+    sender.response = 1000
+    if (!requireAck) executor.failCancellationAt = failedChunk
+    try {
+      events.forEach(buffer::add)
+      buffer.flush()
+      assertEquals(listOf<String?>("id-1", "id-2", "id-3"), sender.attemptedBatchIds)
+      assertEquals(0, store.writes, "Persistence must stay queued off the flush caller")
+      executor.advance(0)
+      assertEquals(listOf(events[failedChunk - 1]), store.pending.single().events)
+      assertEquals("id-$failedChunk", store.pending.single().deliveryId)
+      assertTrue(drops.snapshot().isEmpty(), "A retained chunk is not a flush error or drop")
+      val sentIds = if (requireAck) sender.batchIds else sender.plainBatchIds
+      assertEquals<List<String?>>((1..3).filter { it != failedChunk }.map { "id-$it" }, sentIds)
+      if (requireAck) {
+        assertEquals("id-$failedChunk", sender.attemptedBatchIds.last())
+        assertEquals(4, sender.attempts)
+      } else {
+        assertEquals(0, executor.schedules, "Legacy delivery never schedules an ack timeout")
+      }
+      executor.advance(SdkEventBroadcaster.ACK_TIMEOUT_MS)
+      assertEquals(1, store.writes, "Cancelled timeouts must not persist another copy")
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `second chunk send and cancellation exceptions retain only unsent chunks with stable ids`() {
+    val executor = FakeBufferExecutor()
+    val buffer = realBuffer(executor)
+    val events = (1..3).map { event("chunk-$it-" + "x".repeat(60_000)) }
+    var allocations = 0
+    SdkEventBroadcaster.batchIdProvider = { "id-${++allocations}" }
+    sender.throwForBatchId = "id-2"
+    executor.failCancellationAt = 2
+    try {
+      events.forEach(buffer::add)
+      buffer.flush()
+      assertEquals(listOf<String?>("id-1", "id-2"), sender.attemptedBatchIds)
+      assertEquals(listOf<String?>("id-1"), sender.batchIds)
+      assertEquals(0, store.writes, "Persistence must stay queued off the flush caller")
+      // The submitted prefix can still acknowledge after the suffix's flush failure.
+      sender.respond(0, 1000)
+      executor.drain()
+      assertEquals(listOf<String?>("id-2", "id-3"), store.pending.map { it.deliveryId })
+      assertEquals(listOf(listOf(events[1]), listOf(events[2])), store.pending.map { it.events })
+      assertEquals(2L, drops.snapshot()[DropReason.FLUSH_ERROR])
+      executor.advance(SdkEventBroadcaster.ACK_TIMEOUT_MS)
+      assertEquals(2, store.writes, "Earlier ack and aborted timeout must not persist again")
+      sender.throwForBatchId = null
+      sender.response = 1000
+      EventBatchReplay().replay(store, { it.run() }) { replayEvents, id, complete ->
+        SdkEventBroadcaster.broadcastBatch(
+          context,
+          replayEvents,
+          onUndelivered = { _, _ -> },
+          onFinished = complete,
+          splitBatches = false,
+          batchId = id,
+        )
+      }
+      executor.drain()
+      assertEquals(listOf<String?>("id-1", "id-2", "id-3"), sender.batchIds)
+      assertEquals(3, allocations, "Replay must reuse stored identities")
+      assertTrue(store.pending.isEmpty())
+    } finally {
+      buffer.shutdown()
+    }
+  }
+
+  @Test
+  fun `first chunk send and cancellation exceptions preserve whole flush fallback`() {
+    val executor = FakeBufferExecutor()
+    val buffer = realBuffer(executor)
+    val events = (1..3).map { event("chunk-$it-" + "x".repeat(60_000)) }
+    var allocations = 0
+    SdkEventBroadcaster.batchIdProvider = { "id-${++allocations}" }
+    sender.throwForBatchId = "id-1"
+    executor.failCancellationAt = 1
+    try {
+      events.forEach(buffer::add)
+      buffer.flush()
+      assertEquals(listOf<String?>("id-1"), sender.attemptedBatchIds)
+      assertTrue(sender.batchIds.isEmpty())
+      assertEquals(0, store.writes)
+      executor.drain()
+      assertEquals(events, store.pending.single().events)
+      assertEquals(null, store.pending.single().deliveryId)
+      assertEquals(3L, drops.snapshot()[DropReason.FLUSH_ERROR])
+      executor.advance(SdkEventBroadcaster.ACK_TIMEOUT_MS)
+      assertEquals(1, store.writes)
+    } finally {
+      buffer.shutdown()
+    }
   }
 
   @Test

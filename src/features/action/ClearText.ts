@@ -15,6 +15,8 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { toSearchable } from "../utility/SearchableNode";
 import { ANDROID_INPUT_CLASSES } from "../utility/elementProperties";
 
@@ -180,6 +182,48 @@ export async function clearTextWithKeyEvents(
   }
 }
 
+/** Verify a key-event clear using a fresh capture supplied by the caller's observer. */
+export async function verifyKeyEventClear(
+  observe: () => Promise<ObserveResult>,
+  signal?: AbortSignal,
+  parser: ElementParser = new DefaultElementParser(),
+): Promise<ClearTextResult> {
+  throwIfAborted(signal);
+  try {
+    const observation = await observe();
+    throwIfAborted(signal);
+    const hierarchy = observation.viewHierarchy;
+    if (
+      observation.freshness?.isFresh === false ||
+      !hierarchy ||
+      hierarchy.hierarchy.error ||
+      !hasFocusedTextInput(hierarchy, parser)
+    ) {
+      return {
+        success: false,
+        error: "Cannot verify key-event clear: no fresh focused editable field available",
+      };
+    }
+    const remaining = getFocusedTextLength(hierarchy, parser);
+    if (remaining === undefined) {
+      return {
+        success: false,
+        error: "Cannot verify key-event clear: focused field text length is unreadable",
+      };
+    }
+    return remaining === 0
+      ? { success: true }
+      : {
+          success: false,
+          error: `Field was not fully cleared: ${remaining} UTF-16 units remain`,
+        };
+  } catch (error) {
+    throwIfAborted(signal);
+    logger.warn("[ClearText] Key-event clear verification unavailable", error);
+    return { success: false, error: `Cannot verify key-event clear: ${errorMessage(error)}` };
+  }
+}
+
 export class ClearText extends BaseVisualChange {
   private parser: ElementParser;
 
@@ -339,25 +383,21 @@ export class ClearText extends BaseVisualChange {
     observeResult: ObserveResult,
     signal?: AbortSignal,
   ): Promise<ClearTextResult> {
-    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy.error) {
-      // Fallback: if we can't get view hierarchy, use a reasonable default
-      await this.clearWithDeletes(200, signal);
+    const hierarchy = observeResult.viewHierarchy;
+    const textLength =
+      hierarchy && !hierarchy.hierarchy.error
+        ? getFocusedTextLength(hierarchy, this.parser)
+        : undefined;
+    const count = textLength ?? 200;
+    if (count === 0) {
       return { success: true };
     }
-
-    const textLength = getFocusedTextLength(observeResult.viewHierarchy, this.parser);
-    if (textLength === undefined) {
-      await this.clearWithDeletes(200, signal);
-      return { success: true };
-    }
-
-    // Cursor position is not moved to the end of the text.
-
-    if (textLength > 0) {
-      await this.clearWithDeletes(textLength, signal);
-    }
-
-    return { success: true };
+    await this.clearWithDeletes(count, signal);
+    return verifyKeyEventClear(
+      () => this.observeScreen.execute({ freshness: "fresh", minTimestamp: 0, signal }),
+      signal,
+      this.parser,
+    );
   }
 
   /**

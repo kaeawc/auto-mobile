@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "onTap": [
+        {
+          "type": "setPage",
+          "pager": "p",
+          "page": -1
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].page"
+}

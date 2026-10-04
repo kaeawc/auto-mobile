@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
+import { DragAndDrop, getIosDragTimeoutMs } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -96,6 +96,7 @@ describe("DragAndDrop", () => {
   });
 
   afterEach(() => {
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     getInstanceSpy?.mockRestore();
     managerSpy?.mockRestore();
   });
@@ -242,7 +243,7 @@ describe("DragAndDrop", () => {
     }
   });
 
-  test("preserves the full non-abort Android drag failure result", async () => {
+  test("preserves result fields for an indeterminate dispatched Android drag failure", async () => {
     const controller = new AbortController();
     const observation = createObserveResult();
     fakeObserveScreen.setObserveResult(observation);
@@ -264,7 +265,7 @@ describe("DragAndDrop", () => {
       distance: Math.hypot(200, 200),
       a11yTotalTimeMs: undefined,
       a11yGestureTimeMs: undefined,
-      error: "boom",
+      error: expect.stringContaining("Drag outcome is indeterminate"),
       observation,
     });
   });
@@ -282,7 +283,8 @@ describe("DragAndDrop", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("Drag gesture rejected");
+    expect(result.error).toContain("Drag outcome is indeterminate");
+    expect(result.error).toContain("Drag gesture rejected");
   });
 
   test("surfaces thrown errors from accessibility service", async () => {
@@ -297,7 +299,7 @@ describe("DragAndDrop", () => {
     expect(result.error).toBe("Failed to perform drag and drop: Accessibility service failure");
   });
 
-  test("uses default gesture durations and a 1600ms drag timeout when none are supplied", async () => {
+  test("uses default gesture durations and the shared drag timeout when none are supplied", async () => {
     await dragAndDrop.execute({
       source: { elementId: "source-id" },
       target: { elementId: "target-id" },
@@ -307,22 +309,21 @@ describe("DragAndDrop", () => {
     expect(dragCall.pressDurationMs).toBe(600);
     expect(dragCall.dragDurationMs).toBe(300);
     expect(dragCall.holdDurationMs).toBe(100);
-    // 600 + 300 + 100 + DROP(100) + BUFFER(500) = 1600
-    expect(dragCall.timeoutMs).toBe(1600);
+    expect(dragCall.timeoutMs).toBe(getIosDragTimeoutMs(600, 300, 100));
   });
 
   test("derives the drag timeout from the supplied gesture durations", async () => {
     await dragAndDrop.execute({
       source: { elementId: "source-id" },
       target: { elementId: "target-id" },
-      pressDurationMs: 600,
-      dragDurationMs: 500,
-      holdDurationMs: 200,
+      pressDurationMs: 3000,
+      dragDurationMs: 2000,
+      holdDurationMs: 3000,
     });
 
     const [dragCall] = fakeA11yService.getDragHistory();
-    // 600 + 500 + 200 + DROP(100) + BUFFER(500) = 1900
-    expect(dragCall.timeoutMs).toBe(1900);
+    expect(dragCall.timeoutMs).toBe(getIosDragTimeoutMs(3000, 2000, 3000));
+    expect(dragCall.timeoutMs).toBeGreaterThan(getIosDragTimeoutMs(600, 300, 100));
   });
 
   describe("validateOptions", () => {

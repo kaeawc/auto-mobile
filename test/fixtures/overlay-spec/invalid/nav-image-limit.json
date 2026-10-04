@@ -1,0 +1,162 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            },
+            {
+              "type": "image",
+              "asset": "a"
+            }
+          ]
+        },
+        {
+          "type": "tabBar",
+          "stateKey": "index",
+          "items": [
+            {
+              "label": "one",
+              "image": "nav"
+            }
+          ]
+        }
+      ]
+    },
+    "state": {
+      "index": 0
+    }
+  },
+  "expectedPath": "root.children[1].items[0].image"
+}

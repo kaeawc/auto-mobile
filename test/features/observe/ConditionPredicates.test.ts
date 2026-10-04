@@ -8,6 +8,7 @@ import {
   textEquals,
 } from "../../../src/features/observe/ConditionPredicates";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import type { ConditionResolver } from "../../../src/features/observe/ConditionPredicates";
 import type { SearchableEntry } from "../../../src/features/utility/SearchableNode";
 
@@ -257,6 +258,31 @@ test("presence waits reject an unbounded chosen node from an inspect resolver", 
 
 describe("textEquals predicate", () => {
   const finder = new ElementResolver();
+
+  test("retains exact-search candidates when diagnostic contains resolution fails", () => {
+    const calls: string[] = [];
+    const resolver: ConditionResolver = {
+      resolve: (snapshot, selector, intent) => {
+        calls.push(intent.matchMode ?? "unspecified");
+        const result = finder.resolve(snapshot, selector, intent);
+        return intent.matchMode === "contains"
+          ? { ...result, error: "diagnostic failure" }
+          : result;
+      },
+    };
+    const observation = obs([node({ text: "Ready soon" })]);
+    const exact = finder.resolve(
+      { id: "1", nodes: new SearchableHierarchy().project(observation.viewHierarchy!) },
+      { text: "Ready", match: "exact", caseSensitive: true },
+      { action: "inspect", matchMode: "exact", requireBounds: true },
+    );
+    const evaluation = textEquals(resolver, {}, "Ready")(observation);
+    expect(evaluation.matched).toBe(false);
+    expect(calls).toEqual(["exact", "contains"]);
+    expect(evaluation.candidates).toEqual(
+      exact.matches.flatMap(({ node }) => (node.element ? [node.element] : [])),
+    );
+  });
 
   test("matches when the element located by elementId shows the expected text EXACTLY", () => {
     const predicate = textEquals(finder, { elementId: "counter" }, "5");

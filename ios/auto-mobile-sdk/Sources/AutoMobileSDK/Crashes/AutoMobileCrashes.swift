@@ -178,8 +178,8 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
         lock.lock()
         let initialized = _isInitialized
-        let configuredBundleId = bundleId
         let currentBuffer = buffer
+        let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
         let previousHandler = previousExceptionHandler
         // Snapshot the provider under the lock; invoke it below, outside the lock,
         // so the (host-supplied) closure can never re-enter the non-recursive lock.
@@ -187,7 +187,6 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         lock.unlock()
 
         if enabled, initialized {
-            let currentBundleId = configuredBundleId ?? Bundle.main.bundleIdentifier ?? ""
             let currentScreen = screenProvider?()
             let stackTrace = exception.callStackSymbols.joined(separator: "\n")
 

@@ -605,21 +605,7 @@ export abstract class DeviceServiceClient {
     // Clean up stale WebSocket
     if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
       logger.info(`[${this.logTag}] Cleaning up stale WebSocket (state: ${this.ws.readyState})`);
-      const staleSocket = this.ws;
-      this.finishEstablishedConnection(staleSocket);
-      this.clearLifecycleSocket(staleSocket);
-      try {
-        // This socket may emit close/error after a replacement is installed.
-        // Detach its stateful lifecycle handlers before closing so those late
-        // events cannot tear down the replacement connection.
-        staleSocket.removeAllListeners();
-        staleSocket.on("error", (error) => {
-          logger.debug(`[${this.logTag}] Ignoring error on stale WebSocket: ${error}`);
-        });
-        staleSocket.close();
-      } catch (error) {
-        logger.debug(`[${this.logTag}] Error closing stale WebSocket: ${error}`);
-      }
+      this.cleanUpStaleSocket(this.ws);
     }
 
     if (this.isConnectCooldownActive(background)) {
@@ -807,6 +793,24 @@ export abstract class DeviceServiceClient {
       this.isConnecting = false;
       this.recordFailedConnect(error, background);
       return false;
+    }
+  }
+
+  private cleanUpStaleSocket(staleSocket: WebSocket): void {
+    this.finishEstablishedConnection(staleSocket);
+    this.clearLifecycleSocket(staleSocket);
+    try {
+      // This socket may emit close/error after a replacement is installed.
+      // Detach its stateful lifecycle handlers before closing so those late
+      // events cannot tear down the replacement connection.
+      staleSocket.removeAllListeners();
+      staleSocket.on("error", (error) => {
+        logger.debug(`[${this.logTag}] Ignoring error on stale WebSocket: ${error}`);
+      });
+      staleSocket.close();
+    } catch (error) {
+      // The stale socket may already be closing; nothing else to clean up.
+      logger.debug(`[${this.logTag}] Error closing stale WebSocket: ${error}`);
     }
   }
 

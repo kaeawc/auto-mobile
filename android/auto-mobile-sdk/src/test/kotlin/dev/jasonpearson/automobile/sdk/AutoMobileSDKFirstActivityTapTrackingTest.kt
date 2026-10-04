@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk
 
 import android.app.Activity
 import android.content.ComponentName
+import android.content.ContextWrapper
 import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
@@ -9,8 +10,12 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.Window
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
+import dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -80,6 +85,152 @@ class AutoMobileSDKFirstActivityTapTrackingTest {
 
       assertWrappedOnce(activity, originalCallback)
       assertSingleTapDelegatedAndLogged(activity)
+    }
+  }
+
+  @Test
+  fun `initializing with an already resumed Activity context wraps it once`() {
+    createActivity(TestActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      controller.start().resume()
+
+      AutoMobileSDK.initialize(ContextWrapper(ContextWrapper(activity)))
+      val wrapper = assertWrappedOnce(activity, originalCallback)
+      shadowOf(Looper.getMainLooper()).idle()
+
+      assertSame(wrapper, assertWrappedOnce(activity, originalCallback))
+      controller.pause().resume().pause().resume()
+      assertSame(wrapper, assertWrappedOnce(activity, originalCallback))
+      assertSingleTapDelegatedAndLogged(activity)
+    }
+  }
+
+  @Test
+  @Config(sdk = [29])
+  fun `Application initialization after resume wraps at post resumed`() {
+    createActivity(InitializeAfterPostResumeActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      controller.start().resume()
+
+      assertWrappedOnce(activity, originalCallback)
+      assertSingleTapDelegatedAndLogged(activity)
+    }
+  }
+
+  @Test
+  fun `late Application initialization catches up at the next pause`() {
+    createActivity(TestActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      controller.start().resume()
+
+      AutoMobileSDK.initialize(context)
+      shadowOf(Looper.getMainLooper()).idle()
+      // An Application cannot supply the Activity until another eligible lifecycle callback.
+      assertSame(originalCallback, activity.window.callback)
+      controller.pause()
+      val wrapper = assertWrappedOnce(activity, originalCallback)
+      controller.resume().pause().resume()
+      assertSame(wrapper, assertWrappedOnce(activity, originalCallback))
+      assertSingleTapDelegatedAndLogged(activity)
+    }
+  }
+
+  @Test
+  fun `Activity context initialization before resume preserves framework callback setup`() {
+    createActivity(LifecycleActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      AutoMobileSDK.initialize(activity)
+      assertSame(originalCallback, activity.window.callback)
+      val frameworkCallback = object : Window.Callback by originalCallback {}
+      activity.window.callback = frameworkCallback
+
+      controller.start().resume()
+      shadowOf(Looper.getMainLooper()).idle()
+
+      assertWrappedOnce(activity, frameworkCallback)
+      assertSingleTapDelegatedAndLogged(activity)
+    }
+  }
+
+  @Test
+  fun `shutdown cancels a pending Activity catch up`() {
+    createActivity(LifecycleActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      AutoMobileSDK.initialize(activity)
+      AutoMobileSDK.shutdown()
+      shadowOf(Looper.getMainLooper()).idle()
+
+      assertSame(originalCallback, activity.window.callback)
+      controller.start().resume()
+      assertSame(originalCallback, activity.window.callback)
+    }
+  }
+
+  @Test
+  fun `off main initialization with an already resumed Activity wraps on main`() {
+    createActivity(TestActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      controller.start().resume()
+      var initializationFailure: Throwable? = null
+      val thread = Thread {
+        try {
+          AutoMobileSDK.initialize(ContextWrapper(ContextWrapper(activity)))
+        } catch (error: Throwable) {
+          initializationFailure = error
+        }
+      }
+      thread.start()
+      thread.join()
+
+      assertNull(initializationFailure)
+      assertSame(originalCallback, activity.window.callback)
+      shadowOf(Looper.getMainLooper()).idle()
+      assertWrappedOnce(activity, originalCallback)
+      assertSingleTapDelegatedAndLogged(activity)
+    }
+  }
+
+  @Test
+  fun `destroy restores the window callback and releases the Activity`() {
+    AutoMobileSDK.initialize(context)
+    createActivity(TestActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      controller.start().resume()
+      assertWrappedOnce(activity, originalCallback)
+
+      controller.pause().stop().destroy()
+
+      assertSame(originalCallback, activity.window.callback)
+      val wrappedActivities =
+        AutoMobileClickTracker.javaClass
+          .getDeclaredField("wrappedActivities")
+          .apply { isAccessible = true }
+          .get(AutoMobileClickTracker) as Map<*, *>
+      assertFalse(wrappedActivities.containsKey(activity))
+    }
+  }
+
+  @Test
+  fun `shutdown restores the window callback of a live Activity`() {
+    AutoMobileSDK.initialize(context)
+    createActivity(TestActivity::class.java).use { controller ->
+      val activity = controller.get()
+      val originalCallback = activity.window.callback
+      controller.start().resume()
+      assertWrappedOnce(activity, originalCallback)
+
+      AutoMobileSDK.shutdown()
+
+      assertSame(originalCallback, activity.window.callback)
+      controller.pause().resume()
+      assertSame(originalCallback, activity.window.callback)
     }
   }
 
@@ -234,6 +385,27 @@ class AutoMobileSDKFirstActivityTapTrackingTest {
     override fun onCreate(savedInstanceState: Bundle?) {
       super.onCreate(savedInstanceState)
       AutoMobileSDK.initialize(applicationContext)
+    }
+  }
+
+  class InitializeAfterPostResumeActivity : TestActivity() {
+    override fun onPostResume() {
+      super.onPostResume()
+      AutoMobileSDK.initialize(applicationContext)
+    }
+  }
+
+  class LifecycleActivity : TestActivity(), LifecycleOwner {
+    override val lifecycle = LifecycleRegistry(this)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+      super.onCreate(savedInstanceState)
+      lifecycle.currentState = Lifecycle.State.CREATED
+    }
+
+    override fun onResume() {
+      super.onResume()
+      lifecycle.currentState = Lifecycle.State.RESUMED
     }
   }
 }

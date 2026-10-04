@@ -851,6 +851,9 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
       const pid = findProcessIdentifier(JSON.parse(raw));
       return { success: true, pid };
     } catch (error) {
+      this.deps.logger.warn(
+        `[DeviceAppManager] Failed to launch physical device app: ${redactedLaunchError(error, options.launchArguments)}`,
+      );
       return { success: false, error: redactedLaunchError(error, options.launchArguments) };
     } finally {
       await this.deps.rm(tempDir);

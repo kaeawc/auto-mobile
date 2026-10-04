@@ -316,11 +316,13 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             let screenBounds = snapshot.frame
 
             // Build hierarchy from snapshot (no more IPC calls - all data is local)
+            var truncationReasons: Set<String> = []
             let rawElement = tracked("buildHierarchy") {
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
                     screenBounds: screenBounds,
+                    truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus,
                     disableAllFiltering: disableAllFiltering
                 )
@@ -332,6 +334,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         textInputSnapshot,
                         depth: 1,
                         screenBounds: screenBounds,
+                        truncationReasons: &truncationReasons,
                         parentPath: "typed-text-input",
                         childIndex: index,
                         keyboardFocus: keyboardFocus,
@@ -371,7 +374,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             // 2. Alerts in SpringBoard's tree (system dialogs managed by SpringBoard)
             // System permission dialogs may appear in either location depending on iOS version.
             let systemAlertCapture = try tracked("systemAlerts") {
-                try getSystemAlerts(appSnapshot: snapshot, keyboardFocus: keyboardFocus)
+                try getSystemAlerts(
+                    appSnapshot: snapshot,
+                    truncationReasons: &truncationReasons,
+                    keyboardFocus: keyboardFocus
+                )
             }
 
             // If there are system alerts, include them in the hierarchy
@@ -475,7 +482,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 pixelWidth: pixelDimensions?.pixelWidth,
                 pixelHeight: pixelDimensions?.pixelHeight,
                 rotation: hierarchyRotation,
-                fallbackToSpringboard: tracker.didFallbackToSpringboard ? true : nil
+                fallbackToSpringboard: tracker.didFallbackToSpringboard ? true : nil,
+                truncationReasons: truncationReasons.sorted()
             )
         }
 

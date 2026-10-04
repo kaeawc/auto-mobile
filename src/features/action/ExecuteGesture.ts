@@ -159,6 +159,7 @@ export class ExecuteGesture extends BaseVisualChange {
     let dispatched = false;
     const indeterminateResult = (reason: string): SwipeResult => ({
       success: false,
+      outcomeIndeterminate: true,
       x1,
       y1,
       x2,

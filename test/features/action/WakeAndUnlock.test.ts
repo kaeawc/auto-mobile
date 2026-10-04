@@ -464,14 +464,71 @@ describe("WakeAndUnlock", () => {
 
   test("secure lock, no pin, recorded credential: unlocks with it and does not re-remember", async () => {
     adb.setScreenState(true, "Awake");
-    adb.setDeviceLockSequence([LOCKED_SECURE, UNLOCKED]);
+    adb.setDeviceLockSequence([LOCKED_SECURE, LOCKED_SECURE, UNLOCKED]);
     store.recorded = "1234";
 
     const result = await android().execute();
 
     expect(result.success).toBe(true);
     expect(result.usedRecordedCredential).toBe(true);
+    expect(adb.getExecutedCommands()).toEqual(SECURE_PIN_COMMANDS.slice(1));
     expect(store.remembered).toEqual([]); // recorded pins are not re-persisted
+  });
+
+  test("dismiss-keyguard clears secure lock: explicit PIN is neither typed nor remembered", async () => {
+    adb.setScreenState(true, "Awake");
+    adb.setDeviceLockSequence([LOCKED_SECURE, UNLOCKED]);
+
+    const result = await android().execute("1234");
+
+    expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+    expect(result).toMatchObject({ success: true, secure: true, unlocked: true });
+    expect(result.usedRecordedCredential).toBe(false);
+    expect(store.remembered).toEqual([]);
+  });
+
+  test("dismiss-keyguard clears secure lock: recorded PIN is not replayed into the app", async () => {
+    adb.setScreenState(true, "Awake");
+    adb.setDeviceLockSequence([LOCKED_SECURE, UNLOCKED]);
+    store.recorded = "1234";
+
+    const result = await android().execute();
+
+    expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+    expect(result).toMatchObject({ success: true, secure: true, unlocked: true });
+    expect(result.usedRecordedCredential).toBe(false);
+    expect(store.remembered).toEqual([]);
+    expect(store.recorded).toBe("1234");
+  });
+
+  test.each([false, true])(
+    "lock state unknown after dismiss-keyguard: no credential input (recorded=%s)",
+    async (recorded) => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLockSequence([LOCKED_SECURE, null]);
+      store.recorded = recorded ? "1234" : null;
+
+      const result = await android().execute(recorded ? undefined : "1234");
+
+      expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+      expect(result).toMatchObject({ success: false, unlocked: false });
+      expect(result.error).toMatch(/lock state.*unknown/i);
+      expect(store.remembered).toEqual([]);
+    },
+  );
+
+  test.each([
+    { locked: false, keyguardShowing: true, secure: true }, // occluded by an app
+    LOCKED_SWIPE,
+  ])("keyguard no longer needs credential input: sends no PIN (%j)", async (lock) => {
+    adb.setScreenState(true, "Awake");
+    adb.setDeviceLockSequence([LOCKED_SECURE, lock]);
+
+    const result = await android().execute("1234");
+
+    expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+    expect(result).toMatchObject({ success: false, unlocked: false });
+    expect(store.remembered).toEqual([]);
   });
 
   test("secure lock, pin does not work: reports keyguard failure and remembers nothing", async () => {
@@ -483,6 +540,11 @@ describe("WakeAndUnlock", () => {
     expect(result.success).toBe(false);
     expect(result.unlocked).toBe(false);
     expect(result.error).toContain("remained locked");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell wm dismiss-keyguard",
+      ...Array<string>(4).fill("shell input keyevent KEYCODE_0"),
+      "shell input keyevent KEYCODE_ENTER",
+    ]);
     expect(store.remembered).toEqual([]);
   });
 
@@ -515,7 +577,7 @@ describe("WakeAndUnlock", () => {
   test("unknown secure status with a pin: attempts the credential path and unlocks", async () => {
     adb.setScreenState(true, "Awake");
     adb.setAndroidApiLevel(35);
-    adb.setDeviceLockSequence([LOCKED_UNKNOWN_SECURE, UNLOCKED]);
+    adb.setDeviceLockSequence([LOCKED_UNKNOWN_SECURE, LOCKED_UNKNOWN_SECURE, UNLOCKED]);
 
     const result = await android().execute("1234");
 

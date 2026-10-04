@@ -1,6 +1,11 @@
 import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
-import { createTapAt, observation } from "../../helpers/tapAtCoordinate";
+import { createTapAt, observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { NodeCryptoService } from "../../../src/utils/crypto";
+import { getTempDir, TEMP_SUBDIRS } from "../../../src/utils/tempDir";
 import { issue8379Hierarchy, issue8379SyntheticOutlier } from "../../fixtures/issue8379Hierarchy";
 import {
   DOUBLE_TAP_GAP_MS,
@@ -56,11 +61,45 @@ function createAndroidTapAtWithClient(
     snapshotReferences,
     lastRenderedObservation,
   });
+  setFakeTapAtWindow(tapAt);
   tapAt.observeScreen = observeScreen;
   return { tapAt, observeScreen, adb };
 }
 
 describe("TapAtCoordinate", () => {
+  test.each(["tap", "doubleTap"] as const)(
+    "%s ignores a poisoned persistent Android window cache",
+    async (action) => {
+      const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+      const dataDir = mkdtempSync(path.join(tmpdir(), "tap-at-window-cache-"));
+      try {
+        process.env.AUTOMOBILE_DATA_DIR = dataDir;
+        const windowDir = getTempDir(TEMP_SUBDIRS.WINDOW);
+        mkdirSync(windowDir, { recursive: true, mode: 0o700 });
+        writeFileSync(
+          path.join(windowDir, NodeCryptoService.generateCacheKey(androidDevice.deviceId)),
+          JSON.stringify({
+            appId: "com.example.app",
+            activityName: "com.example.app.MainActivity",
+            layoutSeqSum: 1,
+          }),
+          { mode: 0o600 },
+        );
+        const { tapAt, adb, androidDispatches } = createTapAt(androidDevice);
+        expect(await tapAt.execute({ x: 1, y: 2, action })).toMatchObject({ success: true });
+        expect(androidDispatches).toHaveLength(action === "doubleTap" ? 2 : 1);
+        expect(adb.getExecutedCommands()).toEqual([]);
+      } finally {
+        if (previousDataDir === undefined) {
+          delete process.env.AUTOMOBILE_DATA_DIR;
+        } else {
+          process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+        }
+        rmSync(dataDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("Duo landscape bounds dispatch x=700 and reject exclusive edges", async () => {
     const { tapAt, iosDispatches } = createTapAt(iosDevice, 951, 669);
     expect((await tapAt.execute({ x: 700, y: 48 })).success).toBe(true);
@@ -129,6 +168,113 @@ describe("TapAtCoordinate", () => {
       expect(timer.now() - start).toBe(DOUBLE_TAP_GAP_MS);
     },
   );
+
+  test.each(
+    [
+      { device: androidDevice, display: undefined, route: "Android" },
+      { device: iosDevice, display: undefined, route: "iOS default" },
+      { device: iosDevice, display: "active", route: "iOS explicit" },
+    ].flatMap((route) =>
+      ["advance", "static", "second failure", "first stale", "cancel", "display change"].map(
+        (scenario) => ({ ...route, scenario }),
+      ),
+    ),
+  )("double-tap frame safety: $route / $scenario", async ({ device, display, scenario }) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    const adb = new FakeAdbExecutor();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult({
+      ...observation(100, 200, "epoch:7"),
+      display: { key: "0", role: "unknown", generation: 0 },
+    });
+    let current = scenario === "first stale" ? "epoch:8" : "epoch:7";
+    let delivered = 0;
+    const sent: Array<string | undefined> = [];
+    const client: CoordinateTapClient<() => void> = {
+      requestTapCoordinates: async (
+        _x,
+        _y,
+        _duration,
+        _timeout,
+        _perf,
+        frameContext,
+        onDispatch,
+      ) => {
+        sent.push(frameContext);
+        onDispatch?.();
+        if (frameContext !== undefined && frameContext !== current) {
+          return { success: false, error: "Stale frame context for input/tap" };
+        }
+        if (sent.length === 2 && scenario === "second failure") {
+          return { success: false, error: "Synthetic second tap failure" };
+        }
+        delivered++;
+        if (scenario !== "static") {
+          current = `epoch:${7 + delivered}`;
+        }
+        if (scenario === "display change") {
+          displayTransitions.notifyTransition(device.deviceId, "changed after first tap");
+        }
+        return { success: true };
+      },
+    };
+    const tapAt = new TapAtCoordinate(device, adb, {
+      timer,
+      androidClient: client,
+      iosClient: client,
+      invalidateIosCache: () => {},
+      lastRenderedObservation: () => ({ display: { key: "0" }, displayRevision: 0 }),
+    });
+    setFakeTapAtWindow(tapAt);
+    tapAt.observeScreen = observeScreen;
+    // Cancel in the gap, after the first transport has confirmed success.
+    const sleep = spyOn(timer, "sleep").mockImplementation(async (ms) => {
+      timer.advanceTime(ms);
+      if (scenario === "cancel") {
+        controller.abort();
+      }
+    });
+    try {
+      const result = await tapAt.execute(
+        { x: 10, y: 20, action: "doubleTap", display },
+        undefined,
+        controller.signal,
+      );
+      if (scenario === "advance" || scenario === "static") {
+        expect(result).toMatchObject({ success: true, action: "doubleTap", x: 10, y: 20 });
+        expect(delivered).toBe(2);
+        expect(sent).toEqual(["epoch:7", undefined]);
+      } else if (scenario === "first stale") {
+        expect(result.error).toBe(
+          device.platform === "android"
+            ? "Failed to tap at coordinates: Stale frame context for input/tap"
+            : "Failed to tap at coordinates: CtrlProxy iOS tap failed: Stale frame context for input/tap",
+        );
+        expect(result.success).toBe(false);
+        expect(delivered).toBe(0);
+        expect(sent).toEqual(["epoch:7"]);
+      } else {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("one tap was delivered");
+        expect(result.error).toContain("Do not retry automatically");
+        expect(delivered).toBe(1);
+        expect(sent).toEqual(scenario === "second failure" ? ["epoch:7", undefined] : ["epoch:7"]);
+        if (scenario === "second failure") {
+          expect(result.error).toContain("Synthetic second tap failure");
+        } else if (scenario === "display change") {
+          expect(result.staleDisplay).toBeDefined();
+          expect(result.error).toContain("Display changed");
+        } else {
+          expect(result.error).toContain("cancel");
+        }
+      }
+      expect(adb.getExecutedCommands()).toEqual([]);
+    } finally {
+      sleep.mockRestore();
+    }
+  });
 
   test.each([androidDevice, iosDevice])(
     "schema and implementation share duration bounds on %s",
@@ -381,7 +527,7 @@ describe("TapAtCoordinate", () => {
     expect(androidDispatches).toEqual([
       { x: 30, y: 40, duration: 750, frameContext: "frame-123" },
       { x: 30, y: 40, duration: 10, frameContext: "frame-123" },
-      { x: 30, y: 40, duration: 10, frameContext: "frame-123" },
+      { x: 30, y: 40, duration: 10, frameContext: undefined },
     ]);
     expect(timer.now() - start).toBe(DOUBLE_TAP_GAP_MS);
   });
@@ -647,6 +793,7 @@ describe("TapAtCoordinate", () => {
           lastRenderedObservation: () => ({ display: { key: "inner" } }),
         },
       );
+      setFakeTapAtWindow(tapAt);
       tapAt.observeScreen = observeScreen;
       const displayId = spyOn(
         ObservedAndroidDisplayCache.prototype,
@@ -1020,6 +1167,8 @@ describe("TapAtCoordinate", () => {
     const result = await tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
 
     expect(result).toMatchObject({ success: false, action: "doubleTap" });
+    expect(result.error).toContain("one tap was delivered");
+    expect(result.error).toContain("Synthetic iOS tap rejection");
     expect(iosDispatches).toHaveLength(2);
     expect(iosCacheInvalidations()).toBe(1);
   });
@@ -1081,6 +1230,8 @@ describe("TapAtCoordinate", () => {
       display: "main",
     });
     expect(rejectedResult).toMatchObject({ success: false, action: "doubleTap" });
+    expect(rejectedResult.error).toContain("one tap was delivered");
+    expect(rejectedResult.error).toContain("Synthetic iOS tap rejection");
     expect(rejected.iosCacheInvalidations()).toBe(1);
 
     const aborted = createTapAt(
@@ -1153,6 +1304,7 @@ describe("TapAtCoordinate", () => {
         invalidations++;
       },
     });
+    setFakeTapAtWindow(tapAt);
     tapAt.observeScreen = observeScreen;
 
     const result = await tapAt.execute({ x: 1, y: 2 });

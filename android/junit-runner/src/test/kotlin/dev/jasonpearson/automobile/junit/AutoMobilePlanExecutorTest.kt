@@ -28,6 +28,8 @@ class AutoMobilePlanExecutorTest {
     DaemonSocketClientManager.testClient = fakeDaemonClient
     AutoMobileSharedUtils.testDeviceChecker = fakeDeviceChecker
     DaemonHeartbeat.testController = FakeDaemonHeartbeat()
+    AutoMobilePlanExecutor.testAgent =
+      AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = false))
   }
 
   @After
@@ -37,6 +39,278 @@ class AutoMobilePlanExecutorTest {
     DaemonHeartbeat.testController = null
     AutoMobilePlanExecutor.testAgent = null
     AutoMobilePlanExecutor.retryBackoffMs = 2000L
+  }
+
+  @Test
+  fun `session ownership loss is a failure with code and message`() {
+    assertEnvelopeFailure(
+      sessionOwnershipLostPayload(),
+      "session_ownership_lost",
+      "Session released",
+    )
+  }
+
+  @Test
+  fun `device loss is a failure with code and device id`() {
+    assertEnvelopeFailure(deviceLostPayload(), "device_lost", "emulator-5554")
+  }
+
+  @Test
+  fun `daemon shutdown is a failure with code and message`() {
+    assertEnvelopeFailure(shutdownPayload(), "daemon_shutting_down", "Daemon is shutting down")
+  }
+
+  @Test
+  fun `daemon restart pending is a failure with code and message`() {
+    assertEnvelopeFailure(
+      payload(
+        """{"error":{"code":"daemon_restart_pending",
+          "message":"Daemon restart is pending; retry provisionDevice after the replacement becomes ready.",
+          "retryable":true}}"""
+      ),
+      "daemon_restart_pending",
+      "Daemon restart is pending; retry provisionDevice after the replacement becomes ready.",
+    )
+  }
+
+  @Test
+  fun `session recovery assignment is a failure with code and message`() {
+    assertEnvelopeFailure(
+      payload(
+        """{"error":{"message":"Cannot safely recover session test-session: android device 'emulator-5554' is unavailable or already in use. The session can still resume if the device returns before the recovery window ends (5 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
+          "code":"session_recovery_pending","sessionUuid":"test-session","platform":"android",
+          "deviceId":"emulator-5554","stableDeviceId":"emulator-5554","retryable":true,
+          "recoveryWindowRemainingMs":5000,
+          "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}"""
+      ),
+      "session_recovery_pending",
+      "Cannot safely recover session test-session",
+    )
+  }
+
+  @Test
+  fun `tool error response preserves nested error code and message`() {
+    assertEnvelopeFailure(
+      payload(
+        """{"success":false,"message":"Invalid arguments",
+          "error":{"code":"invalid_arguments","message":"Invalid arguments"}}"""
+      ),
+      "invalid_arguments",
+      "Invalid arguments",
+    )
+  }
+
+  @Test
+  fun `shutdown is retried until retries are exhausted`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(shutdownPayload(), isError = true),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertTrue(result.errorMessage.contains("daemon_shutting_down"))
+    assertEquals(3, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `current retryable session ownership loss is retried`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(sessionOwnershipLostPayload(), isError = true),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `non retryable device loss is not retried`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(deviceLostPayload(), isError = true),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `only boolean true retryable opts into retries`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(
+        payload("""{"error":{"message":"Rejected","retryable":"true"}}"""),
+        isError = true,
+      ),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `genuine executePlan success passes`() {
+    fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))
+
+    val result = executePlan()
+
+    assertTrue(result.success)
+    assertEquals(0, result.exitCode)
+    assertEquals("", result.errorMessage)
+  }
+
+  @Test
+  fun `structured executePlan success passes`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      DaemonResponse(
+        id = "test",
+        type = "mcp_response",
+        success = true,
+        result = JsonObject(mapOf("structuredContent" to successPayload())),
+      ),
+    )
+
+    assertTrue(executePlan().success)
+  }
+
+  @Test
+  fun `structured retryable shutdown is retried and fails`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      DaemonResponse(
+        id = "test",
+        type = "mcp_response",
+        success = true,
+        result =
+          JsonObject(
+            mapOf("structuredContent" to shutdownPayload(), "isError" to JsonPrimitive(true))
+          ),
+      ),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertTrue(result.errorMessage.contains("daemon_shutting_down"))
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `failed step preserves the existing error message`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(
+        payload(
+          """{"success":false,"executedSteps":1,"totalSteps":2,
+            "failedStep":{"stepIndex":1,"tool":"tapOn","error":"Element not found"},
+            "error":"Element not found","platform":"android","deviceId":"emulator-5554"}"""
+        )
+      ),
+    )
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(
+      "AutoMobile plan execution failed with exit code 1\nErrors: " +
+        "Test plan execution failed at step 2 (tapOn):\n  Error: Element not found\n  Executed: 1/2 steps",
+      result.errorMessage,
+    )
+  }
+
+  @Test
+  fun `missing success without isError fails`() {
+    assertEnvelopeFailure(
+      payload("""{"executedSteps":0,"totalSteps":0}"""),
+      "success",
+      isError = false,
+    )
+  }
+
+  @Test
+  fun `non boolean success fails`() {
+    for (value in listOf("\"true\"", "1", "null", "{}", "[]")) {
+      assertEnvelopeFailure(payload("""{"success":$value}"""), "success", isError = false)
+    }
+  }
+
+  @Test
+  fun `isError overrides a success payload`() {
+    assertEnvelopeFailure(successPayload(), "error")
+  }
+
+  @Test
+  fun `error field overrides boolean success`() {
+    assertEnvelopeFailure(
+      payload("""{"success":true,"error":{"code":"rejected","message":"Rejected by daemon"}}"""),
+      "rejected",
+      "Rejected by daemon",
+      isError = false,
+    )
+  }
+
+  @Test
+  fun `malformed JSON fails in the parser with the daemon text`() {
+    fakeDaemonClient.setResponse("executePlan", buildTextResponse("{malformed"))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, result.exitCode)
+    assertTrue(result.errorMessage.contains("Malformed daemon result"))
+    assertTrue(result.errorMessage.contains("{malformed"))
+  }
+
+  @Test
+  fun `plain tool error text fails with the daemon message`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildTextResponse("Error: Rejected by daemon", isError = true),
+    )
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, result.exitCode)
+    assertTrue(result.errorMessage.contains("Error: Rejected by daemon"))
+  }
+
+  @Test
+  fun `missing payload fails`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      DaemonResponse(id = "test", type = "mcp_response", success = true),
+    )
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertTrue(result.errorMessage.contains("Daemon returned empty result"))
+  }
+
+  @Test
+  fun `non object payload fails`() {
+    fakeDaemonClient.setResponse("executePlan", buildTextResponse("[]"))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, result.exitCode)
+    assertTrue(result.errorMessage.contains("Unexpected daemon response format"))
   }
 
   @Test
@@ -271,31 +545,66 @@ class AutoMobilePlanExecutorTest {
     )
   }
 
-  private fun buildDaemonResponse(payload: JsonObject): DaemonResponse {
-    val textPayload = json.encodeToString(JsonElement.serializer(), payload)
+  private fun payload(text: String): JsonObject = json.parseToJsonElement(text) as JsonObject
+
+  // Current server builders: sessionOwnershipLostPayload, deviceLossOutcomeFromError,
+  // daemonShuttingDownMcpOutcome, and PlanExecutionOrchestrator.execute.
+  private fun sessionOwnershipLostPayload(): JsonObject =
+    payload(
+      """{"error":{"code":"session_ownership_lost","message":"Session released",
+      "sessionUuid":"test-session","reason":"explicit","retryable":true,
+      "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}"""
+    )
+
+  private fun deviceLostPayload(): JsonObject =
+    payload(
+      """{"code":"device_lost","deviceId":"emulator-5554","sessionUuid":"test-session",
+      "reason":"confirmed-unavailable"}"""
+    )
+
+  private fun shutdownPayload(): JsonObject =
+    payload(
+      """{"error":{"code":"daemon_shutting_down","message":"Daemon is shutting down","retryable":true}}"""
+    )
+
+  private fun successPayload(): JsonObject =
+    payload(
+      """{"success":true,"executedSteps":1,"totalSteps":1,"platform":"android","deviceId":"emulator-5554"}"""
+    )
+
+  private fun assertEnvelopeFailure(
+    payload: JsonObject,
+    vararg messages: String,
+    isError: Boolean = true,
+  ) {
+    fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(payload, isError))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, result.exitCode)
+    for (message in messages) {
+      assertTrue(result.errorMessage, result.errorMessage.contains(message))
+    }
+  }
+
+  private fun buildDaemonResponse(payload: JsonObject, isError: Boolean = false): DaemonResponse =
+    buildTextResponse(json.encodeToString(JsonElement.serializer(), payload), isError)
+
+  private fun buildTextResponse(text: String, isError: Boolean = false): DaemonResponse {
     val result =
       JsonObject(
         mapOf(
           "content" to
             JsonArray(
               listOf(
-                JsonObject(
-                  mapOf(
-                    "type" to JsonPrimitive("text"),
-                    "text" to JsonPrimitive(textPayload),
-                  )
-                )
+                JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text)))
               )
-            )
+            ),
+          "isError" to JsonPrimitive(isError),
         )
       )
-    return DaemonResponse(
-      id = "test",
-      type = "mcp_response",
-      success = true,
-      result = result,
-      error = null,
-    )
+    return DaemonResponse(id = "test", type = "mcp_response", success = true, result = result)
   }
 }
 
@@ -303,6 +612,9 @@ private class FakeDaemonToolClient : DaemonToolClient {
   private val responses = mutableMapOf<String, DaemonResponse>()
   private val toolSelectionResponses = mutableListOf<DaemonResponse>()
   val toolSelectionArguments = mutableListOf<JsonObject>()
+  var executePlanCalls = 0
+    private set
+
   override var sessionUuid: String = "test-session"
 
   fun setResponse(toolName: String, response: DaemonResponse) {
@@ -323,6 +635,7 @@ private class FakeDaemonToolClient : DaemonToolClient {
       return toolSelectionResponses.removeFirstOrNull()
         ?: DaemonResponse(id = "tool-selection", type = "mcp_response", success = true)
     }
+    if (toolName == "executePlan") executePlanCalls++
     return responses[toolName]
       ?: throw IllegalStateException("No response configured for tool: $toolName")
   }

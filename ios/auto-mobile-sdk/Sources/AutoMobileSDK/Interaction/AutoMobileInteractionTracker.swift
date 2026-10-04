@@ -102,17 +102,45 @@ public final class AutoMobileInteractionTracker: Sendable {
         public func recordTap(from recognizer: UITapGestureRecognizer, in view: UIView) {
             guard isEnabled else { return }
 
-            let location = recognizer.location(in: view)
-            let hitView = view.hitTest(location, with: nil)
+            let target: TapTarget
+            if Thread.isMainThread {
+                target = MainActor.assumeIsolated { TapTarget(recognizer: recognizer, view: view) }
+            } else {
+                target = DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { TapTarget(recognizer: recognizer, view: view) }
+                }
+            }
 
+            // Keep debounce and event delivery on the caller's thread; only UIKit reads hop.
             recordTap(
-                x: Double(location.x),
-                y: Double(location.y),
-                accessibilityLabel: hitView?.accessibilityLabel,
-                accessibilityIdentifier: hitView?.accessibilityIdentifier,
-                viewType: hitView.map { String(describing: type(of: $0)) },
-                text: (hitView as? UILabel)?.text ?? (hitView as? UIButton)?.titleLabel?.text
+                x: target.x,
+                y: target.y,
+                accessibilityLabel: target.accessibilityLabel,
+                accessibilityIdentifier: target.accessibilityIdentifier,
+                viewType: target.viewType,
+                text: target.text
             )
+        }
+
+        private struct TapTarget: Sendable {
+            let x: Double
+            let y: Double
+            let accessibilityLabel: String?
+            let accessibilityIdentifier: String?
+            let viewType: String?
+            let text: String?
+
+            @MainActor
+            init(recognizer: UITapGestureRecognizer, view: UIView) {
+                let location = recognizer.location(in: view)
+                let hitView = view.hitTest(location, with: nil)
+                x = Double(location.x)
+                y = Double(location.y)
+                accessibilityLabel = hitView?.accessibilityLabel
+                accessibilityIdentifier = hitView?.accessibilityIdentifier
+                viewType = hitView.map { String(describing: type(of: $0)) }
+                text = (hitView as? UILabel)?.text ?? (hitView as? UIButton)?.titleLabel?.text
+            }
         }
     #endif
 

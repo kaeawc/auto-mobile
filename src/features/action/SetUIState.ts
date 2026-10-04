@@ -80,6 +80,7 @@ interface SwipeOnLike {
   execute(
     options: {
       direction: string;
+      gestureType?: "scrollTowardsDirection";
       lookFor?: { text?: string; elementId?: string };
       scrollToFind?: boolean;
     },
@@ -679,8 +680,9 @@ export class SetUIState extends BaseVisualChange {
         // discard it.
         const searchRaced = await this.raceAgainstDeadline<ObserveResult | undefined>(
           async (onTick) => {
+            // Search direction describes content to reveal, not finger movement.
             await this.getSwipeOn().execute(
-              { direction: currentDirection },
+              { direction: currentDirection, gestureType: "scrollTowardsDirection" },
               this.withRearmOnTick(fieldProgress(processed.size), onTick),
             );
 

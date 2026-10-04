@@ -61,6 +61,9 @@ export function registerAccessibilityTools() {
           return createStructuredToolResponse({
             enabled,
             service,
+            ...(!talkback.applied && talkback.reason !== undefined
+              ? { reason: talkback.reason }
+              : {}),
             ...(talkback.warning !== undefined ? { warning: talkback.warning } : {}),
             ...(talkback.blockingPrompt !== undefined
               ? { blockingPrompt: talkback.blockingPrompt }

@@ -83,6 +83,31 @@ describe("DeviceAppManager", () => {
       ...overrides,
     });
 
+  test("warns with a redacted launch error and preserves the typed failure", async () => {
+    const fakeLogger = createFakeLogger();
+    const manager = createCommandSpanManager([], {
+      logger: fakeLogger,
+      timer: new FakeTimer(),
+      readFile: async () => JSON.stringify({ deviceProperties: { osVersionNumber: "18.6" } }),
+      execute: async (_file, args) => {
+        if (args.includes("launch")) {
+          throw new Error("Application not found: private-token");
+        }
+        return createExecResult("", "");
+      },
+    });
+
+    const result = await manager.launchApp("device-udid", bundleId, {
+      launchArguments: ["--automobile-mutation-token", "private-token"],
+    });
+
+    expect(result).toEqual({ success: false, error: "Application not found: [REDACTED]" });
+    expect(fakeLogger.warnMessages).toEqual([
+      "[DeviceAppManager] Failed to launch physical device app: Application not found: [REDACTED]",
+    ]);
+    expect(fakeLogger.warnMessages.join(" ")).not.toContain("private-token");
+  });
+
   test("constructed aggregate physical operations always address the UDID, never the device name", async () => {
     const device = { deviceId: "00008120-001C2D3EDEADBEEF", name: "Duplicate Acceptance iPhone" };
     const argv: string[][] = [];

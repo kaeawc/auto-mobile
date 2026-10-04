@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -11,6 +12,18 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class HierarchyDebouncerErrorEmitTest {
+
+  @Test
+  fun `explicit extraction returns null without emitting the failure on the flow`() = runTest {
+    val debouncer =
+      HierarchyDebouncer(
+        scope = backgroundScope,
+        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null },
+      )
+
+    assertNull(debouncer.extractImmediately(skipFlowEmit = true))
+    assertTrue(debouncer.hierarchyFlow.replayCache.isEmpty())
+  }
 
   /**
    * When extraction fails (returns null), a HierarchyResult.Error must be emitted on the flow.

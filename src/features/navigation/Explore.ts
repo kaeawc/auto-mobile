@@ -274,6 +274,10 @@ export class Explore extends BaseVisualChange {
       // Select next element to interact with
       const nextElement = await this.selectNextElement(observation, strategy, mode, perf);
 
+      if (this.stopReason) {
+        break;
+      }
+
       if (!nextElement) {
         logger.info("[Explore] No suitable element found, attempting back navigation");
         await this.handleDeadEnd(progress);
@@ -730,79 +734,15 @@ export class Explore extends BaseVisualChange {
   ): Promise<Element | null> {
     return await perf.track("selectNextElement", async () => {
       const viewHierarchy = observation.viewHierarchy;
-      if (!viewHierarchy || viewHierarchy.hierarchy.error) {
-        return null;
-      }
+      const safeCandidates = this.getSafeExplorationCandidates(observation);
 
-      // Extract both navigation elements and scrollable containers
-      const navigationElements = extractNavigationElements(viewHierarchy, this.elementParser);
-      const scrollableContainers = extractScrollableContainers(viewHierarchy, this.elementParser);
-
-      // Combine all interaction candidates
-      const allCandidates = [...navigationElements, ...scrollableContainers];
-      // Permission handling normally consumes this screen before ordinary
-      // selection. Keep the same conservative deny-label policy at this final
-      // selection boundary too, so a recognized permission dialog can never
-      // route a lowercase machine-form denial through navigation if that
-      // fast-path cannot take an affirmative action.
-      const safeCandidates = filterPermissionNavigationCandidates(
-        allCandidates,
-        extractAllElements(viewHierarchy, this.elementParser),
-      );
-
-      if (safeCandidates.length === 0) {
-        return null;
-      }
-
-      // In validate mode, use graph-based navigation
+      // Validate selection also handles empty leaf screens and missing elements.
       if (mode === "validate" && this.graphTraversalState) {
-        const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
+        return this.selectValidateElement(safeCandidates);
+      }
 
-        // Mark current node as visited
-        if (currentScreen !== "unknown") {
-          markNodeVisited(this.graphTraversalState, currentScreen);
-        }
-
-        // Select next edge to traverse
-        const targetEdge = selectNextEdgeToTraverse(this.graphTraversalState, currentScreen);
-        if (!targetEdge) {
-          logger.info("[Explore] No more edges to traverse in validate mode");
-          this.stopReason = "All edges in navigation graph have been traversed";
-          return null;
-        }
-
-        // Find element that matches the target edge
-        const match = findElementMatchingEdge(safeCandidates, targetEdge);
-        if (!match) {
-          const errorMsg =
-            `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
-            `App may have diverged from known graph.`;
-          logger.error(`[Explore] ${errorMsg}`);
-          this.stopReason = errorMsg;
-
-          // Mark edge as failed
-          markEdgeTraversed(
-            this.graphTraversalState,
-            targetEdge,
-            null,
-            false,
-            this.timer,
-            "Element not found on screen",
-          );
-
-          return null;
-        }
-
-        logger.info(
-          `[Explore] Validate mode: targeting edge ${targetEdge.from}->${targetEdge.to} ` +
-            `(confidence: ${(match.confidence * 100).toFixed(0)}%)`,
-        );
-
-        // Store target edge and confidence for post-interaction validation
-        this.currentTargetEdge = targetEdge;
-        this.currentElementConfidence = match.confidence;
-
-        return match.element;
+      if (safeCandidates.length === 0 || !viewHierarchy) {
+        return null;
       }
 
       // Discovery and hybrid modes: use traditional element selection
@@ -841,6 +781,60 @@ export class Explore extends BaseVisualChange {
         }
       }
     });
+  }
+
+  private getSafeExplorationCandidates(observation: ObserveResult): Element[] {
+    const viewHierarchy = observation.viewHierarchy;
+    if (!viewHierarchy || viewHierarchy.hierarchy.error) {
+      return [];
+    }
+
+    const navigationElements = extractNavigationElements(viewHierarchy, this.elementParser);
+    const scrollableContainers = extractScrollableContainers(viewHierarchy, this.elementParser);
+    // Retain the permission fast-path's conservative deny-label policy at selection.
+    return filterPermissionNavigationCandidates(
+      [...navigationElements, ...scrollableContainers],
+      extractAllElements(viewHierarchy, this.elementParser),
+    );
+  }
+
+  private selectValidateElement(candidates: Element[]): Element | null {
+    const state = this.graphTraversalState;
+    if (!state) {
+      return null;
+    }
+    const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
+    if (currentScreen !== "unknown") {
+      markNodeVisited(state, currentScreen);
+    }
+
+    const targetEdge = selectNextEdgeToTraverse(state, currentScreen);
+    if (!targetEdge) {
+      if (state.pendingEdges.size === 0) {
+        this.stopReason = "All edges in navigation graph have been traversed";
+        logger.info(`[Explore] ${this.stopReason}`);
+      }
+      // Pending sources elsewhere: let the loop use its bounded back recovery.
+      return null;
+    }
+
+    const match = findElementMatchingEdge(candidates, targetEdge);
+    if (!match) {
+      this.stopReason =
+        `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
+        `App may have diverged from known graph.`;
+      logger.error(`[Explore] ${this.stopReason}`);
+      markEdgeTraversed(state, targetEdge, null, false, this.timer, "Element not found on screen");
+      return null;
+    }
+
+    logger.info(
+      `[Explore] Validate mode: targeting edge ${targetEdge.from}->${targetEdge.to} ` +
+        `(confidence: ${(match.confidence * 100).toFixed(0)}%)`,
+    );
+    this.currentTargetEdge = targetEdge;
+    this.currentElementConfidence = match.confidence;
+    return match.element;
   }
 
   private getObservationPackageName(observation: ObserveResult): string | null {
@@ -1111,6 +1105,29 @@ export class Explore extends BaseVisualChange {
     }
   }
 
+  private traversalStopReason(): string {
+    const reason = this.stopReason || "Exploration completed successfully";
+    const state = this.graphTraversalState;
+    if (!state || state.pendingEdges.size === 0) {
+      return reason;
+    }
+
+    const results = Array.from(state.edgeValidationResults.values());
+    const validated = results.filter((result) => result.success).length;
+    const failed = results.length - validated;
+    const pending = Array.from(
+      state.pendingEdges,
+      ([key, edge]) => `${edge.from}->${edge.to} (${key})`,
+    );
+    // A budget/safety stop proves these were not reached in this run, not that
+    // they are globally unreachable. Preserve its reason alongside the remainder.
+    return (
+      `${reason}. Validated ${validated} of ${state.totalEdgesInGraph} edges; ` +
+      `${failed} failed validation; ${state.pendingEdges.size} remain pending. ` +
+      `Pending edges not reached before stopping (source->destination): ${pending.join(", ")}`
+    );
+  }
+
   /**
    * Generate final report
    */
@@ -1163,7 +1180,7 @@ export class Explore extends BaseVisualChange {
       },
       elementSelections: this.elementSelections,
       durationMs: this.timer.now() - startTime,
-      stopReason: this.stopReason || "Exploration completed successfully",
+      stopReason: this.traversalStopReason(),
       graphTraversal,
     };
   }

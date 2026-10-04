@@ -12,6 +12,8 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { ActionableError } from "../../models/ActionableError";
 import { DisplaySelectionError } from "./DisplaySelection";
 import type { Timer } from "../../utils/SystemTimer";
 
@@ -28,7 +30,9 @@ function singlePanelKeyOrDefault(panels: readonly DisplayPanel[]): string {
 async function readAndroidDisplayInfos(
   adb: Pick<AdbExecutor, "executeCommand">,
   signal?: AbortSignal,
-): Promise<ReturnType<typeof parseAndroidDisplayInfos>> {
+): Promise<
+  { infos: ReturnType<typeof parseAndroidDisplayInfos> } | { infos: null; reason: string }
+> {
   try {
     const output = await adb.executeCommand(
       "shell cmd display get-displays",
@@ -38,14 +42,15 @@ async function readAndroidDisplayInfos(
       signal,
     );
     signal?.throwIfAborted();
-    return parseAndroidDisplayInfos(output.stdout);
+    return { infos: parseAndroidDisplayInfos(output.stdout) };
   } catch (error) {
     if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw error;
     }
-    // Older Android versions may lack this optional inventory command.
-    logger.debug(`Unable to map observed Android panel: ${error}`);
-    return [];
+    // A failed live display-list read cannot establish whether a panel is connected.
+    const reason = errorMessage(error);
+    logger.warn(`Android display list could not be read: ${reason}`, error);
+    return { infos: null, reason };
   }
 }
 
@@ -145,8 +150,13 @@ export class ObservedAndroidDisplayCache {
     if (!device.displays?.panels.length && key === "0") {
       return 0;
     }
-    const infos = await readAndroidDisplayInfos(adb, signal);
-    const id = logicalDisplayIdForPanel(infos, key);
+    const result = await readAndroidDisplayInfos(adb, signal);
+    if (result.infos === null) {
+      throw new ActionableError(
+        `Android display list could not be read while selecting panel "${key}": ${result.reason}. Retry the request.`,
+      );
+    }
+    const id = logicalDisplayIdForPanel(result.infos, key);
     if (id === undefined) {
       throw new DisplaySelectionError(
         `Display panel "${key}" is not currently connected. Choose an active panel and retry.`,
@@ -164,9 +174,8 @@ export class ObservedAndroidDisplayCache {
     panelUniqueId?: string | null,
     allowProbe = true,
   ): Promise<DisplayPanel | undefined> {
-    const direct = device.displays?.panels.find(
-      (panel) => panel.key === physicalPanelKey(panelUniqueId ?? ""),
-    );
+    const panels = device.displays?.panels ?? [];
+    const direct = panels.find((panel) => panel.key === physicalPanelKey(panelUniqueId ?? ""));
     if (direct) {
       return direct;
     }
@@ -177,14 +186,17 @@ export class ObservedAndroidDisplayCache {
       displayId
     ];
     if (cachedKey) {
-      return device.displays?.panels.find((panel) => panel.key === cachedKey);
+      return panels.find((panel) => panel.key === cachedKey);
     }
     if (!allowProbe) {
       return undefined;
     }
-    const infos = await readAndroidDisplayInfos(adb, signal);
-    const key = infos.find((info) => Number(info.logicalId) === displayId)?.uniqueId;
-    return device.displays?.panels.find((panel) => panel.key === physicalPanelKey(key ?? ""));
+    const result = await readAndroidDisplayInfos(adb, signal);
+    if (result.infos === null) {
+      return undefined;
+    }
+    const key = result.infos.find((info) => Number(info.logicalId) === displayId)?.uniqueId;
+    return panels.find((panel) => panel.key === physicalPanelKey(key ?? ""));
   }
 
   /** Device state is sampled once per inventory or every 2 seconds; the injected timer controls expiry. */
@@ -263,7 +275,8 @@ export async function observedAndroidDisplay(
       logicalId: 0,
     };
   }
-  const infos = await readAndroidDisplayInfos(adb, signal);
+  const result = await readAndroidDisplayInfos(adb, signal);
+  const infos = result.infos ?? [];
   if (infos.length === 0 && previous) {
     return { ...previous, display: { ...previous.display } };
   }

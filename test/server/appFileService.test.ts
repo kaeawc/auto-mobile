@@ -804,7 +804,7 @@ describe("AppFileService", () => {
           })),
         }),
       ).rejects.toThrow(
-        "Rolled back: none. Rollback failures: second.png: Android shared-storage operation failed: device unavailable; first.png: Android shared-storage operation failed: device unavailable",
+        "Rolled back: none. Rollback failures: second.png, first.png: Android shared-storage operation failed: device unavailable.",
       );
     } finally {
       warnSpy.mockRestore();

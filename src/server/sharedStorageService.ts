@@ -13,6 +13,7 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { shellQuote } from "../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { errorMessage } from "../utils/describeUnknownError";
+import { truncateBodyText } from "../utils/truncateBodyText";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { readAndroidDeviceApiLevel } from "../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
@@ -365,7 +366,11 @@ async function rollbackStagedFiles(
         rolledBack.push(...chunk);
       } catch (error) {
         // A failed command may have removed some paths; none have confirmed success.
-        failures.push(...chunk.map((path) => `${path}: ${errorMessage(error)}`));
+        // execFile embeds every command argument in its first line; keep diagnostics,
+        // but bound the reason independently of the complete list of failed paths.
+        const reason = errorMessage(error).replace(/Command failed:[^\r\n]*/g, "Command failed");
+        const shortReason = reason.length > 256 ? `${truncateBodyText(reason, 253)}...` : reason;
+        failures.push(`${chunk.join(", ")}: ${shortReason}`);
         logger.warn(
           `[SharedStorage] Failed to roll back staged media files ${chunk.join(", ")}`,
           error,

@@ -47,10 +47,12 @@ if [[ "$default_workers" -lt 2 ]]; then
 fi
 
 unit_workers="${AUTOMOBILE_UNIT_TEST_WORKERS:-$default_workers}"
-per_test_timeout_ms="${AUTOMOBILE_TEST_TIMEOUT_MS:-5000}"
-if [[ "$runner_os" == "macOS" ]]; then
-  per_test_timeout_ms="${AUTOMOBILE_TEST_TIMEOUT_MS:-20000}"
-fi
+# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+source "$ROOT/scripts/lib/bun-unit-test.sh"
+per_test_timeout_ms="$(bun_test_timeout_ms "$runner_os")"
+case "$mode" in
+  unit | changed) configure_bun_unit_test "$ROOT" "$runner_os" ;;
+esac
 if [[ -z "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" && "$runner_os" != "Windows" ]]; then
   case "$mode" in
     unit | changed) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=180 ;;
@@ -375,8 +377,7 @@ run_unit_shards() {
     fi
 
     if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
-      printf '%q ' bun test --isolate --timeout "$per_test_timeout_ms" --no-orphans \
-        --preload "$ROOT/test/setup/fileTimingProbe.ts" \
+      printf '%q ' "${BUN_UNIT_TEST_COMMAND[@]}" \
         ${shard_files[@]+"${shard_files[@]}"}
       printf '\n'
       continue
@@ -393,8 +394,7 @@ run_unit_shards() {
       # shellcheck disable=SC2030
       export AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}"
       export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
-      shard_args=(bun test --isolate --timeout "$per_test_timeout_ms" --no-orphans \
-        --preload "$ROOT/test/setup/fileTimingProbe.ts")
+      shard_args=("${BUN_UNIT_TEST_COMMAND[@]}")
       if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
         shard_args+=(
           --reporter junit

@@ -1,3 +1,5 @@
+import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
+import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import {
@@ -121,6 +123,28 @@ describe("DragAndDrop - iOS", () => {
     iosSpy?.mockRestore();
     androidSpy?.mockRestore();
     managerSpy?.mockRestore();
+  });
+
+  test("legacy display drag failure keeps typed stale guidance without a fallback", async () => {
+    const stale = new StaleDisplayError({
+      observedGeneration: 1,
+      currentGeneration: 2,
+      retry: "observe",
+    });
+    dragAndDrop["executeExplicitDisplay"] = async () => undefined;
+    dragAndDrop.observedInteraction = async () => {
+      throw new DispatchedObservationError(stale);
+    };
+    const result = await dragAndDrop.execute({
+      display: "inner",
+      source: { text: "Source" },
+      target: { text: "Target" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.staleDisplay).toEqual(stale.details);
+    expect(result.error).toContain("gesture was dispatched");
+    expect(result.error).toContain("Do not retry automatically");
+    expect(fakeIosClient.getDragHistory()).toHaveLength(0);
   });
 
   // Model the client's transport deadline and a synchronous XCUITest call that

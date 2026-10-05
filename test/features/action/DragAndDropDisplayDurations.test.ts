@@ -249,6 +249,39 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
 });
 
 describe("dragAndDrop display durations", () => {
+  test.each(["settle-throws", "throws"] as const)(
+    "confirmed display drag preserves delivery after %s",
+    async (outcome) => {
+      const h = fixture({ supportsDisplay: true, display: "external" });
+      const destination = {
+        ...h.observation,
+        viewHierarchy: { hierarchy: { node: { text: "Destination" } }, displayId: 2 },
+      };
+      let postReads = 0;
+      h.observe.setObserveResult(() => {
+        if (!h.drag.mock.calls.length) {
+          return h.observation;
+        }
+        postReads++;
+        if (outcome === "throws" || postReads > 1) {
+          throw new Error("display post-read unavailable");
+        }
+        return destination;
+      });
+      const result = await h.action.execute({ ...endpoints, display: "external" });
+      expect(h.drag).toHaveBeenCalledTimes(1);
+      if (outcome === "throws") {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Do not retry automatically");
+        expect(result.observation).toBeUndefined();
+      } else {
+        expect(result.success).toBe(true);
+        expect(result.observation?.viewHierarchy).toEqual(destination.viewHierarchy);
+        expect(result.observation?.freshness?.warning).toContain("display settle");
+      }
+    },
+  );
+
   test("adb external display rounds a fractional drag duration", async () => {
     const { action, adb } = fixture({ supportsDisplay: false, display: "external" });
     const result = await action.execute({

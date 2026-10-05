@@ -1,3 +1,4 @@
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { normalizedAxis } from "./coordinateAxis";
 import { resolveImageRelativePoint } from "./imageRelativePoint";
 import {
@@ -355,6 +356,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     display: string,
     onTapDelivered: () => void,
     signal?: AbortSignal,
+    onDispatchCompleted?: () => void,
   ): Promise<TapAtResult> {
     const action = options.action ?? "tap";
     const { observation, displayId, assertCurrent } = await prepareTargetDisplayAction(
@@ -393,6 +395,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           assertCurrent,
           onTapDelivered,
         });
+        onDispatchCompleted?.();
         return { success: true, x: resolved.x, y: resolved.y, action };
       },
       {
@@ -415,6 +418,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     let dispatchedCoordinates: { x: number; y: number } | undefined;
     let iosDispatchTimestamp: number | undefined;
     let tapsDelivered = 0;
+    let displayDispatchCompleted = false;
     const onTapDelivered = () => {
       tapsDelivered++;
     };
@@ -429,7 +433,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     try {
       throwIfAborted(signal);
       if (options.display !== undefined) {
-        return await this.executeOnDisplay(options, options.display, onTapDelivered, signal);
+        return await this.executeOnDisplay(options, options.display, onTapDelivered, signal, () => {
+          displayDispatchCompleted = true;
+        });
       }
       if (
         this.hasStaleCallerRevision(this.displayTransitionReader.revision(this.device.deviceId))
@@ -536,23 +542,37 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.annotateDeviceLock(result, preDispatchObservation);
       return result;
     } catch (error) {
-      logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
-      const point = dispatchedCoordinates ?? failurePoint(options, this.device.platform);
-      const result = withStaleDisplay(
-        {
-          success: false,
-          x: point.x,
-          y: point.y,
-          error: `Failed to tap at coordinates: ${errorMessage(error)}`,
-          action,
-        },
-        error,
-      );
-      result.error += partialDoubleTapNote(action, tapsDelivered);
-      return result;
+      this.rethrowObservationAbort(error, signal, displayDispatchCompleted);
+      return this.createDispatchFailure(error, options, dispatchedCoordinates, tapsDelivered);
     } finally {
       perf.end();
     }
+  }
+
+  private createDispatchFailure(
+    error: unknown,
+    options: TapAtOptions,
+    dispatchedCoordinates: { x: number; y: number } | undefined,
+    tapsDelivered: number,
+  ): TapAtResult {
+    const action = options.action ?? "tap";
+    logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
+    const point = dispatchedCoordinates ?? failurePoint(options, this.device.platform);
+    const result = withStaleDisplay(
+      {
+        success: false,
+        x: point.x,
+        y: point.y,
+        error: `Failed to tap at coordinates: ${errorMessage(error)}`,
+        action,
+      },
+      error,
+    );
+    result.error +=
+      error instanceof DispatchedObservationError
+        ? ` ${tapsDelivered} ${tapsDelivered === 1 ? "tap was" : "taps were"} delivered.`
+        : partialDoubleTapNote(action, tapsDelivered);
+    return result;
   }
 
   private async dispatchIosTaps(

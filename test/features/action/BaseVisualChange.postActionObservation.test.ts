@@ -1,3 +1,4 @@
+import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   BaseVisualChange,
@@ -175,6 +176,106 @@ describe("BaseVisualChange post-action observation", () => {
     expect(fakeObserveScreen.getCollectDeferredBackStackCallCount()).toBe(1);
     expect(result.observation.backStack?.capturedAt).toBe(999);
   });
+
+  test("terminal display audit failure keeps delivery and typed display guidance", async () => {
+    const after = makeObserve({ display: { key: "inner" }, freshness: { isFresh: true } });
+    fakeObserveScreen.setObserveResult(after);
+    const details = { observedGeneration: 1, currentGeneration: 2, retry: "observe" as const };
+    fakeObserveScreen.setFailureMode("runAccessibilityAudit", new StaleDisplayError(details));
+    const result = await createVisualChange().observedInteraction(async () => ({ success: true }), {
+      changeExpected: false,
+      display: "inner",
+      previousObservation: after,
+    });
+    expect(result.success).toBe(true);
+    expect(result.staleDisplay).toEqual(details);
+    expect(result.observation.settled).toBe(false);
+    expect(result.observation.freshness.warning).toContain("terminal screenshot/audit");
+  });
+
+  test("typed display retry failure survives the kept post-action capture", async () => {
+    const before = makeObserve({ display: { key: "inner" } });
+    const after = makeObserve({ display: { key: "inner" }, freshness: { isFresh: true } });
+    const details = { observedGeneration: 1, currentGeneration: 2, retry: "observe" as const };
+    fakeObserveScreen.setObserveResult((index) => {
+      if (index > 0) {
+        throw new StaleDisplayError(details);
+      }
+      return after;
+    });
+    const result = await createVisualChange().observedInteraction(async () => ({ success: true }), {
+      changeExpected: true,
+      display: "inner",
+      previousObservation: before,
+    });
+    expect(result.staleDisplay).toEqual(details);
+    expect(result.observation.settled).toBe(false);
+  });
+
+  test("display retry failure keeps a trustworthy post-action capture", async () => {
+    const before = makeObserve({ display: { key: "inner" } });
+    const after = makeObserve({ display: { key: "inner" }, freshness: { isFresh: true } });
+    fakeObserveScreen.setObserveResult((index) => {
+      if (index > 0) {
+        throw new Error("retry read failed");
+      }
+      return after;
+    });
+    const result = await createVisualChange().observedInteraction(async () => ({ success: true }), {
+      changeExpected: true,
+      display: "inner",
+      previousObservation: before,
+    });
+    expect(result.observation.viewHierarchy).toEqual(after.viewHierarchy);
+    expect(result.observation.freshness.warning).toContain("retry read failed");
+    expect(result.observation.settled).toBe(false);
+  });
+
+  test("display retry failure after a stale read keeps the earlier trustworthy capture", async () => {
+    const before = makeObserve({ display: { key: "inner" } });
+    const after = makeObserve({ display: { key: "inner" }, freshness: { isFresh: true } });
+    fakeObserveScreen.setObserveResult((index) => {
+      if (index === 0) {
+        return after;
+      }
+      if (index === 1) {
+        return makeObserve({ display: { key: "inner" }, freshness: { isFresh: false } });
+      }
+      throw new Error("later retry read failed");
+    });
+    const result = await createVisualChange().observedInteraction(async () => ({ success: true }), {
+      changeExpected: true,
+      display: "inner",
+      previousObservation: before,
+    });
+    expect(result.observation.viewHierarchy).toEqual(after.viewHierarchy);
+    expect(result.observation.freshness.isFresh).toBe(true);
+    expect(result.observation.freshness.warning).toContain("later retry read failed");
+  });
+
+  test.each(["display", "legacy", "undispatched"] as const)(
+    "%s first post-read failure preserves dispatch classification",
+    async (route) => {
+      const error = new Error("first read failed");
+      fakeObserveScreen.setFailureMode("execute", error);
+      const pending = createVisualChange().observedInteraction(
+        async () => ({ success: route !== "undispatched" }),
+        {
+          changeExpected: false,
+          skipPreviousObserve: true,
+          display: route === "legacy" ? undefined : "inner",
+        },
+      );
+      if (route === "display") {
+        await expect(pending).rejects.toMatchObject({
+          name: "DispatchedObservationError",
+          cause: error,
+        });
+      } else {
+        await expect(pending).rejects.toBe(error);
+      }
+    },
+  );
 
   test("internal swipe skips a stale caller fence", async () => {
     fakeObserveScreen.setObserveResult(makeObserve());

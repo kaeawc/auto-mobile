@@ -499,7 +499,7 @@ export async function detectAndHandleBlockers(
   device: BootedDevice,
   adb: AdbExecutor | null,
   elementParser: ElementParser,
-  handleDeadEnd: DeadEndHandler,
+  _handleDeadEnd: DeadEndHandler,
   progress?: ProgressCallback,
   deps: BlockerHandlerDeps = {},
 ): Promise<boolean> {
@@ -519,9 +519,10 @@ export async function detectAndHandleBlockers(
 
   // Check for login/signup screens
   if (isLoginScreen(elements)) {
-    logger.info("[Explore] Detected login screen, skipping by going back");
-    await handleDeadEnd(progress);
-    return true;
+    // Normal selection already excludes text inputs. Try guest/signup/skip
+    // controls before falling through to the explorer's bounded dead-end path.
+    logger.info("[Explore] Detected login screen, exploring non-input controls");
+    return false;
   }
 
   // Check for app rating/review dialogs

@@ -163,6 +163,28 @@ export interface PlanExecutor {
   ): Promise<PlanExecutionResult>;
 }
 
+interface SequentialPlanExecutionOptions {
+  plan: Plan;
+  startStep: number;
+  platform?: string;
+  deviceId?: string;
+  sessionUuid?: string;
+  signal?: AbortSignal;
+  executionOptions?: PlanExecutionOptions;
+}
+
+interface ParallelPlanExecutionOptions {
+  plan: Plan;
+  partitionedPlan: ReturnType<typeof PlanPartitioner.partition> & { devices: string[] };
+  startStep: number;
+  platform?: string;
+  deviceId?: string;
+  sessionUuid?: string;
+  signal?: AbortSignal;
+  abortStrategy?: AbortStrategy;
+  executionOptions?: PlanExecutionOptions;
+}
+
 /**
  * Default plan execution implementation
  * Executes plan steps sequentially or in parallel (multi-device)
@@ -685,7 +707,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         );
       }
       // Multi-device parallel execution
-      return this.executeParallel(
+      return this.executeParallel({
         plan,
         partitionedPlan,
         startStep,
@@ -695,10 +717,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
         signal,
         abortStrategy,
         executionOptions,
-      );
+      });
     } else {
       // Single-device sequential execution
-      return this.executeSequential(
+      return this.executeSequential({
         plan,
         startStep,
         platform,
@@ -706,7 +728,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         sessionUuid,
         signal,
         executionOptions,
-      );
+      });
     }
   }
 
@@ -714,14 +736,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
    * Execute a single-device plan sequentially (original implementation).
    */
   private async executeSequential(
-    plan: Plan,
-    startStep: number,
-    platform?: string,
-    deviceId?: string,
-    sessionUuid?: string,
-    signal?: AbortSignal,
-    executionOptions?: PlanExecutionOptions,
+    options: SequentialPlanExecutionOptions,
   ): Promise<PlanExecutionResult> {
+    const { plan } = options;
+    let { startStep } = options;
+    const { platform, deviceId, sessionUuid, signal, executionOptions } = options;
     let executedSteps = 0;
     const startTime = this.timer.now();
     // Always capture step data for test recording, not just in debug mode
@@ -940,16 +959,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
    * Execute a multi-device plan with parallel device tracks.
    */
   private async executeParallel(
-    plan: Plan,
-    partitionedPlan: ReturnType<typeof PlanPartitioner.partition> & { devices: string[] },
-    startStep: number,
-    platform?: string,
-    deviceId?: string,
-    sessionUuid?: string,
-    signal?: AbortSignal,
-    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
-    executionOptions?: PlanExecutionOptions,
+    options: ParallelPlanExecutionOptions,
   ): Promise<PlanExecutionResult> {
+    const { plan, partitionedPlan } = options;
+    let { startStep } = options;
+    const {
+      platform,
+      deviceId,
+      sessionUuid,
+      signal,
+      abortStrategy = DEFAULT_ABORT_STRATEGY,
+      executionOptions,
+    } = options;
     const outOfBounds = this.validateParallelStartStep(plan, startStep);
     if (outOfBounds) {
       return outOfBounds;

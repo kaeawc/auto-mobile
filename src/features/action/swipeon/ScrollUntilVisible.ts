@@ -1,3 +1,5 @@
+import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
+import { StaleDisplayError, type StaleDisplayDetails } from "../../../models/StaleDisplayError";
 import {
   scopedSearchDescription,
   usesScopedSwipeContainer,
@@ -360,6 +362,7 @@ export class ScrollUntilVisible {
       };
     }
 
+    let interruptedDisplay: StaleDisplayDetails | undefined;
     let swipeWarning: string | undefined;
     let lastAndroidSwipeError: string | undefined;
 
@@ -480,6 +483,19 @@ export class ScrollUntilVisible {
 
       if (swipeResult.observation?.viewHierarchy) {
         lastObservation = swipeResult.observation;
+      }
+
+      if (swipeResult.staleDisplay) {
+        // The retained capture is validated, but the later read is not. It can
+        // prove a match; it cannot authorize another swipe, even near timeout.
+        interruptedDisplay = swipeResult.staleDisplay;
+        foundElement = await this.matchInterruptedDisplaySearch(
+          options,
+          lastObservation,
+          containerElement,
+          interruptedDisplay,
+        );
+        break;
       }
 
       if (!swipeResult.success && this.deps.device.platform === "ios") {
@@ -678,7 +694,26 @@ export class ScrollUntilVisible {
       y2: 0,
       duration: 0,
       warning: swipeWarning,
+      ...(interruptedDisplay ? { staleDisplay: interruptedDisplay } : {}),
     };
+  }
+
+  private async matchInterruptedDisplaySearch(
+    options: SwipeOnOptions,
+    observation: ObserveResult,
+    container: Element,
+    details: StaleDisplayDetails,
+  ): Promise<Element> {
+    const element = await this.findElementInHierarchy(
+      options.lookFor!,
+      observation.viewHierarchy!,
+      options.container,
+      container,
+    );
+    if (element && this.isElementWithinContainer(element, container.bounds, observation)) {
+      return element;
+    }
+    throw new DispatchedObservationError(new StaleDisplayError(details));
   }
 
   async findTargetElement(

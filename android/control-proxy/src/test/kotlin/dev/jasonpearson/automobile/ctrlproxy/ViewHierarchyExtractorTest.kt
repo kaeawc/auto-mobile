@@ -933,6 +933,242 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `clipboard overlay clips every occluder to its window and keeps visible app content`() {
+    // Real geometry from scratch/evidence9673/clipboard-chip-raw-observe.json and
+    // scratch/evidence9673/occlusion-clipboard.logcat.txt. The covered app target reuses the
+    // dismiss button's footprint to exercise content directly under the overlay.
+    val discover = UIElementInfo(text = "Discover", bounds = bounds(43, 314, 319, 398))
+    val bottomDiscover = UIElementInfo(text = "Discover", bounds = bounds(58, 2253, 197, 2295))
+    val covered = elementWithBounds(resourceId = "covered", bounds = bounds(138, 1322, 264, 1448))
+    val partial = elementWithBounds(resourceId = "partial", bounds = bounds(0, 136, 1080, 1517))
+    val app =
+      UIElementInfo(
+        bounds = bounds(0, 0, 1080, 2400),
+        children = listOf(discover, bottomDiscover, covered, partial),
+      )
+    val overlay = clipboardOverlayHierarchy()
+    val entries =
+      listOf(
+        extractor.createWindowEntry(420, 0, app),
+        extractor.createWindowEntry(
+          423,
+          3,
+          overlay,
+          windowType = "system",
+          windowBounds = bounds(0, 1291, 295, 1543),
+        ),
+      )
+    val info = extractor.buildOcclusionInfoForTest(entries)
+    val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
+
+    assertEquals(
+      listOf(discover.bounds, bottomDiscover.bounds),
+      filtered.children.take(2).map { it.bounds },
+    )
+    assertTrue(filtered.children.take(2).all { it.occlusionState == null })
+    assertNull(findElementByResourceId(filtered, "covered"))
+    val partialResult = findElementByResourceId(filtered, "partial")!!
+    assertEquals("partial", partialResult.occlusionState)
+    assertEquals(partial.bounds, partialResult.bounds)
+    assertEquals(
+      "hidden",
+      extractor.filterOccludedHierarchyForTest(covered, info, 420, "2", true)!!.occlusionState,
+    )
+    val filteredOverlay = extractor.filterOccludedHierarchyForTest(overlay, info, 423, "", true)!!
+    assertEquals(overlay.bounds, filteredOverlay.bounds)
+    assertEquals(overlay.children.single().bounds, filteredOverlay.children.single().bounds)
+  }
+
+  @Test
+  fun `clipboard overlay window bounds are carried through framework extraction`() {
+    // Window 423, its root, and Discover are from
+    // scratch/evidence9673/clipboard-chip-raw-observe.json.
+    val app =
+      fakeNode(
+        packageName = "example.app",
+        text = "App",
+        bounds = Rect(0, 0, 1080, 2400),
+        children =
+          listOf(fakeNode("example.app", text = "Discover", bounds = Rect(43, 314, 319, 398))),
+      )
+    val overlay =
+      fakeNode(
+        packageName = "com.android.systemui",
+        text = "Clipboard",
+        bounds = Rect(0, 0, 1080, 2400),
+      )
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(420, 0, app, focused = true),
+          fakeWindow(
+            423,
+            3,
+            overlay,
+            type = AccessibilityWindowInfo.TYPE_SYSTEM,
+            bounds = Rect(0, 1291, 295, 1543),
+          ),
+        ),
+        null,
+      )
+
+    assertTrue(json.encodeToString(ViewHierarchy.serializer(), result).contains("Discover"))
+    assertEquals(bounds(0, 1291, 295, 1543), result.windows!!.first { it.id == 423 }.bounds)
+  }
+
+  @Test
+  fun `full screen overlay still hides app content`() {
+    // Discover and the full-screen root are from
+    // scratch/evidence9673/occlusion-clipboard.logcat.txt.
+    val target = UIElementInfo(text = "Discover", bounds = bounds(43, 314, 319, 398))
+    val app = UIElementInfo(bounds = bounds(0, 0, 1080, 2400), children = listOf(target))
+    val info =
+      extractor.buildOcclusionInfoForTest(
+        listOf(
+          extractor.createWindowEntry(420, 0, app),
+          extractor.createWindowEntry(
+            423,
+            3,
+            clipboardOverlayHierarchy(),
+            windowBounds = bounds(0, 0, 1080, 2400),
+          ),
+        )
+      )
+    val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
+
+    assertEquals("hidden", filtered.occlusionState)
+    assertTrue(filtered.children.isEmpty())
+  }
+
+  @Test
+  fun `unavailable overlay window bounds preserve unclipped occlusion`() {
+    // Real node geometry from scratch/evidence9673/occlusion-clipboard.logcat.txt.
+    val target = UIElementInfo(text = "Discover", bounds = bounds(43, 314, 319, 398))
+    val app = UIElementInfo(bounds = bounds(0, 0, 1080, 2400), children = listOf(target))
+    for (windowBounds in listOf(null, bounds(0, 0, 0, 0))) {
+      val info =
+        extractor.buildOcclusionInfoForTest(
+          listOf(
+            extractor.createWindowEntry(420, 0, app),
+            extractor.createWindowEntry(
+              423,
+              3,
+              clipboardOverlayHierarchy(),
+              windowBounds = windowBounds,
+            ),
+          )
+        )
+      val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
+
+      assertEquals("hidden", filtered.occlusionState)
+      assertTrue(filtered.children.isEmpty())
+    }
+  }
+
+  @Test
+  fun `occluder clipping rejects empty intersections and preserves unavailable bounds`() {
+    // Overlay geometry from scratch/evidence9673/clipboard-chip-raw-observe.json.
+    val window = bounds(0, 1291, 295, 1543)
+    val fullScreen = bounds(0, 0, 1080, 2400)
+    assertEquals(window, extractor.clipOccluderBounds(fullScreen, window))
+    assertEquals(
+      bounds(0, 1291, 295, 1517),
+      extractor.clipOccluderBounds(bounds(0, 136, 1080, 1517), window),
+    )
+    assertNull(extractor.clipOccluderBounds(bounds(43, 314, 319, 398), window))
+    assertNull(extractor.clipOccluderBounds(bounds(295, 1291, 319, 1543), window))
+    assertEquals(fullScreen, extractor.clipOccluderBounds(fullScreen, null))
+    assertEquals(fullScreen, extractor.clipOccluderBounds(fullScreen, bounds(0, 0, 0, 0)))
+    assertEquals(fullScreen, extractor.clipOccluderBounds(fullScreen, fullScreen))
+  }
+
+  @Test
+  fun `occluder entirely outside its window contributes no coverage`() {
+    // Discover and window 423 geometry from scratch/evidence9673/clipboard-chip-raw-observe.json.
+    val target = UIElementInfo(text = "Discover", bounds = bounds(43, 314, 319, 398))
+    val app = UIElementInfo(bounds = bounds(0, 0, 1080, 2400), children = listOf(target))
+    val info =
+      extractor.buildOcclusionInfoForTest(
+        listOf(
+          extractor.createWindowEntry(420, 0, app),
+          extractor.createWindowEntry(423, 3, target, windowBounds = bounds(0, 1291, 295, 1543)),
+        )
+      )
+    val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
+
+    assertEquals(target.bounds, filtered.children.single().bounds)
+    assertNull(filtered.children.single().occlusionState)
+  }
+
+  @Test
+  fun `systemui notification group retains text marked invisible by the framework`() {
+    val group =
+      fakeNode(
+        packageName = "com.android.systemui",
+        text = "Notifications",
+        children =
+          listOf(
+            fakeNode("com.android.systemui", text = "Grouped notification", visibleToUser = false)
+          ),
+      )
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(fakeWindow(1, 1, group, type = AccessibilityWindowInfo.TYPE_SYSTEM, focused = true)),
+        null,
+      )
+
+    assertTrue(
+      json.encodeToString(ViewHierarchy.serializer(), result).contains("Grouped notification")
+    )
+  }
+
+  @Test
+  fun `clipped occlusion retains the 95 percent threshold`() {
+    // Window bounds from scratch/evidence9673/clipboard-chip-raw-observe.json; synthetic targets
+    // straddle its right edge with exactly 95% and 94% coverage.
+    val atThreshold =
+      elementWithBounds(resourceId = "95-percent", bounds = bounds(200, 1291, 300, 1543))
+    val belowThreshold =
+      elementWithBounds(resourceId = "94-percent", bounds = bounds(201, 1291, 301, 1543))
+    val app =
+      UIElementInfo(
+        bounds = bounds(0, 0, 1080, 2400),
+        children = listOf(atThreshold, belowThreshold),
+      )
+    val info =
+      extractor.buildOcclusionInfoForTest(
+        listOf(
+          extractor.createWindowEntry(420, 0, app),
+          extractor.createWindowEntry(
+            423,
+            3,
+            clipboardOverlayHierarchy(),
+            windowBounds = bounds(0, 1291, 295, 1543),
+          ),
+        )
+      )
+    val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
+
+    assertNull(findElementByResourceId(filtered, "95-percent"))
+    assertEquals("partial", findElementByResourceId(filtered, "94-percent")!!.occlusionState)
+  }
+
+  private fun clipboardOverlayHierarchy(): UIElementInfo =
+    // Root and labelled clipboard_ui bounds from
+    // scratch/evidence9673/clipboard-chip-raw-observe.json.
+    UIElementInfo(
+      bounds = bounds(0, 0, 1080, 2400),
+      children =
+        listOf(
+          UIElementInfo(
+            contentDesc = "Clipboard",
+            resourceId = "com.android.systemui:id/clipboard_ui",
+            bounds = bounds(0, 136, 1080, 1517),
+          )
+        ),
+    )
+
+  @Test
   fun `cross-window occlusion keeps partial overlap and annotates metadata`() {
     val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
     val appRoot =
@@ -2157,6 +2393,7 @@ class ViewHierarchyExtractorTest {
     bounds: Rect = Rect(0, 100, 1080, 200),
     children: List<android.view.accessibility.AccessibilityNodeInfo> = emptyList(),
     enabled: Boolean? = null,
+    visibleToUser: Boolean = true,
   ): android.view.accessibility.AccessibilityNodeInfo {
     val node = android.view.accessibility.AccessibilityNodeInfo.obtain()
     node.packageName = packageName
@@ -2164,7 +2401,7 @@ class ViewHierarchyExtractorTest {
     node.text = text
     node.viewIdResourceName = resourceId
     node.setBoundsInScreen(bounds)
-    node.isVisibleToUser = true
+    node.isVisibleToUser = visibleToUser
     enabled?.let { node.isEnabled = it }
     val shadow = org.robolectric.Shadows.shadowOf(node)
     for (child in children) {
@@ -3117,6 +3354,7 @@ class ViewHierarchyExtractorTest {
     packageName: String? = null,
     isActive: Boolean = true,
     isFocused: Boolean = true,
+    windowBounds: ElementBounds? = null,
   ): Any {
     val windowEntryClass = this.javaClass.declaredClasses.first { it.simpleName == "WindowEntry" }
     val constructor =
@@ -3128,6 +3366,7 @@ class ViewHierarchyExtractorTest {
         Boolean::class.javaPrimitiveType,
         Boolean::class.javaPrimitiveType,
         UIElementInfo::class.java,
+        ElementBounds::class.java,
       )
     constructor.isAccessible = true
     return constructor.newInstance(
@@ -3138,6 +3377,7 @@ class ViewHierarchyExtractorTest {
       isActive,
       isFocused,
       hierarchy,
+      windowBounds,
     )
   }
 

@@ -138,6 +138,38 @@ type ProvisioningHooks = {
   ) => Promise<TeardownToolResponse>;
 };
 
+type ProvisionCleanupOptions = {
+  lifecycleLease: VirtualDeviceLifecycleLease | undefined;
+  pendingMutationSettlement?: Promise<unknown>;
+  recordLifecycle?: RecordProvisionDeviceLifecycle;
+  lifecycleDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
+};
+
+type ProvisionBootOptions = {
+  provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
+  perf: ReturnType<typeof createPerformanceTracker>;
+  totalDeadlineMs: number;
+  lifecycleLease: VirtualDeviceLifecycleLease;
+  signal: AbortSignal | undefined;
+  settlementState: ProvisionSettlementState;
+  onBooted: (device: BootedDevice) => Promise<void>;
+};
+
+type ProvisionSettlementState = {
+  exactProvisioning?: Promise<unknown>;
+  unownedColdBootSettlement?: Promise<void>;
+  bindingSettlements: Promise<unknown>[];
+  readinessReservation?: DeviceReadinessReservation;
+};
+
+type ProvisionBootResult = {
+  device: BootedDevice;
+  sessionId: string;
+  source: "booted" | "cold-boot";
+  sourceImage?: DeviceInfo;
+  resources?: DeviceResourceConfigurationResult;
+};
+
 export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   const {
     bindBootedDeviceSession,
@@ -1355,6 +1387,61 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     });
   }
 
+  function provisionCleanupPreconditionFailure(
+    provisionFailure: ProvisionDeviceError,
+    cleanupArgs: TeardownDeviceArgs,
+    code: string,
+    message: string,
+  ): ProvisionDeviceRollbackError {
+    return new ProvisionDeviceRollbackError(provisionFailure, {
+      status: "failed",
+      operationId: cleanupArgs.operationId,
+      target: cleanupArgs.target,
+      failure: { code, phase: "precondition", message },
+    });
+  }
+
+  function unresolvedProvisionCleanup(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    createdDevice: DeviceInfo,
+    provisionFailure: ProvisionDeviceError,
+  ): ProvisionDeviceRollbackError {
+    return new ProvisionDeviceRollbackError(provisionFailure, {
+      status: "failed",
+      operationId: deps.idGenerator.next(),
+      target: {
+        platform: createdDevice.platform,
+        isVirtual: true,
+        stableId: args.device.name,
+        stableName: createdDevice.name,
+      },
+      failure: {
+        code: "target_identity_unresolved",
+        phase: "precondition",
+        message: "The newly created device has no stable identity for cleanup.",
+      },
+    });
+  }
+
+  function provisionCleanupLifecycle(
+    rollbackError: ProvisionDeviceRollbackError,
+    lifecycleDevice: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>,
+    provisionFailure: ProvisionDeviceError,
+  ): ProvisionDeviceLifecycleOutcome {
+    return {
+      state: lifecycleStateForCleanup(rollbackError.cleanup),
+      phase: "cleanup",
+      device: lifecycleDevice,
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+      cleanup: {
+        status: lifecycleCleanupStatus(rollbackError.cleanup),
+        reason: provisionFailure.code === "timeout" ? "readiness_timeout" : "provisioning_failure",
+        operationId: rollbackError.cleanup.operationId,
+      },
+    };
+  }
+
   async function cleanupFailedProvisionDevice(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
@@ -1365,32 +1452,13 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       pendingMutationSettlement,
       recordLifecycle,
       lifecycleDevice,
-    }: {
-      lifecycleLease: VirtualDeviceLifecycleLease | undefined;
-      pendingMutationSettlement?: Promise<unknown>;
-      recordLifecycle?: RecordProvisionDeviceLifecycle;
-      lifecycleDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
-    },
+    }: ProvisionCleanupOptions,
   ): Promise<ProvisionDeviceRollbackError> {
     const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const stableId =
       createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
     if (!stableId) {
-      return new ProvisionDeviceRollbackError(provisionFailure, {
-        status: "failed",
-        operationId: deps.idGenerator.next(),
-        target: {
-          platform: createdDevice.platform,
-          isVirtual: true,
-          stableId: args.device.name,
-          stableName: createdDevice.name,
-        },
-        failure: {
-          code: "target_identity_unresolved",
-          phase: "precondition",
-          message: "The newly created device has no stable identity for cleanup.",
-        },
-      });
+      return unresolvedProvisionCleanup(args, deps, createdDevice, provisionFailure);
     }
     const cleanupArgs: TeardownDeviceArgs = {
       operationId: deps.idGenerator.next(),
@@ -1410,18 +1478,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       if (!recordLifecycle || !lifecycleDevice) {
         return rollbackError;
       }
-      const lifecycle: ProvisionDeviceLifecycleOutcome = {
-        state: lifecycleStateForCleanup(rollbackError.cleanup),
-        phase: "cleanup",
-        device: lifecycleDevice,
-        reason: provisionDeviceLifecycleReason(provisionFailure),
-        cleanup: {
-          status: lifecycleCleanupStatus(rollbackError.cleanup),
-          reason:
-            provisionFailure.code === "timeout" ? "readiness_timeout" : "provisioning_failure",
-          operationId: rollbackError.cleanup.operationId,
-        },
-      };
+      const lifecycle = provisionCleanupLifecycle(rollbackError, lifecycleDevice, provisionFailure);
       await recordLifecycle(lifecycle);
       if (
         lifecycle.state === "removed" &&
@@ -1445,16 +1502,12 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     try {
       if (!lifecycleLease) {
         return await finalizeCleanup(
-          new ProvisionDeviceRollbackError(provisionFailure, {
-            status: "failed",
-            operationId: cleanupArgs.operationId,
-            target: cleanupArgs.target,
-            failure: {
-              code: "lifecycle_reservation_lost",
-              phase: "precondition",
-              message: "The provisioning lifecycle reservation was lost before cleanup.",
-            },
-          }),
+          provisionCleanupPreconditionFailure(
+            provisionFailure,
+            cleanupArgs,
+            "lifecycle_reservation_lost",
+            "The provisioning lifecycle reservation was lost before cleanup.",
+          ),
         );
       }
       if (
@@ -1467,18 +1520,13 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       ) {
         lifecycleLeaseTransferred = true;
         const pendingCleanup = await finalizeCleanup(
-          new ProvisionDeviceRollbackError(provisionFailure, {
-            status: "failed",
-            operationId: cleanupArgs.operationId,
-            target: cleanupArgs.target,
-            failure: {
-              code: "mutation_settlement_timeout",
-              phase: "precondition",
-              message:
-                "Cancelled provisioning mutation did not settle within the rollback budget; " +
-                "cleanup was not attempted and lifecycle ownership remains until it settles.",
-            },
-          }),
+          provisionCleanupPreconditionFailure(
+            provisionFailure,
+            cleanupArgs,
+            "mutation_settlement_timeout",
+            "Cancelled provisioning mutation did not settle within the rollback budget; " +
+              "cleanup was not attempted and lifecycle ownership remains until it settles.",
+          ),
         );
         continueProvisionCleanupAfterMutationSettles(args, deps, createdDevice, provisionFailure, {
           lifecycleLease: lifecycleLease,
@@ -1491,16 +1539,12 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       const remainingRollbackMs = Math.floor(rollbackDeadlineMs - deps.timer.now());
       if (remainingRollbackMs <= 0) {
         return await finalizeCleanup(
-          new ProvisionDeviceRollbackError(provisionFailure, {
-            status: "failed",
-            operationId: cleanupArgs.operationId,
-            target: cleanupArgs.target,
-            failure: {
-              code: "rollback_budget_exhausted",
-              phase: "precondition",
-              message: "The rollback budget was exhausted before device cleanup could start.",
-            },
-          }),
+          provisionCleanupPreconditionFailure(
+            provisionFailure,
+            cleanupArgs,
+            "rollback_budget_exhausted",
+            "The rollback budget was exhausted before device cleanup could start.",
+          ),
         );
       }
       cleanupArgs.timeoutMs = remainingRollbackMs;
@@ -1886,12 +1930,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let observedRuntimeDevice: BootedDevice | undefined;
     let creationStarted = reconcileExistingConfiguration;
-    const settlementState: {
-      exactProvisioning?: Promise<unknown>;
-      unownedColdBootSettlement?: Promise<void>;
-      bindingSettlements: Promise<unknown>[];
-      readinessReservation?: DeviceReadinessReservation;
-    } = { bindingSettlements: [] };
+    const settlementState: ProvisionSettlementState = { bindingSettlements: [] };
     const notifyResourcesChangedBestEffort = () => {
       void deps.notifyResourcesChanged().catch((error: unknown) => {
         logger.warn(
@@ -2021,31 +2060,38 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         preserveRetryability: signal?.aborted === true,
       });
     } finally {
-      const settlements = [
-        ...settlementState.bindingSettlements,
-        ...(settlementState.unownedColdBootSettlement
-          ? [settlementState.unownedColdBootSettlement]
-          : []),
-      ];
-      if (settlements.length > 0) {
-        // A cancelled autolock binding may still be durably releasing its
-        // session. Keep both identity reservations until that rollback (and
-        // any cold-boot shutdown) is terminal, without delaying the caller.
-        void Promise.allSettled(settlements)
-          .then(() => {
-            releaseProvisionReadiness(settlementState.readinessReservation);
-            lifecycleLease?.release();
-          })
-          .catch((error: unknown) => {
-            logger.warn(
-              `[DeviceTools] Deferred provision reservation release failed: ${errorMessage(error)}`,
-              error,
-            );
-          });
-      } else {
-        releaseProvisionReadiness(settlementState.readinessReservation);
-        lifecycleLease?.release();
-      }
+      releaseProvisionLifecycleReservations(settlementState, () => lifecycleLease);
+    }
+  }
+
+  function releaseProvisionLifecycleReservations(
+    settlementState: ProvisionSettlementState,
+    getLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
+  ): void {
+    const settlements = [
+      ...settlementState.bindingSettlements,
+      ...(settlementState.unownedColdBootSettlement
+        ? [settlementState.unownedColdBootSettlement]
+        : []),
+    ];
+    if (settlements.length > 0) {
+      // A cancelled autolock binding may still be durably releasing its
+      // session. Keep both identity reservations until that rollback (and
+      // any cold-boot shutdown) is terminal, without delaying the caller.
+      void Promise.allSettled(settlements)
+        .then(() => {
+          releaseProvisionReadiness(settlementState.readinessReservation);
+          getLifecycleLease()?.release();
+        })
+        .catch((error: unknown) => {
+          logger.warn(
+            `[DeviceTools] Deferred provision reservation release failed: ${errorMessage(error)}`,
+            error,
+          );
+        });
+    } else {
+      releaseProvisionReadiness(settlementState.readinessReservation);
+      getLifecycleLease()?.release();
     }
   }
 
@@ -2102,43 +2148,13 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     }
   }
 
-  async function bootExactProvisionedDevice(
-    args: ProvisionDeviceArgs,
+  function createProvisionBootService(
     deps: DeviceToolsDependencies,
     deviceManager: PlatformDeviceManager,
     deviceCreationGate: DeviceCreationGate,
-    {
-      provisioned,
-      perf,
-      totalDeadlineMs,
-      lifecycleLease,
-      signal,
-      settlementState,
-      onBooted,
-    }: {
-      provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
-      perf: ReturnType<typeof createPerformanceTracker>;
-      totalDeadlineMs: number;
-      lifecycleLease: VirtualDeviceLifecycleLease;
-      signal: AbortSignal | undefined;
-      settlementState: {
-        unownedColdBootSettlement?: Promise<void>;
-        exactProvisioning?: Promise<unknown>;
-        bindingSettlements: Promise<unknown>[];
-        readinessReservation?: DeviceReadinessReservation;
-      };
-      onBooted: (device: BootedDevice) => Promise<void>;
-    },
-  ): Promise<{
-    device: BootedDevice;
-    sessionId: string;
-    source: "booted" | "cold-boot";
-    sourceImage?: DeviceInfo;
-    resources?: DeviceResourceConfigurationResult;
-  }> {
-    const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
-    const operationSignal = combineAbortSignals(signal, lifecycleLease.signal)!;
-    const bootService = new DeviceBootService({
+    lifecycleLease: VirtualDeviceLifecycleLease,
+  ): DeviceBootService {
+    return new DeviceBootService({
       deviceManager,
       deviceMatcher: deps.deviceMatcherFactory(),
       displayInventory: deps.displayInventory,
@@ -2158,6 +2174,112 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         });
       },
     });
+  }
+
+  function provisionSessionArgs(args: ProvisionDeviceArgs): StartDeviceArgs {
+    return {
+      platform: args.device.platform,
+      name: args.device.name,
+      timeoutMs: args.timeoutMs,
+      __mcpSessionId: args.__mcpSessionId,
+    };
+  }
+
+  function provisionSessionBindingOptions(
+    args: ProvisionDeviceArgs,
+    readinessReservation: DeviceReadinessReservation | undefined,
+    settlementState: ProvisionSettlementState,
+  ) {
+    return {
+      readinessReservationOwners: readinessReservation
+        ? new Set([readinessReservation.owner])
+        : undefined,
+      verifiedAndroidAvdIdentity: undefined,
+      achievedReadiness: resolveProvisionDeviceAchievedReadiness(args.readiness),
+      collectCancellationSettlement: (settlement: Promise<void>) => {
+        settlementState.bindingSettlements.push(settlement);
+      },
+    };
+  }
+
+  function assertProvisionAndroidDiscovery(
+    args: ProvisionDeviceArgs,
+    succeededPlatforms: ReadonlySet<string>,
+  ): void {
+    if (!succeededPlatforms.has("android")) {
+      throw new ProvisionDeviceError(
+        "discovery_incomplete",
+        `Cannot provision Android device '${args.device.name}' because booted-device discovery did not complete.`,
+        true,
+      );
+    }
+  }
+
+  function assertProvisionAndroidIdentities(
+    args: ProvisionDeviceArgs,
+    devices: BootedDevice[],
+  ): void {
+    if (
+      devices
+        .filter((device) => device.platform === "android")
+        .some(isUnresolvedAndroidEmulatorName)
+    ) {
+      throw new ProvisionDeviceError(
+        "discovery_incomplete",
+        `Cannot provision Android device '${args.device.name}' because a running emulator's AVD identity has not resolved yet; retry.`,
+        true,
+      );
+    }
+  }
+
+  function assertProvisionIosIdentity(
+    args: ProvisionDeviceArgs,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
+  ): void {
+    if (args.device.platform === "ios" && !provisioned.device.deviceId) {
+      throw new ProvisionDeviceError(
+        "identity_conflict",
+        `Exact iOS simulator '${args.device.name}' has no UDID.`,
+      );
+    }
+  }
+
+  function assertProvisionIosBootIdentity(
+    args: ProvisionDeviceArgs,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
+    boot: DeviceBootResult,
+  ): void {
+    if (args.device.platform === "ios" && boot.device.deviceId !== provisioned.device.deviceId) {
+      throw new ProvisionDeviceError(
+        "identity_conflict",
+        `Exact iOS simulator '${args.device.name}' resolved to unexpected UDID '${boot.device.deviceId}'.`,
+      );
+    }
+  }
+
+  async function bootExactProvisionedDevice(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    deviceManager: PlatformDeviceManager,
+    deviceCreationGate: DeviceCreationGate,
+    {
+      provisioned,
+      perf,
+      totalDeadlineMs,
+      lifecycleLease,
+      signal,
+      settlementState,
+      onBooted,
+    }: ProvisionBootOptions,
+  ): Promise<ProvisionBootResult> {
+    const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
+    const operationSignal = combineAbortSignals(signal, lifecycleLease.signal)!;
+    const bootService = createProvisionBootService(
+      deps,
+      deviceManager,
+      deviceCreationGate,
+      lifecycleLease,
+    );
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
     let readinessReservation: DeviceReadinessReservation | undefined;
@@ -2174,30 +2296,14 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
               bypassAndroidDeviceListCache: true,
               signal: deadlineSignal,
             });
-            if (!discovery.succeededPlatforms.has("android")) {
-              throw new ProvisionDeviceError(
-                "discovery_incomplete",
-                `Cannot provision Android device '${args.device.name}' because booted-device discovery did not complete.`,
-                true,
-              );
-            }
+            assertProvisionAndroidDiscovery(args, discovery.succeededPlatforms);
             // FUNNEL 1: fold the fresh observation into the pool BEFORE deciding
             // whether it resolves the requested identity, so a discovered
             // placeholder quarantines any stale pooled label under this serial
             // even when the request itself is about to fail closed (#7177
             // review).
             await reconcileDiscoveryObservation(discovery.devices, "provisionDevice-exact");
-            if (
-              discovery.devices
-                .filter((device) => device.platform === "android")
-                .some(isUnresolvedAndroidEmulatorName)
-            ) {
-              throw new ProvisionDeviceError(
-                "discovery_incomplete",
-                `Cannot provision Android device '${args.device.name}' because a running emulator's AVD identity has not resolved yet; retry.`,
-                true,
-              );
-            }
+            assertProvisionAndroidIdentities(args, discovery.devices);
             return discovery.devices;
           }
           const alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
@@ -2212,12 +2318,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         alreadyBooted,
         provisioned.device,
       );
-      if (args.device.platform === "ios" && !provisioned.device.deviceId) {
-        throw new ProvisionDeviceError(
-          "identity_conflict",
-          `Exact iOS simulator '${args.device.name}' has no UDID.`,
-        );
-      }
+      assertProvisionIosIdentity(args, provisioned);
       perf.startOperation("bootDevice");
       // Boot and automation readiness share one provision budget. Reserve the
       // readiness slice up front, the way `applyProvisionDeviceResources` does,
@@ -2245,12 +2346,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         freshProvision: provisioned.created === true,
       });
       perf.endOperation("bootDevice");
-      if (args.device.platform === "ios" && boot.device.deviceId !== provisioned.device.deviceId) {
-        throw new ProvisionDeviceError(
-          "identity_conflict",
-          `Exact iOS simulator '${args.device.name}' resolved to unexpected UDID '${boot.device.deviceId}'.`,
-        );
-      }
+      assertProvisionIosBootIdentity(args, provisioned, boot);
       validatePooledDeviceMapping(boot.device, requestedIdentity);
       await onBooted(boot.device);
       readinessReservation = await runProvisionDeviceWithinDeadline(
@@ -2298,26 +2394,12 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
             async () =>
               await bindBootedDeviceSession(
                 boot!.device,
-                {
-                  platform: args.device.platform,
-                  name: args.device.name,
-                  timeoutMs: args.timeoutMs,
-                  __mcpSessionId: args.__mcpSessionId,
-                },
+                provisionSessionArgs(args),
                 provisioned.device,
                 boot!.processHandle,
                 // Our own stable-name readiness reservation must not deny our
                 // own bind when the pooled incarnation changed during readiness.
-                {
-                  readinessReservationOwners: readinessReservation
-                    ? new Set([readinessReservation.owner])
-                    : undefined,
-                  verifiedAndroidAvdIdentity: undefined,
-                  achievedReadiness: resolveProvisionDeviceAchievedReadiness(args.readiness),
-                  collectCancellationSettlement: (settlement) => {
-                    settlementState.bindingSettlements.push(settlement);
-                  },
-                },
+                provisionSessionBindingOptions(args, readinessReservation, settlementState),
               ),
             (settlement) => {
               settlementState.bindingSettlements.push(settlement);

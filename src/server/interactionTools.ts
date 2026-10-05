@@ -3059,101 +3059,101 @@ export function registerInteractionTools() {
         });
       }
 
-      if (args.action === "clearAll") {
-        let swipeCount = 0;
-        let expectedKeys: string[] | undefined;
-        let clearMatchTexts = appMatchTexts;
-        if (device.platform === "android" && notification.appId) {
-          const attributionLabel = await resolveClearAllAttributionLabel(
-            device,
-            notification.appId,
-            installedApps,
-            signal,
-          );
-          const listed = await listSystemTrayNotifications(
-            device,
-            notification.appId,
-            attributionLabel,
-            awaitTimeoutMs,
-            progress,
-            signal,
-          );
-          expectedKeys = await readRequiredActiveNotificationKeys(
-            device,
-            notification.appId,
-            "before",
-            signal,
-          );
-          // All correlated rows' content text lets the existing row matcher
-          // isolate them, whether ownership comes from a header or dumpsys.
-          clearMatchTexts = [
-            ...new Set([
-              ...appMatchTexts,
-              ...listed.notifications.flatMap((listedNotification) => listedNotification.texts),
-            ]),
-          ];
-        }
-        const { timer } = getSystemTrayDependencies();
-
-        for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
-          const { match } = await waitForNotificationMatch(
-            device,
-            notification,
-            clearMatchTexts,
-            500,
-            progress,
-            signal,
-          );
-
-          if (!match) {
-            break;
-          }
-
-          const swipeTarget = resolveNotificationSwipeElement(match, notification, clearMatchTexts);
-          if (!swipeTarget) {
-            break;
-          }
-
-          await swipeElement(device, swipeTarget, signal);
-          swipeCount++;
-          throwIfAborted(signal);
-          await awaitWhileRequestIsLive(
-            timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100),
-            signal,
-          );
-        }
-
-        const remainingKeys =
-          expectedKeys === undefined || !notification.appId
-            ? undefined
-            : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
-
-        const { observeScreenFactory } = getSystemTrayDependencies();
-        const observeScreen = observeScreenFactory(device);
-        throwIfAborted(signal);
-        const nextObservation = await awaitWhileRequestIsLive(
-          observeScreen.execute({
-            skipScreenshot: true,
-            skipAccessibilityAudit: true,
-            skipPerformanceAudit: true,
-            signal,
-          }),
-          signal,
-        );
-        await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
-
-        const result = formatClearAllResult(
-          notification.appId,
-          swipeCount,
-          expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
-        );
-        return createJSONToolResponse({
-          ...result,
-          observation: nextObservation,
-        });
+      if (args.action !== "clearAll") {
+        throw new ActionableError(`Unknown systemTray action: ${args.action}`);
       }
 
-      throw new ActionableError(`Unknown systemTray action: ${args.action}`);
+      let swipeCount = 0;
+      let expectedKeys: string[] | undefined;
+      let clearMatchTexts = appMatchTexts;
+      if (device.platform === "android" && notification.appId) {
+        const attributionLabel = await resolveClearAllAttributionLabel(
+          device,
+          notification.appId,
+          installedApps,
+          signal,
+        );
+        const listed = await listSystemTrayNotifications(
+          device,
+          notification.appId,
+          attributionLabel,
+          awaitTimeoutMs,
+          progress,
+          signal,
+        );
+        expectedKeys = await readRequiredActiveNotificationKeys(
+          device,
+          notification.appId,
+          "before",
+          signal,
+        );
+        // All correlated rows' content text lets the existing row matcher
+        // isolate them, whether ownership comes from a header or dumpsys.
+        clearMatchTexts = [
+          ...new Set([
+            ...appMatchTexts,
+            ...listed.notifications.flatMap((listedNotification) => listedNotification.texts),
+          ]),
+        ];
+      }
+      const { timer } = getSystemTrayDependencies();
+
+      for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
+        const { match } = await waitForNotificationMatch(
+          device,
+          notification,
+          clearMatchTexts,
+          500,
+          progress,
+          signal,
+        );
+
+        if (!match) {
+          break;
+        }
+
+        const swipeTarget = resolveNotificationSwipeElement(match, notification, clearMatchTexts);
+        if (!swipeTarget) {
+          break;
+        }
+
+        await swipeElement(device, swipeTarget, signal);
+        swipeCount++;
+        throwIfAborted(signal);
+        await awaitWhileRequestIsLive(
+          timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100),
+          signal,
+        );
+      }
+
+      const remainingKeys =
+        expectedKeys === undefined || !notification.appId
+          ? undefined
+          : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
+
+      const { observeScreenFactory } = getSystemTrayDependencies();
+      const observeScreen = observeScreenFactory(device);
+      throwIfAborted(signal);
+      const nextObservation = await awaitWhileRequestIsLive(
+        observeScreen.execute({
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+          skipPerformanceAudit: true,
+          signal,
+        }),
+        signal,
+      );
+      await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
+
+      const result = formatClearAllResult(
+        notification.appId,
+        swipeCount,
+        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
+      );
+      return createJSONToolResponse({
+        ...result,
+        observation: nextObservation,
+      });
     } catch (error) {
       throwIfAborted(signal);
       if (error instanceof ActionableError) {

@@ -240,6 +240,15 @@ async function syncMockRulesToDevice(
   return { synced: true };
 }
 
+function errorSimulationMessageFields(sim: NetworkState["simulation"]) {
+  return {
+    enabled: sim !== null,
+    errorType: sim?.errorType ?? null,
+    limit: sim?.limit ?? null,
+    expiresAtEpochMs: sim?.expiresAt ?? null,
+  };
+}
+
 async function syncErrorSimulationToDevice(
   device: BootedDevice,
   state: NetworkState,
@@ -249,12 +258,9 @@ async function syncErrorSimulationToDevice(
   }
   const sim = state.simulation;
   if (device.platform === "ios") {
-    const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
-      enabled: sim !== null,
-      errorType: sim?.errorType ?? null,
-      limit: sim?.limit ?? null,
-      expiresAtEpochMs: sim?.expiresAt ?? null,
-    });
+    const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation(
+      errorSimulationMessageFields(sim),
+    );
     if (!result.success) {
       throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
     }
@@ -263,10 +269,7 @@ async function syncErrorSimulationToDevice(
 
   return syncAndroidNetworkMessage(device, {
     type: "set_network_error_simulation",
-    enabled: sim !== null,
-    errorType: sim?.errorType ?? null,
-    limit: sim?.limit ?? null,
-    expiresAtEpochMs: sim?.expiresAt ?? null,
+    ...errorSimulationMessageFields(sim),
   });
 }
 
@@ -298,6 +301,90 @@ async function setIosErrorSimulation(
   state.startSimulationUntil(config.errorType, expiresAtEpochMs!, config.limit);
 }
 
+function iosSimulationConfig(
+  state: NetworkState,
+  simulation: NonNullable<NetworkArgs["simulateErrors"]>,
+) {
+  if (simulation.cancel) {
+    if (isIosNetworkErrorSimulationAvailable()) {
+      return null;
+    }
+    state.cancelSimulation();
+    return undefined;
+  }
+  assertIosNetworkErrorSimulationAvailable();
+  if (!simulation.durationSeconds) {
+    throw new ActionableError("durationSeconds is required unless cancel is true");
+  }
+  return {
+    errorType: simulation.errorType ?? "http500",
+    durationSeconds: simulation.durationSeconds,
+    limit: simulation.limit ?? null,
+  };
+}
+
+function updateSimulation(
+  state: NetworkState,
+  simulation: NonNullable<NetworkArgs["simulateErrors"]>,
+): void {
+  if (simulation.cancel) {
+    state.cancelSimulation();
+  } else {
+    if (!simulation.durationSeconds) {
+      throw new ActionableError("durationSeconds is required unless cancel is true");
+    }
+    const errorType: SimulatedErrorType = simulation.errorType ?? "http500";
+    state.startSimulation(errorType, simulation.durationSeconds, simulation.limit ?? null);
+  }
+}
+
+function createNetworkHandler(state: NetworkState) {
+  return async (device: BootedDevice, args: NetworkArgs) => {
+    let syncResult: DeviceSyncResult = { synced: true };
+    if (args.capture !== undefined) {
+      state.setCapture(args.capture);
+    }
+
+    if (args.simulateErrors !== undefined) {
+      if (device.platform === "ios") {
+        const config = iosSimulationConfig(state, args.simulateErrors);
+        if (config !== undefined) {
+          await setIosErrorSimulation(device, state, config);
+        }
+      } else {
+        updateSimulation(state, args.simulateErrors);
+        syncResult = await syncErrorSimulationToDevice(device, state);
+      }
+    }
+
+    if (args.notifFilter !== undefined) {
+      state.setNotifFilter(args.notifFilter);
+    }
+    if (args.notifDebounceMs !== undefined) {
+      state.setNotifDebounceMs(args.notifDebounceMs);
+    }
+    if (args.slowThresholdMs !== undefined) {
+      state.setSlowThresholdMs(args.slowThresholdMs);
+    }
+
+    return createJSONToolResponse({ ...state.getSnapshot(), ...deviceSyncFields(syncResult) });
+  };
+}
+
+function mockRuleFields(args: MockNetworkArgs) {
+  return {
+    host: args.host,
+    path: args.path,
+    method: args.method ?? "*",
+    limit: args.limit ?? null,
+    remaining: args.limit ?? null,
+    statusCode: args.statusCode ?? 200,
+    responseHeaders: args.responseHeaders ?? {},
+    responseBody: args.responseBody ?? "",
+    contentType: args.contentType ?? "application/json",
+  };
+}
+
 export function registerNetworkTools(): void {
   const state = NetworkState.getInstance();
 
@@ -306,61 +393,7 @@ export function registerNetworkTools(): void {
     "network",
     "Control network capture and error simulation.",
     networkSchema,
-    async (device, args: NetworkArgs) => {
-      let syncResult: DeviceSyncResult = { synced: true };
-      if (args.capture !== undefined) {
-        state.setCapture(args.capture);
-      }
-
-      if (args.simulateErrors !== undefined) {
-        if (device.platform === "ios") {
-          if (args.simulateErrors.cancel) {
-            if (isIosNetworkErrorSimulationAvailable()) {
-              await setIosErrorSimulation(device, state, null);
-            } else {
-              state.cancelSimulation();
-            }
-          } else {
-            assertIosNetworkErrorSimulationAvailable();
-            if (!args.simulateErrors.durationSeconds) {
-              throw new ActionableError("durationSeconds is required unless cancel is true");
-            }
-            await setIosErrorSimulation(device, state, {
-              errorType: args.simulateErrors.errorType ?? "http500",
-              durationSeconds: args.simulateErrors.durationSeconds,
-              limit: args.simulateErrors.limit ?? null,
-            });
-          }
-        } else {
-          if (args.simulateErrors.cancel) {
-            state.cancelSimulation();
-          } else {
-            if (!args.simulateErrors.durationSeconds) {
-              throw new ActionableError("durationSeconds is required unless cancel is true");
-            }
-            const errorType: SimulatedErrorType = args.simulateErrors.errorType ?? "http500";
-            state.startSimulation(
-              errorType,
-              args.simulateErrors.durationSeconds,
-              args.simulateErrors.limit ?? null,
-            );
-          }
-          syncResult = await syncErrorSimulationToDevice(device, state);
-        }
-      }
-
-      if (args.notifFilter !== undefined) {
-        state.setNotifFilter(args.notifFilter);
-      }
-      if (args.notifDebounceMs !== undefined) {
-        state.setNotifDebounceMs(args.notifDebounceMs);
-      }
-      if (args.slowThresholdMs !== undefined) {
-        state.setSlowThresholdMs(args.slowThresholdMs);
-      }
-
-      return createJSONToolResponse({ ...state.getSnapshot(), ...deviceSyncFields(syncResult) });
-    },
+    createNetworkHandler(state),
     { defaultEnabled: false, embeddedSdkOnly: true },
   );
 
@@ -392,17 +425,7 @@ export function registerNetworkTools(): void {
       }
       assertValidResponseHeaders(args.responseHeaders);
 
-      const mock = state.addMock({
-        host: args.host,
-        path: args.path,
-        method: args.method ?? "*",
-        limit: args.limit ?? null,
-        remaining: args.limit ?? null,
-        statusCode: args.statusCode ?? 200,
-        responseHeaders: args.responseHeaders ?? {},
-        responseBody: args.responseBody ?? "",
-        contentType: args.contentType ?? "application/json",
-      });
+      const mock = state.addMock(mockRuleFields(args));
 
       const syncResult = await syncMockRulesToDevice(device, state);
 

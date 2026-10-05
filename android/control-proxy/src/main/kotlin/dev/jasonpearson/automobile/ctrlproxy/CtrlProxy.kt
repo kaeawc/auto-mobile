@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -13,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Point
@@ -50,9 +52,11 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -1379,6 +1383,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val screenStateReceiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
+        refreshOverlayWindow()
         when (intent?.action) {
           Intent.ACTION_SCREEN_ON -> {
             Log.i(TAG, "Screen turned ON, triggering hierarchy extraction")
@@ -1514,6 +1519,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
           onTransition = { transition ->
             serviceScope.launch {
+              if (
+                ::overlayController.isInitialized && transition.displayId == Display.DEFAULT_DISPLAY
+              ) {
+                overlayController.onConfigurationChanged(transition.change != "removed")
+              }
               if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
                 webSocketServer.broadcast(displayTransitionFrame(transition))
               }
@@ -1535,6 +1545,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             DefaultInteractiveOverlayHost(
               context = this,
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
+              isBlocked = ::isOverlayBlocked,
             ),
             OverlayResultSink { requestId, success, error ->
               if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
@@ -1550,6 +1561,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 overlayManager.setInteractiveOverlayAttached(false)
               }
             },
+            lifecycle =
+              OverlayLifecycle(
+                CoroutineOverlayScheduler(serviceScope),
+                isBlocked = ::isOverlayBlocked,
+                observerSession = {
+                  if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
+                  else 0
+                },
+              ),
             eventSink =
               OverlayEventSink { event ->
                 if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
@@ -1673,6 +1693,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         IntentFilter().apply {
           addAction(Intent.ACTION_SCREEN_ON)
           addAction(Intent.ACTION_SCREEN_OFF)
+          addAction(Intent.ACTION_USER_PRESENT)
         }
       registerReceiver(screenStateReceiver, screenStateFilter)
       Log.d(TAG, "Screen state receiver registered")
@@ -1769,6 +1790,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
       try {
         val queuedHandler = queuedMessageHandler()
+        val overlays = overlayController
         webSocketServer =
           WebSocketServer(
             port = 8765,
@@ -1777,6 +1799,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             onClientDisconnected = { client ->
               queuedHandler.disconnect(client)
               gestureStreamRouter.cancelOwnedBy(client)
+            },
+            onClientCountChanged = { count, session ->
+              serviceScope.launch { overlays.onClientCountChanged(count, session) }
             },
             onPermanentStartFailure = { disableSelf() },
           )
@@ -1853,10 +1878,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
     if (::overlayController.isInitialized) {
-      // Dismiss without terminal destruction so a same-process rebind can show overlays again.
-      CoroutineScope(Dispatchers.Main.immediate).launch {
-        overlayController.dismiss(requestId = null, id = null, all = true)
-      }
+      // Dismiss (reason teardown) without terminal destruction: a same-process rebind reuses this
+      // controller, and onServiceConnected has early-exit paths that would leave a destroyed one.
+      CoroutineScope(Dispatchers.Main.immediate).launch { overlayController.dismissForUnbind() }
     }
     return super.onUnbind(intent)
   }
@@ -3074,11 +3098,39 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  private fun isOverlayBlocked(): Boolean {
+    val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+    val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
+    // Missing safety services fail closed rather than allowing an overlay over an unknown lock
+    // state.
+    return keyguard?.isKeyguardLocked != false || power?.isInteractive != true
+  }
+
+  private fun refreshOverlayWindow() {
+    if (::overlayController.isInitialized) {
+      val controller = overlayController
+      serviceScope.launch { controller.onConfigurationChanged() }
+    }
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    refreshOverlayWindow()
+  }
+
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null) {
       Log.w(TAG, "onAccessibilityEvent: no event")
       return
     }
+
+    // Overlay animations must not feed the hierarchy debouncer or navigation tracking.
+    if (event.packageName?.toString() == packageName) return
+    if (
+      event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+        event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+    )
+      refreshOverlayWindow()
 
     try {
       when (event.eventType) {

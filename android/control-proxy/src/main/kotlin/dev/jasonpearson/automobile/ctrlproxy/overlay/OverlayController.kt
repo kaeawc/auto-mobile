@@ -26,6 +26,7 @@ class OverlayController(
   private val onDismissed: suspend () -> Unit = {},
   private val eventSink: OverlayEventSink = OverlayEventSink {},
   private val clock: () -> Long = System::currentTimeMillis,
+  private val lifecycle: OverlayLifecycle = OverlayLifecycle(CoroutineOverlayScheduler()),
   private val render: (OverlaySpec) -> InteractiveOverlayRequest = { mapOverlaySpec(it).request() },
 ) {
   val isShowing: Boolean
@@ -38,6 +39,8 @@ class OverlayController(
   // Controller lifetime ledger: same-id show/dismiss/re-show and reconnect never rewind sequences.
   private val sequences = mutableMapOf<String, Long>()
   private var destroyed = false
+  private var activeObserverSession = 0
+  private var activeRequest: InteractiveOverlayRequest? = null
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
     prettyPrint = false
@@ -67,6 +70,7 @@ class OverlayController(
           validate(checkNotNull(current).copy(state = current.state.orEmpty() + state.orEmpty()))
         render(patched) // Validate Compose sizes too, before mutating the live runtime.
         activeRuntime?.replace(patched)
+        activeRuntime?.let { armIdle(it) }
       }
     }
 
@@ -76,10 +80,10 @@ class OverlayController(
         "Unknown overlay id: $id"
       }
       val runtime = activeRuntime
-      if (runtime != null) runtime.dismiss()
+      if (runtime != null) runtime.dismiss(OverlayDismissReason.AGENT)
       else {
         check(host.dismiss()) { "Overlay host failed to dismiss window" }
-        onDismissed()
+        notifyDetached()
       }
     }
 
@@ -96,6 +100,7 @@ class OverlayController(
     val validated = validate(spec)
     val request = render(validated)
     val previous = activeRuntime
+    val observerSession = lifecycle.observerSession()
     val runtime =
       OverlayRuntime(
         validated,
@@ -111,29 +116,56 @@ class OverlayController(
       )
     val interactive =
       request.copy(
+        onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
           OverlayRuntimeContent(runtime) { interaction -> interact(runtime, interaction) }
-        }
+        },
       )
-    check(if (replace) host.replace(interactive) else host.show(interactive)) {
+    val blocked = lifecycle.isBlocked()
+    check(
+      if (blocked) host.dismiss()
+      else if (replace) host.replace(interactive) else host.show(interactive)
+    ) {
       "Overlay host failed to render window"
     }
+    if (blocked) notifyDetached()
     previous?.close()
     activeRuntime = runtime
+    activeRequest = interactive
+    activeObserverSession = observerSession
+    armIdle(runtime)
   }
 
   /** Shared by dismiss_overlay and the dismiss action, under the controller mutex. */
   private suspend fun removeActive(): Boolean {
     if (!host.dismiss()) return false
     activeRuntime = null
-    onDismissed()
+    activeRequest = null
+    lifecycle.cancel()
+    notifyDetached()
     return true
+  }
+
+  private suspend fun notifyDetached() {
+    try {
+      onDismissed()
+    } catch (error: Exception) {
+      // Removal succeeded; ancillary highlight cleanup must not suppress a terminal overlay event.
+      Log.w("OverlayController", "Overlay highlight cleanup failed", error)
+    }
   }
 
   internal suspend fun interact(runtime: OverlayRuntime, interaction: OverlayInteraction) =
     mutex.withLock {
       if (destroyed || runtime !== activeRuntime) return@withLock
       try {
+        // Compose reports its initial/restored settled page; that is rendering, not idle activity.
+        if (
+          interaction !is OverlayInteraction.PagerMotion ||
+            interaction.scrolling ||
+            runtime.current.pages[interaction.pager] != interaction.page
+        )
+          armIdle(runtime)
         runtime.handle(interaction)
       } catch (error: CancellationException) {
         throw error
@@ -157,19 +189,118 @@ class OverlayController(
     sink.send(requestId, error == null, error)
   }
 
+  private fun armIdle(runtime: OverlayRuntime) {
+    lifecycle.arm { token ->
+      signal {
+        if (runtime === activeRuntime && lifecycle.isCurrent(token))
+          runtime.dismiss(OverlayDismissReason.TTL)
+      }
+    }
+  }
+
+  /** Local override until a daemon/tool TTL field exists; no new protocol field is invented. */
+  suspend fun setIdleTtlMillis(millis: Long) = mutex.withLock {
+    lifecycle.ttlMillis = millis
+    activeRuntime?.let { armIdle(it) }
+  }
+
+  suspend fun onClientCountChanged(count: Int, observerSession: Int? = null) = signal {
+    require(count >= 0) { "Client count must be nonnegative" }
+    // A delayed disconnect from a previous observer session cannot dismiss a newly shown overlay.
+    if (count == 0 && (observerSession == null || observerSession == activeObserverSession))
+      activeRuntime?.dismiss(OverlayDismissReason.DISCONNECT)
+  }
+
+  /**
+   * Rotation/density changes keep the same runtime and Compose tree; hiding retains authored state.
+   */
+  suspend fun onConfigurationChanged(displayAvailable: Boolean = true) = signal {
+    val runtime = activeRuntime ?: return@signal
+    when (overlayWindowDecision(displayAvailable, lifecycle.isBlocked())) {
+      OverlayWindowDecision.DISMISS -> runtime.dismiss(OverlayDismissReason.TEARDOWN)
+      OverlayWindowDecision.HIDE -> {
+        check(host.dismiss()) { "Overlay host failed to hide window" }
+        notifyDetached()
+      }
+      OverlayWindowDecision.RELAYOUT -> relayoutOrRestore(runtime)
+    }
+  }
+
+  /**
+   * A window the platform reports detached is cleared by the host, so a failed relayout with
+   * nothing showing means the overlay vanished underneath us: re-show the authored request. If the
+   * window cannot come back the runtime ends once, as teardown, instead of lingering windowless.
+   */
+  private suspend fun relayoutOrRestore(runtime: OverlayRuntime) {
+    val request = checkNotNull(activeRequest)
+    if (host.isShowing) {
+      if (host.relayout()) {
+        if (!host.isShowing) notifyDetached() // The host hid it: a lock arrived mid-signal.
+        return
+      }
+      // Still attached: a retryable platform failure, so keep the window and runtime as they are.
+      check(!host.isShowing) { "Overlay host failed to re-layout window" }
+    }
+    if (host.show(request)) return
+    if (lifecycle.isBlocked()) notifyDetached() // Locked meanwhile: hidden, restored on unlock.
+    else abandon(runtime)
+  }
+
+  /** Terminal teardown for a window that cannot be shown again: exactly one `dismissed` event. */
+  private suspend fun abandon(runtime: OverlayRuntime) {
+    activeRuntime = null
+    activeRequest = null
+    lifecycle.cancel()
+    notifyDetached()
+    runtime.finishDismissal(OverlayDismissReason.TEARDOWN)
+  }
+
+  /**
+   * Service unbind: ends the active overlay as teardown but keeps the controller reusable, because
+   * Android can rebind the same service instance before onDestroy. Failed removal stays retryable.
+   */
+  suspend fun dismissForUnbind() = signal {
+    val runtime = activeRuntime
+    if (runtime != null) runtime.dismiss(OverlayDismissReason.TEARDOWN)
+    else if (host.isShowing) {
+      check(host.dismiss()) { "Overlay host failed to dismiss window" }
+      notifyDetached()
+    }
+  }
+
+  private suspend fun signal(action: suspend () -> Unit) = mutex.withLock {
+    if (destroyed) return@withLock
+    try {
+      action()
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("OverlayController", "Overlay lifecycle signal failed", error)
+    }
+  }
+
   /** Run from a teardown scope independent of the cancelled service scope; no blocking join. */
   suspend fun destroy() = mutex.withLock {
     destroyed = true
-    activeRuntime?.close()
+    lifecycle.cancel()
     try {
-      if (host.destroy()) {
-        activeRuntime = null
-        onDismissed()
-      } else Log.w("OverlayController", "Overlay host failed to destroy window")
+      if (host.destroy()) notifyDetached()
+      else Log.w("OverlayController", "Overlay host failed to destroy window")
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
       Log.w("OverlayController", "Overlay teardown failed", error)
+    } finally {
+      val runtime = activeRuntime
+      activeRuntime = null
+      activeRequest = null
+      // Allocate the terminal sequence even when the last socket or service sink is gone.
+      try {
+        runtime?.finishDismissal(OverlayDismissReason.TEARDOWN)
+      } catch (error: Exception) {
+        // Teardown is best effort once the sink has shut down; the runtime is already terminal.
+        Log.w("OverlayController", "Overlay teardown event delivery failed", error)
+      }
     }
   }
 }

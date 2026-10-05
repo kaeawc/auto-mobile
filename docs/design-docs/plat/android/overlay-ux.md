@@ -284,6 +284,55 @@ into bottom/systemBars, plus ime when the keyboard should move content. Cutout
 padding is normally useful at top/start/end. Anchors stay in screen coordinates;
 inset padding does not reinterpret their coordinate origin.
 
+## Lifecycle and safety
+
+Fullscreen windows reserve an opaque host row above clipped authored content, with
+“Dismiss AutoMobile overlay”. Its visibility, style and opacity are independent of
+the spec, including modal sheets and `window.opacity: 0`. The authored content
+viewport excludes the host row; relative sheet detents use that remaining height.
+Spec opacity continues
+to apply to authored content and scrims; it cannot fade the safety control.
+
+Every dismissal emits one `overlay_event` with `kind: "dismissed"`, null `name`,
+and `payload: {"reason": "user|agent|disconnect|ttl|teardown"}` (one reason string).
+Host and authored dismiss controls use `user`; `dismiss_overlay` uses `agent`;
+last-client disconnect uses `disconnect`; idle expiry uses `ttl`; service teardown,
+unbind/restart and owning-display removal use `teardown`. Sequence allocation
+precedes delivery even if no socket remains. A show replacement closes the old
+runtime silently and cancels its timer. Disconnect counts are captured at removal
+with the existing observer-session generation so rapid reconnects cannot erase the
+zero edge or dismiss a replacement from a new observer session. No state is
+persisted across process restart.
+
+Idle means no interaction or accepted update. The device fallback TTL is five
+minutes (300,000 ms), positive and settable locally on the controller. Show,
+accepted state/spec updates, and user interactions restart it (initial/restored
+unchanged pager reports are rendering and do not count); configuration
+changes and safety hide/restore do not. Hidden overlays still expire. The current
+strict protocol has no TTL or device-session-release message: no wire field is
+added here. Session release is covered only when it closes the last WebSocket;
+a release that retains sockets requires a future daemon/device contract.
+
+Rotation, density/size changes and fold posture callbacks refresh layout params
+without recreating runtime or composition: authored state and settled pager pages
+survive with no event or sequence allocation. If the owning display disappears,
+dismiss rather than moving content onto another display; it never revives on return.
+V1 uses the service's default display; display selection remains #9308.
+
+Show-time keyguard/screen checks fail closed. Screen and window signals hide the
+window while locked or noninteractive and restore the same runtime on unlock;
+no dismissal event is emitted for temporary hiding. Own-package accessibility
+events are dropped before hierarchy debouncing and navigation tracking.
+
+Deferred: foreground-package scoping needs a reliable application-window policy;
+`package_event` reports package installation/removal, while window-state events
+also include IME, dialogs and System UI. Secure app-window detection has no trusted
+existing signal. Automatic bottom-sheet IME movement/yield is also deferred:
+node-level inset selection exists, but smaller edge-to-edge sheet windows do not
+yet have verified keyboard geometry. Existing explicit `safeAreaPadding` behavior
+is preserved. Device checks must cover keyguard timing, daemon death, pager page 3
+across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry.
+
 ## Rejection paths and deterministic first error
 
 Paths omit a leading `$` for ordinary root members: `root.children[1].style.color`.

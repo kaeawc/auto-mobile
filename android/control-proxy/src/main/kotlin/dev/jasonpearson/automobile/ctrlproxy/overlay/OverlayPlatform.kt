@@ -6,7 +6,11 @@ import android.util.Log
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** Narrow main queue seam; post must enqueue on main and report whether it accepted the work. */
 interface OverlayMainThread {
@@ -53,5 +57,18 @@ internal suspend fun <T> OverlayMainThread.onMain(work: () -> T): T {
       continuation.resume(result)
     }
     check(accepted) { "Main queue refused overlay operation" }
+  }
+}
+
+/** The service supplies its own scope; the standalone host uses main for window-safe delivery. */
+class CoroutineOverlayScheduler(
+  private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+) : OverlayScheduler {
+  override fun schedule(millis: Long, action: suspend () -> Unit): OverlayScheduledTask {
+    val job = scope.launch {
+      delay(millis)
+      action()
+    }
+    return OverlayScheduledTask { job.cancel() }
   }
 }

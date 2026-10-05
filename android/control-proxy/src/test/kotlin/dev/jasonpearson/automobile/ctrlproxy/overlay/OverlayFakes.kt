@@ -115,6 +115,11 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
 
   override suspend fun replace(request: InteractiveOverlayRequest) = display("replace", request)
 
+  override suspend fun relayout(): Boolean {
+    calls += "relayout"
+    return accept
+  }
+
   override suspend fun dismiss(): Boolean {
     calls += "dismiss"
     failure?.let { throw it }
@@ -134,4 +139,35 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
   }
 
   override suspend fun <T> withTouchThrough(settleMillis: Long, block: suspend () -> T): T = block()
+}
+
+/** Virtual one-shot scheduler; cancelled callbacks can also be exercised to model queue races. */
+internal class FakeOverlayTimer : OverlayScheduler {
+  internal data class Task(
+    val deadline: Long,
+    val action: suspend () -> Unit,
+    var cancelled: Boolean = false,
+    var fired: Boolean = false,
+  )
+
+  var now = 0L
+    private set
+
+  val tasks = mutableListOf<Task>()
+
+  override fun schedule(millis: Long, action: suspend () -> Unit): OverlayScheduledTask {
+    val task = Task(now + millis, action)
+    tasks += task
+    return OverlayScheduledTask { task.cancelled = true }
+  }
+
+  suspend fun advance(millis: Long) {
+    now += millis
+    for (task in tasks.toList()) {
+      if (!task.cancelled && !task.fired && task.deadline <= now) {
+        task.fired = true
+        task.action()
+      }
+    }
+  }
 }

@@ -149,7 +149,7 @@ export interface AdbExecutor {
    * Check if the device screen is currently on
    * @returns Promise<boolean> - true if screen is on (Awake), false otherwise
    */
-  isScreenOn(): Promise<boolean>;
+  isScreenOn(signal?: AbortSignal): Promise<boolean>;
 
   /**
    * Get the device wakefulness state

@@ -27,6 +27,7 @@ import { AppPermissions } from "../features/action/AppPermissions";
 import { ResetKeychain } from "../features/action/ResetKeychain";
 import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
 import {
+  withIsErrorOnFailure,
   createJSONToolResponse,
   createStructuredToolResponse,
   DefaultToolResponseFormatter,
@@ -1099,7 +1100,8 @@ const crashAppHandler = async (
           result.confirmed ? " (OS crash confirmed)" : " (confirmation unavailable)"
         }`
       : (result.error ?? `Failed to crash app ${args.appId}`);
-    return createStructuredToolResponse({ message, ...result });
+    const response = createStructuredToolResponse({ message, ...result });
+    return withIsErrorOnFailure(response, result.success);
   } catch (error) {
     if (isDeviceLostError(error) || error instanceof ActionableError) {
       throw error;
@@ -1136,7 +1138,8 @@ const appLifecycleHandler = async (
           ? `Backgrounded app ${args.appId}`
           : `Completed background kill request for ${args.appId}`))
       : (result.error ?? `Failed to perform appLifecycle ${args.action} for ${args.appId}`);
-    return createStructuredToolResponse({ ...result, message });
+    const response = createStructuredToolResponse({ ...result, message });
+    return withIsErrorOnFailure(response, result.success);
   } catch (error) {
     signal?.throwIfAborted();
     if (isDeviceLostError(error) || error instanceof ActionableError) {
@@ -1237,12 +1240,13 @@ export function registerAppTools() {
       permissions: args.permissions,
     });
 
-    return createJSONToolResponse({
+    const response = createJSONToolResponse({
       message: result.success
         ? `Read ${result.permissions.length} app permission state row(s) for ${args.appId}`
         : (result.error ?? `Failed to read app permission state for ${args.appId}`),
       ...result,
     });
+    return withIsErrorOnFailure(response, result.success);
   };
 
   const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {

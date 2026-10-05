@@ -104,7 +104,7 @@ for (const success of [true, false]) {
         ...(success ? {} : { error: "failed" }),
       };
       setKeyboardFactory(() => ({ execute: async () => result }));
-      await checkResponse("keyboard", { action }, result);
+      await checkResponse("keyboard", { action }, result, success ? undefined : true);
     });
   }
 }
@@ -224,6 +224,7 @@ for (const success of [true, false]) {
         message: success ? `Opened link ${result.url}` : `Failed to open ${result.url}: failed`,
         ...result,
       },
+      success ? undefined : true,
     );
   });
 }

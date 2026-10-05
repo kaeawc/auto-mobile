@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { stringifyToolResponse } from "../../src/utils/toolUtils";
+import { stringifyToolResponse, withIsErrorOnFailure } from "../../src/utils/toolUtils";
 
 /**
  * Compact (non-pretty) JSON is now the unconditional default for serialized tool
@@ -25,5 +25,28 @@ describe("stringifyToolResponse compact-json default", () => {
     const compact = stringifyToolResponse(sample);
     const pretty = JSON.stringify(sample, null, 2);
     expect(compact.length).toBeLessThan(pretty.length);
+  });
+});
+
+describe("withIsErrorOnFailure", () => {
+  test("success returns the same envelope without isError", () => {
+    const response = { content: [{ type: "text" as const, text: '{"success":true}' }] };
+    const result = withIsErrorOnFailure(response, true);
+    expect(result).toBe(response);
+    expect(result.isError).toBeUndefined();
+    expect(result).not.toHaveProperty("isError");
+  });
+
+  test("failure adds isError without changing or mutating the payload", () => {
+    const payload = { success: false, error: "operation failed" };
+    const response = {
+      content: [{ type: "text" as const, text: JSON.stringify(payload) }],
+      structuredContent: payload,
+    };
+    const result = withIsErrorOnFailure(response, false);
+    expect(result).toEqual({ ...response, isError: true });
+    expect(result.content).toBe(response.content);
+    expect(result.structuredContent).toBe(payload);
+    expect(response).not.toHaveProperty("isError");
   });
 });

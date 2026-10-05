@@ -116,6 +116,7 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { displayWaitInventory } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import {
+  withIsErrorOnFailure,
   awaitWhileRequestIsLive,
   throwIfAborted,
   createJSONToolResponse,
@@ -3216,10 +3217,11 @@ export function registerInteractionTools() {
         ? "Device unlocked"
         : "Device awake"
       : `Failed to unlock device: ${result.error ?? "unknown error"}`;
-    return createStructuredToolResponse({
+    const response = createStructuredToolResponse({
       message: result.warning ? `${message}. Warning: ${result.warning}` : message,
       ...result,
     });
+    return withIsErrorOnFailure(response, result.success);
   };
 
   // Open link handler
@@ -3312,9 +3314,10 @@ export function registerInteractionTools() {
         )
       : null;
 
-    return createStructuredToolResponse(
+    const response = createStructuredToolResponse(
       buildOpenLinkPayload(args.url, effectiveResult, waitOutcome),
     );
+    return withIsErrorOnFailure(response, effectiveResult.success);
   };
 
   // Shake handler
@@ -3335,13 +3338,14 @@ export function registerInteractionTools() {
         signal,
       );
 
-      return createJSONToolResponse({
+      const response = createJSONToolResponse({
         message: result.success
           ? `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`
           : `Failed to shake device: ${result.error ?? "unknown error"}`,
         observation: result.observation,
         ...result,
       });
+      return withIsErrorOnFailure(response, result.success);
     } catch (error) {
       throw toActionableError(error, `Failed to shake device`);
     }
@@ -3374,7 +3378,8 @@ export function registerInteractionTools() {
       const result = await keyboard.execute(args.action, signal);
       throwIfAborted(signal);
 
-      return createStructuredToolResponse(result);
+      const response = createStructuredToolResponse(result);
+      return withIsErrorOnFailure(response, result.success);
     } catch (error) {
       throwIfAborted(signal);
       throw toActionableError(error, `Failed to execute keyboard ${args.action}`);
@@ -3415,11 +3420,12 @@ export function registerInteractionTools() {
       const homeScreen = new HomeScreen(device);
       const result = await homeScreen.execute(progress, signal);
 
-      return createJSONToolResponse({
+      const response = createJSONToolResponse({
         message: "Pressed home button to return to the home screen",
         observation: result.observation,
         ...result,
       });
+      return withIsErrorOnFailure(response, result.success);
     } catch (error) {
       throwIfAborted(signal);
       throw toActionableError(error, `Failed to go to home screen`);

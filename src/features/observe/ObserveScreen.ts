@@ -128,6 +128,7 @@ import {
   observedIosDisplay,
 } from "./ObservationDisplay";
 import { displayTransitions, type DisplayCaptureStart } from "./DisplayTransition";
+import { selectedDisplayPin } from "./SessionDisplayContext";
 import {
   assertAllDisplayObserveSupported,
   DisplaySelectionError,
@@ -1117,6 +1118,29 @@ export class RealObserveScreen implements ObserveScreen {
     await this.hierarchyCollector.collectRaw(result, signal);
   }
 
+  private async readCachedObservationForTarget(): Promise<ObserveResult | undefined> {
+    const stored = await getObserveCacheStore().getMostRecent(this.device.deviceId);
+    if (!stored || (this.device.displays?.panels.length ?? 0) <= 1) {
+      return stored;
+    }
+    const focusedPanel = displayTransitions.currentObservedPanel(this.device.deviceId);
+    // Explicit observations do not update the default panel's transition stamp.
+    // Before its first observation, reuse the existing live display resolver.
+    const activeDisplay = focusedPanel
+      ? undefined
+      : this.device.platform === "android"
+        ? (await this.observedAndroidDisplayCache.resolve(this.device, this.adb)).display
+        : observedIosDisplay(this.device, stored.viewHierarchy);
+    const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {
+      focusedPanelKey: focusedPanel?.key,
+      activePanelKey: activeDisplay?.key,
+      posture: activeDisplay?.posture,
+      displayPin: selectedDisplayPin(),
+    });
+    // Keep the entry for repeated explicit-panel reads; a different target is a miss.
+    return stored.display.key === panel.key ? stored : undefined;
+  }
+
   /**
    * Get the most recent cached observe result from memory or disk cache.
    */
@@ -1124,7 +1148,7 @@ export class RealObserveScreen implements ObserveScreen {
     const startTime = this.timer.now();
     try {
       logger.debug("[OBSERVE_CACHE] Getting most recent cached observe result");
-      const stored = await getObserveCacheStore().getMostRecent(this.device.deviceId);
+      const stored = await this.readCachedObservationForTarget();
       const cached =
         stored && this.device.platform === "ios"
           ? {

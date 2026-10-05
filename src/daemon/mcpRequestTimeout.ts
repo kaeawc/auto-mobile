@@ -24,6 +24,7 @@ import {
   LONG_PRESS_TIMEOUT_HEADROOM_MS,
 } from "../features/action/TapAnyElement";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
+import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "../features/action/installAppTimeout";
 
 export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS, MAX_SETTIMEOUT_DELAY_MS };
 
@@ -113,6 +114,21 @@ export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 90_000;
  */
 export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
 
+/** Headroom for install inventory, force-stop, user restoration and verification. */
+export const INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS = 30_000;
+
+/**
+ * Floor for `installApp` — Android downgrade recovery can consume three full
+ * transfer budgets: the initial install, package-wide uninstall, and reinstall.
+ * Budget the entire chain plus headroom rather than aborting after removal when
+ * only one transfer was allowed. Share the action's per-command constant so the
+ * outer deadline tracks its budget. Headroom is an allowance, not a bound on
+ * arbitrary user counts or transport delays; cancellation can still interrupt
+ * recovery after uninstall.
+ */
+export const MIN_INSTALL_APP_MCP_TIMEOUT_MS =
+  3 * ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS;
+
 /**
  * Floor for preference tools — iOS `setPreference` has a 30s write/read-back
  * deadline and direct `getPreference` permits independently retried value and
@@ -178,6 +194,7 @@ const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS = Math.max(
 
 const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
   setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+  uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
   getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
   setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -245,8 +262,8 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
       return MIN_LAUNCH_APP_MCP_TIMEOUT_MS;
     case "videoRecording":
       return MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS;
-    case "uninstallApp":
-      return MIN_UNINSTALL_APP_MCP_TIMEOUT_MS;
+    case "installApp":
+      return MIN_INSTALL_APP_MCP_TIMEOUT_MS;
     case "openLink":
       return resolveEnvTimeoutFloorMs(
         OPEN_LINK_MCP_TIMEOUT_ENV_VAR,

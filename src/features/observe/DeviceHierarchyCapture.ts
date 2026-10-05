@@ -34,8 +34,11 @@ import {
   type ObservationReadServiceStart,
 } from "./ObservationReadServiceStart";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { fixedBackoff } from "../../utils/Backoff";
+import { logger } from "../../utils/logger";
 
 export const DEFAULT_HIERARCHY_READ_TIMEOUT_MS = 15000;
+const incompleteHierarchyBackoff = fixedBackoff(100);
 
 /** Dynamic platform bridge: normalizers own the raw response shape. */
 export interface HierarchySyncClient {
@@ -255,20 +258,11 @@ async function connectObserverHierarchy(options: ObserverConnectionOptions): Pro
   return serviceStarted;
 }
 
-async function normalizeSyncedHierarchy(options: {
-  device: BootedDevice;
-  dependencies: DeviceHierarchyCaptureDependencies;
-  syncClient: HierarchySyncClient;
-  synced: { hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] };
-  deadline: number;
-  signal?: AbortSignal;
-  timer: Timer;
-  observerMode?: boolean;
-}): Promise<ViewHierarchyResult> {
-  const { device, dependencies, syncClient, synced, deadline, signal, timer } = options;
-  if (device.platform === "ios") {
-    return normalizeSyncedIosHierarchy(syncClient, synced, timer);
-  }
+function normalizeSyncedAndroidHierarchy(
+  syncClient: HierarchySyncClient,
+  synced: { hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] },
+  timer: Timer,
+): ViewHierarchyResult {
   const hierarchy = syncClient.convertToViewHierarchyResult(synced.hierarchy);
   const updatedAt = (synced.hierarchy as { updatedAt?: number } | null)?.updatedAt;
   if (typeof updatedAt === "number" && Number.isFinite(updatedAt)) {
@@ -279,8 +273,64 @@ async function normalizeSyncedHierarchy(options: {
   if (synced.frameContext !== undefined) {
     hierarchy.frameContext = synced.frameContext;
   }
+  return hierarchy;
+}
+
+async function normalizeSyncedHierarchy(options: {
+  device: BootedDevice;
+  dependencies: DeviceHierarchyCaptureDependencies;
+  syncClient: HierarchySyncClient;
+  synced: { hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] };
+  deadline: number;
+  request: HierarchyCaptureRequest;
+  timer: Timer;
+  owned: boolean;
+}): Promise<ViewHierarchyResult> {
+  const { device, dependencies, syncClient, deadline, request, timer, owned } = options;
+  let synced = options.synced;
+  if (device.platform === "ios") {
+    return normalizeSyncedIosHierarchy(syncClient, synced, timer);
+  }
+  let hierarchy = normalizeSyncedAndroidHierarchy(syncClient, synced, timer);
   // UIAutomator supplementation writes a dump and can interfere with an owner action.
-  if (options.observerMode || !hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
+  if (request.observerMode || !hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
+    return hierarchy;
+  }
+  // A window transition can briefly withhold roots. Give the answering service one
+  // fresh read before a dump displaces it; persistent incompleteness still needs XML.
+  const delay = incompleteHierarchyBackoff.delayForAttempt(1);
+  if (deadline - timer.now() > delay) {
+    try {
+      synced = await raceWithDeadline(
+        async () => {
+          await timer.sleep(delay);
+          request.signal?.throwIfAborted();
+          const remaining = deadline - timer.now();
+          if (remaining <= 0) {
+            throw new ActionableError(
+              `Device ${device.deviceId} hierarchy retry deadline exhausted`,
+            );
+          }
+          return requestSyncHierarchy(syncClient, request, {
+            timeoutMs: remaining,
+            deviceId: device.deviceId,
+            owned,
+          });
+        },
+        {
+          timer,
+          timeoutMs: deadline - timer.now(),
+          signal: request.signal,
+          label: `Device ${device.deviceId} incomplete hierarchy retry`,
+        },
+      );
+      hierarchy = normalizeSyncedAndroidHierarchy(syncClient, synced, timer);
+    } catch (error) {
+      request.signal?.throwIfAborted();
+      logger.warn("[HierarchyCapture] Incomplete CtrlProxy hierarchy retry failed", error);
+    }
+  }
+  if (!hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
     return hierarchy;
   }
   const supplemented = await supplementAndroidHierarchy(
@@ -291,9 +341,9 @@ async function normalizeSyncedHierarchy(options: {
       idGenerator: dependencies.ids,
     },
     deadline,
-    signal,
+    request.signal,
   );
-  recordAcquisitionTimestamp(supplemented, updatedAt);
+  recordAcquisitionTimestamp(supplemented, hierarchy.updatedAt);
   return supplemented;
 }
 
@@ -355,9 +405,9 @@ export function createDeviceHierarchyCapture(
           syncClient,
           synced,
           deadline,
-          signal: request.signal,
           timer,
-          observerMode: request.observerMode,
+          request,
+          owned,
         });
         // Action captures may carry native timestamp provenance in a WeakMap.
         // Only observer captures need call-scoped start metadata.

@@ -143,6 +143,9 @@ export async function supplementAndroidHierarchy(
     if (original.packageName !== undefined && original.packageName !== foreground.packageName) {
       return original;
     }
+    logger.warn(
+      `[HierarchyFallback] Supplementing incomplete CtrlProxy hierarchy (ctrlProxyIncompleteReason=${original.ctrlProxyIncompleteReason ?? "unknown"})`,
+    );
     await execute(["shell", "uiautomator", "dump", path]);
     const result = await execute(["shell", "cat", path]);
     throwIfAborted(signal);

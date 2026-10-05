@@ -1200,6 +1200,24 @@ function artifactExecutePlanPayload(
     }
   }
 
+  if (Array.isArray(payload.deviceFailures)) {
+    nextPayload.deviceFailures = payload.deviceFailures.map((failure) => {
+      if (!isRecord(failure)) {
+        return failure;
+      }
+      const failureObservation = artifactPlanObservation(
+        ctx,
+        failure.failureObservation,
+        "ExecutePlanFailureObservation",
+      );
+      if (!failureObservation) {
+        return failure;
+      }
+      changed = true;
+      return { ...failure, failureObservation };
+    });
+  }
+
   if (isRecord(payload.debug) && Array.isArray(payload.debug.steps)) {
     let debugChanged = false;
     const steps = payload.debug.steps.map((step) => {

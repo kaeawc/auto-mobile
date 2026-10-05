@@ -20,6 +20,7 @@ import {
   type PlanExecutionOptions,
   type PlanStepWarnings,
   type PlanSkippedStep,
+  type PlanDeviceFailure,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
@@ -113,27 +114,44 @@ interface ParallelTrackFailure {
   abortConsequence: boolean;
 }
 
+/** Real causes first, then plan index (-1 last), then declared device order. */
+function compareParallelFailures(a: ParallelTrackFailure, b: ParallelTrackFailure): number {
+  if (a.abortConsequence !== b.abortConsequence) {
+    return a.abortConsequence ? 1 : -1;
+  }
+  const aIndex = a.failedStep.stepIndex === -1 ? Infinity : a.failedStep.stepIndex;
+  const bIndex = b.failedStep.stepIndex === -1 ? Infinity : b.failedStep.stepIndex;
+  if (aIndex !== bIndex) {
+    return aIndex < bIndex ? -1 : 1;
+  }
+  return a.deviceOrder - b.deviceOrder;
+}
+
+/** Omit the summary for successful plans and one-device partitions. */
+function parallelDeviceFailuresField(
+  failures: readonly ParallelTrackFailure[],
+  devices: readonly string[],
+): { deviceFailures?: PlanDeviceFailure[] } {
+  if (devices.length < 2 || failures.length === 0) {
+    return {};
+  }
+  return {
+    deviceFailures: [...failures]
+      .sort(compareParallelFailures)
+      .map(({ failedStep, deviceOrder }) => ({
+        ...failedStep,
+        device: devices[deviceOrder],
+      })),
+  };
+}
+
 /** Choose a stable failure after all tracks settle, preserving the abort's cause. */
 export function selectParallelFailure(
   failures: readonly ParallelTrackFailure[],
 ): PlanExecutionResult["failedStep"] {
   let selected: ParallelTrackFailure | undefined;
   for (const candidate of failures) {
-    if (!selected || (selected.abortConsequence && !candidate.abortConsequence)) {
-      selected = candidate;
-      continue;
-    }
-    if (candidate.abortConsequence !== selected.abortConsequence) {
-      continue;
-    }
-    const candidateIndex =
-      candidate.failedStep.stepIndex === -1 ? Infinity : candidate.failedStep.stepIndex;
-    const selectedIndex =
-      selected.failedStep.stepIndex === -1 ? Infinity : selected.failedStep.stepIndex;
-    if (
-      candidateIndex < selectedIndex ||
-      (candidateIndex === selectedIndex && candidate.deviceOrder < selected.deviceOrder)
-    ) {
+    if (!selected || compareParallelFailures(candidate, selected) < 0) {
       selected = candidate;
     }
   }
@@ -1181,6 +1199,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       executedSteps: totalExecutedSteps,
       totalSteps,
       failedStep: selectParallelFailure(failures),
+      ...parallelDeviceFailuresField(failures, partitionedPlan.devices),
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(skippedSteps.length > 0 ? { skippedSteps } : {}),

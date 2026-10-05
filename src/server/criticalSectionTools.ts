@@ -1,10 +1,11 @@
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
+import { waitForTimeoutError } from "../utils/plan/waitForTimeout";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, toActionableError } from "../models/index";
 import { logger } from "../utils/logger";
-import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
+import { createJSONToolResponse, getStructuredPayload, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
@@ -199,6 +200,13 @@ async function executeCriticalSectionSteps(
       if (toolResult?.success === false) {
         const errorMsg = formatCriticalSectionError(toolResult, step.tool);
         throw new ActionableError(errorMsg);
+      }
+      const timeoutError = waitForTimeoutError(
+        getStructuredPayload(toolResult) ?? toolResult,
+        step.tool,
+      );
+      if (timeoutError) {
+        throw new ActionableError(timeoutError);
       }
 
       warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));

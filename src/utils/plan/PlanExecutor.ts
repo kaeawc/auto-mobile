@@ -1,4 +1,5 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
+import { waitForTimeoutError } from "./waitForTimeout";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
@@ -244,20 +245,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
     }
     return null;
-  }
-
-  /**
-   * Observe with waitFor returns awaitTimeout: true when the condition is not met within the timeout.
-   * The handler does not set success: false, so the executor must treat that as a failed step.
-   */
-  private observeWaitForTimedOut(response: unknown): { awaitDuration?: number } | null {
-    const payload = this.parseStructuredToolPayload(response);
-    if (!payload || payload.awaitTimeout !== true) {
-      return null;
-    }
-    return {
-      awaitDuration: typeof payload.awaitDuration === "number" ? payload.awaitDuration : undefined,
-    };
   }
 
   /**
@@ -585,10 +572,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         };
       }
 
-      const observeTimedOut =
-        step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
-      if (observeTimedOut) {
-        const error = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
+      const error = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, step.tool);
+      if (error) {
         if (step.optional) {
           return {
             status: "skipped",

@@ -71,3 +71,38 @@ EOF
   [ "$status" -eq 124 ]
   [[ "$output" == *"WATCHDOG: real timeout exceeded 1s; last started-but-not-ended file: running.test.ts"* ]]
 }
+
+
+@test "macOS watchdog records sorted CPU RSS and pressure diagnostics despite sampler errors" {
+  stub_bin="$BATS_TEST_TMPDIR/bin"
+  snapshot="$BATS_TEST_TMPDIR/watchdog.txt"
+  mkdir -p "$stub_bin"
+  printf '#!/usr/bin/env bash\nprintf "Darwin\\n"\n' > "$stub_bin/uname"
+  cat > "$stub_bin/ps" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == '-axo pid,%cpu,rss,command' ]]; then
+  printf 'PID %%CPU RSS COMMAND\n1 2 100 small\n2 3 200 large\n'
+else
+  exec /bin/ps "$@"
+fi
+EOF
+  cat > "$stub_bin/vm_stat" <<'EOF'
+#!/usr/bin/env bash
+printf 'fake vm_stat\n'
+exit 42
+EOF
+  cat > "$stub_bin/memory_pressure" <<'EOF'
+#!/usr/bin/env bash
+printf 'fake memory_pressure\n'
+exit 42
+EOF
+  chmod +x "$stub_bin/"*
+  run env PATH="$stub_bin:$PATH" AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$snapshot" \
+    bash -c 'source scripts/ios/run_with_timeout.sh; run_with_timeout 1 bash -c "sleep 5"'
+  [ "$status" -eq 124 ]
+  grep -Fq 'fake vm_stat' "$snapshot"
+  grep -Fq 'fake memory_pressure' "$snapshot"
+  # RSS descending; optional sampler failures do not replace timeout status.
+  [ "$(sed -n '/macOS CPU\/RSS/{n;p;}' "$snapshot")" = '2 3 200 large' ]
+}

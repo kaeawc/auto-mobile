@@ -71,6 +71,20 @@ run_with_timeout() {
             } > "$snapshot_file" 2>&1 || true
           fi
         fi
+        # Optional macOS pressure diagnostics. Run separately from signalling so
+        # a missing/failing sampler cannot postpone the deadline's TERM/KILL.
+        if [ "$(uname -s 2> /dev/null || true)" = Darwin ]; then
+          (
+            printf '\nmacOS CPU/RSS (top 15 by RSS; RSS in KiB)\n'
+            ps -axo pid,%cpu,rss,command | sort -k3,3nr | sed -n '1,15p' || true
+            printf '\nvm_stat\n'
+            vm_stat || true
+            if command -v memory_pressure > /dev/null 2>&1; then
+              printf '\nmemory_pressure\n'
+              memory_pressure || true
+            fi
+          ) >> "$snapshot_file" 2>&1 &
+        fi
         # A negative pid targets the process group. Fall back to the bare pid
         # in case the child never became group leader.
         kill -TERM -"${cmd_pid}" 2> /dev/null || kill -TERM "${cmd_pid}" 2> /dev/null || true

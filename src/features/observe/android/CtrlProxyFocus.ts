@@ -384,9 +384,12 @@ export class CtrlProxyFocus {
   }
 
   private copyNodeFlags(node: AccessibilityNode, converted: Record<string, unknown>): void {
+    // Enabled defaults to true, unlike the default-false flags below.
+    if (node.enabled !== undefined && node.enabled !== null) {
+      converted.enabled = node.enabled;
+    }
     for (const key of [
       "clickable",
-      "enabled",
       "focusable",
       "focused",
       "scrollable",

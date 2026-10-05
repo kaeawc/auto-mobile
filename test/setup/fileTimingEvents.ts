@@ -2,7 +2,7 @@ import { appendFileSync } from "node:fs";
 
 export type TimingEvent =
   | { event: "start"; file: string; t: number }
-  | { event: "end"; file: string; t: number; elapsedMs: number };
+  | { event: "end"; file: string; t: number; elapsedMs: number; rss?: number };
 
 export function appendTimingEvent(
   logPath: string | undefined,

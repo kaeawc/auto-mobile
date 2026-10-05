@@ -23,6 +23,11 @@ const playground = fixture("dumpsys-package-installed");
 const read = "android.permission.READ_EXTERNAL_STORAGE";
 const post = "android.permission.POST_NOTIFICATIONS";
 const camera = "android.permission.CAMERA";
+const development = "android.permission.WRITE_SECURE_SETTINGS";
+// Derive an install-time development permission from the captured WRITE_SETTINGS entry.
+const developmentDenied = egg
+  .replaceAll("android.permission.WRITE_SETTINGS", development)
+  .replace(`${development}: granted=true`, `${development}: granted=false`);
 const flip = (capture: string, permission: string, granted: boolean) =>
   capture.replace(`${permission}: granted=${!granted}`, `${permission}: granted=${granted}`);
 function harness(before = egg, after = before) {
@@ -102,15 +107,94 @@ test.each([
   expect(h.adb.wasCommandExecuted(`shell pm ${action}`)).toBe(false);
 });
 
-test("install-time permissions fail before pm", async () => {
+test("not-changeable install permission fails with pm's SecurityException", async () => {
   const h = harness(playground);
+  const reason =
+    "java.lang.SecurityException: Permission android.permission.INTERNET requested by dev.jasonpearson.automobile.playground is not a changeable permission type";
+  h.adb.setCommandResponse("shell pm revoke", { stdout: "", stderr: reason });
   const result = await h.action.execute("dev.jasonpearson.automobile.playground", {
+    action: "revoke",
     permissions: ["android.permission.INTERNET"],
     userId: 0,
   });
   expect(result.success).toBe(false);
-  expect(result.results[0].error).toContain("not a runtime/changeable permission");
-  expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(false);
+  expect(result.results[0].error).toBe(reason);
+  expect(h.adb.wasCommandExecuted("shell pm revoke")).toBe(true);
+});
+
+test.each(["grant", "revoke"] as const)(
+  "%s verifies requested development install permission in its install block",
+  async (action) => {
+    const granted = flip(developmentDenied, development, true);
+    const h = harness(
+      action === "grant" ? developmentDenied : granted,
+      action === "grant" ? granted : developmentDenied,
+    );
+    expect(
+      await h.permissions.setPermissions("com.android.egg", {
+        action,
+        permissions: [development],
+        userId: 0,
+      }),
+    ).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(h.adb.getExecutedCommands()).toEqual([
+      "shell dumpsys package 'com.android.egg'",
+      `shell pm ${action} --user 0 'com.android.egg' '${development}'`,
+      "shell dumpsys package 'com.android.egg'",
+    ]);
+  },
+);
+
+test.each(["grant", "revoke"] as const)(
+  "%s skips install permission already in requested state",
+  async (action) => {
+    const h = harness(
+      action === "grant" ? flip(developmentDenied, development, true) : developmentDenied,
+    );
+    const result = await h.permissions.setPermissions("com.android.egg", {
+      action,
+      permissions: [development],
+      userId: 0,
+    });
+    expect(result).toMatchObject({ success: true, changedCount: 0, failedCount: 0 });
+    expect(result.operations[0].result).toMatchObject({
+      results: [
+        {
+          success: true,
+          skipped: true,
+          skipReason: `already ${action === "grant" ? "granted" : "revoked"}`,
+        },
+      ],
+    });
+    expect(h.adb.wasCommandExecuted(`shell pm ${action}`)).toBe(false);
+  },
+);
+
+test("accepted install grant without changed install state fails verification", async () => {
+  const h = harness(developmentDenied);
+  const result = await h.action.execute("com.android.egg", {
+    permissions: [development],
+    userId: 0,
+  });
+  expect(result.success).toBe(false);
+  expect(result.results[0].error).toContain("verification failed");
+  expect(result.results[0].error).toContain("pm output: (empty)");
+  expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(true);
+});
+
+test("install verification does not accept a grant recorded only in runtime state", async () => {
+  const after = developmentDenied.replace(
+    "      runtime permissions:\n",
+    `      runtime permissions:\n        ${development}: granted=true\n`,
+  );
+  const h = harness(developmentDenied, after);
+  const result = await h.action.execute("com.android.egg", {
+    permissions: [development],
+    userId: 0,
+  });
+  expect(result.success).toBe(false);
+  expect(result.results[0].error).toContain("original permission block");
+  expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(true);
 });
 
 test.each(["grant", "revoke"] as const)(
@@ -230,12 +314,79 @@ test("duplicate runtime permission counts the state change once", async () => {
   ).toHaveLength(1);
 });
 
-test("requested permission without target-user runtime state fails without pm", async () => {
+test("requested permission without target-user state attempts pm and reports absent evidence", async () => {
   const h = harness();
   const result = await h.action.execute("com.android.egg", { permissions: [read], userId: 10 });
   expect(result.success).toBe(false);
-  expect(result.results[0].error).toContain("Cannot determine runtime permission state");
-  expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(false);
+  expect(result.results[0].error).toContain("absent from runtime and install permissions");
+  expect(result.results[0].error).toContain("pm output: (empty)");
+  expect(h.adb.wasCommandExecuted("shell pm grant --user 10")).toBe(true);
+});
+
+test.each(["runtime", "install"] as const)(
+  "absent runtime block attempts pm and verifies new %s evidence",
+  async (block) => {
+    // Rename the captured runtime header so its permission entries are not parsed.
+    const before = egg.replace("      runtime permissions:", "      unreadable permissions:");
+    const after =
+      block === "runtime"
+        ? flip(egg, read, true)
+        : before.replace(
+            "    install permissions:\n",
+            `    install permissions:\n      ${read}: granted=true\n`,
+          );
+    const h = harness(before, after);
+    const result = await h.action.execute("com.android.egg", { permissions: [read], userId: 0 });
+    expect(result.success).toBe(true);
+    expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(true);
+    expect(h.adb.getExecutedCommands()).toHaveLength(3);
+  },
+);
+
+test("absent runtime state retains pm's has-not-requested reason after re-read", async () => {
+  const h = harness(egg.replace("      runtime permissions:", "      unreadable permissions:"));
+  const reason = `java.lang.SecurityException: Package com.android.egg has not requested permission ${read}`;
+  h.adb.setCommandResponse("shell pm grant", { stdout: "", stderr: reason });
+  const result = await h.action.execute("com.android.egg", { permissions: [read], userId: 0 });
+  expect(result.success).toBe(false);
+  expect(result.results[0].error).toBe(reason);
+  expect(h.adb.getExecutedCommands()).toHaveLength(3);
+});
+
+test("permission missing from present runtime block attempts pm and verifies re-read", async () => {
+  const before = egg
+    .split("\n")
+    .filter((line) => !line.trim().startsWith(`${read}:`))
+    .join("\n");
+  const h = harness(before, flip(egg, read, true));
+  const result = await h.action.execute("com.android.egg", { permissions: [read], userId: 0 });
+  expect(result.success).toBe(true);
+  expect(h.adb.wasCommandExecuted("shell pm grant")).toBe(true);
+});
+
+test("app installed only for user 10 uses that user for get and grant verification", async () => {
+  const user10 = egg.replaceAll("User 0:", "User 10:");
+  const h = harness(user10, flip(user10, read, true));
+  h.adb.setUsers([
+    { userId: 0, name: "Owner", flags: 0x13, running: true },
+    { userId: 10, name: "Work", flags: 0x30, running: true },
+  ]);
+  h.adb.setCommandResponse("shell pm list packages --user 0", { stdout: "", stderr: "" });
+  h.adb.setCommandResponse("shell pm list packages --user 10", {
+    stdout: "package:com.android.egg",
+    stderr: "",
+  });
+  const before = await h.permissions.getPermissions("com.android.egg", { permissions: [read] });
+  expect(before.permissions[0].state).toBe("denied");
+  h.adb.setCommandResponseSequence(
+    "shell dumpsys package",
+    [user10, flip(user10, read, true)].map((stdout) => ({ stdout, stderr: "" })),
+  );
+  const result = await h.action.execute("com.android.egg", { permissions: [read] });
+  expect(result).toMatchObject({ success: true, userId: 10 });
+  expect(h.adb.wasCommandExecuted("shell pm grant --user 10")).toBe(true);
+  const after = await h.permissions.getPermissions("com.android.egg", { permissions: [read] });
+  expect(after.permissions[0].state).toBe("granted");
 });
 
 test("multiple runtime changes share a single post-read and trimmed names", async () => {

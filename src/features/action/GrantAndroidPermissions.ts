@@ -126,7 +126,6 @@ export class GrantAndroidPermissions {
       for (const permission of permissions) {
         const item = this.classifyPermission(permission, before, {
           packageName,
-          targetUserId,
           action,
         });
         results.push(item);
@@ -149,7 +148,7 @@ export class GrantAndroidPermissions {
         );
         attempted.push({ item, output });
       }
-      await this.verifyPermissions(packageName, targetUserId, action, attempted);
+      await this.verifyPermissions(packageName, targetUserId, action, attempted, before);
     } finally {
       perf.end();
     }
@@ -177,10 +176,10 @@ export class GrantAndroidPermissions {
   private classifyPermission(
     permission: string,
     before: AndroidPackagePermissionState,
-    context: { packageName: string; targetUserId: number; action: "grant" | "revoke" },
+    context: { packageName: string; action: "grant" | "revoke" },
   ): GrantAndroidPermissionItemResult {
     const trimmed = permission.trim();
-    const { packageName, targetUserId, action } = context;
+    const { packageName, action } = context;
     const item: GrantAndroidPermissionItemResult = {
       operationId: `pm_${action}:${trimmed || "(empty)"}`,
       permission: trimmed || permission,
@@ -191,12 +190,9 @@ export class GrantAndroidPermissions {
       item.error = "empty permission name";
     } else if (!before.requestedPermissions.has(trimmed)) {
       item.error = `${trimmed} is not requested by ${packageName} (not declared in its manifest); nothing was changed`;
-    } else if (before.installPermissions.has(trimmed)) {
-      item.error = `${trimmed} is not a runtime/changeable permission; nothing was changed`;
-    } else if (!before.runtimePermissions.has(trimmed)) {
-      item.error = `Cannot determine runtime permission state for ${trimmed} for Android user ${targetUserId}; nothing was changed`;
     } else if (
-      before.runtimePermissions.get(trimmed)?.state === (action === "grant" ? "granted" : "denied")
+      (before.runtimePermissions.get(trimmed) ?? before.installPermissions.get(trimmed))?.state ===
+      (action === "grant" ? "granted" : "denied")
     ) {
       item.success = true;
       item.skipped = true;
@@ -240,6 +236,7 @@ export class GrantAndroidPermissions {
     userId: number,
     action: "grant" | "revoke",
     attempted: Array<{ item: GrantAndroidPermissionItemResult; output: string }>,
+    before: AndroidPackagePermissionState,
   ): Promise<void> {
     if (attempted.length === 0) {
       return;
@@ -247,14 +244,8 @@ export class GrantAndroidPermissions {
     try {
       const after = await this.readPermissionState(packageName, userId);
       const expected = action === "grant" ? "granted" : "denied";
-      for (const { item, output } of attempted) {
-        if (item.error) {
-          continue;
-        }
-        item.success = after.runtimePermissions.get(item.permission!)?.state === expected;
-        if (!item.success) {
-          item.error = `Permission state verification failed for ${item.permission}: expected ${expected} for Android user ${userId}${output ? `; pm output: ${output}` : ""}`;
-        }
+      for (const attempt of attempted) {
+        this.verifyPermission(attempt, before, after, userId, expected);
       }
     } catch (cause) {
       logger.warn(
@@ -263,6 +254,35 @@ export class GrantAndroidPermissions {
       for (const { item } of attempted) {
         item.error ??= errorMessage(cause);
       }
+    }
+  }
+
+  private verifyPermission(
+    { item, output }: { item: GrantAndroidPermissionItemResult; output: string },
+    before: AndroidPackagePermissionState,
+    after: AndroidPackagePermissionState,
+    userId: number,
+    expected: "granted" | "denied",
+  ): void {
+    if (item.error) {
+      return;
+    }
+    // Preserve the known block; missing pre-state may become runtime or install state.
+    const permission = item.permission!;
+    const observed =
+      after.runtimePermissions.get(permission) ?? after.installPermissions.get(permission);
+    const state = before.runtimePermissions.has(permission)
+      ? after.runtimePermissions.get(permission)
+      : before.installPermissions.has(permission)
+        ? after.installPermissions.get(permission)
+        : observed;
+    item.success = state?.state === expected;
+    if (!item.success) {
+      const detail = observed
+        ? `observed ${observed.state}; required state in original permission block`
+        : "permission absent from runtime and install permissions";
+      item.error = `Permission state verification failed for ${permission}: expected ${expected} for Android user ${userId}; ${detail}; pm output: ${output || "(empty)"}`;
+      logger.warn(`[GrantAndroidPermissions] ${item.error}`);
     }
   }
 

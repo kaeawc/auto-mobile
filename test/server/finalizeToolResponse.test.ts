@@ -1115,6 +1115,9 @@ describe("finalizeToolResponse", () => {
     ): any {
       const metadata = structuredPayload(finalized).observationDiff;
       expect(metadata).toMatchObject(expected);
+      if (!("hint" in expected)) {
+        expect(metadata).not.toHaveProperty("hint");
+      }
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observationDiff).toEqual(metadata);
       return metadata;
@@ -1210,7 +1213,11 @@ describe("finalizeToolResponse", () => {
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
-      expectObservationDiff(finalized, { mode: "full", reason: "disabled" });
+      expectObservationDiff(finalized, {
+        mode: "full",
+        reason: "disabled",
+        hint: "Enable diffs with --actions-diff-observe or the actions-diff-observe feature flag; --actions-no-observe overrides it and strips the observation entirely.",
+      });
       expect(map.size).toBe(0);
     });
 
@@ -2264,8 +2271,8 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
     });
 
@@ -2280,8 +2287,8 @@ describe("finalizeToolResponse", () => {
       expect(observation.viewHierarchy).toBeUndefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
     });
 
@@ -2631,8 +2638,8 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
       expect(map.size).toBe(0);
     });

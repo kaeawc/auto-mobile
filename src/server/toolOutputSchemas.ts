@@ -289,6 +289,7 @@ const observationDiffMetadataSchema = z
       "disabled",
       "stripped_by_actions_no_observe",
     ]),
+    hint: z.string().optional(),
     fromScreen: observationDiffScreenIdentitySchema.optional(),
     toScreen: observationDiffScreenIdentitySchema.optional(),
   })

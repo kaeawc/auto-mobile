@@ -1,3 +1,4 @@
+import { executeAndroidSearchDrag } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
@@ -518,6 +519,28 @@ export class SwipeOn extends BaseVisualChange {
       : { ...observation, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
   }
 
+  private async resolveSearchDisplaySwipeRoute({
+    options,
+    target,
+    signal,
+  }: {
+    options: SwipeOnOptions;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    signal?: AbortSignal;
+  }): Promise<boolean> {
+    if (options.scrollMode === "a11y") {
+      return this.resolveDisplaySwipeRoute({ options, target });
+    }
+    try {
+      return await this.resolveDisplaySwipeRoute({ options, target });
+    } catch (error) {
+      throwIfAborted(signal);
+      // Auto mode's optional capability probe sends no gesture, so ADB remains safe.
+      logger.debug("[SwipeOn] CtrlProxy display gesture capability unavailable", error);
+      return false;
+    }
+  }
+
   private async searchOnAndroidDisplay({
     options,
     target,
@@ -533,7 +556,7 @@ export class SwipeOn extends BaseVisualChange {
     if (direction.error) {
       throw new ActionableError(direction.error);
     }
-    const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
+    const useCtrlProxy = await this.resolveSearchDisplaySwipeRoute({ options, target, signal });
     const display = target.observation.display.key;
     const validateObservation = (observation: ObserveResult) =>
       this.validateSelectedDisplayObservation({
@@ -583,12 +606,36 @@ export class SwipeOn extends BaseVisualChange {
       signal,
       strategy: {
         observe,
-        swipe: async ({ previousObservation, ...coordinates }) => {
+        swipe: async ({ previousObservation, searchDragState, ...coordinates }) => {
           const result = await this.observedInteraction(
             async () => {
-              await this.dispatchDisplaySwipeLeg({ ...coordinates, target, useCtrlProxy, signal });
-              dispatched = true;
-              return { success: true };
+              const fallback = async () => {
+                coordinates.onSearchFallback?.();
+                await this.dispatchDisplaySwipeLeg({
+                  ...coordinates,
+                  target,
+                  useCtrlProxy: false,
+                  signal,
+                });
+                dispatched = true;
+                return { ...coordinates, success: true };
+              };
+              const gesture = await (useCtrlProxy
+                ? executeAndroidSearchDrag({
+                    ...coordinates,
+                    searchDragState,
+                    client: this.accessibilityService,
+                    signal,
+                    displayId: target.displayId === 0 ? undefined : target.displayId,
+                    beforeSend: target.assertCurrent,
+                    fallback,
+                    onIndeterminate: (cause) => {
+                      throw new DispatchedObservationError(cause);
+                    },
+                  })
+                : fallback());
+              dispatched ||= gesture.success;
+              return gesture;
             },
             {
               changeExpected: false,
@@ -610,6 +657,8 @@ export class SwipeOn extends BaseVisualChange {
             ...coordinates,
             targetType: "screen",
             success: result.success,
+            error: result.error,
+            outcomeIndeterminate: result.outcomeIndeterminate,
             observation: result.observation,
             staleDisplay: result.staleDisplay,
           };

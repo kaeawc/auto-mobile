@@ -1,3 +1,7 @@
+import { capLookForTravel } from "./swipeon/lookForScroll";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
+import type { Element } from "../../models";
+import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon/androidSearchDrag";
 import { inputDurationArgument } from "./touchscreenInput";
 import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -23,6 +27,11 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 export interface FencedGestureOptions extends GestureOptions {
   /** Internal opt-in for the iOS lock-screen synthesized swipe. */
   lockScreen?: boolean;
+  /** Search-only drag with an endpoint hold, or a slow ADB fallback. */
+  searchScroll?: boolean;
+  searchScrollBounds?: Element["bounds"];
+  onSearchFallback?: () => void;
+  searchDragState?: AndroidSearchDragState;
   displayFence?: DisplayFence;
 }
 
@@ -92,6 +101,42 @@ export class ExecuteGesture extends BaseVisualChange {
   ): Promise<SwipeResult> {
     const duration = options.duration ?? 300; // Default duration
     const scrollMode = options.scrollMode || "adb"; // Default to ADB mode
+
+    if (options.searchScroll) {
+      const coordinates = options.searchScrollBounds
+        ? capLookForTravel(
+            { startX: x1, startY: y1, endX: x2, endY: y2 },
+            options.searchScrollBounds,
+          )
+        : { startX: x1, startY: y1, endX: x2, endY: y2 };
+      const searchDuration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
+      const fallback = () =>
+        this.executeAndroidSwipe(
+          coordinates.startX,
+          coordinates.startY,
+          coordinates.endX,
+          coordinates.endY,
+          { duration: searchDuration, scrollMode: "adb", displayFence: options.displayFence },
+          perf,
+          signal,
+        );
+      if (options.scrollMode === "adb") {
+        return fallback();
+      }
+      return executeAndroidSearchDrag({
+        client: AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory),
+        x1: coordinates.startX,
+        y1: coordinates.startY,
+        x2: coordinates.endX,
+        y2: coordinates.endY,
+        duration: searchDuration,
+        signal,
+        searchDragState: options.searchDragState,
+        onFallback: options.onSearchFallback,
+        fallback,
+        beforeSend: () => options.displayFence?.assertCurrent(),
+      });
+    }
 
     // Use accessibility service swipe if requested
     if (scrollMode === "a11y") {

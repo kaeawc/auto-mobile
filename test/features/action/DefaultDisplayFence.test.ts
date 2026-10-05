@@ -825,6 +825,11 @@ describe("default-display recovery dispatches", () => {
       `scroll-until-visible ${platform} retains earlier observation: %s`,
       async (mode: Mode) => {
         const h = harness(platform, mode);
+        watch(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
+          success: true,
+          sdkInt: 36,
+          totalTimeMs: 0,
+        });
         let detections = 0;
         watch(h.detector, "detectMethod").mockImplementation(async () => {
           if (++detections === 1) {
@@ -837,7 +842,7 @@ describe("default-display recovery dispatches", () => {
           return false;
         });
         h.observe.setObserveResult(() => {
-          if (h.inputs().length || h.ios.getSwipeHistory().length) {
+          if (h.android.getDragHistory().length || h.ios.getSwipeHistory().length) {
             return {
               ...h.screen,
               viewHierarchy: {
@@ -881,7 +886,8 @@ describe("default-display recovery dispatches", () => {
           expect(result).toMatchObject({ success: true, found: true, scrollIterations: 1 });
         }
         if (platform === "android") {
-          expect(h.inputs()).toHaveLength(mode === "transition" ? 0 : 1);
+          expect(h.android.getDragHistory()).toHaveLength(mode === "transition" ? 0 : 1);
+          expect(h.inputs()).toEqual([]);
         } else {
           expect(h.ios.getSwipeHistory()).toHaveLength(mode === "transition" ? 0 : 1);
         }
@@ -1041,4 +1047,31 @@ describe("display fence options preserve public call shapes", () => {
       }
     });
   }
+});
+
+test("review: explicit adb search preserves the default-display dispatch fence", async () => {
+  const h = harness("android", "unchanged");
+  watch(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
+    success: true,
+    sdkInt: 36,
+    totalTimeMs: 0,
+  });
+  let checks = 0;
+  const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
+  expect(
+    await gesture.swipe(50, 180, 50, 20, {
+      searchScroll: true,
+      scrollMode: "adb",
+      duration: 1,
+      searchScrollBounds: { left: 0, top: 0, right: 100, bottom: 200 },
+      displayFence: {
+        assertCurrent: () => {
+          checks++;
+        },
+      },
+    }),
+  ).toMatchObject({ success: true });
+  expect(h.inputs()).toEqual(["shell input swipe 50 180 50 30 600"]);
+  expect(h.android.getDragHistory()).toEqual([]);
+  expect(checks).toBeGreaterThan(0);
 });

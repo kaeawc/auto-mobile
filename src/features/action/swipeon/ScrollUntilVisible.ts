@@ -66,20 +66,17 @@ import {
   tapPointOutsideIme,
 } from "../../observe/output/SkeletonProjection";
 
-const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
+import {
+  capLookForTravel,
+  LOOK_FOR_HOLD_MS,
+  oppositeDirection,
+  recoverLookForOverlap,
+  visibleScrollKeys,
+} from "./lookForScroll";
 
-function oppositeDirection(dir: SwipeDirection): SwipeDirection {
-  switch (dir) {
-    case "up":
-      return "down";
-    case "down":
-      return "up";
-    case "left":
-      return "right";
-    case "right":
-      return "left";
-  }
-}
+import type { AndroidSearchDragState } from "./androidSearchDrag";
+
+const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
 interface ScrollUntilVisibleDependencies {
   device: BootedDevice;
@@ -136,7 +133,27 @@ export interface ScrollUntilVisibleStrategy {
     y2: number;
     duration: number;
     previousObservation: ObserveResult;
+    holdDurationMs?: number;
+    onSearchFallback?: () => void;
+    searchDragState?: AndroidSearchDragState;
   }) => Promise<SwipeOnResult & { observation: ObserveResult }>;
+}
+
+interface SearchSwipeDispatchOptions {
+  coordinates: { startX: number; startY: number; endX: number; endY: number };
+  direction: SwipeDirection;
+  duration: number;
+  options: SwipeOnResolvedOptions;
+  containerElement: Element;
+  observation: ObserveResult;
+  observationFence?: DisplayFence;
+  strategy?: ScrollUntilVisibleStrategy;
+  scrollIteration: number;
+  perf: PerformanceTracker;
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+  onSearchFallback: () => void;
+  searchDragState: AndroidSearchDragState;
 }
 
 export class ScrollUntilVisible {
@@ -254,31 +271,16 @@ export class ScrollUntilVisible {
       `[SwipeOn] Using container: bounds=${JSON.stringify(containerElement.bounds)}, scrollable=${containerElement.scrollable}`,
     );
 
-    // Calculate container height as percentage of screen height
-    const containerHeight = containerElement.bounds.bottom - containerElement.bounds.top;
-    const screenHeight = lastObservation.screenSize!.height;
-    const heightPercentage = (containerHeight / screenHeight) * 100;
-
-    // Limit speed for lookFor to prevent skipping elements
-    let effectiveSpeed = options.speed;
-    if (heightPercentage >= 80) {
-      if (!effectiveSpeed || effectiveSpeed === "fast") {
-        effectiveSpeed = "normal";
-        logger.info(
-          `[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "normal"`,
+    const lookForOptions = this.resolveLookForOptions(options, containerElement, lastObservation);
+    let fallbackLogged = false;
+    const onSearchFallback = () => {
+      if (!fallbackLogged) {
+        logger.debug(
+          "[SwipeOn] lookFor using slow ADB swipe fallback (600ms, at most 75% viewport)",
         );
+        fallbackLogged = true;
       }
-    } else {
-      if (!effectiveSpeed || effectiveSpeed === "normal" || effectiveSpeed === "fast") {
-        effectiveSpeed = "slow";
-        logger.info(
-          `[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "slow"`,
-        );
-      }
-    }
-
-    // Override options speed for the duration calculations
-    const lookForOptions = { ...options, speed: effectiveSpeed };
+    };
 
     const maxTime = options.lookFor!.maxTime ?? 15000;
     const startTime = this.deps.timer.now();
@@ -362,6 +364,8 @@ export class ScrollUntilVisible {
       };
     }
 
+    const searchDragState: AndroidSearchDragState = {};
+    let overlapRecoveryUsed = false;
     let interruptedDisplay: StaleDisplayDetails | undefined;
     let swipeWarning: string | undefined;
     let lastAndroidSwipeError: string | undefined;
@@ -395,9 +399,21 @@ export class ScrollUntilVisible {
       );
 
       // Perform scroll
-      const activeCoords = reverseMode ? reverseSwipeCoords : swipeCoordinates;
+      const previousKeys = visibleScrollKeys(lastObservation, containerElement);
+      const activeCoords =
+        this.deps.device.platform === "android" && strategy && !reverseMode
+          ? capLookForTravel(swipeCoordinates, reverseBounds)
+          : reverseMode
+            ? reverseSwipeCoords
+            : swipeCoordinates;
       const activeDirection = reverseMode ? reverseDirection : options.direction;
-      const activeDuration = this.deps.getDuration(reverseMode ? reverseOptions : lookForOptions);
+      const activeDuration = this.deps.getDuration(
+        strategy && this.deps.device.platform === "android"
+          ? { ...lookForOptions, duration: undefined, speed: "slow" }
+          : reverseMode
+            ? reverseOptions
+            : lookForOptions,
+      );
       const { startX, startY, endX, endY } = activeCoords;
       const chromeStartWarning = iosSwipeStartWarning({
         observation: lastObservation,
@@ -409,83 +425,30 @@ export class ScrollUntilVisible {
         `[SwipeOn] Swipe: direction=${activeDirection}, coords=(${Math.floor(startX)},${Math.floor(startY)})→(${Math.floor(endX)},${Math.floor(endY)}), duration=${activeDuration}ms`,
       );
 
-      const boomerang = this.deps.resolveBoomerangConfig(options);
-      const gestureOptions: FencedGestureOptions = {
+      searchDragState.pagingStep = false;
+      const swipeResult = await this.dispatchSearchSwipe({
+        coordinates: activeCoords,
+        direction: activeDirection,
         duration: activeDuration,
-        scrollMode: options.scrollMode,
-      };
-
-      // Execute swipe with observedInteraction
-      let iosDispatchTimestamp: number | undefined;
-      const swipeResult: SwipeResult = strategy
-        ? await strategy.swipe({
-            x1: Math.floor(startX),
-            y1: Math.floor(startY),
-            x2: Math.floor(endX),
-            y2: Math.floor(endY),
-            duration: activeDuration,
-            previousObservation: lastObservation,
-          })
-        : await this.deps.observedInteraction(
-            async (_observeResult, fence) => {
-              gestureOptions.displayFence = {
-                assertCurrent: () => {
-                  observationFence?.assertCurrent();
-                  fence?.assertCurrent();
-                },
-              };
-              throwIfAborted(signal);
-              const swipeRunner =
-                this.deps.device.platform === "ios"
-                  ? this.deps.voiceOverExecutor
-                  : this.deps.talkBackExecutor;
-              if (!swipeRunner) {
-                throw new Error(
-                  "VoiceOver swipe runner is not configured for iOS scroll-until-visible",
-                );
-              }
-              const result = await swipeRunner.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                activeDirection,
-                containerElement,
-                gestureOptions,
-                perf,
-                boomerang,
-                signal,
-              );
-              if (this.deps.device.platform === "ios" && result.success) {
-                iosDispatchTimestamp = this.deps.timer.now();
-                IOSCtrlProxyClient.getExistingInstance(
-                  this.deps.device.deviceId,
-                )?.invalidateCache();
-              }
-              return result;
-            },
-            {
-              changeExpected: false,
-              timeoutMs: 500,
-              progress,
-              perf,
-              signal,
-              skipPreviousObserve: scrollIteration > 1,
-              deferPostActionScreenshot: true,
-              observationTimestampProvider: () => iosDispatchTimestamp,
-              predictionContext: {
-                toolName: "swipeOn",
-                toolArgs: this.deps.buildPredictionArgs(options),
-              },
-            },
-          );
+        options,
+        containerElement,
+        observation: lastObservation,
+        observationFence,
+        strategy,
+        scrollIteration,
+        perf,
+        progress,
+        signal,
+        onSearchFallback,
+        searchDragState,
+      });
       throwIfAborted(signal);
 
       if (swipeResult.observation?.viewHierarchy) {
         lastObservation = swipeResult.observation;
       }
 
-      if (swipeResult.staleDisplay) {
+      if (swipeResult.staleDisplay && !swipeResult.outcomeIndeterminate) {
         // The retained capture is validated, but the later read is not. It can
         // prove a match; it cannot authorize another swipe, even near timeout.
         interruptedDisplay = swipeResult.staleDisplay;
@@ -567,16 +530,85 @@ export class ScrollUntilVisible {
         });
       }
 
+      foundElement = await this.findVisibleSearchTarget(options, lastObservation, containerElement);
+      if (foundElement) {
+        break;
+      }
+      let recoveryAttempted = false;
+
+      // Only Android coordinate search steps retain overlap; paging and iOS do not.
+      if (
+        this.shouldGuardSearchStep({
+          failedAndroidSwipe,
+          reverseMode,
+          overlapRecoveryUsed,
+          searchDragState,
+        })
+      ) {
+        const recovered = await this.recoverSearchObservation({
+          previousKeys,
+          observe,
+          deadline: startTime + maxTime,
+          dispatch: {
+            coordinates: activeCoords,
+            direction: activeDirection,
+            duration: activeDuration,
+            options,
+            containerElement,
+            observation: lastObservation,
+            observationFence,
+            strategy,
+            scrollIteration,
+            perf,
+            progress,
+            signal,
+            onSearchFallback,
+            searchDragState,
+          },
+          onRecovery: () => {
+            recoveryAttempted = true;
+            // One bounded recovery episode prevents ambiguous pages repeatedly undoing forward progress.
+            overlapRecoveryUsed = true;
+          },
+        });
+        lastObservation = recovered.observation;
+        interruptedDisplay = recovered.staleDisplay;
+      }
+
+      if (recoveryAttempted) {
+        foundElement = await this.findVisibleSearchTarget(
+          options,
+          lastObservation,
+          containerElement,
+        );
+        if (foundElement) {
+          break;
+        }
+      }
+
       // Check if hierarchy changed (detect scroll end)
       let currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
-      if (currentFingerprint === lastFingerprint && lastObservation.freshness?.isFresh === false) {
+      if (
+        !recoveryAttempted &&
+        currentFingerprint === lastFingerprint &&
+        lastObservation.freshness?.isFresh === false
+      ) {
         logger.info(
           `[SwipeOn] Iteration ${scrollIteration}: stale unchanged observation; re-observing once before scroll-end decision`,
         );
         lastObservation = await observe();
         currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
+        foundElement = await this.findVisibleSearchTarget(
+          options,
+          lastObservation,
+          containerElement,
+        );
+        if (foundElement) {
+          break;
+        }
       }
-      const fingerprintChanged = currentFingerprint !== lastFingerprint;
+      // A guard-restored page is not evidence that the forward step reached the end.
+      const fingerprintChanged = recoveryAttempted || currentFingerprint !== lastFingerprint;
       logger.info(
         `[SwipeOn] Iteration ${scrollIteration}: hierarchy ${fingerprintChanged ? "changed" : "UNCHANGED"} (fingerprint[0:40]="${currentFingerprint.slice(0, 40)}")`,
       );
@@ -629,33 +661,6 @@ export class ScrollUntilVisible {
         lastFingerprint = currentFingerprint;
       }
 
-      logger.info(`[SwipeOn] Iteration ${scrollIteration}: searching for ${target}`);
-
-      // Check if target element is now visible within the container bounds
-      foundElement = await this.findElementInHierarchy(
-        options.lookFor!,
-        lastObservation.viewHierarchy!,
-        options.container,
-        containerElement,
-      );
-
-      if (
-        foundElement &&
-        !this.isElementWithinContainer(foundElement, containerElement.bounds, lastObservation)
-      ) {
-        logger.info(
-          `[SwipeOn] Found ${target} but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), continuing scroll`,
-        );
-        foundElement = null;
-      }
-
-      if (foundElement) {
-        const elapsed = this.deps.timer.now() - startTime;
-        logger.info(
-          `[SwipeOn] Found ${target} after ${scrollIteration} iterations (${elapsed}ms), reverseMode=${reverseMode}, bounds=${JSON.stringify(foundElement.bounds)}`,
-        );
-        break;
-      }
       logger.info(`[SwipeOn] Iteration ${scrollIteration}: ${target} not yet found`);
     }
 
@@ -696,6 +701,264 @@ export class ScrollUntilVisible {
       warning: swipeWarning,
       ...(interruptedDisplay ? { staleDisplay: interruptedDisplay } : {}),
     };
+  }
+
+  private resolveLookForOptions(
+    options: SwipeOnResolvedOptions,
+    containerElement: Element,
+    observation: ObserveResult,
+  ): SwipeOnResolvedOptions {
+    // Calculate container height as percentage of screen height
+    const containerHeight = containerElement.bounds.bottom - containerElement.bounds.top;
+    const screenHeight = observation.screenSize!.height;
+    const heightPercentage = (containerHeight / screenHeight) * 100;
+
+    // Limit speed for lookFor to prevent skipping elements
+    let effectiveSpeed = options.speed;
+    if (heightPercentage >= 80) {
+      if (!effectiveSpeed || effectiveSpeed === "fast") {
+        effectiveSpeed = "normal";
+        logger.info(
+          `[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "normal"`,
+        );
+      }
+    } else {
+      if (!effectiveSpeed || effectiveSpeed === "normal" || effectiveSpeed === "fast") {
+        effectiveSpeed = "slow";
+        logger.info(
+          `[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "slow"`,
+        );
+      }
+    }
+
+    return { ...options, speed: effectiveSpeed };
+  }
+
+  private shouldGuardSearchStep(options: {
+    failedAndroidSwipe: boolean;
+    reverseMode: boolean;
+    overlapRecoveryUsed: boolean;
+    searchDragState: AndroidSearchDragState;
+  }): boolean {
+    return (
+      this.deps.device.platform === "android" &&
+      !options.failedAndroidSwipe &&
+      !options.reverseMode &&
+      !options.overlapRecoveryUsed &&
+      !options.searchDragState.pagingStep
+    );
+  }
+
+  private async findVisibleSearchTarget(
+    options: SwipeOnResolvedOptions,
+    observation: ObserveResult,
+    previousContainer: Element,
+  ): Promise<Element | null> {
+    const container = await this.findScrollableContainer(options, observation, previousContainer);
+    const element = await this.findElementInHierarchy(
+      options.lookFor!,
+      observation.viewHierarchy!,
+      options.container,
+      container,
+    );
+    return element && this.isElementWithinContainer(element, container.bounds, observation)
+      ? element
+      : null;
+  }
+
+  private async recoverSearchObservation({
+    previousKeys,
+    dispatch,
+    observe,
+    deadline,
+    onRecovery,
+  }: {
+    previousKeys: Map<string, number>;
+    dispatch: SearchSwipeDispatchOptions;
+    observe: () => Promise<ObserveResult>;
+    deadline: number;
+    onRecovery: () => void;
+  }): Promise<{ observation: ObserveResult; staleDisplay?: StaleDisplayDetails }> {
+    const { options, containerElement } = dispatch;
+    let staleDisplay: StaleDisplayDetails | undefined;
+    const observation = await recoverLookForOverlap({
+      previousKeys,
+      observation: dispatch.observation,
+      timer: this.deps.timer,
+      deadline,
+      signal: dispatch.signal,
+      hasTarget: async (observation) =>
+        Boolean(await this.findVisibleSearchTarget(options, observation, containerElement)),
+      keys: async (observation) =>
+        visibleScrollKeys(
+          observation,
+          await this.findScrollableContainer(options, observation, containerElement),
+        ),
+      backScroll: async (observation) => {
+        onRecovery();
+        const recovered = await this.performOverlapBackScroll(
+          { ...dispatch, observation },
+          observe,
+          deadline,
+        );
+        staleDisplay = recovered.staleDisplay;
+        return recovered.observation;
+      },
+    });
+    return { observation, staleDisplay };
+  }
+
+  private async performOverlapBackScroll(
+    dispatch: SearchSwipeDispatchOptions,
+    observe: () => Promise<ObserveResult>,
+    deadline: number,
+  ): Promise<{ observation: ObserveResult; staleDisplay?: StaleDisplayDetails }> {
+    const { options, observation, signal } = dispatch;
+    const container = await this.findScrollableContainer(
+      options,
+      observation,
+      dispatch.containerElement,
+    );
+    const direction = oppositeDirection(dispatch.direction);
+    const result = await this.dispatchSearchSwipe({
+      ...dispatch,
+      coordinates: this.computeHalfScreenReverseCoords(
+        direction,
+        this.resolveReverseBounds(options, container, observation),
+      ),
+      direction,
+      duration: this.deps.getDuration({ ...options, speed: "slow" }),
+      containerElement: container,
+    });
+    throwIfAborted(signal);
+    if (result.outcomeIndeterminate) {
+      throw new ActionableError(result.error ?? "Recovery scroll outcome is indeterminate");
+    }
+    if (result.staleDisplay) {
+      // A kept validated capture may prove the target, but never authorize more recovery gestures.
+      await this.matchInterruptedDisplaySearch(
+        options,
+        result.observation!,
+        container,
+        result.staleDisplay,
+      );
+      return { observation: result.observation!, staleDisplay: result.staleDisplay };
+    }
+    if (!result.success || !result.observation?.viewHierarchy) {
+      // Confirmed recovery rejection is optional; the original search can continue safely.
+      logger.debug("[SwipeOn] Overlap recovery unavailable; continuing forward", result.error);
+      return { observation };
+    }
+    if (await this.findVisibleSearchTarget(options, result.observation, container)) {
+      return { observation: result.observation };
+    }
+    return {
+      observation: await waitForScrollIdle(result.observation, {
+        observe,
+        timer: this.deps.timer,
+        maxWaitMs: Math.min(1500, Math.max(0, deadline - this.deps.timer.now())),
+        pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
+        logPrefix: "[SwipeOn] overshoot",
+        signal,
+      }),
+    };
+  }
+
+  private async dispatchSearchSwipe({
+    coordinates,
+    direction,
+    duration,
+    options,
+    containerElement,
+    observation,
+    observationFence,
+    strategy,
+    scrollIteration,
+    perf,
+    progress,
+    signal,
+    onSearchFallback,
+    searchDragState,
+  }: SearchSwipeDispatchOptions): Promise<SwipeResult> {
+    const { startX, startY, endX, endY } = coordinates;
+    const activeDuration = duration;
+    const activeDirection = direction;
+    const lastObservation = observation;
+    const boomerang = this.deps.resolveBoomerangConfig(options);
+    const gestureOptions: FencedGestureOptions = {
+      duration: activeDuration,
+      scrollMode: options.scrollMode,
+      searchScroll: this.deps.device.platform === "android",
+      searchScrollBounds: this.resolveReverseBounds(options, containerElement, observation),
+      onSearchFallback,
+      searchDragState,
+    };
+
+    // Execute swipe with observedInteraction
+    let iosDispatchTimestamp: number | undefined;
+    return strategy
+      ? await strategy.swipe({
+          x1: Math.floor(startX),
+          y1: Math.floor(startY),
+          x2: Math.floor(endX),
+          y2: Math.floor(endY),
+          duration: activeDuration,
+          holdDurationMs: this.deps.device.platform === "android" ? LOOK_FOR_HOLD_MS : undefined,
+          onSearchFallback,
+          searchDragState,
+          previousObservation: lastObservation,
+        })
+      : await this.deps.observedInteraction(
+          async (_observeResult, fence) => {
+            gestureOptions.displayFence = {
+              assertCurrent: () => {
+                observationFence?.assertCurrent();
+                fence?.assertCurrent();
+              },
+            };
+            throwIfAborted(signal);
+            const swipeRunner =
+              this.deps.device.platform === "ios"
+                ? this.deps.voiceOverExecutor
+                : this.deps.talkBackExecutor;
+            if (!swipeRunner) {
+              throw new Error(
+                "VoiceOver swipe runner is not configured for iOS scroll-until-visible",
+              );
+            }
+            const result = await swipeRunner.executeSwipeGesture(
+              Math.floor(startX),
+              Math.floor(startY),
+              Math.floor(endX),
+              Math.floor(endY),
+              activeDirection,
+              containerElement,
+              gestureOptions,
+              perf,
+              boomerang,
+              signal,
+            );
+            if (this.deps.device.platform === "ios" && result.success) {
+              iosDispatchTimestamp = this.deps.timer.now();
+              IOSCtrlProxyClient.getExistingInstance(this.deps.device.deviceId)?.invalidateCache();
+            }
+            return result;
+          },
+          {
+            changeExpected: false,
+            timeoutMs: 500,
+            progress,
+            perf,
+            signal,
+            skipPreviousObserve: scrollIteration > 1,
+            deferPostActionScreenshot: true,
+            observationTimestampProvider: () => iosDispatchTimestamp,
+            predictionContext: {
+              toolName: "swipeOn",
+              toolArgs: this.deps.buildPredictionArgs(options),
+            },
+          },
+        );
   }
 
   private async matchInterruptedDisplaySearch(

@@ -8,7 +8,8 @@ import type { SetTextOptions } from "../DeviceService";
 import type { InsertTextState } from "./ctrlProxyProtocol";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { BaseResult } from "../shared/types";
+import type { ImeAction } from "../../../models";
+import type { ActionTimingResult, BaseResult } from "../shared/types";
 import type { A11ySetTextResult, DelegateContext } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
@@ -152,6 +153,57 @@ export function imeCommitTimeoutMs(text: string): number {
 export class CtrlProxyText extends SharedTextDelegate {
   constructor(context: DelegateContext) {
     super(context);
+  }
+
+  override async requestImeAction(
+    action: ImeAction,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<ActionTimingResult> {
+    let dispatched = false;
+    const startMs = this.context.timer.now();
+    const unconfirmed = (reason: string, totalTimeMs: number): ActionTimingResult => ({
+      success: false,
+      action,
+      totalTimeMs,
+      ...(dispatched ? { retryable: false } : {}),
+      error: dispatched
+        ? `IME action '${action}' outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically. Observe before retrying.`
+        : reason,
+    });
+    try {
+      return await sendCommand<ActionTimingResult>(this.context, {
+        idPrefix: "imeAction",
+        responseType: "ime_action",
+        messageType: "request_ime_action",
+        params: { action },
+        timeoutMs,
+        perf,
+        abortSignal,
+        onDispatch: () => {
+          dispatched = true;
+          onDispatch?.();
+        },
+        notConnectedError: () => ({
+          success: false,
+          action,
+          totalTimeMs: 0,
+          error: "Not connected",
+        }),
+        unsupportedCommandError: (_messageType, error) => ({
+          success: false,
+          action,
+          totalTimeMs: 0,
+          error,
+        }),
+        timeoutError: (timeout) => unconfirmed(`IME action timed out after ${timeout}ms`, timeout),
+      });
+    } catch (error) {
+      logger.warn("[CtrlProxyText] IME action transport failed", error);
+      return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
+    }
   }
 
   async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {

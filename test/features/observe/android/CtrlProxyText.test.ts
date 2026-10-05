@@ -1003,3 +1003,28 @@ test.each([0, 25])("insert respects caller deadline with %s ms remaining", async
   expect(h.sentMessages).toHaveLength(remaining ? 1 : 0);
   expect(result.totalTimeMs).toBe(remaining);
 });
+
+describe("semantic IME dispatch outcomes", () => {
+  test.each(["send", "go", "search", "done", "next", "previous"] as const)(
+    "%s preserves dispatch evidence on timeout",
+    async (action) => {
+      const h = createIosDelegateHarness();
+      let dispatches = 0;
+      const pending = new CtrlProxyText(h.context).requestImeAction(
+        action,
+        5000,
+        undefined,
+        undefined,
+        () => {
+          dispatches++;
+        },
+      );
+      await Promise.resolve();
+      h.advanceTime(5000);
+      expect(await pending).toMatchObject({ success: false, action, retryable: false });
+      expect(dispatches).toBe(1);
+      expect(h.sentMessages).toHaveLength(1);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+});

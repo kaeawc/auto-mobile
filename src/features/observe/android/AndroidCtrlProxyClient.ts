@@ -1124,6 +1124,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
     },
+    transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
   ): Promise<A11ySetTextResult>;
 
   commitViaIme(
@@ -1161,6 +1162,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yImeActionResult>;
 
   requestSelectAll(timeoutMs?: number, perf?: PerformanceTracker): Promise<A11ySelectAllResult>;

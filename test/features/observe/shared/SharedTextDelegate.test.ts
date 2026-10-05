@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { CtrlProxyText as IosCtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyText";
 import { SharedTextDelegate } from "../../../../src/features/observe/shared/SharedTextDelegate";
 import type { DelegateContext } from "../../../../src/features/observe/shared/types";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -252,15 +253,14 @@ describe("SharedTextDelegate", () => {
   });
 });
 
-describe("semantic IME dispatch outcomes", () => {
-  it.each(["send", "go", "search", "done", "next", "previous"] as const)(
-    "%s preserves dispatch evidence on timeout",
-    async (action) => {
+describe("shared and iOS IME result contract", () => {
+  for (const Delegate of [SharedTextDelegate, IosCtrlProxyText]) {
+    it(`${Delegate.name}: preserves plain timeout fields and forwards dispatch`, async () => {
       const h = createIosDelegateHarness();
       let dispatches = 0;
-      const pending = new SharedTextDelegate(h.context).requestImeAction(
-        action,
-        5000,
+      const pending = new Delegate(h.context).requestImeAction(
+        "done",
+        100,
         undefined,
         undefined,
         () => {
@@ -268,11 +268,44 @@ describe("semantic IME dispatch outcomes", () => {
         },
       );
       await Promise.resolve();
-      h.advanceTime(5000);
-      expect(await pending).toMatchObject({ success: false, action, retryable: false });
+      h.advanceTime(100);
+      expect(await pending).toEqual({
+        success: false,
+        action: "done",
+        totalTimeMs: 100,
+        error: "IME action timed out after 100ms",
+      });
       expect(dispatches).toBe(1);
-      expect(h.sentMessages).toHaveLength(1);
       expect(h.timer.getPendingTimeoutCount()).toBe(0);
-    },
-  );
+    });
+
+    it(`${Delegate.name}: throws the original transport rejection`, async () => {
+      const h = createIosDelegateHarness();
+      const pending = new Delegate(h.context).requestImeAction("done");
+      await Promise.resolve();
+      const error = new Error("WebSocket connection closed");
+      h.requestManager.cancelAll(error);
+      await expect(pending).rejects.toBe(error);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    it(`${Delegate.name}: preserves pre-dispatch cancellation without retryable fields`, async () => {
+      const h = createIosDelegateHarness();
+      const controller = new AbortController();
+      controller.abort();
+      const result = await new Delegate(h.context).requestImeAction(
+        "done",
+        100,
+        undefined,
+        controller.signal,
+      );
+      expect(result).toEqual({
+        success: false,
+        action: "done",
+        totalTimeMs: 0,
+        error: "Not connected",
+      });
+      expect(h.sentMessages).toHaveLength(0);
+    });
+  }
 });

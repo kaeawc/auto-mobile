@@ -129,6 +129,7 @@ describe("Android unchanged swipe warning", () => {
     accessibilityDetector.setTalkBackEnabled(true);
     const before = { ...scrollBefore, timestamp: 0 } as ObserveResult;
     const h = harness({ before, accessibilityDetector });
+    spyOn(h.ctrl, "getAccessibilityHierarchy").mockResolvedValue(before.viewHierarchy);
     const result = await h.action.execute({
       direction: "up",
       container: { elementId: "tap_screen_content" },

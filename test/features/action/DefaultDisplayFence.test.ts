@@ -440,6 +440,11 @@ describe("TalkBack waits retain the action fence", () => {
           });
         }
         if (site === "longPress-fallback") {
+          Object.assign(driver, {
+            getAccessibilityHierarchy: async () => ({
+              hierarchy: { node: { $: { "resource-id": "target-id" } } },
+            }),
+          });
           watch(driver, "requestAction").mockImplementation(async () => {
             await h.bump();
             return { success: false, action: "long_click" };
@@ -788,6 +793,9 @@ describe("default-display recovery dispatches", () => {
             ],
           },
         };
+        watch(AndroidCtrlProxyClient.prototype, "getAccessibilityHierarchy").mockResolvedValue(
+          h.screen.viewHierarchy!,
+        );
       }
       watch(h.detector, "detectMethod").mockImplementation(async () => {
         if (site === "detection") {

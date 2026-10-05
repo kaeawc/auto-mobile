@@ -1,4 +1,4 @@
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type {
   AccessibilityNodeSelector,
@@ -13,6 +13,9 @@ import type { FocusNavigationDriver } from "./FocusNavigationExecutor";
  * This interface is used by TalkBackTapStrategy to perform element activation after navigation.
  */
 export interface TalkBackNavigationDriver extends FocusNavigationDriver {
+  /** Full, unfiltered tree for global-ID safety. Drivers without this capability use coordinates. */
+  getAccessibilityHierarchy?(): Promise<ViewHierarchyResult | null>;
+
   /**
    * Request a tap at specific coordinates via accessibility service.
    * @param x - X coordinate
@@ -54,6 +57,16 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
   private accessibilityService: AndroidCtrlProxyClient;
   constructor(accessibilityService: AndroidCtrlProxyClient) {
     this.accessibilityService = accessibilityService;
+  }
+
+  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
+    return this.accessibilityService.getAccessibilityHierarchy(
+      undefined,
+      undefined,
+      false,
+      undefined,
+      true,
+    );
   }
 
   async requestTraversalOrder() {

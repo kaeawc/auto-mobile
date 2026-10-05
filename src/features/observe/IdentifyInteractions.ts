@@ -6,6 +6,8 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { NavigationEdge, SelectedElement } from "../../utils/interfaces/NavigationGraph";
 
+import { isEditableElementProperties } from "../utility/elementProperties";
+
 type InteractionType = "navigation" | "input" | "action" | "scroll" | "toggle";
 
 export interface IdentifyInteractionsOptions {
@@ -367,11 +369,7 @@ export class IdentifyInteractions {
       return true;
     }
 
-    if (element.focusable === "true" || element.focusable === true) {
-      return Boolean(element.text || element["content-desc"] || element["resource-id"]);
-    }
-
-    return false;
+    return isEditableElementProperties(element);
   }
 
   private isToggleElement(element: Element): boolean {

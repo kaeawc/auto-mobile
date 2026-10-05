@@ -11,6 +11,10 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
+import { getAbortSignal } from "../../../utils/AbortContext";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
+import { ActionableError } from "../../../models/ActionableError";
 
 /**
  * Default timeout for `requestVoiceOverState`, shared with
@@ -225,19 +229,53 @@ export class CtrlProxyVoiceOver {
     perf?: PerformanceTracker,
     options?: VoiceOverActivationOptions,
   ): Promise<CtrlProxyActionResult> {
-    return sendCommand<CtrlProxyActionResult>(this.context, {
-      idPrefix: "voiceover_action",
-      responseType: "action",
-      messageType: "request_action",
-      params: { label, action, bounds: options?.bounds, duration: options?.duration },
-      timeoutMs,
-      perf,
-      cancelScreenshotBackoff: false,
-      notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
-      // Parity with requestVoiceOverState: request_action is a real command, so this
-      // is defense-in-depth against an older runner that predates it (#2956).
-      unsupportedCommandError: (_messageType, error) => ({ success: false, totalTimeMs: 0, error }),
-      timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
+    const signal = getAbortSignal();
+    let dispatched = false;
+    const unconfirmed = (error: string): CtrlProxyActionResult => ({
+      success: false,
+      error,
+      dispatched,
+      acknowledged: false,
+      ...(dispatched ? { retryable: false } : {}),
     });
+    try {
+      const result = await sendCommand<CtrlProxyActionResult>(this.context, {
+        idPrefix: "voiceover_action",
+        responseType: "action",
+        messageType: "request_action",
+        params: { label, action, bounds: options?.bounds, duration: options?.duration },
+        timeoutMs,
+        perf,
+        cancelScreenshotBackoff: false,
+        abortSignal: signal,
+        onDispatch: () => {
+          dispatched = true;
+        },
+        notConnectedError: () => unconfirmed("Not connected to CtrlProxy"),
+        // Pre-dispatch capability misses and positive runner refusals both permit fallback.
+        unsupportedCommandError: (_messageType, error) => ({
+          success: false,
+          totalTimeMs: 0,
+          error,
+        }),
+        timeoutError: () => unconfirmed("Timeout waiting for action_result"),
+      });
+      // Only timeout/transport paths supply acknowledged:false. A normal response
+      // after dispatch confirms the runner answered, regardless of its error text.
+      return { ...result, dispatched, acknowledged: result.acknowledged ?? dispatched };
+    } catch (error) {
+      // A dispatched ActionableError acknowledges a runner refusal, except for
+      // the caller's abort reason; preserve the refusal's original throw contract.
+      if (dispatched && error instanceof ActionableError && error !== signal?.reason) {
+        throw error;
+      }
+      logger.warn("[CtrlProxyVoiceOver] Activation transport failed", error);
+      return unconfirmed(errorMessage(error));
+    } finally {
+      // Cancellation before dispatch must escape both result and catch paths without fallback.
+      if (!dispatched) {
+        signal?.throwIfAborted();
+      }
+    }
   }
 }

@@ -51,6 +51,7 @@ import {
   waitContainerSelector,
   isScopedWaitResolutionError,
   waitResolutionFailure,
+  waitCaptureUnavailableReason,
 } from "../features/observe/ConditionPredicates";
 import {
   createJSONToolResponse,
@@ -890,7 +891,7 @@ const runWaitForConditionDsl = async (
   const applySettledGate = async (
     outcome: WaitForObservationOutcome,
     matched: boolean,
-    recheck?: ConditionPredicate,
+    recheck: ConditionPredicate = () => ({ matched: true }),
   ): Promise<WaitForObservationOutcome> => {
     if (!settled || !matched) {
       return outcome;
@@ -931,26 +932,28 @@ const runWaitForConditionDsl = async (
       });
       throwIfAborted(signal);
       polls++;
-      if (recheck) {
-        const evaluation = recheck(observation);
-        if (!evaluation.matched) {
-          conditionMatched = false;
-          matchedHash = null;
-          quietStart = timer.now();
-          matchedElement = undefined;
-          awaitedElement = undefined;
-          continue;
-        }
-        conditionMatched = true;
-        matchedElement = evaluation.matchedElement;
-        awaitedElement = evaluation.matchedElement;
+      const unavailableReason = waitCaptureUnavailableReason(observation);
+      const evaluation: ConditionEvaluation = unavailableReason
+        ? { matched: false, diagnostic: unavailableReason }
+        : recheck(observation);
+      if (!evaluation.matched) {
+        conditionMatched = false;
+        matchedHash = null;
+        quietStart = timer.now();
+        matchedElement = undefined;
+        awaitedElement = undefined;
+        continue;
       }
+      conditionMatched = true;
+      matchedElement = evaluation.matchedElement;
+      awaitedElement = evaluation.matchedElement;
       const hash = hashHierarchyForSettle(observation.viewHierarchy);
-      if (hash === null || matchedHash === null || hash !== matchedHash) {
+      if (hash === null || hash !== matchedHash) {
         matchedHash = hash;
         quietStart = timer.now();
       }
     }
+    const unavailableReason = waitCaptureUnavailableReason(observation);
     return {
       ...outcome,
       observation,
@@ -959,6 +962,10 @@ const runWaitForConditionDsl = async (
       settled: false,
       timedOut: true,
       matched: conditionMatched,
+      ...scopedWaitTimeoutMetadata(
+        { matched: conditionMatched, diagnostic: unavailableReason },
+        timer.now() - startTime,
+      ),
       awaitTimeout: true,
       waitMs: timer.now() - startTime,
       awaitDuration: timer.now() - startTime,
@@ -1422,7 +1429,7 @@ const matchesDisplayStamp = (
 
 const evaluateWaitForObservation = (
   finder: ConditionResolver,
-  waitFor: ObserveWaitForOptions,
+  waitFor: WaitForWithSettled,
   observation: ObserveResult,
   platform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
@@ -1435,6 +1442,12 @@ const evaluateWaitForObservation = (
     display: observation.viewHierarchy,
   };
   const evaluation: ConditionEvaluation = { matched: false };
+  const needsHierarchy =
+    hasElementPredicate(waitFor) || waitFor.absent !== undefined || waitFor.settled !== undefined;
+  const diagnostic = needsHierarchy ? waitCaptureUnavailableReason(observation) : undefined;
+  if (diagnostic) {
+    return { matched: false, diagnostic };
+  }
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
   const displayMatched = matchesDisplayStamp(observation, waitFor, displayInventory);
   const needsElementMatch = hasElementPredicate(waitFor);
@@ -1445,8 +1458,8 @@ const evaluateWaitForObservation = (
           evaluation,
         })
       : null;
-  // Without a hierarchy we cannot confirm the absent element is gone, so treat
-  // an unconfirmed absence as unsatisfied (keep waiting).
+  // The shared admission guard above ensures absence is evaluated only on a
+  // usable capture; an unavailable tree cannot prove that an element is gone.
   const absentSatisfied =
     waitFor.absent === undefined
       ? true
@@ -1463,11 +1476,12 @@ const evaluateWaitForObservation = (
 
   return {
     ...evaluation,
-    matched:
-      activeWindowMatched &&
-      displayMatched &&
-      absentSatisfied &&
-      (!needsElementMatch || awaitedElement !== null),
+    matched: [
+      activeWindowMatched,
+      displayMatched,
+      absentSatisfied,
+      !needsElementMatch || awaitedElement !== null,
+    ].every(Boolean),
     awaitedElement: awaitedElement ?? undefined,
   };
 };
@@ -1769,7 +1783,9 @@ export const waitForObservation = async (
   let observation = await observeOnce(0);
   throwIfAborted(signal);
   checkDisplaySupport();
-  const baselineTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
+  const baselineTimestamp = waitCaptureUnavailableReason(observation)
+    ? undefined
+    : hierarchyUpdatedAtToMillis(observation.viewHierarchy);
   // A posture-only stamp is read independently of hierarchy capture, including
   // while folding locks the device. UI predicates/settling still need a fresh tree.
   const needsHierarchyFreshness =
@@ -1860,7 +1876,11 @@ export const waitForObservation = async (
     // floor. It must not satisfy waitFor as post-invocation evidence.
     waitEvaluation =
       minTimestamp > 0 && (observedTimestamp === undefined || observedTimestamp < minTimestamp)
-        ? { matched: false, awaitedElement: undefined }
+        ? {
+            matched: false,
+            awaitedElement: undefined,
+            diagnostic: waitCaptureUnavailableReason(observation),
+          }
         : evaluateWaitForObservation(finder, waitFor, observation, platform, displayInventory, {
             modes,
             iosMultiPanel,

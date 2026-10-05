@@ -12,6 +12,10 @@ import {
 } from "../../../src/features/utility/DisplayConfig";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import {
+  getDeviceIncarnationListeners,
+  notifyDeviceIdentityReplaced,
+} from "../../../src/utils/deviceIncarnation";
 
 const androidEmulator: BootedDevice = {
   name: "Pixel",
@@ -771,7 +775,95 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   });
 });
 
+describe("DisplayConfig default night-mode baseline lifecycle", () => {
+  async function recordBaseline(deviceId: string) {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    seedReads(adbFactory, { night: captured("night-mode-no") });
+    client.setCommandResultSequence(NIGHT_GET, [
+      { stdout: captured("night-mode-yes"), stderr: "" },
+      { stdout: captured("night-mode-no"), stderr: "" },
+    ]);
+    // Omit themeBaselines to exercise the process-wide store across instances.
+    const config = () => new DisplayConfig({ ...androidEmulator, deviceId }, { adbFactory });
+    expect((await config().setConfig({ theme: "light" })).success).toBe(true);
+    return { client, config };
+  }
+
+  test("identity replacement drops the serial's default night-mode baseline", async () => {
+    const deviceId = "display-config-identity-drop-A";
+    try {
+      const { client, config } = await recordBaseline(deviceId);
+      notifyDeviceIdentityReplaced(deviceId);
+      const result = await config().setConfig({ reset: true });
+      expect(client.getCommandCalls().map((call) => call.command)).not.toContain(
+        `${NIGHT_GET} yes`,
+      );
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("night mode left unchanged");
+      expect(result.applied?.theme).toBe("light");
+    } finally {
+      notifyDeviceIdentityReplaced(deviceId);
+    }
+  });
+
+  test("identity replacement preserves another serial's default night-mode baseline", async () => {
+    const deviceIdA = "display-config-identity-isolation-A";
+    const deviceIdB = "display-config-identity-isolation-B";
+    try {
+      await recordBaseline(deviceIdA);
+      const { client, config } = await recordBaseline(deviceIdB);
+      notifyDeviceIdentityReplaced(deviceIdA);
+      client.setCommandResultSequence(NIGHT_GET, [
+        { stdout: captured("night-mode-no"), stderr: "" },
+        { stdout: captured("night-mode-yes"), stderr: "" },
+      ]);
+      const result = await config().setConfig({ reset: true });
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("night mode restored to dark");
+      expect(result.applied?.theme).toBe("dark");
+      expect(client.getCommandCalls().map((call) => call.command)).toContain(`${NIGHT_GET} yes`);
+    } finally {
+      notifyDeviceIdentityReplaced(deviceIdA);
+      notifyDeviceIdentityReplaced(deviceIdB);
+    }
+  });
+
+  test("snapshot restore preserves the serial's default night-mode baseline", async () => {
+    const deviceId = "display-config-snapshot-baseline-A";
+    try {
+      const { client, config } = await recordBaseline(deviceId);
+      const listener = getDeviceIncarnationListeners().find(
+        ({ name }) => name === "android-display-config-theme-baselines",
+      );
+      expect(listener).toBeDefined();
+      await listener!.onDeviceIncarnationChanged(deviceId);
+      client.setCommandResultSequence(NIGHT_GET, [
+        { stdout: captured("night-mode-no"), stderr: "" },
+        { stdout: captured("night-mode-yes"), stderr: "" },
+      ]);
+      const result = await config().setConfig({ reset: true });
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("night mode restored to dark");
+      expect(result.applied?.theme).toBe("dark");
+      expect(client.getCommandCalls().map((call) => call.command)).toContain(`${NIGHT_GET} yes`);
+    } finally {
+      notifyDeviceIdentityReplaced(deviceId);
+    }
+  });
+});
+
 describe("DisplayConfig Android reset regression captures", () => {
+  test("non-reset success omits an undefined message key", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    seedReads(adbFactory, { fontScale: "1.3\n" });
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      fontScale: 1.3,
+    });
+    expect(result.success).toBe(true);
+    expect(Object.hasOwn(result, "message")).toBe(false);
+  });
+
   function setup() {
     const adbFactory = new FakeAdbClientFactory();
     const themeBaselines = new Map<string, "light" | "dark" | "system" | "custom">();
@@ -791,6 +883,10 @@ describe("DisplayConfig Android reset regression captures", () => {
     expect(result.error).toBeUndefined();
     expect(result.applied?.theme).toBe("dark");
     expect(result.message).toContain("night mode left unchanged");
+    expect(result.message).toBe(
+      "Reset font scale and density to device defaults; night mode left unchanged (no night-mode baseline was recorded by displayConfig).",
+    );
+    expect(result.message).not.toContain("did not change it");
     expect(client.getCommandCalls().some((call) => call.command.startsWith(`${NIGHT_GET} `))).toBe(
       false,
     );

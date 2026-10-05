@@ -6,6 +6,7 @@ import {
   countStable,
   disappear,
   textEquals,
+  waitCaptureUnavailableReason,
 } from "../../../src/features/observe/ConditionPredicates";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
@@ -56,6 +57,80 @@ function emptyObs(): ObserveResult {
 function node(props: Record<string, unknown>): Record<string, unknown> {
   return { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, ...props };
 }
+
+describe("wait capture usability", () => {
+  const freshnessCases: Array<[string, NonNullable<ObserveResult["freshness"]>]> = [
+    ["stale", { isFresh: false }],
+    ["unverified", { isFresh: true, verified: false }],
+    ["no timestamp", { isFresh: false, category: "no_timestamp" }],
+    ["window identity mismatch", { isFresh: false, category: "window_identity" }],
+  ];
+
+  test.each(freshnessCases)(
+    "%s populated trees and childless roots stay usable",
+    (_name, freshness) => {
+      expect(
+        waitCaptureUnavailableReason({
+          ...obs([node({ text: "Ready" })]),
+          freshness,
+        }),
+      ).toBeUndefined();
+      expect(waitCaptureUnavailableReason({ ...obs([]), freshness })).toBeUndefined();
+    },
+  );
+
+  test.each(freshnessCases)(
+    "disappear evaluates presence on a %s populated tree",
+    (_name, freshness) => {
+      const predicate = disappear(new ElementResolver(), { text: "Loading" });
+      for (const present of [false, true]) {
+        const evaluation = predicate({
+          ...obs([node({ text: present ? "Loading" : "Ready" })]),
+          freshness,
+        });
+        expect(evaluation.matched).toBe(!present);
+        expect(evaluation.diagnostic ?? "").not.toContain("hierarchy unavailable");
+      }
+    },
+  );
+
+  const unavailableCases: Array<[string, Partial<ObserveResult>, string]> = [
+    ["missing hierarchy", { viewHierarchy: undefined }, "hierarchy unavailable"],
+    [
+      "error with nodes",
+      { viewHierarchy: { hierarchy: { ...obs([]).viewHierarchy!.hierarchy, error: "failed" } } },
+      "hierarchy unavailable: failed",
+    ],
+    ["zero nodes", { viewHierarchy: { hierarchy: {} } }, "hierarchy unavailable"],
+    [
+      "unavailable reason with nodes",
+      {
+        viewHierarchy: {
+          hierarchy: { ...obs([]).viewHierarchy!.hierarchy, unavailableReason: "connection_lost" },
+        },
+      },
+      "hierarchy unavailable: connection_lost",
+    ],
+    [
+      "freshness unavailable",
+      { freshness: { isFresh: true, category: "unavailable", unavailableDetail: "offline" } },
+      "hierarchy unavailable: offline",
+    ],
+    [
+      "runtime unavailable flag",
+      { freshness: { isFresh: true, ...{ unavailable: true }, warning: "offline" } },
+      "hierarchy unavailable: offline",
+    ],
+  ];
+  test.each(unavailableCases)("%s has an unavailable diagnostic", (_name, overrides, reason) => {
+    const observation = { ...obs([node({ text: "Ready" })]), ...overrides };
+    expect(waitCaptureUnavailableReason(observation)).toBe(reason);
+    expect(disappear(new ElementResolver(), { text: "Loading" })(observation)).toMatchObject({
+      matched: false,
+      diagnostic: reason,
+    });
+  });
+});
 
 describe("clickable predicate", () => {
   const finder = new ElementResolver();

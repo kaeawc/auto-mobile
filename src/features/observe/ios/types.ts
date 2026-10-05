@@ -334,6 +334,10 @@ export interface CtrlProxyActionResult {
   action?: string;
   totalTimeMs?: number;
   error?: string;
+  /** Host-side dispatch/confirmation metadata; absent for other action helpers. */
+  dispatched?: boolean;
+  acknowledged?: boolean;
+  retryable?: boolean;
 }
 
 /** VoiceOver state result from CtrlProxy iOS */

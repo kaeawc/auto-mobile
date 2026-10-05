@@ -11,6 +11,7 @@ import { logger } from "../../utils/logger";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
+import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 
 /**
  * The argv-shaped slice of the simctl client this feature needs. Routing
@@ -118,6 +119,13 @@ export interface ThemeBaselineStore {
 }
 
 const defaultThemeBaselines: ThemeBaselineStore = new Map<string, DisplayTheme>();
+
+registerDeviceIncarnationListener({
+  name: "android-display-config-theme-baselines",
+  onDeviceIdentityReplaced: (deviceId) => defaultThemeBaselines.delete(deviceId),
+  // Snapshot restore and same-device re-pool retain guest night-mode state and its baseline.
+  onDeviceIncarnationChanged: () => {},
+});
 
 export interface DisplayConfigDependencies {
   themeBaselines?: ThemeBaselineStore;
@@ -632,6 +640,7 @@ export class DisplayConfig {
     }
 
     const error = errors.length > 0 ? errors.join("; ") : undefined;
+    const message = this.androidResultMessage(input.reset, expectedTheme, error);
     return {
       success: error === undefined,
       deviceId: this.device.deviceId,
@@ -640,7 +649,7 @@ export class DisplayConfig {
       ...(applied ? { applied } : {}),
       previous,
       ...(error ? { error } : {}),
-      message: this.androidResultMessage(input.reset, expectedTheme, error),
+      ...(message !== undefined ? { message } : {}),
     };
   }
 
@@ -684,7 +693,7 @@ export class DisplayConfig {
     }
     const nightMode =
       theme === undefined
-        ? "night mode left unchanged (displayConfig did not change it)"
+        ? "night mode left unchanged (no night-mode baseline was recorded by displayConfig)"
         : `night mode restored to ${theme} (changed earlier by displayConfig)`;
     return `Reset font scale and density to device defaults; ${nightMode}.`;
   }

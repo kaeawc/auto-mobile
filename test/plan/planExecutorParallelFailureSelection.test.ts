@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
+import type { FailureObservationSummary } from "../../src/models/FailureObservation";
 import type { AbortStrategy, Plan, PlanExecutionResult } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DefaultPlanExecutor, selectParallelFailure } from "../../src/utils/plan/PlanExecutor";
@@ -33,6 +34,7 @@ interface RunOptions {
   strategy?: AbortStrategy;
   successfulDevices?: string[];
   delayedTrack?: string;
+  failureObservation?: FailureObservationSummary;
 }
 
 async function runInOrder(
@@ -42,11 +44,17 @@ async function runInOrder(
     strategy = "finish-current-step",
     successfulDevices = [],
     delayedTrack,
+    failureObservation,
   }: RunOptions = {},
 ): Promise<PlanExecutionResult> {
   const releases = new Map(order.map((device) => [device, Promise.withResolvers<void>()]));
   const started = new Map(order.map((device) => [device, Promise.withResolvers<void>()]));
   const executor = new DefaultPlanExecutor(new FakeTimer());
+  if (failureObservation) {
+    Object.defineProperty(executor, "buildFailureObservationContext", {
+      value: async () => failureObservation,
+    });
+  }
   if (delayedTrack) {
     // Hold the sibling before its first abort check, exercising the real
     // executeDeviceTrack catch that returns the -1 sentinel on cancellation.
@@ -120,6 +128,16 @@ describe("parallel reported failure selection", () => {
         error: "failure on Z",
         failureObservation: undefined,
       });
+      expect(result.deviceFailures).toEqual([
+        result.failedStep,
+        {
+          device: "A",
+          stepIndex: 1,
+          tool: toolName,
+          error: "failure on A",
+          failureObservation: undefined,
+        },
+      ]);
       expect(result.perDeviceResults?.get("A")?.failedStep?.stepIndex).toBe(1);
       expect(result.perDeviceResults?.get("Z")?.failedStep?.stepIndex).toBe(0);
     });
@@ -135,6 +153,8 @@ describe("parallel reported failure selection", () => {
           stepIndex: 0,
           error: "failure on Z",
         });
+        expect(result.deviceFailures?.map(({ device }) => device)).toEqual(["Z", "A"]);
+        expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
       } finally {
         partitionSpy.mockRestore();
       }
@@ -156,6 +176,10 @@ describe("parallel reported failure selection", () => {
         tool: "unknown",
         error: "track-level failure",
       });
+      expect(result.deviceFailures).toEqual([
+        result.failedStep,
+        { device: "A", stepIndex: -1, tool: "unknown", error: "track-level failure" },
+      ]);
     });
   }
 
@@ -169,12 +193,29 @@ describe("parallel reported failure selection", () => {
       stepIndex: 0,
       failureObservation: undefined,
     });
+    expect(result.deviceFailures?.map(({ device }) => device)).toEqual(["A", "Z"]);
+    expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
+    const sibling = result.perDeviceResults!.get("Z")!.failedStep!;
+    expect(result.deviceFailures?.[1]).toEqual({
+      device: "Z",
+      stepIndex: sibling.stepIndex,
+      tool: sibling.tool,
+      error: sibling.error,
+      failureObservation: sibling.failureObservation,
+    });
   });
 
   test("immediate abort excludes a sibling track-level sentinel", async () => {
     const result = await runInOrder(["A", "Z"], { strategy: "immediate", delayedTrack: "Z" });
     expect(result.failedStep).toMatchObject({ device: "A", stepIndex: 1, error: "failure on A" });
     expect(result.perDeviceResults?.get("Z")?.failedStep).toMatchObject({
+      stepIndex: -1,
+      tool: "unknown",
+    });
+    expect(result.deviceFailures?.map(({ device }) => device)).toEqual(["A", "Z"]);
+    expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
+    expect(result.deviceFailures?.[1]).toMatchObject({
+      device: "Z",
       stepIndex: -1,
       tool: "unknown",
     });
@@ -185,6 +226,43 @@ describe("parallel reported failure selection", () => {
     expect(result.failedStep).toMatchObject({ device: "A", stepIndex: 1, error: "failure on A" });
     expect(result).toMatchObject({ success: false, executedSteps: 1, totalSteps: 2 });
     expect(result.perDeviceResults?.get("Z")?.success).toBe(true);
+    expect(result.deviceFailures).toEqual([result.failedStep]);
+  });
+
+  test("sequential single-device failure omits deviceFailures", async () => {
+    const plan = parallelPlan();
+    delete plan.devices;
+    plan.steps = [plan.steps[0]];
+    const result = await runInOrder(["Z"], { plan });
+    expect(result.failedStep).toMatchObject({
+      stepIndex: 0,
+      tool: toolName,
+      error: "failure on Z",
+    });
+    expect(result).not.toHaveProperty("perDeviceResults");
+    expect(result).not.toHaveProperty("deviceFailures");
+  });
+
+  test("preserves each device's failure observation", async () => {
+    const observation = { capturedAtMs: 12, activeWindow: { appId: "fake.app" } };
+    const result = await runInOrder(["A", "Z"], { failureObservation: observation });
+    expect(result.deviceFailures).toEqual([
+      {
+        device: "Z",
+        stepIndex: 0,
+        tool: toolName,
+        error: "failure on Z",
+        failureObservation: observation,
+      },
+      {
+        device: "A",
+        stepIndex: 1,
+        tool: toolName,
+        error: "failure on A",
+        failureObservation: observation,
+      },
+    ]);
+    expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
   });
 
   test("pins a single-track partitioned plan", async () => {
@@ -194,12 +272,14 @@ describe("parallel reported failure selection", () => {
     const result = await runInOrder(["Z"], { plan });
     expect(result.failedStep).toMatchObject({ device: "Z", stepIndex: 0, error: "failure on Z" });
     expect(result.perDeviceResults?.size).toBe(1);
+    expect(result).not.toHaveProperty("deviceFailures");
   });
 
   test("pins success with no reported failure", async () => {
     const result = await runInOrder(["A", "Z"], { successfulDevices: ["A", "Z"] });
     expect(result).toMatchObject({ success: true, executedSteps: 2, totalSteps: 2 });
     expect(result.failedStep).toBeUndefined();
+    expect(result).not.toHaveProperty("deviceFailures");
     expect([...result.perDeviceResults!.values()].every((track) => track.success)).toBe(true);
   });
 });

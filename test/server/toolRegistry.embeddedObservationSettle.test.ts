@@ -1,3 +1,10 @@
+import { logger } from "../../src/utils/logger";
+import {
+  captureChosenTerminalScreenshot,
+  deferTerminalScreenshot,
+  hasPendingTerminalScreenshot,
+  runWithPostActionCaptureScope,
+} from "../../src/utils/PostActionCaptureContext";
 import { describe, expect, spyOn, test } from "bun:test";
 import { DefaultAfterToolCallHandler } from "../../src/server/toolRegistry";
 import { RealSettleObserve } from "../../src/features/observe/SettleObserve";
@@ -274,5 +281,217 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
     await runAfterToolCall(handlerWith(fake), "observe", response, timer);
 
     expect(fake.getExecuteCallCount()).toBe(0);
+  });
+});
+
+describe("pending capture at the real response boundary", () => {
+  test.each([
+    "failed",
+    "handler settled",
+    "in-place",
+    "scroll",
+    "unknown",
+    "internal",
+    "no device",
+  ])("%s bypass finalizes before serializing both representations", async (path) => {
+    const timer = new FakeTimer();
+    const action = { ...obs("kept", 10), deviceId: device.deviceId, observationId: "kept" };
+    let captures = 0;
+    let polls = 0;
+    const handler = new DefaultAfterToolCallHandler(undefined, () => {
+      polls++;
+      return undefined;
+    });
+    await runWithPostActionCaptureScope(undefined, async () => {
+      deferTerminalScreenshot(action, async (chosen) => {
+        captures++;
+        chosen.screenshotPath = "/fake/kept.png";
+        chosen.screenshotCapturedAt = "2026-10-05T12:00:00.000Z";
+      });
+      const response = createStructuredToolResponse({
+        success: path !== "failed",
+        observation: action,
+        ...(path === "handler settled" ? { settled: true } : {}),
+      });
+      const result = await handler.handle({
+        name:
+          path === "in-place"
+            ? "sendKeys"
+            : path === "scroll"
+              ? "swipeOn"
+              : path === "unknown"
+                ? "custom"
+                : "tapOn",
+        outputSchema: undefined,
+        args: { raw: true },
+        device: path === "no device" ? undefined : device,
+        internalCall: path === "internal",
+        response,
+        sessionUuid: undefined,
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 0,
+      });
+      const payload = result.finalizedResponse.structuredContent;
+      expect(payload.observation.screenshotPath).toBe("/fake/kept.png");
+      expect(payload.observation.observationScreenshotResourceUri).toContain("kept");
+      expect(captures).toBe(1);
+      expect(hasPendingTerminalScreenshot(action)).toBe(false);
+      expect(Object.getOwnPropertySymbols(payload.observation)).toEqual([]);
+      const text = JSON.parse(result.finalizedResponse.content[0].text);
+      expect(text).toEqual(payload);
+      expect(text.observation.screenshotCaptureAttempted).toBeUndefined();
+      expect(polls).toBe(0);
+    });
+    expect(captures).toBe(1);
+  });
+
+  test.each([false, true])(
+    "text-only identity changes retain capture status (failure: %s)",
+    async (fail) => {
+      const timer = new FakeTimer();
+      const action = { ...obs("action", 10), deviceId: device.deviceId, observationId: "action" };
+      const chosen = { ...obs("chosen", 20), deviceId: device.deviceId, observationId: "chosen" };
+      let captures = 0;
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const handler = new DefaultAfterToolCallHandler(undefined, () => ({
+        execute: async () => ({
+          observation: chosen,
+          settled: true,
+          polls: 2,
+          waitMs: 0,
+          terminalReason: "settled",
+        }),
+        captureScreenshot: async (frame) => {
+          captures++;
+          if (fail) {
+            throw new Error("capture failed");
+          }
+          frame.screenshotPath = "/fake/chosen.png";
+        },
+      }));
+      try {
+        await runWithPostActionCaptureScope(undefined, async () => {
+          deferTerminalScreenshot(action, async () => {
+            throw new Error("wrong seam");
+          });
+          const result = await handler.handle({
+            name: "tapOn",
+            outputSchema: undefined,
+            args: { raw: true },
+            device,
+            internalCall: false,
+            response: {
+              content: [
+                { type: "text", text: JSON.stringify({ success: true, observation: action }) },
+              ],
+            },
+            sessionUuid: undefined,
+            shouldResolveDevice: false,
+            timer,
+            toolStartMs: 0,
+          });
+          const payload = JSON.parse(result.finalizedResponse.content[0].text);
+          expect(payload.observation.observationId).toBe("chosen");
+          expect(payload.observation.screenshotPath).toBe(fail ? undefined : "/fake/chosen.png");
+          expect(payload.observation.observationScreenshotResourceUri !== undefined).toBe(!fail);
+          expect(payload.observation.screenshotCaptureAttempted).toBeUndefined();
+          expect(JSON.stringify(payload)).not.toContain("terminalScreenshotUnavailable");
+          expect(captures).toBe(fail ? 2 : 1);
+        });
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test.each(["missing", "unusable", "no observation"])(
+    "%s envelope drains pending evidence",
+    async (path) => {
+      let captures = 0;
+      const action = { ...obs("action", 10), deviceId: device.deviceId, observationId: "action" };
+      await runWithPostActionCaptureScope(undefined, async () => {
+        deferTerminalScreenshot(action, async (chosen) => {
+          captures++;
+          chosen.screenshotPath = "/fake/action.png";
+        });
+        const response =
+          path === "missing"
+            ? undefined
+            : path === "unusable"
+              ? { content: [{ type: "text", text: "unusable" }] }
+              : createStructuredToolResponse({ success: true });
+        await runAfterToolCall(
+          new DefaultAfterToolCallHandler(),
+          "tapOn",
+          response,
+          new FakeTimer(),
+        );
+        expect(captures).toBe(1);
+        expect(action.screenshotPath).toBe("/fake/action.png");
+        expect(hasPendingTerminalScreenshot(action)).toBe(false);
+      });
+      expect(captures).toBe(1);
+    },
+  );
+
+  test("observe keeps its own capture and does not enable action deferral", async () => {
+    const timer = new FakeTimer();
+    const observation = {
+      ...obs("observe", 20),
+      deviceId: device.deviceId,
+      observationId: "observe",
+      screenshotPath: "/fake/observe.png",
+    };
+    let captures = 0;
+    await runWithPostActionCaptureScope(
+      undefined,
+      async () => {
+        expect(
+          deferTerminalScreenshot(observation, async () => {
+            captures++;
+          }),
+        ).toBe(false);
+        const result = await runAfterToolCall(
+          new DefaultAfterToolCallHandler(),
+          "observe",
+          createStructuredToolResponse(observation),
+          timer,
+        );
+        expect(JSON.parse(result.finalizedResponse.content[0].text).screenshotPath).toBe(
+          "/fake/observe.png",
+        );
+      },
+      false,
+    );
+    expect(captures).toBe(0);
+  });
+
+  test("closed scope cannot start captures in async descendants after response completion", async () => {
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let late!: Promise<void>;
+    let captures = 0;
+    await runWithPostActionCaptureScope(undefined, async () => {
+      late = (async () => {
+        await wait;
+        const frame = obs("late", 30);
+        await captureChosenTerminalScreenshot(frame, async () => {
+          captures++;
+        });
+        if (
+          !deferTerminalScreenshot(frame, async () => {
+            captures++;
+          })
+        ) {
+          captures++;
+        }
+      })();
+    });
+    release();
+    await late;
+    expect(captures).toBe(0);
   });
 });

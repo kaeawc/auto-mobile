@@ -1,3 +1,4 @@
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { describe, expect, test, spyOn } from "bun:test";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNavigationExecutor";
@@ -429,5 +430,169 @@ describe("TalkBack selected target safety", () => {
         traversalOrder: [element],
       },
     });
+  });
+});
+
+describe("TalkBack newer full hierarchy contradicts selected target", () => {
+  test.each(["tap", "longPress"] as const)(
+    "%s refuses stale duplicate-ID coordinates",
+    async (action) => {
+      const { driver, tap } = harness();
+      const selected = {
+        text: "Photos",
+        "resource-id": "android:id/title",
+        bounds: { left: 0, top: 1500, right: 300, bottom: 1600 },
+      };
+      driver.setElements([
+        { ...selected, text: "Apps", bounds: { left: 0, top: 300, right: 300, bottom: 400 } },
+        {
+          ...selected,
+          text: "Notifications",
+          bounds: { left: 0, top: 500, right: 300, bottom: 600 },
+        },
+      ]);
+      await expect(
+        tap.executeAndroidTap(action, 150, 1550, 500, selected, undefined, { action }),
+      ).rejects.toThrow("Selected element moved or is gone");
+      expect(driver.tapHistory).toEqual([]);
+      expect(driver.doubleTapHistory).toEqual([]);
+      expect(driver.actionHistory).toEqual([]);
+    },
+  );
+});
+
+describe("TalkBack selected node identity and bounds", () => {
+  test.each(["moved", "relabelled", "absent-id"])(
+    "refuses %s target before semantic action",
+    async (change) => {
+      const { driver, strategy } = harness();
+      const selected: Element = {
+        text: "Apps",
+        "resource-id": "android:id/title",
+        bounds: { left: 0, top: 300, right: 300, bottom: 400 },
+      };
+      driver.setElements([
+        {
+          ...selected,
+          ...(change === "moved" ? { bounds: { left: 0, top: 500, right: 300, bottom: 600 } } : {}),
+          ...(change === "relabelled" ? { text: "Photos" } : {}),
+          ...(change === "absent-id" ? { "resource-id": "other:id/title" } : {}),
+        },
+      ]);
+      await expect(strategy.executeDirectActivation(selected, driver)).rejects.toThrow(
+        "Selected element moved or is gone",
+      );
+      expect(driver.actionHistory).toEqual([]);
+      expect(driver.tapHistory).toEqual([]);
+    },
+  );
+});
+
+describe("TalkBack re-resolution before native dispatch", () => {
+  test.each(["tap", "longPress"])(
+    "%s follows the original indexed selector at current bounds",
+    async (action) => {
+      const { tap, driver } = harness();
+      const old = notificationRows[2];
+      const live = {
+        ...old,
+        bounds: { ...old.bounds!, top: old.bounds!.top + 1, bottom: old.bounds!.bottom + 1 },
+      };
+      driver.setElements([notificationRows[1], live]);
+      const result = await tap.executeAndroidTap(action, 1, 1, 500, old, undefined, {
+        elementId: old["resource-id"],
+        index: 1,
+        action,
+      });
+      expect(result).toBeUndefined();
+      expect(driver.actionHistory).toEqual([]);
+      const bounds = live.bounds!;
+      expect(driver.tapHistory[0]).toMatchObject({
+        x: Math.round((bounds.left + bounds.right) / 2),
+        y: Math.round((bounds.top + bounds.bottom) / 2),
+      });
+    },
+  );
+
+  test("index resolving to another labelled row refuses every fallback", async () => {
+    const { tap, driver } = harness();
+    const old = { ...notificationRows[2], text: "Selected notification" };
+    driver.setElements([old, { ...notificationRows[1], text: "Another notification" }]);
+    await expect(
+      tap.executeAndroidTap("longPress", 1, 1, 500, old, undefined, {
+        elementId: old["resource-id"],
+        index: 1,
+        action: "longPress",
+      }),
+    ).rejects.toThrow("selector now resolves to a different element");
+    expect(driver.actionHistory).toEqual([]);
+    expect(driver.tapHistory).toEqual([]);
+  });
+});
+
+describe("TalkBack resolved result and fallback coordinates", () => {
+  test.each([false, true])(
+    "click rejection keeps the re-resolved bounds for fallback (ADB=%s)",
+    async (adbFallback) => {
+      const { tap, driver, strategy } = harness();
+      const selected: Element = {
+        text: "Apps",
+        "resource-id": "android:id/title",
+        clickable: true,
+        bounds: { left: 0, top: 300, right: 300, bottom: 400 },
+      };
+      const moved = { ...selected, bounds: { left: 0, top: 301, right: 300, bottom: 401 } };
+      driver.setElements([moved]);
+      driver.setActionResult({ success: false, action: "click", error: "unsupported" });
+      if (adbFallback) {
+        driver.setTapResult({ success: false, error: "unavailable" });
+      }
+      const fallbackPoints: { x: number; y: number }[] = [];
+      tap["executeAndroidTapWithCoordinates"] = async (_action, x, y) => {
+        fallbackPoints.push({ x, y });
+      };
+      const direct = spyOn(strategy, "executeDirectActivation");
+      let reported: Element | undefined;
+      let reportedMatches: number | undefined;
+      await tap.executeAndroidTap("tap", 150, 350, 500, selected, undefined, {
+        action: "tap",
+        text: "Apps",
+        onResolvedElement: (current, selection) => {
+          reported = current;
+          reportedMatches = selection?.totalMatches;
+        },
+      });
+      expect(reported?.bounds).toEqual(moved.bounds);
+      expect(reportedMatches).toBe(1);
+      expect((await direct.mock.results[0].value).element?.bounds).toEqual(moved.bounds);
+      expect(driver.tapHistory[0]).toMatchObject({ x: 150, y: 351 });
+      expect(fallbackPoints).toEqual(adbFallback ? [{ x: 150, y: 351 }] : []);
+    },
+  );
+
+  test("an ambiguous original unique selector refuses with a recovery step", async () => {
+    const { driver } = harness();
+    const selected: Element = {
+      text: "Apps",
+      "resource-id": "android:id/title",
+      clickable: true,
+      bounds: { left: 0, top: 300, right: 300, bottom: 400 },
+    };
+    driver.setElements([
+      { ...selected, bounds: { left: 0, top: 301, right: 300, bottom: 401 } },
+      { ...selected, bounds: { left: 0, top: 501, right: 300, bottom: 601 } },
+    ]);
+    // Exercise the same unique resolver at the strategy seam: scoped tool
+    // dispatch itself deliberately bypasses global native-ID activation.
+    const selector = new ResolverElementSelector();
+    await expect(
+      new TalkBackTapStrategy().executeDirectActivation(selected, driver, {
+        reResolve: (hierarchy) =>
+          selector.selectByText(hierarchy, "Apps", { strategy: "unique", intentAction: "tap" })
+            .element,
+      }),
+    ).rejects.toThrow("original selector cannot resolve unambiguously");
+    expect(driver.actionHistory).toEqual([]);
+    expect(driver.tapHistory).toEqual([]);
   });
 });

@@ -1,3 +1,8 @@
+import {
+  deferTerminalScreenshot,
+  hasPendingTerminalScreenshot,
+  runWithPostActionCaptureScope,
+} from "../../../src/utils/PostActionCaptureContext";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { Explore } from "../../../src/features/navigation/Explore";
 import { BootedDevice, Element, ExecResult, ObserveResult } from "../../../src/models";
@@ -1812,6 +1817,52 @@ describe("Explore", () => {
   });
 
   describe("platform-aware recovery", () => {
+    for (const platform of ["android", "ios"] as const) {
+      for (const recovery of ["back", "home"] as const) {
+        test(`${platform} ${recovery} recovery flushes pending pixels before dispatch`, async () => {
+          const order: string[] = [];
+          let screen = "action";
+          const dispatch = async () => {
+            order.push(`dispatch-${recovery}`);
+            screen = "recovery";
+            return { success: true };
+          };
+          const press = spyOn(PressButton.prototype, "press").mockImplementation(dispatch);
+          ToolRegistry.register(
+            recovery === "back" ? "pressButton" : "homeScreen",
+            "recovery",
+            {},
+            dispatch,
+          );
+          const action = createMockObservation();
+          action.deviceId = device.deviceId;
+          action.observationId = "before-recovery";
+          explore = new Explore({ ...device, platform }, mockAdb, fakeTimer, fakeGraph);
+          const seams = explore as unknown as {
+            handleDeadEnd(): Promise<void>;
+            resetToHome(): Promise<void>;
+          };
+          try {
+            await runWithPostActionCaptureScope(undefined, async () => {
+              deferTerminalScreenshot(action, async () => {
+                order.push(`capture-${screen}`);
+              });
+              if (recovery === "back") {
+                await seams.handleDeadEnd();
+              } else {
+                await seams.resetToHome();
+              }
+              expect(order).toEqual(["capture-action", `dispatch-${recovery}`]);
+              expect(hasPendingTerminalScreenshot(action)).toBe(false);
+            });
+            expect(order).toHaveLength(2);
+          } finally {
+            press.mockRestore();
+          }
+        });
+      }
+    }
+
     test("routes iOS dead-end and home recovery through internal interaction tools without ADB", async () => {
       const iOSDevice = {
         deviceId: "ios-simulator-123",

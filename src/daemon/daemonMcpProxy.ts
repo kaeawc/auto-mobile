@@ -1,3 +1,4 @@
+import { isMcpQueueTimeoutError } from "./McpTimeoutError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { getRemovedToolHint } from "../models/removedTools";
 import { shellQuote } from "../utils/shellQuote";
@@ -2378,6 +2379,7 @@ export class DaemonMcpProxy {
       error instanceof DaemonRequestNotDeliveredError ||
       (error instanceof DaemonShuttingDownError && !error.requestMayHaveDispatched) ||
       error instanceof DaemonHandshakeMismatchError ||
+      isMcpQueueTimeoutError(error) ||
       this.isRecoverableUnknownToolError(error)
     );
   }

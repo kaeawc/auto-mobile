@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import {
   DisplayConfig,
+  type DisplayConfigDependencies,
   parseFontScale,
   parseFontScaleSnapshot,
   parseNightMode,
@@ -35,6 +38,18 @@ const iosPhysical: BootedDevice = {
   deviceId: "00008130-001234567890ABCD",
   iosVersion: "17.5",
 };
+
+/** Each test owns its store; session tests explicitly share one across instances. */
+function createDisplayConfig(device: BootedDevice, dependencies: DisplayConfigDependencies) {
+  return new DisplayConfig(device, { themeBaselines: new Map(), ...dependencies });
+}
+
+function captured(name: string): string {
+  return readFileSync(
+    new URL(`../../fixtures/android-display-config/${name}.txt`, import.meta.url),
+    "utf8",
+  );
+}
 
 const FONT_GET = "shell settings get system font_scale";
 const DENSITY_GET = "shell wm density";
@@ -102,7 +117,7 @@ describe("DisplayConfig getConfig", () => {
     async (fontScale) => {
       const adbFactory = new FakeAdbClientFactory();
       seedReads(adbFactory, { fontScale });
-      const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
         fontScale: 2,
       });
       expect(result.success).toBe(false);
@@ -121,22 +136,22 @@ describe("DisplayConfig getConfig", () => {
     async (density) => {
       const adbFactory = new FakeAdbClientFactory();
       seedReads(adbFactory, { density: `Physical density: 440\nOverride density: ${density}\n` });
-      const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
       expect(result.success).toBe(false);
       expect(result.current).toBeUndefined();
     },
   );
 
   test.each([{ fontScale: "default" as const }, { reset: true }])(
-    "does not confirm font reset while an explicit scale of one remains",
+    "confirms font reset with the captured explicit scale of one",
     async (input) => {
       const adbFactory = new FakeAdbClientFactory();
-      seedReads(adbFactory, { fontScale: "1.0\n" });
-      const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig(input);
-      expect(result.success).toBe(false);
+      seedReads(adbFactory, { fontScale: captured("font-scale-after-reset") });
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig(input);
+      expect(result.success).toBe(true);
       expect(result.previous?.fontScale).toBe(1);
       expect(result.applied?.fontScale).toBe(1);
-      expect(result.error).toContain("Font scale remained");
+      expect(result.error).toBeUndefined();
     },
   );
 
@@ -148,7 +163,7 @@ describe("DisplayConfig getConfig", () => {
       night: "Night mode: yes\n",
     });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
     expect(result.success).toBe(true);
     expect(result.current).toEqual({ fontScale: 1.15, density: 480, theme: "dark" });
@@ -161,7 +176,7 @@ describe("DisplayConfig getConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
 
-    const result = await new DisplayConfig(androidPhysical, { adbFactory }).getConfig();
+    const result = await createDisplayConfig(androidPhysical, { adbFactory }).getConfig();
 
     expect(result.success).toBe(true);
     expect(result.supported.density).toBe("partial");
@@ -171,7 +186,7 @@ describe("DisplayConfig getConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { density: "Physical density: 440\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
     expect(result.success).toBe(true);
     expect(result.current?.density).toBe(440);
@@ -186,7 +201,7 @@ describe("DisplayConfig getConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { fontScale: "null\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
     expect(result.success).toBe(true);
     expect(result.current?.fontScale).toBe(1.0);
@@ -196,7 +211,7 @@ describe("DisplayConfig getConfig", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(["ui", iosSimulator.deviceId, "appearance"], { stdout: "\n" });
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).getConfig();
+    const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.success).toBe(false);
     expect(result.current).toBeUndefined();
@@ -206,7 +221,7 @@ describe("DisplayConfig getConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { fontScale: "garbage\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
     expect(result.success).toBe(false);
     expect(result.current).toBeUndefined();
@@ -222,7 +237,7 @@ describe("DisplayConfig setConfig", () => {
     client.setCommandResult(DENSITY_GET, "Physical density: 440\n");
     client.setCommandResult(NIGHT_GET, "Night mode: no\n");
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2,
     });
 
@@ -237,7 +252,7 @@ describe("DisplayConfig setConfig", () => {
     const client = adbFactory.getFakeClient();
     seedReads(adbFactory, { fontScale: "garbage\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2,
     });
 
@@ -258,7 +273,7 @@ describe("DisplayConfig setConfig", () => {
     client.setCommandResult(DENSITY_GET, "Physical density: 440\n");
     client.setCommandResult(NIGHT_GET, "Night mode: no\n");
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2.0,
     });
 
@@ -273,7 +288,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ density: 560 });
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({ density: 560 });
 
     const commands = adbFactory
       .getFakeClient()
@@ -289,7 +304,7 @@ describe("DisplayConfig setConfig", () => {
     // command completion alone.
     seedReads(adbFactory, { density: "Physical density: 440\n" });
 
-    const result = await new DisplayConfig(androidPhysical, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidPhysical, { adbFactory }).setConfig({
       density: 560,
     });
 
@@ -302,7 +317,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { density: "Physical density: 440\n" });
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ density: "larger" });
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({ density: "larger" });
 
     const commands = adbFactory
       .getFakeClient()
@@ -316,7 +331,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { density: "Physical density: 80\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       density: "smaller",
     });
 
@@ -341,7 +356,7 @@ describe("DisplayConfig setConfig", () => {
     // PHYSICAL density (440), not compound onto the effective override (#6096).
     seedReads(adbFactory, { density: "Physical density: 440\nOverride density: 506\n" });
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ density: "larger" });
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({ density: "larger" });
 
     const commands = adbFactory
       .getFakeClient()
@@ -355,7 +370,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ theme: "dark" });
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({ theme: "dark" });
 
     const commands = adbFactory
       .getFakeClient()
@@ -368,7 +383,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ theme: "system" });
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({ theme: "system" });
 
     const commands = adbFactory
       .getFakeClient()
@@ -377,11 +392,11 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).toContain("shell cmd uimode night auto");
   });
 
-  test("reset restores font scale, density, and theme to defaults", async () => {
+  test("reset restores font scale and density without writing an unrecorded theme", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { fontScale: "null\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       reset: true,
     });
 
@@ -392,14 +407,14 @@ describe("DisplayConfig setConfig", () => {
       .map((c) => c.command);
     expect(commands).toContain("shell settings delete system font_scale");
     expect(commands).toContain("shell wm density reset");
-    expect(commands).toContain("shell cmd uimode night no");
+    expect(commands).not.toContain("shell cmd uimode night no");
   });
 
   test("restores a custom night-mode schedule via cmd uimode night custom, not auto", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({ theme: "custom" });
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({ theme: "custom" });
 
     const commands = adbFactory
       .getFakeClient()
@@ -413,7 +428,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { night: "Night mode: custom\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2.0,
     });
 
@@ -426,7 +441,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       reset: true,
       theme: "dark",
     });
@@ -457,7 +472,7 @@ describe("DisplayConfig setConfig", () => {
     client.setCommandResult(NIGHT_GET, "Night mode: no\n");
     client.setCommandError("shell wm density 560", new Error("adb: device offline"));
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2.0,
       density: 560,
     });
@@ -479,7 +494,7 @@ describe("DisplayConfig setConfig", () => {
     // take the numeric branch and force an override that never existed (#6096).
     seedReads(adbFactory, { density: "Physical density: 440\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2.0,
     });
 
@@ -490,13 +505,13 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { density: "Physical density: 440\n" });
 
-    const first = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const first = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2.0,
     });
     const restorableDensity = first.previous?.density;
     expect(restorableDensity).toBe("default");
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       density: restorableDensity,
     });
 
@@ -512,13 +527,13 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { fontScale: "null\n" });
 
-    const first = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const first = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       theme: "dark",
     });
     const restorableFontScale = first.previous?.fontScale;
     expect(restorableFontScale).toBe("default");
 
-    await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: restorableFontScale,
     });
 
@@ -534,7 +549,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, { density: "Physical density: 440\nOverride density: 480\n" });
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       fontScale: 2.0,
     });
 
@@ -545,7 +560,7 @@ describe("DisplayConfig setConfig", () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({});
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({});
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("At least one");
@@ -558,7 +573,7 @@ describe("DisplayConfig setConfig", () => {
       .getFakeClient()
       .setCommandResult("shell wm density 560", "", "Exception: bad density");
 
-    const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+    const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
       density: 560,
     });
 
@@ -575,7 +590,7 @@ function simctlArgvCalls(simctl: FakeSimCtlClient): string[][] {
 describe("DisplayConfig platform gating", () => {
   test("reports physical iOS as fully unsupported for reads without issuing commands", async () => {
     const simctl = new FakeSimCtlClient();
-    const result = await new DisplayConfig(iosPhysical, { simctl }).getConfig();
+    const result = await createDisplayConfig(iosPhysical, { simctl }).getConfig();
 
     expect(result.success).toBe(false);
     expect(result.platform).toBe("ios");
@@ -586,7 +601,7 @@ describe("DisplayConfig platform gating", () => {
 
   test("reports physical iOS as fully unsupported for writes without issuing commands", async () => {
     const simctl = new FakeSimCtlClient();
-    const result = await new DisplayConfig(iosPhysical, { simctl }).setConfig({
+    const result = await createDisplayConfig(iosPhysical, { simctl }).setConfig({
       fontScale: 2.0,
     });
 
@@ -600,7 +615,7 @@ describe("DisplayConfig platform gating", () => {
 describe("DisplayConfig iOS Simulator theme support", () => {
   test("reports theme (only) as supported on an iOS Simulator", async () => {
     const simctl = new FakeSimCtlClient();
-    const result = await new DisplayConfig(iosSimulator, { simctl }).getConfig();
+    const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.supported).toEqual({ fontScale: false, density: false, theme: true });
   });
@@ -609,7 +624,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "dark\n");
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).getConfig();
+    const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.success).toBe(true);
     expect(result.current).toEqual({ theme: "dark" });
@@ -624,7 +639,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
       [{ stdout: "light\n" }, { stdout: "dark\n" }],
     );
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       theme: "dark",
     });
 
@@ -645,7 +660,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
       [{ stdout: "light\n" }, { stdout: "light\n" }],
     );
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({ theme: "dark" });
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({ theme: "dark" });
 
     expect(result.success).toBe(false);
     expect(result.applied).toEqual({ theme: "light" });
@@ -660,7 +675,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
       [{ stdout: "dark\n" }, { stdout: "light\n" }],
     );
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       reset: true,
     });
 
@@ -677,7 +692,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "light\n");
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       theme: "system",
     });
 
@@ -694,7 +709,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   test("rejects fontScale on the iOS Simulator without issuing a simctl appearance write", async () => {
     const simctl = new FakeSimCtlClient();
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       fontScale: 1.3,
     });
 
@@ -708,7 +723,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
   test("rejects density on the iOS Simulator", async () => {
     const simctl = new FakeSimCtlClient();
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       density: 480,
     });
 
@@ -720,7 +735,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandArgsResult(["ui", iosSimulator.deviceId, "appearance"], "unknown\n");
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({ theme: "dark" });
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({ theme: "dark" });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("readable Simulator appearance");
@@ -745,7 +760,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
       new Error("simctl: operation cancelled"),
     ]);
 
-    const result = await new DisplayConfig(iosSimulator, { simctl }).setConfig({
+    const result = await createDisplayConfig(iosSimulator, { simctl }).setConfig({
       theme: "dark",
     });
 
@@ -753,5 +768,183 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     expect(result.previous).toEqual({ theme: "light" });
     expect(result.applied).toBeUndefined();
     expect(result.error).toContain("failed to read applied theme");
+  });
+});
+
+describe("DisplayConfig Android reset regression captures", () => {
+  function setup() {
+    const adbFactory = new FakeAdbClientFactory();
+    const themeBaselines = new Map<string, "light" | "dark" | "system" | "custom">();
+    seedReads(adbFactory, {
+      fontScale: captured("font-scale-after-reset"),
+      density: captured("density-physical-420"),
+      night: captured("night-mode-yes"),
+    });
+    const config = () => createDisplayConfig(androidEmulator, { adbFactory, themeBaselines });
+    return { adbFactory, client: adbFactory.getFakeClient(), themeBaselines, config };
+  }
+
+  test("reset leaves captured dark night mode unchanged when the tool never changed it", async () => {
+    const { client, config } = setup();
+    const result = await config().setConfig({ reset: true });
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.applied?.theme).toBe("dark");
+    expect(result.message).toContain("night mode left unchanged");
+    expect(client.getCommandCalls().some((call) => call.command.startsWith(`${NIGHT_GET} `))).toBe(
+      false,
+    );
+  });
+
+  test("reset restores the first theme baseline across instances and clears it after confirmation", async () => {
+    const { client, config, themeBaselines } = setup();
+    // Synthetic post-write state for 1.3; all baseline/reset shell reads use real captures.
+    client.setCommandResultSequence(FONT_GET, [
+      { stdout: captured("font-scale-after-reset"), stderr: "" },
+      { stdout: "1.3\n", stderr: "" },
+    ]);
+    expect((await config().setConfig({ fontScale: 1.3, density: 420 })).success).toBe(true);
+    expect(themeBaselines.size).toBe(0);
+    client.setCommandResultSequence(NIGHT_GET, [
+      { stdout: captured("night-mode-yes"), stderr: "" },
+      { stdout: captured("night-mode-no"), stderr: "" },
+    ]);
+    expect((await config().setConfig({ theme: "light" })).success).toBe(true);
+    expect(themeBaselines.get(androidEmulator.deviceId)).toBe("dark");
+    // A later write must retain the original dark baseline, even with light as previous.
+    client.setCommandResultSequence(NIGHT_GET, [{ stdout: captured("night-mode-no"), stderr: "" }]);
+    expect((await config().setConfig({ theme: "light" })).success).toBe(true);
+    expect(themeBaselines.get(androidEmulator.deviceId)).toBe("dark");
+    client.setCommandResultSequence(FONT_GET, [
+      { stdout: captured("font-scale-1.15"), stderr: "" },
+      { stdout: captured("font-scale-after-reset"), stderr: "" },
+    ]);
+    client.setCommandResultSequence(NIGHT_GET, [
+      { stdout: captured("night-mode-no"), stderr: "" },
+      { stdout: captured("night-mode-yes"), stderr: "" },
+    ]);
+    const result = await config().setConfig({ reset: true });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("night mode restored to dark");
+    expect(result.previous?.theme).toBe("light");
+    expect(result.applied).toEqual({ fontScale: 1, density: 420, theme: "dark" });
+    const commands = client.getCommandCalls().map((call) => call.command);
+    expect(commands).toContain("shell settings delete system font_scale");
+    expect(commands).toContain("shell wm density reset");
+    expect(commands).toContain("shell cmd uimode night yes");
+    expect(themeBaselines.has(androidEmulator.deviceId)).toBe(false);
+  });
+
+  test.each([{ reset: true }, { fontScale: "default" as const }])(
+    "rejects a font reset whose captured 1.15 scale remains: %j",
+    async (input) => {
+      const { client, config } = setup();
+      client.setCommandResult(FONT_GET, captured("font-scale-1.15"));
+      const result = await config().setConfig(input);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Font scale remained 1.15 after requesting default.");
+      expect(result.message).toBe(result.error);
+    },
+  );
+
+  test.each(["shell", "executor"])(
+    "density reset %s failure preserves previous and still resets font scale",
+    async (failure) => {
+      const { client, config } = setup();
+      client.setCommandResultSequence(FONT_GET, [
+        { stdout: captured("font-scale-1.15"), stderr: "" },
+        { stdout: captured("font-scale-after-reset"), stderr: "" },
+      ]);
+      if (failure === "shell") {
+        client.setCommandResult("shell wm density reset", "Error: density refused");
+      } else {
+        client.setCommandError("shell wm density reset", new Error("device offline"));
+      }
+      const result = await config().setConfig({ reset: true });
+      expect(result.success).toBe(false);
+      expect(result.error).toStartWith("density:");
+      expect(result.message).toBe(result.error);
+      expect(result.previous).toEqual({ fontScale: 1.15, density: "default", theme: "dark" });
+      expect(result.applied?.fontScale).toBe(1);
+      expect(client.getCommandCalls().map((call) => call.command)).toContain(
+        "shell settings delete system font_scale",
+      );
+    },
+  );
+
+  test("failed night-mode restore retains the original baseline", async () => {
+    const { client, config, themeBaselines } = setup();
+    themeBaselines.set(androidEmulator.deviceId, "dark");
+    client.setCommandResult(NIGHT_GET, captured("night-mode-no"));
+    client.setCommandError("shell cmd uimode night yes", new Error("device offline"));
+    const result = await config().setConfig({ reset: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toStartWith("night mode:");
+    expect(result.message).toBe(result.error);
+    expect(themeBaselines.get(androidEmulator.deviceId)).toBe("dark");
+  });
+
+  test("an accepted but unapplied night-mode restore retains the baseline", async () => {
+    const { client, config, themeBaselines } = setup();
+    themeBaselines.set(androidEmulator.deviceId, "dark");
+    client.setCommandResult(NIGHT_GET, captured("night-mode-no"));
+    const result = await config().setConfig({ reset: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Night mode remained light after requesting dark.");
+    expect(themeBaselines.get(androidEmulator.deviceId)).toBe("dark");
+  });
+
+  test("reset cannot restore another device's recorded baseline", async () => {
+    const { client, config, themeBaselines } = setup();
+    themeBaselines.set("another-device", "light");
+    expect((await config().setConfig({ reset: true })).success).toBe(true);
+    expect(themeBaselines.get("another-device")).toBe("light");
+    expect(client.getCommandCalls().some((call) => call.command.startsWith(`${NIGHT_GET} `))).toBe(
+      false,
+    );
+  });
+
+  test.each(["font scale", "density", "night mode"])("read failures name %s", async (setting) => {
+    const { client, config } = setup();
+    const command =
+      setting === "font scale" ? FONT_GET : setting === "density" ? DENSITY_GET : NIGHT_GET;
+    client.setCommandError(command, new Error("device offline"));
+    const result = await config().setConfig({ reset: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(setting);
+  });
+
+  test.each([
+    { theme: "light" as const, raw: captured("night-mode-no"), arg: "no" },
+    { theme: "dark" as const, raw: captured("night-mode-yes"), arg: "yes" },
+    { theme: "system" as const, raw: "Night mode: auto\n", arg: "auto" },
+    { theme: "custom" as const, raw: "Night mode: custom\n", arg: "custom" },
+  ])("reset restores the recorded $theme baseline exactly", async ({ theme, raw, arg }) => {
+    const { client, config, themeBaselines } = setup();
+    themeBaselines.set(androidEmulator.deviceId, theme);
+    client.setCommandResult(NIGHT_GET, raw);
+    const result = await config().setConfig({ reset: true });
+    expect(result.success).toBe(true);
+    expect(result.applied?.theme).toBe(theme);
+    expect(client.getCommandCalls().map((call) => call.command)).toContain(`${NIGHT_GET} ${arg}`);
+    expect(themeBaselines.has(androidEmulator.deviceId)).toBe(false);
+  });
+
+  test("a structured read failure retains its setting context", async () => {
+    const { client, config } = setup();
+    client.setCommandError(FONT_GET, new ActionableError("device offline"));
+    const result = await config().setConfig({ reset: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("font scale");
+    expect(result.message).toBe(result.error);
+  });
+
+  test("a rejected first theme write keeps the pre-change baseline for reset", async () => {
+    const { client, config, themeBaselines } = setup();
+    client.setCommandError(`${NIGHT_GET} no`, new Error("device offline"));
+    expect((await config().setConfig({ theme: "light" })).success).toBe(false);
+    expect(themeBaselines.get(androidEmulator.deviceId)).toBe("dark");
+    expect((await config().setConfig({ reset: true })).success).toBe(true);
+    expect(themeBaselines.has(androidEmulator.deviceId)).toBe(false);
   });
 });

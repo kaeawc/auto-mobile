@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, spyOn, test } from "bun:test";
 import { SetAndroidScheduleExactAlarmAppOp } from "../../../src/features/action/SetAndroidScheduleExactAlarmAppOp";
 import { SetAndroidNotificationPolicyAccess } from "../../../src/features/action/SetAndroidNotificationPolicyAccess";
@@ -41,12 +42,24 @@ class RecordingPhysicalPrivacyClient implements IosPhysicalPrivacyClient {
   }
 }
 
+const egg = readFileSync(
+  new URL(
+    "../../fixtures/android-dumpsys-package/dumpsys-package-system-installed.txt",
+    import.meta.url,
+  ),
+  "utf8",
+).replaceAll("com.android.egg", "com.example.app");
+const grantedEgg = egg.replace(
+  "android.permission.READ_EXTERNAL_STORAGE: granted=false",
+  "android.permission.READ_EXTERNAL_STORAGE: granted=true",
+);
+
 describe("AppPermissions", () => {
   test("sets Android runtime permissions and Android-specific options through one action", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
     client.setCommandResult(
-      "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
+      "shell pm grant --user 0 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'",
       "",
     );
     client.setCommandResult("shell cmd notification set_enabled 'com.example.app' true", "");
@@ -56,9 +69,10 @@ describe("AppPermissions", () => {
       "",
     );
 
+    client.setCommandResultSequence("shell dumpsys package 'com.example.app'", [egg, grantedEgg]);
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions("com.example.app", {
-      permissions: ["android.permission.CAMERA"],
+      permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
       userId: 0,
       notificationsEnabled: true,
       notificationPolicyAccess: true,
@@ -75,7 +89,7 @@ describe("AppPermissions", () => {
     ]);
     expect(
       client.wasCommandExecuted(
-        "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
+        "shell pm grant --user 0 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'",
       ),
     ).toBe(true);
     expect(
@@ -216,7 +230,7 @@ describe("AppPermissions", () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
     client.setCommandResult(
-      "shell pm revoke --user 0 'com.example.app' 'android.permission.CAMERA'",
+      "shell pm revoke --user 0 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'",
       "",
     );
     client.setCommandResult(
@@ -225,10 +239,11 @@ describe("AppPermissions", () => {
       "SecurityException: notification access denied",
     );
 
+    client.setCommandResultSequence("shell dumpsys package 'com.example.app'", [grantedEgg, egg]);
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions("com.example.app", {
       action: "revoke",
-      permissions: ["android.permission.CAMERA"],
+      permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
       userId: 0,
       notificationsEnabled: false,
     });
@@ -372,20 +387,13 @@ describe("AppPermissions", () => {
   test("queries Android runtime permission state from dumpsys package", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult(
-      "shell dumpsys package 'com.example.app'",
-      [
-        "runtime permissions:",
-        "  android.permission.CAMERA: granted=true, flags=[ USER_SET ]",
-        "  android.permission.POST_NOTIFICATIONS: granted=false, flags=[ USER_FIXED ]",
-      ].join("\n"),
-    );
+    client.setCommandResult("shell dumpsys package 'com.example.app'", egg);
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.getPermissions("com.example.app", {
       permissions: [
-        "android.permission.CAMERA",
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.ACCESS_FINE_LOCATION",
       ],
     });
@@ -398,9 +406,13 @@ describe("AppPermissions", () => {
         source: permission.source,
       })),
     ).toEqual([
-      { permission: "android.permission.CAMERA", state: "granted", source: "androidRuntime" },
       {
         permission: "android.permission.POST_NOTIFICATIONS",
+        state: "granted",
+        source: "androidRuntime",
+      },
+      {
+        permission: "android.permission.READ_EXTERNAL_STORAGE",
         state: "denied",
         source: "androidRuntime",
       },
@@ -417,11 +429,11 @@ describe("AppPermissions", () => {
     const client = adbFactory.getFakeClient();
     const appId = "com.example.app; id #";
     const command = "shell dumpsys package 'com.example.app; id #'";
-    client.setCommandResult(command, "android.permission.CAMERA: granted=true, flags=[ USER_SET ]");
+    client.setCommandResult(command, egg.replaceAll("com.example.app", appId));
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.getPermissions(appId, {
-      permissions: ["android.permission.CAMERA"],
+      permissions: ["android.permission.POST_NOTIFICATIONS"],
     });
 
     expect(result.success).toBe(true);

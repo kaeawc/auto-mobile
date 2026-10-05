@@ -3,7 +3,11 @@ import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
-import { McpTimeoutError } from "../daemon/McpTimeoutError";
+import {
+  McpTimeoutError,
+  isMcpQueueTimeoutError,
+  MCP_QUEUE_TIMEOUT_ERROR_CODE,
+} from "../daemon/McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 
 export interface ToolCallErrorContext {
@@ -34,9 +38,16 @@ export function shapeToolCallError(
         text:
           error instanceof TextIndeterminateError
             ? JSON.stringify({ success: false, error: message, retryable: false })
-            : error instanceof SessionRecoveryAssignmentError
-              ? JSON.stringify({ error: { message, ...error.details } })
-              : `Error: ${message}`,
+            : isMcpQueueTimeoutError(error)
+              ? JSON.stringify({
+                  success: false,
+                  error: message,
+                  code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
+                  retryable: true,
+                })
+              : error instanceof SessionRecoveryAssignmentError
+                ? JSON.stringify({ error: { message, ...error.details } })
+                : `Error: ${message}`,
       },
     ],
     isError: true,

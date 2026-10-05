@@ -1,3 +1,8 @@
+import {
+  type AndroidPackagePermissionState,
+  parseAndroidRuntimePermissions,
+} from "./parseAndroidRuntimePermissions";
+import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
@@ -115,67 +120,35 @@ export class GrantAndroidPermissions {
         );
       }
 
+      const before = await this.readPermissionState(packageName, targetUserId);
+      const attempted: Array<{ item: GrantAndroidPermissionItemResult; output: string }> = [];
+      const seen = new Set<string>();
       for (const permission of permissions) {
-        const trimmed = permission.trim();
-        if (!trimmed) {
-          results.push({
-            operationId: `pm_${action}:(empty)`,
-            permission,
-            success: false,
-            countsTowardSuccess: true,
-            error: "empty permission name",
-          });
+        const item = this.classifyPermission(permission, before, {
+          packageName,
+          action,
+        });
+        results.push(item);
+        if (item.error || item.skipped) {
           continue;
         }
-
-        const cmd = `shell pm ${action} --user ${targetUserId} ${shellQuote(packageName)} ${shellQuote(trimmed)}`;
-
-        try {
-          await perf.track(
-            `pm${action[0].toUpperCase()}${action.slice(1)}:${trimmed}`,
-            async () => {
-              const execResult = await this.adb.executeCommand(cmd, undefined, undefined, true);
-              const stdout = execResult.stdout;
-              const stderr = execResult.stderr ?? "";
-
-              if (outputLooksLikeShellFailure(stdout, stderr)) {
-                const message = `${stdout}\n${stderr}`.trim() || `pm ${action} reported an error`;
-                results.push({
-                  operationId: `pm_${action}:${trimmed}`,
-                  permission: trimmed,
-                  success: false,
-                  countsTowardSuccess: true,
-                  error: message,
-                });
-                logger.warn(
-                  `[GrantAndroidPermissions] ${action} failed for ${trimmed}: ${message}`,
-                );
-                return;
-              }
-
-              results.push({
-                operationId: `pm_${action}:${trimmed}`,
-                permission: trimmed,
-                success: true,
-                countsTowardSuccess: true,
-              });
-              logger.info(
-                `[GrantAndroidPermissions] ${action} ${trimmed} for ${packageName} (user ${targetUserId})`,
-              );
-            },
-          );
-        } catch (cause) {
-          const message = errorMessage(cause);
-          results.push({
-            operationId: `pm_${action}:${trimmed}`,
-            permission: trimmed,
-            success: false,
-            countsTowardSuccess: true,
-            error: message,
-          });
-          logger.warn(`[GrantAndroidPermissions] ${action} threw for ${trimmed}: ${message}`);
+        if (seen.has(item.permission!)) {
+          item.success = true;
+          item.skipped = true;
+          item.skipReason = "duplicate permission";
+          continue;
         }
+        seen.add(item.permission!);
+        const output = await this.runPermissionCommand(
+          packageName,
+          targetUserId,
+          action,
+          item,
+          perf,
+        );
+        attempted.push({ item, output });
       }
+      await this.verifyPermissions(packageName, targetUserId, action, attempted, before);
     } finally {
       perf.end();
     }
@@ -198,6 +171,144 @@ export class GrantAndroidPermissions {
                 : "One or more required Android permission changes failed",
           }),
     };
+  }
+
+  private classifyPermission(
+    permission: string,
+    before: AndroidPackagePermissionState,
+    context: { packageName: string; action: "grant" | "revoke" },
+  ): GrantAndroidPermissionItemResult {
+    const trimmed = permission.trim();
+    const { packageName, action } = context;
+    const item: GrantAndroidPermissionItemResult = {
+      operationId: `pm_${action}:${trimmed || "(empty)"}`,
+      permission: trimmed || permission,
+      success: false,
+      countsTowardSuccess: true,
+    };
+    if (!trimmed) {
+      item.error = "empty permission name";
+    } else if (!before.requestedPermissions.has(trimmed)) {
+      item.error = `${trimmed} is not requested by ${packageName} (not declared in its manifest); nothing was changed`;
+    } else if (
+      (before.runtimePermissions.get(trimmed) ?? before.installPermissions.get(trimmed))?.state ===
+      (action === "grant" ? "granted" : "denied")
+    ) {
+      item.success = true;
+      item.skipped = true;
+      item.skipReason = action === "grant" ? "already granted" : "already revoked";
+    }
+    return item;
+  }
+
+  private async runPermissionCommand(
+    packageName: string,
+    userId: number,
+    action: "grant" | "revoke",
+    item: GrantAndroidPermissionItemResult,
+    perf: PerformanceTracker,
+  ): Promise<string> {
+    try {
+      const cmd = `shell pm ${action} --user ${userId} ${shellQuote(packageName)} ${shellQuote(item.permission!)}`;
+      const result = await perf.track(
+        `pm${action[0].toUpperCase()}${action.slice(1)}:${item.permission}`,
+        () => this.adb.executeCommand(cmd, undefined, undefined, true),
+      );
+      const output = `${result.stdout}\n${result.stderr ?? ""}`.trim();
+      if (outputLooksLikeShellFailure(result.stdout, result.stderr ?? "")) {
+        item.error = output || `pm ${action} reported an error`;
+        logger.warn(
+          `[GrantAndroidPermissions] ${action} failed for ${item.permission}: ${item.error}`,
+        );
+      }
+      return output;
+    } catch (cause) {
+      item.error = errorMessage(cause);
+      logger.warn(
+        `[GrantAndroidPermissions] ${action} threw for ${item.permission}: ${item.error}`,
+      );
+      return "";
+    }
+  }
+
+  private async verifyPermissions(
+    packageName: string,
+    userId: number,
+    action: "grant" | "revoke",
+    attempted: Array<{ item: GrantAndroidPermissionItemResult; output: string }>,
+    before: AndroidPackagePermissionState,
+  ): Promise<void> {
+    if (attempted.length === 0) {
+      return;
+    }
+    try {
+      const after = await this.readPermissionState(packageName, userId);
+      const expected = action === "grant" ? "granted" : "denied";
+      for (const attempt of attempted) {
+        this.verifyPermission(attempt, before, after, userId, expected);
+      }
+    } catch (cause) {
+      logger.warn(
+        `[GrantAndroidPermissions] permission verification failed: ${errorMessage(cause)}`,
+      );
+      for (const { item } of attempted) {
+        item.error ??= errorMessage(cause);
+      }
+    }
+  }
+
+  private verifyPermission(
+    { item, output }: { item: GrantAndroidPermissionItemResult; output: string },
+    before: AndroidPackagePermissionState,
+    after: AndroidPackagePermissionState,
+    userId: number,
+    expected: "granted" | "denied",
+  ): void {
+    if (item.error) {
+      return;
+    }
+    // Preserve the known block; missing pre-state may become runtime or install state.
+    const permission = item.permission!;
+    const observed =
+      after.runtimePermissions.get(permission) ?? after.installPermissions.get(permission);
+    const state = before.runtimePermissions.has(permission)
+      ? after.runtimePermissions.get(permission)
+      : before.installPermissions.has(permission)
+        ? after.installPermissions.get(permission)
+        : observed;
+    item.success = state?.state === expected;
+    if (!item.success) {
+      const detail = observed
+        ? `observed ${observed.state}; required state in original permission block`
+        : "permission absent from runtime and install permissions";
+      item.error = `Permission state verification failed for ${permission}: expected ${expected} for Android user ${userId}; ${detail}; pm output: ${output || "(empty)"}`;
+      logger.warn(`[GrantAndroidPermissions] ${item.error}`);
+    }
+  }
+
+  private async readPermissionState(packageName: string, userId: number) {
+    try {
+      const result = await this.adb.executeCommand(
+        `shell dumpsys package ${shellQuote(packageName)}`,
+        undefined,
+        undefined,
+        true,
+      );
+      if (outputLooksLikeShellFailure(result.stdout, result.stderr ?? "")) {
+        throw new ActionableError(
+          `Cannot read permission state for ${packageName}: ${result.stdout} ${result.stderr ?? ""}`,
+        );
+      }
+      const state = parseAndroidRuntimePermissions(result.stdout, packageName, userId);
+      if (!state) {
+        throw new ActionableError(
+          `Cannot parse permission state for ${packageName} (missing package or requested permissions section)`,
+        );
+      }
+      return state;
+    } catch (cause) {
+      throw toActionableError(cause, `Cannot read permission state for ${packageName}`);
+    }
   }
 
   private async resetPermissions(

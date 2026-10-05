@@ -69,29 +69,7 @@ function parseTestTimingParams(params: Record<string, string>): TestTimingQueryA
   };
 }
 
-function buildTestTimingUri(options: TestTimingQueryArgs): string {
-  const query = new URLSearchParams();
-  if (options.lookbackDays !== undefined) {
-    query.set("lookbackDays", options.lookbackDays.toString());
-  }
-  if (options.limit !== undefined) {
-    query.set("limit", options.limit.toString());
-  }
-  if (options.minSamples !== undefined) {
-    query.set("minSamples", options.minSamples.toString());
-  }
-  if (options.orderBy !== undefined) {
-    query.set("orderBy", options.orderBy);
-  }
-  if (options.orderDirection !== undefined) {
-    query.set("orderDirection", options.orderDirection);
-  }
-  if (options.testClass) {
-    query.set("testClass", options.testClass);
-  }
-  if (options.testMethod) {
-    query.set("testMethod", options.testMethod);
-  }
+function appendTestTimingDeviceParams(query: URLSearchParams, options: TestTimingQueryArgs): void {
   if (options.deviceId) {
     query.set("deviceId", options.deviceId);
   }
@@ -104,6 +82,12 @@ function buildTestTimingUri(options: TestTimingQueryArgs): string {
   if (options.deviceType) {
     query.set("deviceType", options.deviceType);
   }
+}
+
+function appendTestTimingExecutionParams(
+  query: URLSearchParams,
+  options: TestTimingQueryArgs,
+): void {
   if (options.appVersion) {
     query.set("appVersion", options.appVersion);
   }
@@ -128,6 +112,33 @@ function buildTestTimingUri(options: TestTimingQueryArgs): string {
   if (options.sessionUuid) {
     query.set("sessionUuid", options.sessionUuid);
   }
+}
+
+function buildTestTimingUri(options: TestTimingQueryArgs): string {
+  const query = new URLSearchParams();
+  if (options.lookbackDays !== undefined) {
+    query.set("lookbackDays", options.lookbackDays.toString());
+  }
+  if (options.limit !== undefined) {
+    query.set("limit", options.limit.toString());
+  }
+  if (options.minSamples !== undefined) {
+    query.set("minSamples", options.minSamples.toString());
+  }
+  if (options.orderBy !== undefined) {
+    query.set("orderBy", options.orderBy);
+  }
+  if (options.orderDirection !== undefined) {
+    query.set("orderDirection", options.orderDirection);
+  }
+  if (options.testClass) {
+    query.set("testClass", options.testClass);
+  }
+  if (options.testMethod) {
+    query.set("testMethod", options.testMethod);
+  }
+  appendTestTimingDeviceParams(query, options);
+  appendTestTimingExecutionParams(query, options);
   const queryString = query.toString();
   return queryString
     ? `${TEST_TIMING_RESOURCE_URIS.BASE}?${queryString}`

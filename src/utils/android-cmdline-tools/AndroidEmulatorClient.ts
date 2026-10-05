@@ -948,19 +948,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
             height: config.screenHeight,
             density: config.screenDensity,
           });
-          return {
-            ...device,
-            apiLevel: config.apiLevel ?? device.apiLevel,
-            osVersion: config.osVersion ?? device.osVersion,
-            runtimeId: config.systemImagePackage ?? device.runtimeId,
-            deviceType: config.deviceName ?? device.deviceType,
-            architecture: configuredAvdArchitecture(config, device.architecture),
-            screenWidth: config.screenWidth ?? device.screenWidth,
-            screenHeight: config.screenHeight ?? device.screenHeight,
-            screenDensity: config.screenDensity ?? device.screenDensity,
-            formFactor: formFactor === "unknown" ? device.formFactor : formFactor,
-            capabilityInventory: config.capabilityInventory ?? device.capabilityInventory,
-          };
+          return this.deviceInfoFromConfig(device, config, formFactor);
         } catch (error) {
           logger.debug(`Failed to enrich AVD ${device.name}: ${error}`);
           return device;
@@ -968,6 +956,26 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       }),
     );
     return enriched;
+  }
+
+  private deviceInfoFromConfig(
+    device: DeviceInfo,
+    config: AvdConfig,
+    formFactor: ReturnType<typeof formFactorFrom>,
+  ): DeviceInfo {
+    return {
+      ...device,
+      apiLevel: config.apiLevel ?? device.apiLevel,
+      osVersion: config.osVersion ?? device.osVersion,
+      runtimeId: config.systemImagePackage ?? device.runtimeId,
+      deviceType: config.deviceName ?? device.deviceType,
+      architecture: configuredAvdArchitecture(config, device.architecture),
+      screenWidth: config.screenWidth ?? device.screenWidth,
+      screenHeight: config.screenHeight ?? device.screenHeight,
+      screenDensity: config.screenDensity ?? device.screenDensity,
+      formFactor: formFactor === "unknown" ? device.formFactor : formFactor,
+      capabilityInventory: config.capabilityInventory ?? device.capabilityInventory,
+    };
   }
 
   /**

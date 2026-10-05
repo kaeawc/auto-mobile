@@ -66,6 +66,60 @@ interface TestTimingResponse {
 
 const testExecutionRepository = new TestExecutionRepository();
 
+function appendTestTimingDeviceFilters(
+  filters: Record<string, unknown>,
+  args: TestTimingQueryArgs,
+): void {
+  if (args.deviceId) {
+    filters.deviceId = args.deviceId;
+  }
+  if (args.deviceName) {
+    filters.deviceName = args.deviceName;
+  }
+  if (args.devicePlatform) {
+    filters.devicePlatform = args.devicePlatform;
+  }
+  if (args.deviceType) {
+    filters.deviceType = args.deviceType;
+  }
+}
+
+function buildTestTimingFilters(args: TestTimingQueryArgs): Record<string, unknown> {
+  const filters: Record<string, unknown> = {};
+  if (args.testClass) {
+    filters.testClass = args.testClass;
+  }
+  if (args.testMethod) {
+    filters.testMethod = args.testMethod;
+  }
+  appendTestTimingDeviceFilters(filters, args);
+  if (args.appVersion) {
+    filters.appVersion = args.appVersion;
+  }
+  if (args.gitCommit) {
+    filters.gitCommit = args.gitCommit;
+  }
+  if (args.targetSdk !== undefined) {
+    filters.targetSdk = args.targetSdk;
+  }
+  if (args.jdkVersion) {
+    filters.jdkVersion = args.jdkVersion;
+  }
+  if (args.jvmTarget) {
+    filters.jvmTarget = args.jvmTarget;
+  }
+  if (args.gradleVersion) {
+    filters.gradleVersion = args.gradleVersion;
+  }
+  if (typeof args.isCi === "boolean") {
+    filters.isCi = args.isCi;
+  }
+  if (args.sessionUuid) {
+    filters.sessionUuid = args.sessionUuid;
+  }
+  return filters;
+}
+
 export async function buildTestTimingResponse(
   args: TestTimingQueryArgs,
   repository: TestExecutionRepository = testExecutionRepository,
@@ -99,49 +153,7 @@ export async function buildTestTimingResponse(
   const timings = await repository.getTimingStats(options);
   const totalSamples = timings.reduce((total, entry) => total + entry.sampleSize, 0);
 
-  const filters: Record<string, unknown> = {};
-  if (args.testClass) {
-    filters.testClass = args.testClass;
-  }
-  if (args.testMethod) {
-    filters.testMethod = args.testMethod;
-  }
-  if (args.deviceId) {
-    filters.deviceId = args.deviceId;
-  }
-  if (args.deviceName) {
-    filters.deviceName = args.deviceName;
-  }
-  if (args.devicePlatform) {
-    filters.devicePlatform = args.devicePlatform;
-  }
-  if (args.deviceType) {
-    filters.deviceType = args.deviceType;
-  }
-  if (args.appVersion) {
-    filters.appVersion = args.appVersion;
-  }
-  if (args.gitCommit) {
-    filters.gitCommit = args.gitCommit;
-  }
-  if (args.targetSdk !== undefined) {
-    filters.targetSdk = args.targetSdk;
-  }
-  if (args.jdkVersion) {
-    filters.jdkVersion = args.jdkVersion;
-  }
-  if (args.jvmTarget) {
-    filters.jvmTarget = args.jvmTarget;
-  }
-  if (args.gradleVersion) {
-    filters.gradleVersion = args.gradleVersion;
-  }
-  if (typeof args.isCi === "boolean") {
-    filters.isCi = args.isCi;
-  }
-  if (args.sessionUuid) {
-    filters.sessionUuid = args.sessionUuid;
-  }
+  const filters = buildTestTimingFilters(args);
 
   return {
     testTimings: timings.map((entry) => ({

@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import {
   KeepScreenAwakeManager,
   type KeepScreenAwakeSettingsClient,
+  type KeepScreenAwakeState,
 } from "../../src/utils/KeepScreenAwakeManager";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -340,5 +341,148 @@ describe("KeepScreenAwakeManager", () => {
         expect(adb.called("settings put system screen_off_timeout 60000")).toBe(true);
       }
     }
+  });
+});
+
+describe("KeepScreenAwakeManager restore branches", () => {
+  const setting = "shell settings put global stay_on_while_plugged_in";
+  const disable = "shell svc power stayon false";
+  const cases: Array<{
+    name: string;
+    state: KeepScreenAwakeState;
+    reject?: string[];
+    calls: string[];
+    warnings?: string[];
+  }> = [
+    {
+      name: "missing original and unknown svc",
+      state: { applied: true, method: "svc" },
+      calls: [],
+      warnings: ["prior state unknown"],
+    },
+    {
+      name: "missing original and enabled svc",
+      state: { applied: true, method: "svc", svcWasEnabled: true },
+      calls: [],
+    },
+    {
+      name: "missing original and disabled svc",
+      state: { applied: true, method: "svc", svcWasEnabled: false },
+      calls: [disable],
+    },
+    {
+      name: "failed disable",
+      state: { applied: true, method: "svc", svcWasEnabled: false },
+      reject: [disable],
+      calls: [disable],
+      warnings: ["Failed to disable svc stayon"],
+    },
+    {
+      name: "restore original disabled setting",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "0" },
+      calls: [`${setting} 0`],
+    },
+    {
+      name: "restore original enabled setting",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "7" },
+      calls: [`${setting} 7`],
+    },
+    {
+      name: "restore absent setting",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: null },
+      calls: ["shell settings delete global stay_on_while_plugged_in"],
+    },
+    {
+      name: "disabled setting restore fails then disables svc",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "0" },
+      reject: [setting],
+      calls: [`${setting} 0`, disable],
+      warnings: ["Failed to restore global"],
+    },
+    {
+      name: "absent setting restore fails then disables svc",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: null },
+      reject: ["settings delete"],
+      calls: ["shell settings delete global stay_on_while_plugged_in", disable],
+      warnings: ["Failed to restore global"],
+    },
+    {
+      name: "enabled setting restore failure skips svc",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "7" },
+      reject: [setting],
+      calls: [`${setting} 7`],
+      warnings: ["Failed to restore global"],
+    },
+    {
+      name: "unknown setting restore failure skips svc",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "unknown" },
+      reject: [setting],
+      calls: [`${setting} unknown`],
+      warnings: ["Failed to restore global", "prior state unknown"],
+    },
+    {
+      name: "disabled setting and svc disable both fail",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "0" },
+      reject: [setting, disable],
+      calls: [`${setting} 0`, disable],
+      warnings: ["Failed to restore global", "Failed to disable svc stayon"],
+    },
+    { name: "unknown method", state: { applied: true }, calls: [] },
+    {
+      name: "settings without applied flags",
+      state: { applied: true, method: "settings" },
+      calls: [],
+    },
+    {
+      name: "settings with no applied keys",
+      state: {
+        applied: true,
+        method: "settings",
+        appliedSettings: { stayOnWhilePluggedIn: false, screenOffTimeout: false },
+      },
+      calls: [],
+    },
+    {
+      name: "settings restore continues after first failure",
+      state: {
+        applied: true,
+        method: "settings",
+        originalStayOnWhilePluggedIn: "0",
+        originalScreenOffTimeout: "60000",
+        appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
+      },
+      reject: [setting],
+      calls: [`${setting} 0`, "shell settings put system screen_off_timeout 60000"],
+      warnings: ["Failed to restore global"],
+    },
+  ];
+  for (const row of cases) {
+    test(row.name, async () => {
+      const adb = new FakeAdb({ reject: row.reject });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await new KeepScreenAwakeManager(
+          physicalDevice,
+          makeFactory(adb),
+          () => failingSettingsClient,
+        ).restore(row.state);
+        expect(adb.calls).toEqual(row.calls);
+        expect(warn.mock.calls).toHaveLength(row.warnings?.length ?? 0);
+        for (const [index, message] of (row.warnings ?? []).entries()) {
+          expect(warn.mock.calls[index][0]).toContain(message);
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
+  test("applied state on iOS performs no commands", async () => {
+    const adb = new FakeAdb();
+    await new KeepScreenAwakeManager(
+      { ...physicalDevice, platform: "ios" },
+      makeFactory(adb),
+      () => failingSettingsClient,
+    ).restore({ applied: true, method: "svc", svcWasEnabled: false });
+    expect(adb.calls).toEqual([]);
   });
 });

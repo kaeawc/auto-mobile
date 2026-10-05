@@ -160,76 +160,23 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
 
       switch (sdkEvent.type) {
         case "network_event":
-          await recorder.recordNetworkEvent({
-            timestamp: ts,
-            applicationId: appId,
-            url: event.url as string,
-            method: event.method as string,
-            statusCode: (event.statusCode as number) ?? 0,
-            durationMs: (event.durationMs as number) ?? 0,
-            requestBodySize: (event.requestBodySize as number) ?? -1,
-            responseBodySize: (event.responseBodySize as number) ?? -1,
-            protocol: (event.protocol as string) ?? null,
-            host: (event.host as string) ?? null,
-            path: (event.path as string) ?? null,
-            error: (event.error as string) ?? null,
-            requestHeaders: (event.requestHeaders as Record<string, string>) ?? null,
-            responseHeaders: (event.responseHeaders as Record<string, string>) ?? null,
-            requestBody: (event.requestBody as string) ?? null,
-            responseBody: (event.responseBody as string) ?? null,
-            contentType: (event.contentType as string) ?? null,
-          });
+          await recorder.recordNetworkEvent(this.networkEventInput(ts, appId, event));
           break;
         case "websocket_frame_event":
-          await recorder.recordOsEvent({
-            timestamp: ts,
-            applicationId: appId,
-            category: "websocket_frame",
-            kind: (event.frameType as string) ?? "unknown",
-            details: {
-              connectionId: (event.connectionId as string) ?? "",
-              url: (event.url as string) ?? "",
-              direction: (event.direction as string) ?? "",
-              payloadSize: String((event.payloadSize as number) ?? 0),
-              success: String((event.success as boolean) ?? true),
-            },
-          });
+          await recorder.recordOsEvent(this.webSocketFrameInput(ts, appId, event));
           break;
         case "log_event":
-          await recorder.recordLogEvent({
-            timestamp: ts,
-            applicationId: appId,
-            level: (event.level as number) ?? 0,
-            tag: (event.tag as string) ?? "",
-            message: (event.message as string) ?? "",
-            filterName: (event.filterName as string) ?? "",
-          });
+          await recorder.recordLogEvent(this.logEventInput(ts, appId, event));
           break;
         case "broadcast_event":
-          await recorder.recordOsEvent({
-            timestamp: ts,
-            applicationId: appId,
-            category: "broadcast",
-            kind: (event.action as string) ?? "unknown",
-            details: (event.extraKeys as Record<string, string>) ?? null,
-          });
+          await recorder.recordOsEvent(this.broadcastEventInput(ts, appId, event));
           break;
         case "lifecycle_event":
-          await recorder.recordOsEvent({
-            timestamp: ts,
-            applicationId: appId,
-            category: "lifecycle",
-            kind: (event.kind as string) ?? "unknown",
-            details: (event.details as Record<string, string>) ?? null,
-          });
+          await recorder.recordOsEvent(this.lifecycleEventInput(ts, appId, event));
           break;
         case "custom_event": {
           // Custom events are merged into log events
-          const properties = event.properties as Record<string, unknown> | undefined;
-          const propsStr =
-            properties && Object.keys(properties).length > 0
-              ? ` ${JSON.stringify(properties)}`
-              : "";
+          const propsStr = this.customEventProperties(event);
           await recorder.recordLogEvent({
             timestamp: ts,
             applicationId: appId,
@@ -249,6 +196,86 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
       // Non-fatal — telemetry recording must never break observation.
       logger.debug(`[AndroidSdkEventIngestor] recordSdkEvent(${sdkEvent.type}) failed: ${error}`);
     }
+  }
+
+  private networkEventInput(ts: number, appId: string | null, event: Record<string, unknown>) {
+    return {
+      timestamp: ts,
+      applicationId: appId,
+      url: event.url as string,
+      method: event.method as string,
+      statusCode: (event.statusCode as number) ?? 0,
+      durationMs: (event.durationMs as number) ?? 0,
+      requestBodySize: (event.requestBodySize as number) ?? -1,
+      responseBodySize: (event.responseBodySize as number) ?? -1,
+      protocol: (event.protocol as string) ?? null,
+      host: (event.host as string) ?? null,
+      path: (event.path as string) ?? null,
+      error: (event.error as string) ?? null,
+      ...this.networkBodyFields(event),
+    };
+  }
+
+  private webSocketFrameInput(ts: number, appId: string | null, event: Record<string, unknown>) {
+    return {
+      timestamp: ts,
+      applicationId: appId,
+      category: "websocket_frame",
+      kind: (event.frameType as string) ?? "unknown",
+      details: {
+        connectionId: (event.connectionId as string) ?? "",
+        url: (event.url as string) ?? "",
+        direction: (event.direction as string) ?? "",
+        payloadSize: String((event.payloadSize as number) ?? 0),
+        success: String((event.success as boolean) ?? true),
+      },
+    };
+  }
+
+  private logEventInput(ts: number, appId: string | null, event: Record<string, unknown>) {
+    return {
+      timestamp: ts,
+      applicationId: appId,
+      level: (event.level as number) ?? 0,
+      tag: (event.tag as string) ?? "",
+      message: (event.message as string) ?? "",
+      filterName: (event.filterName as string) ?? "",
+    };
+  }
+
+  private broadcastEventInput(ts: number, appId: string | null, event: Record<string, unknown>) {
+    return {
+      timestamp: ts,
+      applicationId: appId,
+      category: "broadcast",
+      kind: (event.action as string) ?? "unknown",
+      details: (event.extraKeys as Record<string, string>) ?? null,
+    };
+  }
+
+  private lifecycleEventInput(ts: number, appId: string | null, event: Record<string, unknown>) {
+    return {
+      timestamp: ts,
+      applicationId: appId,
+      category: "lifecycle",
+      kind: (event.kind as string) ?? "unknown",
+      details: (event.details as Record<string, string>) ?? null,
+    };
+  }
+
+  private customEventProperties(event: Record<string, unknown>): string {
+    const properties = event.properties as Record<string, unknown> | undefined;
+    return properties && Object.keys(properties).length > 0 ? ` ${JSON.stringify(properties)}` : "";
+  }
+
+  private networkBodyFields(event: Record<string, unknown>) {
+    return {
+      requestHeaders: (event.requestHeaders as Record<string, string>) ?? null,
+      responseHeaders: (event.responseHeaders as Record<string, string>) ?? null,
+      requestBody: (event.requestBody as string) ?? null,
+      responseBody: (event.responseBody as string) ?? null,
+      contentType: (event.contentType as string) ?? null,
+    };
   }
 
   /**

@@ -8,6 +8,9 @@ import {
   WebSocketState,
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
+import { CtrlProxyVoiceOver } from "../../../../src/features/observe/ios/CtrlProxyVoiceOver";
+import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 
 describe("CtrlProxyVoiceOver", function () {
   let testDevice: BootedDevice;
@@ -241,6 +244,156 @@ describe("CtrlProxyVoiceOver", function () {
   });
 
   describe("requestVoiceOverActivate", function () {
+    for (const action of ["activate", "long_press"] as const) {
+      test.each(["timeout", "connection drop", "abort"] as const)(
+        `${action}: dispatched %s is unconfirmed and sends exactly one request`,
+        async (failure) => {
+          const timer = new FakeTimer();
+          const { factory, getSocket } = createCapturingFactory(timer);
+          const client = IOSCtrlProxyClient.createForTesting(
+            testDevice,
+            serverPort,
+            factory,
+            timer,
+          );
+          const controller = new AbortController();
+          try {
+            const pending = runWithAbortSignal(controller.signal, () =>
+              client.requestVoiceOverActivate("Submit", action, 5000),
+            );
+            const socket = await waitForSocket(getSocket);
+            await waitForSocketOpen(socket);
+            await waitForSentMessages(socket);
+            expect(commandPayloads(socket!)).toHaveLength(1);
+            expect(commandPayloads(socket!)[0].action).toBe(action);
+            if (failure === "timeout") {
+              timer.advanceTime(5000);
+            } else if (failure === "abort") {
+              controller.abort(new Error("activation cancelled"));
+              // Settle the old implementation too, which ignored cancellation.
+              await Promise.resolve();
+              timer.advanceTime(5000);
+            } else {
+              socket!.close();
+            }
+            const result = await pending;
+            expect(result).toMatchObject({
+              success: false,
+              dispatched: true,
+              acknowledged: false,
+              retryable: false,
+            });
+            expect(result.error).toContain(
+              failure === "timeout"
+                ? "Timeout waiting for action_result"
+                : failure === "abort"
+                  ? "activation cancelled"
+                  : "WebSocket connection closed",
+            );
+            expect(commandPayloads(socket!)).toHaveLength(1);
+          } finally {
+            await client.close();
+          }
+        },
+      );
+
+      test.each(["Element not found", "Not activatable", "Timeout waiting for action_result"])(
+        `${action}: a runner refusal is acknowledged even when its text says %s`,
+        async (error) => {
+          const h = createIosDelegateHarness();
+          const pending = new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
+            "Submit",
+            action,
+          );
+          await Promise.resolve();
+          h.resolveLast({ success: false, error });
+          expect(await pending).toMatchObject({
+            success: false,
+            error,
+            dispatched: true,
+            acknowledged: true,
+          });
+          expect(h.sentMessages).toHaveLength(1);
+        },
+      );
+    }
+
+    test("not connected is not dispatched", async () => {
+      const h = createIosDelegateHarness({ connected: false });
+      const result = await new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
+        "Submit",
+        "activate",
+      );
+      expect(result).toMatchObject({ success: false, dispatched: false, acknowledged: false });
+      expect(result.retryable).toBeUndefined();
+      expect(h.sentMessages).toHaveLength(0);
+    });
+
+    test("failed send is not dispatched and remains eligible for fallback", async () => {
+      const h = createIosDelegateHarness();
+      h.context.getWebSocket()!.send = () => {
+        throw new Error("send failed");
+      };
+      const result = await new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
+        "Submit",
+        "activate",
+      );
+      expect(result).toMatchObject({
+        success: false,
+        error: "send failed",
+        dispatched: false,
+        acknowledged: false,
+      });
+      expect(result.retryable).toBeUndefined();
+      expect(h.requestManager.getPendingCount()).toBe(0);
+    });
+
+    test.each(["action_result", "error"])("%s runner refusal is acknowledged", async (type) => {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      try {
+        const pending = client.requestVoiceOverActivate("Submit", "activate");
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket);
+        const error =
+          type === "error" ? "Unknown command type: request_action" : "Element not found";
+        socket!.simulateMessage(
+          JSON.stringify({
+            type,
+            requestId: commandPayloads(socket!)[0].requestId,
+            success: false,
+            error,
+          }),
+        );
+        const result = await pending;
+        expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: true });
+        expect(result.error).toContain(
+          type === "error" ? "rejected request_action as unknown" : error,
+        );
+        expect(result.retryable).toBeUndefined();
+        expect(commandPayloads(socket!)).toHaveLength(1);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("an already aborted caller never dispatches", async () => {
+      const h = createIosDelegateHarness();
+      const controller = new AbortController();
+      controller.abort();
+      const result = await runWithAbortSignal(controller.signal, () =>
+        new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Submit", "activate"),
+      );
+      expect(result).toMatchObject({ success: false, dispatched: false, acknowledged: false });
+      expect(h.sentMessages).toHaveLength(0);
+    });
+
     // Regression guard for #2857: VoiceOver activation must ride the existing
     // `request_action` command (a real `RequestType`), not the phantom
     // `request_voiceover_action` the runner rejected as "Unknown command type".
@@ -278,7 +431,7 @@ describe("CtrlProxyVoiceOver", function () {
         );
 
         const result = await resultPromise;
-        expect(result.success).toBe(true);
+        expect(result).toMatchObject({ success: true, dispatched: true, acknowledged: true });
       } finally {
         await client.close();
       }
@@ -387,6 +540,7 @@ describe("CtrlProxyVoiceOver", function () {
         expect(result.success).toBe(false);
         expect(result.totalTimeMs).toBe(0);
         expect(result.error).toContain("request_action");
+        expect(result).toMatchObject({ dispatched: false, acknowledged: false });
         // Unsupported commands short-circuit before hitting the wire.
         expect(commandPayloads(socket!)).toHaveLength(0);
       } finally {

@@ -6,6 +6,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 
 describe("TapOnElement VoiceOver mode", () => {
   let fakeVoiceOverDetector: FakeIosVoiceOverDetector;
@@ -64,6 +65,78 @@ describe("TapOnElement VoiceOver mode", () => {
       bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       "ios-accessibility-label": "Settings",
     } as any;
+
+    for (const action of ["tap", "longPress"] as const) {
+      test.each([
+        "Timeout waiting for action_result",
+        "runner disconnected",
+        "activation cancelled",
+      ])(`${action}: dispatched unconfirmed activation (%s) never falls back`, async (error) => {
+        await wireCtrlProxy();
+        const result = { success: false, error, dispatched: true };
+        fakeIosClient.setVoiceOverActivateResult(result);
+        await expect(
+          tapOnElement["executeIOSTapWithVoiceOver"](action, element, 50, 50, 1000),
+        ).rejects.toMatchObject({
+          message: `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${error}). Do not retry automatically.`,
+        });
+        expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(1);
+        expect(fakeIosClient.getVoiceOverActivateHistory()[0].action).toBe(
+          action === "longPress" ? "long_press" : "activate",
+        );
+        expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+      });
+
+      test.each([
+        "Element not found",
+        "Not activatable",
+        "runner rejected request_action as unknown",
+        "Timeout waiting for action_result",
+      ])(
+        `${action}: acknowledged refusal (%s) permits exactly one coordinate fallback`,
+        async (error) => {
+          await wireCtrlProxy();
+          const result = { success: false, error, dispatched: true, acknowledged: true };
+          fakeIosClient.setVoiceOverActivateResult(result);
+          await tapOnElement["executeIOSTapWithVoiceOver"](action, element, 50, 50, 1000);
+          expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(1);
+          expect(fakeIosClient.getTapHistory()).toEqual([
+            { x: 50, y: 50, duration: action === "longPress" ? 1000 : 50 },
+          ]);
+        },
+      );
+
+      test(`${action}: not dispatched permits coordinate fallback`, async () => {
+        await wireCtrlProxy();
+        const result = {
+          success: false,
+          error: "Not connected to CtrlProxy",
+          dispatched: false,
+          acknowledged: false,
+        };
+        fakeIosClient.setVoiceOverActivateResult(result);
+        await tapOnElement["executeIOSTapWithVoiceOver"](action, element, 50, 50, 1000);
+        expect(fakeIosClient.getTapHistory()).toHaveLength(1);
+        expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(1);
+      });
+
+      test(`${action}: successful activation invalidates the cache without a coordinate tap`, async () => {
+        await wireCtrlProxy();
+        const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
+          fakeIosClient as unknown as IOSCtrlProxyClient,
+        );
+        const invalidate = spyOn(fakeIosClient, "invalidateCache");
+        try {
+          await tapOnElement["executeIOSTapWithVoiceOver"](action, element, 50, 50, 1000);
+          expect(invalidate).toHaveBeenCalledTimes(1);
+          expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(1);
+          expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+        } finally {
+          invalidate.mockRestore();
+          existing.mockRestore();
+        }
+      });
+    }
 
     test.each(["tap", "doubleTap", "longPress"] as const)(
       "%s coordinate transport uses the requested long-press timeout only",

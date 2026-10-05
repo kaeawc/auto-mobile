@@ -178,6 +178,7 @@ internal class JsonDaemonPidFileReader(
     booleanOption("toolResultsNoStructuredContent", "--tool-results-no-structured-content")
     booleanOption("actionsDiffObserve", "--actions-diff-observe")
     booleanOption("actionsNoObserve", "--actions-no-observe")
+    booleanOption("actionsCompactMetadata", "--actions-compact-metadata")
     booleanOption("toolResultsCompactJson", "--tool-results-compact-json")
     booleanOption("observeFocusScope", "--observe-focus-scope")
     booleanOption("observeOverview", "--observe-overview")

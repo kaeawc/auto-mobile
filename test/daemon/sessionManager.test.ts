@@ -4778,6 +4778,36 @@ describe("SessionManager", () => {
   // recordSessionActivity) + set (updateSessionCache → recordSessionActivity)
   // = two fire-and-forget activity UPDATEs per diffed action. A dedicated
   // read-only reader halves that: the read must NOT record activity.
+  describe("compact action metadata session cache", () => {
+    test("cache is session/device scoped and clears on session release", async () => {
+      await sessionManager.createSession("compact-s1", "phone-a", "android");
+      await sessionManager.createSession("compact-s2", "phone-b", "android");
+      const blocks = { systemInsets: { top: 24, bottom: 0, left: 0, right: 0 } };
+      sessionManager.setLastActionMetadata("compact-s1", "phone-a", blocks);
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-a")).toEqual(blocks);
+      expect(sessionManager.getLastActionMetadata("compact-s2", "phone-a")).toBeUndefined();
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-b")).toBeUndefined();
+      sessionManager.setLastActionMetadata("compact-s1", "phone-b", {});
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-a")).toBeUndefined();
+      await sessionManager.releaseSession("compact-s1");
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-b")).toBeUndefined();
+    });
+    test("metadata reader records no activity", async () => {
+      const repo = new FakeDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repo);
+      try {
+        await manager.createSession("compact-s1", "phone-a", "android");
+        manager.setLastActionMetadata("compact-s1", "phone-a", { freshness: { verified: true } });
+        const activity = spyOn(repo, "recordActivity");
+        manager.getLastActionMetadata("compact-s1", "phone-a");
+        expect(activity).not.toHaveBeenCalled();
+        activity.mockRestore();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   describe("getLastRenderedObservation (issue #3053)", () => {
     function makeObservation(id: string): any {
       return {

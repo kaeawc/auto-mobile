@@ -162,6 +162,7 @@ export interface NetworkConditionRestorer {
 export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastObserveTime?: number; // Timestamp of last hierarchy observation
+  lastActionMetadata?: { deviceId: string; blocks: Record<string, unknown> };
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   lastRenderedDisplayGeneration?: number; // Last caller-visible display.generation; survives invalidation
   lastRenderedDisplayRevision?: number; // Caller-visible display revision; survives panel cache invalidation
@@ -4392,6 +4393,23 @@ export class SessionManager {
       lastRenderedDisplayKey: observation.display?.key,
       ...(displayRevision === undefined ? {} : { lastRenderedDisplayRevision: displayRevision }),
     });
+  }
+
+  /** Session cache owns this output-only state, so release/rebind clears it with the session. */
+  getLastActionMetadata(
+    sessionId: string,
+    deviceId: string,
+  ): Readonly<Record<string, unknown>> | undefined {
+    const record = this.getSession(sessionId)?.cacheData.lastActionMetadata;
+    return record?.deviceId === deviceId ? record.blocks : undefined;
+  }
+
+  setLastActionMetadata(
+    sessionId: string,
+    deviceId: string,
+    blocks: Record<string, unknown>,
+  ): void {
+    this.updateSessionCache(sessionId, { lastActionMetadata: { deviceId, blocks } });
   }
 
   /**

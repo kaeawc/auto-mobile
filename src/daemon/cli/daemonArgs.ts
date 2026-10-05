@@ -104,6 +104,7 @@ const booleanFlags: Partial<Record<string, DaemonBooleanOption>> = {
   "--tool-results-no-structured-content": "toolResultsNoStructuredContent",
   "--actions-diff-observe": "actionsDiffObserve",
   "--actions-no-observe": "actionsNoObserve",
+  "--actions-compact-metadata": "actionsCompactMetadata",
 };
 
 function hasDaemonFlagValue(value: string | undefined): value is string {

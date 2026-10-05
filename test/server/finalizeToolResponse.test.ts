@@ -4538,3 +4538,464 @@ describe("finalizeToolResponse — scope-then-cap for layoutWarnings (issue #507
     expect(served.layoutWarnings?.warnings).toHaveLength(1);
   });
 });
+
+describe("actions-compact-metadata", () => {
+  const metadata = {
+    insets: { available: false, source: "unavailable", reason: "test" },
+    systemInsets: { top: 24, bottom: 0, left: 0, right: 0 },
+    backStack: { depth: 1 },
+    gfxMetrics: { isStable: true },
+    displayedTimeMetrics: [{ displayedMs: 10 }],
+    deviceLock: { isLocked: false },
+    accessibilityState: { enabled: false, service: "unknown" },
+    freshness: { verified: true, isFresh: true },
+  };
+  const element = { text: "Hello", bounds: { left: 0, top: 0, right: 100, bottom: 100 } };
+  let compact: boolean;
+  let diff: boolean;
+  let noObserve: boolean;
+  let store: import("../../src/server/finalizeToolResponse").ObservationBaselineStore;
+  let records: Map<string, { deviceId: string; blocks: Record<string, unknown> }>;
+  let baselines: Map<string, ObserveResult>;
+
+  beforeEach(() => {
+    compact = serverConfig.isActionsCompactMetadataEnabled();
+    diff = serverConfig.isActionsDiffObserveEnabled();
+    noObserve = serverConfig.isActionsNoObserveEnabled();
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    serverConfig.setActionsDiffObserveEnabled(false);
+    serverConfig.setActionsNoObserveEnabled(false);
+    // Extend the same Map-backed fake used by the existing diff tests.
+    baselines = new Map();
+    records = new Map();
+    store = {
+      get: (uuid) => baselines.get(uuid),
+      set: (uuid, observation) => {
+        baselines.set(uuid, observation);
+      },
+      getActionMetadata: (uuid, deviceId) => {
+        const record = records.get(uuid);
+        return record?.deviceId === deviceId ? record.blocks : undefined;
+      },
+      setActionMetadata: (uuid, deviceId, blocks) => {
+        records.set(uuid, { deviceId, blocks });
+      },
+    };
+  });
+  afterEach(() => {
+    serverConfig.setActionsCompactMetadataEnabled(compact);
+    serverConfig.setActionsDiffObserveEnabled(diff);
+    serverConfig.setActionsNoObserveEnabled(noObserve);
+  });
+
+  function action(deviceId = "phone-a"): Record<string, unknown> {
+    return {
+      success: true,
+      element: structuredClone(element),
+      selectedElement: { matchedElement: structuredClone(element) },
+      observation: { ...makeObserveResult(), ...structuredClone(metadata), deviceId },
+    };
+  }
+  function emit(
+    payload = action(),
+    overrides: Partial<
+      import("../../src/server/finalizeToolResponse").FinalizeToolResponseContext
+    > = {},
+  ) {
+    return finalizeToolResponse(createStructuredToolResponse(payload), {
+      name: "tapOn",
+      sessionUuid: "s1",
+      baselineStore: store,
+      ...overrides,
+    });
+  }
+  function observation(response: ReturnType<typeof emit>): Record<string, unknown> {
+    return structuredPayload(response).observation as Record<string, unknown>;
+  }
+  function expectFull(response: ReturnType<typeof emit>) {
+    for (const key of Object.keys(metadata)) {
+      expect(observation(response)).toHaveProperty(key);
+    }
+  }
+
+  test("default finalized bytes stay identical; missing session/store are also unchanged", () => {
+    emit();
+    const snapshot = structuredClone(records);
+    const reads = spyOn(store, "getActionMetadata");
+    const writes = spyOn(store, "setActionMetadata");
+    serverConfig.setActionsCompactMetadataEnabled(false);
+    const expected = JSON.stringify(emit());
+    expect(JSON.stringify(emit())).toBe(expected);
+    emit(action().observation as Record<string, unknown>, { name: "observe" });
+    emit({ ...action(), success: false });
+    expect(reads).not.toHaveBeenCalled();
+    expect(writes).not.toHaveBeenCalled();
+    expect(records).toEqual(snapshot);
+    reads.mockRestore();
+    writes.mockRestore();
+    records.clear();
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    expect(JSON.stringify(emit(action(), { sessionUuid: undefined }))).toBe(expected);
+    expect(JSON.stringify(emit(action(), { baselineStore: undefined }))).toBe(expected);
+    expect(records.size).toBe(0);
+  });
+  test("first full; identical second omits each block; changed block alone reappears", () => {
+    expectFull(emit());
+    const repeated = observation(emit());
+    for (const key of Object.keys(metadata)) {
+      expect(repeated).not.toHaveProperty(key);
+    }
+    const changed = action();
+    (changed.observation as Record<string, unknown>).gfxMetrics = { isStable: true, frameCount: 2 };
+    expect(observation(emit(changed)).gfxMetrics).toEqual({ isStable: true, frameCount: 2 });
+    expect(observation(emit(changed))).not.toHaveProperty("gfxMetrics");
+    expect(observation(emit())).not.toHaveProperty("insets");
+  });
+  test("new session and every device switch resend all blocks, including return to the first device", () => {
+    emit();
+    expectFull(emit(action(), { sessionUuid: "s2" }));
+    expectFull(emit(action("phone-b")));
+    expectFull(emit());
+  });
+  test("missing device identity emits full and records nothing", () => {
+    const payload = action();
+    delete (payload.observation as Record<string, unknown>).deviceId;
+    expectFull(emit(payload));
+    expectFull(emit(payload));
+    expect(records.size).toBe(0);
+  });
+  test("identical duplicate element omitted; differing or absent match retained", () => {
+    expect(structuredPayload(emit())).not.toHaveProperty("element");
+    const different = action();
+    different.element = { ...element, text: "Different" };
+    expect(structuredPayload(emit(different)).element).toEqual(different.element);
+    const absent = action();
+    delete absent.selectedElement;
+    expect(structuredPayload(emit(absent)).element).toEqual(element);
+  });
+  test("required element stays present", () => {
+    expect(
+      structuredPayload(
+        emit(action(), { outputSchema: z.object({ element: z.object({ text: z.string() }) }) }),
+      ).element,
+    ).toEqual(element);
+  });
+  test("observe never omits and records the top-level metadata it sends", () => {
+    const payload = action().observation as Record<string, unknown>;
+    for (let i = 0; i < 2; i++) {
+      const result = structuredPayload(emit(payload, { name: "observe" }));
+      for (const key of Object.keys(metadata)) {
+        expect(result).toHaveProperty(key);
+      }
+    }
+    expect(records.get("s1")?.blocks).toEqual(metadata);
+    expect(observation(emit())).not.toHaveProperty("insets");
+  });
+  test("internal calls neither omit nor record, even with a previous external response", () => {
+    expectFull(emit(action(), { internal: true }));
+    expect(records.size).toBe(0);
+    emit();
+    const internal = emit(action(), { internal: true });
+    expectFull(internal);
+    expect(structuredPayload(internal).element).toEqual(element);
+  });
+  test("failure payload and MCP isError never omit but record inline metadata", () => {
+    emit();
+    const failed = action();
+    failed.success = false;
+    (failed.observation as Record<string, unknown>).gfxMetrics = { isStable: false };
+    expectFull(emit(failed));
+    expect(structuredPayload(emit(failed)).element).toEqual(element);
+    const error = createStructuredToolResponse(action());
+    Object.assign(error, { isError: true });
+    finalizeToolResponse(error, { name: "tapOn", sessionUuid: "fresh", baselineStore: store });
+    expect(records.get("fresh")?.blocks).toEqual(metadata);
+    expect(observation(emit()).gfxMetrics).toEqual(metadata.gfxMetrics);
+    expect(structuredPayload(emit({ success: false, error: "failed" }))).toEqual({
+      success: false,
+      error: "failed",
+    });
+  });
+  test("actions-no-observe records no metadata but still removes duplicate element", () => {
+    serverConfig.setActionsNoObserveEnabled(true);
+    const result = structuredPayload(emit());
+    expect(result).not.toHaveProperty("observation");
+    expect(result).not.toHaveProperty("element");
+    expect(records.get("s1")?.blocks).toEqual({});
+    serverConfig.setActionsNoObserveEnabled(false);
+    expectFull(emit());
+  });
+  test("diff passthrough freshness is compacted without changing the hierarchy baseline", () => {
+    serverConfig.setActionsDiffObserveEnabled(true);
+    emit();
+    const repeated = observation(emit());
+    expect(repeated.isDiff).toBe(true);
+    expect(repeated).not.toHaveProperty("freshness");
+    expect(baselines.get("s1")?.freshness).toEqual(metadata.freshness);
+    const changed = action();
+    (changed.observation as Record<string, unknown>).freshness = { verified: true, isFresh: false };
+    expect(observation(emit(changed)).freshness).toEqual({ verified: true, isFresh: false });
+  });
+  test("raw hierarchy inset copies compact independently", () => {
+    const payload = action();
+    const obs = payload.observation as ObserveResult;
+    obs.viewHierarchy!.systemInsets = { top: 4, bottom: 0, left: 0, right: 0 };
+    const context = { args: { raw: true } };
+    const first = observation(emit(payload, context));
+    expect(first.viewHierarchy).toHaveProperty("systemInsets");
+    expect(observation(emit(payload, context)).viewHierarchy).not.toHaveProperty("systemInsets");
+    obs.viewHierarchy!.systemInsets.top = 6;
+    expect(
+      (observation(emit(payload, context)).viewHierarchy as Record<string, unknown>).systemInsets,
+    ).toEqual({ top: 6, bottom: 0, left: 0, right: 0 });
+  });
+  test("artifact-only observation does not prime metadata state", () => {
+    emit(action(), { artifactWriter: new FakeObservationArtifactWriter() });
+    expect(records.get("s1")?.blocks).toEqual({});
+    expectFull(emit());
+  });
+  test("oversized residue does not record blocks removed from inline output", () => {
+    const payload = action();
+    payload.large = "x".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+    const result = emit(payload, {
+      artifactWriter: new FakeObservationArtifactWriter(),
+      artifactMode: "oversized",
+    });
+    expect(structuredPayload(result)).toHaveProperty("artifact");
+    expect(records.get("s1")?.blocks).toEqual({});
+    expectFull(emit());
+  });
+  test("snapshot is detached from caller mutations and omitted blocks stay last-sent", () => {
+    const payload = action();
+    emit(payload);
+    (payload.observation as Record<string, unknown>).systemInsets = {
+      top: 99,
+      bottom: 0,
+      left: 0,
+      right: 0,
+    };
+    expect(observation(emit(payload)).systemInsets).toEqual({
+      top: 99,
+      bottom: 0,
+      left: 0,
+      right: 0,
+    });
+    const missing = action();
+    delete (missing.observation as Record<string, unknown>).systemInsets;
+    emit(missing);
+    expect(observation(emit(payload))).not.toHaveProperty("systemInsets");
+  });
+  test("device switches with stripped or spilled metadata still invalidate the previous device", () => {
+    emit();
+    serverConfig.setActionsNoObserveEnabled(true);
+    emit(action("phone-b"));
+    serverConfig.setActionsNoObserveEnabled(false);
+    expectFull(emit());
+    const spilled = action("phone-b");
+    spilled.large = "x".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+    emit(spilled, {
+      artifactWriter: new FakeObservationArtifactWriter(),
+      artifactMode: "oversized",
+    });
+    expectFull(emit());
+  });
+  test("diff-body artifact records only metadata retained inline", () => {
+    serverConfig.setActionsDiffObserveEnabled(true);
+    const writer = new FakeObservationArtifactWriter();
+    emit(action(), { artifactWriter: writer });
+    expect(records.get("s1")?.blocks).toEqual({});
+    const second = observation(emit(action(), { artifactWriter: writer }));
+    expect(second).toHaveProperty("freshness");
+    expect(second).toHaveProperty("artifact");
+    expect(records.get("s1")?.blocks).toEqual({ freshness: metadata.freshness });
+    expect(observation(emit(action(), { artifactWriter: writer }))).not.toHaveProperty("freshness");
+    expectFull(emit(action(), { args: { raw: true }, sessionUuid: "new-session" }));
+  });
+  test("failed changed metadata is recorded for the next successful response", () => {
+    emit();
+    const changed = action();
+    (changed.observation as Record<string, unknown>).insets = {
+      ...metadata.insets,
+      reason: "changed",
+    };
+    emit({ ...changed, success: false });
+    expect(records.get("s1")?.blocks.insets).toEqual({ ...metadata.insets, reason: "changed" });
+    expect(observation(emit(changed))).not.toHaveProperty("insets");
+  });
+
+  test.each([
+    [
+      "executePlan",
+      {
+        success: true,
+        failedStep: { failureObservation: makeObserveResult() },
+        deviceFailures: [{ failureObservation: makeObserveResult() }],
+        debug: { steps: [{ details: { stepObservation: makeObserveResult() } }] },
+      },
+    ],
+    ["getNetworkGraph", { success: true, graph: [{ host: "example.test" }] }],
+  ] as const)("%s always artifacts identically with compaction on or off", (name, payload) => {
+    const offWriter = new FakeObservationArtifactWriter();
+    serverConfig.setActionsCompactMetadataEnabled(false);
+    const expected = emit(payload, { name, artifactWriter: offWriter, artifactMode: "always" });
+    const onWriter = new FakeObservationArtifactWriter();
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    const actual = emit(payload, { name, artifactWriter: onWriter, artifactMode: "always" });
+    expect(onWriter.writes.length).toBeGreaterThan(0);
+    expect(onWriter.writes).toEqual(offWriter.writes);
+    expect(actual).toEqual(expected);
+  });
+
+  test.each([
+    { success: true },
+    { success: true, observation: { deviceId: "phone-a", insets: metadata.insets } },
+  ])(
+    "no-op compaction preserves payload identity and the original envelope text: %j",
+    (payload) => {
+      // No ObserveResult marker: finalization can return this exact envelope unchanged.
+      const response = createStructuredToolResponse(payload);
+      const originalText = JSON.stringify(payload, null, 2);
+      response.content[0].text = originalText;
+      const textPart = response.content[0];
+      expect(
+        finalizeToolResponse(response, {
+          name: "customAction",
+          sessionUuid: "s1",
+          baselineStore: store,
+        }),
+      ).toBe(response);
+      expect(response.structuredContent).toBe(payload);
+      expect(response.content[0]).toBe(textPart);
+      expect(response.content[0].text).toBe(originalText);
+    },
+  );
+
+  test.each(["full", "skeleton", "early-return", "text-only"])(
+    "observe %s updates last-sent insets before the next action",
+    (mode) => {
+      emit();
+      const insetsB = { ...metadata.insets, reason: "keyboard shown" };
+      const payload =
+        mode === "early-return"
+          ? { deviceId: "phone-a", insets: insetsB }
+          : { ...makeObserveResult(), deviceId: "phone-a", insets: insetsB };
+      const ctx = {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+        args: { project: mode === "skeleton" ? "skeleton" : "full" },
+      };
+      if (mode === "text-only") {
+        const response = { content: [{ type: "text", text: stringifyToolResponse(payload) }] };
+        finalizeToolResponse(response, ctx);
+        expect(JSON.parse(response.content[0].text).insets).toEqual(insetsB);
+      } else {
+        expect(structuredPayload(emit(payload, ctx)).insets).toEqual(insetsB);
+      }
+      expect(records.get("s1")?.blocks.insets).toEqual(insetsB);
+      expect(observation(emit()).insets).toEqual(metadata.insets);
+    },
+  );
+
+  test.each(["success-false", "payload-error", "isError"])(
+    "%s records carried blocks and leaves absent blocks alone",
+    (kind) => {
+      emit();
+      const insetsB = { ...metadata.insets, reason: "error capture" };
+      const payload = action();
+      const obs = payload.observation as Record<string, unknown>;
+      obs.insets = insetsB;
+      delete obs.systemInsets;
+      if (kind === "success-false") {
+        payload.success = false;
+      }
+      if (kind === "payload-error") {
+        payload.error = "failed";
+      }
+      const response = createStructuredToolResponse(payload);
+      if (kind === "isError") {
+        Object.assign(response, { isError: true });
+      }
+      finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+      expect(structuredPayload(response).element).toEqual(element);
+      expect(observation(response).insets).toEqual(insetsB);
+      expect(records.get("s1")?.blocks.insets).toEqual(insetsB);
+      expect(records.get("s1")?.blocks.systemInsets).toEqual(metadata.systemInsets);
+      const snapshot = records.get("s1");
+      emit({ success: false, error: "no capture" });
+      expect(records.get("s1")).toBe(snapshot);
+      expect(observation(emit()).insets).toEqual(metadata.insets);
+    },
+  );
+
+  test.each([
+    ["freshness", { verified: false, isFresh: false, warning: "no capture timestamp" }],
+    ["freshness", { verified: false, warning: "freshness unknown" }],
+    ["gfxMetrics", { isStable: false }],
+  ] as const)("repeated warning block %s %j always stays inline and recorded", (field, block) => {
+    const payload = action();
+    (payload.observation as Record<string, unknown>)[field] = block;
+    for (let i = 0; i < 2; i++) {
+      expect(observation(emit(payload))[field]).toEqual(block);
+      expect(records.get("s1")?.blocks[field]).toEqual(block);
+    }
+  });
+
+  test.each(["observation", "oversized-residue"])(
+    "%s artifact retains uncompacted metadata and does not record artifact-only changes",
+    (mode) => {
+      emit();
+      const payload = action();
+      if (mode === "oversized-residue") {
+        // No ObserveResult marker: exercise the whole-payload ceiling spill directly.
+        payload.observation = {
+          deviceId: "phone-a",
+          insets: metadata.insets,
+          deviceLock: { isLocked: true },
+        };
+      }
+      const obs = payload.observation as Record<string, unknown>;
+      const changedField = mode === "observation" ? "systemInsets" : "deviceLock";
+      if (mode === "observation") {
+        obs.systemInsets = { ...metadata.systemInsets, top: 99 };
+      }
+      const writer = new FakeObservationArtifactWriter();
+      if (mode === "oversized-residue") {
+        payload.large = "x".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+      }
+      const result = emit(payload, {
+        artifactWriter: writer,
+        artifactMode: mode === "observation" ? "always" : "oversized",
+      });
+      expect(writer.writes).toHaveLength(1);
+      const written = JSON.parse(writer.writes[0].serialized!);
+      const writtenObs = mode === "observation" ? written : written.observation;
+      expect(writtenObs.insets).toEqual(metadata.insets);
+      expect(writtenObs[changedField]).toEqual(obs[changedField]);
+      if (mode === "oversized-residue") {
+        expect(written.element).toEqual(element);
+      }
+      const inline = structuredPayload(result);
+      expect(mode === "observation" ? inline.observation : inline).toHaveProperty("artifact");
+      expect(records.get("s1")?.blocks).toEqual(metadata);
+      expect(observation(emit(payload))[changedField]).toEqual(obs[changedField]);
+    },
+  );
+
+  test("artifacted observe carries no metadata inline and leaves last-sent blocks alone", () => {
+    emit();
+    const payload = {
+      ...makeObserveResult(),
+      deviceId: "phone-a",
+      insets: { ...metadata.insets, reason: "only in artifact" },
+    };
+    const result = emit(payload, {
+      name: "observe",
+      artifactWriter: new FakeObservationArtifactWriter(),
+    });
+    expect(structuredPayload(result)).toHaveProperty("artifact");
+    expect(structuredPayload(result)).not.toHaveProperty("insets");
+    expect(records.get("s1")?.blocks).toEqual(metadata);
+    expect(observation(emit())).not.toHaveProperty("insets");
+  });
+});

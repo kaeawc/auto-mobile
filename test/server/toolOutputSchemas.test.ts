@@ -1,3 +1,4 @@
+import generatedDefinitions from "../../schemas/tool-definitions.json";
 import {
   startDeviceOutputSchema,
   pressButtonResultSchema,
@@ -924,4 +925,68 @@ test("observationDiff declares an optional string hint and preserves reason enum
   expect(schema.properties?.hint).toEqual({ type: "string" });
   expect(schema.required ?? []).not.toContain("hint");
   expect(schema.properties?.reason).toEqual({ type: "string", enum: reasons });
+});
+
+// Walk every declared action output, including per-tool unions, without registry/DB setup.
+interface CompactMetadataJsonSchema {
+  properties?: Record<string, CompactMetadataJsonSchema>;
+  required?: string[];
+  anyOf?: CompactMetadataJsonSchema[];
+  oneOf?: CompactMetadataJsonSchema[];
+  allOf?: CompactMetadataJsonSchema[];
+  additionalProperties?: unknown;
+}
+function schemaArms(schema: CompactMetadataJsonSchema): CompactMetadataJsonSchema[] {
+  return [
+    schema,
+    ...[...(schema.anyOf ?? []), ...(schema.oneOf ?? []), ...(schema.allOf ?? [])].flatMap(
+      schemaArms,
+    ),
+  ];
+}
+test("all action schemas allow compact metadata and duplicate-element omissions", () => {
+  const fields = [
+    "insets",
+    "systemInsets",
+    "backStack",
+    "gfxMetrics",
+    "displayedTimeMetrics",
+    "deviceLock",
+    "accessibilityState",
+    "freshness",
+  ];
+  let observations = 0;
+  const definitions: readonly { name: string; outputSchema?: CompactMetadataJsonSchema }[] =
+    generatedDefinitions;
+  for (const definition of definitions) {
+    if (definition.name === "observe" || !definition.outputSchema) {
+      continue;
+    }
+    for (const arm of schemaArms(definition.outputSchema)) {
+      if (arm.properties?.element) {
+        expect(arm.required ?? []).not.toContain("element");
+      }
+      const observation = arm.properties?.observation;
+      if (!observation) {
+        continue;
+      }
+      observations++;
+      for (const observationArm of schemaArms(observation)) {
+        for (const field of fields) {
+          expect(observationArm.required ?? []).not.toContain(field);
+          if (observationArm.properties && !observationArm.properties[field]) {
+            expect(observationArm.additionalProperties).not.toBe(false);
+          }
+        }
+        const hierarchy = observationArm.properties?.viewHierarchy;
+        if (hierarchy) {
+          for (const hierarchyArm of schemaArms(hierarchy)) {
+            expect(hierarchyArm.required ?? []).not.toContain("insets");
+            expect(hierarchyArm.required ?? []).not.toContain("systemInsets");
+          }
+        }
+      }
+    }
+  }
+  expect(observations).toBeGreaterThan(0);
 });

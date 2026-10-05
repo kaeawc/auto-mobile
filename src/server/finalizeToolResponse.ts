@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   terminalScreenshotUnavailable,
   isTerminalScreenshotUnavailable,
@@ -37,7 +38,7 @@ import { buildObservationScreenshotUri } from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 
 /**
- * Read/write access to the per-session diff baseline and the display revision
+ * Read/write access to per-session diff/metadata baselines and the display revision
  * of the last observation output to the agent. Injected (interface + fake) so `finalizeToolResponse`
  * stays free of a direct `sessionManager`/`DaemonState` dependency; the call site
  * backs it with `SessionManager.setLastRenderedObservation` /
@@ -46,6 +47,13 @@ import { stripInternalObservationFields } from "./observationInternalFields";
 export interface ObservationBaselineStore {
   get(sessionUuid: string): ObserveResult | undefined;
   set(sessionUuid: string, observation: ObserveResult, displayRevision?: number): void;
+  /** Last inline-sent blocks for the current device; a different device returns undefined. */
+  getActionMetadata?(
+    sessionUuid: string,
+    deviceId: string,
+  ): Readonly<Record<string, unknown>> | undefined;
+  /** Replaces the current device snapshot, including an empty device-switch invalidation. */
+  setActionMetadata?(sessionUuid: string, deviceId: string, blocks: Record<string, unknown>): void;
   setDisplayRevision?(
     sessionUuid: string,
     revision: number,
@@ -821,7 +829,20 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     }
   }
 
+  // Artifacts retain complete metadata. Compact only the residue delivered inline,
+  // and preserve the original envelope when compaction has nothing to remove.
+  if (canCompactActionMetadata(ctx, payload, envelopeView.envelope)) {
+    const inlinePayload = sanitizedPayload ?? payload;
+    const compacted = compactActionMetadata(inlinePayload, ctx);
+    if (compacted !== inlinePayload) {
+      sanitizedPayload = compacted;
+    }
+  }
+
   if (!sanitizedPayload) {
+    if (canRecordActionMetadata(ctx)) {
+      recordInlineActionMetadata(payload, ctx, actionMetadataDeviceId(payload, ctx.name));
+    }
     return response;
   }
 
@@ -831,6 +852,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload,
     envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
   );
+  if (canRecordActionMetadata(ctx)) {
+    recordInlineActionMetadata(sanitizedPayload, ctx, actionMetadataDeviceId(payload, ctx.name));
+  }
   if (pendingBaselineUpdate) {
     ctx.baselineStore!.set(
       pendingBaselineUpdate.sessionUuid,
@@ -847,6 +871,164 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   }
 
   return response;
+}
+
+/** Only these independently compared blocks are omitted; join keys and screen identity stay inline. */
+const ACTION_METADATA_FIELDS = [
+  "insets",
+  "systemInsets",
+  "backStack",
+  "gfxMetrics",
+  "displayedTimeMetrics",
+  "deviceLock",
+  "accessibilityState",
+  "freshness",
+] as const;
+const HIERARCHY_METADATA_FIELDS = ["insets", "systemInsets"] as const;
+
+function canRecordActionMetadata(ctx: FinalizeToolResponseContext): boolean {
+  return (
+    serverConfig.isActionsCompactMetadataEnabled() &&
+    !ctx.internal &&
+    !!ctx.sessionUuid &&
+    !!ctx.baselineStore?.getActionMetadata &&
+    !!ctx.baselineStore.setActionMetadata
+  );
+}
+
+function canCompactActionMetadata(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+  envelope: object,
+): boolean {
+  return (
+    canRecordActionMetadata(ctx) &&
+    ctx.name !== "observe" &&
+    payload.success !== false &&
+    payload.error === undefined &&
+    (envelope as { isError?: boolean }).isError !== true
+  );
+}
+
+function actionMetadataBlocks(
+  payload: Record<string, unknown>,
+  name: string,
+): Record<string, unknown> {
+  const observation = name === "observe" ? payload : payload.observation;
+  if (!isRecord(observation)) {
+    return {};
+  }
+  const blocks: Record<string, unknown> = {};
+  for (const field of ACTION_METADATA_FIELDS) {
+    if (observation[field] !== undefined) {
+      blocks[field] = observation[field];
+    }
+  }
+  if (isRecord(observation.viewHierarchy)) {
+    for (const field of HIERARCHY_METADATA_FIELDS) {
+      if (observation.viewHierarchy[field] !== undefined) {
+        blocks[`viewHierarchy.${field}`] = observation.viewHierarchy[field];
+      }
+    }
+  }
+  return blocks;
+}
+
+function actionMetadataDeviceId(
+  payload: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  const observation = name === "observe" ? payload : payload.observation;
+  const deviceId = isRecord(observation) ? observation.deviceId : undefined;
+  return typeof deviceId === "string" && deviceId.length > 0 ? deviceId : undefined;
+}
+
+function hasDuplicateActionElement(
+  payload: Record<string, unknown>,
+  outputSchema: unknown,
+): boolean {
+  return (
+    payload.element !== undefined &&
+    isRecord(payload.selectedElement) &&
+    isDeepStrictEqual(payload.element, payload.selectedElement.matchedElement) &&
+    !requiredOutputSchemaKeys(outputSchema).includes("element")
+  );
+}
+
+function compactActionMetadata(
+  payload: Record<string, unknown>,
+  ctx: FinalizeToolResponseContext,
+): Record<string, unknown> {
+  let next = payload;
+  if (hasDuplicateActionElement(payload, ctx.outputSchema)) {
+    next = { ...payload };
+    delete next.element;
+  }
+  const deviceId = actionMetadataDeviceId(payload, ctx.name);
+  if (!deviceId || !isRecord(payload.observation)) {
+    return next;
+  }
+  const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
+  if (!previous) {
+    return next;
+  }
+  const observation = payload.observation;
+  const omittedFields = ACTION_METADATA_FIELDS.filter((field) => {
+    const block = observation[field];
+    // Per-call warnings must survive even when their values have not changed.
+    if (
+      (field === "freshness" && (!isRecord(block) || block.isFresh !== true)) ||
+      (field === "gfxMetrics" && isRecord(block) && block.isStable === false)
+    ) {
+      return false;
+    }
+    return block !== undefined && isDeepStrictEqual(block, previous[field]);
+  });
+  const sourceHierarchy = isRecord(observation.viewHierarchy)
+    ? observation.viewHierarchy
+    : undefined;
+  const omittedHierarchyFields = HIERARCHY_METADATA_FIELDS.filter(
+    (field) =>
+      sourceHierarchy?.[field] !== undefined &&
+      isDeepStrictEqual(sourceHierarchy[field], previous[`viewHierarchy.${field}`]),
+  );
+  if (omittedFields.length === 0 && omittedHierarchyFields.length === 0) {
+    return next;
+  }
+
+  const compactedObservation = { ...observation };
+  for (const field of omittedFields) {
+    delete compactedObservation[field];
+  }
+  if (omittedHierarchyFields.length > 0) {
+    const hierarchy = { ...sourceHierarchy };
+    for (const field of omittedHierarchyFields) {
+      delete hierarchy[field];
+    }
+    compactedObservation.viewHierarchy = hierarchy;
+  }
+  return { ...next, observation: compactedObservation };
+}
+
+/** Record only final inline blocks, including observe and errors; artifacts do not count. */
+function recordInlineActionMetadata(
+  payload: Record<string, unknown>,
+  ctx: FinalizeToolResponseContext,
+  deviceId: string | undefined,
+): void {
+  if (!deviceId) {
+    return;
+  }
+  const blocks = actionMetadataBlocks(payload, ctx.name);
+  const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
+  if (Object.keys(blocks).length === 0 && previous) {
+    return;
+  }
+  // An empty snapshot on a device switch invalidates the old device without
+  // claiming delivery of any artifacted/stripped block.
+  // Detach values from the response and use the text serializer's wire representation.
+  const snapshot: Record<string, unknown> = JSON.parse(stringifyToolResponse(blocks));
+  ctx.baselineStore!.setActionMetadata!(ctx.sessionUuid!, deviceId, { ...previous, ...snapshot });
 }
 
 function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<string, unknown> {

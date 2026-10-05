@@ -1352,6 +1352,12 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
               DaemonState.getInstance()
                 .getSessionManager()
                 .setLastRenderedObservation(uuid, observation, displayRevision),
+            getActionMetadata: (uuid, deviceId) =>
+              DaemonState.getInstance().getSessionManager().getLastActionMetadata(uuid, deviceId),
+            setActionMetadata: (uuid, deviceId, blocks) =>
+              DaemonState.getInstance()
+                .getSessionManager()
+                .setLastActionMetadata(uuid, deviceId, blocks),
             setDisplayRevision: (uuid, revision, key, generation) =>
               DaemonState.getInstance()
                 .getSessionManager()

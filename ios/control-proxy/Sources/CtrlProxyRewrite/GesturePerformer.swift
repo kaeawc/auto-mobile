@@ -587,6 +587,13 @@ public final class GesturePerformer: GesturePerforming {
         case escape
     }
 
+    enum ImeFocusedField: Equatable, Sendable {
+        case absent
+        case singleLine
+        case multiline
+        case unresolved
+    }
+
     enum ImeActionDecision: Equatable, Sendable {
         case tapKey(index: Int)
         case typeReturn
@@ -595,11 +602,12 @@ public final class GesturePerformer: GesturePerforming {
 
     /// Match the requested action exactly (case-insensitive) by label or identifier.
     /// A different action label, including plain Return, is not an IME action
-    /// for a text view. Single-line inputs retain the existing Return fallback.
+    /// for a text view. Single-line and unresolved inputs retain the Return fallback,
+    /// including focused inputs using a hardware keyboard.
     /// An explicitly disabled matching key must not be bypassed by that fallback.
     nonisolated static func imeActionDecision(
         action: String,
-        isMultiline: Bool,
+        focusedField: ImeFocusedField,
         keyboardVisible: Bool,
         keys: [(label: String, identifier: String, isEnabled: Bool)]
     )
@@ -609,19 +617,22 @@ public final class GesturePerformer: GesturePerforming {
         guard ["done", "go", "search", "send", "next"].contains(action) else {
             return .notAvailable("IME action: \(action)")
         }
-        guard keyboardVisible else {
-            return .notAvailable("IME action '\(action)' is not available: no keyboard is visible")
+        if keyboardVisible {
+            let matches = keys.indices.filter {
+                keys[$0].label.lowercased() == action || keys[$0].identifier.lowercased() == action
+            }
+            if let index = matches.first(where: { keys[$0].isEnabled }) {
+                return .tapKey(index: index)
+            }
+            if !matches.isEmpty {
+                return .notAvailable("IME action '\(action)' is not available: the keyboard action key is disabled")
+            }
+        } else if focusedField == .absent {
+            return .notAvailable(
+                "IME action '\(action)' is not available: no keyboard is visible and no focused text field was found"
+            )
         }
-        let matches = keys.indices.filter {
-            keys[$0].label.lowercased() == action || keys[$0].identifier.lowercased() == action
-        }
-        if let index = matches.first(where: { keys[$0].isEnabled }) {
-            return .tapKey(index: index)
-        }
-        if !matches.isEmpty {
-            return .notAvailable("IME action '\(action)' is not available: the keyboard action key is disabled")
-        }
-        if isMultiline {
+        if focusedField == .multiline {
             return .notAvailable(
                 "IME action '\(action)' is not available for this multi-line field: Return would insert a line break"
             )
@@ -1543,18 +1554,22 @@ public final class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
+            try requireKeyboardFocus(
+                app: app,
+                context: "ensure a text field is focused before performing an IME action"
+            )
+
             switch action.lowercased() {
             case "done", "go", "search", "send", "next":
                 try catchingObjCException {
                     let keyboard = app.keyboards.firstMatch.exists
                         ? app.keyboards.firstMatch : self.springboard.keyboards.firstMatch
                     let keyboardVisible = keyboard.exists
-                    var isMultiline = false
-                    if keyboardVisible {
-                        guard let focused = resolveFocusedTextElement(app: app) else {
-                            throw GestureError.notSupported("No focused editable node found for IME action")
-                        }
-                        isMultiline = focused.elementType == .textView
+                    let focusedField: ImeFocusedField
+                    if let focused = resolveFocusedTextElement(app: app) {
+                        focusedField = focused.elementType == .textView ? .multiline : .singleLine
+                    } else {
+                        focusedField = keyboardVisible ? .unresolved : .absent
                     }
                     let keys = keyboardVisible ? keyboard.buttons.matching(NSPredicate(
                         format: "identifier IN[c] %@ OR label IN[c] %@",
@@ -1564,7 +1579,7 @@ public final class GesturePerformer: GesturePerforming {
                     let labels = keys.map { (label: $0.label, identifier: $0.identifier, isEnabled: $0.isEnabled) }
                     switch Self.imeActionDecision(
                         action: action,
-                        isMultiline: isMultiline,
+                        focusedField: focusedField,
                         keyboardVisible: keyboardVisible,
                         keys: labels
                     ) {
@@ -1577,10 +1592,6 @@ public final class GesturePerformer: GesturePerforming {
                     }
                 }
             case "previous":
-                try requireKeyboardFocus(
-                    app: app,
-                    context: "ensure a text field is focused before performing an IME action"
-                )
                 try catchingObjCException {
                     app.typeKey(.tab, modifierFlags: .shift)
                 }

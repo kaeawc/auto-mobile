@@ -62,7 +62,7 @@ export const normalizeBackoff = (input: BackoffInput): BackoffPolicy => {
   if (typeof input === "number") {
     return fixedBackoff(input);
   }
-  if (Array.isArray(input)) {
+  if (isBackoffSequence(input)) {
     return sequenceBackoff(input);
   }
   if (typeof input === "function") {
@@ -75,6 +75,9 @@ export const normalizeBackoff = (input: BackoffInput): BackoffPolicy => {
   }
   return input;
 };
+
+// Array.isArray's built-in predicate only narrows mutable arrays.
+const isBackoffSequence = (input: BackoffInput): input is readonly number[] => Array.isArray(input);
 
 export const delayForAttempt = (input: BackoffInput, attempt: number): number =>
   normalizeBackoff(input).delayForAttempt(attempt);

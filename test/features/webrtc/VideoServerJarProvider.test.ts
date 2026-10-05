@@ -1,5 +1,6 @@
 import AdmZip from "adm-zip";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -154,6 +155,25 @@ describe("VideoServerJarProvider (#3831)", function () {
     checksum.checksum = "c".repeat(64); // differs from the forced expected sha
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
     await expect(fs.access(path.join(cacheDir, VIDEO_SERVER_JAR_CACHE_FILENAME))).rejects.toThrow();
+  });
+
+  test("warns when partial-download cleanup fails and rethrows the original error", async () => {
+    const failure = new Error("download interrupted");
+    downloader.download = async (_url, destination) => {
+      // A directory at the file destination makes file-only cleanup reject.
+      await fs.mkdir(destination);
+      throw failure;
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(makeProvider().ensure()).rejects.toBe(failure);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to remove partial download"),
+        expect.any(Error),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("returns null (degrade) when the expected checksum is unknown, without touching the network", async function () {

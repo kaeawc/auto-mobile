@@ -8,6 +8,7 @@ import fs from "fs/promises";
 import { Element } from "../../models/Element";
 import { WcagLevel } from "../../models/AccessibilityAudit";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { clamp } from "../../utils/bounds";
 import type { ImageBackend, RawImage } from "../../utils/image/backend/ImageBackend";
@@ -260,7 +261,7 @@ export class ContrastChecker {
 
       return result;
     } catch (error) {
-      logger.debug(`Contrast checking error: ${error}`);
+      logger.warn(`Contrast checking error: ${errorMessage(error)}`, error);
       return null;
     }
   }
@@ -313,7 +314,7 @@ export class ContrastChecker {
             });
           }
         } catch (error) {
-          logger.error(`Error checking contrast for element:`, error);
+          logger.warn(`Error checking contrast for element: ${errorMessage(error)}`, error);
           results.set(element, null);
         }
       }
@@ -323,7 +324,7 @@ export class ContrastChecker {
         this.cleanupCache(this.elementCache, this.config.maxCacheSize.elements);
       }
     } catch (error) {
-      logger.error("Batch contrast checking error:", error);
+      logger.warn(`Batch contrast checking error: ${errorMessage(error)}`, error);
       // Return null for all elements on screenshot load failure
       for (const element of elements) {
         results.set(element, null);
@@ -557,7 +558,10 @@ export class ContrastChecker {
       const stat = await fs.stat(path);
       return `${path}:${stat.mtime.getTime()}:${stat.size}`;
     } catch (error) {
-      // If file doesn't exist or can't be stat'd, use timestamp
+      logger.warn(
+        `Failed to stat contrast screenshot ${path}; using timestamp: ${errorMessage(error)}`,
+        error,
+      );
       return `${path}:${this.timer.now()}`;
     }
   }

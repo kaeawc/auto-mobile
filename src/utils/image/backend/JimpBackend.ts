@@ -1,4 +1,4 @@
-import { loadJimp, type JimpImage } from "../loadJimp";
+import { loadJimp, type JimpConstructor } from "../loadJimp";
 import type { ResizeStrategy } from "jimp";
 import type {
   ImageBackend,
@@ -18,13 +18,18 @@ import type {
  */
 const NEAREST_NEIGHBOR = "nearestNeighbor" as ResizeStrategy;
 
+// Jimp declares decoded and chained images separately (notably write's
+// encoding generics). A pipeline can hold either exact library-declared shape.
+type DecodedJimpImage = Awaited<ReturnType<JimpConstructor["fromBuffer"]>>;
+type JimpOperationImage = DecodedJimpImage | ReturnType<DecodedJimpImage["resize"]>;
+
 /**
  * Jimp-backed `ImageBackend`. Reproduces exactly what `ImageTransformer` used
  * to run inline for Jimp-supported formats. WebP is intentionally excluded:
  * sharp owns WebP on macOS/Linux and `JimpCliBackend` owns WebP on Windows.
  */
 export class JimpBackend implements ImageBackend {
-  private applyOperation(image: JimpImage, op: ImageOperation): JimpImage {
+  private applyOperation(image: JimpOperationImage, op: ImageOperation): JimpOperationImage {
     switch (op.type) {
       case "resize": {
         // `"nearest"` forces the nearest-neighbor kernel (no interpolation);
@@ -52,7 +57,7 @@ export class JimpBackend implements ImageBackend {
 
   public async execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer> {
     const Jimp = await loadJimp();
-    let image = (await Jimp.fromBuffer(source)) as JimpImage;
+    let image: JimpOperationImage = await Jimp.fromBuffer(source);
     for (const operation of pipeline.operations) {
       image = this.applyOperation(image, operation);
     }

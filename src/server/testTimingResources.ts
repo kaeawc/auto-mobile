@@ -18,7 +18,7 @@ const TEST_TIMING_RESOURCE_URIS = {
 } as const;
 
 const TEST_TIMING_QUERY_TEMPLATE = `${TEST_TIMING_RESOURCE_URIS.BASE}?{params}`;
-const TEST_TIMING_QUERY_PARAM_KEYS = new Set([
+const TEST_TIMING_QUERY_PARAM_KEYS: ReadonlySet<string> = new Set([
   "lookbackDays",
   "limit",
   "minSamples",

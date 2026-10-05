@@ -64,7 +64,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     const requiredState = edge.uiState;
 
     // Early return if no UI state requirements
-    if (!requiredState?.modalStack?.length && !requiredState?.selectedElements?.length) {
+    if (!requiredState || this.isEmptyUIState(requiredState)) {
       logger.debug(`[UI_STATE_SETUP] No UI state requirements for edge`);
       return [];
     }
@@ -91,20 +91,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
     // Step 2: Handle selected elements (tabs, menu items, etc.)
     if (requiredState.selectedElements?.length) {
-      // Get current state again after modal stack changes if modals were dismissed
-      const updatedState =
-        setupActions.length > 0 ? await this.getCurrentUIState(platform, signal) : currentState;
-
-      if (updatedState) {
-        setupActions.push(
-          ...(await this.setupMissingSelections(
-            requiredState.selectedElements,
-            updatedState.selectedElements,
-            platform,
-            signal,
-          )),
-        );
-      }
+      await this.setupSelectedElements(requiredState, currentState, setupActions, platform, signal);
     }
 
     if (setupActions.length === 0) {
@@ -112,6 +99,33 @@ export class DefaultUIStateSetup implements UIStateSetup {
     }
 
     return setupActions;
+  }
+
+  private isEmptyUIState(requiredState: UIState): boolean {
+    return !requiredState.modalStack?.length && !requiredState.selectedElements?.length;
+  }
+
+  private async setupSelectedElements(
+    requiredState: UIState,
+    currentState: UIState,
+    setupActions: string[],
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    // Get current state again after modal stack changes if modals were dismissed
+    const updatedState =
+      setupActions.length > 0 ? await this.getCurrentUIState(platform, signal) : currentState;
+
+    if (updatedState) {
+      setupActions.push(
+        ...(await this.setupMissingSelections(
+          requiredState.selectedElements,
+          updatedState.selectedElements,
+          platform,
+          signal,
+        )),
+      );
+    }
   }
 
   /**
@@ -411,21 +425,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
     logger.debug(`[UI_STATE_SETUP] Attempting to dismiss ${modal.type} modal`);
 
     // Strategy 1: Try back button (works for most dialogs)
-    if (modal.type === "dialog") {
-      try {
-        throwIfAborted(signal);
-        await this.pressBack(platform, signal);
-        await this.sleep(200, signal);
-
-        // Verify dismissal
-        if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
-          logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button`);
-          return true;
-        }
-      } catch (error) {
-        throwIfAborted(signal);
-        logger.debug(`[UI_STATE_SETUP] Back button failed for ${modal.type}: ${error}`);
-      }
+    if (modal.type === "dialog" && (await this.dismissDialogWithBack(modal, platform, signal))) {
+      return true;
     }
 
     // Strategy 2: Swipe down for bottom sheets
@@ -433,19 +434,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       return true;
     }
 
-    // Strategy 3: Look for close/cancel button
-    if (
-      (modal.type === "dialog" || modal.type === "bottomsheet") &&
-      (await this.dismissWithCloseButton(modal, platform, signal))
-    ) {
-      return true;
-    }
-
-    // Strategy 4: Tap outside (for popups and menus)
-    if (
-      (modal.type === "popup" || modal.type === "menu" || modal.type === "overlay") &&
-      (await this.dismissByTappingOutside(modal, platform, signal))
-    ) {
+    if (await this.dismissWithTap(modal, platform, signal)) {
       return true;
     }
 
@@ -465,6 +454,52 @@ export class DefaultUIStateSetup implements UIStateSetup {
     }
 
     logger.warn(`[UI_STATE_SETUP] All dismissal strategies failed for ${modal.type}`);
+    return false;
+  }
+
+  private async dismissWithTap(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    // Strategy 3: Look for close/cancel button
+    if (
+      (modal.type === "dialog" || modal.type === "bottomsheet") &&
+      (await this.dismissWithCloseButton(modal, platform, signal))
+    ) {
+      return true;
+    }
+
+    // Strategy 4: Tap outside (for popups and menus)
+    if (
+      (modal.type === "popup" || modal.type === "menu" || modal.type === "overlay") &&
+      (await this.dismissByTappingOutside(modal, platform, signal))
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private async dismissDialogWithBack(
+    modal: ModalState,
+    platform: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    try {
+      throwIfAborted(signal);
+      await this.pressBack(platform, signal);
+      await this.sleep(200, signal);
+
+      // Verify dismissal
+      if (await this.isModalConfirmedDismissed(modal, platform, signal)) {
+        logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button`);
+        return true;
+      }
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.debug(`[UI_STATE_SETUP] Back button failed for ${modal.type}: ${error}`);
+    }
     return false;
   }
 

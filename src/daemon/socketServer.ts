@@ -763,6 +763,26 @@ export interface SocketFrameTraceEvent {
   hadError?: boolean;
 }
 
+interface ProfileReaffirmForwardRouteOptions {
+  args: unknown;
+  socketSessionId: string;
+  toolName: unknown;
+  sessionUuid: string;
+  toolSelectionProfileUuid: string | undefined;
+  scopedKey: string | undefined;
+  boundRoute: McpForwardRoute | undefined;
+}
+
+interface AndroidAppendTextOptions {
+  targetDevice: BootedDevice;
+  text: string;
+  deadline: number;
+  totalTimeoutMs: number;
+  frameContext: string | undefined;
+  client: AndroidCtrlProxyClient;
+  signal?: AbortSignal;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
@@ -2523,7 +2543,7 @@ export class UnixSocketServer {
 
     if (sessionUuid) {
       return (
-        this.profileReaffirmForwardRoute(
+        this.profileReaffirmForwardRoute({
           args,
           socketSessionId,
           toolName,
@@ -2531,7 +2551,7 @@ export class UnixSocketServer {
           toolSelectionProfileUuid,
           scopedKey,
           boundRoute,
-        ) ??
+        }) ??
         this.sessionScopedForwardRoute(
           socketSessionId,
           sessionUuid,
@@ -2597,14 +2617,17 @@ export class UnixSocketServer {
    * already bound to (#7005). Undefined for every other explicit-session call.
    */
   private profileReaffirmForwardRoute(
-    args: unknown,
-    socketSessionId: string,
-    toolName: unknown,
-    sessionUuid: string,
-    toolSelectionProfileUuid: string | undefined,
-    scopedKey: string | undefined,
-    boundRoute: McpForwardRoute | undefined,
+    options: ProfileReaffirmForwardRouteOptions,
   ): McpForwardRoute | undefined {
+    const {
+      args,
+      socketSessionId,
+      toolName,
+      sessionUuid,
+      toolSelectionProfileUuid,
+      scopedKey,
+      boundRoute,
+    } = options;
     if (toolName !== SET_TOOL_ENABLED_TOOL_NAME || sessionUuid !== toolSelectionProfileUuid) {
       return undefined;
     }
@@ -5617,15 +5640,15 @@ export class UnixSocketServer {
     // input for this device, not just this one request.
     let appendCharsSent: number | undefined;
     if (append && platform === "android") {
-      const textResult = await this.executeAndroidAppendText(
+      const textResult = await this.executeAndroidAppendText({
         targetDevice,
         text,
         deadline,
-        timeoutMs,
+        totalTimeoutMs: timeoutMs,
         frameContext,
-        client as AndroidCtrlProxyClient,
+        client: client as AndroidCtrlProxyClient,
         signal,
-      );
+      });
       assertSocketInputNotAborted(signal);
       if (textResult.charsSent !== undefined) {
         onConfirmedAppendCharsSent?.(textResult.charsSent);
@@ -5663,14 +5686,9 @@ export class UnixSocketServer {
   }
 
   private async executeAndroidAppendText(
-    targetDevice: BootedDevice,
-    text: string,
-    deadline: number,
-    totalTimeoutMs: number,
-    frameContext: string | undefined,
-    client: AndroidCtrlProxyClient,
-    signal?: AbortSignal,
+    options: AndroidAppendTextOptions,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
+    const { targetDevice, text, deadline, totalTimeoutMs, frameContext, client, signal } = options;
     const appendTimeoutMs = deadline - this.timer.now();
     if (appendTimeoutMs <= 0) {
       return {

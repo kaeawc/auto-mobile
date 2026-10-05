@@ -276,67 +276,7 @@ async function handleTrafficQuery(
   }
 }
 
-export function registerNetworkResources(
-  repository: NetworkResourceRepository = defaultRepository,
-): void {
-  // Base traffic resource (no filters, returns latest 50)
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.TRAFFIC,
-    "Network Traffic",
-    "Query captured network traffic. Use query parameters to filter by host, method, statusCode, since, limit, deviceId.",
-    "application/json",
-    () => handleTrafficQuery({}, repository),
-  );
-
-  ResourceRegistry.registerTemplate(
-    TRAFFIC_QUERY_TEMPLATE,
-    "Network Traffic",
-    "Query captured network traffic with optional filters.",
-    "application/json",
-    async (params) => handleTrafficQuery(params, repository),
-  );
-
-  // Single request detail by ID
-  ResourceRegistry.registerTemplate(
-    NETWORK_RESOURCE_URIS.REQUEST,
-    "Network Request Detail",
-    "Full HTTP request and response detail for a single captured network call (bodies truncated to 10KB).",
-    "application/json",
-    async (params) => {
-      const requestId = parseInt(params.requestId, 10);
-      if (!Number.isFinite(requestId) || requestId < 1) {
-        return {
-          uri: `automobile:network/request/${params.requestId}`,
-          mimeType: "application/json",
-          text: JSON.stringify({ error: `Invalid requestId: ${params.requestId}` }),
-        };
-      }
-
-      try {
-        const event = await repository.getNetworkEventById(requestId);
-        if (!event) {
-          return {
-            uri: `automobile:network/request/${requestId}`,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: `Network request ${requestId} not found` }),
-          };
-        }
-        return {
-          uri: `automobile:network/request/${requestId}`,
-          mimeType: "application/json",
-          text: JSON.stringify(eventToDetail(event), null, 2),
-        };
-      } catch (error) {
-        logger.error(`[NetworkResources] Failed to get request ${requestId}: ${error}`);
-        return {
-          uri: `automobile:network/request/${requestId}`,
-          mimeType: "application/json",
-          text: JSON.stringify({ error: `Failed to retrieve request: ${error}` }),
-        };
-      }
-    },
-  );
-
+function registerNetworkTrafficStreams(repository: NetworkResourceRepository): void {
   // Subscription resources (readable state when notified)
   ResourceRegistry.register(
     NETWORK_RESOURCE_URIS.LIVE,
@@ -400,6 +340,70 @@ export function registerNetworkResources(
       };
     },
   );
+}
+
+export function registerNetworkResources(
+  repository: NetworkResourceRepository = defaultRepository,
+): void {
+  // Base traffic resource (no filters, returns latest 50)
+  ResourceRegistry.register(
+    NETWORK_RESOURCE_URIS.TRAFFIC,
+    "Network Traffic",
+    "Query captured network traffic. Use query parameters to filter by host, method, statusCode, since, limit, deviceId.",
+    "application/json",
+    () => handleTrafficQuery({}, repository),
+  );
+
+  ResourceRegistry.registerTemplate(
+    TRAFFIC_QUERY_TEMPLATE,
+    "Network Traffic",
+    "Query captured network traffic with optional filters.",
+    "application/json",
+    async (params) => handleTrafficQuery(params, repository),
+  );
+
+  // Single request detail by ID
+  ResourceRegistry.registerTemplate(
+    NETWORK_RESOURCE_URIS.REQUEST,
+    "Network Request Detail",
+    "Full HTTP request and response detail for a single captured network call (bodies truncated to 10KB).",
+    "application/json",
+    async (params) => {
+      const requestId = parseInt(params.requestId, 10);
+      if (!Number.isFinite(requestId) || requestId < 1) {
+        return {
+          uri: `automobile:network/request/${params.requestId}`,
+          mimeType: "application/json",
+          text: JSON.stringify({ error: `Invalid requestId: ${params.requestId}` }),
+        };
+      }
+
+      try {
+        const event = await repository.getNetworkEventById(requestId);
+        if (!event) {
+          return {
+            uri: `automobile:network/request/${requestId}`,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: `Network request ${requestId} not found` }),
+          };
+        }
+        return {
+          uri: `automobile:network/request/${requestId}`,
+          mimeType: "application/json",
+          text: JSON.stringify(eventToDetail(event), null, 2),
+        };
+      } catch (error) {
+        logger.error(`[NetworkResources] Failed to get request ${requestId}: ${error}`);
+        return {
+          uri: `automobile:network/request/${requestId}`,
+          mimeType: "application/json",
+          text: JSON.stringify({ error: `Failed to retrieve request: ${error}` }),
+        };
+      }
+    },
+  );
+
+  registerNetworkTrafficStreams(repository);
 
   // Slow requests resource
   ResourceRegistry.register(

@@ -346,6 +346,19 @@ export class CtrlProxyFocus {
     const converted: any = {};
 
     // Copy over all properties
+    this.copyNodeIdentity(node, converted);
+    this.copyNodeFlags(node, converted);
+    this.copyNodeMetadata(node, converted);
+
+    // Convert child nodes recursively
+    if (node.node) {
+      converted.node = this.convertAccessibilityNode(node.node);
+    }
+
+    return converted;
+  }
+
+  private copyNodeIdentity(node: AccessibilityNode, converted: Record<string, unknown>): void {
     if (node.text) {
       converted.text = node.text;
     }
@@ -368,37 +381,28 @@ export class CtrlProxyFocus {
     if (node.packageName) {
       converted.packageName = node.packageName;
     }
-    if (node.clickable && node.clickable !== "false") {
-      converted.clickable = node.clickable;
-    }
-    if (node.enabled && node.enabled !== "false") {
-      converted.enabled = node.enabled;
-    }
-    if (node.focusable && node.focusable !== "false") {
-      converted.focusable = node.focusable;
-    }
-    if (node.focused && node.focused !== "false") {
-      converted.focused = node.focused;
-    }
-    if (node.scrollable && node.scrollable !== "false") {
-      converted.scrollable = node.scrollable;
-    }
-    if (node.password && node.password !== "false") {
-      converted.password = node.password;
-    }
-    if (node.checkable && node.checkable !== "false") {
-      converted.checkable = node.checkable;
-    }
-    if (node.checked && node.checked !== "false") {
-      converted.checked = node.checked;
-    }
-    if (node.selected && node.selected !== "false") {
-      converted.selected = node.selected;
-    }
-    if (node["long-clickable"] && node["long-clickable"] !== "false") {
-      converted["long-clickable"] = node["long-clickable"];
-    }
+  }
 
+  private copyNodeFlags(node: AccessibilityNode, converted: Record<string, unknown>): void {
+    for (const key of [
+      "clickable",
+      "enabled",
+      "focusable",
+      "focused",
+      "scrollable",
+      "password",
+      "checkable",
+      "checked",
+      "selected",
+      "long-clickable",
+    ] as const) {
+      if (node[key] && node[key] !== "false") {
+        converted[key] = node[key];
+      }
+    }
+  }
+
+  private copyNodeMetadata(node: AccessibilityNode, converted: Record<string, unknown>): void {
     if (node.occlusionState) {
       converted.occlusionState = node.occlusionState;
     }
@@ -418,12 +422,5 @@ export class CtrlProxyFocus {
     if (node.bounds) {
       converted.bounds = node.bounds;
     }
-
-    // Convert child nodes recursively
-    if (node.node) {
-      converted.node = this.convertAccessibilityNode(node.node);
-    }
-
-    return converted;
   }
 }

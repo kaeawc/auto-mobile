@@ -1161,3 +1161,95 @@ steps:
     });
   });
 });
+
+describe("PlanValidator validation ordering", () => {
+  for (const [devices, message] of [
+    ["phone", "Plan 'devices' field must be an array of device labels"],
+    [[null], "Plan 'devices' entries must be strings or objects with label/platform."],
+    [[{ label: "phone" }], "Invalid device platform for phone: undefined."],
+    [
+      [{ label: " ", platform: "ios" }],
+      'Invalid device label: " ". Device labels must be non-empty strings.',
+    ],
+    [
+      [{ platform: "ios" }],
+      "Invalid device label: undefined. Device labels must be non-empty strings.",
+    ],
+  ] as const) {
+    test(`rejects malformed devices: ${JSON.stringify(devices)}`, () => {
+      const plan = { name: "validation", devices, steps: [] } as unknown as Plan;
+      expect(() => PlanValidator.validate(plan)).toThrow(message);
+    });
+  }
+  test("reports all label categories in stable order and ignores non-object substeps", () => {
+    const plan = {
+      name: "labels",
+      devices: ["phone"],
+      steps: [
+        { tool: "observe", params: { device: null } },
+        { tool: "tapOn", params: { device: 42 } },
+        {
+          tool: "criticalSection",
+          params: {
+            device: "phone",
+            steps: [
+              null,
+              7,
+              { params: {} },
+              { tool: "observe", params: { device: "" } },
+              { tool: "tapOn", params: { device: "other" } },
+              { tool: "observe", params: { device: "phone" } },
+            ],
+          },
+        },
+        { tool: "criticalSection", params: { device: "phone", steps: "not an array" } },
+      ],
+    } as unknown as Plan;
+    expect(() => PlanValidator.validate(plan)).toThrow(
+      [
+        "Plan declares 'devices' field but the following steps are missing 'device' parameter: step 0 (observe)",
+        'Plan declares devices [phone] but the following steps use invalid device labels: step 1 (tapOn): device="42"',
+        "Every step inside a criticalSection must declare a 'device' parameter, but the following sub-steps are missing it: step 2.steps[2] (unknown), step 2.steps[3] (observe)",
+        'Plan declares devices [phone] but the following criticalSection sub-steps use invalid device labels: step 2.steps[4] (tapOn): device="other"',
+      ].join("\n"),
+    );
+  });
+  test("reports critical section count mismatch before repeated device and keeps lock order", () => {
+    const step = (lock: string, deviceCount: number) => ({
+      tool: "criticalSection",
+      params: { device: "phone", lock, deviceCount, steps: [] },
+    });
+    const plan: Plan = {
+      name: "locks",
+      devices: ["phone"],
+      steps: [step("first", 3), step("first", 3), step("second", 3), step("second", 3)],
+    };
+    expect(() => PlanValidator.validate(plan)).toThrow(
+      [
+        'criticalSection lock "first" declares deviceCount=3 but 2 steps reference it. Every participating device needs its own criticalSection step with this lock.',
+        'criticalSection lock "first" is entered twice by device "phone" (steps 0, 1). Each device can participate in a given lock at most once.',
+        'criticalSection lock "second" declares deviceCount=3 but 2 steps reference it. Every participating device needs its own criticalSection step with this lock.',
+        'criticalSection lock "second" is entered twice by device "phone" (steps 2, 3). Each device can participate in a given lock at most once.',
+      ].join("\n"),
+    );
+  });
+  test("inconsistent counts skip the repeated-device diagnostic for that lock", () => {
+    const plan: Plan = {
+      name: "locks",
+      devices: ["phone"],
+      steps: [
+        {
+          tool: "criticalSection",
+          params: { device: "phone", lock: "same", deviceCount: 1, steps: [] },
+        },
+        {
+          tool: "criticalSection",
+          params: { device: "phone", lock: "same", deviceCount: 2, steps: [] },
+        },
+      ],
+    };
+    expect(() => PlanValidator.validate(plan)).toThrow(
+      'criticalSection lock "same" has inconsistent deviceCount values: step 0 deviceCount=1, step 1 deviceCount=2. All steps sharing a lock must declare the same deviceCount.',
+    );
+  });
+});

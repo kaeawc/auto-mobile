@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import { DevicePoolStats, handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
+import {
+  DevicePoolStats,
+  handleDaemonRequest,
+  type DaemonStateAccess,
+} from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import { DAEMON_SESSION_NOT_FOUND_CODE, DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -117,6 +121,100 @@ describe("handleDaemonRequest", () => {
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
+  });
+
+  test.each(["tools/list", "daemon/unknown"])("rejects unsupported method %s", async (method) => {
+    const state = new FakeDaemonState(
+      sessionManager,
+      new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 }),
+    );
+    expect(await handleDaemonRequest(buildRequest(method), state)).toEqual({
+      success: false,
+      error: `Unsupported daemon method: ${method}`,
+    });
+  });
+
+  test.each(["daemon/heartbeat", "daemon/releaseSession"])(
+    "%s rejects absent parameters",
+    async (method) => {
+      const state = new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 }),
+      );
+      expect(await handleDaemonRequest(buildRequest(method), state)).toEqual({
+        success: false,
+        error: "sessionId parameter required",
+      });
+    },
+  );
+
+  test("retains inventory response shapes when optional state methods are absent", async () => {
+    const stats = { total: 0, idle: 0, assigned: 0, error: 0 };
+    const state: DaemonStateAccess = {
+      isInitialized: () => true,
+      getSessionManager: () => ({
+        hasSession: () => false,
+        getSession: () => null,
+        getDeviceLabels: () => undefined,
+        releaseSession: async () => null,
+      }),
+      getDevicePool: () => ({
+        refreshDevices: async () => 0,
+        getStats: () => stats,
+        releaseDevice: async () => {},
+      }),
+      getDeviceSessionRegistry: () => ({ list: () => [] }),
+    };
+    expect(await handleDaemonRequest(buildRequest("daemon/availableDevices"), state)).toEqual({
+      success: true,
+      result: {
+        availableDevices: 0,
+        totalDevices: 0,
+        assignedDevices: 0,
+        errorDevices: 0,
+        stats,
+      },
+    });
+    expect(await handleDaemonRequest(buildRequest("daemon/activeSessions"), state)).toEqual({
+      success: true,
+      result: { activeSessions: 0, activeExecutions: 0 },
+    });
+  });
+
+  test("rejects a heartbeat when release completes while its ownership claim awaits", async () => {
+    const sessionId = "claim-release-race";
+    await sessionManager.createSession(sessionId, "device", "android");
+    const state = new FakeDaemonState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+    );
+    const claim = Promise.withResolvers<boolean>();
+    const ownership = spyOn(sessionManager, "claimLivenessOwnership").mockImplementation(
+      () => claim.promise,
+    );
+    const heartbeat = spyOn(sessionManager, "recordHeartbeat");
+    try {
+      const response = handleDaemonRequest(
+        buildRequest("daemon/heartbeat", {
+          sessionId,
+          livenessOwnerToken: "owner",
+          claimLivenessOwnership: true,
+        }),
+        state,
+      );
+      expect(ownership).toHaveBeenCalledTimes(1);
+      await sessionManager.releaseSession(sessionId);
+      claim.resolve(true);
+      expect(await response).toEqual({
+        success: false,
+        error: `Session not found: ${sessionId}`,
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+      });
+      expect(heartbeat).not.toHaveBeenCalled();
+    } finally {
+      ownership.mockRestore();
+      heartbeat.mockRestore();
+    }
   });
 
   test("returns error when daemon is not initialized", async () => {

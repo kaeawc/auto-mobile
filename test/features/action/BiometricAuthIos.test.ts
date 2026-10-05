@@ -1,4 +1,5 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { DeviceState } from "../../../src/features/utility/DeviceState";
 import { BiometricAuth } from "../../../src/features/action/BiometricAuth";
 import { BootedDevice } from "../../../src/models";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -99,6 +100,41 @@ describe("BiometricAuth - iOS Simulator", () => {
     expect(result.success).toBe(true);
     expect(result.action).toBe("unenroll");
     expect(commands()).toEqual([UNENROLL_COMMAND]);
+  });
+
+  test.each([
+    { supported: false, error: "enrollment unsupported" },
+    { supported: true, error: "enrollment failed" },
+    { supported: true, enrollment: "not_enrolled" as const, verified: false },
+  ])("reports unsuccessful enrollment state: %j", async (state) => {
+    const setter = spyOn(DeviceState.prototype, "setBiometricEnrollmentState").mockResolvedValue(
+      state,
+    );
+    try {
+      const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl);
+      const result = await auth.execute({
+        action: "enroll",
+        modality: "face",
+        fingerprintId: 3,
+        errorCode: 7,
+      });
+      expect(result).toMatchObject({
+        success: false,
+        supported: state.supported,
+        action: "enroll",
+        modality: "face",
+        fingerprintId: 3,
+        errorCode: 7,
+      });
+      expect(result.error).toBe(state.error);
+      expect(result.message).toBe(
+        state.error ? undefined : "Biometric enrollment set to not_enrolled.",
+      );
+      expect(setter.mock.calls).toEqual([["enrolled"]]);
+      expect(commands()).toEqual([]);
+    } finally {
+      setter.mockRestore();
+    }
   });
 
   test("physical iOS device is unsupported (no public injection API)", async () => {

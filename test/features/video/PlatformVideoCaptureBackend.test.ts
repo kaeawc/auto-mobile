@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -18,6 +18,7 @@ import { type BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 
 describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   let backend: PlatformVideoCaptureBackend;
@@ -271,6 +272,94 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   });
 
   describe("Android stop sequence (issue #1960)", () => {
+    test.each(["exit", "error", "reject"] as const)(
+      "keeps cleanup after pull and before codec probing when cleanup ends with %s",
+      async (outcome) => {
+        const factory = new FakeAdbClientFactory();
+        const adb = factory.getFakeClient();
+        if (outcome === "error") {
+          adb.setSpawnError("shell rm ", new Error("cleanup event failed"));
+        } else if (outcome === "reject") {
+          adb.setSpawnRejection("shell rm ", new Error("cleanup spawn failed"));
+        }
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const outputPath = path.join(tempDir, "cleanup.mp4");
+        const codecProbe = {
+          async codec(filePath: string): Promise<string> {
+            expect(filePath).toBe(outputPath);
+            expect(adb.getSpawnCalls()).toEqual([
+              ["pull", "/sdcard/auto-mobile-test.mp4", outputPath],
+              ["shell", "rm", "/sdcard/auto-mobile-test.mp4"],
+            ]);
+            return "h264";
+          },
+        };
+        const process = new FakeChildProcess(timer);
+        process.exitCode = 0;
+        const handle = buildAndroidStopHandle(outputPath, process);
+
+        const result = await new PlatformVideoCaptureBackend(factory, timer, codecProbe).stop(
+          handle,
+        );
+
+        expect(result.codec).toBe("h264");
+        expect(adb.getAllCommands()).toEqual([
+          "shell pkill -2 screenrecord",
+          "shell stat -c %s /sdcard/auto-mobile-test.mp4",
+          "shell stat -c %s /sdcard/auto-mobile-test.mp4",
+          "shell stat -c %s /sdcard/auto-mobile-test.mp4",
+          "shell stat -c %s /sdcard/auto-mobile-test.mp4",
+          "shell stat -c %s /sdcard/auto-mobile-test.mp4",
+        ]);
+      },
+    );
+
+    test.each([null, 0, 1])(
+      "pins exit diagnostics for code %j after codec probing",
+      async (exitCode) => {
+        const factory = new FakeAdbClientFactory();
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const events: string[] = [];
+        const warn = spyOn(logger, "warn").mockImplementation((message) => {
+          events.push(String(message));
+        });
+        const info = spyOn(logger, "info").mockImplementation((message) => {
+          events.push(String(message));
+        });
+        try {
+          const process = new FakeChildProcess(timer);
+          process.exitCode = 0;
+          const handle = buildAndroidStopHandle(path.join(tempDir, "diagnostics.mp4"), process);
+          const backendHandle = handle.backendHandle as {
+            exitState: { exitCode: number | null };
+            stderr: string[];
+          };
+          backendHandle.exitState.exitCode = exitCode;
+          backendHandle.stderr.push("first", "second");
+          const probe = {
+            async codec(): Promise<string> {
+              events.push("codec");
+              return "hevc";
+            },
+          };
+
+          const result = await new PlatformVideoCaptureBackend(factory, timer, probe).stop(handle);
+
+          expect(result.codec).toBe("hevc");
+          expect(events.slice(events.indexOf("codec"))).toEqual([
+            "codec",
+            ...(exitCode === 1 ? ["[VideoCapture] Recording exited with code 1: firstsecond"] : []),
+            "[VideoCapture] Stderr output: firstsecond",
+          ]);
+        } finally {
+          warn.mockRestore();
+          info.mockRestore();
+        }
+      },
+    );
+
     function buildAndroidStopHandle(
       outputPath: string,
       fakeProcess: FakeChildProcess,

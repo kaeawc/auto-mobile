@@ -148,18 +148,7 @@ export function parseIceServers(raw: string | undefined): RTCIceServer[] | undef
       username?: string;
       credential?: string;
     }>) {
-      const { username, credential } = entry ?? {};
-      if (typeof entry?.urls === "string") {
-        servers.push({ urls: entry.urls, username, credential });
-      } else if (Array.isArray(entry?.urls) && entry.urls.every((url) => typeof url === "string")) {
-        for (const url of entry.urls as string[]) {
-          servers.push({ urls: url, username, credential });
-        }
-      } else {
-        throw new ActionableError(
-          `${WEBRTC_ENV.ICE_SERVERS} JSON entries must have a string or string[] "urls".`,
-        );
-      }
+      appendIceServer(servers, entry);
     }
     return servers;
   }
@@ -168,6 +157,24 @@ export function parseIceServers(raw: string | undefined): RTCIceServer[] | undef
     .map((url) => url.trim())
     .filter((url) => url.length > 0)
     .map((url) => ({ urls: url }));
+}
+
+function appendIceServer(
+  servers: RTCIceServer[],
+  entry: { urls?: unknown; username?: string; credential?: string },
+): void {
+  const { username, credential } = entry ?? {};
+  if (typeof entry?.urls === "string") {
+    servers.push({ urls: entry.urls, username, credential });
+  } else if (Array.isArray(entry?.urls) && entry.urls.every((url) => typeof url === "string")) {
+    for (const url of entry.urls as string[]) {
+      servers.push({ urls: url, username, credential });
+    }
+  } else {
+    throw new ActionableError(
+      `${WEBRTC_ENV.ICE_SERVERS} JSON entries must have a string or string[] "urls".`,
+    );
+  }
 }
 
 /** Parse a `WIDTHxHEIGHT` string (e.g. `1280x720`). */
@@ -219,6 +226,30 @@ export function resolveWebRtcStreamingConfig(
 
   const iceServers =
     overrides.iceServers ?? parseIceServers(env[WEBRTC_ENV.ICE_SERVERS]) ?? DEFAULT_ICE_SERVERS;
+  const { bitrateKbps, size, iosSimulatorFps, androidFps } = resolveVideoEncodingConfig(
+    overrides,
+    env,
+  );
+  const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
+  const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
+
+  return {
+    whipEndpoint: validateWhipEndpoint(whipEndpoint, env),
+    bearerToken: overrides.bearerToken ?? env[WEBRTC_ENV.WHIP_TOKEN] ?? undefined,
+    iceServers,
+    bitrateKbps,
+    size,
+    iosSimulatorFps,
+    androidFps,
+    trickleIce,
+    audioEnabled,
+  };
+}
+
+function resolveVideoEncodingConfig(
+  overrides: WebRtcStreamingOverrides,
+  env: NodeJS.ProcessEnv,
+): Pick<WebRtcStreamingConfig, "bitrateKbps" | "size" | "iosSimulatorFps" | "androidFps"> {
   const bitrateKbps =
     overrides.bitrateKbps === undefined
       ? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS])
@@ -236,20 +267,7 @@ export function resolveWebRtcStreamingConfig(
     overrides.androidFps === undefined
       ? (parseAndroidFps(env[WEBRTC_ENV.ANDROID_FPS]) ?? WEBRTC_ANDROID_FPS_DEFAULT)
       : validateAndroidFps(overrides.androidFps);
-  const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
-  const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
-
-  return {
-    whipEndpoint: validateWhipEndpoint(whipEndpoint, env),
-    bearerToken: overrides.bearerToken ?? env[WEBRTC_ENV.WHIP_TOKEN] ?? undefined,
-    iceServers,
-    bitrateKbps,
-    size,
-    iosSimulatorFps,
-    androidFps,
-    trickleIce,
-    audioEnabled,
-  };
+  return { bitrateKbps, size, iosSimulatorFps, androidFps };
 }
 
 function parseIosSimulatorFps(raw: string | undefined): number | undefined {

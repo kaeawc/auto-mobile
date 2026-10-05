@@ -3,6 +3,7 @@ import { IdentifyInteractions } from "../../../src/features/observe/IdentifyInte
 import { swipeOnSchema, tapOnSchema } from "../../../src/server/interactionTools";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
+import type { Element } from "../../../src/models";
 
 // Build a minimal Android view hierarchy whose child nodes are the interaction
 // candidates. Each entry becomes a `$`-attributed node with bounds so the
@@ -26,6 +27,172 @@ function hierarchyOf(nodes: Array<Record<string, unknown>>): ObserveResult {
 }
 
 const classifier = new IdentifyInteractions();
+
+describe("IdentifyInteractions scoring characterization", () => {
+  const identifiers = {
+    text: "Submit",
+    resourceId: "submit",
+    contentDescription: "Send",
+    className: "button",
+  };
+  const edge = (toolName: string, args: Record<string, unknown> = {}): NavigationEdge => ({
+    from: "Home",
+    to: "Detail",
+    timestamp: 1,
+    edgeType: "tool",
+    interaction: { toolName, args, timestamp: 1 },
+  });
+
+  test("scores tap args by exact id or normalized text and ignores other tools' args", () => {
+    expect(
+      classifier["scoreEdgeMatch"](
+        identifiers,
+        edge("tapOn", { elementId: "submit", text: "Submit" }),
+      ),
+    ).toBe(0.95);
+    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { id: "submit" }))).toBe(0.95);
+    expect(
+      classifier["scoreEdgeMatch"](
+        identifiers,
+        edge("tapOn", { elementId: "wrong", id: "submit" }),
+      ),
+    ).toBe(0);
+    expect(
+      classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { elementId: 2, id: "submit" })),
+    ).toBe(0.95);
+    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { text: " SEND " }))).toBe(0.85);
+    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { text: " " }))).toBe(0);
+    expect(
+      classifier["scoreEdgeMatch"](identifiers, edge("swipeOn", { id: "submit", text: "Submit" })),
+    ).toBe(0);
+    expect(
+      classifier["scoreEdgeMatch"](identifiers, { ...edge("tapOn"), interaction: undefined }),
+    ).toBe(0);
+  });
+
+  test("scores selected identifiers independently and keeps the strongest score", () => {
+    const selectedEdge = edge("swipeOn");
+    for (const [selected, expected] of [
+      [{ resourceId: "submit" }, 0.8],
+      [{ text: " SUBMIT " }, 0.75],
+      [{ contentDesc: " send " }, 0.7],
+      [{}, 0],
+      [{ resourceId: "wrong", text: "Wrong", contentDesc: "Wrong" }, 0],
+    ] as const) {
+      selectedEdge.interaction!.uiState = { selectedElements: [selected] };
+      expect(classifier["scoreEdgeMatch"](identifiers, selectedEdge)).toBe(expected);
+    }
+    selectedEdge.interaction!.uiState = {
+      selectedElements: [{ contentDesc: "Send" }, { text: "Submit" }, { resourceId: "submit" }],
+    };
+    expect(classifier["scoreEdgeMatch"](identifiers, selectedEdge)).toBe(0.8);
+    expect(classifier["scoreEdgeMatch"]({ className: "button" }, selectedEdge)).toBe(0);
+  });
+
+  test("confidence retains type floors, identifier weights, boolean/string flags, and cap", () => {
+    const empty: Element = {};
+    for (const [type, expected] of [
+      ["action", 0.6],
+      ["input", 0.85],
+      ["toggle", 0.8],
+      ["scroll", 0.7],
+      ["navigation", 0.75],
+    ] as const) {
+      expect(classifier["computeConfidence"](empty, type, false)).toBe(expected);
+    }
+    expect(
+      classifier["computeConfidence"]({ clickable: true, "resource-id": "submit" }, "action", true),
+    ).toBe(0.85);
+    expect(
+      classifier["computeConfidence"](
+        { clickable: "true", "content-desc": "Send" },
+        "action",
+        true,
+      ),
+    ).toBe(0.8);
+    expect(
+      classifier["computeConfidence"]({ scrollable: true, "resource-id": "feed" }, "scroll", true),
+    ).toBe(0.8);
+    expect(
+      classifier["computeConfidence"]({ scrollable: "true", text: "Home" }, "navigation", false),
+    ).toBe(0.85);
+    expect(
+      classifier["computeConfidence"](
+        { clickable: true, scrollable: true, "resource-id": "all", "content-desc": "All" },
+        "action",
+        true,
+      ),
+    ).toBe(0.99);
+  });
+
+  test("descriptions retain label precedence and every type's unlabeled form", () => {
+    for (const [type, labeled, unlabeled] of [
+      ["input", "Submit input field", "Input field"],
+      ["toggle", "Submit toggle", "Toggle"],
+      ["scroll", "Scrollable area (Submit)", "Scrollable area"],
+      ["navigation", "Submit navigation", "Navigation option"],
+      ["action", "Submit action", "Action"],
+    ] as const) {
+      expect(classifier["buildDescription"](type, identifiers)).toBe(labeled);
+      expect(classifier["buildDescription"](type, { className: "button" })).toBe(unlabeled);
+    }
+    expect(
+      classifier["buildDescription"]("action", {
+        text: "",
+        contentDescription: "Send",
+        resourceId: "submit",
+        className: "button",
+      }),
+    ).toBe("Send action");
+    expect(
+      classifier["buildDescription"]("action", { resourceId: "submit", className: "button" }),
+    ).toBe("submit action");
+  });
+
+  test("builds contiguous ids, admits unlabeled scrolls, and honors optional details", () => {
+    const candidates = [
+      { element: { clickable: true }, hasText: false },
+      { element: { scrollable: true }, typeHint: "scroll" as const, hasText: false },
+      { element: { text: "Submit", clickable: true, "resource-id": "submit" }, hasText: true },
+    ];
+    const result = classifier["buildInteractions"](
+      candidates,
+      false,
+      false,
+      [edge("tapOn", { id: "submit" })],
+      "Home",
+    );
+    expect(result).toEqual([
+      { id: "int_1", type: "scroll", description: "Scrollable area", confidence: 0.7 },
+      {
+        id: "int_2",
+        type: "action",
+        description: "Submit action",
+        confidence: 0.85,
+        predictedOutcome: { type: "screen_change", destination: "Detail", confidence: 0.95 },
+      },
+    ]);
+    const noMatch = classifier["buildInteractions"](
+      candidates,
+      true,
+      true,
+      [edge("tapOn", { text: "Other" })],
+      "Home",
+    );
+    expect(noMatch[0].suggestedToolCall?.tool).toBe("swipeOn");
+    expect(noMatch[1].element?.resourceId).toBe("submit");
+    expect(noMatch[1].predictedOutcome).toBeUndefined();
+    expect(
+      classifier["buildInteractions"](
+        candidates,
+        false,
+        false,
+        [edge("tapOn", { id: "submit" })],
+        null,
+      )[1].predictedOutcome,
+    ).toBeUndefined();
+  });
+});
 
 describe("IdentifyInteractions", () => {
   test("returns an error when no observation is available", () => {

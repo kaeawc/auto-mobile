@@ -4,7 +4,12 @@ import { FakeViewHierarchy } from "../../../fakes/FakeViewHierarchy";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { AdbClientFactory } from "../../../../src/utils/android-cmdline-tools/AdbClientFactory";
-import type { BootedDevice, ObserveResult, Element } from "../../../../src/models";
+import type {
+  BootedDevice,
+  ObserveResult,
+  Element,
+  ViewHierarchyResult,
+} from "../../../../src/models";
 
 function makeResult(): ObserveResult {
   return {
@@ -46,6 +51,85 @@ describe("HierarchyCollector", () => {
   });
 
   describe("collect", () => {
+    test("preserves read, focus, and dialog attachment order with fresh extraction options", async () => {
+      const calls: string[] = [];
+      const hierarchy: ViewHierarchyResult = {
+        hierarchy: {},
+        updatedAt: 42,
+        intentChooserDetected: false,
+        notificationPermissionDetected: false,
+      };
+      const result = makeResult();
+      const readOptions = { timeoutMs: 750, requireFreshExtraction: true };
+      fakeViewHierarchy.configureRecompositionTracking = async () => {
+        calls.push("configure");
+      };
+      fakeViewHierarchy.getViewHierarchy = async (
+        ...args: Parameters<
+          import("../../../../src/features/observe/interfaces/ViewHierarchy").ViewHierarchy["getViewHierarchy"]
+        >
+      ) => {
+        expect(args[5]).toBe(readOptions);
+        calls.push("read");
+        return hierarchy;
+      };
+      fakeViewHierarchy.findFocusedElement = () => {
+        expect(result.viewHierarchy).toBe(hierarchy);
+        expect(result.updatedAt).toBe(42);
+        calls.push("focus");
+        return { "resource-id": "field" };
+      };
+      fakeViewHierarchy.findAccessibilityFocusedElement = () => {
+        expect(result.focusedElement).toEqual({ "resource-id": "field" });
+        expect(result.intentChooserDetected).toBeUndefined();
+        calls.push("accessibilityFocus");
+        return { "resource-id": "accessibility-field" };
+      };
+      await collector.collect(
+        result,
+        undefined,
+        undefined,
+        false,
+        0,
+        undefined,
+        false,
+        undefined,
+        readOptions,
+      );
+      expect(calls).toEqual(["configure", "read", "focus", "accessibilityFocus"]);
+      expect(result.intentChooserDetected).toBe(false);
+      expect(result.notificationPermissionDetected).toBe(false);
+    });
+
+    test("captured read-only hierarchy skips configuration and reads and preserves absent fields", async () => {
+      const hierarchy: ViewHierarchyResult = { hierarchy: {}, updatedAt: 0 };
+      const result = makeResult();
+      result.updatedAt = 7;
+      result.notificationPermissionDetected = true;
+      await collector.collect(result, undefined, undefined, false, 0, undefined, true, hierarchy);
+      expect(fakeViewHierarchy.getRecompositionTrackingCallCount()).toBe(0);
+      expect(fakeViewHierarchy.getCallCount()).toBe(0);
+      expect(result.viewHierarchy).toBe(hierarchy);
+      expect(result.updatedAt).toBe(7);
+      expect(result.notificationPermissionDetected).toBe(true);
+    });
+
+    test("intent chooser getter failure retains focused elements and continues permission attachment", async () => {
+      const hierarchy: ViewHierarchyResult = {
+        hierarchy: {},
+        notificationPermissionDetected: true,
+        get intentChooserDetected(): boolean {
+          throw new Error("intent unavailable");
+        },
+      };
+      fakeViewHierarchy.configureFocusedElement({ text: "Focused" });
+      const result = makeResult();
+      await collector.collect(result, undefined, undefined, false, 0, undefined, true, hierarchy);
+      expect(result.focusedElement?.text).toBe("Focused");
+      expect(result.notificationPermissionDetected).toBe(true);
+      expect(result.errors).toBeUndefined();
+    });
+
     test("forwards the caller's remaining timeout to the hierarchy read", async () => {
       fakeViewHierarchy.configureHierarchy({ hierarchy: { node: {} } } as any);
       let readTimeout: number | undefined;

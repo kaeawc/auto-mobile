@@ -44,6 +44,8 @@ export class RealWaitForCondition implements WaitForCondition {
         pollMs,
         signal: options.signal,
         initialMinTimestampMs: options.initialMinTimestampMs,
+        skipWaitForFresh: options.skipWaitForFresh,
+        requireFreshExtraction: options.requireFreshExtraction,
         readBackStackEachPoll: options.readBackStackEachPoll,
       },
       (observation) => {

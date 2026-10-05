@@ -9,7 +9,7 @@ import { BootedDevice } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
-import { Explore, ExploreOptions } from "../features/navigation/Explore";
+import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { throwIfAborted, createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
@@ -44,14 +44,24 @@ export const getNavigationGraphSchema = addDeviceTargetingToSchema(
 export const exploreSchema = addDeviceTargetingToSchema(
   z
     .object({
-      maxInteractions: z.number().optional().describe("Max interactions (default: 50)"),
-      timeoutMs: z.number().optional().describe("Timeout ms (default: 300000)"),
+      maxInteractions: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(`Max interactions (default: ${DEFAULT_MAX_INTERACTIONS})`),
+      timeoutMs: z.number().positive().optional().describe("Timeout ms (default: 300000)"),
       strategy: z
         .enum(["breadth-first", "depth-first", "weighted"])
         .optional()
         .describe("Strategy (default: weighted)"),
       resetToHome: z.boolean().optional().describe("Reset to home periodically (default: false)"),
-      resetInterval: z.number().optional().describe("Reset interval (default: 15)"),
+      resetInterval: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Reset interval (default: 15)"),
       mode: z
         .enum(["discover", "validate", "hybrid"])
         .optional()

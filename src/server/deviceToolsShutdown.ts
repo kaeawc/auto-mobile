@@ -1033,14 +1033,8 @@ async function findReplacementOrRetainShutdownReservation(
     logger.warn(`[DeviceTools] Post-release discovery failed for ${device.deviceId}: ${error}`);
     if (!disappearanceConfirmed) {
       // Teardown has not confirmed disappearance. A failed recheck cannot
-      // authorize retirement of an already-known-stopped pooled incarnation.
-      const retirement = Promise.reject(error);
-      retirement.catch((lateError) => {
-        logger.warn(
-          `[DeviceTools] Retaining shutdown reservation after retirement failed for ${device.deviceId}: ${lateError}`,
-        );
-      });
-      retainReservationUntil(retirement);
+      // authorize retirement. Ownership release has settled, so let the
+      // caller's finally release the reservation while leaving the entry intact.
       throw error;
     }
     if (retryAfterFailure) {
@@ -1403,10 +1397,10 @@ async function handleUnconfirmedKillCommandError(
     deadlineMs,
     timeoutMs,
   } = context;
-  const keepIntentionalShutdown = shouldKeepIntentionalShutdownAfterCommandError(
-    error,
-    requestAbortSignal,
-  );
+  // A command that was never invoked cannot produce a late platform exit.
+  const keepIntentionalShutdown =
+    platformShutdown !== undefined &&
+    shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal);
   retainLatePlatformShutdown(
     platformShutdown,
     platformShutdownSettled,

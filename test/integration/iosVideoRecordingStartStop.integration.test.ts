@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -19,12 +18,13 @@ import {
   IOS_RECORDING_STOP_TIMEOUT_MS,
 } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import {
   cleanupIosVideoRecordingSession,
   type IosVideoRecordingCleanupFailure,
 } from "../helpers/iosVideoRecordingSessionCleanup";
 import {
-  createSingleClaimSessionOwnershipRenewal,
+  createReclaimingSessionOwnershipRenewal,
   startSessionOwnershipHeartbeat,
   type SessionOwnershipHeartbeat,
 } from "../helpers/sessionOwnershipHeartbeat";
@@ -153,7 +153,6 @@ async function startVideoRecordingSessionHeartbeat(
   // Keep one daemon socket open for the lifetime of the recording. Spawning a
   // fresh CLI process every two seconds can exceed the command deadline on a
   // loaded macOS runner even after the daemon accepted the heartbeat.
-  const livenessOwnerToken = `ios-video-keeper-${randomUUID()}`;
   const client = new DaemonClient(
     undefined,
     undefined,
@@ -168,19 +167,24 @@ async function startVideoRecordingSessionHeartbeat(
   try {
     const heartbeat = await startSessionOwnershipHeartbeat({
       intervalMs: SESSION_HEARTBEAT_INTERVAL_MS,
-      renew: createSingleClaimSessionOwnershipRenewal(async (claimLivenessOwnership, signal) => {
-        await client.callDaemonMethod(
-          DAEMON_HEARTBEAT_METHOD,
-          {
-            sessionId: sessionUuid,
-            livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
-            idleTimeoutMs: getCliSessionIdleTimeoutMs(),
-            livenessOwnerToken,
-            ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
-          },
-          { signal, timeoutMs: SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS },
-        );
-      }),
+      // Each one-shot CLI claims liveness, then exits. The keeper must take it
+      // back with a fresh token to protect the session between CLI calls.
+      renew: createReclaimingSessionOwnershipRenewal(
+        async (livenessOwnerToken, claimLivenessOwnership, signal) => {
+          await client.callDaemonMethod(
+            DAEMON_HEARTBEAT_METHOD,
+            {
+              sessionId: sessionUuid,
+              livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+              idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+              livenessOwnerToken,
+              ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
+            },
+            { signal, timeoutMs: SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS },
+          );
+        },
+        defaultIdGenerator,
+      ),
     });
     return {
       assertHealthy: () => heartbeat.assertHealthy(),

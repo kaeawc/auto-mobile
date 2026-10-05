@@ -587,6 +587,59 @@ public final class GesturePerformer: GesturePerforming {
         case escape
     }
 
+    enum ImeFocusedField: Equatable, Sendable {
+        case absent
+        case singleLine
+        case multiline
+        case unresolved
+    }
+
+    enum ImeActionDecision: Equatable, Sendable {
+        case tapKey(index: Int)
+        case typeReturn
+        case notAvailable(String)
+    }
+
+    /// Match the requested action exactly (case-insensitive) by label or identifier.
+    /// A different action label, including plain Return, is not an IME action
+    /// for a text view. Single-line and unresolved inputs retain the Return fallback,
+    /// including focused inputs using a hardware keyboard.
+    /// An explicitly disabled matching key must not be bypassed by that fallback.
+    nonisolated static func imeActionDecision(
+        action: String,
+        focusedField: ImeFocusedField,
+        keyboardVisible: Bool,
+        keys: [(label: String, identifier: String, isEnabled: Bool)]
+    )
+        -> ImeActionDecision
+    {
+        let action = action.lowercased()
+        guard ["done", "go", "search", "send", "next"].contains(action) else {
+            return .notAvailable("IME action: \(action)")
+        }
+        if keyboardVisible {
+            let matches = keys.indices.filter {
+                keys[$0].label.lowercased() == action || keys[$0].identifier.lowercased() == action
+            }
+            if let index = matches.first(where: { keys[$0].isEnabled }) {
+                return .tapKey(index: index)
+            }
+            if !matches.isEmpty {
+                return .notAvailable("IME action '\(action)' is not available: the keyboard action key is disabled")
+            }
+        } else if focusedField == .absent {
+            return .notAvailable(
+                "IME action '\(action)' is not available: no keyboard is visible and no focused text field was found"
+            )
+        }
+        if focusedField == .multiline {
+            return .notAvailable(
+                "IME action '\(action)' is not available for this multi-line field: Return would insert a line break"
+            )
+        }
+        return .typeReturn
+    }
+
     nonisolated static func closeAttemptOrder(
         hasEnabledMatch: Bool,
         hasSubmitKey: Bool,
@@ -1509,7 +1562,34 @@ public final class GesturePerformer: GesturePerforming {
             switch action.lowercased() {
             case "done", "go", "search", "send", "next":
                 try catchingObjCException {
-                    app.typeText("\n")
+                    let keyboard = app.keyboards.firstMatch.exists
+                        ? app.keyboards.firstMatch : self.springboard.keyboards.firstMatch
+                    let keyboardVisible = keyboard.exists
+                    let focusedField: ImeFocusedField
+                    if let focused = resolveFocusedTextElement(app: app) {
+                        focusedField = focused.elementType == .textView ? .multiline : .singleLine
+                    } else {
+                        focusedField = keyboardVisible ? .unresolved : .absent
+                    }
+                    let keys = keyboardVisible ? keyboard.buttons.matching(NSPredicate(
+                        format: "identifier IN[c] %@ OR label IN[c] %@",
+                        Self.submitButtonNames,
+                        Self.submitButtonNames
+                    )).allElementsBoundByIndex : []
+                    let labels = keys.map { (label: $0.label, identifier: $0.identifier, isEnabled: $0.isEnabled) }
+                    switch Self.imeActionDecision(
+                        action: action,
+                        focusedField: focusedField,
+                        keyboardVisible: keyboardVisible,
+                        keys: labels
+                    ) {
+                    case let .tapKey(index):
+                        keys[index].tap()
+                    case .typeReturn:
+                        app.typeText("\n")
+                    case let .notAvailable(reason):
+                        throw GestureError.notSupported(reason)
+                    }
                 }
             case "previous":
                 try catchingObjCException {

@@ -19,6 +19,9 @@ import { DefaultElementParser } from "../../../src/features/utility/ElementParse
 import { getFocusedTextField, getFocusedTextValue } from "../../../src/features/action/ClearText";
 import { logger } from "../../../src/utils/logger";
 import { spyOn } from "bun:test";
+import { createExecResult } from "../../../src/utils/execResult";
+import { wrapCommandError } from "../../../src/utils/CommandError";
+import { errorMessage } from "../../../src/utils/describeUnknownError";
 
 // Synthetic focused-value variants of the representative iOS forms fixture, not captures.
 function focusedIOSForm(value?: string): ViewHierarchyResult {
@@ -566,15 +569,292 @@ describe("Clipboard Android", () => {
     );
     const result = await action.execute("paste");
     const indeterminate = !undelivered && !acknowledged;
-    expect(result.success).toBe(!indeterminate);
+    expect(result.success).toBe(undelivered || reason === "success");
     if (indeterminate) {
-      expect(result.error).toContain("may have been applied");
-      expect(result.error).toContain("Observe before retrying");
+      expect(result).toEqual({
+        success: false,
+        action: "paste",
+        method: "a11y",
+        error: `Paste outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The paste may have been applied. Do not retry automatically. Observe before retrying.`,
+      });
     }
-    expect(
-      adb.getExecutedCommands().filter((command) => command.includes("KEYCODE_PASTE")),
-    ).toEqual(indeterminate || reason === "success" ? [] : ["shell input keyevent KEYCODE_PASTE"]);
+    if (acknowledged && reason !== "success") {
+      expect(result).toEqual({ success: false, action: "paste", method: "a11y", error: reason });
+    }
+    if (undelivered) {
+      expect(result).toEqual({ success: true, action: "paste", method: "adb" });
+    }
+    expect(adb.getExecutedCommands()).toEqual(
+      undelivered ? ["shell input keyevent KEYCODE_PASTE"] : [],
+    );
   });
+
+  test.each(["copy", "clear", "paste"] as const)(
+    "acknowledged %s refusal preserves the device error without ADB recovery",
+    async (action) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd clipboard get",
+        createExecResult("", "No shell command implementation.\n"),
+      );
+      const error = "No focused input field found. Focus a text field before pasting.";
+      const clipboard = new Clipboard(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => ({
+          requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+            onDispatch?.();
+            return { success: false, acknowledged: true, error, totalTimeMs: 1 };
+          },
+        }),
+        undefined,
+        new FakeTimer(),
+      );
+
+      expect(await clipboard.execute(action, "x")).toEqual({
+        success: false,
+        action,
+        error,
+        method: "a11y",
+      });
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  for (const action of ["copy", "clear"] as const) {
+    for (const proxyFailure of ["timeout", "unreachable", "pre-send throw"] as const) {
+      test.each([
+        "stdout",
+        "stderr",
+        "rejected stdout",
+        "rejected stderr",
+        "cause stdout",
+        "cause stderr",
+        "own stdout with cause",
+        "own stderr with cause",
+        "non-zero exit",
+        "wrapped non-zero exit",
+        "success",
+      ] as const)(`${action} after ${proxyFailure}: %s`, async (outcome) => {
+        const adb = new FakeAdbExecutor();
+        const command =
+          action === "copy" ? "shell cmd clipboard set 'x'" : "shell cmd clipboard clear";
+        const message = "No shell command implementation.\n";
+        const transportFailure = outcome === "non-zero exit" || outcome === "wrapped non-zero exit";
+        const unsupported = !transportFailure && outcome !== "success";
+        let rejection: Error | undefined;
+        if (outcome === "stdout" || outcome === "stderr" || outcome === "success") {
+          adb.setCommandResponse(
+            command,
+            createExecResult(
+              outcome === "stdout" ? message : "",
+              outcome === "stderr" ? message : "",
+            ),
+          );
+        } else {
+          const output = {
+            code: 1,
+            stdout: unsupported && outcome.includes("stdout") ? message : "",
+            stderr: unsupported && outcome.includes("stderr") ? message : "adb: device offline",
+          };
+          const error = Object.assign(
+            new Error(transportFailure ? "adb: device offline" : "Command failed"),
+            output,
+          );
+          if (outcome.startsWith("cause") || outcome === "wrapped non-zero exit") {
+            rejection = wrapCommandError(error, { command });
+          } else if (outcome.startsWith("own")) {
+            rejection = Object.assign(
+              new Error("Command failed", { cause: new Error("exec failed") }),
+              output,
+            );
+          } else {
+            rejection = error;
+          }
+          adb.setCommandError(command, rejection);
+        }
+        const reason =
+          proxyFailure === "timeout"
+            ? "Clipboard request timed out"
+            : "Failed to connect to accessibility service";
+        const clipboard = new Clipboard(
+          androidDevice,
+          new FakeAdbClientFactory(adb),
+          () => ({
+            requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+              if (proxyFailure === "pre-send throw") {
+                throw new Error(reason);
+              }
+              if (proxyFailure === "timeout") {
+                onDispatch?.();
+              }
+              return { success: false, acknowledged: false, error: reason, totalTimeMs: 1 };
+            },
+          }),
+          undefined,
+          new FakeTimer(),
+        );
+
+        expect(await clipboard.execute(action, "x")).toEqual({
+          success: outcome === "success",
+          action,
+          method: "adb",
+          ...(unsupported
+            ? {
+                error: `cmd clipboard is not supported on this device/API level (CtrlProxy: ${reason})`,
+              }
+            : transportFailure
+              ? { error: `ADB clipboard operation failed: ${errorMessage(rejection)}` }
+              : {}),
+        });
+        expect(adb.getExecutedCommands()).toEqual([command]);
+      });
+    }
+  }
+
+  for (const proxyFailure of ["unreachable", "pre-send throw"] as const) {
+    test.each(["available", "unimplemented"] as const)(
+      `paste after ${proxyFailure} ignores %s cmd clipboard get and completes the key event`,
+      async (availability) => {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse(
+          "shell cmd clipboard get",
+          createExecResult(
+            availability === "available" ? "hello" : "",
+            availability === "unimplemented" ? "No shell command implementation.\n" : "",
+          ),
+        );
+        const clipboard = new Clipboard(
+          androidDevice,
+          new FakeAdbClientFactory(adb),
+          () => ({
+            requestClipboard: async () => {
+              if (proxyFailure === "pre-send throw") {
+                throw new Error("Failed to connect to accessibility service");
+              }
+              return {
+                success: false,
+                acknowledged: false,
+                error: "Failed to connect to accessibility service",
+                totalTimeMs: 1,
+              };
+            },
+          }),
+          undefined,
+          new FakeTimer(),
+        );
+        expect(await clipboard.execute("paste")).toEqual({
+          success: true,
+          action: "paste",
+          method: "adb",
+        });
+        expect(adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_PASTE"]);
+      },
+    );
+  }
+
+  test.each(["transport", "wrapped transport", "unimplemented"] as const)(
+    "paste key event rejection: %s",
+    async (failure) => {
+      const adb = new FakeAdbExecutor();
+      const command = "shell input keyevent KEYCODE_PASTE";
+      const error = Object.assign(new Error("adb: device offline"), {
+        code: 1,
+        stdout: "",
+        stderr:
+          failure === "unimplemented" ? "No shell command implementation." : "adb: device offline",
+      });
+      const rejection =
+        failure === "wrapped transport" ? wrapCommandError(error, { command }) : error;
+      adb.setCommandError(command, rejection);
+      const reason = "Failed to connect to accessibility service";
+      const clipboard = new Clipboard(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => ({
+          requestClipboard: async () => ({
+            success: false,
+            acknowledged: false,
+            error: reason,
+            totalTimeMs: 1,
+          }),
+        }),
+        undefined,
+        new FakeTimer(),
+      );
+      expect(await clipboard.execute("paste")).toEqual({
+        success: false,
+        action: "paste",
+        method: "adb",
+        error:
+          failure === "unimplemented"
+            ? `cmd clipboard is not supported on this device/API level (CtrlProxy: ${reason})`
+            : `ADB clipboard operation failed: ${errorMessage(rejection)}`,
+      });
+      expect(adb.getExecutedCommands()).toEqual([command]);
+    },
+  );
+
+  test.each(["acknowledged", "unacknowledged", "throw"] as const)(
+    "get failure: %s never falls back to adb",
+    async (failure) => {
+      const adb = new FakeAdbExecutor();
+      const reason = "Clipboard read is restricted";
+      const clipboard = new Clipboard(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => ({
+          requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+            onDispatch?.();
+            if (failure === "throw") {
+              throw new Error(reason);
+            }
+            return {
+              success: false,
+              acknowledged: failure === "acknowledged",
+              error: reason,
+              totalTimeMs: 1,
+            };
+          },
+        }),
+        undefined,
+        new FakeTimer(),
+      );
+      expect(await clipboard.execute("get")).toEqual({
+        success: false,
+        action: "get",
+        method: "a11y",
+        error: failure === "throw" ? `Accessibility clipboard get failed: ${reason}` : reason,
+      });
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test.each(["copy", "clear", "paste", "get"] as const)(
+    "CtrlProxy %s success is unchanged",
+    async (action) => {
+      const adb = new FakeAdbExecutor();
+      const clipboard = new Clipboard(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => ({
+          requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+            onDispatch?.();
+            return { success: true, acknowledged: true, text: "hello", totalTimeMs: 1 };
+          },
+        }),
+        undefined,
+        new FakeTimer(),
+      );
+      expect(await clipboard.execute(action, "x")).toEqual({
+        success: true,
+        action,
+        text: "hello",
+        method: "a11y",
+      });
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
 
   // Regression for https://github.com/kaeawc/auto-mobile/issues/2227.
   // AndroidCtrlProxyClient.getInstance expects an AdbClientFactory and calls

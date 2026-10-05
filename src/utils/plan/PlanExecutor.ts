@@ -19,6 +19,7 @@ import {
   ExecutePlanStepDebugInfo,
   type PlanExecutionOptions,
   type PlanStepWarnings,
+  type PlanSkippedStep,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
@@ -279,10 +280,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
   /**
    * Record a failed `optional: true` step as skipped so the sequential executor can continue
-   * without aborting the plan. Returns nothing; the caller continues its loop.
+   * without aborting the plan. The caller continues its loop.
    */
   private recordSkippedOptionalStep(
-    debugSteps: ExecutePlanStepDebugInfo[],
+    records: { debugSteps: ExecutePlanStepDebugInfo[]; skippedSteps: PlanSkippedStep[] },
     stepNumber: number,
     step: PlanStep,
     durationMs: number,
@@ -291,7 +292,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     logger.warn(
       `[PLAN_STEP_${stepNumber}] optional step ${step.tool} failed; skipping and continuing: ${error}`,
     );
-    debugSteps.push({
+    records.skippedSteps.push({ stepIndex: stepNumber - 1, tool: step.tool, error });
+    records.debugSteps.push({
       step: `Execute step ${stepNumber}: ${step.tool}`,
       status: "skipped",
       durationMs,
@@ -733,6 +735,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     // Promoted out of the debug trace so an ordinary plan's caller sees them
     // (#6887 review).
     const warnings: PlanStepWarnings[] = [];
+    const skippedSteps: PlanSkippedStep[] = [];
 
     try {
       // Validate and normalize startStep
@@ -785,7 +788,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
         if (stepResult.status === "skipped") {
           this.recordSkippedOptionalStep(
-            debugSteps,
+            { debugSteps, skippedSteps },
             i + 1,
             step,
             this.timer.now() - stepStartTime,
@@ -822,6 +825,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             // Warnings from the steps that DID succeed explain the state the
             // failing step ran against, so a failed plan keeps them too.
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
           };
         }
 
@@ -853,6 +857,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           steps: debugSteps,
         },
         ...(warnings.length > 0 ? { warnings } : {}),
+        ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -883,6 +888,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           steps: debugSteps,
         },
         ...(warnings.length > 0 ? { warnings } : {}),
+        ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
       };
     }
   }
@@ -1132,6 +1138,17 @@ export class DefaultPlanExecutor implements PlanExecutor {
       .flatMap((result) => result.warnings)
       .sort((a, b) => a.stepIndex - b.stepIndex);
 
+    const skippedSteps = [...perDeviceResults.values()]
+      .flatMap((result) =>
+        (result.skippedSteps ?? []).map(({ stepIndex, tool, error }) => ({
+          stepIndex,
+          tool,
+          error,
+          device: result.device,
+        })),
+      )
+      .sort((a, b) => a.stepIndex - b.stepIndex);
+
     // Log per-device timing in debug mode or on failure
     if (debugMode || !allSucceeded) {
       logger.info(`[PARALLEL_EXEC] Per-device results:`);
@@ -1156,6 +1173,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       failedStep: selectParallelFailure(failures),
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
+      ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
     };
   }
 

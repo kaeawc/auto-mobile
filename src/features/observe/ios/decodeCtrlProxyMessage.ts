@@ -79,8 +79,8 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
   if (type === "hierarchy_update") {
     return decodeHierarchyUpdate(message, requestId);
   }
-  const decoder = messageDecoders.get(type);
-  if (decoder) {
+  const decoder = typeof type === "string" ? messageDecoders.get(type) : undefined;
+  if (typeof decoder === "function") {
     return { requestId, result: decoder(message, requestId, phaseSummary, type) };
   }
   if (message.error) {

@@ -754,6 +754,9 @@ export class Daemon {
     if (options.actionsDiffObserve) {
       serverConfig.setActionsDiffObserveEnabled(true);
     }
+    if (options.actionsCompactMetadata) {
+      serverConfig.setActionsCompactMetadataEnabled(true);
+    }
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
     }

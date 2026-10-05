@@ -70,3 +70,32 @@ capture passed the gate:
 
 In diff mode (`--actions-diff-observe`) the flag rides on the diff alongside
 `activeWindow` and `freshness`, so one accessor works in both modes.
+
+## Opt-in compact action metadata
+
+`--actions-compact-metadata` (or `AUTOMOBILE_ACTIONS_COMPACT_METADATA=1`,
+feature-flag key `actions-compact-metadata`) defaults off. Default response bytes
+are unchanged. With an external action call's `sessionUuid` and session store,
+this omits each unchanged `observation` block independently: `insets`,
+`systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`,
+`accessibilityState`, and `freshness`. Raw observations' `viewHierarchy.insets`
+and `viewHierarchy.systemInsets` copies follow the same rule independently.
+Values must be deeply equal; timestamps inside a block count as changes.
+The first action response sends available blocks in full, changes resend the
+changed block, and a new session or any device switch sends available blocks
+in full again. `screenSize`, `display`, and observation/device join keys remain
+present. A top-level `element` is omitted only when deeply equal to
+`selectedElement.matchedElement` and its output schema allows omission.
+
+Compaction follows projection and diff emission. With `--actions-diff-observe`,
+only metadata actually emitted by the diff can be compacted (including its
+`freshness` passthrough); the hierarchy diff baseline is unchanged. With
+`--actions-no-observe`, there are no observation blocks to compact or remember,
+but duplicate element removal still applies. An empty snapshot on a device
+switch invalidates the previous device's metadata without claiming delivery.
+
+Only blocks that survive artifact and oversized-residue spills **inline** are
+remembered as sent; an artifact pointer does not count as delivery. `observe`,
+internal tool-to-tool calls, and error responses neither omit blocks nor update
+this record. Calls without a session/store emit the existing full response.
+The record lives in the session cache and is cleared on session release/rebind.

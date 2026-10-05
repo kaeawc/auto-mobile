@@ -89,6 +89,7 @@ export const daemonOptionsSchema = z.object({
   toolResultsNoStructuredContent: z.boolean().optional(),
   actionsDiffObserve: z.boolean().optional(),
   actionsNoObserve: z.boolean().optional(),
+  actionsCompactMetadata: z.boolean().optional(),
 }) satisfies z.ZodType<DaemonOptions>;
 
 // Fails at compile time when DaemonOptions gains a field that ide/status would

@@ -52,6 +52,7 @@ const PROPAGATING_BOOLEAN_FLAGS: (keyof DaemonOptions)[] = [
   "toolResultsNoStructuredContent",
   "actionsDiffObserve",
   "actionsNoObserve",
+  "actionsCompactMetadata",
   // Accessibility-service view filters — the flags the audit found dropped.
   "noA11yIncludeNotImportantViews",
   "noA11yReportViewIds",

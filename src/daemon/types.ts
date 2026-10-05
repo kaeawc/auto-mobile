@@ -498,6 +498,7 @@ export interface DaemonOptions {
   actionsDiffObserve?: boolean;
   /** Output reduction: skip the post-action observation entirely (issue #2756) */
   actionsNoObserve?: boolean;
+  actionsCompactMetadata?: boolean;
 }
 
 /**

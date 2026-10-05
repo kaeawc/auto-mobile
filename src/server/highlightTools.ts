@@ -13,12 +13,16 @@ import {
 } from "../models";
 import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
 import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
-import type { HierarchyCapture } from "../features/observe/HierarchyCapture";
+import type { HierarchyCapture, HierarchySnapshot } from "../features/observe/HierarchyCapture";
 import {
   createDeviceHierarchyCapture,
   type HierarchySyncClient,
 } from "../features/observe/DeviceHierarchyCapture";
-import { ElementResolver, matchedSourceNode } from "../features/utility/ElementResolver";
+import {
+  ElementResolver,
+  matchedSourceNode,
+  type ElementResolution,
+} from "../features/utility/ElementResolver";
 import type { SearchableEntry } from "../features/utility/SearchableNode";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import {
@@ -128,11 +132,11 @@ const findContainerForElement = (
   return null;
 };
 
-const resolveHighlightShapeFromSelector = async (
+const captureHighlightHierarchy = (
   device: BootedDevice,
   args: HighlightArgs,
-  dependencies: HighlightToolDependencies = {},
-): Promise<HighlightShape> => {
+  dependencies: HighlightToolDependencies,
+): Promise<HierarchySnapshot> => {
   if (!args.elementId && !args.text) {
     throw new ActionableError("highlight requires elementId or text when shape is not provided.");
   }
@@ -142,10 +146,44 @@ const resolveHighlightShapeFromSelector = async (
     createDeviceHierarchyCapture(device, {
       syncClientFactory: dependencies.viewHierarchyClientFactory,
     });
-  const snapshot = await capture.capture({
+  return capture.capture({
     freshness: "fresh",
     timeoutMs: args.timeoutMs ?? DEFAULT_HIERARCHY_TIMEOUT_MS,
   });
+};
+
+const selectHighlightElement = (
+  device: BootedDevice,
+  args: HighlightArgs,
+  snapshot: HierarchySnapshot,
+  resolution: ElementResolution,
+): Element => {
+  if (resolution.error) {
+    throw new ActionableError(resolution.error);
+  }
+  if (!resolution.chosen?.element) {
+    throw new ActionableError("Unable to find an element that matches the highlight selector.");
+  }
+  const selected =
+    args.text && (args.containerOf || device.platform !== "android")
+      ? (matchedSourceNode(resolution, { text: args.text }) ?? resolution.chosen)
+      : resolution.chosen;
+  const highlightElement = args.containerOf
+    ? findContainerForElement(snapshot.nodes, selected)
+    : selected.element;
+  if (!highlightElement) {
+    throw new ActionableError("Unable to resolve a container for the selected element.");
+  }
+
+  return highlightElement;
+};
+
+const resolveHighlightShapeFromSelector = async (
+  device: BootedDevice,
+  args: HighlightArgs,
+  dependencies: HighlightToolDependencies = {},
+): Promise<HighlightShape> => {
+  const snapshot = await captureHighlightHierarchy(device, args, dependencies);
   const viewHierarchy = snapshot.hierarchy;
   const resolution = new ElementResolver().resolve(
     { id: snapshot.captureId, nodes: snapshot.nodes },
@@ -163,22 +201,7 @@ const resolveHighlightShapeFromSelector = async (
           : undefined,
     },
   );
-  if (resolution.error) {
-    throw new ActionableError(resolution.error);
-  }
-  if (!resolution.chosen?.element) {
-    throw new ActionableError("Unable to find an element that matches the highlight selector.");
-  }
-  const selected =
-    args.text && (args.containerOf || device.platform !== "android")
-      ? (matchedSourceNode(resolution, { text: args.text }) ?? resolution.chosen)
-      : resolution.chosen;
-  const highlightElement = args.containerOf
-    ? findContainerForElement(snapshot.nodes, selected)
-    : selected.element;
-  if (!highlightElement) {
-    throw new ActionableError("Unable to resolve a container for the selected element.");
-  }
+  const highlightElement = selectHighlightElement(device, args, snapshot, resolution);
 
   const bounds = highlightElement.bounds;
   const width = Math.round(bounds.right - bounds.left);

@@ -473,6 +473,51 @@ export class InputText extends BaseVisualChange {
       );
     }
 
+    const inputFailure = await this.sendAndroidEventAllCharacters(text, chars, a11yClient, signal);
+    if (inputFailure) {
+      return inputFailure;
+    }
+
+    if (dismissKeyboard) {
+      const finalResult = await a11yClient.requestSetText(text);
+      assertInputNotAborted(signal);
+      if (!finalResult.success) {
+        return this.setTextFailure(
+          text,
+          "eventAll final",
+          "after eventAll input",
+          finalResult.error,
+          "eventAll",
+        );
+      }
+    }
+
+    // IME action before dismiss — see the a11y path for why (issue #5887).
+    if (imeAction) {
+      await this.executeImeAction(imeAction, signal);
+    }
+
+    // Dismiss via the confirmed Keyboard.close() route (issue #5887); a failure
+    // there degrades to a warning on this success (issue #6868). imeAction is
+    // carried so a dismiss-only failure is not mistaken for a no-op and retried
+    // (issue #5887 review).
+    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
+
+    return {
+      success: true,
+      text,
+      imeAction,
+      method: "eventAll",
+      ...dismissal,
+    };
+  }
+
+  private async sendAndroidEventAllCharacters(
+    text: string,
+    chars: string[],
+    a11yClient: Pick<AndroidCtrlProxyClient, "requestSetText">,
+    signal?: AbortSignal,
+  ): Promise<(SendTextResult & { method?: InputTextMode }) | undefined> {
     let targetText = "";
     for (let index = 0; index < chars.length; index++) {
       assertInputNotAborted(signal);
@@ -509,38 +554,7 @@ export class InputText extends BaseVisualChange {
       }
     }
 
-    if (dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text);
-      assertInputNotAborted(signal);
-      if (!finalResult.success) {
-        return this.setTextFailure(
-          text,
-          "eventAll final",
-          "after eventAll input",
-          finalResult.error,
-          "eventAll",
-        );
-      }
-    }
-
-    // IME action before dismiss — see the a11y path for why (issue #5887).
-    if (imeAction) {
-      await this.executeImeAction(imeAction, signal);
-    }
-
-    // Dismiss via the confirmed Keyboard.close() route (issue #5887); a failure
-    // there degrades to a warning on this success (issue #6868). imeAction is
-    // carried so a dismiss-only failure is not mistaken for a no-op and retried
-    // (issue #5887 review).
-    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
-
-    return {
-      success: true,
-      text,
-      imeAction,
-      method: "eventAll",
-      ...dismissal,
-    };
+    return undefined;
   }
 
   /**

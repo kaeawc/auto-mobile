@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -51,6 +51,23 @@ function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): 
 }
 
 describe("RealSettleObserve", () => {
+  test("terminal screenshot capture delegates the adopted observation and caller signal", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    const adopted = obs({ "resource-id": "destination" }, { observationId: "adopted" });
+    const signal = new AbortController().signal;
+    const capture = spyOn(fake, "captureScreenshot");
+    const settle = new RealSettleObserve(fake, timer);
+    try {
+      await settle.captureScreenshot(adopted, signal);
+      expect(fake.getCapturedScreenshotObservations()).toEqual([adopted]);
+      expect(capture).toHaveBeenCalledWith(undefined, signal, adopted);
+      expect(fake.getCaptureScreenshotCallCount()).toBe(1);
+    } finally {
+      capture.mockRestore();
+    }
+  });
+
   test("standalone finishing mismatch preserves the early timeout and finishing capture", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

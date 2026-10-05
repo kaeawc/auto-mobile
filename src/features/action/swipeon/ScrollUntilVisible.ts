@@ -716,38 +716,7 @@ export class ScrollUntilVisible {
       await this.deps.timer.sleep(delayNextAttempt);
       throwIfAborted(signal);
 
-      let latestViewHierarchy: ViewHierarchyResult | null | undefined = null;
-
-      switch (this.deps.device.platform) {
-        case "android":
-          const queryOptions = {
-            query: options.container.text || options.container.elementId || "",
-            containerElementId: undefined,
-          };
-          latestViewHierarchy = await this.deps.accessibilityService.getAccessibilityHierarchy(
-            queryOptions,
-            undefined,
-            undefined,
-            undefined,
-            serverConfig.isRawElementSearchEnabled(),
-          );
-          break;
-        case "ios":
-          // Refresh through ObserveScreen so retrying a selector sees the same
-          // cleaned iOS projection that introduced it, rather than CtrlProxy's
-          // separate action-only conversion.
-          latestViewHierarchy = (
-            await this.deps.observeScreen.execute({
-              freshness: "cached-ok",
-              skipScreenshot: true,
-              skipAccessibilityAudit: true,
-              signal,
-            })
-          ).viewHierarchy;
-          break;
-        default:
-          throw unsupportedPlatformError(this.deps.device.platform, "scroll until visible");
-      }
+      const latestViewHierarchy = await this.refreshContainerHierarchy(options.container, signal);
 
       if (latestViewHierarchy) {
         logger.info(`Retrying to find element after ${delayNextAttempt}ms delay`);
@@ -768,6 +737,40 @@ export class ScrollUntilVisible {
     }
 
     return element;
+  }
+
+  private async refreshContainerHierarchy(
+    container: NonNullable<SwipeOnOptions["container"]>,
+    signal?: AbortSignal,
+  ): Promise<ViewHierarchyResult | null | undefined> {
+    switch (this.deps.device.platform) {
+      case "android":
+        const queryOptions = {
+          query: container.text || container.elementId || "",
+          containerElementId: undefined,
+        };
+        return await this.deps.accessibilityService.getAccessibilityHierarchy(
+          queryOptions,
+          undefined,
+          undefined,
+          undefined,
+          serverConfig.isRawElementSearchEnabled(),
+        );
+      case "ios":
+        // Refresh through ObserveScreen so retrying a selector sees the same
+        // cleaned iOS projection that introduced it, rather than CtrlProxy's
+        // separate action-only conversion.
+        return (
+          await this.deps.observeScreen.execute({
+            freshness: "cached-ok",
+            skipScreenshot: true,
+            skipAccessibilityAudit: true,
+            signal,
+          })
+        ).viewHierarchy;
+      default:
+        throw unsupportedPlatformError(this.deps.device.platform, "scroll until visible");
+    }
   }
 
   async findScrollableContainer(

@@ -435,25 +435,7 @@ export class ExecuteGesture extends BaseVisualChange {
         const fingers = path as FingerPath[];
         const swipe = this.resolveIOSMultiFingerSwipe(fingers);
         if (swipe) {
-          throwIfAborted(signal);
-          const client = IOSCtrlProxyClient.getInstance(this.device);
-          // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-          fence?.assertCurrent();
-          const result = await client.requestMultiFingerSwipe(
-            swipe.start.x,
-            swipe.start.y,
-            swipe.end.x,
-            swipe.end.y,
-            swipe.fingerCount,
-            duration,
-            undefined,
-            undefined,
-            swipe.fingerSpacing,
-          );
-          throwIfAborted(signal);
-          if (!result.success) {
-            throw new Error(`iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`);
-          }
+          await this.executeIOSMultiFingerSwipe(swipe, duration, signal, fence);
         }
       } else {
         // Single finger path - convert to simple swipe using CtrlProxy iOS
@@ -477,6 +459,33 @@ export class ExecuteGesture extends BaseVisualChange {
       duration,
       platform: "ios",
     };
+  }
+
+  private async executeIOSMultiFingerSwipe(
+    swipe: NonNullable<ReturnType<ExecuteGesture["resolveIOSMultiFingerSwipe"]>>,
+    duration: number,
+    signal?: AbortSignal,
+    fence?: DisplayFence,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const client = IOSCtrlProxyClient.getInstance(this.device);
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence?.assertCurrent();
+    const result = await client.requestMultiFingerSwipe(
+      swipe.start.x,
+      swipe.start.y,
+      swipe.end.x,
+      swipe.end.y,
+      swipe.fingerCount,
+      duration,
+      undefined,
+      undefined,
+      swipe.fingerSpacing,
+    );
+    throwIfAborted(signal);
+    if (!result.success) {
+      throw new Error(`iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`);
+    }
   }
 
   private resolveIOSMultiFingerSwipe(fingers: FingerPath[]): {

@@ -147,7 +147,7 @@ export class TelemetryEventBuffer {
     const os = this.os;
     const navigation = this.navigation;
     const layout = this.layout;
-    if (logs.length === 0 && os.length === 0 && navigation.length === 0 && layout.length === 0) {
+    if (this.bufferedRowCount() === 0) {
       return;
     }
     this.logs = [];

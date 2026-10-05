@@ -28,9 +28,16 @@ describe("pruneLogFiles", () => {
     return dir;
   }
 
-  beforeEach(() => resetLogRetentionNamespaceSourceForTesting());
+  beforeEach(async () => {
+    // The preload can start the real sweep before this suite loads. Reset only
+    // cancels queued work; drain an in-flight directory read before swapping readers.
+    await flushLogRetentionStartupSweepForTesting();
+    resetLogRetentionNamespaceSourceForTesting();
+  });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Keep an unfinished sweep from consulting the next test's namespace source.
+    await flushLogRetentionStartupSweepForTesting();
     resetLogRetentionNamespaceSourceForTesting();
     for (const dir of tempDirs) {
       try {

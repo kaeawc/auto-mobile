@@ -71,7 +71,7 @@ export async function settleEmbeddedObservation(
 
   // The settle loop's own budget is checked BETWEEN polls, so a single device
   // read that hangs could still overrun it — on a hot path that now runs after
-  // every navigation action. Bound the whole gate with a real-clock deadline as
+  // every navigation action. Bound hierarchy reads with a real-clock deadline as
   // well, combined with the caller's signal so a cancelled request stops
   // observing immediately. Real-clock deliberately: it fences a real device
   // read, which no fake clock governs, and fake-backed unit tests resolve long
@@ -111,6 +111,13 @@ export async function settleEmbeddedObservation(
     });
     if (!isAdoptableCapture(input.observation, result.observation, strictDisplay)) {
       return { observation: input.observation, settled: false };
+    }
+    if (input.observation.screenshotCaptureAttempted === true) {
+      // Screenshot policy already ran on the action. Its pixels cannot describe
+      // this later tree: capture once under the adopted id, never on a poll.
+      // Like other terminal evidence, capture uses caller cancellation rather
+      // than the settle deadline, which bounds only hierarchy polling.
+      await input.settleObserve.captureScreenshot?.(result.observation, input.signal);
     }
     return {
       observation: mergeActionMetadata(input.observation, result.observation),
@@ -230,10 +237,10 @@ function mergeActionMetadata(
  * ids that no longer resolve, and "passed"/"failed" verdicts about a screen the
  * client is not looking at. A false audit is worse than no audit.
  *
- * Re-running it here is not an option worth the hot path: the auditor needs a
- * screenshot of the ADOPTED frame to judge contrast, and the settle poll takes
- * none — re-capturing one would charge every navigation action a screenshot it
- * did not ask for. So the audit is dropped, and its absence is recorded rather
+ * A requested terminal screenshot can supply a new audit of the adopted frame
+ * through ObserveScreen's capture seam. Otherwise the poll takes no screenshot,
+ * and re-running the audit would charge the action a screenshot it did not ask
+ * for. So the old audit is dropped, and its absence is recorded rather
  * than silent: `accessibilityAuditSkipped` tells a caller who explicitly
  * enabled auditing that this observation has no audit BECAUSE the gate replaced
  * the capture, and that a standalone `observe` will produce one for the settled

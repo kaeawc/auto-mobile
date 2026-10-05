@@ -4,6 +4,7 @@ import { diffObserveResult, isSameObservationScreen } from "./output/ObserveResu
 import type { ObserveDiff } from "./output/ObserveResultOutput";
 import { pollObserveUntil } from "./ObservePoll";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import type { ObserveResult } from "../../models";
 
 export const DEFAULT_SETTLE_TIMEOUT_MS = 2500;
 export const DEFAULT_SETTLE_POLL_MS = 150;
@@ -44,6 +45,10 @@ export class RealSettleObserve implements SettleObserve {
     private readonly observeScreen: ObserveScreen,
     private readonly timer: Timer = defaultTimer,
   ) {}
+
+  async captureScreenshot(observation: ObserveResult, signal?: AbortSignal): Promise<void> {
+    await this.observeScreen.captureScreenshot?.(undefined, signal, observation);
+  }
 
   async execute(options: SettleOptions = {}): Promise<SettleResult> {
     const timeoutMs = options.timeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS;

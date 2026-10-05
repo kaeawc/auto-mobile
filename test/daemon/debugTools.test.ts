@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import { getDaemonHealthReport, runSocketDiagnostics } from "../../src/daemon/debugTools";
 import { logger } from "../../src/utils/logger";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("getDaemonHealthReport", () => {
   const tempDirs: string[] = [];
@@ -20,6 +21,84 @@ describe("getDaemonHealthReport", () => {
       rmSync(dir, { recursive: true, force: true });
     }
     tempDirs.length = 0;
+  });
+
+  test.each(["running", "stale", "no-start-time"])(
+    "preserves PID liveness and recommendation order for %s",
+    async (state) => {
+      const tempDir = mkdtempSync(join(tmpdir(), "automobile-health-characterization-"));
+      tempDirs.push(tempDir);
+      const socketPath = join(tempDir, "daemon.sock");
+      const pidFilePath = join(tempDir, "daemon.pid");
+      writeFileSync(socketPath, "");
+      writeFileSync(
+        pidFilePath,
+        JSON.stringify({
+          pid: 12345,
+          port: 9876,
+          ...(state !== "no-start-time" ? { startedAt: 1000 } : {}),
+        }),
+      );
+      const timer = new FakeTimer();
+      timer.advanceTime(4000);
+      const kill = spyOn(process, "kill").mockImplementation(() => {
+        if (state === "stale") {
+          throw new Error("stale PID");
+        }
+        return true;
+      });
+      isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      try {
+        const report = await getDaemonHealthReport(timer, {
+          socketPath,
+          pidFilePath,
+          platform: "linux",
+        });
+        expect(kill).toHaveBeenCalledWith(12345, 0);
+        expect(report.pidFileValid).toBe(true);
+        expect(report.daemonPid).toBe(12345);
+        expect(report.daemonPort).toBe(9876);
+        expect(report.daemonRunning).toBe(true);
+        expect(report.daemonUptime).toBe(state === "running" ? 3000 : undefined);
+        expect(report.recommendations).toEqual(
+          state === "stale"
+            ? [
+                "PID file references process 12345 which is not running. Daemon may have crashed. Stale PID file should be cleaned up.",
+                "Daemon socket is responsive, but PID bookkeeping is stale or missing.",
+              ]
+            : ["Daemon is healthy and responsive."],
+        );
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
+
+  test.each([false, "throws"])("preserves unresponsive socket result %j", async (result) => {
+    const tempDir = mkdtempSync(join(tmpdir(), "automobile-health-unresponsive-"));
+    tempDirs.push(tempDir);
+    const socketPath = join(tempDir, "daemon.sock");
+    const pidFilePath = join(tempDir, "daemon.pid");
+    writeFileSync(socketPath, "");
+    isAvailable = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
+      if (result === "throws") {
+        throw new Error("probe failed");
+      }
+      return false;
+    });
+    const report = await getDaemonHealthReport(new FakeTimer(), {
+      socketPath,
+      pidFilePath,
+      platform: "linux",
+    });
+    expect(report.daemonRunning).toBe(false);
+    expect(report.lastError).toBe(result === "throws" ? "probe failed" : undefined);
+    expect(report.recommendations).toEqual([
+      "Socket exists but PID file missing. Daemon may be in bad state.",
+      result === "throws"
+        ? "Socket connection test failed. Daemon may be unresponsive or socket may be corrupted."
+        : "Socket file exists, but socket is not responding. Daemon may be stuck or unresponsive.",
+    ]);
   });
 
   test("warns once with static context for invalid PID JSON and preserves the recommendation", async () => {

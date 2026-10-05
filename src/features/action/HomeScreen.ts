@@ -17,6 +17,16 @@ import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DefaultElementFinder } from "../utility/ElementFinder";
+import { nodeAttributes } from "../../models/ViewHierarchyResult";
+
+// Overlay ids come from the Pixel Launcher captures under test/fixtures/android-launcher/.
+const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
+  "overview_panel",
+  "task_view_single",
+  "apps_view",
+  "search_container_all_apps",
+  "primary_widgets_list_view",
+] as const;
 
 /**
  * Navigates to the home screen using the accessibility service global action
@@ -105,12 +115,24 @@ export class HomeScreen extends BaseVisualChange {
     if (launcherPackage === undefined || viewHierarchy?.packageName !== launcherPackage) {
       return false;
     }
-    // Quickstep launchers also render Recents under the launcher package.
-    // Exclude overview markers from the pre-action tree without another device read.
     const finder = new DefaultElementFinder();
-    return !["overview_panel", "task_view_single"].some((marker) =>
-      finder.hasContainerElement(viewHierarchy, { elementId: `${launcherPackage}:id/${marker}` }),
-    );
+    const workspace = finder.findContainerNode(viewHierarchy, {
+      elementId: `${launcherPackage}:id/workspace`,
+    });
+    // Partial occlusion is normal on Home (system bars), so do not exclude it.
+    if (workspace !== null && nodeAttributes(workspace)["visible-to-user"] === true) {
+      return true;
+    }
+    if (
+      ANDROID_LAUNCHER_OVERLAY_MARKERS.some((marker) =>
+        finder.hasContainerElement(viewHierarchy, { elementId: `${launcherPackage}:id/${marker}` }),
+      )
+    ) {
+      return false;
+    }
+    // Preserve already-home handling for launchers with a different vocabulary.
+    // An existing but hidden workspace still requires a visual change (#9762).
+    return workspace === null;
   }
 
   private async executeAndroidHome(requestSignal?: AbortSignal): Promise<string | undefined> {

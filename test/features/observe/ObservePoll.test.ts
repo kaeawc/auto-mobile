@@ -786,6 +786,165 @@ describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
     expect(fake.getExecuteOptions().every((o) => o.skipBackStack === true)).toBe(true);
   });
 
+  test.each(["A", "B"])(
+    "embedded terminal mismatch resumes only when finishing read is %s",
+    async (marker) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeObserveScreen();
+      const finishing = obs(30, marker);
+      const terminal = obs(40, "B");
+      fake.setObserveSequence([obs(20, "A"), obs(20, "A"), finishing, terminal, terminal]);
+      fake.setDeferredBackStackDisagreement(true);
+      fake.setCacheGenerationSequence([1, 2, 3, 4, 5]);
+      const options = {
+        timeoutMs: 100,
+        pollMs: 10,
+        initialMinTimestampMs: 10,
+        resumeOnTerminalMismatch: true,
+        skipRecompositionTracking: true,
+      };
+      const outcome = await pollObserveUntil(
+        fake,
+        timer,
+        options,
+        (current, previous) =>
+          current.viewHierarchy?.hierarchy.node?.marker ===
+          previous?.viewHierarchy?.hierarchy.node?.marker,
+      );
+      const expected = marker === "A" ? finishing : terminal;
+      expect(outcome).toMatchObject({
+        stopped: true,
+        terminalReason: "matched",
+        polls: marker === "A" ? 3 : 5,
+        waitMs: marker === "A" ? 10 : 20,
+      });
+      expect(outcome.observation).toBe(expected);
+      expect(fake.getCacheObserveResultObservations()).toEqual([expected]);
+      expect(fake.getProcessRecompositionObservations()).toEqual([expected]);
+      expect(fake.getCacheObserveResultGenerations()).toEqual([marker === "A" ? 3 : 5]);
+      expect(fake.getCacheObserveResultCachedAts()).toEqual([marker === "A" ? 10 : 20]);
+      expect(fake.getExecuteMinTimestamps()).toEqual(
+        marker === "A" ? [11, 20, 20] : [11, 20, 20, 30, 40],
+      );
+    },
+  );
+
+  test.each([0, 10])(
+    "repeated finishing mismatches consume the real deadline (pollMs %i)",
+    async (pollMs) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeObserveScreen();
+      fake.setObserveResult((i) => obs(20 + i, String(Math.floor(i / 2))));
+      fake.setDeferredBackStackDisagreement(true);
+      const options = {
+        timeoutMs: 100,
+        pollMs,
+        initialMinTimestampMs: 10,
+        resumeOnTerminalMismatch: true,
+      };
+      const outcome = await pollObserveUntil(
+        fake,
+        timer,
+        options,
+        (current, previous) =>
+          current.viewHierarchy?.hierarchy.node?.marker ===
+          previous?.viewHierarchy?.hierarchy.node?.marker,
+      );
+      expect(outcome).toMatchObject({ stopped: false, terminalReason: "timeout", waitMs: 100 });
+      expect(timer.now()).toBe(100);
+      expect(fake.getExecuteCallCount()).toBeLessThan(pollMs === 0 ? 205 : 30);
+      expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
+    },
+  );
+
+  test.each(["below-floor", "stale", "unverified"])(
+    "resuming ignores a %s finishing capture without lowering the floor or baseline",
+    async (kind) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeObserveScreen();
+      const first = obs(20, "A");
+      const candidate = obs(40, "A");
+      const rejected = obs(kind === "below-floor" ? 30 : 80, "B");
+      if (kind === "stale") {
+        rejected.freshness = { isFresh: false, verified: true };
+      }
+      if (kind === "unverified") {
+        rejected.freshness = { isFresh: true, verified: false };
+      }
+      const next = obs(50, "C");
+      const terminal = obs(60, "C");
+      fake.setObserveSequence([first, candidate, rejected, next, terminal, terminal]);
+      fake.setDeferredBackStackDisagreement(true);
+      const calls: Array<[ObserveResult, ObserveResult | undefined]> = [];
+      const options = {
+        timeoutMs: 100,
+        pollMs: 10,
+        initialMinTimestampMs: 10,
+        resumeOnTerminalMismatch: true,
+      };
+      const outcome = await pollObserveUntil(fake, timer, options, (current, previous) => {
+        calls.push([current, previous]);
+        return (
+          current.viewHierarchy?.hierarchy.node?.marker ===
+          previous?.viewHierarchy?.hierarchy.node?.marker
+        );
+      });
+      expect(outcome).toMatchObject({ stopped: true, polls: 6, waitMs: 30 });
+      expect(outcome.observation).toBe(terminal);
+      expect(calls).toEqual([
+        [first, undefined],
+        [candidate, first],
+        [next, candidate],
+        [terminal, next],
+        [terminal, terminal],
+      ]);
+      expect(fake.getExecuteMinTimestamps()).toEqual([11, 20, 40, 40, 50, 60]);
+      expect(fake.getCacheObserveResultObservations()).toEqual([terminal]);
+    },
+  );
+
+  test("a contradicting finishing read at the deadline never reports a match", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const finishing = obs(30, "B");
+    fake.setObserveSequence([obs(20, "A"), obs(20, "A"), finishing]);
+    fake.setDeferredBackStackDisagreement(true);
+    const execute = fake.execute.bind(fake);
+    fake.execute = async (options) => {
+      const result = await execute(options);
+      if (fake.getExecuteCallCount() === 3) {
+        timer.advanceTime(90);
+      }
+      return result;
+    };
+    const options = {
+      timeoutMs: 100,
+      pollMs: 10,
+      initialMinTimestampMs: 10,
+      resumeOnTerminalMismatch: true,
+    };
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      options,
+      (current, previous) =>
+        current.viewHierarchy?.hierarchy.node?.marker ===
+        previous?.viewHierarchy?.hierarchy.node?.marker,
+    );
+    expect(outcome).toMatchObject({
+      stopped: false,
+      terminalReason: "timeout",
+      polls: 3,
+      waitMs: 100,
+    });
+    expect(outcome.observation).toBe(finishing);
+    expect(timer.now()).toBe(100);
+  });
+
   test("disagreement takes one full poll and caches its own generation and start time", async () => {
     const timer = new FakeTimer();
     const fake = new FakeObserveScreen();

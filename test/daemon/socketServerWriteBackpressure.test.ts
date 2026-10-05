@@ -2,7 +2,14 @@ import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { expect, test } from "bun:test";
 import { DaemonSocketQueueOverflowError, UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import {
+  DAEMON_CANCEL_REQUEST_METHOD,
+  DAEMON_HEARTBEAT_METHOD,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+} from "../../src/daemon/constants";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -12,15 +19,20 @@ class BackpressuredSocket extends EventEmitter {
   destroyed = false;
   writableLength = 0;
   readonly callbacks: Array<(error?: Error | null) => void> = [];
+  readonly writes: string[] = [];
+  readonly timeouts: number[] = [];
+  backpressure = true;
 
-  setTimeout(_ms: number): this {
+  setTimeout(ms: number): this {
+    this.timeouts.push(ms);
     return this;
   }
 
   write(payload: string, callback: (error?: Error | null) => void): boolean {
+    this.writes.push(payload);
     this.writableLength += Buffer.byteLength(payload);
     this.callbacks.push(callback);
-    return false;
+    return !this.backpressure;
   }
 
   destroy(): this {
@@ -43,6 +55,15 @@ class BackpressuredSocket extends EventEmitter {
 interface SocketServerInternals {
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
+  handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
+  handleRequest(
+    sessionId: string,
+    socket: Socket,
+    request: DaemonRequest,
+    receivedAtMs: number,
+    onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
+  ): Promise<DaemonResponse | undefined>;
+  pendingSocketRequests: Set<unknown>;
   writeFrameData(
     socket: Socket,
     sessionId: string,
@@ -176,4 +197,236 @@ test("inbound data and fully flushed writes refresh the RPC idle deadline", () =
   expect(socket.destroyed).toBeFalse();
   timer.advanceTime(1);
   expect(socket.destroyed).toBeTrue();
+});
+
+const longBudgetMs = 20 * 60 * 1000;
+
+function sendRequest(socket: BackpressuredSocket, id = "silent", timeoutMs = longBudgetMs): void {
+  const request: DaemonRequest = {
+    id,
+    type: "mcp_request",
+    method: "tools/call",
+    params: { name: "tapOn", arguments: { deviceId: id } },
+    timeoutMs,
+  };
+  socket.emit("data", Buffer.from(JSON.stringify(request) + "\n"));
+}
+
+async function settleHandlers(): Promise<void> {
+  for (let index = 0; index < 30; index++) {
+    await Promise.resolve();
+  }
+}
+
+test.each(["native", "flushed backpressure"])(
+  "silent 20-minute request survives %s idle expiry and delivers its deadline answer",
+  async (idlePath) => {
+    const timer = new FakeTimer();
+    const socket = new BackpressuredSocket();
+    socket.backpressure = false;
+    const server = connectedServer(timer, socket);
+    if (idlePath === "flushed backpressure") {
+      socket.backpressure = true;
+      server.writeFrameData(socket as unknown as Socket, "session", response);
+      socket.flush();
+      socket.writes.length = 0;
+      socket.backpressure = false;
+    }
+    server.handleLocalSocketRequest = async () =>
+      new Promise<never>((_resolve, reject) => {
+        timer.setTimeout(
+          () =>
+            reject(
+              new McpTimeoutError({
+                toolName: "tapOn",
+                timeoutMs: longBudgetMs,
+                origin: "fake handler",
+              }),
+            ),
+          longBudgetMs,
+        );
+      });
+    sendRequest(socket);
+    await settleHandlers();
+    timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+    if (idlePath === "native") {
+      socket.emit("timeout");
+    }
+    expect(socket.destroyed).toBeFalse();
+    timer.advanceTime(longBudgetMs - DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+    await settleHandlers();
+    expect(socket.destroyed).toBeFalse();
+    expect(socket.writes.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        id: "silent",
+        success: false,
+        error: expect.stringContaining("1200000ms"),
+      }),
+    ]);
+    socket.flush();
+    timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
+    expect(socket.destroyed).toBeFalse();
+    timer.advanceTime(1);
+    expect(socket.destroyed).toBeTrue();
+  },
+);
+
+test("a request exactly at the idle limit survives an idle event racing its answer", async () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  socket.backpressure = false;
+  const server = connectedServer(timer, socket);
+  const completed = Promise.withResolvers<unknown>();
+  server.handleLocalSocketRequest = () => completed.promise;
+  sendRequest(socket, "boundary", DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  await settleHandlers();
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeFalse();
+  completed.resolve({ answered: true });
+  await settleHandlers();
+  expect(socket.writes.map((line) => JSON.parse(line))).toEqual([
+    expect.objectContaining({ id: "boundary", success: true, result: { answered: true } }),
+  ]);
+  socket.flush();
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeTrue();
+});
+
+test("terminal flush resets a fresh full native idle window", async () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  socket.backpressure = false;
+  const server = connectedServer(timer, socket);
+  const completed = Promise.withResolvers<unknown>();
+  server.handleLocalSocketRequest = () => completed.promise;
+  sendRequest(socket);
+  await settleHandlers();
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
+  completed.resolve({});
+  await settleHandlers();
+  expect(server.pendingSocketRequests.size).toBe(1);
+  socket.flush();
+  expect(server.pendingSocketRequests.size).toBe(0);
+  expect(socket.timeouts).toEqual([
+    DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+    DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+  ]);
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeTrue();
+});
+
+test("native idle expiry still destroys a socket without in-flight requests", () => {
+  const socket = new BackpressuredSocket();
+  connectedServer(new FakeTimer(), socket);
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeTrue();
+});
+
+test("all in-flight responses must flush before ordinary idle protection resumes", async () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  socket.backpressure = false;
+  const server = connectedServer(timer, socket);
+  const first = Promise.withResolvers<unknown>();
+  const second = Promise.withResolvers<unknown>();
+  server.handleLocalSocketRequest = (request) =>
+    request.id === "first" ? first.promise : second.promise;
+  sendRequest(socket, "first");
+  sendRequest(socket, "second");
+  await settleHandlers();
+  first.resolve({});
+  await settleHandlers();
+  socket.flush();
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeFalse();
+  second.resolve({});
+  await settleHandlers();
+  expect(server.pendingSocketRequests.size).toBe(1);
+  socket.flush();
+  expect(server.pendingSocketRequests.size).toBe(0);
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
+  expect(socket.destroyed).toBeFalse();
+  timer.advanceTime(1);
+  expect(socket.destroyed).toBeTrue();
+});
+
+test("an in-flight request cannot keep an unread backpressured socket alive", async () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  const server = connectedServer(timer, socket);
+  const completed = Promise.withResolvers<unknown>();
+  server.handleLocalSocketRequest = () => completed.promise;
+  sendRequest(socket);
+  await settleHandlers();
+  server.writeFrameData(socket as unknown as Socket, "session", response);
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  expect(socket.destroyed).toBeTrue();
+  expect(server.pendingSocketRequests.size).toBe(0);
+  completed.resolve({});
+  await settleHandlers();
+});
+
+test.each([
+  DAEMON_HEARTBEAT_METHOD,
+  DAEMON_CANCEL_REQUEST_METHOD,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+])("%s without a terminal answer does not exempt its socket from idle expiry", async (method) => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  const server = connectedServer(timer, socket);
+  const completed = Promise.withResolvers<DaemonResponse | undefined>();
+  server.handleRequest = () => completed.promise;
+  socket.emit(
+    "data",
+    Buffer.from(JSON.stringify({ id: "control", type: "mcp_request", method }) + "\n"),
+  );
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeTrue();
+  expect(server.pendingSocketRequests.size).toBe(0);
+  completed.resolve(undefined);
+  await settleHandlers();
+});
+
+test("a never-answering handler loses its idle exemption after its request deadline", async () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  const server = connectedServer(timer, socket);
+  const completed = Promise.withResolvers<unknown>();
+  server.handleLocalSocketRequest = () => completed.promise;
+  sendRequest(socket);
+  await settleHandlers();
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeFalse();
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  expect(socket.destroyed).toBeTrue();
+  expect(server.pendingSocketRequests.size).toBe(0);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  completed.resolve({});
+  await settleHandlers();
+});
+
+test("idle exemption follows the live progress-extended deadline", async () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  const server = connectedServer(timer, socket);
+  const completed = Promise.withResolvers<DaemonResponse | undefined>();
+  const deadline = new ProgressExtendableDeadline(0, longBudgetMs, 40 * 60 * 1000);
+  server.handleRequest = (_sessionId, _socket, _request, _receivedAtMs, onAdmitted) => {
+    onAdmitted?.(deadline);
+    return completed.promise;
+  };
+  sendRequest(socket);
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  socket.emit("timeout");
+  expect(socket.destroyed).toBeFalse();
+  deadline.extendOnProgress(timer.now(), longBudgetMs);
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  expect(socket.destroyed).toBeFalse();
+  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+  expect(socket.destroyed).toBeTrue();
+  completed.resolve(undefined);
+  await settleHandlers();
 });

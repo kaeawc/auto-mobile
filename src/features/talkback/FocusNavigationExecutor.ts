@@ -21,6 +21,8 @@ interface NavigationOptions {
   verificationInterval?: number;
   swipeDelay?: number;
   onFocusObserved?: (element: Element | null) => void;
+  /** Called immediately before a swipe request; even failed requests may move the screen. */
+  onSwipeRequested?: () => void;
 }
 
 export interface FocusNavigationDriver {
@@ -207,7 +209,13 @@ export class FocusNavigationExecutor {
     }
 
     while (remainingSwipes > 0) {
-      await this.performFocusSwipe(driver, currentPath.direction, screenSize, options.displayFence);
+      await this.performFocusSwipe(
+        driver,
+        currentPath.direction,
+        screenSize,
+        options.displayFence,
+        options.onSwipeRequested,
+      );
       totalSwipes += 1;
       remainingSwipes -= 1;
 
@@ -334,10 +342,12 @@ export class FocusNavigationExecutor {
     direction: "forward" | "backward",
     screenSize: ScreenSize,
     fence?: DisplayFence,
+    onSwipeRequested?: () => void,
   ): Promise<void> {
     const { x1, y1, x2, y2 } = this.getSwipeCoordinates(direction, screenSize);
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
+    onSwipeRequested?.();
     const result = await driver.requestSwipe(
       x1,
       y1,

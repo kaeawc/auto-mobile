@@ -1,4 +1,5 @@
 import { StaleDisplayError } from "../../src/models/StaleDisplayError";
+import { nodeAttributes } from "../../src/models/ViewHierarchyResult";
 import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import {
   deferTerminalScreenshot,
@@ -9,6 +10,7 @@ import type { SettleObserve } from "../../src/features/observe/interfaces/Settle
 import { describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import {
+  EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS,
   EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
   EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
   settleEmbeddedObservation,
@@ -1212,6 +1214,193 @@ describe("settleEmbeddedObservation adoption guard (#6866)", () => {
     expect((outcome.observation.viewHierarchy!.hierarchy.node as any)["resource-id"]).toBe(
       "android:id/clock",
     );
+  });
+});
+
+describe("settleEmbeddedObservation abort fence (#9880)", () => {
+  const FENCE_MS =
+    EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS + EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS;
+
+  /** FakeTimer auto-advance does not list timeouts as pending, so log arm/clear explicitly. */
+  class FenceRecordingTimer extends FakeTimer {
+    readonly armed: Array<{ ms: number; handle: NodeJS.Timeout }> = [];
+    readonly cleared: NodeJS.Timeout[] = [];
+
+    override setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
+      const handle = super.setTimeout(callback, ms);
+      this.armed.push({ ms, handle });
+      return handle;
+    }
+
+    override clearTimeout(handle: NodeJS.Timeout): void {
+      this.cleared.push(handle);
+      super.clearTimeout(handle);
+    }
+
+    /** Delays of armed timeouts that were never cleared. */
+    uncleared(): number[] {
+      return this.armed.filter((t) => !this.cleared.includes(t.handle)).map((t) => t.ms);
+    }
+  }
+
+  function tickingClock(index: number): ObserveResult {
+    return obs(
+      { class: "android.widget.TextView", "resource-id": "android:id/clock", text: `0:0${index}` },
+      20 + index * 10,
+    );
+  }
+
+  /** The root node's `text`, read through the typed hierarchy accessor. */
+  function rootText(observation: ObserveResult): unknown {
+    return nodeAttributes(observation.viewHierarchy!.hierarchy.node!)["text"];
+  }
+
+  /** Records the signal and the fence timers armed while the loop runs. */
+  function recordingSettle(
+    inner: SettleObserve,
+    timer: FenceRecordingTimer,
+  ): { settle: SettleObserve; signals: AbortSignal[]; pendingAtStart: number[][] } {
+    const signals: AbortSignal[] = [];
+    const pendingAtStart: number[][] = [];
+    const settle: SettleObserve = {
+      captureScreenshot: inner.captureScreenshot?.bind(inner),
+      execute: async (options) => {
+        pendingAtStart.push(timer.uncleared());
+        if (options.signal) {
+          signals.push(options.signal);
+        }
+        return inner.execute(options);
+      },
+    };
+    return { settle, signals, pendingAtStart };
+  }
+
+  test("a never-settling screen ends through the loop budget: newest capture, cached, no warning", async () => {
+    const timer = new FenceRecordingTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(tickingClock);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const recorded = recordingSettle(settleFor(fake, timer), timer);
+      const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+      const outcome = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: captured,
+        settleObserve: recorded.settle,
+        timer,
+      });
+
+      // The fence is armed on the injected timer strictly after the loop budget.
+      expect(recorded.pendingAtStart).toEqual([[FENCE_MS]]);
+      expect(FENCE_MS).toBeGreaterThan(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
+      expect(timer.now()).toBe(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
+      expect(recorded.signals[0].aborted).toBe(false);
+
+      const lastIndex = fake.getExecuteCallCount() - 1;
+      const returnedText = rootText(outcome.observation);
+      expect(outcome.settled).toBe(false);
+      expect(outcome.observation).not.toBe(captured);
+      expect(returnedText).toBe(rootText(tickingClock(lastIndex)));
+      const cached = fake.getCacheObserveResultObservations();
+      expect(cached).toHaveLength(1);
+      expect(rootText(cached[0])).toBe(returnedText);
+      expect(warn).not.toHaveBeenCalled();
+      expect(timer.uncleared().filter((ms) => ms === FENCE_MS)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a screen that settles early returns then and leaves no timer pending", async () => {
+    const timer = new FenceRecordingTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([
+      obs(AIRPLANE_ROW_HALF_INFLATED, 20),
+      obs(AIRPLANE_ROW_INFLATED, 30),
+      obs(AIRPLANE_ROW_INFLATED, 40),
+    ]);
+    const recorded = recordingSettle(settleFor(fake, timer), timer);
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+      settleObserve: recorded.settle,
+      timer,
+    });
+
+    expect(outcome.settled).toBe(true);
+    expect(timer.now()).toBeLessThan(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
+    expect(recorded.signals[0].aborted).toBe(false);
+    expect(timer.uncleared().filter((ms) => ms === FENCE_MS)).toEqual([]);
+  });
+
+  test("a caller cancel mid-poll aborts promptly with the caller's reason, not the fence's", async () => {
+    const timer = new FenceRecordingTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(tickingClock);
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled");
+    timer.setTimeout(() => controller.abort(reason), 300);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const recorded = recordingSettle(settleFor(fake, timer), timer);
+      const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+      const outcome = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: captured,
+        settleObserve: recorded.settle,
+        signal: controller.signal,
+        timer,
+      });
+
+      expect(outcome.observation).toBe(captured);
+      expect(outcome.settled).toBe(false);
+      expect(timer.now()).toBeLessThan(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
+      expect(recorded.signals[0].aborted).toBe(true);
+      expect(recorded.signals[0].reason).toBe(reason);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(timer.uncleared().filter((ms) => ms === FENCE_MS)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("the fence still bounds a read that hangs past the loop budget", async () => {
+    const timer = new FenceRecordingTimer();
+    let seen: AbortSignal | undefined;
+    const hung: SettleObserve = {
+      execute: (options) =>
+        new Promise((_resolve, reject) => {
+          seen = options.signal;
+          options.signal?.addEventListener("abort", () => reject(options.signal!.reason), {
+            once: true,
+          });
+        }),
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+      const pending = settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: captured,
+        settleObserve: hung,
+        timer,
+      });
+      timer.advanceTime(FENCE_MS - 1);
+      expect(seen?.aborted).toBe(false);
+      timer.advanceTime(1);
+      const outcome = await pending;
+
+      expect(seen?.aborted).toBe(true);
+      expect(outcome.observation).toBe(captured);
+      expect(outcome.settled).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(timer.uncleared().filter((ms) => ms === FENCE_MS)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

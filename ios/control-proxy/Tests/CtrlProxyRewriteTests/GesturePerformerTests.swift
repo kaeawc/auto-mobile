@@ -10,6 +10,166 @@ final class ConsumerButtonUsageTests: XCTestCase {
     }
 }
 
+final class ImeActionKeySelectionTests: XCTestCase {
+    private let actions = ["send", "done", "go", "search", "next"]
+
+    func testAllActionsTapMatchingKeyForSingleLineAndMultilineFields() {
+        for action in actions {
+            for isMultiline in [false, true] {
+                XCTAssertEqual(
+                    GesturePerformer.imeActionDecision(
+                        action: action, isMultiline: isMultiline, keyboardVisible: true,
+                        keys: [
+                            (label: "Return", identifier: "", isEnabled: true),
+                            (label: action.capitalized, identifier: "", isEnabled: true),
+                        ]
+                    ),
+                    .tapKey(index: 1), "\(action), multiline=\(isMultiline)"
+                )
+            }
+        }
+    }
+
+    func testAllActionsRejectPlainReturnForMultilineFields() {
+        for action in actions {
+            for returnName in ["Return", "return_arrow", "returnarrow", "↵", "⏎", "↩"] {
+                XCTAssertEqual(
+                    GesturePerformer.imeActionDecision(
+                        action: action, isMultiline: true, keyboardVisible: true,
+                        keys: [(label: returnName, identifier: "", isEnabled: true)]
+                    ),
+                    .notAvailable(
+                        "IME action '\(action)' is not available for this multi-line field: Return would insert a line break"
+                    )
+                )
+            }
+        }
+    }
+
+    func testAllActionsKeepSingleLineReturnFallback() {
+        for action in actions {
+            XCTAssertEqual(
+                GesturePerformer.imeActionDecision(
+                    action: action, isMultiline: false, keyboardVisible: true,
+                    keys: [(label: "Return", identifier: "", isEnabled: true)]
+                ),
+                .typeReturn
+            )
+        }
+    }
+
+    func testNoKeyboardRejectsAllActionsEvenWithMatchingKey() {
+        for action in actions {
+            for isMultiline in [false, true] {
+                XCTAssertEqual(
+                    GesturePerformer.imeActionDecision(
+                        action: action, isMultiline: isMultiline, keyboardVisible: false,
+                        keys: [(label: action, identifier: "", isEnabled: true)]
+                    ),
+                    .notAvailable("IME action '\(action)' is not available: no keyboard is visible")
+                )
+            }
+        }
+    }
+
+    func testMismatchedActionLabelsDoNotSubmitMultilineFields() {
+        for action in actions {
+            let keys = actions.filter { $0 != action }.map { (label: $0, identifier: "", isEnabled: true) }
+            XCTAssertEqual(
+                GesturePerformer.imeActionDecision(
+                    action: action, isMultiline: true, keyboardVisible: true, keys: keys
+                ),
+                .notAvailable(
+                    "IME action '\(action)' is not available for this multi-line field: Return would insert a line break"
+                )
+            )
+            XCTAssertEqual(
+                GesturePerformer.imeActionDecision(
+                    action: action, isMultiline: false, keyboardVisible: true, keys: keys
+                ),
+                .typeReturn
+            )
+        }
+    }
+
+    func testActionLabelAndIdentifierAreCaseInsensitive() {
+        for action in actions {
+            for key in [
+                (label: action.uppercased(), identifier: "", isEnabled: true),
+                (label: "", identifier: action.uppercased(), isEnabled: true),
+                (label: "Return", identifier: action.uppercased(), isEnabled: true),
+            ] {
+                XCTAssertEqual(
+                    GesturePerformer.imeActionDecision(
+                        action: action.capitalized, isMultiline: true, keyboardVisible: true, keys: [key]
+                    ),
+                    .tapKey(index: 0)
+                )
+            }
+        }
+    }
+
+    func testDisabledMatchingKeyCannotBeBypassedByReturn() {
+        for action in actions {
+            for isMultiline in [false, true] {
+                XCTAssertEqual(
+                    GesturePerformer.imeActionDecision(
+                        action: action, isMultiline: isMultiline, keyboardVisible: true,
+                        keys: [
+                            (label: action, identifier: "", isEnabled: false),
+                            (label: "Return", identifier: "", isEnabled: true),
+                        ]
+                    ),
+                    .notAvailable("IME action '\(action)' is not available: the keyboard action key is disabled")
+                )
+            }
+        }
+    }
+
+    func testEnabledMatchingKeyWinsOverDisabledDuplicate() {
+        XCTAssertEqual(
+            GesturePerformer.imeActionDecision(
+                action: "send", isMultiline: true, keyboardVisible: true,
+                keys: [
+                    (label: "Send", identifier: "", isEnabled: false),
+                    (label: "", identifier: "send", isEnabled: true),
+                ]
+            ),
+            .tapKey(index: 1)
+        )
+    }
+
+    func testNoRecognizedKeysOnlyAllowsSingleLineFallback() {
+        for keys in [[], [(label: "Google", identifier: "sender", isEnabled: true)]] {
+            XCTAssertEqual(
+                GesturePerformer.imeActionDecision(
+                    action: "go", isMultiline: false, keyboardVisible: true, keys: keys
+                ),
+                .typeReturn
+            )
+            XCTAssertEqual(
+                GesturePerformer.imeActionDecision(
+                    action: "go", isMultiline: true, keyboardVisible: true, keys: keys
+                ),
+                .notAvailable(
+                    "IME action 'go' is not available for this multi-line field: Return would insert a line break"
+                )
+            )
+        }
+    }
+
+    func testUnsupportedActionsDoNotTypeReturn() {
+        for action in ["previous", "return", "unknown"] {
+            XCTAssertEqual(
+                GesturePerformer.imeActionDecision(
+                    action: action, isMultiline: false, keyboardVisible: true, keys: []
+                ),
+                .notAvailable("IME action: \(action)")
+            )
+        }
+    }
+}
+
 final class KeyboardCloseKeySelectionTests: XCTestCase {
     func testKeyboardResponseEncodesDismissalMethod() throws {
         let response = KeyboardResponse(

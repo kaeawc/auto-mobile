@@ -51,11 +51,19 @@ teardown() {
   [[ "$output" == *"bun-version-coherence"* ]]
 }
 
+@test "fast validation lists the quiet grep pipeline guard" {
+  run "$ABS_SCRIPT" --list
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pipefail-grep-q"*"(groups: lint,shell)"* ]]
+}
+
 @test "fast validation lists registered implementation scripts" {
   run "$ABS_SCRIPT" --list-checks
 
   [ "$status" -eq 0 ]
   [[ "$output" == *$'claude-plugin\tscripts/claude/validate_plugin.sh'* ]]
+  [[ "$output" == *$'pipefail-grep-q\tscripts/shellcheck/validate_shell_pipefail_grepq.sh'* ]]
   while IFS=$'\t' read -r name script_path; do
     [[ -n "$name" ]]
     [[ -n "$script_path" ]]

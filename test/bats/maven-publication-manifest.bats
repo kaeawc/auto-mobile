@@ -452,3 +452,15 @@ per_coordinate_byte_sum() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"files=110"* ]]
 }
+
+
+@test "digit grep here-strings preserve the former pipeline's line semantics" {
+  local value previous rewritten
+  for value in "" "12" "invalid" $'12\n34' $'invalid\n12' $'12\ninvalid' $'\n' $'12\n'; do
+    previous=0
+    printf '%s' "$value" | grep -qE '^[0-9]+$' || previous=$?
+    rewritten=0
+    grep -qE '^[0-9]+$' <<< "$value" || rewritten=$?
+    [ "$previous" -eq "$rewritten" ]
+  done
+}

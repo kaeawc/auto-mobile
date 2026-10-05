@@ -1,10 +1,2 @@
 # quiet grep pipeline baseline: count path (shrink-only per file).
 # Regenerate: bash scripts/shellcheck/validate_shell_pipefail_grepq.sh --update
-1 scripts/android/put-app-file-picker-smoke.sh
-1 scripts/claude/validate_plugin.sh
-2 scripts/docker/test_container.sh
-4 scripts/ios/setup-ios-simulator.sh
-1 scripts/local-dev/probe-android-locale.sh
-2 scripts/release/maven-publication-manifest.sh
-7 scripts/shellcheck/validate_markdown_bash.sh
-3 scripts/shellcheck/validate_shell_portability.sh

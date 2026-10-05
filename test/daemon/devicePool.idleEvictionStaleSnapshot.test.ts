@@ -1,3 +1,4 @@
+import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
@@ -409,7 +410,11 @@ describe("idle eviction with a stale discovery snapshot", () => {
 
     // A resumes on its stale "absent" snapshot.
     deviceManager.parked[0].resolve();
-    await allocation;
+    await settleWithFakeTime(timer, allocation, {
+      stepMs: 1_000,
+      maxSteps: 2,
+      description: "stale preflight allocation timeout",
+    });
     await flushMicrotasks();
 
     const diagnostic = {

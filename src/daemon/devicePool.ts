@@ -6,7 +6,7 @@ import {
   type DeviceHealthMarkers,
   type DeviceHealthMarker,
 } from "./deviceHealthMarkers";
-import { fixedBackoff, type BackoffPolicy } from "../utils/Backoff";
+import { type BackoffPolicy } from "../utils/Backoff";
 import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
@@ -729,12 +729,12 @@ export class DevicePool {
   private deviceSessionStarts: Map<string, number> = new Map();
   private sessionManager: SessionManager;
   private assignmentMutex = new Mutex();
-  // FIFO from multi-device call entry, shared by both APIs: only the head may
-  // claim devices. Later multi-device requests cannot overtake an earlier one,
-  // even if smaller or disjoint. Single-device allocation is unchanged. Each
-  // attempt releases NEW partial claims before waiting; pre-existing sessions
-  // remain owned by their caller. Every exit (including abort) removes its ticket.
-  private readonly multiDeviceAllocationQueue: symbol[] = [];
+  // Tickets begin after preflight. Only platform-disjoint requests may
+  // overtake earlier waiters; new partial claims are released before waiting.
+  private readonly multiDeviceAllocationQueue: Array<{
+    requests: DeviceAllocationRequest[];
+  }> = [];
+  private readonly multiDeviceAllocationWaiters = new Set<() => void>();
 
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
@@ -2056,8 +2056,9 @@ export class DevicePool {
     timeoutMs: number = 300000,
     platform?: Platform,
   ): Promise<Map<string, string>> {
-    const ticket = Symbol("multi-device allocation");
-    this.multiDeviceAllocationQueue.push(ticket);
+    const ticket = {
+      requests: sessionIds.map((sessionId) => ({ sessionId, criteria: { platform } })),
+    };
     try {
       const startTime = this.timer.now();
       const assignments = new Map<string, string>();
@@ -2095,101 +2096,95 @@ export class DevicePool {
 
       this.assertMultiDeviceCapacity(stats, requiredCount, platform, refreshFailure);
 
-      // Try to assign devices with shared timeout using retry executor
-      const maxAttempts = Math.ceil(timeoutMs / this.DEVICE_WAIT_INTERVAL_MS);
+      this.multiDeviceAllocationQueue.push(ticket);
+      // Queue waits consume deadline time, but never allocation attempts.
       const assigned = new Set<string>();
       let firstWaitLogged = false;
 
-      const result = await this.retryExecutor.execute(
-        async () => {
-          throwIfRequestAborted();
-          if (requiredCount > 0 && this.multiDeviceAllocationQueue[0] !== ticket) {
-            throw new DevicePoolError("All devices busy", true, refreshFailure);
-          }
-          // Try to assign all remaining sessions
-          while (assigned.size < requiredCount) {
-            const sessionId = sessionIds[assigned.size];
+      const allocate = () =>
+        this.executeMultiDeviceAllocation(
+          ticket,
+          startTime + timeoutMs,
+          (failure) => {
+            refreshFailure = failure;
+          },
+          async () => {
+            throwIfRequestAborted();
+            // Try to assign all remaining sessions
+            while (assigned.size < requiredCount) {
+              const sessionId = sessionIds[assigned.size];
 
-            const assignResult = await this.tryAssignDevice(sessionId, platform);
-            if (assignResult.refreshCompleted) {
-              refreshFailure = assignResult.refreshFailure;
-            }
-
-            if (assignResult.success) {
-              assigned.add(sessionId);
-              assignments.set(sessionId, assignResult.deviceId!);
-              if (assignResult.session) {
-                assignmentsToRollback.set(sessionId, {
-                  deviceId: assignResult.deviceId!,
-                  session: assignResult.session,
-                });
+              const assignResult = await this.tryAssignDevice(sessionId, platform);
+              if (assignResult.refreshCompleted) {
+                refreshFailure = assignResult.refreshFailure;
               }
-              logger.info(
-                `[DevicePool] Allocated device ${assignResult.deviceId} to session ${sessionId} (${assigned.size}/${requiredCount})`,
-              );
-            } else if (assignResult.livenessUnknown) {
-              throw new DevicePoolError(
-                `Unable to verify iOS simulator liveness for session ${sessionId}; iOS discovery failed.`,
-                false,
-              );
-            } else if (!assignResult.shouldWait) {
-              // No devices at all - non-retryable error
-              const currentStats = this.getStatsForPlatform(platform);
-              throw new DevicePoolError(
-                `Failed to allocate devices: no devices available.\n` +
-                  `Required: ${requiredCount} devices, allocated: ${assigned.size}\n` +
-                  `Device pool status:\n` +
-                  `  Total devices: ${currentStats.total}\n` +
-                  `  Idle: ${currentStats.idle}\n` +
-                  `  Assigned: ${currentStats.assigned}\n` +
-                  `  Error: ${currentStats.error}\n\n` +
-                  `Suggestions:\n` +
-                  `  - Start an emulator or simulator\n` +
-                  `  - Check device pool status: auto-mobile --cli listDevices\n` +
-                  `  - Verify device tooling is working for the selected platform`,
-                false,
-              );
-            } else {
-              // Devices busy - throw retryable error to wait
-              if (!firstWaitLogged) {
-                firstWaitLogged = true;
+
+              if (assignResult.success) {
+                assigned.add(sessionId);
+                assignments.set(sessionId, assignResult.deviceId!);
+                if (assignResult.session) {
+                  assignmentsToRollback.set(sessionId, {
+                    deviceId: assignResult.deviceId!,
+                    session: assignResult.session,
+                  });
+                }
                 logger.info(
-                  `[DevicePool] Waiting for ${requiredCount - assigned.size} more device(s) (${assignResult.totalDevices} total, all currently busy)...`,
+                  `[DevicePool] Allocated device ${assignResult.deviceId} to session ${sessionId} (${assigned.size}/${requiredCount})`,
                 );
+              } else if (assignResult.livenessUnknown) {
+                throw new DevicePoolError(
+                  `Unable to verify iOS simulator liveness for session ${sessionId}; iOS discovery failed.`,
+                  false,
+                );
+              } else if (!assignResult.shouldWait) {
+                // No devices at all - non-retryable error
+                const currentStats = this.getStatsForPlatform(platform);
+                throw new DevicePoolError(
+                  `Failed to allocate devices: no devices available.\n` +
+                    `Required: ${requiredCount} devices, allocated: ${assigned.size}\n` +
+                    `Device pool status:\n` +
+                    `  Total devices: ${currentStats.total}\n` +
+                    `  Idle: ${currentStats.idle}\n` +
+                    `  Assigned: ${currentStats.assigned}\n` +
+                    `  Error: ${currentStats.error}\n\n` +
+                    `Suggestions:\n` +
+                    `  - Start an emulator or simulator\n` +
+                    `  - Check device pool status: auto-mobile --cli listDevices\n` +
+                    `  - Verify device tooling is working for the selected platform`,
+                  false,
+                );
+              } else {
+                // Devices busy - throw retryable error to wait
+                if (!firstWaitLogged) {
+                  firstWaitLogged = true;
+                  logger.info(
+                    `[DevicePool] Waiting for ${requiredCount - assigned.size} more device(s) (${assignResult.totalDevices} total, all currently busy)...`,
+                  );
+                }
+                await this.rollbackAssignments(assignmentsToRollback);
+                assignmentsToRollback.clear();
+                assignments.clear();
+                assigned.clear();
+                throw new DevicePoolError("All devices busy", true, refreshFailure);
               }
-              await this.rollbackAssignments(assignmentsToRollback);
-              assignmentsToRollback.clear();
-              assignments.clear();
-              assigned.clear();
-              throw new DevicePoolError("All devices busy", true, refreshFailure);
             }
-          }
 
-          // All devices assigned successfully
-          return assignments;
-        },
-        {
-          maxAttempts,
-          delays: fixedBackoff(this.DEVICE_WAIT_INTERVAL_MS),
-          signal: getAbortSignal(),
-          shouldRetry: (error) => error instanceof DevicePoolError && error.isRetryable,
-        },
-      );
+            // All devices assigned successfully
+            return assignments;
+          },
+        );
+
+      let result: Awaited<ReturnType<typeof allocate>>;
+      try {
+        result = await allocate();
+      } catch (error) {
+        await this.rollbackAssignments(assignmentsToRollback);
+        throw error;
+      }
 
       if (!result.success) {
         await this.rollbackAssignments(assignmentsToRollback);
         throwIfRequestAborted();
-
-        // Check if it was a non-retryable error
-        if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
-          throw new ActionableError(result.error.message);
-        }
-        if (
-          result.error &&
-          !(result.error instanceof DevicePoolError && result.error.isRetryable)
-        ) {
-          throw result.error;
-        }
 
         // Timeout case
         const elapsed = this.timer.now() - startTime;
@@ -2234,8 +2229,7 @@ export class DevicePool {
     requests: DeviceAllocationRequest[],
     timeoutMs: number = 300000,
   ): Promise<Map<string, string>> {
-    const ticket = Symbol("multi-device allocation");
-    this.multiDeviceAllocationQueue.push(ticket);
+    const ticket = { requests };
     try {
       const startTime = this.timer.now();
       const assignments = new Map<string, string>();
@@ -2297,95 +2291,79 @@ export class DevicePool {
         }
       }
 
-      // Auto-start and per-criteria validation run first, just as before. An
-      // impossible pool-size request must fail before holding the FIFO head.
-      this.assertMultiDeviceCapacity(
-        this.getStatsForPlatform(),
-        requiredCount,
-        undefined,
-        refreshFailure,
-      );
+      // There is no configured pool maximum. A short current inventory may
+      // grow through another flow, so preserve waiting for additional devices.
+      this.multiDeviceAllocationQueue.push(ticket);
 
       let attemptCount = 0;
-
-      const allocate = async (): Promise<void> => {
-        while (assignments.size < requiredCount) {
-          throwIfRequestAborted();
-          attemptCount++;
-          const elapsed = this.timer.now() - startTime;
-
-          if (elapsed > timeoutMs) {
-            throw new ActionableError(
-              `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
-                refreshFailureContext(refreshFailure) +
-                `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
-                `Suggestions:\n` +
-                `  - Boot additional simulators or emulators that match the plan requirements\n` +
-                `  - Reduce the number of devices required in the test plan\n` +
-                `  - Increase device allocation timeout`,
-            );
-          }
-
-          if (this.multiDeviceAllocationQueue[0] !== ticket) {
-            await this.waitForMultiDeviceRetry(attemptCount, startTime + timeoutMs);
-            continue;
-          }
-
-          for (const request of sortedRequests) {
-            if (assignments.has(request.sessionId)) {
-              continue;
-            }
-
-            const result = await this.tryAssignDeviceWithCriteria(
-              request.sessionId,
-              request.criteria,
-            );
-            if (result.refreshCompleted) {
-              refreshFailure = result.refreshFailure;
-            }
-
-            if (result.success) {
-              this.recordCriteriaAssignment(request, result, assignments, assignmentsToRollback);
-              logger.info(
-                `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
-                  `(${assignments.size}/${requiredCount})`,
-              );
-            } else if (result.livenessUnknown) {
-              throw new ActionableError(
-                `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
-              );
-            } else if (!result.shouldWait) {
-              const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
-              throw new ActionableError(
-                `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
-                  `No matching devices are currently available.\n` +
-                  `Suggestions:\n` +
-                  `  - Boot a simulator or emulator that matches the requested criteria\n` +
-                  `  - Wait for a device to become idle\n` +
-                  `  - Reduce parallel test count to match available devices`,
-              );
-            }
-          }
-
-          if (assignments.size >= requiredCount) {
-            break;
-          }
-
-          // Never wait while retaining claims made by this attempt. The head
-          // keeps its FIFO turn, so competing multi-device requests cannot livelock.
-          await this.rollbackAssignments(assignmentsToRollback);
-          assignmentsToRollback.clear();
-          assignments.clear();
-          if (attemptCount === 1) {
-            logger.info(`[DevicePool] Waiting for matching devices to become available...`);
-          }
-          await this.waitForMultiDeviceRetry(attemptCount, startTime + timeoutMs);
-        }
-      };
-
       let allocationCompleted = false;
       try {
-        await allocate();
+        const result = await this.executeMultiDeviceAllocation(
+          ticket,
+          startTime + timeoutMs,
+          (failure) => {
+            refreshFailure = failure;
+          },
+          async () => {
+            for (const request of sortedRequests) {
+              if (assignments.has(request.sessionId)) {
+                continue;
+              }
+
+              const result = await this.tryAssignDeviceWithCriteria(
+                request.sessionId,
+                request.criteria,
+              );
+              if (result.refreshCompleted) {
+                refreshFailure = result.refreshFailure;
+              }
+
+              if (result.success) {
+                this.recordCriteriaAssignment(request, result, assignments, assignmentsToRollback);
+                logger.info(
+                  `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
+                    `(${assignments.size}/${requiredCount})`,
+                );
+              } else if (result.livenessUnknown) {
+                throw new ActionableError(
+                  `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
+                );
+              } else if (!result.shouldWait) {
+                const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
+                throw new ActionableError(
+                  `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
+                    `No matching devices are currently available.\n` +
+                    `Suggestions:\n` +
+                    `  - Boot a simulator or emulator that matches the requested criteria\n` +
+                    `  - Wait for a device to become idle\n` +
+                    `  - Reduce parallel test count to match available devices`,
+                );
+              }
+            }
+
+            if (assignments.size < requiredCount) {
+              // Never retain new claims while waiting; existing sessions survive.
+              await this.rollbackAssignments(assignmentsToRollback);
+              assignmentsToRollback.clear();
+              assignments.clear();
+              throw new DevicePoolError("All devices busy", true, refreshFailure);
+            }
+            return assignments;
+          },
+        );
+        attemptCount = result.attempts;
+        if (!result.success) {
+          const elapsed = this.timer.now() - startTime;
+          throw new ActionableError(
+            `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
+              refreshFailureContext(refreshFailure) +
+              `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
+              `Suggestions:\n` +
+              `  - Boot additional simulators or emulators that match the plan requirements\n` +
+              `  - Reduce the number of devices required in the test plan\n` +
+              `  - Increase device allocation timeout`,
+          );
+        }
         allocationCompleted = true;
       } finally {
         if (!allocationCompleted) {
@@ -2405,30 +2383,138 @@ export class DevicePool {
     }
   }
 
-  private async waitForMultiDeviceRetry(attempt: number, deadlineMs: number): Promise<void> {
-    // Session creation/discovery may have consumed the deadline already.
-    if (this.timer.now() > deadlineMs) {
-      return;
+  private canClaimMultiDeviceAllocation(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): boolean {
+    const earlier = this.multiDeviceAllocationQueue.slice(
+      0,
+      this.multiDeviceAllocationQueue.indexOf(ticket),
+    );
+    // Comparing live candidate IDs alone misses devices joining later. Use a
+    // conservative platform-disjoint rule across both APIs, including wildcards.
+    if (
+      earlier.some((waiter) =>
+        waiter.requests.some((prior) =>
+          ticket.requests.some(
+            (request) =>
+              !prior.criteria?.platform ||
+              !request.criteria?.platform ||
+              prior.criteria.platform === request.criteria.platform,
+          ),
+        ),
+      )
+    ) {
+      return false;
     }
-    const delay = fixedBackoff(this.DEVICE_WAIT_INTERVAL_MS).delayForAttempt(attempt);
-    const signal = getAbortSignal();
-    if (!signal) {
-      await this.timer.sleep(delay);
+    const available = new Set<string>();
+    for (const request of this.criteriaMatcher.sortBySpecificity(ticket.requests)) {
+      // Existing sessions do not require a new claim and must survive rollback.
+      if (this.sessionManager.getSession(request.sessionId)) {
+        continue;
+      }
+      const candidates = this.getDevicesMatchingCriteria(request.criteria);
+      const device = candidates.find(
+        (candidate) =>
+          candidate.status === "idle" &&
+          !this.isReservedForAssignment(candidate) &&
+          !available.has(candidate.id),
+      );
+      if (!device) {
+        this.assertHealthyAllocationPossible(candidates, undefined);
+        return false;
+      }
+      available.add(device.id);
+    }
+    return true;
+  }
+
+  private async executeMultiDeviceAllocation<T>(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+    deadlineMs: number,
+    setRefreshFailure: (failure: string | undefined) => void,
+    allocate: () => Promise<T>,
+  ): Promise<{ success: boolean; value?: T; attempts: number; error?: DevicePoolError }> {
+    let attempts = 0;
+    let waited = false;
+    while (true) {
+      if (waited) {
+        await this.waitForMultiDeviceRetry(deadlineMs);
+        const refreshed = await this.refreshMultiDeviceInventory(ticket);
+        if (refreshed) {
+          setRefreshFailure(refreshed.failure);
+        }
+      }
+      throwIfRequestAborted();
+      if (this.timer.now() >= deadlineMs && waited) {
+        return { success: false, attempts };
+      }
+      waited = true;
+      if (!this.canClaimMultiDeviceAllocation(ticket)) {
+        if (this.timer.now() >= deadlineMs) {
+          return { success: false, attempts };
+        }
+        continue;
+      }
+      attempts++;
+      try {
+        return { success: true, value: await allocate(), attempts };
+      } catch (error) {
+        if (!(error instanceof DevicePoolError) || !error.isRetryable) {
+          throw error instanceof DevicePoolError ? new ActionableError(error.message) : error;
+        }
+        // Contention is expected; allocate released this round's new claims.
+        logger.debug("Multi-device allocation will retry after contention", error);
+      }
+    }
+  }
+
+  private async refreshMultiDeviceInventory(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): Promise<DevicePoolRefreshResult | undefined> {
+    // Busy-only rounds must retain the last actual discovery failure. Refresh
+    // only for missing capacity; releases already publish availability directly.
+    const candidates = this.getDevicesMatchingAnyRequest(ticket.requests);
+    if (
+      candidates.length < ticket.requests.length ||
+      ticket.requests.some(
+        (request) => this.getDevicesMatchingCriteria(request.criteria).length === 0,
+      )
+    ) {
+      return this.refreshDevicesWithOutcome();
+    }
+    return undefined;
+  }
+
+  private async waitForMultiDeviceRetry(deadlineMs: number): Promise<void> {
+    const delay = Math.min(this.DEVICE_WAIT_INTERVAL_MS, deadlineMs - this.timer.now());
+    if (delay <= 0) {
       return;
     }
     let handle: NodeJS.Timeout | undefined;
+    let wake: (() => void) | undefined;
     try {
       await raceWithDeadline(
         () =>
           new Promise<void>((resolve) => {
+            wake = resolve;
+            this.multiDeviceAllocationWaiters.add(resolve);
             handle = this.timer.setTimeout(resolve, delay);
           }),
-        { timer: this.timer, signal, label: "Multi-device allocation wait" },
+        { timer: this.timer, signal: getAbortSignal(), label: "Multi-device allocation wait" },
       );
     } finally {
+      if (wake) {
+        this.multiDeviceAllocationWaiters.delete(wake);
+      }
       if (handle !== undefined) {
         this.timer.clearTimeout(handle);
       }
+    }
+  }
+
+  private notifyMultiDeviceAllocationWaiters(): void {
+    for (const wake of this.multiDeviceAllocationWaiters) {
+      wake();
     }
   }
 
@@ -2462,10 +2548,13 @@ export class DevicePool {
     }
   }
 
-  private removeMultiDeviceAllocationTicket(ticket: symbol): void {
+  private removeMultiDeviceAllocationTicket(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): void {
     const index = this.multiDeviceAllocationQueue.indexOf(ticket);
     if (index >= 0) {
       this.multiDeviceAllocationQueue.splice(index, 1);
+      this.notifyMultiDeviceAllocationWaiters();
     }
   }
 
@@ -4977,6 +5066,7 @@ export class DevicePool {
     getObserveCacheStore().clear(deviceId);
     device.errorCount = 0;
     this.lastReleasedDeviceId = deviceId;
+    this.notifyMultiDeviceAllocationWaiters();
 
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
   }

@@ -136,6 +136,7 @@ describe("allocation after a partial refresh failure", () => {
         true,
       );
       const discovery = spyOn(deviceManager, "getBootedDevicesDetailed");
+      const waits = spyOn(timer, "setTimeout");
       try {
         const allocation =
           kind === "single"
@@ -147,10 +148,13 @@ describe("allocation after a partial refresh failure", () => {
                   3_000,
                 );
         await expect(allocation).rejects.toThrow("tracking persistence unavailable");
-        expect(timer.getSleepCallCount()).toBeGreaterThan(1);
+        expect(
+          kind === "single" ? timer.getSleepCallCount() : waits.mock.calls.length,
+        ).toBeGreaterThan(1);
         // Exactly one real refresh; every subsequent attempt only sees a busy candidate.
         expect(discovery.mock.calls.filter(([platform]) => platform === "either")).toHaveLength(1);
       } finally {
+        waits.mockRestore();
         discovery.mockRestore();
       }
     },
@@ -167,12 +171,20 @@ describe("allocation after a partial refresh failure", () => {
       );
       const discovery = spyOn(deviceManager, "getBootedDevicesDetailed");
       const sleep = timer.sleep.bind(timer);
-      const sleepSpy = spyOn(timer, "sleep").mockImplementation(async (ms) => {
-        if (timer.getSleepCallCount() === 0) {
-          // Model disappearance between attempts; the next allocation must refresh.
+      const timeout = timer.setTimeout.bind(timer);
+      let waits = 0;
+      const beforeWait = () => {
+        if (waits++ === 0) {
           clearPool();
         }
+      };
+      const sleepSpy = spyOn(timer, "sleep").mockImplementation(async (ms) => {
+        beforeWait();
         await sleep(ms);
+      });
+      const timeoutSpy = spyOn(timer, "setTimeout").mockImplementation((callback, ms) => {
+        beforeWait();
+        return timeout(callback, ms);
       });
       try {
         const allocation =
@@ -186,10 +198,11 @@ describe("allocation after a partial refresh failure", () => {
                 );
         await expect(allocation).rejects.toThrow("Timed out");
         await expect(allocation).rejects.not.toThrow("Could not refresh device list");
-        expect(timer.getSleepCallCount()).toBeGreaterThan(1);
+        expect(waits).toBeGreaterThan(1);
         expect(discovery.mock.calls.filter(([platform]) => platform === "either")).toHaveLength(2);
       } finally {
         sleepSpy.mockRestore();
+        timeoutSpy.mockRestore();
         discovery.mockRestore();
       }
     },

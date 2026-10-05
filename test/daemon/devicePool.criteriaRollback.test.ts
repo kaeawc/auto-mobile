@@ -69,7 +69,7 @@ describe("criteria allocation rollback on thrown errors", () => {
     ]);
   };
 
-  test("third label abort preserves released partial allocations before rejection", async () => {
+  test("third label abort releases partial allocations before rejection", async () => {
     await pool.bindOrReuseDeviceSession("other-owner", "device-c", "android");
     const controller = new AbortController();
     const originalError = new Error("client cancelled criteria allocation");

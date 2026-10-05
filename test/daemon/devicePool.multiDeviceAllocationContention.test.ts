@@ -233,14 +233,16 @@ for (const criteria of [false, true]) {
       ]);
     });
 
-    test("impossible pool-size request fails without waiting or blocking a follower", async () => {
+    test("pool-size shortage rejects platform preflight but criteria waits for growth", async () => {
       const impossible = observe(["too-many:a", "too-many:b", "too-many:c"]);
-      const follower = observe(["a", "b"]);
+      const follower = observe(["a", "b"], 8_000);
       await drainUntilQuiescent(timer);
       const rejectedWithoutWaiting = impossible.isSettled();
-      expect(String(await settle(impossible.result))).toContain("Not enough devices in pool");
+      expect(String(await settle(impossible.result))).toContain(
+        criteria ? "Timed out allocating devices" : "Not enough devices in pool",
+      );
       expect(await settle(follower.result)).toBeInstanceOf(Map);
-      expect(rejectedWithoutWaiting).toBe(true);
+      expect(rejectedWithoutWaiting).toBe(!criteria);
     });
 
     test("a waiter's own timeout removes it from the queue", async () => {

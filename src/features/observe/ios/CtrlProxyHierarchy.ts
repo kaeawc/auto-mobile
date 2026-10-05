@@ -699,22 +699,19 @@ export class CtrlProxyHierarchy {
     requestId: string,
     disableAllFiltering: boolean | undefined,
     requestOptions: { forceCapture?: boolean } | undefined,
-  ) {
-    return {
+  ): string {
+    // Keep the literal discriminator at the serialization sink for the wire-parity scanner.
+    return JSON.stringify({
       type:
         requestOptions?.forceCapture || disableAllFiltering
           ? "request_hierarchy"
           : "request_hierarchy_if_stale",
       requestId,
       disableAllFiltering: disableAllFiltering ?? false,
-    };
+    });
   }
 
-  private sendHierarchyRequest(
-    ws: WebSocket | null,
-    requestId: string,
-    message: ReturnType<CtrlProxyHierarchy["hierarchyRequestMessage"]>,
-  ): void {
+  private sendHierarchyRequest(ws: WebSocket | null, requestId: string, payload: string): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       this.context.requestManager.reject(
         requestId,
@@ -722,7 +719,7 @@ export class CtrlProxyHierarchy {
       );
     } else {
       try {
-        ws.send(JSON.stringify(message));
+        ws.send(payload);
       } catch (error) {
         this.context.requestManager.reject(
           requestId,

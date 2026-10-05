@@ -2756,7 +2756,6 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     avdName: string,
     options: EmulatorProcessOptions = {},
   ): Promise<ChildProcess | null> {
-    const {} = options;
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
 

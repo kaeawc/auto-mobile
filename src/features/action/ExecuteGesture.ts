@@ -1,7 +1,7 @@
 import { capLookForTravel } from "./swipeon/lookForScroll";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { Element } from "../../models";
-import { executeAndroidSearchDrag } from "./swipeon/androidSearchDrag";
+import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon/androidSearchDrag";
 import { inputDurationArgument } from "./touchscreenInput";
 import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -31,6 +31,7 @@ export interface FencedGestureOptions extends GestureOptions {
   searchScroll?: boolean;
   searchScrollBounds?: Element["bounds"];
   onSearchFallback?: () => void;
+  searchDragState?: AndroidSearchDragState;
   displayFence?: DisplayFence;
 }
 
@@ -109,6 +110,19 @@ export class ExecuteGesture extends BaseVisualChange {
           )
         : { startX: x1, startY: y1, endX: x2, endY: y2 };
       const searchDuration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
+      const fallback = () =>
+        this.executeAndroidSwipe(
+          coordinates.startX,
+          coordinates.startY,
+          coordinates.endX,
+          coordinates.endY,
+          { duration: searchDuration, scrollMode: "adb", displayFence: options.displayFence },
+          perf,
+          signal,
+        );
+      if (options.scrollMode === "adb") {
+        return fallback();
+      }
       return executeAndroidSearchDrag({
         client: AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory),
         x1: coordinates.startX,
@@ -117,17 +131,9 @@ export class ExecuteGesture extends BaseVisualChange {
         y2: coordinates.endY,
         duration: searchDuration,
         signal,
+        searchDragState: options.searchDragState,
         onFallback: options.onSearchFallback,
-        fallback: () =>
-          this.executeAndroidSwipe(
-            coordinates.startX,
-            coordinates.startY,
-            coordinates.endX,
-            coordinates.endY,
-            { duration: searchDuration, scrollMode: "adb", displayFence: options.displayFence },
-            perf,
-            signal,
-          ),
+        fallback,
         beforeSend: () => options.displayFence?.assertCurrent(),
       });
     }

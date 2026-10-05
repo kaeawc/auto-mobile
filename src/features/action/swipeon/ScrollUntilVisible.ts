@@ -72,6 +72,8 @@ import {
   visibleScrollKeys,
 } from "./lookForScroll";
 
+import type { AndroidSearchDragState } from "./androidSearchDrag";
+
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
 interface ScrollUntilVisibleDependencies {
@@ -131,7 +133,25 @@ export interface ScrollUntilVisibleStrategy {
     previousObservation: ObserveResult;
     holdDurationMs?: number;
     onSearchFallback?: () => void;
+    searchDragState?: AndroidSearchDragState;
   }) => Promise<SwipeOnResult & { observation: ObserveResult }>;
+}
+
+interface SearchSwipeDispatchOptions {
+  coordinates: { startX: number; startY: number; endX: number; endY: number };
+  direction: SwipeDirection;
+  duration: number;
+  options: SwipeOnResolvedOptions;
+  containerElement: Element;
+  observation: ObserveResult;
+  observationFence?: DisplayFence;
+  strategy?: ScrollUntilVisibleStrategy;
+  scrollIteration: number;
+  perf: PerformanceTracker;
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+  onSearchFallback: () => void;
+  searchDragState: AndroidSearchDragState;
 }
 
 export class ScrollUntilVisible {
@@ -342,6 +362,8 @@ export class ScrollUntilVisible {
       };
     }
 
+    const searchDragState: AndroidSearchDragState = {};
+    let overlapRecoveryUsed = false;
     let swipeWarning: string | undefined;
     let lastAndroidSwipeError: string | undefined;
 
@@ -400,6 +422,7 @@ export class ScrollUntilVisible {
         `[SwipeOn] Swipe: direction=${activeDirection}, coords=(${Math.floor(startX)},${Math.floor(startY)})→(${Math.floor(endX)},${Math.floor(endY)}), duration=${activeDuration}ms`,
       );
 
+      searchDragState.pagingStep = false;
       const swipeResult = await this.dispatchSearchSwipe({
         coordinates: activeCoords,
         direction: activeDirection,
@@ -414,6 +437,7 @@ export class ScrollUntilVisible {
         progress,
         signal,
         onSearchFallback,
+        searchDragState,
       });
       throwIfAborted(signal);
 
@@ -490,68 +514,83 @@ export class ScrollUntilVisible {
         });
       }
 
-      if (!failedAndroidSwipe) {
-        lastObservation = await recoverLookForOverlap({
+      foundElement = await this.findVisibleSearchTarget(options, lastObservation, containerElement);
+      if (foundElement) {
+        break;
+      }
+      let recoveryAttempted = false;
+
+      // Only Android coordinate search steps retain overlap; paging and iOS do not.
+      if (
+        this.shouldGuardSearchStep({
+          failedAndroidSwipe,
+          reverseMode,
+          overlapRecoveryUsed,
+          searchDragState,
+        })
+      ) {
+        lastObservation = await this.recoverSearchObservation({
           previousKeys,
-          observation: lastObservation,
-          timer: this.deps.timer,
+          observe,
           deadline: startTime + maxTime,
-          signal,
-          keys: async (observation) =>
-            visibleScrollKeys(
-              observation,
-              await this.findScrollableContainer(options, observation, containerElement),
-            ),
-          backScroll: async (observation) => {
-            const container = await this.findScrollableContainer(
-              options,
-              observation,
-              containerElement,
-            );
-            const direction = oppositeDirection(activeDirection);
-            const result = await this.dispatchSearchSwipe({
-              coordinates: this.computeHalfScreenReverseCoords(
-                direction,
-                this.resolveReverseBounds(options, container, observation),
-              ),
-              direction,
-              duration: this.deps.getDuration(reverseOptions),
-              options,
-              containerElement: container,
-              observation,
-              observationFence,
-              strategy,
-              scrollIteration,
-              perf,
-              progress,
-              signal,
-              onSearchFallback,
-            });
-            if (!result.success || !result.observation?.viewHierarchy) {
-              throw new ActionableError(result.error ?? "Scroll overshoot back-scroll failed");
-            }
-            return waitForScrollIdle(result.observation, {
-              observe,
-              timer: this.deps.timer,
-              maxWaitMs: Math.min(1500, Math.max(0, startTime + maxTime - this.deps.timer.now())),
-              pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
-              logPrefix: "[SwipeOn] overshoot",
-              signal,
-            });
+          dispatch: {
+            coordinates: activeCoords,
+            direction: activeDirection,
+            duration: activeDuration,
+            options,
+            containerElement,
+            observation: lastObservation,
+            observationFence,
+            strategy,
+            scrollIteration,
+            perf,
+            progress,
+            signal,
+            onSearchFallback,
+            searchDragState,
+          },
+          onRecovery: () => {
+            recoveryAttempted = true;
+            // One bounded recovery episode prevents ambiguous pages repeatedly undoing forward progress.
+            overlapRecoveryUsed = true;
           },
         });
       }
 
+      if (recoveryAttempted) {
+        foundElement = await this.findVisibleSearchTarget(
+          options,
+          lastObservation,
+          containerElement,
+        );
+        if (foundElement) {
+          break;
+        }
+      }
+
       // Check if hierarchy changed (detect scroll end)
       let currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
-      if (currentFingerprint === lastFingerprint && lastObservation.freshness?.isFresh === false) {
+      if (
+        !recoveryAttempted &&
+        currentFingerprint === lastFingerprint &&
+        lastObservation.freshness?.isFresh === false
+      ) {
         logger.info(
           `[SwipeOn] Iteration ${scrollIteration}: stale unchanged observation; re-observing once before scroll-end decision`,
         );
         lastObservation = await observe();
         currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
+        foundElement = await this.findVisibleSearchTarget(
+          options,
+          lastObservation,
+          containerElement,
+        );
+        if (foundElement) {
+          break;
+        }
       }
-      const fingerprintChanged = currentFingerprint !== lastFingerprint;
+      // A guard-restored page is not evidence that the forward step reached the end.
+      const fingerprintChanged = recoveryAttempted || currentFingerprint !== lastFingerprint;
       logger.info(
         `[SwipeOn] Iteration ${scrollIteration}: hierarchy ${fingerprintChanged ? "changed" : "UNCHANGED"} (fingerprint[0:40]="${currentFingerprint.slice(0, 40)}")`,
       );
@@ -604,33 +643,6 @@ export class ScrollUntilVisible {
         lastFingerprint = currentFingerprint;
       }
 
-      logger.info(`[SwipeOn] Iteration ${scrollIteration}: searching for ${target}`);
-
-      // Check if target element is now visible within the container bounds
-      foundElement = await this.findElementInHierarchy(
-        options.lookFor!,
-        lastObservation.viewHierarchy!,
-        options.container,
-        containerElement,
-      );
-
-      if (
-        foundElement &&
-        !this.isElementWithinContainer(foundElement, containerElement.bounds, lastObservation)
-      ) {
-        logger.info(
-          `[SwipeOn] Found ${target} but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), continuing scroll`,
-        );
-        foundElement = null;
-      }
-
-      if (foundElement) {
-        const elapsed = this.deps.timer.now() - startTime;
-        logger.info(
-          `[SwipeOn] Found ${target} after ${scrollIteration} iterations (${elapsed}ms), reverseMode=${reverseMode}, bounds=${JSON.stringify(foundElement.bounds)}`,
-        );
-        break;
-      }
       logger.info(`[SwipeOn] Iteration ${scrollIteration}: ${target} not yet found`);
     }
 
@@ -703,6 +715,116 @@ export class ScrollUntilVisible {
     return { ...options, speed: effectiveSpeed };
   }
 
+  private shouldGuardSearchStep(options: {
+    failedAndroidSwipe: boolean;
+    reverseMode: boolean;
+    overlapRecoveryUsed: boolean;
+    searchDragState: AndroidSearchDragState;
+  }): boolean {
+    return (
+      this.deps.device.platform === "android" &&
+      !options.failedAndroidSwipe &&
+      !options.reverseMode &&
+      !options.overlapRecoveryUsed &&
+      !options.searchDragState.pagingStep
+    );
+  }
+
+  private async findVisibleSearchTarget(
+    options: SwipeOnResolvedOptions,
+    observation: ObserveResult,
+    previousContainer: Element,
+  ): Promise<Element | null> {
+    const container = await this.findScrollableContainer(options, observation, previousContainer);
+    const element = await this.findElementInHierarchy(
+      options.lookFor!,
+      observation.viewHierarchy!,
+      options.container,
+      container,
+    );
+    return element && this.isElementWithinContainer(element, container.bounds, observation)
+      ? element
+      : null;
+  }
+
+  private async recoverSearchObservation({
+    previousKeys,
+    dispatch,
+    observe,
+    deadline,
+    onRecovery,
+  }: {
+    previousKeys: Map<string, number>;
+    dispatch: SearchSwipeDispatchOptions;
+    observe: () => Promise<ObserveResult>;
+    deadline: number;
+    onRecovery: () => void;
+  }): Promise<ObserveResult> {
+    const { options, containerElement } = dispatch;
+    return recoverLookForOverlap({
+      previousKeys,
+      observation: dispatch.observation,
+      timer: this.deps.timer,
+      deadline,
+      signal: dispatch.signal,
+      hasTarget: async (observation) =>
+        Boolean(await this.findVisibleSearchTarget(options, observation, containerElement)),
+      keys: async (observation) =>
+        visibleScrollKeys(
+          observation,
+          await this.findScrollableContainer(options, observation, containerElement),
+        ),
+      backScroll: async (observation) => {
+        onRecovery();
+        return this.performOverlapBackScroll({ ...dispatch, observation }, observe, deadline);
+      },
+    });
+  }
+
+  private async performOverlapBackScroll(
+    dispatch: SearchSwipeDispatchOptions,
+    observe: () => Promise<ObserveResult>,
+    deadline: number,
+  ): Promise<ObserveResult> {
+    const { options, observation, signal } = dispatch;
+    const container = await this.findScrollableContainer(
+      options,
+      observation,
+      dispatch.containerElement,
+    );
+    const direction = oppositeDirection(dispatch.direction);
+    const result = await this.dispatchSearchSwipe({
+      ...dispatch,
+      coordinates: this.computeHalfScreenReverseCoords(
+        direction,
+        this.resolveReverseBounds(options, container, observation),
+      ),
+      direction,
+      duration: this.deps.getDuration({ ...options, speed: "slow" }),
+      containerElement: container,
+    });
+    throwIfAborted(signal);
+    if (result.outcomeIndeterminate) {
+      throw new ActionableError(result.error ?? "Recovery scroll outcome is indeterminate");
+    }
+    if (!result.success || !result.observation?.viewHierarchy) {
+      // Confirmed recovery rejection is optional; the original search can continue safely.
+      logger.debug("[SwipeOn] Overlap recovery unavailable; continuing forward", result.error);
+      return observation;
+    }
+    if (await this.findVisibleSearchTarget(options, result.observation, container)) {
+      return result.observation;
+    }
+    return waitForScrollIdle(result.observation, {
+      observe,
+      timer: this.deps.timer,
+      maxWaitMs: Math.min(1500, Math.max(0, deadline - this.deps.timer.now())),
+      pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
+      logPrefix: "[SwipeOn] overshoot",
+      signal,
+    });
+  }
+
   private async dispatchSearchSwipe({
     coordinates,
     direction,
@@ -717,21 +839,8 @@ export class ScrollUntilVisible {
     progress,
     signal,
     onSearchFallback,
-  }: {
-    coordinates: { startX: number; startY: number; endX: number; endY: number };
-    direction: SwipeDirection;
-    duration: number;
-    options: SwipeOnResolvedOptions;
-    containerElement: Element;
-    observation: ObserveResult;
-    observationFence?: DisplayFence;
-    strategy?: ScrollUntilVisibleStrategy;
-    scrollIteration: number;
-    perf: PerformanceTracker;
-    progress?: ProgressCallback;
-    signal?: AbortSignal;
-    onSearchFallback: () => void;
-  }): Promise<SwipeResult> {
+    searchDragState,
+  }: SearchSwipeDispatchOptions): Promise<SwipeResult> {
     const { startX, startY, endX, endY } = coordinates;
     const activeDuration = duration;
     const activeDirection = direction;
@@ -743,6 +852,7 @@ export class ScrollUntilVisible {
       searchScroll: this.deps.device.platform === "android",
       searchScrollBounds: this.resolveReverseBounds(options, containerElement, observation),
       onSearchFallback,
+      searchDragState,
     };
 
     // Execute swipe with observedInteraction
@@ -756,6 +866,7 @@ export class ScrollUntilVisible {
           duration: activeDuration,
           holdDurationMs: this.deps.device.platform === "android" ? LOOK_FOR_HOLD_MS : undefined,
           onSearchFallback,
+          searchDragState,
           previousObservation: lastObservation,
         })
       : await this.deps.observedInteraction(

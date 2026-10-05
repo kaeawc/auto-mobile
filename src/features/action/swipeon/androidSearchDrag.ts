@@ -6,6 +6,23 @@ import type { SwipeResult } from "../../../models";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { LOOK_FOR_HOLD_MS } from "./lookForScroll";
 
+/** Owned by one lookFor execution, including recovery steps; never shared across searches. */
+export interface AndroidSearchDragState {
+  deviceInfo?: ReturnType<AndroidCtrlProxyClient["requestDeviceInfo"]>;
+  pagingStep?: boolean;
+}
+
+function searchDeviceInfo(
+  client: Pick<AndroidCtrlProxyClient, "requestDeviceInfo">,
+  state?: AndroidSearchDragState,
+): ReturnType<AndroidCtrlProxyClient["requestDeviceInfo"]> {
+  const request = state?.deviceInfo ?? client.requestDeviceInfo();
+  if (state) {
+    state.deviceInfo = request;
+  }
+  return request;
+}
+
 /**
  * Reuse CtrlProxy's continued drag strokes: travel, then a stationary final stroke.
  * The final stroke emits UP at 100ms; a continued stationary stroke alone completes
@@ -26,6 +43,7 @@ export async function executeAndroidSearchDrag(options: {
   beforeSend?: () => void;
   fallback: () => Promise<SwipeResult>;
   onFallback?: () => void;
+  searchDragState?: AndroidSearchDragState;
 }): Promise<SwipeResult> {
   const { client, x1, y1, x2, y2, duration, signal, displayId, beforeSend } = options;
   const fallback = () => {
@@ -47,7 +65,7 @@ export async function executeAndroidSearchDrag(options: {
   let dispatched = false;
   try {
     throwIfAborted(signal);
-    const info = await client.requestDeviceInfo();
+    const info = await searchDeviceInfo(client, options.searchDragState);
     throwIfAborted(signal);
     beforeSend?.();
     if (!info.success || info.sdkInt === undefined || info.sdkInt < 26) {

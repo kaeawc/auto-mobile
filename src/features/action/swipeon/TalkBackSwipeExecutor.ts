@@ -101,6 +101,10 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     throwIfAborted(signal);
 
     if (isTalkBackEnabled) {
+      // ACTION_SCROLL and its two-finger fallback page; child overlap is not expected.
+      if (gestureOptions?.searchDragState) {
+        gestureOptions.searchDragState.pagingStep = true;
+      }
       if (boomerangEnabled) {
         logger.info(
           "[SwipeOn] TalkBack enabled, boomerang requested; announcing swipeable element",

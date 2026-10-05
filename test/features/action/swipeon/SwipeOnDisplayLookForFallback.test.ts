@@ -43,14 +43,18 @@ test("correction: display dispatched timeout stops without a second ADB scroll",
 });
 
 for (const scrollMode of [undefined, "a11y"] as const) {
-  test(`correction: unavailable display capability probe falls back before dispatch (${scrollMode})`, async () => {
+  test(`correction: unavailable display capability probe respects explicit mode (${scrollMode})`, async () => {
     const h = harness({ foundAfter: 1 });
     spyOn(h.ctrl, "supportsCommand").mockRejectedValue(new Error("not connected"));
-    expect(await h.action.execute({ ...search, scrollMode })).toMatchObject({
-      success: true,
-      found: true,
-    });
-    expect(h.commands()).toEqual(["shell input touchscreen -d 2 swipe 100 180 100 30 600"]);
+    const result = await h.action.execute({ ...search, scrollMode });
+    if (scrollMode === "a11y") {
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not connected");
+      expect(h.commands()).toEqual([]);
+    } else {
+      expect(result).toMatchObject({ success: true, found: true });
+      expect(h.commands()).toEqual(["shell input touchscreen -d 2 swipe 100 180 100 30 600"]);
+    }
     expect(h.ctrl.getDragHistory()).toEqual([]);
   });
 }
@@ -71,4 +75,11 @@ test("correction: display fallback keeps the timeout bound", async () => {
   expect(result.success).toBe(false);
   expect(result.error).toContain("timeout=1ms");
   expect(h.commands()).toHaveLength(1);
+});
+
+test("review: explicit-display device-info probe is cached per search", async () => {
+  const h = harness({ foundAfter: 3 });
+  const info = spyOn(h.ctrl, "requestDeviceInfo");
+  expect(await h.action.execute(search)).toMatchObject({ found: true, scrollIterations: 3 });
+  expect(info).toHaveBeenCalledTimes(1);
 });

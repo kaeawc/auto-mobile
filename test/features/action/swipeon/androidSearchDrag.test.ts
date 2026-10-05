@@ -39,6 +39,10 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
           scrollable: true,
           bounds: { left: 0, top: 300, right: 1080, bottom: 2100 },
           node: [
+            ...Array.from({ length: 4 }, (_, i) => ({
+              text: `${residualMomentum && scrolls === 1 ? "gap" : "shared"} ${i}`,
+              bounds: { left: 0, top: 900 + i * 150, right: 1080, bottom: 1050 + i * 150 },
+            })),
             {
               text: residualMomentum && scrolls === 1 ? "gap" : "overlap",
               bounds: { left: 0, top: 300, right: 1080, bottom: 600 },
@@ -77,10 +81,10 @@ function searchHarness(foundAfter = 1, residualMomentum = false) {
   return {
     adb,
     gesture,
-    search: () => {
+    search: (scrollMode?: "adb") => {
       scrolls = 0;
       screen.setObserveResult(observe);
-      return scroll.execute({ direction: "up", lookFor: { text: "Target" } });
+      return scroll.execute({ direction: "up", lookFor: { text: "Target" }, scrollMode });
     },
   };
 }
@@ -256,4 +260,37 @@ test("dispatched drag rejection reports an indeterminate outcome for the loop", 
   });
   expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
   expect(result.error).toContain("ack lost");
+});
+
+test("review: device-info probe is cached for one multi-step default-display search", async () => {
+  const info = spyOn(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
+    success: true,
+    sdkInt: 36,
+    totalTimeMs: 0,
+  });
+  spyOn(AndroidCtrlProxyClient.prototype, "requestDrag").mockResolvedValue({
+    success: true,
+    totalTimeMs: 0,
+  });
+  const h = searchHarness(3);
+  expect(await h.search()).toMatchObject({ found: true, scrollIterations: 3 });
+  expect(info).toHaveBeenCalledTimes(1);
+  expect(await h.search()).toMatchObject({ found: true, scrollIterations: 3 });
+  expect(info).toHaveBeenCalledTimes(2);
+});
+
+test("review: explicit adb lookFor on default display uses slow adb without CtrlProxy drag", async () => {
+  spyOn(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
+    success: true,
+    sdkInt: 36,
+    totalTimeMs: 0,
+  });
+  const drag = spyOn(AndroidCtrlProxyClient.prototype, "requestDrag").mockResolvedValue({
+    success: true,
+    totalTimeMs: 0,
+  });
+  const h = searchHarness();
+  expect(await h.search("adb")).toMatchObject({ found: true });
+  expect(h.adb.getExecutedCommands()).toEqual(["shell input swipe 540 1920 540 570 600"]);
+  expect(drag).not.toHaveBeenCalled();
 });

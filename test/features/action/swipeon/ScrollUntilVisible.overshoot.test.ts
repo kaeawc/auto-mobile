@@ -441,8 +441,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
   test("stale unchanged observation is re-observed before deciding to reverse", async () => {
     finder.nextScrollableContainer = CONTAINER_ELEMENT;
-    let findCount = 0;
-    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    // Tie the synthetic target to the final page, regardless of how many earlier pages are searched.
+    finder.findElementByText = (hierarchy) =>
+      hierarchy.hierarchy.node === final.viewHierarchy!.hierarchy.node ? TARGET_ELEMENT : null;
 
     const initial = makeObserveResult(0);
     const stale = { ...makeObserveResult(0), freshness: { isFresh: false } };

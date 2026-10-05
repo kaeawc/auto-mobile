@@ -659,3 +659,58 @@ describe("ScrollUntilVisible end-of-list detection", () => {
     expect(result.success).toBe(true);
   });
 });
+
+test("review: TalkBack searches three disjoint keyed pages without scroll_backward", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const detector = new FakeAccessibilityDetector();
+  detector.setTalkBackEnabled(true);
+  const ctrl = new FakeCtrlProxy();
+  let page = 0;
+  const requestAction = ctrl.requestAction.bind(ctrl);
+  ctrl.requestAction = async (...args) => {
+    page = Math.max(0, Math.min(2, page + (args[0] === "scroll_forward" ? 1 : -1)));
+    return requestAction(...args);
+  };
+  const finder = new FakeElementFinder();
+  finder.nextScrollableContainer = CONTAINER_ELEMENT;
+  finder.findElementByText = () => (page === 2 ? TARGET_ELEMENT : null);
+  const executor = new TalkBackSwipeExecutor(
+    DEVICE,
+    new FakeGestureExecutor(),
+    // @ts-expect-error -- Fake supplies the accessibility actions used by the executor.
+    ctrl,
+    detector,
+    new FakeAdbClient(),
+    timer,
+  );
+  const suv = makeScrollUntilVisible({
+    accessibilityDetector: detector,
+    finder,
+    timer,
+    accessibilityService: new FakeScrollAccessibilityService(),
+    observeResults: [],
+    talkBackExecutor: executor,
+    resolveObservation: () => ({
+      timestamp: timer.now(),
+      screenSize: SCREEN_SIZE,
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            ...CONTAINER_ELEMENT,
+            node: Array.from({ length: 6 }, (_, i) => ({
+              "resource-id": "row",
+              text: `page ${page} row ${i}`,
+              bounds: { left: 0, top: i * 100, right: 400, bottom: (i + 1) * 100 },
+            })),
+          },
+        },
+      },
+    }),
+  });
+  expect(await suv.execute(BASE_OPTIONS)).toMatchObject({ found: true, scrollIterations: 2 });
+  expect(ctrl.getActionHistory().map((call) => call.action)).toEqual([
+    "scroll_forward",
+    "scroll_forward",
+  ]);
+});

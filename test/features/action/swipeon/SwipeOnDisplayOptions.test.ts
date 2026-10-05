@@ -255,7 +255,7 @@ for (const entry of routes) {
 }
 
 for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
-  test(`a11y display capability requirement permits search fallback, search=${!!lookFor}`, async () => {
+  test(`a11y requires non-default display capability, search=${!!lookFor}`, async () => {
     const h = optionsHarness({ route: "adb" });
     const result = await h.action.execute({
       ...displaySwipe,
@@ -263,18 +263,10 @@ for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
       scrollMode: "a11y",
       lookFor,
     });
-    if (lookFor) {
-      expect(result).toMatchObject({ success: true, found: true, scrollIterations: 2 });
-      expect(h.commands()).toEqual(
-        Array(2).fill("shell input touchscreen -d 2 swipe 90 160 90 85 600"),
-      );
-      expect(h.ctrl.getDragHistory()).toEqual([]);
-    } else {
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("gesture_display_id_v1");
-      expect(result.error).toContain("a11y");
-      expect(h.legs()).toEqual([]);
-    }
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("gesture_display_id_v1");
+    expect(result.error).toContain("a11y");
+    expect(h.legs()).toEqual([]);
   });
 }
 

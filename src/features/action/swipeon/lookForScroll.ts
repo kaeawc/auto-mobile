@@ -1,5 +1,4 @@
 import type { Element, ObserveResult, SwipeDirection } from "../../../models";
-import { ActionableError } from "../../../models";
 import { boundsEqual, intersectBounds } from "../../../utils/bounds";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { HOLD_DURATION_MIN_MS } from "../DragAndDrop";
@@ -9,6 +8,9 @@ import { throwIfAborted } from "../../../utils/toolUtils";
 
 export const LOOK_FOR_HOLD_MS = HOLD_DURATION_MIN_MS;
 export const LOOK_FOR_MAX_BACK_SCROLLS = 3;
+/** Require four non-duplicated identities in each page: a 75% step retains about one of four rows.
+ * Sparse or ambiguous pages cannot provide meaningful zero-overlap evidence. */
+export const LOOK_FOR_MIN_DISTINCT_KEYS = 4;
 const searchable = new SearchableHierarchy();
 type Coordinates = { startX: number; startY: number; endX: number; endY: number };
 
@@ -38,9 +40,12 @@ export function oppositeDirection(direction: SwipeDirection): SwipeDirection {
 }
 
 /** Bounds-independent child identities, scoped through the existing hierarchy projection. */
-export function visibleScrollKeys(observation: ObserveResult, container: Element): Set<string> {
+export function visibleScrollKeys(
+  observation: ObserveResult,
+  container: Element,
+): Map<string, number> {
   if (!observation.viewHierarchy) {
-    return new Set();
+    return new Map();
   }
   const nodes = searchable.project(observation.viewHierarchy);
   const root = nodes.find(
@@ -66,8 +71,8 @@ export function visibleScrollKeys(observation: ObserveResult, container: Element
     }
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  // Recycled row ids without labels cannot identify an item; duplicates are ambiguous.
-  return new Set([...counts].filter(([, count]) => count === 1).map(([key]) => key));
+  // Keep repeated identities: shared presence still establishes overlap.
+  return counts;
 }
 
 function scrollItemKey(node: SearchableEntry, viewport: Element["bounds"]): string | undefined {
@@ -92,31 +97,57 @@ function scrollItemKey(node: SearchableEntry, viewport: Element["bounds"]): stri
   return JSON.stringify([node.nativeId, text, description, iosLabel]);
 }
 
+/** Exclude identities duplicated in either page only when assessing evidence density. */
+function hasEnoughDistinctKeys(
+  previous: Map<string, number>,
+  current: Map<string, number>,
+): boolean {
+  const distinctCount = (page: Map<string, number>, other: Map<string, number>) =>
+    [...page].filter(([key, count]) => count === 1 && (other.get(key) ?? 0) <= 1).length;
+  return (
+    distinctCount(previous, current) >= LOOK_FOR_MIN_DISTINCT_KEYS &&
+    distinctCount(current, previous) >= LOOK_FOR_MIN_DISTINCT_KEYS
+  );
+}
+
 export async function recoverLookForOverlap(options: {
-  previousKeys: Set<string>;
+  previousKeys: Map<string, number>;
   observation: ObserveResult;
-  keys: (observation: ObserveResult) => Promise<Set<string>>;
+  keys: (observation: ObserveResult) => Promise<Map<string, number>>;
   backScroll: (observation: ObserveResult) => Promise<ObserveResult>;
+  hasTarget?: (observation: ObserveResult) => Promise<boolean>;
   timer: Timer;
   deadline: number;
   signal?: AbortSignal;
 }): Promise<ObserveResult> {
   let observation = options.observation;
-  if (options.previousKeys.size === 0) {
+  const currentKeys = await options.keys(observation);
+  if (!hasEnoughDistinctKeys(options.previousKeys, currentKeys)) {
     return observation;
   }
   for (let attempts = 0; ; attempts++) {
     throwIfAborted(options.signal);
-    const keys = await options.keys(observation);
-    if ([...keys].some((key) => options.previousKeys.has(key))) {
+    // Every recovered page is searched before deciding to discard it or move again.
+    if (attempts > 0 && (await options.hasTarget?.(observation))) {
+      return observation;
+    }
+    const keys = attempts === 0 ? currentKeys : await options.keys(observation);
+    if ([...keys.keys()].some((key) => options.previousKeys.has(key))) {
+      return observation;
+    }
+    if (!hasEnoughDistinctKeys(options.previousKeys, keys)) {
+      // Sparse recovered pages cannot prove overshoot; the bounded forward search remains safe.
+      logger.debug("[SwipeOn] Recovery overlap evidence is sparse; continuing forward");
       return observation;
     }
     if (attempts >= LOOK_FOR_MAX_BACK_SCROLLS || options.timer.now() >= options.deadline) {
-      throw new ActionableError(
-        `Scroll overshoot: could not restore visible content overlap after ${attempts} back-scrolls. Retry with a smaller container.`,
+      // Overlap is heuristic; ordinary forward search remains bounded by the search deadline.
+      logger.debug(
+        `[SwipeOn] Overlap not restored after ${attempts} back-scrolls; continuing forward`,
       );
+      return observation;
     }
-    logger.warn(
+    logger.debug(
       `[SwipeOn] Zero visible child overlap; back-scroll ${attempts + 1}/${LOOK_FOR_MAX_BACK_SCROLLS}`,
     );
     observation = await options.backScroll(observation);

@@ -265,6 +265,25 @@ describe("HomeScreen", () => {
         },
       );
 
+      test("presses Home when an overlay is present above a visible workspace", async () => {
+        const observation = structuredClone(launcherObservation("home", 5600));
+        const overlay = structuredClone(launcherObservation("allapps", 5600));
+        const homeRoots = observation.viewHierarchy.hierarchy.node;
+        const overlayRoots = overlay.viewHierarchy.hierarchy.node;
+        if (!Array.isArray(homeRoots) || !Array.isArray(overlayRoots)) {
+          throw new Error("Expected captured launcher root node lists");
+        }
+        homeRoots.push(...overlayRoots);
+        fakeObserveScreen.setObserveResult(observation);
+
+        const result = await homeScreen.execute();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe("No visual change observed");
+        expect(result).not.toHaveProperty("message");
+        expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+      });
+
       test.each([false, true])(
         "presses Home from a hidden workspace without overlay markers (hierarchy changes: %s)",
         async (hierarchyChanges) => {

@@ -116,19 +116,20 @@ export class HomeScreen extends BaseVisualChange {
       return false;
     }
     const finder = new DefaultElementFinder();
-    const workspace = finder.findContainerNode(viewHierarchy, {
-      elementId: `${launcherPackage}:id/workspace`,
-    });
-    // Partial occlusion is normal on Home (system bars), so do not exclude it.
-    if (workspace !== null && nodeAttributes(workspace)["visible-to-user"] === true) {
-      return true;
-    }
+    // Overlays outrank a workspace that remains visible underneath (#9762).
     if (
       ANDROID_LAUNCHER_OVERLAY_MARKERS.some((marker) =>
         finder.hasContainerElement(viewHierarchy, { elementId: `${launcherPackage}:id/${marker}` }),
       )
     ) {
       return false;
+    }
+    const workspace = finder.findContainerNode(viewHierarchy, {
+      elementId: `${launcherPackage}:id/workspace`,
+    });
+    // Partial occlusion is normal on Home (system bars), so do not exclude it.
+    if (workspace !== null && nodeAttributes(workspace)["visible-to-user"] === true) {
+      return true;
     }
     // Preserve already-home handling for launchers with a different vocabulary.
     // An existing but hidden workspace still requires a visual change (#9762).

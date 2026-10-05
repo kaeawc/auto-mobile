@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { ActionableError, BootedDevice } from "../../../src/models";
 import { GrantAndroidPermissions } from "../../../src/features/action/GrantAndroidPermissions";
@@ -11,6 +12,29 @@ const androidDevice: BootedDevice = {
   platform: "android",
   deviceId: "emulator-5554",
 };
+
+const egg = readFileSync(
+  new URL(
+    "../../fixtures/android-dumpsys-package/dumpsys-package-system-installed.txt",
+    import.meta.url,
+  ),
+  "utf8",
+);
+function snapshots(action: "grant" | "revoke", userId: number) {
+  // Keep the captured structure; derive the package/user and the single grant token.
+  const capture = egg
+    .replaceAll("com.android.egg", "com.example.app")
+    .replaceAll("User 0:", `User ${userId}:`);
+  const before = capture.replace(
+    "android.permission.READ_EXTERNAL_STORAGE: granted=false",
+    `android.permission.READ_EXTERNAL_STORAGE: granted=${action === "revoke"}`,
+  );
+  const after = capture.replace(
+    "android.permission.READ_EXTERNAL_STORAGE: granted=false",
+    `android.permission.READ_EXTERNAL_STORAGE: granted=${action === "grant"}`,
+  );
+  return [before, after];
+}
 
 describe("GrantAndroidPermissions", () => {
   test.each([
@@ -27,6 +51,10 @@ describe("GrantAndroidPermissions", () => {
         { userId: 0, name: "Owner", flags: 0x13, running: true },
         { userId: 10, name: "Work", flags: 0x30, running: true },
       ]);
+      adb.setCommandResponseSequence(
+        "shell dumpsys package",
+        snapshots(permissionAction, userId).map((stdout) => ({ stdout, stderr: "" })),
+      );
       const action = new GrantAndroidPermissions(
         androidDevice,
         new FakeAdbClientFactory(adb),
@@ -36,13 +64,15 @@ describe("GrantAndroidPermissions", () => {
       const result = await action.execute("com.example.app", {
         action: permissionAction,
         userId,
-        permissions: ["android.permission.CAMERA"],
+        permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
       });
 
       expect(result.success).toBe(true);
       expect(result.userId).toBe(userId);
       expect(adb.getExecutedCommands()).toEqual([
-        `shell pm ${permissionAction} --user ${userId} 'com.example.app' 'android.permission.CAMERA'`,
+        "shell dumpsys package 'com.example.app'",
+        `shell pm ${permissionAction} --user ${userId} 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'`,
+        "shell dumpsys package 'com.example.app'",
       ]);
     },
   );
@@ -64,6 +94,10 @@ describe("GrantAndroidPermissions", () => {
         stdout: "package:com.example.other",
         stderr: "",
       });
+      adb.setCommandResponseSequence(
+        "shell dumpsys package",
+        snapshots(permissionAction, 0).map((stdout) => ({ stdout, stderr: "" })),
+      );
       const action = new GrantAndroidPermissions(
         androidDevice,
         new FakeAdbClientFactory(adb),
@@ -72,7 +106,7 @@ describe("GrantAndroidPermissions", () => {
 
       const result = await action.execute("com.example.app", {
         action: permissionAction,
-        permissions: ["android.permission.CAMERA"],
+        permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
       });
 
       expect(result.success).toBe(true);
@@ -82,7 +116,7 @@ describe("GrantAndroidPermissions", () => {
           .getExecutedCommands()
           .filter((command) => command.startsWith(`shell pm ${permissionAction} `)),
       ).toEqual([
-        `shell pm ${permissionAction} --user 0 'com.example.app' 'android.permission.CAMERA'`,
+        `shell pm ${permissionAction} --user 0 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'`,
       ]);
     },
   );
@@ -110,7 +144,7 @@ describe("GrantAndroidPermissions", () => {
       );
       const execution = action.execute("com.example.app", {
         action: permissionAction,
-        permissions: ["android.permission.CAMERA"],
+        permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
       });
 
       await expect(execution).rejects.toBeInstanceOf(ActionableError);
@@ -141,7 +175,7 @@ describe("GrantAndroidPermissions", () => {
 
     await expect(
       action.execute("com.example.app", {
-        permissions: ["android.permission.CAMERA"],
+        permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
       }),
     ).rejects.toBe(failure);
 
@@ -160,92 +194,25 @@ describe("GrantAndroidPermissions", () => {
     expect(result.results).toHaveLength(0);
   });
 
-  test("runs pm grant for each permission with explicit userId", async () => {
-    const factory = new FakeAdbClientFactory();
-    const client = factory.getFakeClient();
-    client.setCommandResult(
-      "shell pm grant --user 0 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
-      "",
-    );
-    client.setCommandResult(
-      "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
-      "",
-    );
-
-    const action = new GrantAndroidPermissions(androidDevice, factory);
-    const result = await action.execute("com.example.app", {
-      permissions: ["android.permission.POST_NOTIFICATIONS", "android.permission.CAMERA"],
-      userId: 0,
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.userId).toBe(0);
-    expect(result.results).toHaveLength(2);
-    expect(result.results.every((r) => r.success && r.countsTowardSuccess)).toBe(true);
-    expect(result.results.map((r) => r.operationId)).toEqual([
-      "pm_grant:android.permission.POST_NOTIFICATIONS",
-      "pm_grant:android.permission.CAMERA",
-    ]);
-
-    const calls = client.getCommandCalls().map((c) => c.command);
-    expect(calls).toContain(
-      "shell pm grant --user 0 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
-    );
-    expect(calls).toContain(
-      "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
-    );
-  });
-
-  test("runs pm revoke for each permission with the resolved target user", async () => {
-    const factory = new FakeAdbClientFactory();
-    const client = factory.getFakeClient();
-    client.setCommandResult(
-      "shell pm revoke --user 12 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
-      "",
-    );
-
-    const action = new GrantAndroidPermissions(androidDevice, factory);
-    const result = await action.execute("com.example.app", {
-      action: "revoke",
-      permissions: ["android.permission.POST_NOTIFICATIONS"],
-      userId: 12,
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.userId).toBe(12);
-    expect(result.results).toEqual([
-      {
-        operationId: "pm_revoke:android.permission.POST_NOTIFICATIONS",
-        permission: "android.permission.POST_NOTIFICATIONS",
-        success: true,
-        countsTowardSuccess: true,
-      },
-    ]);
-    expect(
-      client.wasCommandExecuted(
-        "shell pm revoke --user 12 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
-      ),
-    ).toBe(true);
-  });
-
-  test("quotes package and permission values before passing them to the device shell", async () => {
-    const factory = new FakeAdbClientFactory();
-    const client = factory.getFakeClient();
+  test("quotes unrequested permission and package safely without sending pm", async () => {
+    const adb = new FakeAdbExecutor();
     const packageName = "com.example.app; id #";
-    const permission = "android.permission.CAMERA; id #";
-    const command =
-      "shell pm revoke --user 0 'com.example.app; id #' 'android.permission.CAMERA; id #'";
-    client.setCommandResult(command, "");
-
-    const action = new GrantAndroidPermissions(androidDevice, factory);
+    adb.setCommandResponse("shell dumpsys package", {
+      stdout: egg.replaceAll("com.android.egg", packageName),
+      stderr: "",
+    });
+    const action = new GrantAndroidPermissions(
+      androidDevice,
+      new FakeAdbClientFactory(adb),
+      () => new NoOpPerformanceTracker(),
+    );
     const result = await action.execute(packageName, {
-      action: "revoke",
-      permissions: [permission],
+      permissions: ["android.permission.CAMERA; id #"],
       userId: 0,
     });
-
-    expect(result.success).toBe(true);
-    expect(client.getAllCommands()).toContain(command);
+    expect(result.success).toBe(false);
+    expect(result.results[0].error).toContain("not requested");
+    expect(adb.getExecutedCommands()).toEqual(["shell dumpsys package 'com.example.app; id #'"]);
   });
 
   test("resets all Android runtime permissions through pm reset-permissions", async () => {
@@ -289,7 +256,7 @@ describe("GrantAndroidPermissions", () => {
     const action = new GrantAndroidPermissions(androidDevice, factory);
     const result = await action.execute("com.example.app", {
       action: "reset",
-      permissions: ["android.permission.CAMERA"],
+      permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
     });
 
     expect(result.success).toBe(false);
@@ -360,14 +327,15 @@ describe("GrantAndroidPermissions", () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
-      "shell pm grant --user 0 'com.example.app' 'android.permission.SEND_SMS'",
+      "shell pm grant --user 0 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'",
       "",
       "java.lang.SecurityException: Permission denial",
     );
 
+    client.setCommandResult("shell dumpsys package 'com.example.app'", snapshots("grant", 0)[0]);
     const action = new GrantAndroidPermissions(androidDevice, factory);
     const result = await action.execute("com.example.app", {
-      permissions: ["android.permission.SEND_SMS"],
+      permissions: ["android.permission.READ_EXTERNAL_STORAGE"],
       userId: 0,
     });
 
@@ -385,9 +353,13 @@ describe("GrantAndroidPermissions", () => {
       "",
     );
 
+    client.setCommandResultSequence(
+      "shell dumpsys package 'com.example.app'",
+      snapshots("grant", 0),
+    );
     const action = new GrantAndroidPermissions(androidDevice, factory);
     const result = await action.execute("com.example.app", {
-      permissions: ["   ", "android.permission.CAMERA"],
+      permissions: ["   ", "android.permission.READ_EXTERNAL_STORAGE"],
       userId: 0,
     });
 
@@ -405,8 +377,8 @@ describe("GrantAndroidPermissions", () => {
   });
 
   test.each([
-    ["grant", "android.permission.SEND_SMS"],
-    ["revoke", "android.permission.CAMERA"],
+    ["grant", "android.permission.READ_EXTERNAL_STORAGE"],
+    ["revoke", "android.permission.READ_EXTERNAL_STORAGE"],
   ] as const)(
     "reports the failed %s operation ID when setting a permission fails",
     async (actionType, permission) => {
@@ -417,6 +389,10 @@ describe("GrantAndroidPermissions", () => {
         new Error("java.lang.SecurityException: Permission denial"),
       );
 
+      client.setCommandResult(
+        "shell dumpsys package 'com.example.app'",
+        snapshots(actionType, 0)[0],
+      );
       const action = new GrantAndroidPermissions(
         androidDevice,
         factory,

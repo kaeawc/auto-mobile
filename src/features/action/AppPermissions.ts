@@ -1,3 +1,4 @@
+import { parseAndroidRuntimePermissions } from "./parseAndroidRuntimePermissions";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -5,8 +6,8 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { BootedDevice, AndroidDeviceShellToolResult } from "../../models";
-import { AndroidCtrlProxyClient } from "../observe/android";
 import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
 import { SetAndroidNotificationsEnabled } from "./SetAndroidNotificationsEnabled";
 import { SetAndroidNotificationPolicyAccess } from "./SetAndroidNotificationPolicyAccess";
@@ -122,31 +123,6 @@ export interface AppPermissionsDependencies {
   simctl?: IosSimulatorPrivacyClient | null;
   tccReader?: TccPermissionReader | null;
   iosPhysicalClient?: IosPhysicalPrivacyClient | null;
-}
-
-function parseAndroidRuntimePermissions(output: string): Map<string, AppPermissionStateResult> {
-  const permissions = new Map<string, AppPermissionStateResult>();
-  const permissionLine = /^\s*([A-Za-z0-9_.]+):\s+granted=(true|false)\b(.*)$/;
-
-  for (const line of output.split(/\r?\n/)) {
-    const match = line.match(permissionLine);
-    if (!match) {
-      continue;
-    }
-
-    const [, permission, granted, rest] = match;
-    permissions.set(permission, {
-      permission,
-      state: granted === "true" ? "granted" : "denied",
-      source: "androidRuntime",
-      raw: {
-        granted: granted === "true",
-        flags: rest.trim() || null,
-      },
-    });
-  }
-
-  return permissions;
 }
 
 export class AppPermissions {
@@ -470,36 +446,13 @@ export class AppPermissions {
       );
     }
 
-    // Try WebSocket PackageManager first; fall back to ADB dumpsys on failure.
-    try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const info = await a11y.requestPackageInfo(
-        normalizedAppId,
-        { includePermissions: true },
-        4000,
-      );
-      if (info.success) {
-        const granted = info.grantedPermissions;
-        const allKeys =
-          info.requestedPermissions.length > 0 ? info.requestedPermissions : Object.keys(granted);
-        const permissionNames = requestedPermissions.length > 0 ? requestedPermissions : allKeys;
-        return {
-          success: true,
-          appId: normalizedAppId,
-          deviceId: this.device.deviceId,
-          platform: "android",
-          permissions: mapAndroidPermissionStates(permissionNames, granted),
-        };
-      }
-    } catch (error) {
-      // CtrlProxy is optional; ADB can read permissions when it is unavailable.
-      logger.debug(
-        `[AppPermissions] CtrlProxy permission read unavailable: ${errorMessage(error)}`,
-      );
-    }
-
     try {
       const adb: AdbExecutor = this.adbFactory.create(this.device);
+      // CtrlProxy package info has no user selector; dumpsys scopes state to the resolved user.
+      const { userId } = await new AndroidUserTargetResolver(adb).resolve({
+        packageName: normalizedAppId,
+        installedOnly: true,
+      });
       const result = await adb.executeCommand(
         `shell dumpsys package ${shellQuote(normalizedAppId)}`,
         undefined,
@@ -513,15 +466,16 @@ export class AppPermissions {
           `Package not installed: ${normalizedAppId}`,
         );
       }
-      const parsed = parseAndroidRuntimePermissions(stdout);
-      if (parsed.size === 0 && !/Package \[/.test(stdout)) {
+      const state = parseAndroidRuntimePermissions(stdout, normalizedAppId, userId);
+      if (!state) {
         return this.androidQueryFailure(
           normalizedAppId,
           `Package lookup returned no data for ${normalizedAppId}`,
         );
       }
+      const parsed = new Map([...state.installPermissions, ...state.runtimePermissions]);
       const permissionNames =
-        requestedPermissions.length > 0 ? requestedPermissions : [...parsed.keys()];
+        requestedPermissions.length > 0 ? requestedPermissions : [...state.requestedPermissions];
 
       return {
         success: true,
@@ -538,6 +492,7 @@ export class AppPermissions {
         ),
       };
     } catch (error) {
+      logger.warn(`[AppPermissions] permission read failed: ${errorMessage(error)}`, error);
       return this.androidQueryFailure(normalizedAppId, errorMessage(error));
     }
   }

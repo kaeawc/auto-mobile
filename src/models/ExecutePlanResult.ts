@@ -77,4 +77,6 @@ export interface ExecutePlanResult {
   /** Populated when automatic plan video used multiple Android segments (screenrecord limit). */
   videoFilePaths?: string[];
   videoRecordingIds?: string[];
+  /** Capture gaps, truncation or failures, including when no video could be returned. */
+  videoWarnings?: string[];
 }

@@ -17,6 +17,7 @@ import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.SdkConstants
 import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
+import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import dev.jasonpearson.automobile.sdk.logging.FakeSdkLogger
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -50,16 +51,19 @@ class AutoMobileAnrTest {
   private val context: android.content.Context = RuntimeEnvironment.getApplication()
   private val originalLogger = AutoMobileSDK.logger
   private val logger = FakeSdkLogger()
+  private val originalScheduler = SdkEventBroadcaster.deliveryScheduler
 
   @Before
   fun setUp() {
     AutoMobileSDK.logger = logger
+    SdkEventBroadcaster.deliveryScheduler = FakeDeliveryScheduler()
   }
 
   @After
   fun tearDown() {
     AutoMobileAnr.reset()
     AutoMobileSDK.logger = originalLogger
+    SdkEventBroadcaster.deliveryScheduler = originalScheduler
   }
 
   @Test
@@ -471,7 +475,7 @@ class AutoMobileAnrTest {
     sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
     assertEquals(20L, storedTimestamp())
     assertEquals(listOf(101, 102), sender.orderedEvents.map { it.pid })
-    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_INVALID_PAYLOAD)
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_QUEUE_FULL)
     assertEquals(20L, storedTimestamp())
     AutoMobileAnr.initialize(sender)
     assertEquals(listOf(101, 102, 102), sender.orderedEvents.map { it.pid })
@@ -544,10 +548,10 @@ class AutoMobileAnrTest {
   @Config(sdk = [Build.VERSION_CODES.R])
   fun `ack arrival wins over timeout while scheduler dispatch is queued`() {
     val timer = ackScheduler()
-    timer.queueResults = true
     addAnr(timestamp = 20L)
     val sender = OrderedBroadcastContext(context)
     AutoMobileAnr.initialize(sender)
+    timer.queueResults = true
     sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
     timer.fireTimeout()
     assertEquals(0L, storedTimestamp())
@@ -569,7 +573,84 @@ class AutoMobileAnrTest {
     assertTrue(timer.tasks.isEmpty())
   }
 
-  private fun installAckCapableCtrlProxy() {
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `batch ack flag alone preserves plain ANR delivery`() {
+    installAckCapableCtrlProxy(anrAck = false)
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(1, sender.attempts)
+    assertTrue(sender.ordered.isEmpty())
+    assertEquals(20L, storedTimestamp())
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `ANR ack flag enables ordered delivery independently of batch flag`() {
+    installAckCapableCtrlProxy(batchAck = false)
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(0, sender.attempts)
+    assertEquals(1, sender.ordered.size)
+    assertEquals(0L, storedTimestamp())
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `permanently invalid ANR is consumed at warn and next ANR is sent`() {
+    ackScheduler()
+    addAnr(timestamp = 20L, pid = 101)
+    addAnr(timestamp = 30L, pid = 102)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_INVALID_PAYLOAD)
+    assertEquals(20L, storedTimestamp())
+    assertEquals(setOf(identity(101, context.packageName)), storedIds())
+    assertEquals(listOf(101, 102), sender.orderedEvents.map { it.pid })
+    assertTrue(logger.entries.any { it.level == "W" && it.message.contains("invalid") })
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertEquals(30L, storedTimestamp())
+    AutoMobileAnr.initialize(sender)
+    assertEquals(2, sender.ordered.size)
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `scan and later trace builds use existing SDK executor outside result callback`() {
+    installAckCapableCtrlProxy()
+    val worker = FakeDeliveryScheduler().apply { queueResults = true }
+    SdkEventBroadcaster.deliveryScheduler = worker
+    ReflectionHelpers.setField(AutoMobileAnr, "deliveryScheduler", null)
+    var secondTraceRead = false
+    val stream =
+      object : ByteArrayInputStream("trace".toByteArray()) {
+        override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+          assertTrue("trace must be built on the executor", worker.executing)
+          secondTraceRead = true
+          return super.read(bytes, offset, length)
+        }
+      }
+    addAnr(timestamp = 20L, pid = 101)
+    addAnr(timestamp = 30L, pid = 102, traceStream = stream)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    assertTrue(sender.ordered.isEmpty())
+    worker.runNext()
+    assertEquals(listOf(101), sender.orderedEvents.map { it.pid })
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertFalse(secondTraceRead)
+    assertEquals(listOf(101), sender.orderedEvents.map { it.pid })
+    worker.runNext()
+    assertTrue(secondTraceRead)
+    assertEquals(listOf(101, 102), sender.orderedEvents.map { it.pid })
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    worker.runNext()
+    assertEquals(30L, storedTimestamp())
+  }
+
+  private fun installAckCapableCtrlProxy(batchAck: Boolean = true, anrAck: Boolean = true) {
     val info =
       PackageInfo().apply {
         packageName = SdkConstants.CTRL_PROXY_PACKAGE
@@ -578,7 +659,8 @@ class AutoMobileAnrTest {
             packageName = SdkConstants.CTRL_PROXY_PACKAGE
             metaData =
               Bundle().apply {
-                putBoolean(SdkEventBatchBroadcastContract.META_DATA_ACK_SUPPORTED, true)
+                putBoolean(SdkEventBatchBroadcastContract.META_DATA_ACK_SUPPORTED, batchAck)
+                putBoolean("dev.jasonpearson.automobile.ctrlproxy.SDK_ANR_ACK_SUPPORTED", anrAck)
               }
           }
       }
@@ -596,6 +678,7 @@ class AutoMobileAnrTest {
     val tasks = mutableListOf<Runnable>()
     val completions = mutableListOf<Runnable>()
     var queueResults = false
+    var executing = false
 
     override fun schedule(task: Runnable, delayMs: Long): () -> Unit {
       assertEquals(5_000L, delayMs)
@@ -605,6 +688,15 @@ class AutoMobileAnrTest {
 
     override fun execute(task: Runnable) {
       if (queueResults) completions.add(task) else task.run()
+    }
+
+    fun runNext() {
+      executing = true
+      try {
+        completions.removeAt(0).run()
+      } finally {
+        executing = false
+      }
     }
 
     fun fireTimeout() {

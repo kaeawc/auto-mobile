@@ -17,11 +17,12 @@ import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.SdkConstants
-import dev.jasonpearson.automobile.sdk.events.AndroidAckPackageInfoReader
+import dev.jasonpearson.automobile.sdk.events.AckPackageInfoReader
 import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
 import dev.jasonpearson.automobile.sdk.events.SdkEventAckCapability
 import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import java.io.InputStream
+import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -91,7 +92,7 @@ object AutoMobileAnr {
       if (session?.isFinished == false) return
       val ctx = context.applicationContext
       val gate =
-        capabilityGate ?: SdkEventAckCapability(AndroidAckPackageInfoReader(ctx.packageManager))
+        capabilityGate ?: SdkEventAckCapability(AndroidAnrAckPackageInfoReader(ctx.packageManager))
       AutoMobileSDK.logger.d(TAG) { "AutoMobileAnr initialized, checking for previous ANRs..." }
       val reporting = AnrReportingSession(ctx, gate.isSupported(), deliveryScheduler)
       session = reporting
@@ -109,6 +110,31 @@ object AutoMobileAnr {
       capabilityGate = null
       deliveryScheduler = null
     }
+
+  // Keep this reader private: the javap API baseline also includes Kotlin internal classes.
+  // The batch reader's constructor and metadata key must retain their existing contract.
+  private class AndroidAnrAckPackageInfoReader(private val packageManager: PackageManager) :
+    AckPackageInfoReader {
+    override fun supportsAcknowledgment(): Boolean {
+      val info =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          packageManager.getApplicationInfo(
+            SdkConstants.CTRL_PROXY_PACKAGE,
+            PackageManager.ApplicationInfoFlags.of(PackageManager.GET_META_DATA.toLong()),
+          )
+        } else {
+          @Suppress("DEPRECATION")
+          packageManager.getApplicationInfo(
+            SdkConstants.CTRL_PROXY_PACKAGE,
+            PackageManager.GET_META_DATA,
+          )
+        }
+      return info.metaData?.getBoolean(
+        "dev.jasonpearson.automobile.ctrlproxy.SDK_ANR_ACK_SUPPORTED",
+        false,
+      ) == true
+    }
+  }
 
   // Private pure seams keep the javap-based public API signature unchanged.
   @Suppress("NOTHING_TO_INLINE")
@@ -190,6 +216,7 @@ object AutoMobileAnr {
     private val handler = Handler(Looper.getMainLooper())
     private val scheduler =
       injectedScheduler
+        ?: SdkEventBroadcaster.deliveryScheduler
         ?: object : BatchDeliveryScheduler {
           override fun schedule(task: Runnable, delayMs: Long): (() -> Unit)? {
             if (!handler.postDelayed(task, delayMs)) return null
@@ -197,7 +224,9 @@ object AutoMobileAnr {
           }
 
           override fun execute(task: Runnable) {
-            task.run()
+            // Direct initialization can precede the SDK buffer. Reuse the runtime's shared
+            // workers rather than creating another pool or building traces on the main looper.
+            ForkJoinPool.commonPool().execute(task)
           }
         }
     private var pending = emptyList<ApplicationExitInfo>()
@@ -215,8 +244,18 @@ object AutoMobileAnr {
       cancelTimeout = null
     }
 
-    @Synchronized
     fun start() {
+      try {
+        scheduler.execute(Runnable { scan() })
+      } catch (error: Exception) {
+        AutoMobileSDK.logger.w(TAG, error) { "Could not dispatch ANR scan" }
+        close()
+      }
+    }
+
+    @Synchronized
+    private fun scan() {
+      if (isFinished) return
       try {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         if (am == null) {
@@ -238,8 +277,8 @@ object AutoMobileAnr {
       }
     }
 
-    // Exactly one ANR is in flight. The next one is sent only after this one's accepted
-    // cursor is persisted. Failure stops this scan; only a later initialize retries.
+    // Exactly one ANR is in flight. The next one is sent only after this one's consumed
+    // cursor is persisted. Invalid payloads are consumed; transient failures stop this scan.
     @Synchronized
     private fun reportNext() {
       if (isFinished) return
@@ -268,11 +307,11 @@ object AutoMobileAnr {
     }
 
     @Synchronized
-    private fun complete(item: ApplicationExitInfo, identity: String, delivered: Boolean) {
+    private fun complete(item: ApplicationExitInfo, identity: String, consumed: Boolean) {
       if (isFinished) return
       cancelTimeout?.invoke()
       cancelTimeout = null
-      if (!delivered) {
+      if (!consumed) {
         close()
         return
       }
@@ -283,7 +322,7 @@ object AutoMobileAnr {
         AutoMobileSDK.logger.d(TAG) { "Updated last reported timestamp to ${cursor.timestamp}" }
         reportNext()
       } catch (error: Exception) {
-        AutoMobileSDK.logger.e(TAG, error) { "Failed to persist acknowledged ANR" }
+        AutoMobileSDK.logger.e(TAG, error) { "Failed to persist consumed ANR" }
         close()
       }
     }
@@ -291,13 +330,13 @@ object AutoMobileAnr {
     @RequiresApi(Build.VERSION_CODES.R)
     private fun broadcastAnr(exitInfo: ApplicationExitInfo, identity: String) {
       val resolved = AtomicBoolean(false)
-      fun finish(delivered: Boolean) {
+      fun finish(consumed: Boolean) {
         if (resolved.compareAndSet(false, true)) {
           try {
-            scheduler.execute(Runnable { complete(exitInfo, identity, delivered) })
+            scheduler.execute(Runnable { complete(exitInfo, identity, consumed) })
           } catch (error: Exception) {
             AutoMobileSDK.logger.w(TAG, error) { "Could not dispatch ANR delivery result" }
-            complete(exitInfo, identity, delivered)
+            close()
           }
         }
       }
@@ -355,7 +394,18 @@ object AutoMobileAnr {
         val resultReceiver =
           object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-              finish(resultCode == SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+              val consumed =
+                when (resultCode) {
+                  SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED -> true
+                  SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_INVALID_PAYLOAD -> {
+                    AutoMobileSDK.logger.w(TAG) {
+                      "Consuming permanently invalid ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
+                    }
+                    true
+                  }
+                  else -> false
+                }
+              finish(consumed)
             }
           }
         context.sendOrderedBroadcast(intent, null, resultReceiver, handler, 0, null, null)

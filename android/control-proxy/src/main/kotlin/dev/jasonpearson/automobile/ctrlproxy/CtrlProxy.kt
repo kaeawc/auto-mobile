@@ -1316,24 +1316,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val anrBroadcastHandler =
     SdkAnrBroadcastHandler(
       enqueue = { event ->
-        !serviceScope
-          .launch {
-            broadcastAnrEvent(
-              timestamp = event.timestamp,
-              pid = event.pid,
-              processName = event.processName,
-              importance = event.importance,
-              trace = event.trace,
-              reason = event.reason,
-              packageName = event.applicationId ?: "unknown",
-              appVersion = event.appVersion,
-              deviceModel = event.deviceInfo?.model ?: "unknown",
-              deviceManufacturer = event.deviceInfo?.manufacturer ?: "unknown",
-              osVersion = event.deviceInfo?.osVersion ?: "unknown",
-              sdkInt = event.deviceInfo?.sdkInt ?: 0,
-            )
-          }
-          .isCancelled
+        sdkEventBatchProcessor.enqueue(
+          SdkEventBatch(timestamp = event.timestamp, events = listOf(event))
+        )
       },
       log =
         object : SdkEventBatchBroadcastHandler.LogSink {
@@ -7717,62 +7702,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Broadcast ANR event to WebSocket clients using typed protocol */
-  private suspend fun broadcastAnrEvent(
-    timestamp: Long,
-    pid: Int,
-    processName: String,
-    importance: String,
-    trace: String?,
-    reason: String,
-    packageName: String,
-    appVersion: String?,
-    deviceModel: String,
-    deviceManufacturer: String,
-    osVersion: String,
-    sdkInt: Int,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping ANR broadcast")
-      return
-    }
-
-    try {
-      val response =
-        AnrEvent(
-          timestamp = timestamp,
-          event =
-            AnrData(
-              pid = pid,
-              processName = processName,
-              importance = importance,
-              trace = trace,
-              reason = reason,
-              packageName = packageName,
-              appVersion = appVersion,
-              deviceInfo =
-                DeviceInfo(
-                  model = deviceModel,
-                  manufacturer = deviceManufacturer,
-                  osVersion = osVersion,
-                  sdkInt = sdkInt,
-                ),
-            ),
-        )
-
-      webSocketServer.broadcast(response)
-      Log.i(
-        TAG,
-        "Broadcasted ANR to ${webSocketServer.getConnectionCount()} clients: pid=$pid process=$processName",
-      )
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting ANR event", e)
-    }
-  }
-
   /** Broadcast an individual SDK event from a batch to WebSocket clients. */
   private suspend fun broadcastSdkEvent(
     event: SdkEvent,
@@ -7844,11 +7773,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   applicationId = event.applicationId,
                 ),
             )
+          is SdkAnrEvent ->
+            AnrEvent(
+              timestamp = event.timestamp,
+              event =
+                AnrData(
+                  pid = event.pid,
+                  processName = event.processName,
+                  importance = event.importance,
+                  trace = event.trace,
+                  reason = event.reason,
+                  packageName = event.applicationId ?: "unknown",
+                  appVersion = event.appVersion,
+                  deviceInfo =
+                    DeviceInfo(
+                      model = event.deviceInfo?.model ?: "unknown",
+                      manufacturer = event.deviceInfo?.manufacturer ?: "unknown",
+                      osVersion = event.deviceInfo?.osVersion ?: "unknown",
+                      sdkInt = event.deviceInfo?.sdkInt ?: 0,
+                    ),
+                ),
+            )
           // Existing event types handled by their own receivers — skip here
           is SdkNavigationEvent,
           is SdkHandledExceptionEvent,
           is SdkCrashEvent,
-          is SdkAnrEvent,
           is SdkNotificationActionEvent,
           is SdkRecompositionSnapshotEvent,
           is SdkEventBatch -> null

@@ -261,7 +261,7 @@ export class Explore extends BaseVisualChange {
         signal,
       });
 
-      const preparation = await this.prepareExplorationObservation(observation, progress);
+      const preparation = await this.prepareExplorationObservation(observation, progress, signal);
       if (preparation === "break") {
         break;
       }
@@ -305,6 +305,7 @@ export class Explore extends BaseVisualChange {
   private async prepareExplorationObservation(
     observation: ObserveResult,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<"none" | "continue" | "break"> {
     const permissionOutcome = await this.handlePermissionDialogFastPath(observation, progress);
     if (permissionOutcome === "break") {
@@ -326,6 +327,7 @@ export class Explore extends BaseVisualChange {
         observation,
         this.targetPackageName,
         progress,
+        signal,
       );
       if (enforcement === "handled") {
         return "continue";
@@ -853,6 +855,7 @@ export class Explore extends BaseVisualChange {
     observation: ObserveResult,
     targetPackageName: string,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<"ok" | "handled" | "stop"> {
     const currentPackage = this.getObservationPackageName(observation);
 
@@ -866,7 +869,19 @@ export class Explore extends BaseVisualChange {
       `[Explore] Foreground package '${currentPackage}' is outside target '${targetPackageName}', attempting to return`,
     );
 
-    await this.handleDeadEnd(progress);
+    try {
+      if (progress) {
+        await progress(
+          this.interactionCount,
+          this.interactionCount + 1,
+          `Returning to target app (${targetPackageName})...`,
+        );
+      }
+      await this.relaunchTargetApp(targetPackageName, signal);
+    } catch (error) {
+      logger.warn(`[Explore] Failed to return to target app: ${errorMessage(error)}`, error);
+    }
+    await this.timer.sleep(1000);
 
     if (this.consecutiveOutOfAppCount >= Explore.MAX_OUT_OF_APP_ATTEMPTS) {
       this.stopReason =
@@ -1065,7 +1080,7 @@ export class Explore extends BaseVisualChange {
   }
 
   /**
-   * Bring the target app back to the foreground after a home reset.
+   * Bring the target app back to the foreground after a home reset or app exit.
    *
    * This is a plain warm launchApp on purpose (no clearAppData, no coldBoot):
    * it recovers the foreground (issue #6126) with the platform's cheapest
@@ -1136,9 +1151,11 @@ export class Explore extends BaseVisualChange {
     startTime: number,
     cancelled: boolean,
   ): Promise<ExploreResult> {
-    const finalGraph = await this.navigationManager.exportGraph();
-    const screensDiscovered = finalGraph.nodes.length - initialGraph.nodes.length;
-    const edgesAdded = finalGraph.edges.length - initialGraph.edges.length;
+    const finalGraph = initialGraph.appId
+      ? await this.navigationManager.exportGraphForApp(initialGraph.appId)
+      : await this.navigationManager.exportGraph();
+    const screensDiscovered = Math.max(0, finalGraph.nodes.length - initialGraph.nodes.length);
+    const edgesAdded = Math.max(0, finalGraph.edges.length - initialGraph.edges.length);
 
     // Calculate coverage
     const totalScreens = finalGraph.nodes.length;

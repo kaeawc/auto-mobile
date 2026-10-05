@@ -379,6 +379,16 @@ export class FakeNavigationGraphManager
     };
   }
 
+  async exportGraphForApp(appId: string | null): Promise<ExportedGraph> {
+    this.trackCall("exportGraphForApp", [appId]);
+    return {
+      appId,
+      nodes: appId && appId === this.currentAppId ? Array.from(this.nodes.values()) : [],
+      edges: appId && appId === this.currentAppId ? [...this.edges] : [],
+      currentScreen: appId && appId === this.currentAppId ? this.currentScreen : null,
+    };
+  }
+
   async exportGraphSummary(): Promise<NavigationGraphSummary> {
     this.trackCall("exportGraphSummary", []);
     const nodes: NavigationGraphSummaryNode[] = Array.from(this.nodes.values()).map((node) => ({

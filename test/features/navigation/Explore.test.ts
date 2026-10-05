@@ -34,6 +34,11 @@ import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
 import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
+import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import { registerNavigationTools } from "../../../src/server/navigationTools";
+import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
+import type { ExportedGraph } from "../../../src/utils/interfaces/NavigationGraph";
+import { logger } from "../../../src/utils/logger";
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification
@@ -257,6 +262,257 @@ describe("Explore", () => {
         expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(2);
         expect(progressMessages).toContain("Explored 1 new screens (1/1 interactions)");
         expect(result.screensDiscovered).toBe(1);
+      });
+    }
+  });
+
+  describe("target app recovery and reports", () => {
+    function recoverySeams() {
+      return explore as unknown as {
+        selectNextElement: () => Promise<Element | undefined>;
+        performInteraction: () => Promise<boolean>;
+        consecutiveOutOfAppCount: number;
+        generateReport: (
+          initialGraph: ExportedGraph,
+          startTime: number,
+          cancelled: boolean,
+        ) => Promise<ExploreResult>;
+      };
+    }
+
+    function seedTargetGraph(): ExportedGraph {
+      fakeGraph.setCurrentAppId("com.test.app");
+      for (const screenName of ["Home", "Settings", "Profile"]) {
+        fakeGraph.addNode({ screenName, firstSeenAt: 0, lastSeenAt: 0, visitCount: 1 });
+      }
+      fakeGraph.addEdge({ from: "Home", to: "Settings", timestamp: 0, edgeType: "tool" });
+      fakeGraph.addEdge({ from: "Home", to: "Profile", timestamp: 0, edgeType: "tool" });
+      fakeGraph.setCurrentScreenValue("Home");
+      return fakeGraph.exportGraph();
+    }
+
+    test("reports the target graph after leaving the app and exhausting return attempts", async () => {
+      const targetGraph = seedTargetGraph();
+      const finalTargetGraph: ExportedGraph = {
+        ...targetGraph,
+        nodes: [
+          ...targetGraph.nodes,
+          { screenName: "Detail", firstSeenAt: 0, lastSeenAt: 0, visitCount: 1 },
+        ],
+        edges: [
+          ...targetGraph.edges,
+          { from: "Profile", to: "Detail", timestamp: 0, edgeType: "tool" },
+        ],
+        currentScreen: null,
+      };
+      const targetExport = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue(
+        finalTargetGraph,
+      );
+      const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
+        success: true,
+        packageName: "com.test.app",
+      });
+      const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => {
+          fakeGraph.clearCurrentGraph();
+          fakeGraph.setCurrentAppId("com.android.launcher3");
+          return createMockObservation([], "com.android.launcher3");
+        },
+      } as typeof explore.observeScreen;
+      try {
+        const result = await explore.execute({ packageName: "com.test.app" });
+        expect(result.navigationGraph).toEqual(finalTargetGraph);
+        expect(result.screensDiscovered).toBe(1);
+        expect(result.edgesAdded).toBe(1);
+        expect(result.coverage.totalScreens).toBe(4);
+        expect(result.success).toBe(true);
+        expect(result.cancelled).toBe(false);
+        expect(result.stopReason).toBe(
+          "Left target app (com.test.app) and could not return after 5 attempts",
+        );
+        expect(targetExport).toHaveBeenCalledWith(targetGraph.appId);
+        expect(launch).toHaveBeenCalledTimes(5);
+        expect(back).not.toHaveBeenCalled();
+        expect(recoverySeams().consecutiveOutOfAppCount).toBe(5);
+      } finally {
+        targetExport.mockRestore();
+        launch.mockRestore();
+        back.mockRestore();
+      }
+    });
+
+    test("relaunches the target and resets consecutive attempts after returning", async () => {
+      seedTargetGraph();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      let foreground = "com.android.launcher3";
+      explore.observeScreen = {
+        execute: async () => createMockObservation([], foreground),
+      } as typeof explore.observeScreen;
+      recoverySeams().performInteraction = async () => true;
+      const launch = spyOn(LaunchApp.prototype, "execute").mockImplementation(
+        async (packageName) => {
+          foreground = packageName;
+          return { success: true, packageName };
+        },
+      );
+      const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      const controller = new AbortController();
+      try {
+        const result = await explore.execute(
+          { packageName: "com.test.app", maxInteractions: 1 },
+          undefined,
+          controller.signal,
+        );
+        expect(result.interactionsPerformed).toBe(1);
+        expect(launch).toHaveBeenCalledTimes(1);
+        expect(launch.mock.calls[0]?.slice(0, 3)).toEqual(["com.test.app", false, false]);
+        expect(launch.mock.calls[0]?.[6]).toBe(controller.signal);
+        expect(back).not.toHaveBeenCalled();
+        expect(recoverySeams().consecutiveOutOfAppCount).toBe(0);
+        expect(result.stopReason).toBe("Reached max interactions limit (1)");
+      } finally {
+        launch.mockRestore();
+        back.mockRestore();
+      }
+    });
+
+    for (const failure of ["typed failure", "throw"] as const) {
+      test(`counts failed target relaunch attempts without throwing (${failure})`, async () => {
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        explore.observeScreen = {
+          execute: async () => createMockObservation([], "com.android.launcher3"),
+        } as typeof explore.observeScreen;
+        const launch = spyOn(LaunchApp.prototype, "execute").mockImplementation(async () => {
+          if (failure === "throw") {
+            throw new Error("Launch rejected");
+          }
+          return { success: false, error: "Launch rejected" };
+        });
+        const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await explore.execute({ packageName: "com.test.app" });
+          expect(launch).toHaveBeenCalledTimes(5);
+          expect(back).not.toHaveBeenCalled();
+          expect(result.stopReason).toContain("could not return after 5 attempts");
+          expect(recoverySeams().consecutiveOutOfAppCount).toBe(5);
+          expect(
+            warn.mock.calls.filter(([message]) =>
+              message.startsWith("[Explore] Failed to return to target app: Launch rejected"),
+            ),
+          ).toHaveLength(5);
+        } finally {
+          launch.mockRestore();
+          back.mockRestore();
+          warn.mockRestore();
+        }
+      });
+    }
+
+    test("uses Back for an ordinary dead end with no packageName option", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => createMockObservation([], ""),
+      } as typeof explore.observeScreen;
+      recoverySeams().selectNextElement = async () => undefined;
+      const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
+      try {
+        const result = await explore.execute({ timeoutMs: 1000 });
+        expect(back).toHaveBeenCalledWith("back");
+        expect(launch).not.toHaveBeenCalled();
+        expect(result.stopReason).toBe("Reached timeout limit (1000ms)");
+      } finally {
+        back.mockRestore();
+        launch.mockRestore();
+      }
+    });
+
+    for (const appId of ["com.test.app", null]) {
+      test(`clamps report counts when the graph shrinks (initial appId ${appId})`, async () => {
+        const initialGraph = { ...seedTargetGraph(), appId };
+        fakeGraph.clearCurrentGraph();
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        const result = await recoverySeams().generateReport(initialGraph, fakeTimer.now(), false);
+        expect(result.screensDiscovered).toBe(0);
+        expect(result.edgesAdded).toBe(0);
+        expect(result.navigationGraph.appId).toBe("com.test.app");
+        expect(fakeGraph.getMethodCallCount("exportGraphForApp")).toBe(appId ? 1 : 0);
+      });
+    }
+
+    test("keeps a normal in-app report unchanged", async () => {
+      seedTargetGraph();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => createMockObservation(),
+      } as typeof explore.observeScreen;
+      recoverySeams().performInteraction = async () => true;
+      const result = await explore.execute({ packageName: "com.test.app", maxInteractions: 1 });
+      expect(result).toMatchObject({
+        success: true,
+        cancelled: false,
+        interactionsPerformed: 1,
+        screensDiscovered: 0,
+        edgesAdded: 0,
+        navigationGraph: fakeGraph.exportGraph(),
+        coverage: { totalScreens: 3, exploredScreens: 1, percentage: 33.33 },
+        explorationPath: ["Home"],
+        durationMs: 0,
+        stopReason: "Reached max interactions limit (1)",
+      });
+    });
+
+    for (const leftTarget of [true, false]) {
+      test(`tool message ${leftTarget ? "discloses leaving the target app" : "preserves normal completion"}`, async () => {
+        const stopReason = leftTarget
+          ? "Left target app (com.test.app) and could not return after 5 attempts"
+          : "Reached max interactions limit (1)";
+        const result: ExploreResult = {
+          success: true,
+          interactionsPerformed: 1,
+          screensDiscovered: 0,
+          edgesAdded: 0,
+          navigationGraph: seedTargetGraph(),
+          explorationPath: ["Home"],
+          coverage: { totalScreens: 3, exploredScreens: 1, percentage: 33.33 },
+          durationMs: 0,
+          stopReason,
+        };
+        const execute = spyOn(Explore.prototype, "execute").mockResolvedValue(result);
+        const manager = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+          fakeGraph as unknown as NavigationGraphManager,
+        );
+        try {
+          registerNavigationTools();
+          const registry = ToolRegistry as unknown as {
+            tools: Map<
+              string,
+              {
+                deviceAwareHandler: (
+                  device: BootedDevice,
+                  args: object,
+                ) => Promise<{
+                  content: Array<{ text: string }>;
+                }>;
+              }
+            >;
+          };
+          const response = await registry.tools.get("explore")!.deviceAwareHandler(device, {});
+          const output = JSON.parse(response.content[0]!.text);
+          expect(output.success).toBe(true);
+          expect(output.stopReason).toBe(stopReason);
+          expect(output.message).toBe(
+            leftTarget
+              ? `Exploration stopped: ${stopReason}. 1 interactions, 0 new screens discovered, 33.33% coverage`
+              : "Exploration completed: 1 interactions, 0 new screens discovered, 33.33% coverage",
+          );
+        } finally {
+          execute.mockRestore();
+          manager.mockRestore();
+        }
       });
     }
   });
@@ -1050,75 +1306,46 @@ describe("Explore", () => {
   // Full device integration tests are in JUnitRunner and XCTestRunner
 
   describe("foreground app enforcement", () => {
-    test("should default to initial foreground package when packageName is not provided", async () => {
-      const outOfAppLimit = (Explore as any).MAX_OUT_OF_APP_ATTEMPTS ?? 5;
-      const backPresses: string[] = [];
-      const adbWithTracking = {
-        executeCommand: async (cmd: string) => {
-          if (cmd.includes("KEYCODE_BACK")) {
-            backPresses.push(cmd);
+    for (const explicitPackage of [false, true]) {
+      test(
+        explicitPackage
+          ? "should relaunch the provided package when navigation leaves app"
+          : "should default to initial foreground package when packageName is not provided",
+        async () => {
+          const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
+          const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+          explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+          const seams = explore as unknown as { performInteraction: () => Promise<boolean> };
+          seams.performInteraction = async () => true;
+          let observeCount = 0;
+          explore.observeScreen = {
+            execute: async () => {
+              observeCount++;
+              return createMockObservation(
+                [],
+                !explicitPackage && observeCount === 1 ? "com.test.app" : "com.android.settings",
+              );
+            },
+          } as typeof explore.observeScreen;
+          try {
+            const result = await explore.execute({
+              maxInteractions: 50,
+              timeoutMs: 5000,
+              ...(explicitPackage ? { packageName: "com.test.app" } : {}),
+            });
+            expect(result.stopReason).toContain("com.test.app");
+            expect(launch).toHaveBeenCalledTimes(5);
+            expect(launch.mock.calls.every(([packageName]) => packageName === "com.test.app")).toBe(
+              true,
+            );
+            expect(back).not.toHaveBeenCalled();
+          } finally {
+            launch.mockRestore();
+            back.mockRestore();
           }
-          return "";
         },
-      } as AdbClient;
-
-      explore = new Explore(device, adbWithTracking, fakeTimer, fakeGraph);
-      (explore as any).handleDeadEnd = async () => {
-        backPresses.push("back");
-      };
-      // The first observation is in-app, so the loop reaches performInteraction;
-      // stub it so the test stays on the enforcement path and off the tap pipeline.
-      (explore as any).performInteraction = async () => true;
-
-      let observeCount = 0;
-      (explore as any).observeScreen = {
-        execute: async () => {
-          observeCount++;
-          if (observeCount === 1) {
-            return createMockObservation([], "com.test.app");
-          }
-          return createMockObservation([], "com.android.settings");
-        },
-      };
-
-      const result = await explore.execute({
-        maxInteractions: 50,
-        timeoutMs: 5000,
-      });
-
-      expect(result.stopReason).toContain("com.test.app");
-      expect(backPresses.length).toBe(outOfAppLimit);
-    });
-
-    test("should attempt to return to provided package when navigation leaves app", async () => {
-      const outOfAppLimit = (Explore as any).MAX_OUT_OF_APP_ATTEMPTS ?? 5;
-      const backPresses: string[] = [];
-      const adbWithTracking = {
-        executeCommand: async (cmd: string) => {
-          if (cmd.includes("KEYCODE_BACK")) {
-            backPresses.push(cmd);
-          }
-          return "";
-        },
-      } as AdbClient;
-
-      explore = new Explore(device, adbWithTracking, fakeTimer, fakeGraph);
-      (explore as any).handleDeadEnd = async () => {
-        backPresses.push("back");
-      };
-      (explore as any).observeScreen = {
-        execute: async () => createMockObservation([], "com.android.settings"),
-      };
-
-      const result = await explore.execute({
-        maxInteractions: 50,
-        timeoutMs: 5000,
-        packageName: "com.test.app",
-      });
-
-      expect(result.stopReason).toContain("com.test.app");
-      expect(backPresses.length).toBe(outOfAppLimit);
-    });
+      );
+    }
   });
 
   describe("platform-aware recovery", () => {

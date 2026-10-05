@@ -169,6 +169,7 @@ export interface NavigationGraphService
   clearCurrentGraph(): Promise<void>;
   clearAllGraphs(): Promise<void>;
   exportGraph(): Promise<ExportedGraph>;
+  exportGraphForApp(appId: string | null): Promise<ExportedGraph>;
   exportGraphSummary(): Promise<NavigationGraphSummary>;
   exportGraphSummaryForApp(appId: string | null): Promise<NavigationGraphSummary>;
   exportGraphHistory(options?: {

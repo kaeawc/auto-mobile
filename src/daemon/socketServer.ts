@@ -3948,7 +3948,13 @@ export class UnixSocketServer {
       return undefined;
     }
 
-    const record = args as Record<string, unknown>;
+    return this.getObjectRequestArgumentScopeKey(args as Record<string, unknown>, args);
+  }
+
+  private getObjectRequestArgumentScopeKey(
+    record: Record<string, unknown>,
+    args: object,
+  ): string | undefined {
     const hasSessionUuid = isNonBlankSessionUuid(record.sessionUuid);
     const hasDeviceLabel = typeof record.device === "string" && record.device.length > 0;
 
@@ -5682,10 +5688,12 @@ export class UnixSocketServer {
     text: string,
     imeAction: ImeAction | undefined,
     timeoutMs: number,
-    append: boolean = false,
-    frameContext?: string,
-    onConfirmedAppendCharsSent?: (charsSent: number) => void,
-    signal?: AbortSignal,
+    ...[append = false, frameContext, onConfirmedAppendCharsSent, signal]: [
+      append?: boolean,
+      frameContext?: string,
+      onConfirmedAppendCharsSent?: (charsSent: number) => void,
+      signal?: AbortSignal,
+    ]
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
@@ -6013,6 +6021,26 @@ export class UnixSocketServer {
     ) {
       throw new Error("input/tap requires numeric x and y params");
     }
+    this.validateInputTapOptions(args);
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      x: args.x,
+      y: args.y,
+      duration: args.duration,
+      frameContext: args.frameContext,
+    };
+  }
+
+  private validateInputTapOptions(args: Record<string, unknown>): asserts args is Record<
+    string,
+    unknown
+  > & {
+    duration?: number;
+    deviceId?: string;
+    frameContext?: string;
+  } {
     if (
       args.duration !== undefined &&
       (typeof args.duration !== "number" || !Number.isInteger(args.duration))
@@ -6028,15 +6056,6 @@ export class UnixSocketServer {
     ) {
       throw new Error("input/tap frameContext must be a non-empty string when provided");
     }
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      x: args.x,
-      y: args.y,
-      duration: args.duration,
-      frameContext: args.frameContext,
-    };
   }
 
   private parseInputSwipeParams(params: unknown): {
@@ -6057,27 +6076,7 @@ export class UnixSocketServer {
     if (args.platform !== "android" && args.platform !== "ios") {
       throw new Error("input/swipe requires platform 'android' or 'ios'");
     }
-    if (
-      typeof args.startX !== "number" ||
-      !Number.isFinite(args.startX) ||
-      typeof args.startY !== "number" ||
-      !Number.isFinite(args.startY) ||
-      typeof args.endX !== "number" ||
-      !Number.isFinite(args.endX) ||
-      typeof args.endY !== "number" ||
-      !Number.isFinite(args.endY)
-    ) {
-      throw new Error("input/swipe requires numeric startX, startY, endX, and endY params");
-    }
-    if (
-      args.durationMs !== undefined &&
-      (typeof args.durationMs !== "number" ||
-        !Number.isInteger(args.durationMs) ||
-        args.durationMs < 1 ||
-        args.durationMs > 60_000)
-    ) {
-      throw new Error("input/swipe durationMs must be integer milliseconds between 1 and 60000");
-    }
+    this.validateInputSwipeGeometry(args);
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/swipe deviceId must be a string when provided");
     }
@@ -6098,6 +6097,43 @@ export class UnixSocketServer {
       durationMs: args.durationMs ?? 300,
       frameContext: args.frameContext,
     };
+  }
+
+  private validateInputSwipeCoordinates(args: Record<string, unknown>): void {
+    if (
+      typeof args.startX !== "number" ||
+      !Number.isFinite(args.startX) ||
+      typeof args.startY !== "number" ||
+      !Number.isFinite(args.startY) ||
+      typeof args.endX !== "number" ||
+      !Number.isFinite(args.endX) ||
+      typeof args.endY !== "number" ||
+      !Number.isFinite(args.endY)
+    ) {
+      throw new Error("input/swipe requires numeric startX, startY, endX, and endY params");
+    }
+  }
+
+  private validateInputSwipeGeometry(args: Record<string, unknown>): asserts args is Record<
+    string,
+    unknown
+  > & {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    durationMs?: number;
+  } {
+    this.validateInputSwipeCoordinates(args);
+    if (
+      args.durationMs !== undefined &&
+      (typeof args.durationMs !== "number" ||
+        !Number.isInteger(args.durationMs) ||
+        args.durationMs < 1 ||
+        args.durationMs > 60_000)
+    ) {
+      throw new Error("input/swipe durationMs must be integer milliseconds between 1 and 60000");
+    }
   }
 
   private parseInputTypeTextParams(params: unknown): {
@@ -6128,12 +6164,7 @@ export class UnixSocketServer {
     if (args.platform !== "android" && args.platform !== "ios") {
       throw new Error("input/typeText requires platform 'android' or 'ios'");
     }
-    if (typeof args.text !== "string" || args.text.length === 0) {
-      throw new Error("input/typeText requires non-empty string text param");
-    }
-    if (args.submit !== undefined && typeof args.submit !== "boolean") {
-      throw new Error("input/typeText submit must be a boolean when provided");
-    }
+    this.validateInputTypeTextContent(args);
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/typeText deviceId must be a string when provided");
     }
@@ -6152,6 +6183,17 @@ export class UnixSocketServer {
       append: args.mode === "append",
       frameContext: args.frameContext as string | undefined,
     };
+  }
+
+  private validateInputTypeTextContent(
+    args: Record<string, unknown>,
+  ): asserts args is Record<string, unknown> & { text: string; submit?: boolean } {
+    if (typeof args.text !== "string" || args.text.length === 0) {
+      throw new Error("input/typeText requires non-empty string text param");
+    }
+    if (args.submit !== undefined && typeof args.submit !== "boolean") {
+      throw new Error("input/typeText submit must be a boolean when provided");
+    }
   }
 
   private parseInputPressButtonParams(params: unknown): {
@@ -6464,8 +6506,7 @@ export class UnixSocketServer {
      * every reset, and this daemon's own `deadline`) uses THIS value
      * instead, independent of queue wait (#6222 review, P1).
      */
-    originalTimeoutMs: number,
-    signal?: AbortSignal,
+    ...[originalTimeoutMs, signal]: [originalTimeoutMs: number, signal?: AbortSignal]
   ): Promise<any> {
     signal?.throwIfAborted();
     const requestOptions = this.mcpRequestOptions(timeoutMs, signal);

@@ -145,8 +145,6 @@
 5	src/utils/plan/PlanExecutor.ts	eslint(complexity)
 6	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(complexity)
 6	src/daemon/daemon.ts	eslint(max-lines-per-function)
-6	src/features/utility/ElementFinder.ts	eslint(complexity)
-6	src/features/utility/ElementFinder.ts	eslint(max-depth)
 7	src/devices/DeviceSessionManager.ts	eslint(max-depth)
 7	src/features/action/TapOnElement.ts	eslint(complexity)
 7	src/features/observe/android/CtrlProxyHierarchy.ts	eslint(max-depth)

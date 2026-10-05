@@ -1,4 +1,5 @@
 test/fixtures/android-display/**/*.txt text eol=lf
+test/fixtures/android-display-config/*.txt text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.

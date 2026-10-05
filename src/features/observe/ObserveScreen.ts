@@ -1,3 +1,4 @@
+import { recordObservationRead } from "./observationReadScope";
 import { displayPinFailure } from "./SessionDisplayContext";
 import {
   publishScreenshotPaths,
@@ -1944,7 +1945,11 @@ export class RealObserveScreen implements ObserveScreen {
       }
       logger.debug("Observe command completed");
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
-      return result;
+      // cached-ok may serve CtrlProxy's client cache without a device read.
+      // Its fresh=false verdict must not grant this action acquisition authority.
+      return this.device.platform !== "android" || result.viewHierarchy?.fresh === true
+        ? recordObservationRead(result)
+        : result;
     } catch (err) {
       if (preserveDisplayState) {
         signal?.throwIfAborted();

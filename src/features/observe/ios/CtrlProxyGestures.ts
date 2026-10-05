@@ -1,3 +1,4 @@
+import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * CtrlProxyGestures - iOS gesture delegate.
  *
@@ -13,7 +14,6 @@ import type { DelegateContext } from "./types";
 import type { GestureTimingResult } from "../shared/types";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
-import { sendCommand } from "../DeviceServiceUtils";
 import {
   DefaultSystemDetection,
   type SystemDetection,
@@ -69,14 +69,18 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     fingerSpacing?: number,
-  ): Promise<GestureTimingResult> {
-    return sendCommand<GestureTimingResult>(this.context, {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    return sendIOSPressCommand(this.context, {
       idPrefix: "multi_finger_swipe",
       responseType: "multi_finger_swipe_result",
       messageType: "request_multi_finger_swipe",
       params: { x1, y1, x2, y2, fingerCount, duration, offset: fingerSpacing },
       timeoutMs,
+      abortSignal: signal,
       perf,
+      onDispatch,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Multi-finger swipe",
     });

@@ -523,7 +523,14 @@ describe("InputKey", () => {
       key: "enter",
       keyCode: "enter",
     });
-    expect(requestPressKey).toHaveBeenCalledWith("enter", ["meta"], 500);
+    expect(requestPressKey).toHaveBeenCalledWith(
+      "enter",
+      ["meta"],
+      500,
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 });

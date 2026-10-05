@@ -162,6 +162,7 @@ class WebSocketServer(
         is CurrentFocusResult -> response.requestId
         is TraversalOrderResult -> response.requestId
         is HighlightResponse -> response.requestId
+        is OverlayResult -> response.requestId
         is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
         is PreferenceFilesResult -> response.requestId
         is PreferencesResult -> response.requestId
@@ -177,6 +178,7 @@ class WebSocketServer(
         is HierarchyUpdateEvent -> response.requestId
         // Other event/status frames never echo a requestId.
         is ConnectedResponse,
+        is OverlayEvent,
         is InteractionEvent,
         is PackageEvent,
         is NavigationEventResponse,

@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.OverlayResult
+import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -129,3 +131,14 @@ internal fun traversalOrderErrorFrame(
     put("totalTimeMs", totalTimeMs)
     put("error", error ?: "Unknown error")
   }
+
+/** Deliberate refusal until the overlay host is connected to the typed actions. */
+internal fun overlayNotWiredResultFrame(requestId: String?): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    OverlayResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = false,
+      error = "overlay host not wired",
+    )
+  )

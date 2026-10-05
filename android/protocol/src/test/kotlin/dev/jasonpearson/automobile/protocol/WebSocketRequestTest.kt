@@ -648,4 +648,36 @@ class WebSocketRequestTest {
     assertEquals(null, request.packageName)
     assertEquals(null, request.fileName)
   }
+
+  @Test
+  fun `overlay requests round trip byte identical nested objects`() {
+    val literals =
+      listOf(
+        """{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}""",
+        """{"type":"update_overlay","requestId":"r2","id":"panel","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}""",
+        """{"type":"update_overlay","requestId":"r3","id":"panel","state":{"label":"Next","enabled":true,"count":2.5}}""",
+        """{"type":"dismiss_overlay","requestId":"r4","id":"panel"}""",
+        """{"type":"dismiss_overlay","requestId":"r5","all":true}""",
+      )
+    literals.forEach { literal ->
+      val request = json.decodeFromString<WebSocketRequest>(literal)
+      assertEquals(literal, json.encodeToString(request))
+      assertEquals(request, json.decodeFromString<WebSocketRequest>(json.encodeToString(request)))
+    }
+    val show = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(literals.first()))
+    assertEquals("panel", show.spec.id)
+    assertEquals(OverlayTextNode(text = "Hello"), show.spec.root)
+    assertTrue(json.encodeToString<WebSocketRequest>(show).contains("\"spec\":{"))
+    val patch = assertIs<UpdateOverlay>(json.decodeFromString<WebSocketRequest>(literals[2]))
+    assertEquals(OverlayScalar.Numeric(2.5), patch.state?.get("count"))
+    assertIs<DismissOverlay>(json.decodeFromString<WebSocketRequest>(literals.last()))
+  }
+
+  @Test
+  fun `request decoder remains lenient inside nested overlay spec`() {
+    val literal =
+      """{"type":"show_overlay","requestId":"r","spec":{"id":"panel","extra":true,"window":{"placement":{"type":"fullscreen","future":true}},"root":{"type":"text","text":"Hello","unknown":1}}}"""
+    val request = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(literal))
+    assertEquals(OverlayTextNode(text = "Hello"), request.spec.root)
+  }
 }

@@ -3,6 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
+import dev.jasonpearson.automobile.protocol.OverlayEvent
+import dev.jasonpearson.automobile.protocol.OverlayEventKind
+import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
@@ -1032,4 +1035,27 @@ class WebSocketServerTest {
       // Cleanup
       customServer.stop()
     }
+
+  @Test
+  fun `overlay results correlate while overlay events do not`() {
+    assertEquals(
+      "overlay-r",
+      WebSocketServer.correlationRequestId(
+        OverlayResult(timestamp = 0L, requestId = "overlay-r", success = false)
+      ),
+    )
+    assertNull(
+      WebSocketServer.correlationRequestId(
+        OverlayEvent(
+          timestamp = 0L,
+          id = "panel",
+          sequence = 1L,
+          kind = OverlayEventKind.DISMISSED,
+          name = null,
+          payload = null,
+          state = emptyMap(),
+        )
+      )
+    )
+  }
 }

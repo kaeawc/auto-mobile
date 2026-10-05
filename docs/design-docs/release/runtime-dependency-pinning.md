@@ -71,6 +71,19 @@ manifest) and enforced by:
 | `pin-runtime-deps.ts --check`    | Fast Validation (`runtime-pins`)      | `package.json` + manifest are in lock-step with `bun.lock` (hermetic)                               |
 | `verify-pinned-runtime-graph.sh` | PR benchmarks job + release preflight | a clean-cache install of the **packed** artifact reproduces every exact and bundled runtime version |
 
+## CI pack trimming
+
+The prepack hook moves unused sources, declarations, maps, tests, docs and
+verified browser-only files out of the bundled production dependency closure.
+Runtime entry points, wildcard export prefixes, package metadata, README and
+license files stay intact. Postpack restores the original bytes; the next enabled
+prepack also restores any backup left by an interrupted pack.
+
+`AUTOMOBILE_TRIM_BUNDLED_DEPS=true` enables trimming; `false` disables it.
+Otherwise trimming runs only with `CI=true` or `CI=1`. Local `npm pack` is
+untrimmed by default, so local `bun run benchmark-npm-unpacked-size` measurements
+are larger than CI's. All hook diagnostics go to stderr to preserve pack JSON.
+
 ## Refreshing the graph (dependency / security updates)
 
 ### Automatic refresh on Dependabot PRs

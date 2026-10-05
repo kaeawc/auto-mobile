@@ -14,6 +14,7 @@ import {
   collectBundledPackages,
   listCandidates,
   runTrim,
+  restoreBackup,
   shouldTrimBundledDeps,
   type TrimOptions,
 } from "../../scripts/release/trim-bundled-deps";
@@ -226,4 +227,78 @@ describe("reversible bundled dependency pack trim", () => {
     put("node_modules/pkg/node_modules/dep/test/test.ts", "keep ambiguous");
     expect(listCandidates(root).some((item) => item.path.endsWith("dep/test/test.ts"))).toBe(false);
   });
+});
+
+for (const condition of ["bun", "require", "default"]) {
+  test(`post-move check re-reads ${condition} entry outside the protected snapshot`, () => {
+    const { root, put, options } = fixture();
+    const before = tree(root);
+    expect(() =>
+      runTrim("prepack", {
+        ...options,
+        candidates: (directory, packages) => {
+          const candidates = listCandidates(directory, packages);
+          // Introduce an entry after collection: cached metadata did not protect it.
+          put("node_modules/pkg/package.json", {
+            name: "pkg",
+            exports: {
+              ".": [
+                { types: "./absent.d.ts", "@source": "./absent.ts" },
+                { [condition]: "./src/index.ts" },
+              ],
+            },
+          });
+          return candidates;
+        },
+      }),
+    ).toThrow("Trim removed runtime entry");
+    expect(readFileSync(path.join(root, "node_modules/pkg/src/index.ts"), "utf8")).toBe(
+      "remove src/index.ts",
+    );
+    expect(existsSync(path.join(root, ".pack-trim-backup"))).toBe(false);
+    // Restore the intentionally edited metadata to compare all original bytes.
+    writeFileSync(
+      path.join(root, "node_modules/pkg/package.json"),
+      Buffer.from(before["node_modules/pkg/package.json"]!, "base64"),
+    );
+    expect(tree(root)).toEqual(before);
+  });
+}
+for (const manifest of [undefined, "broken json"]) {
+  test(`backup recovery by path with ${manifest === undefined ? "absent" : "corrupt"} manifest`, () => {
+    const { root, put } = fixture();
+    const before = tree(root);
+    const relative = "node_modules/pkg/src/index.ts";
+    put(`.pack-trim-backup/${relative}`, "remove src/index.ts");
+    rmSync(path.join(root, relative));
+    if (manifest) {
+      put(".pack-trim-backup/manifest.json", manifest);
+    }
+    expect(restoreBackup(root)).toBe(1);
+    expect(tree(root)).toEqual(before);
+  });
+}
+test("empty interrupted backup is removed", () => {
+  const { root, put } = fixture();
+  put(".pack-trim-backup/manifest.json.tmp", "partial");
+  expect(restoreBackup(root)).toBe(0);
+  expect(existsSync(path.join(root, ".pack-trim-backup"))).toBe(false);
+});
+test("path recovery conflicts name both copies and explain remedy", () => {
+  const { root, put } = fixture();
+  put(".pack-trim-backup/node_modules/pkg/src/index.ts", "saved");
+  expect(() => restoreBackup(root)).toThrow("node_modules/pkg/src/index.ts. Compare");
+  expect(() => restoreBackup(root)).toThrow("move one copy aside, then rerun postpack");
+  expect(existsSync(path.join(root, ".pack-trim-backup/node_modules/pkg/src/index.ts"))).toBe(true);
+});
+test("valid manifest conflict retains backups and explains remedy", () => {
+  const { root, options, put } = fixture();
+  runTrim("prepack", options);
+  put("node_modules/pkg/src/index.ts", "changed");
+  expect(() => restoreBackup(root)).toThrow("move one copy aside, then rerun postpack");
+});
+test("unsafe recovered paths fail with manual recovery instructions", () => {
+  const { root, put } = fixture();
+  put(".pack-trim-backup/outside.txt", "saved");
+  expect(() => restoreBackup(root)).toThrow("outside.txt. Move the backup aside");
 });

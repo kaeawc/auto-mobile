@@ -13,7 +13,8 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-interface PackageJson {
+export interface PackageJson {
+  version?: string;
   name: string;
   main?: string;
   module?: string;
@@ -139,12 +140,9 @@ function exportTargets(value: unknown): string[] {
 
 function runtimeTargets(metadata: PackageJson): string[] {
   const bin = typeof metadata.bin === "string" ? [metadata.bin] : Object.values(metadata.bin ?? {});
-  return [
-    metadata.main ?? (metadata.exports ? undefined : "index.js"),
-    metadata.module,
-    ...bin,
-    ...exportTargets(metadata.exports),
-  ].filter((target): target is string => typeof target === "string");
+  return [metadata.main, metadata.module, ...bin, ...exportTargets(metadata.exports)].filter(
+    (target): target is string => typeof target === "string" && target.length > 0,
+  );
 }
 
 /** Node's legacy main probing, also retaining direct ESM/module targets. */
@@ -184,9 +182,22 @@ function resolveEntry(
   return undefined;
 }
 
+function entryTargets(pkg: BundledPackage): string[] {
+  const targets = runtimeTargets(pkg.metadata);
+  if (!pkg.metadata.main && pkg.metadata.exports === undefined) {
+    for (const extension of ["js", "mjs", "cjs", "ts", "mts", "cts", "json", "node"]) {
+      const index = `index.${extension}`;
+      if (existsSync(path.join(pkg.directory, index))) {
+        targets.push(index);
+      }
+    }
+  }
+  return targets;
+}
+
 function protectedPaths(pkg: BundledPackage): string[] {
   const result: string[] = [];
-  for (const target of runtimeTargets(pkg.metadata)) {
+  for (const target of entryTargets(pkg)) {
     if (target.includes("*")) {
       const literal = target.slice(0, target.indexOf("*"));
       const prefix = path.resolve(
@@ -293,11 +304,23 @@ export function listCandidates(root: string, packages = collectBundledPackages(r
   return candidates.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function assertEntries(packages: BundledPackage[], entries: string[][]): void {
-  for (let i = 0; i < packages.length; i++) {
-    for (const entry of entries[i]!) {
-      if (!existsSync(entry)) {
-        throw new Error(`Trim removed runtime entry: ${entry}`);
+function assertEntries(packages: BundledPackage[]): void {
+  for (const pkg of packages) {
+    // Re-read metadata and resolve on the trimmed tree, independently of protection.
+    for (const target of entryTargets({ ...pkg, metadata: readPackage(pkg.directory) })) {
+      const literal = target.slice(0, target.indexOf("*"));
+      const prefix = path.resolve(
+        pkg.directory,
+        literal.endsWith("/") ? literal : path.dirname(literal),
+      );
+      const entry = target.includes("*") ? prefix : resolveEntry(pkg.directory, target);
+      if (
+        !entry ||
+        !inside(pkg.directory, entry) ||
+        !existsSync(entry) ||
+        (target.includes("*") && !statSync(entry).isDirectory())
+      ) {
+        throw new Error(`Trim removed runtime entry: ${pkg.directory}: ${target}`);
       }
     }
   }
@@ -309,7 +332,9 @@ function backupPath(root: string): string {
 function checkedPath(root: string, relative: string): string {
   const filename = path.resolve(root, relative);
   if (!inside(path.join(root, "node_modules"), filename)) {
-    throw new Error(`Unsafe trim manifest path: ${relative}`);
+    throw new Error(
+      `Unsafe trim manifest path: ${relative}. Move the backup aside and recover files manually before packing again.`,
+    );
   }
   return filename;
 }
@@ -319,20 +344,55 @@ export function restoreBackup(root: string): number {
   if (!existsSync(backup)) {
     return 0;
   }
-  const manifest = JSON.parse(
-    readFileSync(path.join(backup, "manifest.json"), "utf8"),
-  ) as Candidate[];
+  let manifest: Candidate[];
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path.join(backup, "manifest.json"), "utf8"));
+    if (!Array.isArray(parsed) || !parsed.every((item) => item && typeof item.path === "string")) {
+      throw new Error("Invalid trim manifest");
+    }
+    manifest = parsed;
+  } catch (error) {
+    // An interrupted manifest write is recoverable from the mirrored backup paths.
+    console.error(
+      `Recovering trim backup by path: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    const walk = (directory: string): Candidate[] =>
+      readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const filename = path.join(directory, entry.name);
+        if (directory === backup && ["manifest.json", "manifest.json.tmp"].includes(entry.name)) {
+          return [];
+        }
+        if (entry.isSymbolicLink()) {
+          throw new Error(
+            `Unsafe trim backup: ${filename}. Move the backup aside and recover files manually before packing again.`,
+          );
+        }
+        return entry.isDirectory()
+          ? walk(filename)
+          : [{ path: path.relative(backup, filename), size: statSync(filename).size }];
+      });
+    manifest = walk(backup);
+  }
+  // Validate the entire plan before moving files so conflicts leave all backups intact.
+  for (const item of manifest) {
+    const original = checkedPath(root, item.path);
+    const saved = checkedPath(backup, item.path);
+    if (existsSync(original) && existsSync(saved)) {
+      throw new Error(
+        `Refusing to overwrite changed file: ${item.path}. Compare ${original} with ${saved}; move one copy aside, then rerun postpack.`,
+      );
+    }
+    if (!existsSync(original) && !existsSync(saved)) {
+      throw new Error(
+        `Missing both backup and original: ${item.path}. Recover this file manually before rerunning postpack; keep ${backup}.`,
+      );
+    }
+  }
   for (const item of manifest) {
     const original = checkedPath(root, item.path);
     const saved = checkedPath(backup, item.path);
     if (!existsSync(saved)) {
-      if (!existsSync(original)) {
-        throw new Error(`Missing both backup and original: ${item.path}`);
-      }
       continue; // Planned but not moved, or already restored after an interrupted postpack.
-    }
-    if (existsSync(original)) {
-      throw new Error(`Refusing to overwrite changed file: ${item.path}`);
     }
     mkdirSync(path.dirname(original), { recursive: true });
     renameSync(saved, original);
@@ -344,7 +404,9 @@ export function restoreBackup(root: string): number {
 export function runTrim(mode: string, options: TrimOptions): void {
   const root = path.resolve(options.root);
   if (mode === "postpack") {
-    options.stderr(`Bundled trim restored ${restoreBackup(root)} files.`);
+    if (existsSync(backupPath(root))) {
+      options.stderr(`Bundled trim restored ${restoreBackup(root)} files.`);
+    }
     return;
   }
   if (mode === "prepack" && !shouldTrimBundledDeps(options.env)) {
@@ -369,16 +431,11 @@ export function runTrim(mode: string, options: TrimOptions): void {
     options.stdout(`Total: ${candidates.length} files, ${total} bytes`);
     return;
   }
-  // Snapshot independently of the candidate/protection rules, including wildcard files.
-  const entries = packages.map((pkg) =>
-    files(pkg.directory).filter((filename) =>
-      protectedPaths(pkg).some((entry) => inside(entry, filename)),
-    ),
-  );
   const backup = backupPath(root);
   mkdirSync(backup, { recursive: true });
   // Write the complete plan BEFORE moving anything so a killed process is recoverable.
-  writeFileSync(path.join(backup, "manifest.json"), `${JSON.stringify(candidates, null, 2)}\n`);
+  writeFileSync(path.join(backup, "manifest.json.tmp"), `${JSON.stringify(candidates, null, 2)}\n`);
+  renameSync(path.join(backup, "manifest.json.tmp"), path.join(backup, "manifest.json"));
   try {
     for (const item of candidates) {
       const original = checkedPath(root, item.path);
@@ -386,7 +443,7 @@ export function runTrim(mode: string, options: TrimOptions): void {
       mkdirSync(path.dirname(saved), { recursive: true });
       renameSync(original, saved);
     }
-    assertEntries(packages, entries);
+    assertEntries(packages);
   } catch (error) {
     restoreBackup(root);
     throw error;

@@ -1,3 +1,4 @@
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { DragAndDropTarget } from "../../models/DragAndDropOptions";
@@ -423,7 +424,7 @@ export class DragAndDrop extends BaseVisualChange {
 
       logger.warn(`Drag and drop failed: ${errorMessage(error)}`, error);
       throwIfAborted(signal);
-      if (error instanceof StaleDisplayError) {
+      if (error instanceof StaleDisplayError || error instanceof DispatchedObservationError) {
         return withStaleDisplay({ success: false, duration: 0, distance: 0 }, error);
       }
       const baseErrorMessage = errorMessage(error);

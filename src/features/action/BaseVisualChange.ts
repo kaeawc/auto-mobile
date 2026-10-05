@@ -10,7 +10,12 @@ import { RealSettleObserve } from "../observe/SettleObserve";
 import type { TapEffect } from "../../models/TapOnElementResult";
 import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
-import { staleDisplayError } from "../../models/StaleDisplayError";
+import {
+  staleDisplayError,
+  StaleDisplayError,
+  type StaleDisplayDetails,
+} from "../../models/StaleDisplayError";
+import type { BaseActionResult } from "../../models/BaseActionResult";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type {
   ObserveScreen,
@@ -151,6 +156,12 @@ interface ObservedChangeOptions {
     toolName: string;
     toolArgs: Record<string, any>;
   };
+}
+
+interface PostActionCapture {
+  observation: ObserveResult;
+  readFailed: boolean;
+  staleDisplay?: StaleDisplayDetails;
 }
 
 export class BaseVisualChange {
@@ -694,7 +705,7 @@ export class BaseVisualChange {
     options: ObserveScreenExecuteOptions,
     shouldRetry: (observation: ObserveResult) => boolean,
     blockResult: { success?: boolean; skipped?: unknown; wasAlreadyFocused?: boolean },
-  ): Promise<{ observation: ObserveResult; readFailed: boolean }> {
+  ): Promise<PostActionCapture> {
     const perf = options.perf ?? new NoOpPerformanceTracker();
     const retryBackoff = sequenceBackoff(FINAL_OBSERVATION_RETRY_BACKOFF_MS);
     let latestObservation: ObserveResult | undefined;
@@ -746,7 +757,7 @@ export class BaseVisualChange {
     observation: ObserveResult | undefined,
     options: ObserveScreenExecuteOptions,
     blockResult: { success?: boolean; skipped?: unknown; wasAlreadyFocused?: boolean },
-  ): { observation: ObserveResult; readFailed: boolean } {
+  ): PostActionCapture {
     if (options.display === undefined) {
       throw error;
     }
@@ -755,15 +766,12 @@ export class BaseVisualChange {
       throw error;
     }
     if (observation && isAdoptableCapture(observation, observation, true)) {
-      return {
-        observation: this.notePostActionReadFailure(
-          observation,
-          "observation retry",
-          errorMessage(error),
-          error,
-        ),
-        readFailed: true,
-      };
+      return this.notePostActionReadFailure(
+        observation,
+        "observation retry",
+        errorMessage(error),
+        error,
+      );
     }
     // A refused or skipped block never delivered a gesture.
     if (blockResult.success === false || blockResult.skipped || blockResult.wasAlreadyFocused) {
@@ -777,17 +785,21 @@ export class BaseVisualChange {
     phase: string,
     reason: string,
     error?: unknown,
-  ): ObserveResult {
+  ): PostActionCapture {
     const warning = `Post-action ${phase} failed: ${reason}; retaining the earlier observation`;
     logger.warn(`[BaseVisualChange] ${warning}`, error);
     return {
-      ...observation,
-      settled: false,
-      freshness: {
-        ...observation.freshness,
-        isFresh: observation.freshness?.isFresh ?? true,
-        warning: [observation.freshness?.warning, warning].filter(Boolean).join("; "),
+      observation: {
+        ...observation,
+        settled: false,
+        freshness: {
+          ...observation.freshness,
+          isFresh: observation.freshness?.isFresh ?? true,
+          warning: [observation.freshness?.warning, warning].filter(Boolean).join("; "),
+        },
       },
+      readFailed: true,
+      ...(error instanceof StaleDisplayError ? { staleDisplay: error.details } : {}),
     };
   }
 
@@ -803,7 +815,7 @@ export class BaseVisualChange {
 
   /** Validate a completed gesture without turning its capture into a retryable refusal. */
   protected checkPostActionDisplay(
-    result: { observation?: ObserveResult },
+    result: Pick<BaseActionResult, "observation" | "staleDisplay">,
     assertCurrent: (() => void) | undefined,
     signal?: AbortSignal,
   ): boolean {
@@ -821,12 +833,14 @@ export class BaseVisualChange {
       ) {
         throw new DispatchedObservationError(error);
       }
-      result.observation = this.notePostActionReadFailure(
+      const failed = this.notePostActionReadFailure(
         result.observation,
         "display settle validation",
         errorMessage(error),
         error,
       );
+      result.observation = failed.observation;
+      result.staleDisplay = failed.staleDisplay ?? result.staleDisplay;
       return false;
     }
   }
@@ -835,7 +849,7 @@ export class BaseVisualChange {
     observation: ObserveResult,
     observeScreen: ObserveScreen,
     options: { display: string; signal?: AbortSignal },
-  ): Promise<ObserveResult> {
+  ): Promise<PostActionCapture> {
     try {
       const settled = await new RealSettleObserve(observeScreen, this.timer).execute({
         ...options,
@@ -845,8 +859,16 @@ export class BaseVisualChange {
       });
       throwIfAborted(options.signal);
       return isAdoptableCapture(observation, settled.observation, true)
-        ? settled.observation
-        : this.notePostActionReadFailure(observation, "display settle", "unusable settle capture");
+        ? { observation: settled.observation, readFailed: false }
+        : this.notePostActionReadFailure(
+            observation,
+            "display settle",
+            "unusable settle capture",
+            this.staleDisplay(
+              observation.display.generation ??
+                this.displayTransitionReader.identityRevision(this.device.deviceId),
+            ),
+          );
     } catch (error) {
       throwIfAborted(options.signal);
       if (error instanceof Error && error.name === "AbortError") {
@@ -858,6 +880,32 @@ export class BaseVisualChange {
         errorMessage(error),
         error,
       );
+    }
+  }
+
+  private async finalizePostActionCapture(
+    captured: PostActionCapture,
+    options: { display?: string; signal?: AbortSignal; perf: PerformanceTracker },
+  ): Promise<PostActionCapture> {
+    try {
+      await this.captureTerminalObservationScreenshot(
+        captured.observation,
+        options.perf,
+        options.signal,
+      );
+      return captured;
+    } catch (error) {
+      if (options.display === undefined) {
+        throw error;
+      }
+      this.rethrowObservationAbort(error, options.signal);
+      const failed = this.notePostActionReadFailure(
+        captured.observation,
+        "terminal screenshot/audit",
+        errorMessage(error),
+        error,
+      );
+      return { ...failed, staleDisplay: failed.staleDisplay ?? captured.staleDisplay };
     }
   }
 
@@ -904,7 +952,7 @@ export class BaseVisualChange {
       return !!previousHash && !!currentHash && previousHash === currentHash;
     };
 
-    const captured = await this.capturePostActionObservation(
+    let captured = await this.capturePostActionObservation(
       observeScreen,
       {
         freshness: "fresh",
@@ -942,14 +990,21 @@ export class BaseVisualChange {
       latestObservation.viewHierarchy &&
       !latestObservation.viewHierarchy.hierarchy.error
     ) {
-      latestObservation = await this.settleDisplayObservation(latestObservation, observeScreen, {
+      captured = await this.settleDisplayObservation(latestObservation, observeScreen, {
         display: options.display,
         signal: options.signal,
       });
+      latestObservation = captured.observation;
     }
-
     if (!options.deferPostActionScreenshot) {
-      await this.captureTerminalObservationScreenshot(latestObservation, perf, options.signal);
+      captured = await this.finalizePostActionCapture(
+        { ...captured, observation: latestObservation },
+        { ...options, perf },
+      );
+      latestObservation = captured.observation;
+    }
+    if (captured.staleDisplay) {
+      blockResult.staleDisplay = captured.staleDisplay;
     }
 
     // Compare content fingerprints, not object identity: every observe returns a

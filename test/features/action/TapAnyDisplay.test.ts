@@ -265,6 +265,26 @@ test.each(["settle-throws", "throws", "settle-transition"] as const)(
       expect(result.success).toBe(true);
       expect(result.observation?.viewHierarchy).toEqual(h.observation.viewHierarchy);
       expect(result.observation?.freshness?.warning).toContain("display settle");
+      if (outcome === "settle-transition") {
+        expect(result.staleDisplay?.retry).toBe("observe");
+      }
     }
   },
 );
+
+test("tapAny block refusal before dispatch never receives the dispatched marker", async () => {
+  const h = harness(true);
+  h.action.observedInteraction = async () => {
+    h.transitions.transition();
+    return {
+      success: false,
+      error: "Unable to get view hierarchy, cannot tap on element",
+      observation: { ...h.observation, viewHierarchy: undefined },
+    };
+  };
+  const result = await h.action.execute({ action: "tap", display: "cover" });
+  expect(result.success).toBe(false);
+  expect(result.error).not.toContain("gesture was dispatched");
+  expect(result.error).not.toContain("Do not retry automatically");
+  expect(h.dispatches).toEqual([]);
+});

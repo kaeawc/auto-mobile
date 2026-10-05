@@ -87,6 +87,7 @@ type PinchExecutionContext = {
 
 type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestPinch"]>> & {
   observation?: ObserveResult;
+  staleDisplay?: PinchOnResult["staleDisplay"];
   pinchPath?: string;
 };
 
@@ -373,10 +374,14 @@ export class PinchOn extends BaseVisualChange {
         signal,
       );
       throwIfAborted(signal);
-      displayTarget?.assertCurrent();
+      if (result.success) {
+        this.checkPostActionDisplay({}, displayTarget?.assertCurrent, signal);
+      } else {
+        displayTarget?.assertCurrent();
+      }
       return result;
     };
-    return this.observedInteraction(
+    const result = await this.observedInteraction(
       async () => {
         throwIfAborted(signal);
         if (this.device.platform === "ios") {
@@ -427,6 +432,10 @@ export class PinchOn extends BaseVisualChange {
         },
       },
     );
+    if (result.success) {
+      this.checkPostActionDisplay(result, displayTarget?.assertCurrent, signal);
+    }
+    return result;
   }
 
   private formatPinchResult(
@@ -452,6 +461,7 @@ export class PinchOn extends BaseVisualChange {
         container: target.container,
         warning: target.warning,
         observation: pinchResult.observation,
+        ...(pinchResult.staleDisplay ? { staleDisplay: pinchResult.staleDisplay } : {}),
         // sendCommand's timeout result means dispatch completed without a confirmed reply.
         error: pinchResult.error?.startsWith("Pinch timed out after ")
           ? `Pinch outcome is indeterminate: the request was dispatched but no result was confirmed (${pinchResult.error}). Do not retry automatically.`
@@ -483,6 +493,7 @@ export class PinchOn extends BaseVisualChange {
       container: target.container,
       warning,
       observation: pinchResult.observation,
+      ...(pinchResult.staleDisplay ? { staleDisplay: pinchResult.staleDisplay } : {}),
       a11yTotalTimeMs: pinchResult.totalTimeMs,
       a11yGestureTimeMs: pinchResult.gestureTimeMs,
     };

@@ -379,6 +379,9 @@ describe("explicit action display", () => {
             if (outcome.startsWith("settle-")) {
               expect(result.observation?.settled).toBe(false);
               expect(result.observation?.freshness?.warning).toContain("display settle");
+              if (outcome === "settle-transition" || outcome === "settle-stale") {
+                expect(result.staleDisplay?.retry).toBe("observe");
+              }
             }
             if (outcome === "empty") {
               expect(result.effect?.basis).toBe("insufficient observation data");

@@ -1674,7 +1674,7 @@ export class TapAnyElement extends BaseVisualChange {
         },
       );
 
-      this.checkPostActionDisplay(result, targetDisplay?.assertCurrent, signal);
+      this.checkTapDeliveryDisplay(result, targetDisplay?.assertCurrent, signal);
       return { ...result, ...(warnings.size > 0 ? { warnings: [...warnings] } : {}) };
     } catch (error) {
       perf.end();
@@ -1695,6 +1695,19 @@ export class TapAnyElement extends BaseVisualChange {
         },
         error,
       );
+    }
+  }
+
+  private checkTapDeliveryDisplay(
+    result: TapAnyElementResult,
+    assertCurrent?: () => void,
+    signal?: AbortSignal,
+  ): void {
+    // A successful block returns only after the selected tap was delivered.
+    if (result.success) {
+      this.checkPostActionDisplay(result, assertCurrent, signal);
+    } else {
+      assertCurrent?.();
     }
   }
 

@@ -1,3 +1,5 @@
+import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -115,7 +117,7 @@ describe("PinchOn", () => {
     managerSpy?.mockRestore();
   });
 
-  test.each(["settle-throws", "throws"] as const)(
+  test.each(["settle-throws", "throws", "dispatch-transition", "settle-transition"] as const)(
     "confirmed display pinch preserves delivery after %s",
     async (outcome) => {
       const display = {
@@ -135,6 +137,18 @@ describe("PinchOn", () => {
         stderr: "",
       });
       fakeA11yService.setSupportedCommands(["gesture_display_id_v1"]);
+      const transitions = new FakeDisplayTransitionReader();
+      transitions.generation = 0;
+      transitions.fullRevision = 0;
+      transitions.panel = { key: "inner", role: "inner" };
+      const requestPinch = fakeA11yService.requestPinch.bind(fakeA11yService);
+      if (outcome === "dispatch-transition") {
+        spyOn(fakeA11yService, "requestPinch").mockImplementation(async (...args) => {
+          const result = await requestPinch(...args);
+          transitions.transition();
+          return result;
+        });
+      }
       const action = new PinchOn(
         {
           ...device,
@@ -146,6 +160,7 @@ describe("PinchOn", () => {
         fakeAdb,
         {
           timer: fakeTimer,
+          displayTransitions: transitions,
           capture: new FakeHierarchyCapture(() => before.viewHierarchy!),
           lastRenderedObservation: () => before,
         },
@@ -158,20 +173,34 @@ describe("PinchOn", () => {
         }
         postReads++;
         if (outcome === "throws" || postReads > 1) {
+          if (outcome === "settle-transition") {
+            transitions.transition();
+            throw new StaleDisplayError({
+              observedGeneration: 0,
+              currentGeneration: 1,
+              retry: "observe",
+            });
+          }
           throw new Error("display post-read unavailable");
         }
         return destination;
       });
       const result = await action.execute({ direction: "in", display: "inner", autoTarget: false });
       expect(fakeA11yService.getPinchHistory()).toHaveLength(1);
-      if (outcome === "throws") {
+      if (outcome === "throws" || outcome === "dispatch-transition") {
         expect(result.success).toBe(false);
         expect(result.error).toContain("Do not retry automatically");
         expect(result.observation).toBeUndefined();
+        if (outcome === "dispatch-transition") {
+          expect(result.staleDisplay?.retry).toBe("observe");
+        }
       } else {
         expect(result.success).toBe(true);
         expect(result.observation?.viewHierarchy).toEqual(destination.viewHierarchy);
         expect(result.observation?.freshness?.warning).toContain("display settle");
+        if (outcome === "settle-transition") {
+          expect(result.staleDisplay?.retry).toBe("observe");
+        }
       }
     },
   );

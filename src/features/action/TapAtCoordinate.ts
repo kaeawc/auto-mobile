@@ -1,5 +1,8 @@
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../accessibility/interfaces/AccessibilityDetector";
+import {
+  resolveTalkBackStateConfirmation,
+  TALKBACK_STATE_UNKNOWN_WARNING,
+} from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
@@ -404,7 +407,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private async executeOnDisplay(
     options: TapAtOptions,
     display: string,
-    onTapDelivered: () => void,
+    onTapDelivered: (talkBack?: boolean) => void,
     signal?: AbortSignal,
     onDispatchCompleted?: () => void,
     onActivationWarnings?: (warnings?: string[]) => void,
@@ -459,7 +462,7 @@ export class TapAtCoordinate extends BaseVisualChange {
             signal,
             {
               assertCurrent,
-              onTapDelivered,
+              onTapDelivered: () => onTapDelivered(true),
               onActivationWarnings,
             },
           );
@@ -491,16 +494,16 @@ export class TapAtCoordinate extends BaseVisualChange {
     perf.serial("tapAt");
     let dispatchedCoordinates: { x: number; y: number } | undefined;
     let iosDispatchTimestamp: number | undefined;
-    let tapsDelivered = 0;
-    let displayDispatchCompleted = false;
+    const delivery = { tapsDelivered: 0, talkBack: false, displayCompleted: false };
     const warnings = new Set<string>();
     const onActivationWarnings = (messages: string[] = []) => {
       for (const warning of messages) {
         warnings.add(warning);
       }
     };
-    const onTapDelivered = () => {
-      tapsDelivered++;
+    const onTapDelivered = (talkBack = false) => {
+      delivery.talkBack ||= talkBack;
+      delivery.tapsDelivered++;
     };
     const transitionRevision = {
       revision: this.currentActionRevision(),
@@ -519,7 +522,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           onTapDelivered,
           signal,
           () => {
-            displayDispatchCompleted = true;
+            delivery.displayCompleted = true;
           },
           onActivationWarnings,
         );
@@ -578,6 +581,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           switch (this.device.platform) {
             case "android": {
               const talkBackEnabled = await this.resolveTalkBackState(signal, onActivationWarnings);
+              delivery.talkBack = talkBackEnabled;
               await this.dispatchAndroidTapWithOneFreshRetry(
                 options,
                 resolved,
@@ -634,8 +638,8 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.annotateDeviceLock(result, preDispatchObservation);
       return { ...result, ...(warnings.size ? { warnings: [...warnings] } : {}) };
     } catch (error) {
-      this.rethrowObservationAbort(error, signal, displayDispatchCompleted);
-      return this.createDispatchFailure(error, options, dispatchedCoordinates, tapsDelivered);
+      this.rethrowObservationAbort(error, signal, delivery.displayCompleted);
+      return this.createDispatchFailure(error, options, dispatchedCoordinates, delivery);
     } finally {
       perf.end();
     }
@@ -645,9 +649,10 @@ export class TapAtCoordinate extends BaseVisualChange {
     error: unknown,
     options: TapAtOptions,
     dispatchedCoordinates: { x: number; y: number } | undefined,
-    tapsDelivered: number,
+    delivery: { tapsDelivered: number; talkBack: boolean },
   ): TapAtResult {
     const action = options.action ?? "tap";
+    const { tapsDelivered, talkBack } = delivery;
     logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
     const point = dispatchedCoordinates ?? failurePoint(options, this.device.platform);
     const result = withStaleDisplay(
@@ -660,10 +665,16 @@ export class TapAtCoordinate extends BaseVisualChange {
       },
       error,
     );
-    result.error +=
-      error instanceof DispatchedObservationError
-        ? ` ${tapsDelivered} ${tapsDelivered === 1 ? "tap was" : "taps were"} delivered.`
-        : partialDoubleTapNote(action, tapsDelivered);
+    if (talkBack && action !== "longPress") {
+      if (error instanceof DispatchedObservationError && tapsDelivered === 3) {
+        result.error += " A TalkBack focus touch and an activation double tap were delivered.";
+      }
+    } else {
+      result.error +=
+        error instanceof DispatchedObservationError
+          ? ` ${tapsDelivered} ${tapsDelivered === 1 ? "tap was" : "taps were"} delivered.`
+          : partialDoubleTapNote(action, tapsDelivered);
+    }
     return result;
   }
 
@@ -936,8 +947,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     onActivationWarnings?: (warnings?: string[]) => void,
   ): Promise<boolean> {
     throwIfAborted(signal);
-    const state = await awaitWhileRequestIsLive(
-      this.accessibilityDetector.resolveTalkBackState(
+    const { talkBack, unconfirmed } = await awaitWhileRequestIsLive(
+      resolveTalkBackStateConfirmation(
+        this.accessibilityDetector,
         this.device.deviceId,
         this.adb,
         this.featureFlags,
@@ -945,10 +957,10 @@ export class TapAtCoordinate extends BaseVisualChange {
       signal,
     );
     throwIfAborted(signal);
-    if (state === null) {
+    if (unconfirmed) {
       onActivationWarnings?.([TALKBACK_STATE_UNKNOWN_WARNING]);
     }
-    return state === true;
+    return talkBack === true;
   }
 
   private async dispatchAndroidTalkBackTap(

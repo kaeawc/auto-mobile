@@ -772,9 +772,10 @@ describe("TapAtCoordinate", () => {
   );
   let defaultDetection: ReturnType<typeof spyOn>;
   beforeEach(() => {
-    defaultDetection = spyOn(accessibilityDetector, "resolveTalkBackState").mockResolvedValue(
-      false,
-    );
+    defaultDetection = spyOn(
+      accessibilityDetector,
+      "resolveTalkBackStateWithConfirmation",
+    ).mockResolvedValue({ talkBack: false, unconfirmed: false });
     displayTransitions.reset(androidDevice.deviceId);
     displayTransitions.reset(iosDevice.deviceId);
   });
@@ -2153,8 +2154,19 @@ test("iOS snapshot tap accepts size-derived rotation and rejects a later rotatio
 });
 
 describe("TapAtCoordinate TalkBack", () => {
-  function setup(state: boolean | null = true, device = androidDevice, useDefaultDriver = false) {
-    const detector = new FakeAccessibilityDetector();
+  function setup(
+    state: boolean | null = true,
+    device = androidDevice,
+    useDefaultDriver = false,
+    unconfirmed?: boolean,
+  ) {
+    class ConfirmationDetector extends FakeAccessibilityDetector {
+      async resolveTalkBackStateWithConfirmation() {
+        return { talkBack: state, unconfirmed: unconfirmed ?? false };
+      }
+    }
+    const detector =
+      unconfirmed === undefined ? new FakeAccessibilityDetector() : new ConfirmationDetector();
     detector.setDefaultResult(state, state === true ? "talkback" : "unknown");
     const driver = new FakeTalkBackNavigationDriver();
     const timer = new FakeTimer();
@@ -2211,6 +2223,48 @@ describe("TapAtCoordinate TalkBack", () => {
       expect(h.detector.getDetectionCallCount()).toBe(1);
     },
   );
+
+  test.each([true, false])(
+    "unconfirmed last-known state %s warns and preserves the doubleTap route",
+    async (state) => {
+      const h = setup(state, androidDevice, false, true);
+      const result = await h.tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
+      expect(result.success).toBe(true);
+      expect(result.warnings).toContain(TALKBACK_STATE_UNKNOWN_WARNING);
+      expect(h.driver.tapHistory).toHaveLength(state ? 1 : 0);
+      expect(h.driver.doubleTapHistory).toHaveLength(state ? 1 : 0);
+      expect(h.plainCalls).toEqual(
+        state
+          ? []
+          : [
+              [1, 2, 10],
+              [1, 2, 10],
+            ],
+      );
+    },
+  );
+
+  test.each([true, false])("confirmed state %s has no state warning", async (state) => {
+    const h = setup(state, androidDevice, false, false);
+    const result = await h.tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
+    expect(result.success).toBe(true);
+    expect(result.warnings ?? []).not.toContain(TALKBACK_STATE_UNKNOWN_WARNING);
+    expect(h.driver.doubleTapHistory).toHaveLength(state ? 1 : 0);
+    expect(h.plainCalls).toHaveLength(state ? 0 : 2);
+  });
+
+  test("TalkBack doubleTap activation failure does not report a partial double tap", async () => {
+    const h = setup();
+    h.driver.queueTapResult({ success: true, totalTimeMs: 1 });
+    h.driver.queueTapResult({ success: false, totalTimeMs: 0, error: "Activation rejected" });
+    const result = await h.tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Focus touch was delivered; activation failed.");
+    expect(result.error).not.toContain("Double tap partially applied");
+    expect(h.driver.tapHistory).toHaveLength(1);
+    expect(h.driver.doubleTapHistory).toHaveLength(1);
+    expect(h.observeScreen.getExecuteCallCount()).toBe(1);
+  });
 
   test("unconfirmed activation uses the existing warnings field", async () => {
     const h = setup();
@@ -2398,7 +2452,7 @@ describe("TapAtCoordinate TalkBack", () => {
     expect(h.driver.doubleTapHistory).toEqual([]);
   });
 
-  test("post-observation failure reports all three delivered TalkBack touches", async () => {
+  test("post-observation failure describes the TalkBack focus and activation", async () => {
     const h = setup();
     const capture = h.observeScreen.execute.bind(h.observeScreen);
     let captures = 0;
@@ -2410,7 +2464,10 @@ describe("TapAtCoordinate TalkBack", () => {
     });
     const result = await h.tapAt.execute({ x: 1, y: 2 });
     expect(result.success).toBe(false);
-    expect(result.error).toContain("3 taps were delivered.");
+    expect(result.error).not.toContain("3 taps were delivered");
+    expect(result.error).toContain(
+      "A TalkBack focus touch and an activation double tap were delivered.",
+    );
     expect(h.driver.tapHistory).toHaveLength(1);
     expect(h.driver.doubleTapHistory).toHaveLength(1);
   });

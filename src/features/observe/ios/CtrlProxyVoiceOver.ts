@@ -14,6 +14,7 @@ import { sendCommand } from "../DeviceServiceUtils";
 import { getAbortSignal } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { ActionableError } from "../../../models/ActionableError";
 
 /**
  * Default timeout for `requestVoiceOverState`, shared with
@@ -228,6 +229,7 @@ export class CtrlProxyVoiceOver {
     perf?: PerformanceTracker,
     options?: VoiceOverActivationOptions,
   ): Promise<CtrlProxyActionResult> {
+    const signal = getAbortSignal();
     let dispatched = false;
     const unconfirmed = (error: string): CtrlProxyActionResult => ({
       success: false,
@@ -245,7 +247,7 @@ export class CtrlProxyVoiceOver {
         timeoutMs,
         perf,
         cancelScreenshotBackoff: false,
-        abortSignal: getAbortSignal(),
+        abortSignal: signal,
         onDispatch: () => {
           dispatched = true;
         },
@@ -262,8 +264,18 @@ export class CtrlProxyVoiceOver {
       // after dispatch confirms the runner answered, regardless of its error text.
       return { ...result, dispatched, acknowledged: result.acknowledged ?? dispatched };
     } catch (error) {
+      // A dispatched ActionableError acknowledges a runner refusal, except for
+      // the caller's abort reason; preserve the refusal's original throw contract.
+      if (dispatched && error instanceof ActionableError && error !== signal?.reason) {
+        throw error;
+      }
       logger.warn("[CtrlProxyVoiceOver] Activation transport failed", error);
       return unconfirmed(errorMessage(error));
+    } finally {
+      // Cancellation before dispatch must escape both result and catch paths without fallback.
+      if (!dispatched) {
+        signal?.throwIfAborted();
+      }
     }
   }
 }

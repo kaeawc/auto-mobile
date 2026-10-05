@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
+import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import type { CtrlProxyActionResult, IOSCtrlProxy } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import {
@@ -383,15 +385,94 @@ describe("CtrlProxyVoiceOver", function () {
       }
     });
 
-    test("an already aborted caller never dispatches", async () => {
+    test("a dispatched runner_busy rejection is rethrown unchanged", async () => {
+      const h = createIosDelegateHarness();
+      const error = new ActionableError(
+        "iOS runner is busy executing request_tap for 1.0s; retry shortly",
+      );
+      const pending = new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
+        "Submit",
+        "activate",
+      );
+      await Promise.resolve();
+      expect(h.sentMessages).toHaveLength(1);
+      h.requestManager.reject(h.lastRequestId()!, error);
+      await expect(pending).rejects.toBe(error);
+      expect(h.sentMessages).toHaveLength(1);
+    });
+
+    test("a service port change after dispatch remains unconfirmed", async () => {
+      const h = createIosDelegateHarness();
+      const pending = new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
+        "Submit",
+        "activate",
+      );
+      await Promise.resolve();
+      h.requestManager.cancelAll(new CtrlProxyServicePortChangedError());
+      expect(await pending).toMatchObject({
+        success: false,
+        error: "CtrlProxy service port changed",
+        dispatched: true,
+        acknowledged: false,
+        retryable: false,
+      });
+      expect(h.sentMessages).toHaveLength(1);
+    });
+
+    test("an ActionableError send failure is not a runner reply", async () => {
+      const h = createIosDelegateHarness();
+      h.context.getWebSocket()!.send = () => {
+        throw new ActionableError("send failed");
+      };
+      expect(
+        await new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Submit", "activate"),
+      ).toMatchObject({
+        success: false,
+        error: "send failed",
+        dispatched: false,
+        acknowledged: false,
+      });
+    });
+
+    test.each(["result", "catch"] as const)(
+      "an already aborted caller rethrows its reason on the %s path without dispatch",
+      async (path) => {
+        const h = createIosDelegateHarness();
+        const controller = new AbortController();
+        const error = new ActionableError("activation cancelled before dispatch");
+        controller.abort(error);
+        if (path === "catch") {
+          h.context.ensureConnected = async () => {
+            throw error;
+          };
+        }
+        const pending = runWithAbortSignal(controller.signal, () =>
+          new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Submit", "activate"),
+        );
+        await expect(pending).rejects.toBe(error);
+        expect(h.sentMessages).toHaveLength(0);
+        expect(h.requestManager.getPendingCount()).toBe(0);
+      },
+    );
+
+    test("an ActionableError abort after dispatch remains unconfirmed", async () => {
       const h = createIosDelegateHarness();
       const controller = new AbortController();
-      controller.abort();
-      const result = await runWithAbortSignal(controller.signal, () =>
+      const error = new ActionableError("activation cancelled after dispatch");
+      const pending = runWithAbortSignal(controller.signal, () =>
         new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Submit", "activate"),
       );
-      expect(result).toMatchObject({ success: false, dispatched: false, acknowledged: false });
-      expect(h.sentMessages).toHaveLength(0);
+      await Promise.resolve();
+      expect(h.sentMessages).toHaveLength(1);
+      controller.abort(error);
+      expect(await pending).toMatchObject({
+        success: false,
+        error: error.message,
+        dispatched: true,
+        acknowledged: false,
+        retryable: false,
+      });
+      expect(h.sentMessages).toHaveLength(1);
     });
 
     // Regression guard for #2857: VoiceOver activation must ride the existing

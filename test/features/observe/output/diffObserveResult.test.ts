@@ -1,4 +1,4 @@
-import { androidEnabledObservation } from "../../../helpers/androidEnabledCapture";
+import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import {
@@ -3079,7 +3079,7 @@ test("iOS stable identity ignores lower- and upper-case generated UUID view-ids"
 });
 
 test("captured Android enabled flip is exactly one changed node in either direction", () => {
-  const captures = [androidEnabledObservation(), androidEnabledObservation("false")].map(
+  const captures = [androidControlObservation("enabled"), androidControlObservation()].map(
     (observation) =>
       sanitizeObserveResult(observation, { dropElements: false, project: "full", compact: true }),
   );

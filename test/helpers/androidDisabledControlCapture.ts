@@ -1,4 +1,4 @@
-import capturedIme from "../fixtures/android-ime-window/playground-gboard-api36.json";
+import capture from "../fixtures/android-enabled/playground-disabled-control-api36.json";
 import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
   AccessibilityHierarchy,
@@ -11,32 +11,41 @@ import { RequestManager } from "../../src/utils/RequestManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-// Existing raw device capture, also used by skeletonProjection.test.ts. No real
-// disabled Android capture was found in test/fixtures or the mt26–mt30 evidence
-// tree (including its other scratch batches). Derive the disabled wire value
-// in-test, exactly as ViewHierarchyExtractor emits it; never edit the capture.
-export function capturedAndroidControl(enabled?: string): AccessibilityNode {
-  const capture = structuredClone(capturedIme) as AccessibilityHierarchy;
-  const pending = [capture.hierarchy];
+// Parse the raw wire hierarchy once; the top-level viewHierarchy is already converted.
+const rawHierarchy: AccessibilityHierarchy = JSON.parse(capture.rawViewHierarchy.json);
+const disabledControl = findDisabledControl();
+
+function findDisabledControl(): AccessibilityNode {
+  const pending = [rawHierarchy.hierarchy];
   while (pending.length) {
     const node = pending.pop();
     if (!node) {
       continue;
     }
-    if (node["view-id"] === "6b9279dc-8ced-8c76-7de6-a9d07f621ae5") {
-      if (enabled !== undefined) {
-        node.enabled = enabled;
-      }
+    if (node.enabled === "false") {
       return node;
     }
     if (node.node) {
       pending.push(...(Array.isArray(node.node) ? node.node : [node.node]));
     }
   }
-  throw new Error("Expected Basic Text Field in captured Android hierarchy");
+  throw new Error("Expected Disabled button in captured Android hierarchy");
 }
 
-export function androidEnabledObservation(enabled?: string): ObserveResult {
+export function capturedAndroidControl(
+  state: "disabled" | "enabled" = "disabled",
+): AccessibilityNode {
+  const node = structuredClone(disabledControl);
+  if (state === "enabled") {
+    // State-only comparisons need the same node: enabled wire nodes omit this key.
+    delete node.enabled;
+  }
+  return node;
+}
+
+export function androidControlObservation(
+  state: "disabled" | "enabled" = "disabled",
+): ObserveResult {
   const timer = new FakeTimer();
   const context: HierarchyDelegateContext = {
     timer,
@@ -53,8 +62,8 @@ export function androidEnabledObservation(enabled?: string): ObserveResult {
   };
   const viewHierarchy = new CtrlProxyHierarchy(context).convertToViewHierarchyResult({
     updatedAt: 1,
-    packageName: capturedIme.packageName,
-    hierarchy: { node: capturedAndroidControl(enabled) },
+    packageName: rawHierarchy.packageName,
+    hierarchy: { node: capturedAndroidControl(state) },
   });
   return {
     updatedAt: 1,

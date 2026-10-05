@@ -16,6 +16,7 @@
     "test/fixtures/swipeon-auto-target/*.json",
     "test/fixtures/identify-interactions/*.json",
     "test/fixtures/android-ime-window/*.json",
+    "test/fixtures/android-enabled/*.json",
     "test/fixtures/observe-output/ios-keyboard-tabbar/*.json",
     "test/fixtures/observe-output/ios-keyboard-states/*.json",
     "test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json",

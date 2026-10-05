@@ -1,4 +1,4 @@
-import { androidEnabledObservation } from "../../../helpers/androidEnabledCapture";
+import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
@@ -220,7 +220,7 @@ test("linked window above the IME retains tap even inside the keyboard rectangle
 });
 
 test("captured Android control preserves disabled state through conversion, normalisation and full/raw output", () => {
-  const observation = androidEnabledObservation("false");
+  const observation = androidControlObservation();
   const hierarchy = observation.viewHierarchy!;
   const element = observation.elements!.clickable[0];
   expect(element.enabled).toBe("false");

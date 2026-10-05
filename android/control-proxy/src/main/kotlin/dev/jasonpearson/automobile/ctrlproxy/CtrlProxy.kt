@@ -1631,7 +1631,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           .launchIn(serviceScope)
 
       // Initialize storage subscription manager for SharedPreferences inspection
-      storageSubscriptionManager = StorageSubscriptionManager(this)
+      storageSubscriptionManager = StorageSubscriptionManager(this, scope = serviceScope)
       Log.d(TAG, "Storage subscription manager initialized")
 
       // Subscribe to storage change events and broadcast them

@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import type { ZodTypeAny } from "zod";
+import { z as specZ, type ZodTypeAny } from "zod";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { ToolRegistry } from "./toolRegistry";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchemaHelpers";
@@ -22,6 +22,9 @@ import type { Timer } from "../utils/SystemTimer";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
+import { deleteInternalToolParams } from "../daemon/constants";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 
 // The settled spec is Zod 3; registry/device targeting use Zod 4. The installed
 // MCP SDK converts the original schema, avoiding a second authored spec schema.
@@ -45,6 +48,8 @@ function rehomeSpecReferences(value: unknown): void {
 }
 rehomeSpecReferences(advertisedSpec);
 delete advertisedSpec.$schema;
+const specDetailsSchema = specZ.object({ spec: overlaySpecSchema });
+const stateDetailsSchema = overlaySpecSchema.pick({ state: true });
 
 function specError(spec: unknown): string | undefined {
   const validated = validateOverlaySpec(spec);
@@ -52,11 +57,15 @@ function specError(spec: unknown): string | undefined {
     return undefined;
   }
   const { path, message } = validated.error;
+  // Nested authored values are not tool metadata. Strip only the envelope so
+  // reserved names inside state remain valid user keys.
+  const external = { spec };
+  deleteInternalToolParams(external);
   // The contract supplies deterministic paths/limits; Zod supplies allowed enum
   // values and numeric bounds. Avoid recursing into inputs that exceed limits.
   const details = /limit|depth|budget/i.test(message)
     ? undefined
-    : overlaySpecSchema.safeParse(spec);
+    : specDetailsSchema.safeParse(external);
   return `Invalid overlay at spec.${path}: ${message}${details && !details.success ? `; ${details.error.message}` : ""}`;
 }
 
@@ -72,7 +81,9 @@ const specInput = withJsonSchemaOverride(
 const stateInput = z
   .record(z.string(), z.union([z.string(), z.number().finite(), z.boolean()]))
   .superRefine((value, ctx) => {
-    if (!overlaySpecSchema.shape.state.safeParse(value).success) {
+    const external = { state: value };
+    deleteInternalToolParams(external);
+    if (!stateDetailsSchema.safeParse(external).success) {
       ctx.addIssue({
         code: "custom",
         message:
@@ -187,6 +198,7 @@ interface OverlayToolDependencies {
 }
 const responseFor = (payload: z.infer<typeof overlayOutputSchema>) =>
   withIsErrorOnFailure(createStructuredToolResponse(payload), payload.success);
+let unsubscribeOverlayLifecycle: (() => void) | undefined;
 
 // Validation has already succeeded. Forward authored specs unchanged; omitted
 // defaults (including opacity=100) remain the wire contract's defaults.
@@ -208,13 +220,18 @@ async function mutate(
   return client.requestDismissOverlay(target, args.timeoutMs);
 }
 
-export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): void {
+export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
+  // Registry replacement makes the previous handler/store obsolete.
+  unsubscribeOverlayLifecycle?.();
   const store = dependencies.store ?? new InMemoryOverlayStatusStore(dependencies.clock);
   const clientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
   const handler = async (device: BootedDevice, input: unknown) => {
-    const parsed = overlaySchema.safeParse(input);
+    const external: Record<string, unknown> =
+      input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
+    deleteInternalToolParams(external);
+    const parsed = overlaySchema.safeParse(external);
     if (!parsed.success) {
       return responseFor({
         success: false,
@@ -259,4 +276,24 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },
   );
+  const unsubscribeSession = SessionReleaseBroadcaster.subscribe(
+    (sessionUuid, _reason, snapshot) => {
+      store.clearSession(sessionUuid);
+      if (snapshot) {
+        store.clearDevice(snapshot.deviceId);
+      }
+    },
+  );
+  const unsubscribeDevice = getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved((deviceId) => {
+    store.clearDevice(deviceId);
+  });
+  const unsubscribe = () => {
+    unsubscribeSession();
+    unsubscribeDevice();
+    if (unsubscribeOverlayLifecycle === unsubscribe) {
+      unsubscribeOverlayLifecycle = undefined;
+    }
+  };
+  unsubscribeOverlayLifecycle = unsubscribe;
+  return unsubscribe;
 }

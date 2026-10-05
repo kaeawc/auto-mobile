@@ -18,6 +18,10 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { compileJsonSchema } from "../helpers/jsonSchemaCompile";
 import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
+import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
+import { InMemoryOverlayStatusStore } from "../../src/features/overlay/OverlayStatusStore";
 
 const device: BootedDevice = { deviceId: "fake-overlay", platform: "android", name: "Fake" };
 const spec = {
@@ -30,13 +34,17 @@ describe("overlay MCP tool", () => {
   let client: FakeCtrlProxy;
   let timer: FakeTimer;
   let restore: () => void;
+  let unsubscribe: () => void;
   beforeEach(() => {
     restore = preserveToolRegistry();
     timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    registerOverlayTools({ clientFactory: () => client, clock: timer });
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, clock: timer });
   });
-  afterEach(() => restore());
+  afterEach(() => {
+    unsubscribe();
+    restore();
+  });
 
   async function call(input: unknown, target = device) {
     const response = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(target, input);
@@ -49,8 +57,28 @@ describe("overlay MCP tool", () => {
   test("registering overlay preserves an existing highlight registration", () => {
     registerHighlightTools();
     const highlight = ToolRegistry.getTool("highlight");
-    registerOverlayTools({ clientFactory: () => client, clock: timer });
+    const unsubscribeReplacement = registerOverlayTools({
+      clientFactory: () => client,
+      clock: timer,
+    });
+    unsubscribeReplacement();
     expect(ToolRegistry.getTool("highlight")).toBe(highlight);
+  });
+
+  test("replacement registration retires lifecycle subscriptions for the previous store", () => {
+    const oldStore = new InMemoryOverlayStatusStore(timer);
+    const newStore = new InMemoryOverlayStatusStore(timer);
+    const scope = { deviceId: device.deviceId, sessionUuid: "one" };
+    oldStore.record(scope, "show", { id: "old" }, { success: true });
+    newStore.record(scope, "show", { id: "new" }, { success: true });
+    const unsubscribeOld = registerOverlayTools({ clientFactory: () => client, store: oldStore });
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, store: newStore });
+    // A stale disposer must not detach the replacement's listeners.
+    unsubscribeOld();
+    SessionReleaseBroadcaster.emit("one", "released");
+    getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(device.deviceId);
+    expect(oldStore.status(scope).overlays.map((entry) => entry.id)).toEqual(["old"]);
+    expect(newStore.status(scope)).toEqual({ overlays: [] });
   });
 
   test("ambient routing session scopes local status when input omits sessionUuid", async () => {
@@ -83,6 +111,122 @@ describe("overlay MCP tool", () => {
     expect(client.getOverlayHistory()[0].spec?.window).toEqual({
       placement: spec.window.placement,
     });
+  });
+
+  test("successful show replaces the previous id, which status no longer offers for dismissal", async () => {
+    await call({ action: "show", spec });
+    await call({ action: "show", spec: { ...spec, id: "second" } });
+    const status = (await call({ action: "status" })).payload;
+    expect(status.overlays?.map((entry) => entry.id)).toEqual(["second"]);
+    client.setOverlayResult({ success: false, error: "Unknown overlay id" });
+    await call({ action: "dismiss", id: "panel" });
+    expect((await call({ action: "status" })).payload.overlays?.map((entry) => entry.id)).toEqual([
+      "second",
+    ]);
+  });
+
+  test("successful show replaces presence across sessions on only that device", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    await call({ action: "show", spec, sessionUuid: "one" }, { ...device, deviceId: "other" });
+    await call({ action: "show", spec: { ...spec, id: "second" }, sessionUuid: "two" });
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+    expect(
+      (await call({ action: "status", sessionUuid: "two" })).payload.overlays?.map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(["second"]);
+    expect(
+      (await call({ action: "status", sessionUuid: "one" }, { ...device, deviceId: "other" }))
+        .payload.overlays,
+    ).toHaveLength(1);
+  });
+
+  test("session release forgets all device scopes but preserves unrelated devices", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    await call({ action: "show", spec: { ...spec, id: "second" }, sessionUuid: "two" });
+    await call({ action: "show", spec, sessionUuid: "other" }, { ...device, deviceId: "other" });
+    SessionReleaseBroadcaster.emit("one", "released");
+    expect((await call({ action: "status", sessionUuid: "one" })).payload).toEqual({
+      success: true,
+      overlays: [],
+    });
+    expect((await call({ action: "status", sessionUuid: "two" })).payload).toEqual({
+      success: true,
+      overlays: [],
+    });
+    expect(
+      (await call({ action: "status", sessionUuid: "other" }, { ...device, deviceId: "other" }))
+        .payload.overlays,
+    ).toHaveLength(1);
+  });
+
+  test("device removal forgets every scope for that device", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    await call({ action: "show", spec: { ...spec, id: "second" }, sessionUuid: "two" });
+    await call({ action: "show", spec, sessionUuid: "one" }, { ...device, deviceId: "other" });
+    getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(device.deviceId);
+    for (const sessionUuid of ["one", "two"]) {
+      expect((await call({ action: "status", sessionUuid })).payload).toEqual({
+        success: true,
+        overlays: [],
+      });
+    }
+    expect(
+      (await call({ action: "status", sessionUuid: "one" }, { ...device, deviceId: "other" }))
+        .payload.overlays,
+    ).toHaveLength(1);
+  });
+
+  test("canonical metadata is stripped only from tool input, preserving authored state keys", async () => {
+    const state = Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, "authored"]));
+    const metadata = Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true]));
+    const authored = { ...spec, state };
+    expect((await call({ action: "show", spec: authored, ...metadata })).payload.success).toBe(
+      true,
+    );
+    await call({ action: "update", id: "panel", state, ...metadata });
+    expect(client.getOverlayHistory()[0].spec).toEqual(authored);
+    expect(client.getOverlayHistory()[1].update).toEqual({ id: "panel", state });
+    expect(state).toEqual(
+      Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, "authored"])),
+    );
+  });
+
+  test("failed replacement preserves presence and lastResult for an existing scope", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    client.setOverlayResult({ success: false, error: "Service refused" });
+    const failed = await call({
+      action: "show",
+      spec: { ...spec, id: "second" },
+      sessionUuid: "one",
+    });
+    const status = (await call({ action: "status", sessionUuid: "one" })).payload;
+    expect(status.overlays?.map((entry) => entry.id)).toEqual(["panel"]);
+    expect(status.lastResult).toEqual(failed.payload.lastResult);
+    await call({ action: "show", spec: { ...spec, id: "second" }, sessionUuid: "two" });
+    expect(
+      (await call({ action: "status", sessionUuid: "two" })).payload.lastResult,
+    ).toBeUndefined();
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toHaveLength(1);
+  });
+
+  test("a reserved name in authored state is still validated", async () => {
+    const state = { [INTERNAL_TOOL_PARAM_NAMES[0]]: { invalid: true } };
+    expect((await call({ action: "update", id: "panel", state })).response.isError).toBe(true);
+    expect(client.getOverlayHistory()).toEqual([]);
+  });
+
+  test("release snapshot clears unscoped device entries even without session history", async () => {
+    await call({ action: "show", spec });
+    SessionReleaseBroadcaster.emit("unrecorded-session", "released", {
+      sessionId: "unrecorded-session",
+      deviceId: device.deviceId,
+      releaseReason: "released",
+      releasedAtMs: timer.now(),
+      terminal: true,
+      heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 50, ageMs: 0 },
+    });
+    expect((await call({ action: "status" })).payload).toEqual({ success: true, overlays: [] });
   });
 
   test("update spec and state, dismiss id and all update local status", async () => {
@@ -196,7 +340,8 @@ describe("overlay MCP tool", () => {
     expect(failed.payload.error).toContain("enable accessibility");
     let status = (await call({ action: "status" })).payload;
     expect(status.overlays).toEqual([]);
-    expect(status.lastResult?.success).toBe(false);
+    expect(status.lastResult).toBeUndefined();
+    expect(failed.payload.lastResult?.success).toBe(false);
     client.setOverlayResult({ success: true });
     await call({ action: "show", spec });
     client.setOverlayResult({ success: false, error: "Service refused" });
@@ -248,16 +393,18 @@ describe("overlay MCP tool", () => {
 describe("overlay discovery over MCP", () => {
   let fixture: McpTestFixture;
   let restore: () => void;
+  let unsubscribe: () => void;
   beforeAll(async () => {
     restore = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
     ToolRegistry.clearTools();
-    registerOverlayTools();
+    unsubscribe = registerOverlayTools();
     registerHighlightTools();
     registerToolSelectionTools();
   });
   afterAll(async () => {
+    unsubscribe();
     await fixture.teardown();
     restore();
   });
@@ -286,6 +433,7 @@ describe("overlay CLI and advertised schema registration", () => {
   let definition: ReturnType<typeof ToolRegistry.getToolDefinitions>[number];
   beforeAll(() => {
     restore = preserveToolRegistry();
+    ToolRegistry.clearTools();
     initializeCliTools();
     definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "overlay")!;
     compileJsonSchema(definition.inputSchema);

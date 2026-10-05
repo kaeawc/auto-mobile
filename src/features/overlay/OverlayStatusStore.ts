@@ -22,6 +22,8 @@ export interface OverlayScope {
 }
 export interface OverlayStatusStore {
   status(scope: OverlayScope): OverlayStatus;
+  clearDevice(deviceId: string): void;
+  clearSession(sessionUuid: string): void;
   record(
     scope: OverlayScope,
     action: OverlayMutation,
@@ -29,13 +31,14 @@ export interface OverlayStatusStore {
     result: OverlayResult,
   ): OverlayLastResult;
 }
+interface StoredOverlayStatus extends OverlayScope {
+  shown: Map<string, OverlayLastResult>;
+  lastResult: OverlayLastResult;
+}
 
 /** Host knowledge only: successful shows establish presence; successful dismissals remove it. */
 export class InMemoryOverlayStatusStore implements OverlayStatusStore {
-  private readonly scopes = new Map<
-    string,
-    { deviceId: string; shown: Map<string, OverlayLastResult>; lastResult: OverlayLastResult }
-  >();
+  private readonly scopes = new Map<string, StoredOverlayStatus>();
 
   constructor(private readonly clock: Pick<Timer, "now"> = defaultTimer) {}
 
@@ -54,26 +57,55 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     result: OverlayResult,
   ): OverlayLastResult {
     const entry = this.createResult(action, target, result);
-    const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId])) ?? {
-      deviceId: scope.deviceId,
+    const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
+    const existing = this.scopes.get(key);
+    if (!existing && !result.success) {
+      return { ...entry };
+    }
+    const stored = existing ?? {
+      ...scope,
       shown: new Map<string, OverlayLastResult>(),
       lastResult: entry,
     };
     stored.lastResult = entry;
-    if (action === "dismiss" && result.success) {
-      if (target.all) {
-        this.clearDevice(scope.deviceId);
-      } else if (target.id) {
-        this.clearDevice(scope.deviceId, target.id);
-      }
-    } else if (
-      target.id &&
-      ((action === "show" && result.success) || stored.shown.has(target.id))
-    ) {
-      stored.shown.set(target.id, entry);
-    }
-    this.scopes.set(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]), stored);
+    this.updatePresence(stored, entry);
+    this.scopes.set(key, stored);
     return { ...entry };
+  }
+
+  private updatePresence(stored: StoredOverlayStatus, entry: OverlayLastResult): void {
+    if (entry.lastAction === "show" && entry.success && entry.id) {
+      // The device has one active overlay; replacement invalidates every session's presence.
+      this.clearShown(stored.deviceId);
+      stored.shown.set(entry.id, entry);
+    } else if (entry.lastAction === "dismiss" && entry.success) {
+      if (entry.all) {
+        this.clearShown(stored.deviceId);
+      } else if (entry.id) {
+        this.clearShown(stored.deviceId, entry.id);
+      }
+    } else if (entry.id && stored.shown.has(entry.id)) {
+      stored.shown.set(entry.id, entry);
+    }
+  }
+
+  clearDevice(deviceId: string): void {
+    for (const [key, stored] of this.scopes) {
+      if (stored.deviceId === deviceId) {
+        this.scopes.delete(key);
+      }
+    }
+  }
+
+  clearSession(sessionUuid: string): void {
+    const devices = new Set(
+      Array.from(this.scopes.values())
+        .filter((stored) => stored.sessionUuid === sessionUuid)
+        .map((stored) => stored.deviceId),
+    );
+    for (const deviceId of devices) {
+      this.clearDevice(deviceId);
+    }
   }
 
   private createResult(
@@ -91,7 +123,7 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     };
   }
 
-  private clearDevice(deviceId: string, id?: string): void {
+  private clearShown(deviceId: string, id?: string): void {
     for (const known of this.scopes.values()) {
       if (known.deviceId !== deviceId) {
         continue;

@@ -25,6 +25,7 @@ import {
 } from "../../src/server/observationResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { z } from "zod/v4";
+import realTapOns from "../fixtures/android-action-compact/tapon-consecutive-emulator-5600.json";
 import { settleEmbeddedObservationInResponse } from "../../src/server/embeddedObservationSettle";
 import { RealSettleObserve } from "../../src/features/observe/SettleObserve";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
@@ -4997,5 +4998,80 @@ describe("actions-compact-metadata", () => {
     expect(structuredPayload(result)).not.toHaveProperty("insets");
     expect(records.get("s1")?.blocks).toEqual(metadata);
     expect(observation(emit())).not.toHaveProperty("insets");
+  });
+
+  // Real consecutive tapOn blocks captured on emulator-5600 (#9886): the back stack
+  // differs between the two calls only in capturedAt.
+  function realAction(which: "first" | "second", blocks: Record<string, unknown> = {}) {
+    return {
+      success: true,
+      observation: { ...makeObserveResult(), ...structuredClone(realTapOns[which]), ...blocks },
+    };
+  }
+
+  test("real consecutive Android taps omit backStack that differs only in capturedAt", () => {
+    expect(realTapOns.first.backStack.capturedAt).not.toBe(realTapOns.second.backStack.capturedAt);
+    expect(observation(emit(realAction("first")))).toHaveProperty("backStack");
+    const second = observation(emit(realAction("second")));
+    expect(second).not.toHaveProperty("backStack");
+    // The baseline stays what the client last received, so the next change still compares.
+    expect(records.get("s1")?.blocks.backStack).toEqual(realTapOns.first.backStack);
+  });
+  test("real consecutive Android taps still send freshness and gfxMetrics", () => {
+    emit(realAction("first"));
+    const second = observation(emit(realAction("second")));
+    expect(second.freshness).toEqual(realTapOns.second.freshness);
+    expect(second.gfxMetrics).toEqual(realTapOns.second.gfxMetrics);
+  });
+  test("a different top activity sends backStack in full with the new capturedAt", () => {
+    emit(realAction("first"));
+    const moved = structuredClone(realTapOns.second.backStack);
+    moved.currentActivity.name = "dev.jasonpearson.automobile.playground.OtherActivity";
+    moved.activities[0].name = moved.currentActivity.name;
+    const sent = observation(emit(realAction("second", { backStack: moved }))).backStack;
+    expect(sent).toEqual(moved);
+    expect((sent as { capturedAt: number }).capturedAt).toBe(
+      realTapOns.second.backStack.capturedAt,
+    );
+  });
+  test("a partial backStack is always sent even when only capturedAt differs", () => {
+    const partial = (capturedAt: number) => ({
+      depth: 0,
+      activities: [],
+      tasks: [],
+      capturedAt,
+      partial: true,
+      source: "adb",
+    });
+    emit(realAction("first", { backStack: partial(1) }));
+    expect(observation(emit(realAction("second", { backStack: partial(2) }))).backStack).toEqual(
+      partial(2),
+    );
+  });
+  test("in-memory undefined keys compare in wire form against the recorded baseline", () => {
+    // A bare observation skips ObserveResult shaping, so the undefined keys reach the comparison.
+    const bare = () => ({
+      success: true,
+      observation: {
+        deviceId: realTapOns.first.deviceId,
+        backStack: {
+          ...structuredClone(realTapOns.first.backStack),
+          displayCount: undefined,
+          currentActivity: undefined,
+        },
+      },
+    });
+    emit(bare());
+    expect(observation(emit(bare()))).not.toHaveProperty("backStack");
+  });
+  test("flag off leaves real consecutive responses byte-identical and records nothing", () => {
+    serverConfig.setActionsCompactMetadataEnabled(false);
+    const bytes = (payload: Record<string, unknown>) => JSON.stringify(emit(payload));
+    const withoutStore = (payload: Record<string, unknown>) =>
+      JSON.stringify(emit(payload, { baselineStore: undefined }));
+    expect(bytes(realAction("first"))).toBe(withoutStore(realAction("first")));
+    expect(bytes(realAction("second"))).toBe(withoutStore(realAction("second")));
+    expect(observation(emit(realAction("second"))).backStack).toEqual(realTapOns.second.backStack);
+    expect(records.size).toBe(0);
   });
 });

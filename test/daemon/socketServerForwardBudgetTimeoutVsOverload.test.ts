@@ -98,3 +98,24 @@ describe("UnixSocketServer MCP forward budget classification", () => {
     }
   });
 });
+
+test.each(["waiting in queue", "waiting in queues and reconnecting the MCP client"])(
+  "expired forward budget marks only an undispatched queue wait: %s",
+  (phase) => {
+    const timer = new FakeTimer();
+    const server = createServer(timer);
+    const deadline = new ProgressExtendableDeadline(0, 1000);
+    timer.advanceTime(1000);
+    try {
+      requireBudget(server, request, 1000, deadline, phase);
+      expect.unreachable("expired budget should throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(McpTimeoutError);
+      if (phase === "waiting in queue") {
+        expect(error).toMatchObject({ code: "daemon_queue_timeout" });
+      } else {
+        expect(error).not.toMatchObject({ code: "daemon_queue_timeout" });
+      }
+    }
+  },
+);

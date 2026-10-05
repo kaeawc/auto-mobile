@@ -137,3 +137,20 @@ describe("shapeToolCallError", () => {
     });
   }
 });
+
+test("queue deadline marker survives tool error shaping; plain timeouts remain unmarked", () => {
+  const error = Object.assign(new Error("timed out in queue before admission"), {
+    code: "daemon_queue_timeout",
+  });
+  expect(JSON.parse(shapeToolCallError(error, context).content[0].text)).toEqual({
+    success: false,
+    error: error.message,
+    code: "daemon_queue_timeout",
+    retryable: true,
+  });
+  const started = new McpTimeoutError({ toolName: "tapOn", timeoutMs: 1000, origin: "device" });
+  expect(shapeToolCallError(started, context)).toEqual({
+    content: [{ type: "text", text: `Error: ${started.message}` }],
+    isError: true,
+  });
+});

@@ -71,6 +71,9 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(true);
     fakeCtrlProxy = new FakeCtrlProxy();
+    spyOn(fakeCtrlProxy, "getAccessibilityHierarchy").mockResolvedValue({
+      hierarchy: { node: { $: container } },
+    });
     // The real TalkBackSwipeExecutor inside SwipeOn talks to this fake service.
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       fakeCtrlProxy as unknown as AndroidCtrlProxyClient,

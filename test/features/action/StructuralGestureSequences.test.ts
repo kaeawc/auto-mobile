@@ -53,6 +53,10 @@ describe("gesture request sequences", () => {
       const timer = clock(calls);
       const proxy = new FakeCtrlProxy(timer);
       const controller = new AbortController();
+      proxy.getAccessibilityHierarchy = async () => {
+        calls.push("hierarchy");
+        return { hierarchy: { node: { $: element } } };
+      };
       proxy.requestAction = async (action, id, timeout) => {
         calls.push(`action:${action}:${id}:${timeout}`);
         if (mode === "throws") {
@@ -61,7 +65,7 @@ describe("gesture request sequences", () => {
         expect(calls).toEqual(
           mode === "absent"
             ? ["fence", "two:100:500:100:200:400:100:5000"]
-            : ["action:scroll_forward:selected:5000"],
+            : ["hierarchy", "action:scroll_forward:selected:5000"],
         );
         if (mode === "abort") {
           controller.abort();
@@ -117,7 +121,11 @@ describe("gesture request sequences", () => {
       const action = "action:scroll_forward:selected:5000";
       const fallback = ["fence", "two:100:500:100:200:400:100:5000"];
       expect(calls).toEqual(
-        mode === "absent" ? fallback : mode === "refusal" ? [action, ...fallback] : [action],
+        mode === "absent"
+          ? fallback
+          : mode === "refusal"
+            ? ["hierarchy", action, ...fallback]
+            : ["hierarchy", action],
       );
     },
   );

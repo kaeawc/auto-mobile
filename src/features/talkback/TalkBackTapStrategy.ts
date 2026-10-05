@@ -7,6 +7,7 @@ import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { AccessibilityNodeSelector, A11yTapCoordinatesResult } from "../observe/android/types";
+import { resourceIdActionError } from "./resourceIdActionError";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import {
   FocusNavigationExecutor,
@@ -100,6 +101,25 @@ export function requiresNodeSelector(selector: AccessibilityNodeSelector): boole
   );
 }
 
+/** Resolve whether the observed selector can safely cross the native action boundary. */
+export async function nodeActionTargetError(
+  selector: AccessibilityNodeSelector,
+  driver: Pick<
+    TalkBackNavigationDriver,
+    "supportsNodeActionSelectors" | "getAccessibilityHierarchy"
+  >,
+): Promise<string | undefined> {
+  if (requiresNodeSelector(selector)) {
+    return (await driver.supportsNodeActionSelectors())
+      ? undefined
+      : "Runner does not support stable node selectors";
+  }
+  return resourceIdActionError(
+    selector.resourceId!,
+    () => driver.getAccessibilityHierarchy?.() ?? Promise.resolve(null),
+  );
+}
+
 function advertisesAction(element: Element, action: string): boolean {
   return Array.isArray(element.actions) && element.actions.includes(action);
 }
@@ -157,6 +177,7 @@ export class TalkBackTapStrategy {
     fence?: DisplayFence,
   ): Promise<TalkBackTapResult> {
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
+    let swipeRequests = 0;
     const resourceId = element?.["resource-id"] as string | undefined;
     const elementText = element.text as string | undefined;
     const elementContentDesc = element["content-desc"] as string | undefined;
@@ -183,28 +204,103 @@ export class TalkBackTapStrategy {
         resourceId,
         elementText,
         elementContentDesc,
+        onSwipeRequested: () => {
+          swipeRequests += 1;
+        },
         onNavigationResult: (result) => {
           screenReaderNavigation = result;
         },
       });
     } catch (error) {
-      if (error instanceof StaleDisplayError || error instanceof ActionableError) {
+      // Navigation's typed failures are evidence; activation/caller failures must propagate.
+      if (
+        error instanceof StaleDisplayError ||
+        !(error instanceof ActionableError) ||
+        screenReaderNavigation?.reachable
+      ) {
         throw error;
       }
-      const errorMsg = errorMessage(error);
-      logger.warn(`[TalkBackTapStrategy] Focus navigation failed: ${errorMsg}`);
-      return {
-        success: false,
-        method: "focus-navigation",
-        error: errorMsg,
-        screenReaderNavigation: screenReaderNavigation
-          ? { ...screenReaderNavigation, focusTrapDetected: this.isFocusTrapError(errorMsg) }
-          : {
-              reachable: false,
-              traversalOrder: [],
-              focusTrapDetected: this.isFocusTrapError(errorMsg),
-            },
-      };
+      return this.navigationFailureResult(
+        error,
+        element,
+        driver,
+        swipeRequests,
+        screenReaderNavigation,
+      );
+    }
+  }
+
+  private async navigationFailureResult(
+    error: ActionableError,
+    element: Element,
+    driver: TalkBackNavigationDriver,
+    swipeRequests: number,
+    navigation?: ScreenReaderNavigationResult,
+  ): Promise<TalkBackTapResult> {
+    const message = errorMessage(error);
+    const focusTrapDetected = this.isFocusTrapError(message);
+    const disappeared = message.includes("Target element disappeared during navigation");
+    const safeFallback =
+      !disappeared &&
+      (swipeRequests === 0 ||
+        (focusTrapDetected && (await this.targetBoundsUnchanged(element, driver))));
+    if (!safeFallback) {
+      throw new ActionableError(
+        `${message} Coordinate fallback refused; focusTrapDetected=${focusTrapDetected}. ` +
+          "Use observe to resolve the target again before retrying.",
+        { cause: error },
+      );
+    }
+    logger.warn(`[TalkBackTapStrategy] Focus navigation failed: ${message}`, error);
+    return {
+      success: false,
+      method: "focus-navigation",
+      error: message,
+      screenReaderNavigation: {
+        reachable: false,
+        traversalOrder: navigation?.traversalOrder ?? [],
+        focusTrapDetected,
+      },
+    };
+  }
+
+  private async targetBoundsUnchanged(
+    element: Element,
+    driver: TalkBackNavigationDriver,
+  ): Promise<boolean> {
+    if (!element.bounds) {
+      return false;
+    }
+    const selector = this.createFocusSelector({
+      resourceId: nonEmptyString(element["resource-id"]),
+      elementText: nonEmptyString(element.text),
+      elementContentDesc: nonEmptyString(element["content-desc"]),
+      bounds: element.bounds,
+    });
+    try {
+      const traversal = await driver.requestTraversalOrder();
+      if (traversal.error || !traversal.elements?.length) {
+        return false;
+      }
+      const index = this.matcher.findTargetIndex(traversal.elements, selector);
+      const bounds = index === null ? undefined : traversal.elements[index].bounds;
+      // Resolve with the same selector, then require all original edges, not just its center.
+      return (
+        bounds !== undefined &&
+        bounds.left === element.bounds.left &&
+        bounds.top === element.bounds.top &&
+        bounds.right === element.bounds.right &&
+        bounds.bottom === element.bounds.bottom
+      );
+    } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
+      logger.warn(
+        `[TalkBackTapStrategy] Could not verify fallback target: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
     }
   }
 
@@ -236,6 +332,7 @@ export class TalkBackTapStrategy {
     elementText,
     elementContentDesc,
     onNavigationResult,
+    onSwipeRequested,
   }: {
     deviceId: string;
     element: Element;
@@ -245,6 +342,7 @@ export class TalkBackTapStrategy {
     elementText?: string;
     elementContentDesc?: string;
     onNavigationResult: (result: ScreenReaderNavigationResult) => void;
+    onSwipeRequested: () => void;
   }): Promise<TalkBackTapResult> {
     logger.debug(
       `[TalkBackTapStrategy] Attempting focus navigation to element (resourceId: ${resourceId}, text: ${elementText})`,
@@ -306,6 +404,7 @@ export class TalkBackTapStrategy {
       orderedElements,
       traversalResult,
       navigationResult,
+      onSwipeRequested,
     });
   }
 
@@ -319,6 +418,7 @@ export class TalkBackTapStrategy {
     orderedElements,
     traversalResult,
     navigationResult,
+    onSwipeRequested,
   }: {
     deviceId: string;
     element: Element;
@@ -329,6 +429,7 @@ export class TalkBackTapStrategy {
     orderedElements: Element[];
     traversalResult: TraversalOrderResult;
     navigationResult: ScreenReaderNavigationResult;
+    onSwipeRequested: () => void;
   }): Promise<TalkBackTapResult> {
     // Calculate navigation path
     const navigationPath = this.pathCalculator.calculatePath(
@@ -364,16 +465,12 @@ export class TalkBackTapStrategy {
         verificationInterval: 1,
         swipeDelay: 100,
         onFocusObserved: (focus) => this.appendTraversalFocus(navigationResult, focus),
+        onSwipeRequested,
       },
     );
 
     if (!navigationSuccess) {
-      return {
-        success: false,
-        method: "focus-navigation",
-        error: "Focus navigation did not reach target element",
-        screenReaderNavigation: navigationResult,
-      };
+      throw new ActionableError("Focus navigation did not reach target element");
     }
 
     navigationResult.reachable = true;
@@ -381,7 +478,7 @@ export class TalkBackTapStrategy {
     logger.info(`[TalkBackTapStrategy] Focus navigation successful, activating element`);
 
     // Activate the focused element with double-tap gesture
-    const activationResult = await this.activateElement(element, driver, fence);
+    const activationResult = await this.activateElement(element, driver, fence, orderedElements);
     return { ...activationResult, screenReaderNavigation: navigationResult };
   }
 
@@ -409,7 +506,8 @@ export class TalkBackTapStrategy {
     return (
       error.includes("Focus did not move") ||
       error.includes("could not track the TalkBack cursor") ||
-      error.includes("not converging on the target")
+      error.includes("not converging on the target") ||
+      error.includes("Focus navigation did not reach target element")
     );
   }
 
@@ -440,12 +538,9 @@ export class TalkBackTapStrategy {
       };
     }
 
-    if (requiresNodeSelector(selector) && !(await driver.supportsNodeActionSelectors())) {
-      return {
-        success: false,
-        method: "accessibility-action",
-        error: "Runner does not support stable node selectors",
-      };
+    const targetError = await nodeActionTargetError(selector, driver);
+    if (targetError) {
+      return { success: false, method: "accessibility-action", error: targetError };
     }
 
     const result = requiresNodeSelector(selector)
@@ -594,10 +689,9 @@ export class TalkBackTapStrategy {
     const selector = stableNodeSelectorForElement(element);
 
     if (selector) {
-      if (requiresNodeSelector(selector) && !(await driver.supportsNodeActionSelectors())) {
-        logger.info(
-          "[TalkBackTapStrategy] Runner does not support stable node selectors; using coordinate long press",
-        );
+      const targetError = await nodeActionTargetError(selector, driver);
+      if (targetError) {
+        logger.info(`[TalkBackTapStrategy] ${targetError}`);
         return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
           displayFence: fence,
         });
@@ -638,11 +732,12 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver,
     fence: DisplayFence = { assertCurrent: () => {} },
+    orderedElements: Element[],
   ): Promise<TalkBackTapResult> {
     const resourceId = element["resource-id"] as string | undefined;
     // Activate against the node TalkBack actually focused (live bounds), not the
     // caller's possibly-stale element (#3918).
-    const center = await this.resolveActivationCenter(element, driver);
+    const center = await this.resolveActivationCenter(element, driver, orderedElements);
     const tapDuration = 50;
 
     // No usable bounds on either the focused node or the caller's element: never
@@ -653,10 +748,7 @@ export class TalkBackTapStrategy {
         logger.warn(
           "[TalkBackTapStrategy] Activation target has no bounds; using ACTION_CLICK fallback",
         );
-        const clickResult = await this.executeDirectActivation(
-          { "resource-id": resourceId, bounds: element.bounds },
-          driver,
-        );
+        const clickResult = await this.executeDirectActivation(element, driver);
         if (clickResult.success) {
           return { success: true, method: "accessibility-action" };
         }
@@ -684,10 +776,7 @@ export class TalkBackTapStrategy {
         logger.warn(
           `[TalkBackTapStrategy] Double-tap activation failed, trying ACTION_CLICK fallback`,
         );
-        const clickResult = await this.executeDirectActivation(
-          { "resource-id": resourceId, bounds: element.bounds },
-          driver,
-        );
+        const clickResult = await this.executeDirectActivation(element, driver);
         if (!clickResult.success) {
           return {
             success: false,
@@ -715,10 +804,7 @@ export class TalkBackTapStrategy {
       if (resourceId) {
         // If second tap fails, try ACTION_CLICK as fallback
         logger.warn(`[TalkBackTapStrategy] Second tap failed, trying ACTION_CLICK fallback`);
-        const clickResult = await this.executeDirectActivation(
-          { "resource-id": resourceId, bounds: element.bounds },
-          driver,
-        );
+        const clickResult = await this.executeDirectActivation(element, driver);
         if (!clickResult.success) {
           return {
             success: false,
@@ -800,20 +886,73 @@ export class TalkBackTapStrategy {
   private async resolveActivationCenter(
     element: Element,
     driver: TalkBackNavigationDriver,
+    orderedElements: Element[],
   ): Promise<{ x: number; y: number } | null> {
     try {
       const focus = await driver.requestCurrentFocus();
       const focused = focus.focusedElement;
-      if (focused?.bounds) {
-        return this.getElementCenter(focused);
+      if (focused?.bounds && !focus.error) {
+        const selector = this.createFocusSelector({
+          resourceId: nonEmptyString(element["resource-id"]),
+          elementText: nonEmptyString(element.text),
+          elementContentDesc: nonEmptyString(element["content-desc"]),
+          bounds: element.bounds,
+        });
+        // Resolve repeated rows against their current bounds after navigation may scroll.
+        const freshElements = await this.activationTraversal(driver, orderedElements, selector);
+        if (this.matcher.matchesFocusedTarget(focused, freshElements, selector)) {
+          return this.getElementCenter(focused);
+        }
+        throw new ActionableError(
+          "TalkBack focus no longer matches the selected activation target.",
+        );
       }
     } catch (error) {
-      if (error instanceof StaleDisplayError) {
+      if (error instanceof ActionableError) {
         throw error;
       }
       // Live-focus read is best-effort; fall back to the caller's element bounds.
       logger.debug(`[TalkBackTapStrategy] Could not read current focus for activation: ${error}`);
     }
     return this.getElementCenter(element);
+  }
+
+  private async activationTraversal(
+    driver: TalkBackNavigationDriver,
+    orderedElements: Element[],
+    selector: ElementSelector,
+  ): Promise<Element[]> {
+    let traversal: TraversalOrderResult | undefined;
+    try {
+      traversal = await driver.requestTraversalOrder();
+    } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
+      logger.warn(
+        `[TalkBackTapStrategy] Could not refresh activation traversal: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    if (!traversal?.error && traversal?.elements?.length) {
+      return traversal.elements;
+    }
+
+    // An unavailable/empty fresh traversal cannot disambiguate repeated rows. A
+    // single original match retains the matcher's existing selector-only acceptance.
+    const exactMatches = orderedElements.filter((node) =>
+      this.matcher.matchesSelector(node, selector),
+    );
+    const matches = exactMatches.length
+      ? exactMatches
+      : orderedElements.filter((node) =>
+          this.matcher.matchesSelector(node, selector, { partialMatch: true }),
+        );
+    if (matches.length === 1) {
+      return orderedElements;
+    }
+    throw new ActionableError(
+      "Cannot verify the selected TalkBack activation target: fresh traversal is unavailable or empty.",
+    );
   }
 }

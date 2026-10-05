@@ -581,6 +581,7 @@ describe("ClearText Android ADB fallback", () => {
           observation.freshness = { isFresh: false };
         } else if (unavailable === "unreadable") {
           delete observation.viewHierarchy!.hierarchy.node!.$!.text;
+          observation.viewHierarchy!.hierarchy.node!.$!.password = "true";
         }
         refreshSpy = spyOn(clearText.observeScreen, "execute");
         if (unavailable === "throws") {

@@ -236,7 +236,7 @@ export class ScreenFingerprint {
       // Check resource-id patterns
       if (node["resource-id"]) {
         const id = node["resource-id"];
-        if (id.includes("keyboard") || id.includes("inputmethod")) {
+        if (ScreenFingerprint.isKeyboardResourceId(id)) {
           return true;
         }
       }
@@ -244,13 +244,7 @@ export class ScreenFingerprint {
       // Check content-desc for keyboard indicators
       if (node["content-desc"]) {
         const desc = node["content-desc"];
-        if (
-          desc.includes("Delete") ||
-          desc.includes("Enter") ||
-          desc.includes("keyboard") ||
-          desc.includes("emoji") ||
-          desc.includes("Shift")
-        ) {
+        if (ScreenFingerprint.isKeyboardDescription(desc)) {
           return true;
         }
       }
@@ -346,13 +340,8 @@ export class ScreenFingerprint {
 
     // Skip keyboard elements (match detectKeyboard indicators)
     if (
-      node["content-desc"]?.includes("Delete") ||
-      node["content-desc"]?.includes("Enter") ||
-      node["content-desc"]?.includes("keyboard") ||
-      node["content-desc"]?.includes("emoji") ||
-      node["content-desc"]?.includes("Shift") ||
-      node["resource-id"]?.includes("keyboard") ||
-      node["resource-id"]?.includes("inputmethod")
+      this.isKeyboardDescription(node["content-desc"]) ||
+      this.isKeyboardResourceId(node["resource-id"])
     ) {
       return null;
     }
@@ -361,33 +350,75 @@ export class ScreenFingerprint {
 
     // Handle scrollable containers with enhanced strategy
     if (node.scrollable === "true") {
-      filtered._scrollable = true;
-
-      // Keep container identifiers (not navigation IDs)
-      if (node["resource-id"] && !node["resource-id"].startsWith("navigation.")) {
-        filtered["resource-id"] = node["resource-id"];
-      }
-
-      if (node.className) {
-        filtered.className = node.className;
-      }
-
-      // CRITICAL: Preserve selected items in scrollable containers
-      if (node.node) {
-        const children = Array.isArray(node.node) ? node.node : [node.node];
-        const selectedItems = children
-          .filter((child: AccessibilityNode) => child.selected === "true")
-          .map((child: AccessibilityNode) => this.extractSelectedInfo(child))
-          .filter(Boolean);
-
-        if (selectedItems.length > 0) {
-          filtered._selected = selectedItems;
-        }
-      }
-
+      this.collectScrollableInfo(node, filtered);
       return filtered;
     }
 
+    this.collectNodeIdentity(node, filtered);
+
+    this.collectStaticLabels(node, filtered);
+
+    // Keep test tags
+    if (node["test-tag"]) {
+      filtered["test-tag"] = node["test-tag"];
+    }
+
+    // Recurse into children
+    if (node.node) {
+      const children = Array.isArray(node.node) ? node.node : [node.node];
+      const filteredChildren = children
+        .map((child: AccessibilityNode) => this.filterHierarchyEnhanced(child))
+        .filter(Boolean) as FilteredNode[];
+
+      if (filteredChildren.length > 0) {
+        filtered.node = filteredChildren;
+      }
+    }
+
+    return Object.keys(filtered).length > 0 ? filtered : null;
+  }
+
+  private static isKeyboardResourceId(id: string | undefined): boolean {
+    return Boolean(id?.includes("keyboard") || id?.includes("inputmethod"));
+  }
+
+  private static isKeyboardDescription(desc: string | undefined): boolean {
+    return Boolean(
+      desc?.includes("Delete") ||
+      desc?.includes("Enter") ||
+      desc?.includes("keyboard") ||
+      desc?.includes("emoji") ||
+      desc?.includes("Shift"),
+    );
+  }
+
+  private static collectScrollableInfo(node: AccessibilityNode, filtered: FilteredNode): void {
+    filtered._scrollable = true;
+
+    // Keep container identifiers (not navigation IDs)
+    if (node["resource-id"] && !node["resource-id"].startsWith("navigation.")) {
+      filtered["resource-id"] = node["resource-id"];
+    }
+
+    if (node.className) {
+      filtered.className = node.className;
+    }
+
+    // CRITICAL: Preserve selected items in scrollable containers
+    if (node.node) {
+      const children = Array.isArray(node.node) ? node.node : [node.node];
+      const selectedItems = children
+        .filter((child: AccessibilityNode) => child.selected === "true")
+        .map((child: AccessibilityNode) => this.extractSelectedInfo(child))
+        .filter(Boolean);
+
+      if (selectedItems.length > 0) {
+        filtered._selected = selectedItems;
+      }
+    }
+  }
+
+  private static collectNodeIdentity(node: AccessibilityNode, filtered: FilteredNode): void {
     // Keep app resource-ids (not system UI, not navigation)
     if (node["resource-id"]) {
       const id = node["resource-id"];
@@ -409,7 +440,9 @@ export class ScreenFingerprint {
     if (node.selected === "true") {
       filtered.selected = "true";
     }
+  }
 
+  private static collectStaticLabels(node: AccessibilityNode, filtered: FilteredNode): void {
     // Keep static text (not editable, not dynamic)
     if (node.text && !this.isEditableField(node)) {
       const text = node.text;
@@ -432,25 +465,6 @@ export class ScreenFingerprint {
         filtered["content-desc"] = desc;
       }
     }
-
-    // Keep test tags
-    if (node["test-tag"]) {
-      filtered["test-tag"] = node["test-tag"];
-    }
-
-    // Recurse into children
-    if (node.node) {
-      const children = Array.isArray(node.node) ? node.node : [node.node];
-      const filteredChildren = children
-        .map((child: AccessibilityNode) => this.filterHierarchyEnhanced(child))
-        .filter(Boolean) as FilteredNode[];
-
-      if (filteredChildren.length > 0) {
-        filtered.node = filteredChildren;
-      }
-    }
-
-    return Object.keys(filtered).length > 0 ? filtered : null;
   }
 
   /**

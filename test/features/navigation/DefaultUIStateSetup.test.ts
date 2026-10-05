@@ -36,6 +36,62 @@ const emptyModalHierarchy = (): ObserveResult =>
 
 const emptyModalObserve = (): ObserveScreenLike => ({ execute: async () => emptyModalHierarchy() });
 
+describe("DefaultUIStateSetup alignment order", () => {
+  for (const modalActions of [[], ["dismissModal(dialog)"]]) {
+    for (const refreshAvailable of [false, true]) {
+      test(`selection setup after ${modalActions.length} modal actions, refresh=${refreshAvailable}`, async () => {
+        const setup = makeSetup(emptyModalObserve);
+        const order: string[] = [];
+        const current = { selectedElements: [{ text: "Old" }], modalStack: [] };
+        const refreshed = refreshAvailable ? { selectedElements: [{ text: "New" }] } : undefined;
+        const internals = setup as unknown as {
+          getCurrentUIState: DefaultUIStateSetup["getCurrentUIState"];
+          setupModalStack: DefaultUIStateSetup["setupModalStack"];
+          setupMissingSelections: DefaultUIStateSetup["setupMissingSelections"];
+        };
+        let observations = 0;
+        const observe = spyOn(internals, "getCurrentUIState").mockImplementation(async () => {
+          order.push("observe");
+          return observations++ === 0 ? current : refreshed;
+        });
+        const modal = spyOn(internals, "setupModalStack").mockImplementation(async () => {
+          order.push("modals");
+          return modalActions;
+        });
+        const selections = spyOn(internals, "setupMissingSelections").mockImplementation(
+          async (_required, selected) => {
+            order.push(`select:${selected[0].text}`);
+            return ["tapOn(Tab)"];
+          },
+        );
+        try {
+          const actions = await setup.setupUIState(
+            {
+              uiState: {
+                modalStack: [{ type: "dialog", layer: 0 }],
+                selectedElements: [{ text: "Tab" }],
+              },
+            } as NavigationEdge,
+            "android",
+          );
+          const shouldSelect = modalActions.length === 0 || refreshAvailable;
+          expect(actions).toEqual([...modalActions, ...(shouldSelect ? ["tapOn(Tab)"] : [])]);
+          expect(order).toEqual([
+            "observe",
+            "modals",
+            ...(modalActions.length ? ["observe"] : []),
+            ...(shouldSelect ? [`select:${modalActions.length ? "New" : "Old"}`] : []),
+          ]);
+        } finally {
+          observe.mockRestore();
+          modal.mockRestore();
+          selections.mockRestore();
+        }
+      });
+    }
+  }
+});
+
 // A flat sheet node with an explicit window ID uses the real extractor path.
 const bottomSheetHierarchy = (windowId: number): ObserveResult =>
   ({

@@ -1125,20 +1125,25 @@ export class RealObserveScreen implements ObserveScreen {
     }
     const focusedPanel = displayTransitions.currentObservedPanel(this.device.deviceId);
     // Explicit observations do not update the default panel's transition stamp.
-    // Before its first observation, reuse the existing live display resolver.
-    const activeDisplay = focusedPanel
-      ? undefined
-      : this.device.platform === "android"
-        ? (await this.observedAndroidDisplayCache.resolve(this.device, this.adb)).display
-        : observedIosDisplay(this.device, stored.viewHierarchy);
+    // Before its first observation, reuse the live resolver unless the request
+    // already selects a panel; explicit "active" still needs live state.
+    const explicitPanel = ![undefined, "active"].includes(this.requestedDisplay);
+    const activeDisplay =
+      focusedPanel || explicitPanel
+        ? undefined
+        : this.device.platform === "android"
+          ? (await this.observedAndroidDisplayCache.resolve(this.device, this.adb)).display
+          : observedIosDisplay(this.device, stored.viewHierarchy);
+    const { key: activePanelKey, posture } = activeDisplay ?? {};
     const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {
       focusedPanelKey: focusedPanel?.key,
-      activePanelKey: activeDisplay?.key,
-      posture: activeDisplay?.posture,
+      activePanelKey,
+      posture,
       displayPin: selectedDisplayPin(),
     });
     // Keep the entry for repeated explicit-panel reads; a different target is a miss.
-    return stored.display.key === panel.key ? stored : undefined;
+    // On multi-panel devices, a missing display key cannot prove the target: miss.
+    return stored.display?.key === panel.key ? stored : undefined;
   }
 
   /**

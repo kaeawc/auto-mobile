@@ -156,6 +156,64 @@ function panelSetup(singleDisplay = false) {
 }
 
 describe("ObserveScreen cached panel targeting", () => {
+  test.each(["display", "key"])(
+    "multi-panel cache without %s is a miss, not a retrieval failure",
+    async (missing) => {
+      const h = panelSetup();
+      const observation = await h.observe();
+      // Model an older disk-cache payload without weakening the public result type.
+      Reflect.deleteProperty(missing === "display" ? observation : observation.display, missing);
+      const cached = await h.screen.getMostRecentCachedObserveResult();
+      expect(cached.error).toBe("No cached observe result available");
+      expect(cached.viewHierarchy).toBeUndefined();
+    },
+  );
+
+  test.each(["display", "key"])(
+    "single-panel cache without %s remains a hit without device reads",
+    async (missing) => {
+      const h = panelSetup(true);
+      const observation = await h.observe();
+      Reflect.deleteProperty(missing === "display" ? observation : observation.display, missing);
+      const commands = h.adb.getExecutedCommands();
+      const cached = await h.screen.getMostRecentCachedObserveResult();
+      expect(cached.error).toBeUndefined();
+      expect(cached.viewHierarchy).toEqual(observation.viewHierarchy);
+      expect(cached.observationId).toBe(observation.observationId);
+      expect(h.adb.getExecutedCommands()).toEqual(commands);
+      expect(h.capture.requests).toHaveLength(1);
+    },
+  );
+
+  test.each(["inner", "cover"])(
+    "explicit %s cache read needs no active-display read before any default observe",
+    async (key) => {
+      const h = panelSetup();
+      const observation = h.screen.createBaseResult();
+      observation.display = { ...observation.display, key };
+      await h.cacheStore.put(device.deviceId, observation);
+      expect(displayTransitions.currentObservedPanel(device.deviceId)).toBeUndefined();
+      const cached = await h.createScreen(key).getMostRecentCachedObserveResult();
+      expect(cached.error).toBeUndefined();
+      expect(cached.observationId).toBe(observation.observationId);
+      expect(h.adb.getExecutedCommands()).toEqual([]);
+      expect(h.capture.requests).toHaveLength(0);
+    },
+  );
+
+  test("explicit active still reads the live display and bypasses the pin before any default observe", async () => {
+    const h = panelSetup();
+    const observation = h.screen.createBaseResult();
+    observation.display = { ...observation.display, key: "cover" };
+    await h.cacheStore.put(device.deviceId, observation);
+    await runWithSelectedDisplayPin({ pin: "cover", inventory: h.target.displays }, async () => {
+      const cached = await h.createScreen("active").getMostRecentCachedObserveResult();
+      expect(cached.error).toBe("No cached observe result available");
+      expect(h.adb.getExecutedCommands()).toContain("shell cmd display get-displays");
+      expect(h.capture.requests).toHaveLength(0);
+    });
+  });
+
   test("an explicit cover capture before any default observe is a miss for an unscoped read", async () => {
     const h = panelSetup();
     const cover = await h.observe("cover");

@@ -171,6 +171,14 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus } from "./CtrlProxyFocus";
+import { CtrlProxyOverlays } from "./CtrlProxyOverlays";
+import type { OverlaySpec } from "../../overlay/overlaySpec";
+import type {
+  OverlayDismiss,
+  OverlayEvent,
+  OverlayResult,
+  OverlayUpdate,
+} from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
@@ -541,6 +549,12 @@ interface WsTraversalOrderResultMessage extends WsMessageBase {
     truncationReasons?: string[];
   };
 }
+
+interface WsOverlayResultMessage extends OverlayResult {
+  type: "overlay_result";
+  requestId: string;
+}
+type WsOverlayEventMessage = OverlayEvent;
 
 interface WsHighlightResponseMessage extends WsMessageBase {
   type: "highlight_response";
@@ -958,6 +972,8 @@ type WebSocketMessage =
   | WsPermissionResultMessage
   | WsCurrentFocusResultMessage
   | WsTraversalOrderResultMessage
+  | WsOverlayResultMessage
+  | WsOverlayEventMessage
   | WsHighlightResponseMessage
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
@@ -1237,6 +1253,23 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<A11yPermissionResult>;
+
+  requestShowOverlay(
+    spec: OverlaySpec,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult>;
+  requestUpdateOverlay(
+    update: OverlayUpdate,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult>;
+  requestDismissOverlay(
+    target: OverlayDismiss,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult>;
+  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void;
 
   requestAddHighlight(
     id: string,
@@ -1568,6 +1601,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private _storage: CtrlProxyStorage | null = null;
   private _certificates: CtrlProxyCertificates | null = null;
   private _focus: CtrlProxyFocus | null = null;
+  private _overlays: CtrlProxyOverlays | null = null;
   private _highlights: CtrlProxyHighlights | null = null;
   private _packages: CtrlProxyPackages | null = null;
 
@@ -2255,6 +2289,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this._focus = value;
       },
       () => new CtrlProxyFocus(this.createDelegateContext()),
+    );
+  }
+
+  private get overlays(): CtrlProxyOverlays {
+    return this.lazyDelegate(
+      () => this._overlays,
+      (value) => {
+        this._overlays = value;
+      },
+      () => new CtrlProxyOverlays(this.createDelegateContext()),
     );
   }
 
@@ -3485,6 +3529,31 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
   // Delegated Public Methods - Highlights
   // ===========================================================================
+
+  requestShowOverlay(
+    spec: OverlaySpec,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    return this.overlays.requestShowOverlay(spec, timeoutMs, perf);
+  }
+  requestUpdateOverlay(
+    update: OverlayUpdate,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    return this.overlays.requestUpdateOverlay(update, timeoutMs, perf);
+  }
+  requestDismissOverlay(
+    target: OverlayDismiss,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    return this.overlays.requestDismissOverlay(target, timeoutMs, perf);
+  }
+  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
+    return this.overlays.onOverlayEvent(listener);
+  }
 
   async requestAddHighlight(
     id: string,
@@ -5049,10 +5118,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (rejectedCommand) {
         this.rejectedCommands.add(rejectedCommand);
       }
-      const errorText = rewriteUnknownCommandError(
-        message.error || "Runner reported an unstructured protocol error",
-        "android",
-      );
+      const deviceError = message.error || "Runner reported an unstructured protocol error";
+      // Overlay failures preserve the device cause; capability refusal has its own pre-send error.
+      const errorText =
+        rejectedCommand &&
+        ["show_overlay", "update_overlay", "dismiss_overlay"].includes(rejectedCommand)
+          ? deviceError
+          : rewriteUnknownCommandError(deviceError, "android");
       logger.warn(
         `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
       );
@@ -5454,6 +5526,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }),
 
+    overlay_result: (message) =>
+      this.resolvePendingResponse(message, (message): OverlayResult => ({
+        success: message.success,
+        error: message.error,
+        requestId: message.requestId,
+        timestamp: message.timestamp,
+      })),
+
     highlight_response: (message) =>
       this.resolvePendingResponse(message, (message): HighlightOperationResult => ({
         success: message.success ?? false,
@@ -5649,6 +5729,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (event) {
         await this.handlePackageEvent(event, message.timestamp);
       }
+    },
+
+    overlay_event: (message) => {
+      this.overlays.handleOverlayEvent(message);
     },
 
     interaction_event: (message) => {

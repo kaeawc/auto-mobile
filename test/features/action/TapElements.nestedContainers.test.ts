@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
@@ -128,7 +129,9 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
     action.setRefreshViewHierarchyForTesting(async () => null);
   }
   action.observedInteraction = (callback) =>
-    callback({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } });
+    callback(
+      recordObservationRead({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
+    );
   const execute = (options: Partial<TapOnElementOptions> = {}) => {
     const request = {
       elementId: "remove",
@@ -563,7 +566,12 @@ test.each([true, false])(
         iosVoiceOverDetector: detector,
       });
       tap.observedInteraction = (callback) =>
-        callback({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } });
+        callback(
+          recordObservationRead({
+            viewHierarchy: hierarchy,
+            screenSize: { width: 500, height: 500 },
+          }),
+        );
       const result = await tap.execute({
         action: "tap",
         container: scope,

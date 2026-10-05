@@ -141,6 +141,41 @@ interface TextFocusRecovery {
   occlusionError?: KeyboardOcclusionError;
 }
 
+type FieldApplicationResult = {
+  success: boolean;
+  error?: string;
+  unclassifiable?: boolean;
+  stopRetrying?: boolean;
+};
+
+type FieldValueVerification = {
+  verified: boolean;
+  observation?: ObserveResult;
+  observedValue?: string | boolean;
+  unverifiable?: boolean;
+};
+
+type VisibleField = { fieldSpec: FieldSpec; fieldIndex: number; element: Element };
+
+type FieldLoopContext = {
+  options: SetUIStateOptions;
+  fieldResults: FieldResult[];
+  processed: Set<number>;
+  signal?: AbortSignal;
+  subscribeLiveTransportDeadline?: LiveDeadlineSubscriber;
+  admissionDeadlineMs: () => number;
+  cutoffMs: () => number;
+  admissionDeadlineBudgetMsForMessage: () => number;
+  emitProgress: (raw: number, message?: string) => Promise<void>;
+  fieldProgress: (fieldSequence: number) => ProgressCallback | undefined;
+  state: {
+    totalAttempts: number;
+    lastObservation: ObserveResult;
+    searchDeadline: number | null;
+    resultBudgetSpent: boolean;
+  };
+};
+
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_SCROLL_DIRECTION = "down";
 const MAX_FUTILE_SCROLLS = 3;
@@ -302,7 +337,6 @@ export class SetUIState extends BaseVisualChange {
 
     const fieldResults: FieldResult[] = new Array(options.fields.length);
     const processed = new Set<number>();
-    let totalAttempts = 0;
     // See RESULT_DEADLINE_BUDGET_MS -- this is the whole-call safety net,
     // independent of (and in addition to) the search budget below.
     const callStartMs = this.timer.now();
@@ -363,7 +397,6 @@ export class SetUIState extends BaseVisualChange {
     // RESULT_DEADLINE_BUDGET_MS and can change between checks when a live
     // getter is in play.
     const admissionDeadlineBudgetMsForMessage = (): number => admissionDeadlineMs() - callStartMs;
-    let resultBudgetSpent = false;
 
     // Progress reported to the client MUST stay on one consistent scale and
     // strictly increase -- MCP clients that enforce monotonicity reject or
@@ -464,15 +497,46 @@ export class SetUIState extends BaseVisualChange {
         error: `setUIState's initial observation did not settle within the result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s); not attempted: ${missing.join(", ")}`,
       };
     }
-    let lastObservation = initialObservationRaced;
+    return this.runFieldLoop(scrollDirection, {
+      options,
+      fieldResults,
+      processed,
+      signal,
+      subscribeLiveTransportDeadline,
+      admissionDeadlineMs,
+      cutoffMs,
+      admissionDeadlineBudgetMsForMessage,
+      emitProgress,
+      fieldProgress,
+      state: {
+        totalAttempts: 0,
+        lastObservation: initialObservationRaced,
+        searchDeadline: null,
+        resultBudgetSpent: false,
+      },
+    });
+  }
 
-    let scrollsWithoutProgress = 0;
-    let currentDirection: "up" | "down" = scrollDirection;
-    let triedReverse = false;
-    // Null until a search actually starts. Holding a rolling deadline instead
-    // makes the budget sensitive to how long unrelated work took -- a slow
-    // post-success observe would age it before the next search even began.
-    let searchDeadline: number | null = null;
+  private async runFieldLoop(
+    scrollDirection: "up" | "down",
+    context: FieldLoopContext,
+  ): Promise<SetUIStateResult> {
+    const {
+      options,
+      processed,
+      signal,
+      subscribeLiveTransportDeadline,
+      admissionDeadlineMs,
+      cutoffMs,
+      fieldProgress,
+      state,
+    } = context;
+
+    const searchState = {
+      scrollsWithoutProgress: 0,
+      currentDirection: scrollDirection,
+      triedReverse: false,
+    };
     let budgetSpent = false;
 
     while (processed.size < options.fields.length) {
@@ -483,7 +547,7 @@ export class SetUIState extends BaseVisualChange {
       // applied rather than let the transport's own deadline discard it
       // (issue #6222 reopen).
       if (this.timer.now() >= admissionDeadlineMs()) {
-        resultBudgetSpent = true;
+        state.resultBudgetSpent = true;
         break;
       }
 
@@ -491,190 +555,24 @@ export class SetUIState extends BaseVisualChange {
       const visibleFields = this.findVisibleFieldsInScreenOrder(
         options.fields,
         processed,
-        lastObservation,
+        state.lastObservation,
       );
 
       if (visibleFields.length > 0) {
-        scrollsWithoutProgress = 0;
+        searchState.scrollsWithoutProgress = 0;
 
-        // Process only the topmost visible field, then re-evaluate.
-        // Each edit may change layout (keyboard, reflow, dynamic fields),
-        // so we re-find visible fields from a fresh observation each iteration.
-        const { fieldSpec, fieldIndex, element } = visibleFields[0];
-        // This field's slice starts at processed.size * 100, before it is
-        // added to `processed` below. `fieldBudgetMs` here is only a snapshot
-        // for the timeout message below -- the race itself re-reads
-        // `cutoffMs()` live, both at admission and again on every progress
-        // tick via `onTick` (issue #6222 P1, fujuk): a mid-field progress
-        // notification that extends the live transport deadline re-arms this
-        // SAME field's own timeout against the new, larger budget instead of
-        // timing out against the stale value captured here.
-        const fieldBudgetMs = cutoffMs() - this.timer.now();
-        const raced = await this.raceAgainstDeadline<InternalFieldResult>(
-          (onTick) =>
-            runWithTextRequestContext({ getDeadlineMs: cutoffMs }, () =>
-              this.processField(
-                fieldSpec,
-                element,
-                this.withRearmOnTick(fieldProgress(processed.size), onTick),
-                signal,
-              ),
-            ),
-          () => cutoffMs(),
-          this.describeSelector(fieldSpec.selector),
-          subscribeLiveTransportDeadline,
-        ).catch((error: unknown): InternalFieldResult => {
-          signal?.throwIfAborted();
-          return {
-            selector: fieldSpec.selector,
-            success: false,
-            attempts: 0,
-            error: errorMessage(error),
-          };
-        });
-        signal?.throwIfAborted();
-
-        processed.add(fieldIndex);
-
-        if (raced === "timed-out") {
-          // The field WAS admitted and started but did not settle within its
-          // remaining share of the real transport deadline -- `processField`
-          // may still be running against the device. Its eventual outcome is
-          // no longer awaited or reported. Stop and return the partial
-          // result instead of risking the SAME overrun this whole feature
-          // exists to prevent (issue #6222 review, coderabbit fuTtO).
-          fieldResults[fieldIndex] = {
-            selector: fieldSpec.selector,
-            success: false,
-            attempts: 0,
-            timedOut: true,
-            error: `Field ${this.describeSelector(fieldSpec.selector)} did not settle within its ${Math.round(Math.max(fieldBudgetMs, 0) / 1000)}s share of setUIState's result deadline; it may still be applying in the background`,
-          };
-          resultBudgetSpent = true;
+        const outcome = await this.processVisibleField(visibleFields[0], context);
+        if (outcome === "stop") {
           break;
         }
-
-        const result = raced;
-        // Retain only the small, public FieldResult fields across the loop --
-        // `freshObservation` (a full view hierarchy) is used immediately below
-        // for reuse and then must NOT be kept alive in `fieldResults` for the
-        // rest of the call, or peak memory grows to fieldCount x one full
-        // hierarchy instead of staying ~one hierarchy (#6222 review).
-        fieldResults[fieldIndex] = this.toPublicFieldResult(result);
-        totalAttempts += result.attempts;
-        // Progress clears the budget: it bounds futile searching, not successful
-        // work. The next search re-arms it from scratch (#4252 review).
-        searchDeadline = null;
-
-        // Report per-field advancement at the top of the field's own slice.
-        // This keeps the request alive on progress-aware clients (a live
-        // request timeout is commonly reset by progress notifications) and,
-        // independent of transport behavior, gives the client a durable
-        // trace of what has already been applied before a bare timeout could
-        // otherwise leave it blind (#6222).
-        await emitProgress(
-          processed.size * 100,
-          result.success
-            ? `Set field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`
-            : `Failed field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`,
-        );
-
-        // Refresh observation after each success. processField already fetched
-        // a fresh observation as part of verification for most field types —
-        // reuse it instead of paying for a second, effectively redundant
-        // observe against the device, which is exactly the per-field cost that
-        // was pushing multi-field calls past the request timeout (#6222).
-        if (result.success) {
-          // The field itself already succeeded and is recorded in
-          // `fieldResults` above -- only the follow-up observation used to
-          // locate the NEXT field is at risk here. Without a
-          // `freshObservation`, `observationAfterSuccess`'s fallback issues
-          // an UNBOUNDED `ObserveScreen.execute()`; if that stalls, awaiting
-          // it directly would let the daemon's outer transport deadline win
-          // and discard everything already applied -- exactly the failure
-          // mode this whole feature exists to prevent. Race it against the
-          // SAME live cutoff every other device call in this method already
-          // respects (issue #6222 review, PRRT_kwDOP-GF5M6fu4ev).
-          signal?.throwIfAborted();
-          const observationRaced = await this.raceAgainstDeadline<ObserveResult>(
-            () => this.observationAfterSuccess(result, signal),
-            () => cutoffMs(),
-            "post-success observation refresh",
-            subscribeLiveTransportDeadline,
-          );
-          signal?.throwIfAborted();
-
-          if (observationRaced === "timed-out") {
-            logger.warn(
-              `[SetUIState] Post-success observation refresh stalled after field ${this.describeSelector(fieldSpec.selector)}; returning ${processed.size}/${options.fields.length} accumulated field result(s) without a fresh observation`,
-            );
-            const notAttemptedReason =
-              processed.size < options.fields.length
-                ? `Not attempted: setUIState's post-success observation refresh stalled after applying ${processed.size}/${options.fields.length} field(s)`
-                : undefined;
-            return {
-              success: false,
-              fields: this.collectResults(
-                fieldResults,
-                options.fields,
-                processed,
-                notAttemptedReason,
-              ),
-              totalAttempts,
-              // Keep whatever observation is already on hand (from the
-              // PREVIOUS successful field, or the initial observation)
-              // rather than blocking on the unbounded refresh -- omitted
-              // only when no observation was ever captured.
-              observation: lastObservation,
-              error: `setUIState's post-success observation refresh did not settle within the result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) after applying ${processed.size}/${options.fields.length} field(s); the applied field(s) succeeded but the refreshed observation is unavailable`,
-            };
-          }
-
-          lastObservation = observationRaced;
-        }
-
-        // Fail fast on failure
-        if (!result.success) {
-          logger.debug(
-            `[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`,
-          );
-          const notAttemptedReason = `Not attempted: setUIState stopped after field ${this.describeSelector(fieldSpec.selector)} failed`;
-          return {
-            success: false,
-            fields: this.collectResults(
-              fieldResults,
-              options.fields,
-              processed,
-              notAttemptedReason,
-            ),
-            totalAttempts,
-            observation: lastObservation,
-            error:
-              result.error ?? `Failed to set field: ${this.describeSelector(fieldSpec.selector)}`,
-          };
+        if (outcome) {
+          return outcome;
         }
       } else {
-        // No visible matches — scroll to find more.
-        // Arm the budget on entering the search; only elapsed *search* time counts.
-        if (searchDeadline === null) {
-          searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
-        } else if (this.timer.now() >= searchDeadline) {
-          budgetSpent = true;
+        const searchStop = this.prepareSearchIteration(state, searchState);
+        if (searchStop) {
+          budgetSpent = searchStop === "budget-spent";
           break;
-        }
-
-        scrollsWithoutProgress++;
-
-        if (scrollsWithoutProgress > MAX_FUTILE_SCROLLS) {
-          if (!triedReverse) {
-            // Try reverse direction
-            currentDirection = currentDirection === "down" ? "up" : "down";
-            triedReverse = true;
-            scrollsWithoutProgress = 0;
-          } else {
-            // Exhausted both directions
-            break;
-          }
         }
 
         // Scroll one step without lookFor to avoid jumping past intermediate fields.
@@ -696,7 +594,7 @@ export class SetUIState extends BaseVisualChange {
           async (onTick) => {
             // Search direction describes content to reveal, not finger movement.
             await this.getSwipeOn().execute(
-              { direction: currentDirection, gestureType: "scrollTowardsDirection" },
+              { direction: searchState.currentDirection, gestureType: "scrollTowardsDirection" },
               this.withRearmOnTick(fieldProgress(processed.size), onTick),
             );
 
@@ -715,22 +613,222 @@ export class SetUIState extends BaseVisualChange {
         signal?.throwIfAborted();
 
         if (searchRaced === "timed-out") {
-          resultBudgetSpent = true;
+          state.resultBudgetSpent = true;
           break;
         }
 
         if (searchRaced) {
-          lastObservation = searchRaced;
+          state.lastObservation = searchRaced;
         }
       }
     }
 
+    return this.finishFieldLoop(context, budgetSpent);
+  }
+
+  private prepareSearchIteration(
+    state: FieldLoopContext["state"],
+    searchState: {
+      scrollsWithoutProgress: number;
+      currentDirection: "up" | "down";
+      triedReverse: boolean;
+    },
+  ): "budget-spent" | "exhausted" | undefined {
+    // No visible matches — scroll to find more.
+    // Arm the budget on entering the search; only elapsed *search* time counts.
+    if (state.searchDeadline === null) {
+      state.searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
+    } else if (this.timer.now() >= state.searchDeadline) {
+      return "budget-spent";
+    }
+
+    searchState.scrollsWithoutProgress++;
+
+    if (searchState.scrollsWithoutProgress > MAX_FUTILE_SCROLLS) {
+      if (!searchState.triedReverse) {
+        // Try reverse direction
+        searchState.currentDirection = searchState.currentDirection === "down" ? "up" : "down";
+        searchState.triedReverse = true;
+        searchState.scrollsWithoutProgress = 0;
+      } else {
+        // Exhausted both directions
+        return "exhausted";
+      }
+    }
+  }
+
+  private async processVisibleField(
+    visibleField: VisibleField,
+    context: FieldLoopContext,
+  ): Promise<SetUIStateResult | "stop" | undefined> {
+    const {
+      options,
+      fieldResults,
+      processed,
+      signal,
+      subscribeLiveTransportDeadline,
+      cutoffMs,
+      admissionDeadlineBudgetMsForMessage,
+      emitProgress,
+      fieldProgress,
+      state,
+    } = context;
+    // Process only the topmost visible field, then re-evaluate.
+    // Each edit may change layout (keyboard, reflow, dynamic fields),
+    // so we re-find visible fields from a fresh observation each iteration.
+    const { fieldSpec, fieldIndex, element } = visibleField;
+    // This field's slice starts at processed.size * 100, before it is
+    // added to `processed` below. `fieldBudgetMs` here is only a snapshot
+    // for the timeout message below -- the race itself re-reads
+    // `cutoffMs()` live, both at admission and again on every progress
+    // tick via `onTick` (issue #6222 P1, fujuk): a mid-field progress
+    // notification that extends the live transport deadline re-arms this
+    // SAME field's own timeout against the new, larger budget instead of
+    // timing out against the stale value captured here.
+    const fieldBudgetMs = cutoffMs() - this.timer.now();
+    const raced = await this.raceAgainstDeadline<InternalFieldResult>(
+      (onTick) =>
+        runWithTextRequestContext({ getDeadlineMs: cutoffMs }, () =>
+          this.processField(
+            fieldSpec,
+            element,
+            this.withRearmOnTick(fieldProgress(processed.size), onTick),
+            signal,
+          ),
+        ),
+      () => cutoffMs(),
+      this.describeSelector(fieldSpec.selector),
+      subscribeLiveTransportDeadline,
+    ).catch((error: unknown): InternalFieldResult => {
+      signal?.throwIfAborted();
+      return {
+        selector: fieldSpec.selector,
+        success: false,
+        attempts: 0,
+        error: errorMessage(error),
+      };
+    });
+    signal?.throwIfAborted();
+
+    processed.add(fieldIndex);
+
+    if (raced === "timed-out") {
+      // The field WAS admitted and started but did not settle within its
+      // remaining share of the real transport deadline -- `processField`
+      // may still be running against the device. Its eventual outcome is
+      // no longer awaited or reported. Stop and return the partial
+      // result instead of risking the SAME overrun this whole feature
+      // exists to prevent (issue #6222 review, coderabbit fuTtO).
+      fieldResults[fieldIndex] = {
+        selector: fieldSpec.selector,
+        success: false,
+        attempts: 0,
+        timedOut: true,
+        error: `Field ${this.describeSelector(fieldSpec.selector)} did not settle within its ${Math.round(Math.max(fieldBudgetMs, 0) / 1000)}s share of setUIState's result deadline; it may still be applying in the background`,
+      };
+      state.resultBudgetSpent = true;
+      return "stop";
+    }
+
+    const result = raced;
+    // Retain only the small, public FieldResult fields across the loop --
+    // `freshObservation` (a full view hierarchy) is used immediately below
+    // for reuse and then must NOT be kept alive in `fieldResults` for the
+    // rest of the call, or peak memory grows to fieldCount x one full
+    // hierarchy instead of staying ~one hierarchy (#6222 review).
+    fieldResults[fieldIndex] = this.toPublicFieldResult(result);
+    state.totalAttempts += result.attempts;
+    // Progress clears the budget: it bounds futile searching, not successful
+    // work. The next search re-arms it from scratch (#4252 review).
+    state.searchDeadline = null;
+
+    // Report per-field advancement at the top of the field's own slice.
+    // This keeps the request alive on progress-aware clients (a live
+    // request timeout is commonly reset by progress notifications) and,
+    // independent of transport behavior, gives the client a durable
+    // trace of what has already been applied before a bare timeout could
+    // otherwise leave it blind (#6222).
+    await emitProgress(
+      processed.size * 100,
+      result.success
+        ? `Set field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`
+        : `Failed field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`,
+    );
+
+    // Refresh observation after each success. processField already fetched
+    // a fresh observation as part of verification for most field types —
+    // reuse it instead of paying for a second, effectively redundant
+    // observe against the device, which is exactly the per-field cost that
+    // was pushing multi-field calls past the request timeout (#6222).
+    if (result.success) {
+      // The field itself already succeeded and is recorded in
+      // `fieldResults` above -- only the follow-up observation used to
+      // locate the NEXT field is at risk here. Without a
+      // `freshObservation`, `observationAfterSuccess`'s fallback issues
+      // an UNBOUNDED `ObserveScreen.execute()`; if that stalls, awaiting
+      // it directly would let the daemon's outer transport deadline win
+      // and discard everything already applied -- exactly the failure
+      // mode this whole feature exists to prevent. Race it against the
+      // SAME live cutoff every other device call in this method already
+      // respects (issue #6222 review, PRRT_kwDOP-GF5M6fu4ev).
+      signal?.throwIfAborted();
+      const observationRaced = await this.raceAgainstDeadline<ObserveResult>(
+        () => this.observationAfterSuccess(result, signal),
+        () => cutoffMs(),
+        "post-success observation refresh",
+        subscribeLiveTransportDeadline,
+      );
+      signal?.throwIfAborted();
+
+      if (observationRaced === "timed-out") {
+        logger.warn(
+          `[SetUIState] Post-success observation refresh stalled after field ${this.describeSelector(fieldSpec.selector)}; returning ${processed.size}/${options.fields.length} accumulated field result(s) without a fresh observation`,
+        );
+        const notAttemptedReason =
+          processed.size < options.fields.length
+            ? `Not attempted: setUIState's post-success observation refresh stalled after applying ${processed.size}/${options.fields.length} field(s)`
+            : undefined;
+        return {
+          success: false,
+          fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
+          totalAttempts: state.totalAttempts,
+          // Keep whatever observation is already on hand (from the
+          // PREVIOUS successful field, or the initial observation)
+          // rather than blocking on the unbounded refresh -- omitted
+          // only when no observation was ever captured.
+          observation: state.lastObservation,
+          error: `setUIState's post-success observation refresh did not settle within the result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) after applying ${processed.size}/${options.fields.length} field(s); the applied field(s) succeeded but the refreshed observation is unavailable`,
+        };
+      }
+
+      state.lastObservation = observationRaced;
+    }
+
+    // Fail fast on failure
+    if (!result.success) {
+      logger.debug(
+        `[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`,
+      );
+      const notAttemptedReason = `Not attempted: setUIState stopped after field ${this.describeSelector(fieldSpec.selector)} failed`;
+      return {
+        success: false,
+        fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
+        totalAttempts: state.totalAttempts,
+        observation: state.lastObservation,
+        error: result.error ?? `Failed to set field: ${this.describeSelector(fieldSpec.selector)}`,
+      };
+    }
+  }
+
+  private finishFieldLoop(context: FieldLoopContext, budgetSpent: boolean): SetUIStateResult {
+    const { options, fieldResults, processed, admissionDeadlineBudgetMsForMessage, state } =
+      context;
     // Check for any unprocessed fields -- or a per-field timeout on the LAST
     // admitted field (issue #6222 review, coderabbit fuTtO): that field IS in
     // `processed` (it was admitted and started) but did not succeed, so
     // `processed.size === options.fields.length` alone would otherwise fall
     // through to the unconditional success return below despite the timeout.
-    if (processed.size < options.fields.length || resultBudgetSpent) {
+    if (processed.size < options.fields.length || state.resultBudgetSpent) {
       const missing = options.fields
         .filter((_, i) => !processed.has(i))
         .map((f) => this.describeSelector(f.selector));
@@ -739,16 +837,16 @@ export class SetUIState extends BaseVisualChange {
       // be on screen, they were simply never reached. Say so distinctly and
       // mark them `notAttempted` so a client can tell "safe to retry just
       // these" apart from "attempted and failed" (issue #6222 reopen).
-      const notAttemptedReason = resultBudgetSpent
+      const notAttemptedReason = state.resultBudgetSpent
         ? `Not attempted: setUIState's result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) was reached after applying ${processed.size}/${options.fields.length} field(s)`
         : undefined;
 
       return {
         success: false,
         fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
-        totalAttempts,
-        observation: lastObservation,
-        error: resultBudgetSpent
+        totalAttempts: state.totalAttempts,
+        observation: state.lastObservation,
+        error: state.resultBudgetSpent
           ? missing.length > 0
             ? `setUIState result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) reached after applying ${processed.size}/${options.fields.length} field(s); not attempted: ${missing.join(", ")}`
             : `setUIState result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) reached while applying field(s); the last-admitted field did not settle in time`
@@ -761,8 +859,8 @@ export class SetUIState extends BaseVisualChange {
     return {
       success: true,
       fields: fieldResults,
-      totalAttempts,
-      observation: lastObservation,
+      totalAttempts: state.totalAttempts,
+      observation: state.lastObservation,
     };
   }
 
@@ -1147,28 +1245,28 @@ export class SetUIState extends BaseVisualChange {
           attempts,
           signal,
         );
-        if (verification.error) {
-          lastError = verification.error;
-          if (verification.stopRetrying) {
-            return {
-              selector: fieldSpec.selector,
-              success: false,
-              attempts,
-              error: lastError,
-              fieldType,
-            };
-          }
-          continue;
+        if (!verification.error) {
+          return {
+            selector: fieldSpec.selector,
+            success: true,
+            attempts,
+            verified: verification.verified,
+            fieldType,
+            freshObservation: verification.observation,
+          };
         }
 
-        return {
-          selector: fieldSpec.selector,
-          success: true,
-          attempts,
-          verified: verification.verified,
-          fieldType,
-          freshObservation: verification.observation,
-        };
+        lastError = verification.error;
+        if (verification.stopRetrying) {
+          return {
+            selector: fieldSpec.selector,
+            success: false,
+            attempts,
+            error: lastError,
+            fieldType,
+          };
+        }
+        continue;
       } catch (error) {
         signal?.throwIfAborted();
         lastError = errorMessage(error);
@@ -1461,157 +1559,36 @@ export class SetUIState extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
     focusRecovery: TextFocusRecovery = {},
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    unclassifiable?: boolean;
-    stopRetrying?: boolean;
-  }> {
+  ): Promise<FieldApplicationResult> {
     const tapOnElement = this.getTapOnElement();
     const inputText = this.getInputText();
     const clearText = this.getClearText();
 
     try {
       switch (fieldType) {
-        case "text": {
-          if (fieldSpec.value === undefined) {
-            return { success: false, error: "value is required for text fields" };
-          }
-
-          const selectorDesc = this.describeSelector(fieldSpec.selector);
-
-          // The focus action verifies that this editable field, rather than a
-          // previously focused field, owns input before ClearText can mutate it.
-          logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
-          const tapStart = Date.now();
-          const tapResult = await this.focusTextField(
+        case "text":
+          return await this.applyTextFieldValue({
             element,
             fieldSpec,
             focusRecovery,
             progress,
             signal,
-          );
-          signal?.throwIfAborted();
-          logger.debug(
-            `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
-          );
-          if (!tapResult.success || tapResult.focusVerified !== true) {
-            return {
-              success: false,
-              error: `Failed to tap/focus on field: ${tapResult.error ?? "focus was not verified"}`,
-            };
-          }
-
-          // Clear existing text
-          logger.debug(`[SetUIState] text.clear selector=${selectorDesc}`);
-          const clearStart = Date.now();
-          signal?.throwIfAborted();
-          const clearResult = await clearText.execute(progress, signal);
-          if (clearResult.retryable !== false) {
-            signal?.throwIfAborted();
-          }
-          logger.debug(
-            `[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`,
-          );
-          if (!clearResult.success) {
-            return {
-              success: false,
-              error: `Failed to clear text: ${clearResult.error}`,
-              stopRetrying: clearResult.retryable === false,
-            };
-          }
-
-          // Input new text. Intentionally passes no mode so the shared
-          // InputText.execute applies event-all marker auto-promotion here too
-          // (a form field value containing a configured marker, e.g. an
-          // @mention, is typed via eventAll). This is by design — the feature
-          // is scoped to both the internal text-input primitive and setUIState text fields.
-          logger.debug(
-            `[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value.length}`,
-          );
-          const inputStart = Date.now();
-          signal?.throwIfAborted();
-          const inputResult = await inputText.execute(
-            fieldSpec.value,
-            undefined,
-            false,
-            undefined,
-            signal,
-          );
-          if (inputResult.retryable !== false) {
-            signal?.throwIfAborted();
-          }
-          logger.debug(
-            `[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`,
-          );
-          if (!inputResult.success) {
-            return {
-              success: false,
-              error: `Failed to input text: ${inputResult.error}`,
-              stopRetrying: inputResult.retryable === false,
-            };
-          }
-
-          return { success: true };
-        }
+            inputText,
+            clearText,
+          });
 
         case "checkbox":
-        case "toggle": {
-          if (fieldSpec.selected === undefined) {
-            return { success: false, error: "selected is required for checkbox/toggle fields" };
-          }
-
-          // Check current state
-          const isChecked = this.fieldTypeDetector.isChecked(element);
-
-          // Only tap if state needs to change
-          if (isChecked !== fieldSpec.selected) {
-            const tapResult = await tapOnElement.execute(
-              this.buildTapOptions(fieldSpec.selector, "tap"),
-              progress,
-              signal,
-            );
-            if (!tapResult.success) {
-              return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
-            }
-          }
-
-          return { success: true };
-        }
-
-        case "dropdown": {
-          if (fieldSpec.value === undefined) {
-            return { success: false, error: "value is required for dropdown fields" };
-          }
-
-          // Tap to open dropdown
-          const openResult = await tapOnElement.execute(
-            this.buildTapOptions(fieldSpec.selector, "tap"),
+        case "toggle":
+          return await this.applySelectedFieldValue(
+            element,
+            fieldSpec,
+            tapOnElement,
             progress,
             signal,
           );
-          if (!openResult.success) {
-            return { success: false, error: `Failed to open dropdown: ${openResult.error}` };
-          }
 
-          // Wait a bit for dropdown to open
-          await this.timer.sleep(200);
-
-          // Tap on the desired value
-          const selectResult = await tapOnElement.execute(
-            { text: fieldSpec.value, action: "tap" },
-            progress,
-            signal,
-          );
-          if (!selectResult.success) {
-            return {
-              success: false,
-              error: `Failed to select dropdown value: ${selectResult.error}`,
-            };
-          }
-
-          return { success: true };
-        }
+        case "dropdown":
+          return await this.applyDropdownFieldValue(fieldSpec, tapOnElement, progress, signal);
 
         default:
           // Name what was actually matched: this is normally a label rather than
@@ -1636,6 +1613,181 @@ export class SetUIState extends BaseVisualChange {
     }
   }
 
+  private async applyTextFieldValue({
+    element,
+    fieldSpec,
+    focusRecovery,
+    progress,
+    signal,
+    inputText,
+    clearText,
+  }: {
+    element: Element;
+    fieldSpec: FieldSpec;
+    focusRecovery: TextFocusRecovery;
+    progress?: ProgressCallback;
+    signal?: AbortSignal;
+    inputText: InputTextLike;
+    clearText: ClearTextLike;
+  }): Promise<FieldApplicationResult> {
+    if (fieldSpec.value === undefined) {
+      return { success: false, error: "value is required for text fields" };
+    }
+
+    const selectorDesc = this.describeSelector(fieldSpec.selector);
+
+    // The focus action verifies that this editable field, rather than a
+    // previously focused field, owns input before ClearText can mutate it.
+    logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
+    const tapStart = Date.now();
+    const tapResult = await this.focusTextField(
+      element,
+      fieldSpec,
+      focusRecovery,
+      progress,
+      signal,
+    );
+    signal?.throwIfAborted();
+    logger.debug(
+      `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
+    );
+    if (!tapResult.success || tapResult.focusVerified !== true) {
+      return {
+        success: false,
+        error: `Failed to tap/focus on field: ${tapResult.error ?? "focus was not verified"}`,
+      };
+    }
+
+    // Clear existing text
+    logger.debug(`[SetUIState] text.clear selector=${selectorDesc}`);
+    const clearStart = Date.now();
+    signal?.throwIfAborted();
+    const clearResult = await clearText.execute(progress, signal);
+    if (clearResult.retryable !== false) {
+      signal?.throwIfAborted();
+    }
+    logger.debug(
+      `[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`,
+    );
+    if (!clearResult.success) {
+      return {
+        success: false,
+        error: `Failed to clear text: ${clearResult.error}`,
+        stopRetrying: clearResult.retryable === false,
+      };
+    }
+
+    return await this.inputFieldText(fieldSpec, selectorDesc, inputText, signal);
+  }
+
+  private async inputFieldText(
+    fieldSpec: FieldSpec,
+    selectorDesc: string,
+    inputText: InputTextLike,
+    signal?: AbortSignal,
+  ): Promise<FieldApplicationResult> {
+    // Input new text. Intentionally passes no mode so the shared
+    // InputText.execute applies event-all marker auto-promotion here too
+    // (a form field value containing a configured marker, e.g. an
+    // @mention, is typed via eventAll). This is by design — the feature
+    // is scoped to both the internal text-input primitive and setUIState text fields.
+    logger.debug(
+      `[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value!.length}`,
+    );
+    const inputStart = Date.now();
+    signal?.throwIfAborted();
+    const inputResult = await inputText.execute(
+      fieldSpec.value!,
+      undefined,
+      false,
+      undefined,
+      signal,
+    );
+    if (inputResult.retryable !== false) {
+      signal?.throwIfAborted();
+    }
+    logger.debug(
+      `[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`,
+    );
+    if (!inputResult.success) {
+      return {
+        success: false,
+        error: `Failed to input text: ${inputResult.error}`,
+        stopRetrying: inputResult.retryable === false,
+      };
+    }
+
+    return { success: true };
+  }
+
+  private async applySelectedFieldValue(
+    element: Element,
+    fieldSpec: FieldSpec,
+    tapOnElement: TapOnElementLike,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<FieldApplicationResult> {
+    if (fieldSpec.selected === undefined) {
+      return { success: false, error: "selected is required for checkbox/toggle fields" };
+    }
+
+    // Check current state
+    const isChecked = this.fieldTypeDetector.isChecked(element);
+
+    // Only tap if state needs to change
+    if (isChecked !== fieldSpec.selected) {
+      const tapResult = await tapOnElement.execute(
+        this.buildTapOptions(fieldSpec.selector, "tap"),
+        progress,
+        signal,
+      );
+      if (!tapResult.success) {
+        return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
+      }
+    }
+
+    return { success: true };
+  }
+
+  private async applyDropdownFieldValue(
+    fieldSpec: FieldSpec,
+    tapOnElement: TapOnElementLike,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<FieldApplicationResult> {
+    if (fieldSpec.value === undefined) {
+      return { success: false, error: "value is required for dropdown fields" };
+    }
+
+    // Tap to open dropdown
+    const openResult = await tapOnElement.execute(
+      this.buildTapOptions(fieldSpec.selector, "tap"),
+      progress,
+      signal,
+    );
+    if (!openResult.success) {
+      return { success: false, error: `Failed to open dropdown: ${openResult.error}` };
+    }
+
+    // Wait a bit for dropdown to open
+    await this.timer.sleep(200);
+
+    // Tap on the desired value
+    const selectResult = await tapOnElement.execute(
+      { text: fieldSpec.value, action: "tap" },
+      progress,
+      signal,
+    );
+    if (!selectResult.success) {
+      return {
+        success: false,
+        error: `Failed to select dropdown value: ${selectResult.error}`,
+      };
+    }
+
+    return { success: true };
+  }
+
   /**
    * Verify field value after setting
    */
@@ -1644,12 +1796,7 @@ export class SetUIState extends BaseVisualChange {
     fieldType: FieldType,
     signal?: AbortSignal,
     previouslyMatchedElement?: Element,
-  ): Promise<{
-    verified: boolean;
-    observation?: ObserveResult;
-    observedValue?: string | boolean;
-    unverifiable?: boolean;
-  }> {
+  ): Promise<FieldValueVerification> {
     // Get fresh observation. The caller (processField -> execute) reuses this
     // as its own post-success refresh instead of issuing a second, effectively
     // redundant observe against the device (#6222).
@@ -1690,6 +1837,15 @@ export class SetUIState extends BaseVisualChange {
       return { verified: false, observation };
     }
 
+    return this.verifyObservedFieldValue(fieldSpec, fieldType, element, observation);
+  }
+
+  private verifyObservedFieldValue(
+    fieldSpec: FieldSpec,
+    fieldType: FieldType,
+    element: Element,
+    observation: ObserveResult,
+  ): FieldValueVerification {
     // Verify based on field type
     switch (fieldType) {
       case "text":

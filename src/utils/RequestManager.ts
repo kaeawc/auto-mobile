@@ -171,18 +171,25 @@ export class RequestManager {
     this.timer.clearTimeout(request.timeoutId);
     this.pending.delete(id);
 
-    const result = request.responseErrorFactory
-      ? request.responseErrorFactory(error, totalTimeMs)
-      : { success: false, totalTimeMs, error };
-    const duration = this.timer.now() - request.createdAt;
-    logger.debug(
-      `[RequestManager] Resolved errored request: ${request.type} (id: ${id}, duration: ${duration}ms)`,
-    );
-    request.resolve(
-      diagnostics && typeof result === "object" && result !== null
-        ? { ...result, ...diagnostics }
-        : result,
-    );
+    try {
+      const result = request.responseErrorFactory
+        ? request.responseErrorFactory(error, totalTimeMs)
+        : { success: false, totalTimeMs, error };
+      const duration = this.timer.now() - request.createdAt;
+      logger.debug(
+        `[RequestManager] Resolved errored request: ${request.type} (id: ${id}, duration: ${duration}ms)`,
+      );
+      request.resolve(
+        diagnostics && typeof result === "object" && result !== null
+          ? { ...result, ...diagnostics }
+          : result,
+      );
+    } catch (factoryError) {
+      logger.warn("[RequestManager] Response error factory failed", factoryError);
+      request.reject(
+        factoryError instanceof Error ? factoryError : new Error(String(factoryError)),
+      );
+    }
 
     return true;
   }

@@ -40,6 +40,11 @@ exclude = [
   # including links to other repos' issues/PRs, are unaffected and still
   # checked.
   "^https://github\\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$",
+  # The release-asset base URL with no tag or file. It is the documented default
+  # of AUTOMOBILE_ASSET_BASE_URL (docs/using/environment-variables.md) and is a
+  # prefix, not a page: GitHub answers 404 for it. Only this exact URL is
+  # excluded; real download links under it are still checked.
+  "^https://github\\.com/kaeawc/auto-mobile/releases/download/?$",
 ]
 
 # Exclude specific input paths. These are regexes matched against each input

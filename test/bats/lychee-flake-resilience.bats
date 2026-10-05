@@ -46,10 +46,16 @@ requires_yq() {
   skip "yq not installed"
 }
 
-# Extracts the single exclude pattern that mentions kaeawc/auto-mobile, as a
-# raw (non-JSON-escaped) string usable directly as a bash =~ regex.
+# Extracts the kaeawc/auto-mobile issue/pull exclude pattern as a raw
+# (non-JSON-escaped) string usable directly as a bash =~ regex.
 self_referential_exclude_pattern() {
-  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile"))' "$CONFIG"
+  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/") and test("(issues|pull)"))' "$CONFIG"
+}
+
+# Extracts the kaeawc/auto-mobile release-download base exclude pattern as a
+# raw (non-JSON-escaped) string usable directly as a bash =~ regex.
+release_download_base_exclude_pattern() {
+  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/releases/download"))' "$CONFIG"
 }
 
 @test "lychee retries failed requests with a backoff (retry_wait_time)" {
@@ -86,7 +92,7 @@ self_referential_exclude_pattern() {
   requires_yq
   run self_referential_exclude_pattern
   [ "$status" -eq 0 ]
-  # Exactly one exclude entry mentions kaeawc/auto-mobile, and it covers both
+  # Exactly one exclude entry covers kaeawc/auto-mobile issue/pull links, both
   # issues and pull, any number, on github.com/kaeawc/auto-mobile specifically,
   # anchored at the end so nothing but an optional fragment/query can follow
   # the numeric ID.
@@ -140,4 +146,34 @@ self_referential_exclude_pattern() {
   # kaeawc/auto-mobile path segment, not a prefix match.
   local lookalike="https://github.com/kaeawc/auto-mobile-extra/issues/50"
   [[ ! "$lookalike" =~ $pattern ]]
+}
+
+@test "release-download base exclude pattern matches only the bare base with an optional trailing slash" {
+  requires_yq
+  run release_download_base_exclude_pattern
+  [ "$status" -eq 0 ]
+  [ "$output" = '^https://github\.com/kaeawc/auto-mobile/releases/download/?$' ]
+  local pattern="$output"
+
+  # AUTOMOBILE_ASSET_BASE_URL is a prefix, not a downloadable page.
+  local base="https://github.com/kaeawc/auto-mobile/releases/download"
+  local base_with_slash="https://github.com/kaeawc/auto-mobile/releases/download/"
+  [[ "$base" =~ $pattern ]]
+  [[ "$base_with_slash" =~ $pattern ]]
+}
+
+@test "release-download base exclude pattern does not match real assets, release pages, or other repos" {
+  requires_yq
+  run release_download_base_exclude_pattern
+  [ "$status" -eq 0 ]
+  local pattern="$output"
+
+  # Downloadable assets and release pages must still be checked, as must
+  # another repo's release-download base.
+  local asset="https://github.com/kaeawc/auto-mobile/releases/download/0.0.82/AutoMobile-0.0.82-macos.dmg"
+  local releases="https://github.com/kaeawc/auto-mobile/releases"
+  local other_repo="https://github.com/lycheeverse/lychee/releases/download"
+  [[ ! "$asset" =~ $pattern ]]
+  [[ ! "$releases" =~ $pattern ]]
+  [[ ! "$other_repo" =~ $pattern ]]
 }

@@ -22,6 +22,8 @@ import org.robolectric.annotation.Config
 @Config(sdk = [30])
 class OverlayControllerTest {
   private val host = FakeInteractiveOverlayHost()
+  private val events = mutableListOf<OverlayEvent>()
+  private var connected = true
   private val results = mutableListOf<OverlayResult>()
   private val json = Json { ignoreUnknownKeys = true }
   private var dismissed = 0
@@ -35,6 +37,8 @@ class OverlayControllerTest {
             as OverlayResult
       },
       onDismissed = { dismissed++ },
+      eventSink = OverlayEventSink { if (connected) events += it },
+      clock = { 42L },
       render = { spec ->
         mapOverlaySpec(spec).also { models += it }.request()
       },
@@ -101,7 +105,7 @@ class OverlayControllerTest {
     )
     assertResult("state", true)
     assertEquals("Jason", models.last().root.text)
-    assertEquals(listOf("show", "replace", "replace"), host.calls)
+    assertEquals(listOf("show", "replace"), host.calls)
     dispatch(DismissOverlay(requestId = "dismiss", id = "panel"))
     assertResult("dismiss", true)
     assertEquals(1, dismissed)
@@ -175,7 +179,7 @@ class OverlayControllerTest {
       assertEquals("old 2 true", models.last().root.text)
       controller.update("invalid-key", "panel", null, mapOf("bad-key" to OverlayScalar.Text("bad")))
       assertResult("invalid-key", false, "state[\"bad-key\"]")
-      assertEquals(listOf("show", "replace"), host.calls)
+      assertEquals(listOf("show"), host.calls)
     }
 
   @Test
@@ -236,6 +240,109 @@ class OverlayControllerTest {
     assertResult("render", false, "render broke")
     assertTrue(host.calls.isEmpty())
   }
+
+  @Test
+  fun `controller patch keeps runtime pages composition and sequence while full spec clamps pages`() =
+    runTest {
+      val tree =
+        OverlayPagerNode(
+          "pager",
+          children = List(3) { OverlayTextNode(text = "{page}/{pageCount} {name}") },
+        )
+      controller.show("show", spec().copy(root = tree))
+      val runtime = checkNotNull(controller.activeRuntime)
+      controller.interact(runtime, OverlayInteraction.SettledPage("pager", 2))
+      val request = host.requests.single()
+      controller.update("patch", "panel", null, mapOf("name" to OverlayScalar.Text("patch")))
+      assertSame(runtime, controller.activeRuntime)
+      assertSame(request, host.requests.single())
+      assertEquals(2, runtime.current.pages["pager"])
+      assertEquals(
+        "3/3 patch",
+        mapOverlaySpec(runtime.current.spec, runtime.current.pages).root.children.first().text,
+      )
+      controller.interact(runtime, OverlayInteraction.Tap(listOf(OverlayEmitAction("patched"))))
+      controller.update(
+        "replace",
+        "panel",
+        spec().copy(root = tree.copy(children = tree.children.take(2))),
+        null,
+      )
+      val replaced = checkNotNull(controller.activeRuntime)
+      assertEquals(1, replaced.current.pages["pager"])
+      assertFalse(runtime.current.active)
+      controller.interact(runtime, OverlayInteraction.Tap(listOf(OverlayEmitAction("stale"))))
+      controller.interact(replaced, OverlayInteraction.Tap(listOf(OverlayEmitAction("current"))))
+      assertEquals(listOf(1L, 2L, 3L), events.map { it.sequence })
+    }
+
+  @Test
+  fun `same id re-show continues sequence new ids start at one and returning ids continue`() =
+    runTest {
+      suspend fun emit() {
+        controller.interact(
+          checkNotNull(controller.activeRuntime),
+          OverlayInteraction.Tap(listOf(OverlayEmitAction("event"))),
+        )
+      }
+      controller.show("show", spec())
+      emit()
+      connected = false
+      emit()
+      connected = true
+      controller.show("same", spec())
+      emit()
+      controller.dismiss("dismiss", "panel", null)
+      controller.show("other", spec("other"))
+      emit()
+      controller.show("return", spec())
+      emit()
+      assertEquals(listOf("panel", "panel", "panel", "other", "panel"), events.map { it.id })
+      assertEquals(listOf(1L, 3L, 4L, 1L, 5L), events.map { it.sequence })
+    }
+
+  @Test
+  fun `action and protocol dismiss use same host path and suppress late interactions`() = runTest {
+    controller.show("show", spec())
+    val runtime = checkNotNull(controller.activeRuntime)
+    controller.interact(
+      runtime,
+      OverlayInteraction.Tap(listOf(OverlayDismissAction, OverlayEmitAction("late"))),
+    )
+    assertEquals(listOf("show", "dismiss"), host.calls)
+    assertEquals(OverlayEventKind.DISMISSED, events.single().kind)
+    assertNull(controller.activeRuntime)
+    controller.interact(runtime, OverlayInteraction.SettledPage("pager", 1))
+    controller.show("again", spec())
+    controller.dismiss("dismiss", "panel", null)
+    assertEquals(listOf(1L, 2L), events.map { it.sequence })
+    controller.destroy()
+    controller.interact(runtime, OverlayInteraction.Tap(listOf(OverlayEmitAction("late"))))
+    assertEquals(2, events.size)
+  }
+
+  @Test
+  fun `destroy is silent terminal even when host removal fails and text fields control focusability`() =
+    runTest {
+      controller.show(
+        "show",
+        spec()
+          .copy(
+            root = OverlayScrollNode(child = OverlayTextFieldNode(stateKey = "query")),
+            state = mapOf("query" to OverlayScalar.Text("")),
+          ),
+      )
+      assertTrue(host.requests.last().hasTextField)
+      val runtime = checkNotNull(controller.activeRuntime)
+      controller.interact(runtime, OverlayInteraction.TextChange("query", "typed"))
+      assertEquals(1, events.size)
+      host.accept = false
+      controller.destroy()
+      assertFalse(runtime.current.active)
+      controller.interact(runtime, OverlayInteraction.TextChange("query", "late"))
+      assertEquals(1, events.size)
+      assertEquals("typed", (runtime.current.state["query"] as OverlayScalar.Text).value)
+    }
 
   @Test
   fun `typed scalar dimension and integer fields round trip exactly`() {

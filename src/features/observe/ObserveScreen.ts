@@ -129,6 +129,7 @@ import {
   observedIosDisplay,
 } from "./ObservationDisplay";
 import { displayTransitions, type DisplayCaptureStart } from "./DisplayTransition";
+import { selectedDisplayPin } from "./SessionDisplayContext";
 import {
   assertAllDisplayObserveSupported,
   DisplaySelectionError,
@@ -1118,6 +1119,34 @@ export class RealObserveScreen implements ObserveScreen {
     await this.hierarchyCollector.collectRaw(result, signal);
   }
 
+  private async readCachedObservationForTarget(): Promise<ObserveResult | undefined> {
+    const stored = await getObserveCacheStore().getMostRecent(this.device.deviceId);
+    if (!stored || (this.device.displays?.panels.length ?? 0) <= 1) {
+      return stored;
+    }
+    const focusedPanel = displayTransitions.currentObservedPanel(this.device.deviceId);
+    // Explicit observations do not update the default panel's transition stamp.
+    // Before its first observation, reuse the live resolver unless the request
+    // already selects a panel; explicit "active" still needs live state.
+    const explicitPanel = ![undefined, "active"].includes(this.requestedDisplay);
+    const activeDisplay =
+      focusedPanel || explicitPanel
+        ? undefined
+        : this.device.platform === "android"
+          ? (await this.observedAndroidDisplayCache.resolve(this.device, this.adb)).display
+          : observedIosDisplay(this.device, stored.viewHierarchy);
+    const { key: activePanelKey, posture } = activeDisplay ?? {};
+    const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {
+      focusedPanelKey: focusedPanel?.key,
+      activePanelKey,
+      posture,
+      displayPin: selectedDisplayPin(),
+    });
+    // Keep the entry for repeated explicit-panel reads; a different target is a miss.
+    // On multi-panel devices, a missing display key cannot prove the target: miss.
+    return stored.display?.key === panel.key ? stored : undefined;
+  }
+
   /**
    * Get the most recent cached observe result from memory or disk cache.
    */
@@ -1125,7 +1154,7 @@ export class RealObserveScreen implements ObserveScreen {
     const startTime = this.timer.now();
     try {
       logger.debug("[OBSERVE_CACHE] Getting most recent cached observe result");
-      const stored = await getObserveCacheStore().getMostRecent(this.device.deviceId);
+      const stored = await this.readCachedObservationForTarget();
       const cached =
         stored && this.device.platform === "ios"
           ? {

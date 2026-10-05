@@ -33,6 +33,7 @@ class RequestIdEchoContractTest {
       "storage_changed",
       "crash_event",
       "anr_event",
+      "overlay_event",
     )
 
   @Test

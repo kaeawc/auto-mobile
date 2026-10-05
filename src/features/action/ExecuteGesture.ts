@@ -4,7 +4,7 @@ import type { Element } from "../../models";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon/androidSearchDrag";
 import { inputDurationArgument } from "./touchscreenInput";
 import { StaleDisplayError } from "../../models/StaleDisplayError";
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, Point } from "../../models";
 import { FingerPath } from "../../models";
@@ -526,10 +526,18 @@ export class ExecuteGesture extends BaseVisualChange {
       undefined,
       undefined,
       swipe.fingerSpacing,
+      signal,
     );
+    if (!result.success && result.dispatched && result.acknowledged === false) {
+      throw new ActionableError(
+        `Gesture outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The gesture may have been applied. Do not retry automatically. Observe before retrying.`,
+      );
+    }
     throwIfAborted(signal);
     if (!result.success) {
-      throw new Error(`iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`);
+      throw new ActionableError(
+        `iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`,
+      );
     }
   }
 

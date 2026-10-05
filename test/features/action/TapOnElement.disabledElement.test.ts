@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -32,7 +33,9 @@ function createCommand(state: "disabled" | "enabled", talkBackUnknown = false) {
     },
   );
   // Exercise real resolution and dispatch; replace only the surrounding observation loop.
-  spyOn(command, "observedInteraction").mockImplementation(async (block) => block(observation));
+  spyOn(command, "observedInteraction").mockImplementation(async (block) =>
+    block(recordObservationRead(observation)),
+  );
   return { command, service, adb, observation, node };
 }
 

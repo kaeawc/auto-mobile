@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -101,9 +102,11 @@ async function executeFocus(
   (tapOnElement as any).observedInteraction = async (
     action: (currentObservation: typeof observation) => Promise<Record<string, unknown>>,
   ) => {
-    const actionResult = await action({
-      viewHierarchy: preTapHierarchy ?? { hierarchy: { node: {} } },
-    });
+    const actionResult = await action(
+      recordObservationRead({
+        viewHierarchy: preTapHierarchy ?? { hierarchy: { node: {} } },
+      }),
+    );
     if (index !== undefined || postSelectedIndex !== undefined) {
       const resolvedIndex = index ?? postSelectedIndex ?? 0;
       const matches = new SearchableHierarchy()
@@ -228,7 +231,7 @@ describe("TapOnElement selectionStrategy", () => {
     );
     let tapped = false;
     (tapOnElement as any).observedInteraction = async (action: (observation: unknown) => unknown) =>
-      action({ viewHierarchy: { hierarchy: { node: {} } } });
+      action(recordObservationRead({ viewHierarchy: { hierarchy: { node: {} } } }));
     (tapOnElement as any).executeAndroidTap = async () => {
       tapped = true;
     };

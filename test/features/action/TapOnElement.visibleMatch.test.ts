@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -137,7 +138,10 @@ async function run(
     viewHierarchy: initial,
   };
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
+  tap.observedInteraction = async (action) => ({
+    ...(await action(recordObservationRead(observation))),
+    observation,
+  });
   tap.refreshViewHierarchy = async () => refreshed;
   tap.executeAndroidTap = async (_action, x, y) => {
     points.push({ x, y });

@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { expect, spyOn, test } from "bun:test";
 import {
   SendKeys,
@@ -226,7 +227,9 @@ function realTap(capture: ViewHierarchyResult) {
   );
   tap.prepareSelectionCapture = async () => null;
   tap.observedInteraction = (callback) =>
-    callback({ viewHierarchy: capture, screenSize: { width: 500, height: 500 } });
+    callback(
+      recordObservationRead({ viewHierarchy: capture, screenSize: { width: 500, height: 500 } }),
+    );
   return tap;
 }
 for (const [kind, message] of [

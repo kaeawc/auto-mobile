@@ -20,6 +20,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import path from "path";
@@ -58,6 +59,9 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
 });
 
 class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
+  honourRequestAbort = false;
+  reinstallOperation?: () => Promise<ExecResult>;
+  private installAttempts = 0;
   private installSucceeded = false;
   postInstallListingError?: Error;
   reinstallError?: Error;
@@ -73,14 +77,25 @@ class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
     signal?: AbortSignal,
     waitForProcessSettlementAfterAbort?: boolean,
   ): Promise<ExecResult> {
-    const result = await super.executeCommand(
+    // Match AdbClient's explicit-or-ambient selection before dispatching.
+    const resolvedSignal = this.honourRequestAbort ? (signal ?? getAbortSignal()) : signal;
+    if (this.honourRequestAbort) {
+      resolvedSignal?.throwIfAborted();
+    }
+    let result = await super.executeCommand(
       command,
       timeoutMs,
       maxBuffer,
       noRetry,
-      signal,
+      resolvedSignal,
       waitForProcessSettlementAfterAbort,
     );
+    if (command.startsWith("install ") && ++this.installAttempts === 2 && this.reinstallOperation) {
+      result = await this.reinstallOperation();
+      if (this.honourRequestAbort) {
+        resolvedSignal?.throwIfAborted();
+      }
+    }
     if (this.otherUserRestoreCompleted && command === "shell pm list packages --user 0") {
       this.postRestoreAbortController?.abort();
     }
@@ -1310,6 +1325,7 @@ describe("InstallApp", () => {
         hostExecutor: fakeHost,
         buildToolsLocator: fakeLocator,
         performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        timer: fakeTimer,
       });
     }
 
@@ -1448,17 +1464,198 @@ describe("InstallApp", () => {
       ]);
     });
 
-    test("cancellation during reinstall still reports the completed uninstall", async () => {
-      configureDowngrade();
-      const controller = new AbortController();
-      fakeAdb.setThrowOnAbortedSignal();
-      fakeAdb.abortAfterCommand("uninstall ", controller);
-      const execution = androidAction().execute(apkPath, 10, controller.signal);
-      await expect(execution).rejects.toThrow("Operation cancelled");
-      await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
-      await expect(execution).rejects.toHaveProperty("cause");
-      expect(fakeAdb.wasCommandExecuted("install-existing")).toBe(false);
-    });
+    const cancellationSources = ["explicit", "ambient", "ambient with explicit"] as const;
+
+    function executeWithCancellation(
+      source: (typeof cancellationSources)[number],
+      controller: AbortController,
+    ) {
+      const signal =
+        source === "ambient"
+          ? undefined
+          : source === "explicit"
+            ? controller.signal
+            : new AbortController().signal;
+      return runWithAbortSignal(source === "explicit" ? undefined : controller.signal, () =>
+        androidAction().execute(apkPath, 10, signal),
+      );
+    }
+
+    test.each(
+      cancellationSources.flatMap(
+        (source) =>
+          [
+            [source, false],
+            [source, true],
+          ] as const,
+      ),
+    )(
+      "downgrade reinstall finishes before reporting cancellation: %s (during reinstall: %s)",
+      async (source, duringReinstall) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const controller = new AbortController();
+        const pending = Promise.withResolvers<ExecResult>();
+        const started = Promise.withResolvers<boolean>();
+        adb.reinstallOperation = () => {
+          if (duringReinstall) {
+            controller.abort(new DOMException("Client cancelled", "AbortError"));
+          }
+          started.resolve(true);
+          return pending.promise;
+        };
+        if (!duringReinstall) {
+          adb.abortAfterCommand("uninstall ", controller);
+        }
+        let settled = false;
+        const execution = executeWithCancellation(source, controller);
+        const outcome = execution.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        try {
+          expect(await Promise.race([started.promise, outcome.then(() => false)])).toBe(true);
+          expect(settled).toBe(false);
+          expect(
+            adb
+              .getCommandCalls()
+              .filter((call) => call.command === command)
+              .at(-1)?.signal,
+          ).toBeUndefined();
+          pending.resolve(createExecResult("Success"));
+          await expect(execution).rejects.toThrow("reinstalled for target user 10");
+          await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
+          expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(2);
+          expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          pending.resolve(createExecResult("Success"));
+          await outcome;
+        }
+      },
+    );
+
+    test.each(cancellationSources)(
+      "cancelled downgrade reinstall failure discloses missing app: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const failure = new Error("adb: device offline");
+        adb.reinstallError = failure;
+        const controller = new AbortController();
+        adb.abortAfterCommand("uninstall ", controller);
+        const execution = executeWithCancellation(source, controller);
+        await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
+        await expect(execution).rejects.toThrow("not installed");
+        await expect(execution).rejects.toThrow("adb: device offline");
+        await expect(execution).rejects.toHaveProperty("cause", failure);
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(2);
+        expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+      },
+    );
+
+    test.each(cancellationSources)(
+      "cancelled downgrade reinstall output failure discloses missing app: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        adb.setCommandResponseSequence(command, [
+          createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+          createExecResult("", "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]"),
+        ]);
+        const controller = new AbortController();
+        adb.abortAfterCommand("uninstall ", controller);
+        const result = await executeWithCancellation(source, controller);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("was uninstalled during downgrade recovery");
+        expect(result.error).toContain("not installed");
+        expect(result.error).toContain("INSTALL_FAILED_INSUFFICIENT_STORAGE");
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(2);
+        expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+      },
+    );
+
+    test.each(["explicit", "ambient"] as const)(
+      "cancellation before downgrade uninstall prevents removal and reinstall: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const controller = new AbortController();
+        adb.abortAfterCommand("shell am force-stop", controller);
+        const execution = executeWithCancellation(source, controller);
+        await expect(execution).rejects.toHaveProperty("name", "AbortError");
+        await expect(execution).rejects.toBe(controller.signal.reason);
+        expect(adb.wasCommandExecuted("uninstall ")).toBe(false);
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(1);
+      },
+    );
+
+    test.each(["explicit", "ambient"] as const)(
+      "cancellation during downgrade uninstall does not trigger reinstall: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const controller = new AbortController();
+        const uninstall = adb.executeCommand.bind(adb);
+        spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+          if (args[0].startsWith("uninstall ")) {
+            controller.abort();
+            throw controller.signal.reason;
+          }
+          return uninstall(...args);
+        });
+        const execution = executeWithCancellation(source, controller);
+        await expect(execution).rejects.toHaveProperty("name", "AbortError");
+        await expect(execution).rejects.toBe(controller.signal.reason);
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(1);
+        expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+      },
+    );
+
+    test.each(["explicit", "ambient"] as const)(
+      "cancelled downgrade reinstall retains its step deadline: %s",
+      async (source) => {
+        configureDowngrade();
+        fakeTimer = new FakeTimer();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const pending = Promise.withResolvers<ExecResult>();
+        const started = Promise.withResolvers<boolean>();
+        adb.reinstallOperation = () => {
+          started.resolve(true);
+          return pending.promise;
+        };
+        const controller = new AbortController();
+        adb.abortAfterCommand("uninstall ", controller);
+        const execution = executeWithCancellation(source, controller);
+        const outcome = execution.then(
+          () => undefined,
+          () => undefined,
+        );
+        try {
+          expect(await Promise.race([started.promise, outcome.then(() => false)])).toBe(true);
+          expect(fakeTimer.getPendingTimeouts()).toEqual([120_000]);
+          fakeTimer.advanceTime(120_000);
+          await expect(execution).rejects.toThrow("timed out after 120000ms");
+          await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
+          await expect(execution).rejects.toThrow("not installed");
+          expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          pending.resolve(createExecResult("Success"));
+          await outcome;
+        }
+      },
+    );
 
     test("uninstall errors propagate unchanged without claiming removal", async () => {
       configureDowngrade();

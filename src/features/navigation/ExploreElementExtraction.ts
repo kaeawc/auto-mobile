@@ -1,10 +1,17 @@
-import type { Element, ViewHierarchyResult } from "../../models";
+import type { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { isTruthy, isFalsy } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { DefaultElementSelector } from "../utility/DefaultElementSelector";
+import { nodeAttributes, type NodeAttributes } from "../../models/ViewHierarchyResult";
+import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
+import {
+  getHierarchyNodeSource,
+  setHierarchyNodeSource,
+} from "../observe/output/elementProvenance";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { boundsEqual } from "../../utils/bounds";
 import { asString } from "../../utils/ios-cmdline-tools/devicectlFailureEnvelope";
 
@@ -45,27 +52,21 @@ export function extractNavigationElements(
 export function enrichElementWithChildProperties(element: Element): Element {
   const enriched = { ...element };
 
-  // For Compose elements, text and className might be on child nodes
-  if (element.node) {
-    const children = Array.isArray(element.node) ? element.node : [element.node];
-
-    for (const child of children) {
-      // Extract text from first child with text
-      if (!enriched.text && child.text) {
-        enriched.text = asString(child.text);
-      }
-
-      // Extract className from first child with className
-      if (!enriched["class"] && child.className) {
-        enriched["class"] = asString(child.className);
-      }
-
-      // Extract content-desc from first child with content-desc
-      if (!enriched["content-desc"] && child["content-desc"]) {
-        enriched["content-desc"] = asString(child["content-desc"]);
-      }
-    }
+  // Flattening removes children, but the parser retains the original tree node.
+  // Reuse its traversal for flat Android attributes, XML `$`, node and children.
+  const source = getHierarchyNodeSource(element);
+  if (source) {
+    setHierarchyNodeSource(enriched, source);
   }
+  new ViewHierarchyParser().traverseNode(source ?? element, (node: ViewHierarchyNode, depth) => {
+    if (depth === 0) {
+      return;
+    }
+    const properties = nodeAttributes(node);
+    enriched.text ||= asString(properties.text);
+    enriched["class"] ||= asString(properties.class || properties.className);
+    enriched["content-desc"] ||= asString(properties["content-desc"]);
+  });
 
   return enriched;
 }
@@ -167,6 +168,16 @@ export type TapSelector = { elementId: string; index?: number } | { text: string
 
 type SelectOccurrence = (index?: number) => ElementSelectionResult;
 
+/** Keep own labels authoritative; only unlabelled controls inherit descendant labels. */
+function tapPropertiesFor(element: Element): NodeAttributes {
+  const source = getHierarchyNodeSource(element);
+  const own = source ? nodeAttributes(source) : element;
+  const hasOwnLabel = ["resource-id", "text", "content-desc", "ios-accessibility-label"].some(
+    (property) => own[property],
+  );
+  return hasOwnLabel ? own : enrichElementWithChildProperties(element);
+}
+
 /**
  * Single tapOn selector for an element on the given screen.
  *
@@ -185,8 +196,11 @@ export function tapSelectorFor(
   viewHierarchy: ViewHierarchyResult,
   selector: ElementSelector = new DefaultElementSelector(),
 ): TapSelector | null {
-  const id = element["resource-id"];
-  const text = element.text || element["content-desc"] || element["ios-accessibility-label"];
+  const properties = tapPropertiesFor(element);
+  const id = asString(properties["resource-id"]);
+  const text = asString(
+    properties.text || properties["content-desc"] || properties["ios-accessibility-label"],
+  );
   const candidates: Array<{ selector: TapSelector; select: SelectOccurrence }> = [];
   if (id) {
     candidates.push({
@@ -216,19 +230,42 @@ export function tapSelectorFor(
     : null;
 }
 
-/** Position of `element` among the selector's on-screen matches, located by bounds. */
+/** Match the control or its descendant label among tapOn's on-screen matches. */
 function occurrenceIndex(select: SelectOccurrence, element: Element): { index?: number } {
+  const descendants = new Set<ViewHierarchyNode>();
+  new ViewHierarchyParser().traverseNode(
+    getHierarchyNodeSource(element) ?? element,
+    (node: ViewHierarchyNode) => descendants.add(node),
+  );
   const total = select(0).totalMatches;
   for (let index = 0; index < total; index++) {
     const match = select(index).element;
     if (!match) {
       break;
     }
-    if (boundsEqual(match.bounds, element.bounds)) {
+    const source = getHierarchyNodeSource(match);
+    if ((source && descendants.has(source)) || boundsEqual(match.bounds, element.bounds)) {
       return { index };
     }
   }
   return {};
+}
+
+/** Existing tapAt path accepts the centre of finite, positive-area bounds. */
+export function tapCoordinatesFor(element: Element): { x: number; y: number } | null {
+  const bounds = element.bounds;
+  if (
+    !bounds ||
+    ![bounds.left, bounds.top, bounds.right, bounds.bottom].every(Number.isFinite) ||
+    bounds.right <= bounds.left ||
+    bounds.bottom <= bounds.top
+  ) {
+    return null;
+  }
+  const point = new DefaultElementGeometry().getElementCenter(element);
+  return Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.y >= 0
+    ? point
+    : null;
 }
 
 /**
@@ -244,19 +281,20 @@ export function getElementKey(element: Element, viewHierarchy?: ViewHierarchyRes
     }
   }
 
-  const parts: string[] = [];
-
-  if (element["resource-id"]) {
-    parts.push(`id:${element["resource-id"]}`);
-  }
-  if (element.text) {
-    parts.push(`text:${element.text}`);
-  }
-  if (element["content-desc"]) {
-    parts.push(`desc:${element["content-desc"]}`);
-  }
-  if (element["class"]) {
-    parts.push(`class:${element["class"]}`);
+  const keyed = tapPropertiesFor(element);
+  const fields = [
+    ["resource-id", "id"],
+    ["text", "text"],
+    ["content-desc", "desc"],
+    ["class", "class"],
+  ] as const;
+  const parts = fields.flatMap(([property, prefix]) =>
+    keyed[property] ? [`${prefix}:${keyed[property]}`] : [],
+  );
+  const hasLabel = ["resource-id", "text", "content-desc"].some((property) => keyed[property]);
+  if (!hasLabel && tapCoordinatesFor(element)) {
+    const { left, top, right, bottom } = element.bounds;
+    parts.push(`bounds:${left},${top},${right},${bottom}`);
   }
 
   return parts.join("|") || "unknown";

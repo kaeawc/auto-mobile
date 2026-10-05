@@ -20,6 +20,7 @@ import {
 import { combineAbortSignals } from "../utils/AbortContext";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import { SystemTimer, type Timer } from "../utils/SystemTimer";
 import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
 
 /**
@@ -36,6 +37,18 @@ import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelop
  */
 export const EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS = 1000;
 
+/**
+ * How long the outer abort fence outlives the loop's own budget.
+ *
+ * The loop's budget decides a screen that never settles: it adopts the newest
+ * trustworthy capture and caches it (`terminalReason: "timeout"`). The fence
+ * exists only to bound a single device read that hangs past that budget, so it
+ * must fire strictly AFTER the loop has had time to finish its terminal work
+ * (back-stack reconciliation, cache write). Equal deadlines made the winner a
+ * timer tie (#9880).
+ */
+export const EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS = 1000;
+
 /** Poll interval for the gate, matching the shared settle/scroll-idle cadence. */
 export const EMBEDDED_OBSERVATION_SETTLE_POLL_MS = 150;
 
@@ -47,6 +60,8 @@ export interface EmbeddedObservationSettleInput {
   args?: { display?: unknown };
   settleObserve: SettleObserve;
   signal?: AbortSignal;
+  /** Drives the outer abort fence; defaults to the real clock. */
+  timer?: Timer;
 }
 
 export interface EmbeddedObservationSettleOutcome {
@@ -90,18 +105,19 @@ export async function settleEmbeddedObservation(
   // read that hangs could still overrun it — on a hot path that now runs after
   // every navigation action. Bound hierarchy reads with a real-clock deadline as
   // well, combined with the caller's signal so a cancelled request stops
-  // observing immediately. Real-clock deliberately: it fences a real device
-  // read, which no fake clock governs, and fake-backed unit tests resolve long
-  // before it can fire.
+  // observing immediately. The fence is armed on the injected timer (real clock
+  // in production) and deliberately outlives the loop budget by a margin, so a
+  // never-settling screen always ends through the loop's own timeout path and
+  // never through the fence (#9880).
   const strictDisplay = isExplicitDisplay(input.observation, input.args);
-  const deadline = AbortSignal.timeout(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
+  const fence = createSettleFence(input.timer ?? defaultTimer);
   try {
     const result = await input.settleObserve.execute({
       // Keep post-action polls on the panel selected at the shared tool boundary.
       display: strictDisplay ? input.observation.display?.key : undefined,
       timeoutMs: EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
       pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
-      signal: combineAbortSignals(input.signal, deadline),
+      signal: combineAbortSignals(input.signal, fence.signal),
       initialMinTimestampMs: hierarchyUpdatedAtToMillis(input.observation.viewHierarchy),
       // A still screen pushes nothing newer than the action's capture. Skip
       // the push wait so a rejected cache triggers sync re-extraction (#6099)
@@ -154,7 +170,21 @@ export async function settleEmbeddedObservation(
       input.signal,
     );
     return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
+  } finally {
+    fence.dispose();
   }
+}
+
+const defaultTimer: Timer = new SystemTimer();
+
+/** Abort fence that fires only after the loop's own budget plus its margin. */
+function createSettleFence(timer: Timer): { signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const handle = timer.setTimeout(
+    () => controller.abort(new DOMException("The operation timed out.", "TimeoutError")),
+    EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS + EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS,
+  );
+  return { signal: controller.signal, dispose: () => timer.clearTimeout(handle) };
 }
 
 async function captureAdoptedObservation(
@@ -379,6 +409,8 @@ export interface EmbeddedObservationSettleContext {
    */
   createSettleObserve: () => SettleObserve | undefined;
   signal?: AbortSignal;
+  /** Drives the settle gate's abort fence; defaults to the real clock. */
+  timer?: Timer;
 }
 
 /**
@@ -532,6 +564,7 @@ async function settleEmbeddedObservationResponse(
         args: ctx.args,
         settleObserve,
         signal: ctx.signal,
+        timer: ctx.timer,
       })
     : { observation, settled: false };
 

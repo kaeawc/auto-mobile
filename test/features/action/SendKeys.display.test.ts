@@ -7,7 +7,7 @@ import {
 } from "../../../src/features/action/SendKeys";
 import { runWithSelectedDisplayPin } from "../../../src/features/observe/SessionDisplayContext";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
-import { PinnedDisplayUnavailableError } from "../../../src/models/PinnedDisplayError";
+import { buildDisconnectedPanelMessage } from "../../../src/models/DisplayPanel";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -275,7 +275,7 @@ describe("sendKeys Android focus read routing", () => {
             route === "explicit selector" ? { text: "Search" } : undefined,
             undefined,
             undefined,
-            explicit ? display : undefined,
+            display,
           );
         const result = await runWithSelectedDisplayPin(
           route === "pin" ? { pin: "cover", inventory: multiDisplay.displays } : undefined,
@@ -323,57 +323,64 @@ describe("sendKeys Android focus read routing", () => {
   });
 
   for (const route of ["explicit", "pin"] as const) {
-    test(`${route}: observation disconnection errors refuse input as stale`, async () => {
-      const h = recordingHarness(route === "explicit" ? "cover" : "outside");
-      const error = new DisplaySelectionError("Requested panel disconnected", {
-        disconnectedPanel: {
-          panel: multiDisplay.displays!.panels[1],
-          connectedPanels: [multiDisplay.displays!.panels[0]],
-          hasPostures: false,
+    test(`${route}: observation disconnection preserves the original message before dispatch`, async () => {
+      const h = recordingHarness("cover");
+      const error = new DisplaySelectionError(
+        buildDisconnectedPanelMessage(
+          "outside",
+          "cover",
+          [{ key: "inside", role: "inner" }],
+          true,
+          false,
+        ),
+        {
+          disconnectedPanel: {
+            panel: multiDisplay.displays!.panels[1],
+            connectedPanels: [{ key: "inside", role: "inner" }],
+            hasPostures: true,
+          },
         },
-      });
+      );
       h.observer.execute = async () => {
-        throw route === "pin"
-          ? new PinnedDisplayUnavailableError("cover", multiDisplay.displays, { cause: error })
-          : error;
+        throw error;
       };
       const result = await runWithSelectedDisplayPin(
         route === "pin" ? { pin: "cover", inventory: multiDisplay.displays } : undefined,
-        () =>
-          h.action.execute(
-            commands,
-            undefined,
-            undefined,
-            undefined,
-            route === "explicit" ? "cover" : undefined,
-          ),
+        () => h.action.execute(commands, undefined, undefined, undefined, "cover"),
       );
       expect(result.success).toBe(false);
-      expect(result.staleDisplay?.retry).toBe("observe");
+      expect(result.error).toBe(
+        route === "pin"
+          ? 'Display "outside" (cover) is not connected in the current posture. Connected panels: inside (inner). Target a connected panel, omit display, or use display: "active"; to make this panel available, change the device posture with setPosture {posture: "closed"}. Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly.'
+          : 'Display "outside" (cover) is not connected in the current posture. Connected panels: inside (inner). Target a connected panel, omit display, or use display: "active"; to make this panel available, change the device posture with setPosture {posture: "closed"}.',
+      );
+      expect(Object.hasOwn(result, "staleDisplay")).toBe(false);
+      if (route === "pin") {
+        expect(result.pinnedDisplay).toEqual({
+          pin: "cover",
+          availablePanels: [{ key: "inside", role: "inner" }],
+        });
+      } else {
+        expect(Object.hasOwn(result, "pinnedDisplay")).toBe(false);
+      }
       expect(h.deliveries).toEqual([]);
       expect(h.clientCalls).toEqual([]);
       expect(h.adb.getExecutedCommands().some((command) => command.includes("input "))).toBe(false);
     });
 
-    test(`${route}: a disconnected requested display is stale before any dispatch`, async () => {
-      const h = recordingHarness(route === "explicit" ? "cover" : "outside");
+    test(`${route}: a disconnected requested display refuses before any dispatch`, async () => {
+      const h = recordingHarness("cover");
       h.adb.setCommandResponse("cmd display get-displays", {
         stdout: 'Display id 0: DisplayInfo{uniqueId "local:inside" type INTERNAL, real 100 x 100}',
         stderr: "",
       });
       const result = await runWithSelectedDisplayPin(
         route === "pin" ? { pin: "cover", inventory: multiDisplay.displays } : undefined,
-        () =>
-          h.action.execute(
-            commands,
-            undefined,
-            undefined,
-            undefined,
-            route === "explicit" ? "cover" : undefined,
-          ),
+        () => h.action.execute(commands, undefined, undefined, undefined, "cover"),
       );
       expect(result.success).toBe(false);
-      expect(result.staleDisplay?.retry).toBe("observe");
+      expect(result.error).toContain('Display "outside" (cover) is not connected');
+      expect(Object.hasOwn(result, "staleDisplay")).toBe(false);
       expect(h.deliveries).toEqual([]);
       expect(h.clientCalls).toEqual([]);
       expect(h.adb.getExecutedCommands().some((command) => command.includes("input "))).toBe(false);

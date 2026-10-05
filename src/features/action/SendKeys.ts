@@ -1,14 +1,11 @@
 import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import { PinnedDisplayUnavailableError } from "../../models/PinnedDisplayError";
 import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
-import { staleDisplayError, withStaleDisplay } from "../../models/StaleDisplayError";
-import { DisplaySelectionError, resolveTargetDisplay } from "../observe/DisplaySelection";
-import { selectedDisplayPin } from "../observe/SessionDisplayContext";
+import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
@@ -2096,18 +2093,17 @@ export class SendKeys {
     this.executor.resetCaretState?.();
     let displayId: number | undefined;
     let assertCurrent: (() => void) | undefined;
-    try {
-      display = this.resolveRequestedDisplay(display);
-      if (display !== undefined) {
-        if (preflight) {
-          return {
-            success: false,
-            completedCommands: 0,
-            failedIndex: preflight.failure.index,
-            commands: preflight.results,
-            error: preflight.failure.error,
-          };
-        }
+    if (display !== undefined) {
+      if (preflight) {
+        return {
+          success: false,
+          completedCommands: 0,
+          failedIndex: preflight.failure.index,
+          commands: preflight.results,
+          error: preflight.failure.error,
+        };
+      }
+      try {
         const target = await this.prepareExplicitDisplay(
           commands,
           selector,
@@ -2118,9 +2114,9 @@ export class SendKeys {
         displayId = target.displayId;
         selector = target.selector;
         assertCurrent = target.assertCurrent;
+      } catch (error) {
+        return this.displayRoutingFailure(error, signal);
       }
-    } catch (error) {
-      return this.displayRoutingFailure(error, signal);
     }
     const semanticKey =
       commands.length === 1 && commands[0]?.action === "key" && isSemanticKey(commands[0].key)
@@ -2141,18 +2137,6 @@ export class SendKeys {
     });
   }
 
-  private resolveRequestedDisplay(display?: string): string | undefined {
-    if (display !== undefined) {
-      return display;
-    }
-    const pin = selectedDisplayPin();
-    // The server normally supplies the resolved pin as display. Internal calls
-    // can inherit its provenance directly; use the same panel resolver there.
-    return pin === undefined
-      ? undefined
-      : resolveTargetDisplay(this.device.displays, undefined, { displayPin: pin }).key;
-  }
-
   private validateFocusOptions(
     selector: SendKeysSelector | undefined,
     options: SendKeysFocusOptions = {},
@@ -2171,17 +2155,6 @@ export class SendKeys {
   private displayRoutingFailure(error: unknown, signal?: AbortSignal): SendKeysResult {
     signal?.throwIfAborted();
     logger.warn(`sendKeys display routing failed: ${errorMessage(error)}`, error);
-    const selectionError = error instanceof PinnedDisplayUnavailableError ? error.cause : error;
-    if (selectionError instanceof DisplaySelectionError && selectionError.disconnectedPanel) {
-      // A live inventory proved the prepared panel disappeared. Refuse before
-      // focus/input rather than letting subsequent reads fall back to the default.
-      error = staleDisplayError(
-        this.lastRenderedObservation?.(this.device.deviceId)?.display.generation ??
-          this.displayTransitionReader.identityRevision(this.device.deviceId),
-        this.displayTransitionReader.identityRevision(this.device.deviceId),
-        this.displayTransitionReader.currentObservedPanel(this.device.deviceId)?.key,
-      );
-    }
     return withStaleDisplay(
       {
         success: false,

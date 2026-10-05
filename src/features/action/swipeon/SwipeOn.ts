@@ -1,3 +1,4 @@
+import { executeAndroidSearchDrag } from "./androidSearchDrag";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
 import {
@@ -532,7 +533,19 @@ export class SwipeOn extends BaseVisualChange {
     if (direction.error) {
       throw new ActionableError(direction.error);
     }
-    const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
+    let useCtrlProxy = false;
+    if (options.scrollMode !== "adb") {
+      try {
+        useCtrlProxy = await supportsCtrlProxyGestureDisplay(
+          this.accessibilityService,
+          target.displayId,
+        );
+      } catch (error) {
+        throwIfAborted(signal);
+        // The optional display capability probe sends no gesture, so ADB remains safe.
+        logger.debug("[SwipeOn] CtrlProxy display gesture capability unavailable", error);
+      }
+    }
     const display = target.observation.display.key;
     const validateObservation = (observation: ObserveResult) =>
       this.validateSelectedDisplayObservation({
@@ -577,8 +590,26 @@ export class SwipeOn extends BaseVisualChange {
         swipe: async ({ previousObservation, ...coordinates }) => {
           const result = await this.observedInteraction(
             async () => {
-              await this.dispatchDisplaySwipeLeg({ ...coordinates, target, useCtrlProxy, signal });
-              return { success: true };
+              const fallback = async () => {
+                coordinates.onSearchFallback?.();
+                await this.dispatchDisplaySwipeLeg({
+                  ...coordinates,
+                  target,
+                  useCtrlProxy: false,
+                  signal,
+                });
+                return { ...coordinates, success: true };
+              };
+              return useCtrlProxy
+                ? executeAndroidSearchDrag({
+                    ...coordinates,
+                    client: this.accessibilityService,
+                    signal,
+                    displayId: target.displayId === 0 ? undefined : target.displayId,
+                    beforeSend: target.assertCurrent,
+                    fallback,
+                  })
+                : fallback();
             },
             {
               changeExpected: false,
@@ -595,6 +626,8 @@ export class SwipeOn extends BaseVisualChange {
             ...coordinates,
             targetType: "screen",
             success: result.success,
+            error: result.error,
+            outcomeIndeterminate: result.outcomeIndeterminate,
             observation: validateObservation(result.observation),
           };
         },

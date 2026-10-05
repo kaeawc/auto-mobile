@@ -418,6 +418,38 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
 });
 
 describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
+  test("correction: TalkBack two-finger fallback preserves HEAD coordinates and timing", async () => {
+    const detector = new FakeAccessibilityDetector();
+    detector.setTalkBackEnabled(true);
+    const ctrl = new FakeCtrlProxy();
+    const gesture = new FakeGestureExecutor();
+    const executor = new TalkBackSwipeExecutor(
+      DEVICE,
+      gesture,
+      // @ts-expect-error -- Fake supplies the accessibility gesture methods used by the executor.
+      ctrl,
+      detector,
+      new FakeAdbClient(),
+      new FakeTimer(),
+    );
+    expect(
+      await executor.executeSwipeGesture(540, 2114, 540, 505, "up", null, {
+        duration: 300,
+        searchScroll: true,
+        searchScrollBounds: { left: 0, top: 304, right: 1080, bottom: 2316 },
+      }),
+    ).toMatchObject({ success: true });
+    expect(ctrl.getTwoFingerSwipeHistory()[0]).toMatchObject({
+      x1: 540,
+      y1: 2114,
+      x2: 540,
+      y2: 505,
+      duration: 300,
+    });
+    expect(ctrl.getDragHistory()).toEqual([]);
+    expect(gesture.getSwipeCalls()).toEqual([]);
+  });
+
   // Marker the fake device puts on the hierarchy once the list has actually
   // scrolled forward (finger up) far enough to bring the target on screen.
   const TARGET_REVEALED = "target-revealed";
@@ -430,7 +462,7 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
     viewHierarchy: { hierarchy: { node: { $: { _id: TARGET_REVEALED } } } },
   });
 
-  test("lookFor below the viewport (finger up) issues scroll_forward and finds the target on the first scroll", async () => {
+  test("correction: TalkBack lookFor issues scroll_forward without a coordinate drag", async () => {
     const detector = new FakeAccessibilityDetector();
     detector.setTalkBackEnabled(true);
     const timer = new FakeTimer();
@@ -445,9 +477,10 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
     // Real executor + fake accessibility service: the fake "device" reveals the
     // target only after it receives scroll_forward. Anything else (the inverted
     // scroll_backward) leaves the list where it was.
+    const gesture = new FakeGestureExecutor();
     const talkBackExecutor = new TalkBackSwipeExecutor(
       DEVICE,
-      new FakeGestureExecutor(),
+      gesture,
       fakeCtrlProxy as any,
       detector,
       new FakeAdbClient() as any,
@@ -485,6 +518,8 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
       timeoutMs: 5000,
     });
     expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
+    expect(fakeCtrlProxy.getDragHistory()).toEqual([]);
+    expect(gesture.getSwipeCalls()).toEqual([]);
   });
 });
 

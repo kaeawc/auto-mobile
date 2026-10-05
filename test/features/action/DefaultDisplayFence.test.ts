@@ -825,6 +825,11 @@ describe("default-display recovery dispatches", () => {
       `scroll-until-visible ${platform} retains earlier observation: %s`,
       async (mode: Mode) => {
         const h = harness(platform, mode);
+        watch(AndroidCtrlProxyClient.prototype, "requestDeviceInfo").mockResolvedValue({
+          success: true,
+          sdkInt: 36,
+          totalTimeMs: 0,
+        });
         let detections = 0;
         watch(h.detector, "detectMethod").mockImplementation(async () => {
           if (++detections === 1) {
@@ -837,7 +842,7 @@ describe("default-display recovery dispatches", () => {
           return false;
         });
         h.observe.setObserveResult(() => {
-          if (h.inputs().length || h.ios.getSwipeHistory().length) {
+          if (h.android.getDragHistory().length || h.ios.getSwipeHistory().length) {
             return {
               ...h.screen,
               viewHierarchy: {
@@ -881,7 +886,8 @@ describe("default-display recovery dispatches", () => {
           expect(result).toMatchObject({ success: true, found: true, scrollIterations: 1 });
         }
         if (platform === "android") {
-          expect(h.inputs()).toHaveLength(mode === "transition" ? 0 : 1);
+          expect(h.android.getDragHistory()).toHaveLength(mode === "transition" ? 0 : 1);
+          expect(h.inputs()).toEqual([]);
         } else {
           expect(h.ios.getSwipeHistory()).toHaveLength(mode === "transition" ? 0 : 1);
         }

@@ -125,6 +125,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
           observation: { display: { key: "external" } },
         });
         expect(h.legs()).toHaveLength(n);
+        expect(h.legs().every((leg) => leg.duration === 600)).toBe(true);
         expect(
           h.observe.getExecuteOptions().every((options) => options.display === "external"),
         ).toBe(true);
@@ -138,7 +139,11 @@ for (const route of ["ctrlproxy", "adb"] as const) {
         expect(h.talkback).not.toHaveBeenCalled();
         expect(h.voiceover).not.toHaveBeenCalled();
         if (route === "ctrlproxy") {
-          expect(h.ctrl.getSwipeHistory().every((leg) => leg.displayId === 2)).toBe(true);
+          expect(
+            h.ctrl
+              .getDragHistory()
+              .every((leg) => leg.displayId === 2 && leg.holdDurationMs === 100),
+          ).toBe(true);
           expect(h.commands()).toEqual([]);
         } else {
           expect(
@@ -175,10 +180,10 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     test("dispatch failure is a failure result and stops the search", async () => {
       const h = harness({ route });
       if (route === "ctrlproxy") {
-        h.ctrl.setSwipeResult({ success: false, error: "search swipe failed" });
+        h.ctrl.setDragResult({ success: false, error: "search swipe failed", totalTimeMs: 0 });
       } else {
         h.adb.setCommandResult(
-          "shell input touchscreen -d 2 swipe 100 180 100 20 300",
+          "shell input touchscreen -d 2 swipe 100 180 100 30 600",
           "Error: search swipe failed",
         );
       }
@@ -265,8 +270,8 @@ for (const route of ["ctrlproxy", "adb"] as const) {
           expect(h.legs()[0]).toMatchObject(
             lookFor
               ? includeSystemInsets
-                ? { x1: 100, y1: 180, x2: 100, y2: 20 }
-                : { x1: 110, y1: 168, x2: 110, y2: 72 }
+                ? { x1: 100, y1: 180, x2: 100, y2: 30 }
+                : { x1: 110, y1: 168, x2: 110, y2: 78 }
               : includeSystemInsets
                 ? { x1: 100, y1: 160, x2: 100, y2: 40 }
                 : { x1: 110, y1: 156, x2: 110, y2: 84 },
@@ -281,7 +286,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       const searching = harness({ route, foundAfter: 1 });
       const result = await searching.action.execute(search);
       expect(result.success).toBe(true);
-      expect(searching.legs()[0]).toMatchObject({ x1: 100, y1: 180, x2: 100, y2: 20 });
+      expect(searching.legs()[0]).toMatchObject({ x1: 100, y1: 180, x2: 100, y2: 30 });
     });
     test("display lookFor explicitly rejects boomerang before observing", async () => {
       const h = harness({ route });

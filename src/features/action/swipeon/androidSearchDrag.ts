@@ -1,0 +1,95 @@
+import type { AndroidCtrlProxyClient } from "../../observe/android";
+import { StaleDisplayError } from "../../../models/StaleDisplayError";
+import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import type { SwipeResult } from "../../../models";
+import { throwIfAborted } from "../../../utils/toolUtils";
+import { LOOK_FOR_HOLD_MS } from "./lookForScroll";
+
+/**
+ * Reuse CtrlProxy's continued drag strokes: travel, then a stationary final stroke.
+ * The final stroke emits UP at 100ms; a continued stationary stroke alone completes
+ * at its last emitted event and would not hold. Zero movement during the last 100ms
+ * gives 0 px/s release velocity, below the ~50 dp/s Android fling threshold at any
+ * density. The emulator's 42px/16dp list padding implies density 2.625:
+ * ~50dp/s is ~131px/s, versus the reported 1609px/300ms = ~5363px/s.
+ */
+export async function executeAndroidSearchDrag(options: {
+  client: Pick<AndroidCtrlProxyClient, "requestDrag" | "requestDeviceInfo">;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  duration: number;
+  signal?: AbortSignal;
+  displayId?: number;
+  beforeSend?: () => void;
+  fallback: () => Promise<SwipeResult>;
+  onFallback?: () => void;
+}): Promise<SwipeResult> {
+  const { client, x1, y1, x2, y2, duration, signal, displayId, beforeSend } = options;
+  const fallback = () => {
+    throwIfAborted(signal);
+    beforeSend?.();
+    options.onFallback?.();
+    return options.fallback();
+  };
+  const indeterminate = (reason: string): SwipeResult => ({
+    success: false,
+    outcomeIndeterminate: true,
+    x1,
+    y1,
+    x2,
+    y2,
+    duration,
+    error: `Drag outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
+  });
+  let dispatched = false;
+  try {
+    throwIfAborted(signal);
+    const info = await client.requestDeviceInfo();
+    throwIfAborted(signal);
+    beforeSend?.();
+    if (!info.success || info.sdkInt === undefined || info.sdkInt < 26) {
+      return fallback();
+    }
+    const result = await client.requestDrag(
+      x1,
+      y1,
+      x2,
+      y2,
+      0,
+      duration,
+      LOOK_FOR_HOLD_MS,
+      5000,
+      undefined,
+      signal,
+      displayId,
+      beforeSend,
+      () => {
+        dispatched = true;
+      },
+    );
+    throwIfAborted(signal);
+    if (!result.success) {
+      if (!dispatched) {
+        return fallback();
+      }
+      logger.warn(`[SwipeOn] Search drag outcome indeterminate: ${result.error}`);
+      return indeterminate(result.error ?? "unknown error");
+    }
+    return { ...result, x1, y1, x2, y2, duration };
+  } catch (error) {
+    if (error instanceof StaleDisplayError) {
+      throw error;
+    }
+    throwIfAborted(signal);
+    if (dispatched) {
+      logger.warn(`[SwipeOn] Search drag outcome indeterminate: ${errorMessage(error)}`, error);
+      return indeterminate(errorMessage(error));
+    }
+    // Optional CtrlProxy capability/connection failures are safe to retry via ADB before dispatch.
+    logger.debug(`[SwipeOn] Precise search drag unavailable: ${errorMessage(error)}`, error);
+    return fallback();
+  }
+}

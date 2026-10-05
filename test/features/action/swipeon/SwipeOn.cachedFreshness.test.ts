@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../../src/features/observe/observationReadScope";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
@@ -33,6 +34,11 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
       new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
     );
     observe = new FakeObserveScreen();
+    const cachedRead = observe.getMostRecentCachedObserveResult.bind(observe);
+    // These fixtures represent a hierarchy already acquired within this call.
+    spyOn(observe, "getMostRecentCachedObserveResult").mockImplementation(async () =>
+      recordObservationRead(await cachedRead()),
+    );
     finder = new FakeElementFinder();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

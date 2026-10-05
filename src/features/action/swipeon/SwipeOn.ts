@@ -1,3 +1,4 @@
+import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import {
   pendingWindowResolutionGeneration,
   completeWindowResolutionRead,
@@ -75,7 +76,7 @@ import { OverlayDetector } from "./OverlayDetector";
 import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
 import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
-import { ScrollUntilVisible } from "./ScrollUntilVisible";
+import { ScrollUntilVisible, type ScrollUntilVisibleStrategy } from "./ScrollUntilVisible";
 import { buildContainerFromElement, isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import {
@@ -280,6 +281,19 @@ export class SwipeOn extends BaseVisualChange {
       });
     }
 
+    observeResult = await freshSwipeHierarchy(
+      observeResult,
+      (timeoutMs) =>
+        this.observeScreen.execute({
+          freshness: "fresh",
+          timeoutMs,
+          skipStaleWindowRecovery: true,
+          signal,
+        }),
+      this.timer,
+      signal,
+    );
+
     if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
       return { scrollables: [], candidates: [], observeResult };
     }
@@ -337,8 +351,23 @@ export class SwipeOn extends BaseVisualChange {
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     signal?: AbortSignal;
   }): Promise<SwipeOnResult> {
+    let resolutionObservation = target.observation;
+    if (requestedOptions.container || requestedOptions.autoTarget === true) {
+      resolutionObservation = await freshSwipeHierarchy(
+        resolutionObservation,
+        (timeoutMs) =>
+          this.observeScreen.execute({
+            display: target.observation.display.key,
+            freshness: "fresh",
+            timeoutMs,
+            signal,
+          }),
+        this.timer,
+        signal,
+      );
+    }
     const observation = this.validateSelectedDisplayObservation({
-      observation: target.observation,
+      observation: resolutionObservation,
       target,
       includeSystemInsets: requestedOptions.includeSystemInsets,
     });
@@ -597,13 +626,14 @@ export class SwipeOn extends BaseVisualChange {
       cacheObserveResult: this.observeScreen.cacheObserveResult?.bind(this.observeScreen),
     };
     let dispatched = false;
-    const observe = async () => {
+    const observe: ScrollUntilVisibleStrategy["observe"] = async (captureOptions) => {
       try {
         target.assertCurrent();
         return validateObservation(
           await this.observeScreen.execute({
             display,
-            freshness: "cached-ok",
+            freshness: captureOptions?.freshness ?? "cached-ok",
+            timeoutMs: captureOptions?.timeoutMs,
             skipScreenshot: true,
             skipAccessibilityAudit: true,
             signal,
@@ -817,6 +847,16 @@ export class SwipeOn extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
+    return withSwipeObservationReadScope(() =>
+      this.executeWithReadScope(options, progress, signal),
+    );
+  }
+
+  private async executeWithReadScope(
+    options: SwipeOnOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<SwipeOnResult> {
     throwIfAborted(signal);
     const targeted = await this.executeExplicitDisplay(options, { progress, signal });
     if (targeted) {
@@ -937,6 +977,7 @@ export class SwipeOn extends BaseVisualChange {
               progress,
               perf,
               signal,
+              context.observeResult ? { observation: context.observeResult } : undefined,
             )
           : await this.executeScreenSwipe(options, progress, perf, signal);
     return this.withAutoTargetDecision({ result, decision });
@@ -1275,7 +1316,7 @@ export class SwipeOn extends BaseVisualChange {
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
-    selected?: { element: Element; observation: ObserveResult },
+    selected?: { element?: Element; observation: ObserveResult },
   ): Promise<SwipeOnResult> {
     logger.info(
       `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,
@@ -1286,14 +1327,27 @@ export class SwipeOn extends BaseVisualChange {
     return this.observedSwipeInteraction(
       async (observeResult: ObserveResult, fence) => {
         throwIfAborted(signal);
+        observeResult = await freshSwipeHierarchy(
+          observeResult,
+          (timeoutMs) =>
+            this.observeScreen.execute({
+              freshness: "fresh",
+              timeoutMs,
+              skipStaleWindowRecovery: true,
+              display: options.display,
+              signal,
+            }),
+          this.timer,
+          signal,
+        );
         const viewHierarchy = observeResult.viewHierarchy;
-        if (!viewHierarchy) {
+        if (!viewHierarchy || viewHierarchy.hierarchy.error) {
           throw new ActionableError("Unable to get view hierarchy, cannot swipe on element");
         }
 
         // Find the container element
         const element =
-          selected?.element ??
+          (selected?.observation.viewHierarchy === viewHierarchy ? selected.element : undefined) ??
           (await perf.track("findElement", () =>
             this.scrollUntilVisible.findTargetElement(options, viewHierarchy, 0, signal),
           ));

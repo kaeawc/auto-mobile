@@ -427,6 +427,32 @@ data class AddHighlight(
   val shape: HighlightShape? = null,
 ) : WebSocketRequest()
 
+// Agent-authored overlays
+@Serializable
+@SerialName("show_overlay")
+data class ShowOverlay(
+  override val requestId: String? = null,
+  val spec: OverlaySpec,
+) : WebSocketRequest()
+
+/** Replacement spec.id must equal id; the host rejects mismatches before sending. */
+@Serializable
+@SerialName("update_overlay")
+data class UpdateOverlay(
+  override val requestId: String? = null,
+  val id: String,
+  val spec: OverlaySpec? = null,
+  val state: Map<String, OverlayScalar>? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("dismiss_overlay")
+data class DismissOverlay(
+  override val requestId: String? = null,
+  val id: String? = null,
+  val all: Boolean? = null,
+) : WebSocketRequest()
+
 // =============================================================================
 // Storage Requests
 // =============================================================================

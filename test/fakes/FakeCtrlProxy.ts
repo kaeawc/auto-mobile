@@ -14,6 +14,13 @@ import {
   AccessibilityHierarchy,
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
+import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
+import type {
+  OverlayDismiss,
+  OverlayEvent,
+  OverlayResult,
+  OverlayUpdate,
+} from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
@@ -88,6 +95,65 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     });
     onDispatch?.();
     return { success: true, totalTimeMs: duration };
+  }
+
+  private overlayResult: OverlayResult = { success: true };
+  private readonly overlayHistory: Array<
+    | { method: "show"; spec: OverlaySpec; timeoutMs: number; perf?: PerformanceTracker }
+    | { method: "update"; update: OverlayUpdate; timeoutMs: number; perf?: PerformanceTracker }
+    | { method: "dismiss"; target: OverlayDismiss; timeoutMs: number; perf?: PerformanceTracker }
+  > = [];
+  private readonly overlayListeners = new Set<(event: OverlayEvent) => void>();
+
+  setOverlayResult(result: OverlayResult): void {
+    this.overlayResult = result;
+  }
+
+  getOverlayHistory() {
+    return [...this.overlayHistory];
+  }
+
+  async requestShowOverlay(
+    spec: OverlaySpec,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestShowOverlay");
+    this.overlayHistory.push({ method: "show", spec, timeoutMs, perf });
+    return this.overlayResult;
+  }
+
+  async requestUpdateOverlay(
+    update: OverlayUpdate,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestUpdateOverlay");
+    this.overlayHistory.push({ method: "update", update, timeoutMs, perf });
+    return this.overlayResult;
+  }
+
+  async requestDismissOverlay(
+    target: OverlayDismiss,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestDismissOverlay");
+    this.overlayHistory.push({ method: "dismiss", target, timeoutMs, perf });
+    return this.overlayResult;
+  }
+
+  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
+    this.overlayListeners.add(listener);
+    return () => {
+      this.overlayListeners.delete(listener);
+    };
+  }
+
+  emitOverlayEvent(event: OverlayEvent): void {
+    for (const listener of this.overlayListeners) {
+      listener(event);
+    }
   }
 
   // Session binding (matches CtrlProxyClient.bindSession for test compatibility)

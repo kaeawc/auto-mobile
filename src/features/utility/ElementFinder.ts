@@ -331,48 +331,29 @@ export class DefaultElementFinder implements ElementFinder {
         );
 
         // Check text attribute
-        if (
-          nodeProperties.text &&
-          typeof nodeProperties.text === "string" &&
-          matchesText(nodeProperties.text)
-        ) {
+        if (this.matchesTextProperty(nodeProperties, "text", matchesText)) {
           logger.debug("[Element] Matches text property");
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            if (isExactMatch(nodeProperties.text)) {
-              exactMatches.push(parsedNode);
-            } else {
-              partialMatches.push(parsedNode);
-            }
-          }
-        } else if (
-          nodeProperties["content-desc"] &&
-          typeof nodeProperties["content-desc"] === "string" &&
-          matchesText(nodeProperties["content-desc"])
-        ) {
+          this.collectParsedTextMatch(node, nodeProperties, "text", {
+            isExactMatch,
+            exactMatches,
+            partialMatches,
+          });
+        } else if (this.matchesTextProperty(nodeProperties, "content-desc", matchesText)) {
           logger.debug("[Element] Matches content-desc property");
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            if (isExactMatch(nodeProperties["content-desc"])) {
-              exactMatches.push(parsedNode);
-            } else {
-              partialMatches.push(parsedNode);
-            }
-          }
+          this.collectParsedTextMatch(node, nodeProperties, "content-desc", {
+            isExactMatch,
+            exactMatches,
+            partialMatches,
+          });
         } else if (
-          nodeProperties["ios-accessibility-label"] &&
-          typeof nodeProperties["ios-accessibility-label"] === "string" &&
-          matchesText(nodeProperties["ios-accessibility-label"])
+          this.matchesTextProperty(nodeProperties, "ios-accessibility-label", matchesText)
         ) {
           logger.debug("[Element] Matches ios-accessibility-label property");
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            if (isExactMatch(nodeProperties["ios-accessibility-label"])) {
-              exactMatches.push(parsedNode);
-            } else {
-              partialMatches.push(parsedNode);
-            }
-          }
+          this.collectParsedTextMatch(node, nodeProperties, "ios-accessibility-label", {
+            isExactMatch,
+            exactMatches,
+            partialMatches,
+          });
         } else if (
           matchesText(nodeProperties.text || nodeProperties["content-desc"] || "") &&
           (nodeProperties["ios-role"] === "AXButton" ||
@@ -398,6 +379,38 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     return { exactMatches, partialMatches };
+  }
+
+  private matchesTextProperty(
+    properties: Record<string, unknown>,
+    property: string,
+    matchesText: (input?: string) => boolean,
+  ): boolean {
+    return Boolean(
+      properties[property] &&
+      typeof properties[property] === "string" &&
+      matchesText(properties[property]),
+    );
+  }
+
+  private collectParsedTextMatch(
+    node: ViewHierarchyNode,
+    nodeProperties: ReturnType<ElementParser["extractNodeProperties"]>,
+    property: string,
+    matches: {
+      isExactMatch: (input?: string) => boolean;
+      exactMatches: Element[];
+      partialMatches: Element[];
+    },
+  ): void {
+    const parsedNode = this.parser.parseNodeBounds(node);
+    if (parsedNode) {
+      if (matches.isExactMatch(nodeProperties[property])) {
+        matches.exactMatches.push(parsedNode);
+      } else {
+        matches.partialMatches.push(parsedNode);
+      }
+    }
   }
 
   private collectResourceIdMatchesInRoots(
@@ -917,6 +930,35 @@ export class DefaultElementFinder implements ElementFinder {
       );
     }
 
+    return this.findTextMatchesAcrossRoots(viewHierarchy, {
+      isExactMatch,
+      matchesText,
+      preserveTraversalOrder,
+      includeWindows,
+      selectionIntent,
+      selectMatches,
+    });
+  }
+
+  private findTextMatchesAcrossRoots(
+    viewHierarchy: ViewHierarchyResult,
+    options: {
+      isExactMatch: (input?: string) => boolean;
+      matchesText: (input?: string) => boolean;
+      preserveTraversalOrder: boolean;
+      includeWindows: boolean;
+      selectionIntent?: TextSelectionIntent;
+      selectMatches: (matches: { exactMatches: Element[]; partialMatches: Element[] }) => Element[];
+    },
+  ): Element[] {
+    const {
+      isExactMatch,
+      matchesText,
+      preserveTraversalOrder,
+      includeWindows,
+      selectionIntent,
+      selectMatches,
+    } = options;
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
     const mainMatches = this.collectTextMatchesInRoots(
       rootNodes,
@@ -951,6 +993,18 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
+    return this.selectTextMatchesAcrossWindows(mainMatches, windowMatches, {
+      preserveTraversalOrder,
+      selectionIntent,
+    });
+  }
+
+  private selectTextMatchesAcrossWindows(
+    mainMatches: { exactMatches: Element[]; partialMatches: Element[] },
+    windowMatches: { exactMatches: Element[]; partialMatches: Element[] }[],
+    options: { preserveTraversalOrder: boolean; selectionIntent?: TextSelectionIntent },
+  ): Element[] {
+    const { preserveTraversalOrder, selectionIntent } = options;
     if (preserveTraversalOrder) {
       const exactMatches = [mainMatches, ...windowMatches].flatMap(
         (matches) => matches.exactMatches,
@@ -1481,36 +1535,43 @@ export class DefaultElementFinder implements ElementFinder {
       const children = element.node;
       if (Array.isArray(children)) {
         for (const child of children) {
-          const parsedNode = this.parser.parseNodeBounds(child);
-          if (
-            parsedNode &&
-            parsedNode.class &&
-            spannableClasses.some((cls) => parsedNode.class?.includes(cls)) &&
-            parsedNode.text
-          ) {
-            spannables.push(parsedNode);
-          }
-
-          // Recursively search for spannables in this child
-          if (parsedNode) {
-            const childSpannables = this.findSpannables(parsedNode);
-            if (childSpannables) {
-              spannables.push(...childSpannables);
-            }
-          }
+          this.collectSpannableArrayChild(child, spannableClasses, spannables);
         }
       } else if (typeof children === "object") {
         const parsedNode = this.parser.parseNodeBounds(children);
-        if (parsedNode) {
-          const childSpannables = this.findSpannables(parsedNode);
-          if (childSpannables) {
-            spannables.push(...childSpannables);
-          }
-        }
+        this.collectDescendantSpannables(parsedNode, spannables);
       }
     }
 
     return spannables.length > 0 ? spannables : null;
+  }
+
+  private collectSpannableArrayChild(
+    child: Record<string, unknown>,
+    spannableClasses: string[],
+    spannables: Element[],
+  ): void {
+    const parsedNode = this.parser.parseNodeBounds(child);
+    if (
+      parsedNode &&
+      parsedNode.class &&
+      spannableClasses.some((cls) => parsedNode.class?.includes(cls)) &&
+      parsedNode.text
+    ) {
+      spannables.push(parsedNode);
+    }
+
+    // Recursively search for spannables in this child
+    this.collectDescendantSpannables(parsedNode, spannables);
+  }
+
+  private collectDescendantSpannables(parsedNode: Element | null, spannables: Element[]): void {
+    if (parsedNode) {
+      const childSpannables = this.findSpannables(parsedNode);
+      if (childSpannables) {
+        spannables.push(...childSpannables);
+      }
+    }
   }
 
   /**
@@ -1634,6 +1695,14 @@ export class DefaultElementFinder implements ElementFinder {
     if (containerNode && !scope) {
       return [];
     }
+    return this.collectClickableParentsContainingText(nodes, scope, matchesText);
+  }
+
+  private collectClickableParentsContainingText(
+    nodes: ReturnType<SearchableHierarchy["project"]>,
+    scope: ReturnType<SearchableHierarchy["project"]>[number] | undefined,
+    matchesText: (input?: string) => boolean,
+  ): Element[] {
     const matches = new Map<(typeof nodes)[number]["source"], (typeof nodes)[number]>();
     for (const node of [...nodes].sort(
       (a, b) => a.windowRank - b.windowRank || a.index - b.index,
@@ -1738,20 +1807,14 @@ export class DefaultElementFinder implements ElementFinder {
     // ambiguity check's internal real-id BYPASS shares that same narrower scope,
     // not the whole capture (review thread PRRT_kwDOP-GF5M6f2X6J).
     const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
-    const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(
-      containerNode ? searchRoots : fullCaptureRoots,
-      resourceId,
-    );
+    const preferenceRoots = containerNode ? searchRoots : fullCaptureRoots;
+    const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(preferenceRoots, resourceId);
     const preferViewIdOnly = this.preferIdLessViewId(
-      containerNode ? searchRoots : fullCaptureRoots,
+      preferenceRoots,
       resourceId,
       preferResourceIdOnly,
     );
-    this.assertStableViewIdSelectorNotAmbiguous(
-      containerNode ? searchRoots : fullCaptureRoots,
-      fullCaptureRoots,
-      resourceId,
-    );
+    this.assertStableViewIdSelectorNotAmbiguous(preferenceRoots, fullCaptureRoots, resourceId);
 
     const matchesId = (nodeProperties: Record<string, unknown>): boolean =>
       preferResourceIdOnly
@@ -1805,22 +1868,30 @@ export class DefaultElementFinder implements ElementFinder {
     });
 
     if (hasIdMatch) {
-      for (const child of childArray) {
-        const childProps = this.parser.extractNodeProperties(child);
-        const isClickable = this.isClickableNode(childProps);
-        const isIdMatch = matchesId(childProps);
-
-        if (isClickable && !isIdMatch) {
-          const parsedNode = this.parser.parseNodeBounds(child);
-          if (parsedNode) {
-            results.push(parsedNode);
-          }
-        }
-      }
+      this.collectClickableResourceIdSiblings(childArray, matchesId, results);
     }
 
     for (const child of childArray) {
       this.findClickableSiblingsOfResourceIdInNode(child, matchesId, results);
+    }
+  }
+
+  private collectClickableResourceIdSiblings(
+    childArray: ViewHierarchyNode[],
+    matchesId: (nodeProperties: Record<string, unknown>) => boolean,
+    results: Element[],
+  ): void {
+    for (const child of childArray) {
+      const childProps = this.parser.extractNodeProperties(child);
+      const isClickable = this.isClickableNode(childProps);
+      const isIdMatch = matchesId(childProps);
+
+      if (isClickable && !isIdMatch) {
+        const parsedNode = this.parser.parseNodeBounds(child);
+        if (parsedNode) {
+          results.push(parsedNode);
+        }
+      }
     }
   }
 
@@ -1943,34 +2014,24 @@ export class DefaultElementFinder implements ElementFinder {
     node: ViewHierarchyNode,
     matchesText: (input?: string) => boolean,
   ): boolean {
-    const nodeProperties = this.parser.extractNodeProperties(node);
-
-    // Check this node's text properties
-    const nodeText = nodeProperties.text;
-    const nodeContentDesc = nodeProperties["content-desc"];
-    const nodeIosLabel = nodeProperties["ios-accessibility-label"];
-
-    if (
-      (typeof nodeText === "string" && matchesText(nodeText)) ||
-      (typeof nodeContentDesc === "string" && matchesText(nodeContentDesc)) ||
-      (typeof nodeIosLabel === "string" && matchesText(nodeIosLabel))
-    ) {
+    if (this.nodeHasText(node, matchesText)) {
       return true;
     }
 
     // Recursively check children
     const children = node.node;
-    if (children) {
-      if (Array.isArray(children)) {
-        for (const child of children) {
-          if (this.nodeOrDescendantHasText(child, matchesText)) {
-            return true;
-          }
-        }
-      } else if (typeof children === "object") {
-        if (this.nodeOrDescendantHasText(children as ViewHierarchyNode, matchesText)) {
+    if (!children) {
+      return false;
+    }
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        if (this.nodeOrDescendantHasText(child, matchesText)) {
           return true;
         }
+      }
+    } else if (typeof children === "object") {
+      if (this.nodeOrDescendantHasText(children as ViewHierarchyNode, matchesText)) {
+        return true;
       }
     }
 

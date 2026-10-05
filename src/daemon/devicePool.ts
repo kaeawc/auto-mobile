@@ -2192,7 +2192,7 @@ export class DevicePool {
         throw new ActionableError(
           `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${result.attempts} attempts).\n` +
             refreshFailureContext(refreshFailure) +
-            `Required: ${requiredCount} devices, allocated: ${assigned.size}\n` +
+            `Required: ${requiredCount} devices\n` +
             `Device pool status:\n` +
             `  Total devices: ${currentStats.total}\n` +
             `  Idle: ${currentStats.idle}\n` +
@@ -2357,7 +2357,7 @@ export class DevicePool {
           throw new ActionableError(
             `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
               refreshFailureContext(refreshFailure) +
-              `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
+              `Required: ${requiredCount} devices\n` +
               `Suggestions:\n` +
               `  - Boot additional simulators or emulators that match the plan requirements\n` +
               `  - Reduce the number of devices required in the test plan\n` +
@@ -2407,6 +2407,7 @@ export class DevicePool {
       return false;
     }
     const available = new Set<string>();
+    let canClaim = true;
     for (const request of this.criteriaMatcher.sortBySpecificity(ticket.requests)) {
       // Existing sessions do not require a new claim and must survive rollback.
       if (this.sessionManager.getSession(request.sessionId)) {
@@ -2414,18 +2415,30 @@ export class DevicePool {
       }
       const candidates = this.getDevicesMatchingCriteria(request.criteria);
       const device = candidates.find(
-        (candidate) =>
-          candidate.status === "idle" &&
-          !this.isReservedForAssignment(candidate) &&
-          !available.has(candidate.id),
+        (candidate) => this.isIdleDeviceEligible(candidate) && !available.has(candidate.id),
       );
       if (!device) {
-        this.assertHealthyAllocationPossible(candidates, undefined);
-        return false;
+        const idle = this.selectIdleDevice(candidates);
+        // Healthy idle capacity already counted for another request may grow
+        // later; it is neither a health failure nor a reason to claim partially.
+        this.assertHealthyAllocationPossible(candidates, idle);
+        if (
+          !idle &&
+          !this.shouldWaitForDevice(
+            this.countBusyDevices(candidates),
+            this.hasPendingAndroidRecoveryMatching(request.criteria),
+          )
+        ) {
+          // Let the real attempt refresh once and report authoritative absence
+          // (or recover an errored entry), as single-attempt allocation does.
+          return true;
+        }
+        canClaim = false;
+        continue;
       }
       available.add(device.id);
     }
-    return true;
+    return canClaim;
   }
 
   private async executeMultiDeviceAllocation<T>(
@@ -2969,6 +2982,12 @@ export class DevicePool {
 
   private shouldWaitForDevice(busyDevices: number, pendingRecovery: boolean): boolean {
     return busyDevices > 0 || pendingRecovery;
+  }
+
+  private countBusyDevices(candidates: PooledDevice[]): number {
+    return candidates.filter(
+      (device) => device.status === "busy" || this.isReservedForAssignment(device),
+    ).length;
   }
 
   /**
@@ -4458,9 +4477,7 @@ export class DevicePool {
         candidates = selectCandidates();
         const totalDevices = candidates.length;
         this.assertHealthyAllocationPossible(candidates, device);
-        const busyDevices = candidates.filter(
-          (candidate) => candidate.status === "busy" || this.isReservedForAssignment(candidate),
-        ).length;
+        const busyDevices = this.countBusyDevices(candidates);
         const shouldRefresh =
           !refreshed && (this.devices.size === 0 || totalDevices === 0 || busyDevices === 0);
         if (shouldRefresh) {
@@ -4679,14 +4696,17 @@ export class DevicePool {
     return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
   }
 
+  private isIdleDeviceEligible(device: PooledDevice): boolean {
+    return (
+      device.status === "idle" &&
+      !this.isReservedForAssignment(device) &&
+      !this.getDeviceHealthMarker(device.id)
+    );
+  }
+
   private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
     // Find idle devices and prefer most recently released for reuse
-    const idleDevices = candidates.filter(
-      (device) =>
-        device.status === "idle" &&
-        !this.isReservedForAssignment(device) &&
-        !this.getDeviceHealthMarker(device.id),
-    );
+    const idleDevices = candidates.filter((device) => this.isIdleDeviceEligible(device));
     if (idleDevices.length === 0) {
       return undefined;
     }

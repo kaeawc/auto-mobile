@@ -29,6 +29,9 @@ import {
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
+import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { PressButton } from "../../../src/features/action/PressButton";
@@ -971,6 +974,101 @@ describe("Explore", () => {
       );
       return { calls, restore: () => spy.mockRestore() };
     }
+
+    for (const label of ["child text", "grandchild text", "descendant description"]) {
+      test(`taps an unlabeled clickable parent using ${label}`, async () => {
+        const child = createMockViewHierarchyNode({
+          text: label === "descendant description" ? "" : "Skip",
+          "content-desc": label === "descendant description" ? "Skip" : "",
+          "resource-id": "",
+          clickable: "false",
+        });
+        child.bounds = { left: 20, top: 10, right: 80, bottom: 40 };
+        const wrapper = createMockViewHierarchyNode({
+          text: "",
+          "resource-id": "",
+          clickable: "false",
+        });
+        wrapper.node = [child];
+        const parent = createMockViewHierarchyNode({ text: "", class: "", "resource-id": "" });
+        parent.node = [label === "child text" ? child : wrapper];
+        const observation = createMockObservation([parent]);
+        const [candidate] = extractNavigationElements(observation.viewHierarchy!, elementParser);
+        const { calls, restore } = captureTapOptions();
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        const perform: (element: Element, observation: ObserveResult) => Promise<boolean> =
+          Reflect.get(explore, "performInteraction").bind(explore);
+        try {
+          expect(await perform(candidate, observation)).toBe(true);
+          expect(calls).toEqual([{ text: "Skip", action: "tap" }]);
+          const selection = new DefaultElementSelector().selectByText(
+            observation.viewHierarchy!,
+            "Skip",
+          );
+          expect(selection.element?.bounds).toEqual(child.bounds);
+          const tapOn = new TapOnElement(device, mockAdb, {
+            timer: fakeTimer,
+            tapStrategy: new FakeTapStrategy(),
+          });
+          const target = tapOn.resolveTapTargetElement(
+            selection.element!,
+            observation.viewHierarchy!,
+            "tap",
+            false,
+          );
+          expect(target.element.bounds).toEqual(parent.bounds);
+          expect(target.element.clickable).toBe("true");
+          expect(target.usedParent).toBe(true);
+        } finally {
+          restore();
+        }
+      });
+    }
+
+    test("taps an unlabeled bounded candidate through tapAt", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      const tap = spyOn(TapAtCoordinate.prototype, "execute").mockResolvedValue({ success: true });
+      const { calls, restore } = captureTapOptions();
+      const perform: (element: Element, observation: ObserveResult) => Promise<boolean> =
+        Reflect.get(explore, "performInteraction").bind(explore);
+      try {
+        expect(
+          await perform(
+            createMockElement({ text: "", "resource-id": "", class: "" }),
+            createMockObservation(),
+          ),
+        ).toBe(true);
+        expect(tap).toHaveBeenCalledWith({ x: 50, y: 25, action: "tap" }, undefined, undefined);
+        expect(calls).toEqual([]);
+      } finally {
+        tap.mockRestore();
+        restore();
+      }
+    });
+
+    test("skips a candidate without labels or usable bounds with an actionable warning", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const { calls, restore } = captureTapOptions();
+      const perform: (element: Element, observation: ObserveResult) => Promise<boolean> =
+        Reflect.get(explore, "performInteraction").bind(explore);
+      try {
+        const element = createMockElement({
+          text: "",
+          "resource-id": "",
+          class: "",
+          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+        });
+        expect(await perform(element, createMockObservation())).toBe(false);
+        expect(calls).toEqual([]);
+        expect(warn).toHaveBeenCalledWith(
+          '[Explore] Element has no tap target: missing resource-id, text/content-desc (including descendants), and usable bounds; class=<empty>; bounds={"left":0,"top":0,"right":0,"bottom":0}',
+        );
+      } finally {
+        warn.mockRestore();
+        restore();
+      }
+    });
 
     test("taps an element with both text and resource-id once, by id only", async () => {
       const { calls, restore } = captureTapOptions();

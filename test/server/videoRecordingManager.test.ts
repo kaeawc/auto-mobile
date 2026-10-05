@@ -63,7 +63,6 @@ import {
   getVideoArchiveItem,
   type VideoRecordingResourceStore,
 } from "../../src/server/videoRecordingResources";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import {
@@ -140,17 +139,18 @@ describe("videoRecordingManager", () => {
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });
 
-  const waitForRecordingCount = async (expected: number): Promise<void> => {
-    for (let attempt = 0; attempt < 50; attempt++) {
-      const recordings = await listVideoRecordings();
-      if (recordings.length === expected) {
+  const drainAsyncUntil = async (
+    predicate: () => Promise<boolean>,
+    attempts = 100,
+    failureMessage = "drainAsyncUntil timed out",
+  ): Promise<void> => {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (await predicate()) {
         return;
       }
-      // Use setTimeout instead of setImmediate for more reliable cross-platform timing
-      // The auto-stop callback fires async work that needs multiple event loop cycles
-      await defaultTimer.sleep(1);
+      await Promise.resolve();
     }
-    throw new Error(`Timed out waiting for ${expected} recordings`);
+    throw new Error(failureMessage);
   };
 
   function restoreListener(options: { expiryMs?: number; failListing?: boolean } = {}) {
@@ -294,7 +294,7 @@ describe("videoRecordingManager", () => {
 
     fakeTimer.advanceTime(1);
     await stopCall;
-    await waitForRecordingCount(1);
+    await stopVideoRecording(active.recordingId);
 
     const recordings = await listVideoRecordings();
     expect(recordings[0]?.recordingId).toBe(active.recordingId);
@@ -584,6 +584,41 @@ describe("videoRecordingManager", () => {
     ]);
   });
 
+  test.each([false, true])(
+    "preserves backend display warnings and clears a rejected panel (%s)",
+    async (rejected) => {
+      const panel = { key: "11", role: "inner" as const };
+      await setVideoRecordingManagerDependencies({
+        resolveAndroidDisplay: async () => ({ panel, activePanel: panel, physicalId: "11" }),
+      });
+      const startRecording = service.startRecording.bind(service);
+      const start = spyOn(service, "startRecording").mockImplementation(async (input) => {
+        const active = await startRecording(input);
+        active.warning = rejected
+          ? "rejected --display-id; using the default display"
+          : "backend warning";
+        return active;
+      });
+      try {
+        const active = await startVideoRecording({
+          device: testDevice,
+          ownerSessionUuid: "owner-session",
+        });
+        expect(active.warning).toBe(
+          rejected ? "rejected --display-id; using the default display" : "backend warning",
+        );
+        expect(active.recordedPanel).toEqual(rejected ? undefined : panel);
+        const row = await fakeRepository.getRecording(active.recordingId);
+        expect(row?.recordedPanel).toEqual(rejected ? undefined : panel);
+        expect(row?.transitions).toEqual(rejected ? undefined : []);
+        expect(row?.ownerSessionUuid).toBe("owner-session");
+        expect(fakeBackend.startCalls[0]?.physicalDisplayId).toBe("11");
+      } finally {
+        start.mockRestore();
+      }
+    },
+  );
+
   test("retains durable ownership when a generic backend stop failure has no exit confirmation", async () => {
     const active = await startVideoRecording({ device: testDevice });
 
@@ -671,24 +706,33 @@ describe("videoRecordingManager", () => {
   test("re-arms a bounded stop retry when the auto-stop callback retains ownership", async () => {
     const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 1 });
     let stopAttempts = 0;
+    let stopCalled = Promise.withResolvers<void>();
     fakeBackend.stop = async () => {
       stopAttempts += 1;
+      stopCalled.resolve();
+      stopCalled = Promise.withResolvers<void>();
       throw new ProcessTeardownUnconfirmedError("host process may still be alive");
     };
 
+    const autoStopCall = stopCalled.promise;
     fakeTimer.advanceTime(1000);
-    for (let attempt = 0; attempt < 50 && stopAttempts === 0; attempt++) {
-      await defaultTimer.sleep(1);
-    }
+    await Promise.race([
+      autoStopCall,
+      drainAsyncUntil(async () => false, 100, "stop not called by timer (auto-stop)"),
+    ]);
     expect(stopAttempts).toBe(1);
+    // Backend failure re-arms safety in later microtasks, after signalling the call.
+    await drainAsyncUntil(async () => fakeTimer.getPendingTimeoutCount() === 1);
     expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
     // The fired one-shot timeout is replaced by the bounded retained-owner retry.
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 
+    const retryStopCall = stopCalled.promise;
     fakeTimer.advanceTime(5000);
-    for (let attempt = 0; attempt < 50 && stopAttempts < 2; attempt++) {
-      await defaultTimer.sleep(1);
-    }
+    await Promise.race([
+      retryStopCall,
+      drainAsyncUntil(async () => false, 100, "stop not called by timer (retained-owner retry)"),
+    ]);
     expect(stopAttempts).toBe(2);
   });
 
@@ -1331,24 +1375,6 @@ describe("videoRecordingManager", () => {
       });
     };
 
-    const drainAsyncUntil = async (
-      predicate: () => Promise<boolean>,
-      attempts = 100,
-    ): Promise<void> => {
-      for (let attempt = 0; attempt < attempts; attempt++) {
-        if (await predicate()) {
-          return;
-        }
-        // Real 1ms sleep, not setImmediate: the size-cap stop chain is fire-and-
-        // forget async, and setImmediate can be starved under macOS CI I/O load,
-        // intermittently timing out this drain (#4762). Mirrors the proven
-        // waitForRecordingCount approach above. On success the loop returns early,
-        // so the 1ms cost is only paid while genuinely waiting.
-        await defaultTimer.sleep(1);
-      }
-      throw new Error("drainAsyncUntil timed out");
-    };
-
     test("resolveVideoRetentionPolicy uses documented defaults and env overrides", () => {
       const defaults = resolveVideoRetentionPolicy({});
       expect(defaults.ttlMs).toBe(7 * MS_PER_DAY);
@@ -1409,8 +1435,19 @@ describe("videoRecordingManager", () => {
       expect((await listVideoRecordings()).length).toBe(1);
 
       // Crossing the interval fires the timer-driven sweep.
-      fakeTimer.advanceTime(1);
-      await drainAsyncUntil(async () => (await listVideoRecordings()).length === 0);
+      const deleted = Promise.withResolvers<void>();
+      const deleteRecording = fakeRepository.deleteRecording.bind(fakeRepository);
+      const deletion = spyOn(fakeRepository, "deleteRecording").mockImplementation(async (id) => {
+        const result = await deleteRecording(id);
+        deleted.resolve();
+        return result;
+      });
+      try {
+        fakeTimer.advanceTime(1);
+        await deleted.promise;
+      } finally {
+        deletion.mockRestore();
+      }
       expect((await listVideoRecordings()).length).toBe(0);
     });
 
@@ -1431,18 +1468,10 @@ describe("videoRecordingManager", () => {
       // One in-progress-check interval is armed (TTL sweep disabled via ttlMs: 0).
       expect(fakeTimer.getPendingIntervalCount()).toBe(1);
 
+      const stopCall = fakeBackend.waitForStopCall();
       fakeTimer.advanceTime(1000);
-      // The interval fires enforceInProgressSizeCap → stopVideoRecording, which
-      // stops the backend, THEN persists status "completed", THEN enforces the
-      // archive limit — a chain that settles across several microtasks. Drain
-      // until the capture is fully finalized (visible in the completed listing),
-      // not merely until backend.stop() was called: `stopCalls` is bumped inside
-      // stopRecording and races ahead of the "completed" status write, so a
-      // stopCalls-only predicate reads the recording mid-stop (still "recording",
-      // filtered out of the listing) under CI event-loop pressure (#4762 macOS flake).
-      await drainAsyncUntil(async () =>
-        (await listVideoRecordings()).some((record) => record.recordingId === active.recordingId),
-      );
+      await stopCall;
+      await stopVideoRecording(active.recordingId);
 
       expect(fakeBackend.stopCalls.length).toBe(1);
       const recordings = await listVideoRecordings();
@@ -1492,6 +1521,7 @@ describe("videoRecordingManager", () => {
   describe("maxDuration per-platform cap (#3906)", () => {
     test("iOS recording past the 300s non-iOS cap is accepted and arms auto-stop at maxDuration", async () => {
       // 500s: above the non-iOS cap (300), below the iOS cap (3600).
+      const stopCall = fakeBackend.waitForStopCall();
       const active = await startVideoRecording({
         device: iosDevice,
         maxDurationSeconds: 500,
@@ -1504,7 +1534,8 @@ describe("videoRecordingManager", () => {
       fakeTimer.advanceTime(499_999);
       expect(fakeBackend.stopCalls.length).toBe(0);
       fakeTimer.advanceTime(1);
-      await waitForRecordingCount(0);
+      await stopCall;
+      await stopVideoRecording(active.recordingId);
       expect(fakeBackend.stopCalls.length).toBe(1);
 
       expect(active.recordingId).toBeDefined();

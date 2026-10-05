@@ -593,6 +593,165 @@ async function captureBiometricEnrollment(
   return { sessionManager, initialEnrollment: state.enrollment };
 }
 
+interface LocalizationChanges {
+  locale?: string;
+  timeZone?: string;
+  textDirection?: "ltr" | "rtl";
+  timeFormat?: "12" | "24";
+  calendarSystem?: string;
+}
+
+interface LocalizationLocaleMetadata {
+  localeScope?: "app" | "system";
+  localeAppId?: string;
+  localeMethod?: string;
+}
+
+async function applyLocaleChange(
+  manager: SystemConfigurationManager,
+  device: BootedDevice,
+  args: ChangeLocalizationArgs,
+  changes: LocalizationChanges,
+  errors: string[],
+): Promise<LocalizationLocaleMetadata> {
+  const localeOptions =
+    args.appId && device.platform === "android"
+      ? { broadcast: false, appId: args.appId }
+      : { broadcast: false };
+  const result = await manager.setLocale(args.locale!, localeOptions);
+  if (result.success) {
+    changes.locale = result.languageTag;
+    // Prefer the scope the adapter reports directly (issue #6346): on
+    // Android < 13 a per-app request is forced device-wide, and the adapter
+    // says so via localeScope: "system" rather than us inferring it from the
+    // method string.
+    const localeScope =
+      result.localeScope ??
+      (result.method?.startsWith("cmd locale set-app-locales") ? "app" : "system");
+    return {
+      localeScope,
+      ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
+      ...(result.method ? { localeMethod: result.method } : {}),
+    };
+  } else {
+    errors.push(result.error ?? "Failed to set locale");
+  }
+  return {};
+}
+
+async function applyTextDirectionChange(
+  manager: SystemConfigurationManager,
+  textDirection: "ltr" | "rtl",
+  changes: LocalizationChanges,
+  errors: string[],
+): Promise<void> {
+  const rtl = textDirection === "rtl";
+  const result = await manager.setTextDirection(rtl, { broadcast: false });
+  if (result.success) {
+    changes.textDirection = rtl ? "rtl" : "ltr";
+  } else {
+    errors.push(result.error ?? "Failed to set text direction");
+  }
+}
+
+async function applyAdditionalLocalizationChanges(
+  manager: SystemConfigurationManager,
+  args: ChangeLocalizationArgs,
+  changes: LocalizationChanges,
+  errors: string[],
+): Promise<void> {
+  if (args.timeZone !== undefined) {
+    const result = await manager.setTimeZone(args.timeZone);
+    if (result.success) {
+      changes.timeZone = result.zoneId;
+    } else {
+      errors.push(result.error ?? "Failed to set time zone");
+    }
+  }
+
+  if (args.textDirection !== undefined) {
+    await applyTextDirectionChange(manager, args.textDirection, changes, errors);
+  }
+
+  if (args.timeFormat !== undefined) {
+    const enabled = args.timeFormat === "24";
+    const result = await manager.set24HourFormat(enabled);
+    if (result.success) {
+      changes.timeFormat = enabled ? "24" : "12";
+    } else {
+      errors.push(result.error ?? "Failed to set time format");
+    }
+  }
+
+  if (args.calendarSystem !== undefined) {
+    const result = await manager.setCalendarSystem(args.calendarSystem);
+    if (result.success) {
+      changes.calendarSystem = result.calendarSystem;
+    } else {
+      errors.push(result.error ?? "Failed to set calendar system");
+    }
+  }
+}
+
+const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocalizationArgs) => {
+  assertChangeLocalizationPlatformConstraints(device.platform, args);
+
+  const manager = new SystemConfigurationManager(device);
+  const changes: LocalizationChanges = {};
+  const errors: string[] = [];
+  let localeMetadata: LocalizationLocaleMetadata = {};
+
+  if (args.locale !== undefined) {
+    localeMetadata = await applyLocaleChange(manager, device, args, changes, errors);
+  }
+
+  await applyAdditionalLocalizationChanges(manager, args, changes, errors);
+
+  const success = errors.length === 0;
+  let intentBroadcast = false;
+  let liveChanges:
+    | { springBoardRestarted: boolean; notificationPosted: boolean; appRestarted?: boolean }
+    | undefined;
+
+  if (Object.keys(changes).length > 0) {
+    if (device.platform === "android") {
+      intentBroadcast = await manager.broadcastLocaleChange();
+    } else if (device.platform === "ios") {
+      liveChanges = await manager.applyIosLiveChanges(args.restartApp);
+    }
+  }
+
+  return createJSONToolResponse({
+    success,
+    changes,
+    intentBroadcast,
+    ...localeMetadata,
+    ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
+    ...(success ? {} : { error: errors.join("; ") }),
+  });
+};
+
+const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {
+  const displayConfig = new DisplayConfig(device);
+  const result = displayConfigArgsAreSet(args)
+    ? await displayConfig.setConfig(displayConfigSetInput(args))
+    : await displayConfig.getConfig();
+  return createJSONToolResponse({
+    message: displayConfigMessage(result),
+    ...result,
+  });
+};
+
+const getDeviceStateHandler = async (device: BootedDevice, args: GetDeviceStateArgs) => {
+  const deviceState = new DeviceState(device);
+  const result = await deviceState.getState(args.include);
+
+  return createStructuredToolResponse({
+    message: deviceStateMessage(result),
+    ...result,
+  });
+};
+
 // Register tools
 export function registerUtilityTools(
   options: { displayInventory?: DisplayInventoryProvider } = {},
@@ -601,132 +760,6 @@ export function registerUtilityTools(
     displayInventory: options.displayInventory,
     resumeCtrlProxy: resumeCtrlProxyIfCurrentlyBooted,
   });
-
-  const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocalizationArgs) => {
-    assertChangeLocalizationPlatformConstraints(device.platform, args);
-
-    const manager = new SystemConfigurationManager(device);
-    const changes: {
-      locale?: string;
-      timeZone?: string;
-      textDirection?: "ltr" | "rtl";
-      timeFormat?: "12" | "24";
-      calendarSystem?: string;
-    } = {};
-    const errors: string[] = [];
-    let localeMetadata: {
-      localeScope?: "app" | "system";
-      localeAppId?: string;
-      localeMethod?: string;
-    } = {};
-
-    if (args.locale !== undefined) {
-      const localeOptions =
-        args.appId && device.platform === "android"
-          ? { broadcast: false, appId: args.appId }
-          : { broadcast: false };
-      const result = await manager.setLocale(args.locale, localeOptions);
-      if (result.success) {
-        changes.locale = result.languageTag;
-        // Prefer the scope the adapter reports directly (issue #6346): on
-        // Android < 13 a per-app request is forced device-wide, and the adapter
-        // says so via localeScope: "system" rather than us inferring it from the
-        // method string.
-        const localeScope =
-          result.localeScope ??
-          (result.method?.startsWith("cmd locale set-app-locales") ? "app" : "system");
-        localeMetadata = {
-          localeScope,
-          ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
-          ...(result.method ? { localeMethod: result.method } : {}),
-        };
-      } else {
-        errors.push(result.error ?? "Failed to set locale");
-      }
-    }
-
-    if (args.timeZone !== undefined) {
-      const result = await manager.setTimeZone(args.timeZone);
-      if (result.success) {
-        changes.timeZone = result.zoneId;
-      } else {
-        errors.push(result.error ?? "Failed to set time zone");
-      }
-    }
-
-    if (args.textDirection !== undefined) {
-      const rtl = args.textDirection === "rtl";
-      const result = await manager.setTextDirection(rtl, { broadcast: false });
-      if (result.success) {
-        changes.textDirection = rtl ? "rtl" : "ltr";
-      } else {
-        errors.push(result.error ?? "Failed to set text direction");
-      }
-    }
-
-    if (args.timeFormat !== undefined) {
-      const enabled = args.timeFormat === "24";
-      const result = await manager.set24HourFormat(enabled);
-      if (result.success) {
-        changes.timeFormat = enabled ? "24" : "12";
-      } else {
-        errors.push(result.error ?? "Failed to set time format");
-      }
-    }
-
-    if (args.calendarSystem !== undefined) {
-      const result = await manager.setCalendarSystem(args.calendarSystem);
-      if (result.success) {
-        changes.calendarSystem = result.calendarSystem;
-      } else {
-        errors.push(result.error ?? "Failed to set calendar system");
-      }
-    }
-
-    const success = errors.length === 0;
-    let intentBroadcast = false;
-    let liveChanges:
-      | { springBoardRestarted: boolean; notificationPosted: boolean; appRestarted?: boolean }
-      | undefined;
-
-    if (Object.keys(changes).length > 0) {
-      if (device.platform === "android") {
-        intentBroadcast = await manager.broadcastLocaleChange();
-      } else if (device.platform === "ios") {
-        liveChanges = await manager.applyIosLiveChanges(args.restartApp);
-      }
-    }
-
-    return createJSONToolResponse({
-      success,
-      changes,
-      intentBroadcast,
-      ...localeMetadata,
-      ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
-      ...(success ? {} : { error: errors.join("; ") }),
-    });
-  };
-
-  const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {
-    const displayConfig = new DisplayConfig(device);
-    const result = displayConfigArgsAreSet(args)
-      ? await displayConfig.setConfig(displayConfigSetInput(args))
-      : await displayConfig.getConfig();
-    return createJSONToolResponse({
-      message: displayConfigMessage(result),
-      ...result,
-    });
-  };
-
-  const getDeviceStateHandler = async (device: BootedDevice, args: GetDeviceStateArgs) => {
-    const deviceState = new DeviceState(device);
-    const result = await deviceState.getState(args.include);
-
-    return createStructuredToolResponse({
-      message: deviceStateMessage(result),
-      ...result,
-    });
-  };
 
   const setDeviceStateHandler = async (device: BootedDevice, args: SetDeviceStateArgs) => {
     if (args.clock !== undefined) {

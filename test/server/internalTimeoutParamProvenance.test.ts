@@ -8,10 +8,16 @@
  * have it honored and reattached onto the handler's arguments.
  */
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
+import { stripInternalToolParams } from "../../src/server/index";
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { logger } from "../../src/utils/logger";
+import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
+import { stripInternalParams } from "../../src/features/record/McpCallRecorder";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
@@ -22,6 +28,8 @@ import {
 
 const TOOL = "__internal_timeout_provenance_probe_6222__";
 const STRICT_TOOL = "__internal_strip_strict_probe_6917__";
+const strictSchema = z.object({ appId: z.string().optional() }).strict();
+let strictHandlerArgs: unknown;
 
 describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", () => {
   let restoreHermeticServer: () => void;
@@ -70,8 +78,12 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
     ToolRegistry.register(
       STRICT_TOOL,
       "probe tool whose input schema rejects undeclared arguments",
-      z.object({ appId: z.string().optional() }).strict(),
-      async () => createStructuredToolResponse({ success: true }),
+      strictSchema,
+      async (args: unknown) => {
+        strictHandlerArgs = args;
+        const publicArgs = strictSchema.parse(stripInternalToolParams(args));
+        return createStructuredToolResponse({ success: true, ...publicArgs });
+      },
       { outputSchema: z.object({ success: z.boolean() }) },
     );
   });
@@ -117,6 +129,19 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       });
 
       expect(getStructuredField(result, "receivedDeadlineMs")).toBeNull();
+    });
+
+    test("live deadline metadata is removed before a direct strict tool handler", async () => {
+      const { client } = fixture.getContext();
+      const result = await client.callTool({
+        name: STRICT_TOOL,
+        arguments: { appId: "com.example", [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "live-key" },
+      });
+
+      expect(strictHandlerArgs).not.toHaveProperty(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+      expect(result.isError ?? false).toBe(false);
+      expect(JSON.stringify(result)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+      expect(JSON.stringify(result)).not.toContain("live-key");
     });
   });
 
@@ -188,6 +213,60 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
 
       expect(result.isError ?? false).toBe(false);
       expect(getStructuredField(result, "success")).toBe(true);
+    });
+
+    test("live deadline metadata stays out of strict public arguments, results, logs, telemetry and validation errors", async () => {
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      const telemetry = spyOn(TelemetryRecorder.getInstance(), "recordToolCallEvent");
+      try {
+        const { client } = fixture.getContext();
+        const argumentsWithKey = {
+          appId: "com.example",
+          [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "live-key",
+        };
+        const result = await client.callTool({ name: STRICT_TOOL, arguments: argumentsWithKey });
+
+        expect(result.isError ?? false).toBe(false);
+        // Trusted daemon metadata is deliberately reattached for deadline consumers.
+        expect(strictHandlerArgs).toHaveProperty(INTERNAL_LIVE_DEADLINE_KEY_PARAM, "live-key");
+        expect(stripInternalToolParams(strictHandlerArgs)).toEqual({ appId: "com.example" });
+        expect(JSON.stringify(result)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+        expect(JSON.stringify(result)).not.toContain("live-key");
+        expect(info.mock.calls.some(([message]) => message === "Request: ")).toBe(true);
+        expect(JSON.stringify(info.mock.calls)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+        expect(JSON.stringify(info.mock.calls)).not.toContain("live-key");
+        const timer = new FakeTimer();
+        await new DefaultAfterToolCallHandler().handle({
+          name: STRICT_TOOL,
+          args: strictHandlerArgs,
+          response: result,
+          internalCall: true,
+          device: undefined,
+          sessionUuid: undefined,
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: timer.now(),
+        });
+        expect(telemetry.mock.calls).toHaveLength(1);
+        expect(telemetry.mock.calls[0][0].args).toEqual({ appId: "com.example" });
+        expect(stripInternalParams(argumentsWithKey)).toEqual({ appId: "com.example" });
+
+        const invalid = await client
+          .callTool({
+            name: STRICT_TOOL,
+            arguments: { ...argumentsWithKey, appId: 42 },
+          })
+          .catch((error: unknown) =>
+            shapeToolCallError(error, { toolName: STRICT_TOOL, source: "MCP" }),
+          );
+        expect(invalid.isError).toBe(true);
+        expect(JSON.stringify(invalid)).toContain("appId");
+        expect(JSON.stringify(invalid)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+        expect(JSON.stringify(invalid)).not.toContain("live-key");
+      } finally {
+        info.mockRestore();
+        telemetry.mockRestore();
+      }
     });
   });
 });

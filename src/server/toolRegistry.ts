@@ -96,6 +96,7 @@ import {
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   stripNavigationToolParams,
+  deleteInternalToolParams,
 } from "../daemon/constants";
 
 /**
@@ -1371,13 +1372,15 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       artifactMode,
     });
 
+    const telemetryArgs = { ...args };
+    deleteInternalToolParams(telemetryArgs);
     TelemetryRecorder.getInstance().recordToolCallEvent({
       timestamp: toolStartMs,
       toolName: name,
       durationMs,
       success: toolSuccess,
       error: toolError,
-      args: typeof args === "object" ? args : null,
+      args: typeof args === "object" ? telemetryArgs : null,
     });
 
     if (toolSuccess) {

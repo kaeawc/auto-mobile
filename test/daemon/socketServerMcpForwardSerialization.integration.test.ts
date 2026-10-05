@@ -16,6 +16,7 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "../../src/daemon/constants";
 import { DEFAULT_OBSERVE_MCP_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -2554,6 +2555,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       __mcpSessionId: expect.any(String),
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
       [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: expect.any(Number),
+      [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: expect.any(String),
     });
     expect(typeof args.__mcpSessionId).toBe("string");
   });

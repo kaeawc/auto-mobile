@@ -880,7 +880,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         unknown
       >;
     }
-    logger.info("Request: ", request);
+    logger.info("Request: ", {
+      ...request,
+      params: {
+        ...request.params,
+        arguments: stripInternalToolParams(request.params.arguments),
+      },
+    });
   };
 
   // The shared envelope (`dispatchToolCall`, #6545) has already read the tool

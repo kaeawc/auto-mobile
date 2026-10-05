@@ -2707,18 +2707,18 @@ async function handleInstalledImeAction(
     if (!args.imeId || !args.key) {
       throw new ActionableError("tapImeKey requires imeId and key.");
     }
-    return createJSONToolResponse(
+    return createStructuredToolResponse(
       await createInstalledImeKeySession(device).tapKey(args.imeId, args.key, signal),
     );
   }
   const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device), device.deviceId);
   if (args.action === "listImes") {
-    return createJSONToolResponse(await catalog.list(signal));
+    return createStructuredToolResponse(await catalog.list(signal));
   }
   if (!args.imeId) {
     throw new ActionableError("keyboard setIme requires imeId from listImes.");
   }
-  return createJSONToolResponse(await catalog.select(args.imeId, signal));
+  return createStructuredToolResponse(await catalog.select(args.imeId, signal));
 }
 
 // Per-command factories preserve the default device implementations in production.
@@ -3185,7 +3185,7 @@ export function registerInteractionTools() {
       args.display,
       { container: args.container, selectionStrategy: args.selectionStrategy },
     );
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? `Executed ${result.completedCommands} sendKeys command(s)`
         : `sendKeys stopped at command ${result.failedIndex}: ${result.error}`,
@@ -3311,7 +3311,9 @@ export function registerInteractionTools() {
         )
       : null;
 
-    return createJSONToolResponse(buildOpenLinkPayload(args.url, effectiveResult, waitOutcome));
+    return createStructuredToolResponse(
+      buildOpenLinkPayload(args.url, effectiveResult, waitOutcome),
+    );
   };
 
   // Shake handler
@@ -3354,12 +3356,14 @@ export function registerInteractionTools() {
     try {
       throwIfAborted(signal);
       if (args.action === "setProfile") {
-        return createJSONToolResponse(
+        return createStructuredToolResponse(
           await setKeyboardProfileForTool(device, args.profile, undefined, signal),
         );
       }
       if (args.action === "listProfiles") {
-        return createJSONToolResponse(await listKeyboardProfilesForTool(device, undefined, signal));
+        return createStructuredToolResponse(
+          await listKeyboardProfilesForTool(device, undefined, signal),
+        );
       }
       if (args.action === "listImes" || args.action === "setIme" || args.action === "tapImeKey") {
         return handleInstalledImeAction(device, args, signal);
@@ -3369,7 +3373,7 @@ export function registerInteractionTools() {
       const result = await keyboard.execute(args.action, signal);
       throwIfAborted(signal);
 
-      return createJSONToolResponse(result);
+      return createStructuredToolResponse(result);
     } catch (error) {
       throwIfAborted(signal);
       throw toActionableError(error, `Failed to execute keyboard ${args.action}`);

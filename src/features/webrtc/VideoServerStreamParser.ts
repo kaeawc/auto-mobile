@@ -147,59 +147,8 @@ export class VideoServerStreamParser {
   push(chunk: Buffer): void {
     this.buffered.append(chunk);
 
-    if (!this.header && !this.muxTracks) {
-      if (this.buffered.length < STREAM_HEADER_BYTES) {
-        return;
-      }
-      const streamHeader = this.buffered.peek(STREAM_HEADER_BYTES);
-      const codecOrMagic = streamHeader.readUInt32BE(0);
-      if (codecOrMagic === VIDEO_SERVER_CODEC_ID_AMUX) {
-        const trackCount = streamHeader.readUInt32BE(8);
-        this.assertWithinCap(trackCount, MAX_TRACK_COUNT, "trackCount");
-        const headerBytes = STREAM_HEADER_BYTES + trackCount * MUX_TRACK_BYTES;
-        if (this.buffered.length < headerBytes) {
-          return;
-        }
-        const fullHeader = this.buffered.peek(headerBytes);
-        this.muxTracks = new Map();
-        let videoHeader: Pick<VideoServerStreamHeader, "codecId" | "width" | "height"> | null =
-          null;
-        let hasPcmAudioTrack = false;
-        for (let i = 0; i < trackCount; i++) {
-          const offset = STREAM_HEADER_BYTES + i * MUX_TRACK_BYTES;
-          const trackId = fullHeader.readUInt32BE(offset);
-          const codecId = fullHeader.readUInt32BE(offset + 4);
-          const param1 = fullHeader.readUInt32BE(offset + 8);
-          const param2 = fullHeader.readUInt32BE(offset + 12);
-          this.muxTracks.set(trackId, { codecId, param1, param2 });
-          if (codecId === VIDEO_SERVER_CODEC_ID_H264) {
-            videoHeader = { codecId, width: param1, height: param2 };
-          } else if (
-            trackId === VIDEO_SERVER_TRACK_ID_AUDIO &&
-            codecId === VIDEO_SERVER_CODEC_ID_PCM16
-          ) {
-            hasPcmAudioTrack = true;
-          }
-        }
-        if (videoHeader) {
-          this.header = {
-            ...videoHeader,
-            muxed: true,
-            audio: hasPcmAudioTrack,
-            muxVersion: fullHeader.readUInt32BE(4),
-          };
-          this.callbacks.onHeader?.(this.header);
-        }
-        this.buffered.discard(headerBytes);
-      } else {
-        this.header = {
-          codecId: codecOrMagic,
-          width: streamHeader.readUInt32BE(4),
-          height: streamHeader.readUInt32BE(8),
-        };
-        this.buffered.discard(STREAM_HEADER_BYTES);
-        this.callbacks.onHeader?.(this.header);
-      }
+    if (!this.header && !this.muxTracks && !this.readStreamHeader()) {
+      return;
     }
 
     if (this.muxTracks) {
@@ -228,6 +177,61 @@ export class VideoServerStreamParser {
         ptsUs: Number(flags & PTS_MASK),
       });
     }
+  }
+
+  private readStreamHeader(): boolean {
+    if (this.buffered.length < STREAM_HEADER_BYTES) {
+      return false;
+    }
+    const streamHeader = this.buffered.peek(STREAM_HEADER_BYTES);
+    const codecOrMagic = streamHeader.readUInt32BE(0);
+    if (codecOrMagic === VIDEO_SERVER_CODEC_ID_AMUX) {
+      const trackCount = streamHeader.readUInt32BE(8);
+      this.assertWithinCap(trackCount, MAX_TRACK_COUNT, "trackCount");
+      const headerBytes = STREAM_HEADER_BYTES + trackCount * MUX_TRACK_BYTES;
+      if (this.buffered.length < headerBytes) {
+        return false;
+      }
+      const fullHeader = this.buffered.peek(headerBytes);
+      this.muxTracks = new Map();
+      let videoHeader: Pick<VideoServerStreamHeader, "codecId" | "width" | "height"> | null = null;
+      let hasPcmAudioTrack = false;
+      for (let i = 0; i < trackCount; i++) {
+        const offset = STREAM_HEADER_BYTES + i * MUX_TRACK_BYTES;
+        const trackId = fullHeader.readUInt32BE(offset);
+        const codecId = fullHeader.readUInt32BE(offset + 4);
+        const param1 = fullHeader.readUInt32BE(offset + 8);
+        const param2 = fullHeader.readUInt32BE(offset + 12);
+        this.muxTracks.set(trackId, { codecId, param1, param2 });
+        if (codecId === VIDEO_SERVER_CODEC_ID_H264) {
+          videoHeader = { codecId, width: param1, height: param2 };
+        } else if (
+          trackId === VIDEO_SERVER_TRACK_ID_AUDIO &&
+          codecId === VIDEO_SERVER_CODEC_ID_PCM16
+        ) {
+          hasPcmAudioTrack = true;
+        }
+      }
+      if (videoHeader) {
+        this.header = {
+          ...videoHeader,
+          muxed: true,
+          audio: hasPcmAudioTrack,
+          muxVersion: fullHeader.readUInt32BE(4),
+        };
+        this.callbacks.onHeader?.(this.header);
+      }
+      this.buffered.discard(headerBytes);
+    } else {
+      this.header = {
+        codecId: codecOrMagic,
+        width: streamHeader.readUInt32BE(4),
+        height: streamHeader.readUInt32BE(8),
+      };
+      this.buffered.discard(STREAM_HEADER_BYTES);
+      this.callbacks.onHeader?.(this.header);
+    }
+    return true;
   }
 
   private drainMuxPackets(): void {

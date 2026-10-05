@@ -10,6 +10,17 @@ import type { PooledDevice, DeviceRecoveryPolicy } from "./devicePool";
 import type { Session } from "./sessionManager";
 import type { AndroidRecoveryRecordLedger } from "./androidRecoveryRecordLedger";
 
+interface SameAvdRecoveryContext {
+  device: PooledDevice;
+  avdName: string;
+  preservedSessionId: string | undefined;
+  preservedSession: Session | undefined;
+  preservedAutolockSessionId: string | undefined;
+  recoveryImage: DeviceInfo;
+  incidentId: string | undefined;
+  handoffOwner: symbol;
+}
+
 export class UnconfirmedRecoveryShutdownError extends ActionableError {
   constructor(avdName: string, cause: unknown) {
     super(
@@ -197,8 +208,7 @@ export class AndroidRebootCoordinator {
         return false;
       }
       if (replacementState !== "stopped") {
-        return await this.finishAndroidRecoveryWithoutActiveStop(
-          replacementState,
+        return await this.finishAndroidRecoveryWithoutActiveStop(replacementState, {
           device,
           avdName,
           preservedSessionId,
@@ -206,8 +216,8 @@ export class AndroidRebootCoordinator {
           preservedAutolockSessionId,
           recoveryImage,
           incidentId,
-          replacementHandoffOwner,
-        );
+          handoffOwner: replacementHandoffOwner,
+        });
       }
       if (
         !this.pool.detachSessionForAndroidRecovery(device, preservedSessionId, preservedSession)
@@ -406,40 +416,24 @@ export class AndroidRebootCoordinator {
 
   private async finishAndroidRecoveryWithoutActiveStop(
     replacementState: "same-avd" | "declined",
-    device: PooledDevice,
-    avdName: string,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
-    preservedAutolockSessionId: string | undefined,
-    recoveryImage: DeviceInfo,
-    incidentId: string | undefined,
-    handoffOwner: symbol,
+    context: SameAvdRecoveryContext,
   ): Promise<boolean> {
     if (replacementState === "declined") {
       return false;
     }
-    return await this.recoverSameAvdReplacement(
-      device,
-      avdName,
-      preservedSessionId,
-      preservedSession,
-      preservedAutolockSessionId,
-      recoveryImage,
-      incidentId,
-      handoffOwner,
-    );
+    return await this.recoverSameAvdReplacement(context);
   }
 
-  private async recoverSameAvdReplacement(
-    device: PooledDevice,
-    avdName: string,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
-    preservedAutolockSessionId: string | undefined,
-    recoveryImage: DeviceInfo,
-    incidentId: string | undefined,
-    handoffOwner: symbol,
-  ): Promise<boolean> {
+  private async recoverSameAvdReplacement({
+    device,
+    avdName,
+    preservedSessionId,
+    preservedSession,
+    preservedAutolockSessionId,
+    recoveryImage,
+    incidentId,
+    handoffOwner,
+  }: SameAvdRecoveryContext): Promise<boolean> {
     if (
       !(await this.pool.rebindSameAvdReplacementSession(
         device,

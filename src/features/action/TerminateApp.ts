@@ -1,7 +1,7 @@
 import { toActionableError } from "../../models/ActionableError";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
@@ -184,13 +184,14 @@ export class TerminateApp extends BaseVisualChange {
         // `force-stop` is destructive, so determine the selected user's process
         // state before changing it. A package running in another profile must not
         // make this operation report that the selected profile was running.
-        const isRunning = await perf.track("checkRunning", async () => {
+        const runningPids = await perf.track("checkRunning", async () => {
           try {
             const result = await readAndroidPackageProcesses(this.adb, packageName, {
               userId: targetUserId,
               timer: this.timer,
             });
-            return result.isRunning;
+            const processes = result.processes.filter((p) => p.userId === targetUserId);
+            return new Set(processes.map((p) => p.pid));
           } catch (error) {
             logger.warn(
               `[TerminateApp] Running-state check failed for user ${targetUserId}`,
@@ -202,7 +203,7 @@ export class TerminateApp extends BaseVisualChange {
           }
         });
 
-        if (!isRunning) {
+        if (runningPids.size === 0) {
           // The process is already gone — the exact dead-process state that
           // terminate-then-observe is meant to recover from (issue #5867). Any
           // cached window/hierarchy record for it is stale, so invalidate here too,
@@ -236,7 +237,7 @@ export class TerminateApp extends BaseVisualChange {
 
         if (!options?.skipObservation) {
           await perf.track("awaitTerminated", () =>
-            this.awaitTerminated(packageName, targetUserId, isForeground, signal),
+            this.awaitTerminated(packageName, targetUserId, isForeground, signal, runningPids),
           );
         }
 
@@ -273,26 +274,30 @@ export class TerminateApp extends BaseVisualChange {
     userId: number,
     wasForeground: boolean,
     signal?: AbortSignal,
+    baselinePids: ReadonlySet<number> = new Set(),
   ): Promise<void> {
     const startedAt = this.timer.now();
     const deadline = startedAt + TERMINATE_VERIFY_BUDGET_MS;
     const backoff = sequenceBackoff(TERMINATE_VERIFY_BACKOFF_MS);
     let attempts = 0;
-    let gone = false;
+    let state: boolean | "restarted" = false;
 
     while (this.timer.now() < deadline) {
       throwIfAborted(signal);
       attempts++;
-      gone = await this.isAndroidAppGone(packageName, userId, wasForeground, signal);
+      state = await this.isAndroidAppGone(packageName, userId, wasForeground, signal, baselinePids);
       throwIfAborted(signal);
-      if (gone) {
+      if (state) {
         break;
       }
       const remainingMs = deadline - this.timer.now();
       if (remainingMs <= 0) {
         break;
       }
-      await this.timer.sleep(Math.min(backoff.delayForAttempt(attempts), remainingMs));
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(Math.min(backoff.delayForAttempt(attempts), remainingMs)),
+        signal,
+      );
     }
     throwIfAborted(signal);
 
@@ -301,7 +306,7 @@ export class TerminateApp extends BaseVisualChange {
         `[TerminateApp] Termination verification for ${packageName} took ${attempts} attempts and ${this.timer.now() - startedAt}ms`,
       );
     }
-    if (!gone) {
+    if (!state) {
       // Force-stop succeeded; a missing post-condition must not change its result.
       logger.warn(
         `[TerminateApp] ${packageName} for user ${userId} still reported running/foreground or could not be verified after force-stop (${TERMINATE_VERIFY_BUDGET_MS}ms budget)`,
@@ -314,7 +319,8 @@ export class TerminateApp extends BaseVisualChange {
     userId: number,
     wasForeground: boolean,
     signal?: AbortSignal,
-  ): Promise<boolean> {
+    baselinePids: ReadonlySet<number> = new Set(),
+  ): Promise<boolean | "restarted"> {
     try {
       const [processes, foreground] = await Promise.all([
         readAndroidPackageProcesses(this.adb, packageName, {
@@ -324,6 +330,16 @@ export class TerminateApp extends BaseVisualChange {
         }),
         wasForeground ? this.adb.getForegroundApp(signal) : Promise.resolve(null),
       ]);
+      const userProcesses = processes.processes.filter((process) => process.userId === userId);
+      if (
+        userProcesses.length > 0 &&
+        userProcesses.every((process) => baselinePids.size > 0 && !baselinePids.has(process.pid))
+      ) {
+        logger.warn(
+          `[TerminateApp] ${packageName} for user ${userId} was killed and restarted with a new pid (old pids: ${[...baselinePids].join(", ")}; new pids: ${userProcesses.map((process) => process.pid).join(", ")})`,
+        );
+        return "restarted";
+      }
       return (
         !processes.isRunning &&
         !(foreground?.packageName === packageName && foreground.userId === userId)

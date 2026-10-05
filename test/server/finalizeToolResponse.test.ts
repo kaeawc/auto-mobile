@@ -3826,25 +3826,30 @@ describe("finalizeToolResponse", () => {
       expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
     });
 
-    test("executePlan artifacts every device failure observation and preserves the failure list", () => {
+    test("executePlan artifacts the selected failure once and each remaining observation", () => {
       const writer = new FakeObservationArtifactWriter();
       const observation = {
         capturedAtMs: 123,
         visibleTextsSample: ["Submit"],
         viewHierarchy: { hierarchy: { node: { "resource-id": "root" } } },
-        rawViewHierarchy: '<hierarchy><node text="large" /></hierarchy>',
       };
       const payload = {
         success: false,
         executedSteps: 0,
         totalSteps: 3,
+        failedStep: {
+          device: "A",
+          stepIndex: 0,
+          tool: "tapOn",
+          error: "missing",
+          failureObservation: observation,
+        },
         deviceFailures: [
           {
             device: "A",
             stepIndex: 0,
             tool: "tapOn",
             error: "missing",
-            failureObservation: observation,
           },
           {
             device: "B",
@@ -3864,27 +3869,35 @@ describe("finalizeToolResponse", () => {
         });
         const failures = structuredPayload(finalized).deviceFailures;
         expect(failures).toHaveLength(3);
+        expect(failures[0]).toEqual(payload.deviceFailures[0]);
+        expect(failures[0]).not.toHaveProperty("failureObservation");
         expect(failures[2]).toEqual(payload.deviceFailures[2]);
         if (internal) {
           expect(failures).toEqual(payload.deviceFailures);
           expect(writer.writes).toHaveLength(0);
         } else {
-          for (const failure of failures.slice(0, 2)) {
+          for (const failure of [structuredPayload(finalized).failedStep, failures[1]]) {
             expect(failure.failureObservation.visibleTextsSample).toEqual(["Submit"]);
             expect(failure.failureObservation.viewHierarchy.artifact.payload).toBe(
               "ExecutePlanFailureObservationViewHierarchy",
             );
-            expect(failure.failureObservation.rawViewHierarchy.artifact.payload).toBe(
-              "ExecutePlanFailureObservationRawViewHierarchy",
-            );
           }
-          expect(writer.writes).toHaveLength(4);
+          expect(writer.writes.map((write) => write.payload)).toEqual([
+            "ExecutePlanFailureObservationViewHierarchy",
+            "ExecutePlanFailureObservationViewHierarchy",
+          ]);
+          expect(writer.writes.map((write) => write.data)).toEqual([
+            observation.viewHierarchy,
+            observation.viewHierarchy,
+          ]);
           expect(finalized.content[0].text).toBe(
             stringifyToolResponse(structuredPayload(finalized)),
           );
         }
       }
-      expect(payload.deviceFailures[0].failureObservation).toEqual(observation);
+      expect(payload.deviceFailures[0]).not.toHaveProperty("failureObservation");
+      expect(payload.failedStep.failureObservation).toEqual(observation);
+      expect(payload.deviceFailures[1].failureObservation).toEqual(observation);
     });
 
     test("getNetworkGraph artifacts aggregate graph and keeps host count inline", () => {

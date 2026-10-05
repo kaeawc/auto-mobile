@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, RecentAppsResult, ViewHierarchyResult } from "../../models";
+import { ActionableError, BootedDevice, RecentAppsResult, ViewHierarchyResult } from "../../models";
 import { PressButton } from "./PressButton";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -307,10 +307,13 @@ export class RecentApps extends BaseVisualChange {
   private async executeIosRecentApps(signal?: AbortSignal): Promise<RecentAppsResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     throwIfAborted(signal);
-    const result = await awaitWhileRequestIsLive(
-      client.requestRecentApps(undefined, undefined, undefined, signal),
-      signal,
-    );
+    const result = await client.requestRecentApps(undefined, undefined, undefined, signal);
+    if (!result.success && result.dispatched && result.acknowledged === false) {
+      // Preserve the uncertain dispatch before post-action reads can replace it with cancellation.
+      throw new ActionableError(
+        `Recent apps press outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
+      );
+    }
     return {
       success: result.success,
       method: "ios_swipe",

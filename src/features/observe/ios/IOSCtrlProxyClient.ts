@@ -593,6 +593,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     ownerResourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyActionResult>;
 
   requestMultiFingerSwipe(
@@ -4008,12 +4010,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Android remains unchanged: count matching links in document order within the
    * owner's subtree, or the whole active-window tree when owner-less.
    */
+  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
+  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
     text: string,
     occurrence: number,
     ownerResourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestActivateAccessibilityLink(
       text,
@@ -4021,6 +4027,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       ownerResourceId,
       timeoutMs,
       perf,
+      signal,
+      onDispatch,
     );
   }
 

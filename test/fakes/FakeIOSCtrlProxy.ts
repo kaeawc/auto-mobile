@@ -1272,9 +1272,16 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     text: string,
     occurrence: number,
     ownerResourceId?: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyActionResult> {
+    signal?.throwIfAborted();
     await this.applyDelay("accessibilityLink");
     this.checkFailure("accessibilityLink");
+    signal?.throwIfAborted();
+    onDispatch?.();
     this.actionHistory.push({
       action: "activate_accessibility_link",
       resourceId: ownerResourceId,

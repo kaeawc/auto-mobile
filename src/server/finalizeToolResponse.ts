@@ -623,7 +623,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         observationDiff = {
           mode: "full",
           reason: "disabled",
-          hint: "Enable diffs with --actions-diff-observe or the actions-diff-observe feature flag; --actions-no-observe overrides it and strips the observation entirely.",
+          hint: "Set --actions-diff-observe to receive diffs.",
         };
       } else if (!ctx.sessionUuid || !ctx.baselineStore) {
         observationDiff = {

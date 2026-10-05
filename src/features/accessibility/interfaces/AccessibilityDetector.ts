@@ -6,15 +6,22 @@ import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
  */
 export type AccessibilityService = "talkback" | "voiceover" | "unknown";
 
-/** A successful settings read; null from resolveState means unavailable. */
+/** Settings evidence, possibly retained after failure; null means unavailable. */
 export interface AndroidAccessibilityState {
+  /** True only for last-known evidence returned after a failed probe. */
+  unconfirmed?: boolean;
   enabled: boolean;
   service: AccessibilityService;
   ctrlProxyEnabled: boolean | null;
 }
 
+export interface TalkBackStateConfirmation {
+  talkBack: boolean | null;
+  unconfirmed: boolean;
+}
+
 export const TALKBACK_STATE_UNKNOWN_WARNING =
-  "AutoMobile could not determine TalkBack state after two probes; using the default gesture. TalkBack may be enabled.";
+  "AutoMobile could not determine the current TalkBack state; using the last known state when available, otherwise the default gesture. TalkBack may have changed.";
 
 /**
  * Interface for Android accessibility detection
@@ -27,12 +34,19 @@ export interface AccessibilityDetector {
     featureFlags?: FeatureFlagService,
   ): Promise<AndroidAccessibilityState | null>;
 
-  /** Gesture decision: synchronously retry an unavailable probe once, then return null. */
+  /** Gesture decision: retry unavailable evidence once, respecting probe backoff. */
   resolveTalkBackState(
     deviceId: string,
     adb: AdbExecutor,
     featureFlags?: FeatureFlagService,
   ): Promise<boolean | null>;
+
+  /** Optional for compatibility with existing injected detectors. */
+  resolveTalkBackStateWithConfirmation?(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<TalkBackStateConfirmation>;
 
   /**
    * CtrlProxy's actual enabled state; null means detection failed or was skipped.
@@ -84,4 +98,18 @@ export interface AccessibilityDetector {
    * Clear all cached entries (primarily for testing)
    */
   clearAllCache(): void;
+}
+
+/** Preserve legacy injected detectors while carrying confirmation for production taps. */
+export async function resolveTalkBackStateConfirmation(
+  detector: AccessibilityDetector,
+  deviceId: string,
+  adb: AdbExecutor,
+  featureFlags?: FeatureFlagService,
+): Promise<TalkBackStateConfirmation> {
+  if (detector.resolveTalkBackStateWithConfirmation) {
+    return detector.resolveTalkBackStateWithConfirmation(deviceId, adb, featureFlags);
+  }
+  const talkBack = await detector.resolveTalkBackState(deviceId, adb, featureFlags);
+  return { talkBack, unconfirmed: talkBack === null };
 }

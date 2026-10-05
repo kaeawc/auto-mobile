@@ -19,7 +19,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "lint": {
-      "description": "Run oxlint with auto-fix on source and test files, then the oxlint ratchet gate",
+      "description": "Run oxlint and oxfmt (check-only for CI=true/1, auto-fix locally), then the ratchet and boundary gates; CI is hashed to separate check and fix caches",
       "inputs": [
         "src/**",
         "test/**",
@@ -38,8 +38,8 @@
       ],
       "outputs": [],
       "outputLogs": "new-only",
-      "passThroughEnv": ["CI", "GITHUB_ACTIONS"],
-      "env": ["GITHUB_BASE_REF"]
+      "passThroughEnv": ["GITHUB_ACTIONS"],
+      "env": ["CI", "GITHUB_BASE_REF"]
     },
     "test": {
       "description": "Run the hermetic Bun unit suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity, sdkApiBaselineWorkflow, validateMarkdownRepoPaths); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",

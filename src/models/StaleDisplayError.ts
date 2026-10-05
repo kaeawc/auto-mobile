@@ -1,3 +1,4 @@
+import { DispatchedObservationError } from "./DispatchedObservationError";
 import { displayPinFailure, selectedDisplayPin } from "../features/observe/SessionDisplayContext";
 import { PinnedDisplayUnavailableError } from "./PinnedDisplayError";
 import { ActionableError } from "./ActionableError";
@@ -40,6 +41,10 @@ export function staleDisplayError(
 
 /** Preserve the canonical message and typed details in the action's existing result channel. */
 export function withStaleDisplay<T extends BaseActionResult>(result: T, error: unknown): T {
+  if (error instanceof DispatchedObservationError) {
+    // Retain display guidance without replacing the completed-gesture warning.
+    return { ...withStaleDisplay(result, error.cause), error: result.error ?? error.message };
+  }
   const pinError = displayPinFailure(error);
   if (pinError instanceof PinnedDisplayUnavailableError) {
     return { ...result, error: pinError.message, pinnedDisplay: pinError.details };

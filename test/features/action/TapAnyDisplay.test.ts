@@ -1,3 +1,4 @@
+import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
@@ -235,3 +236,55 @@ for (const unavailable of [false, true]) {
     expect(h.adb.getCommandCalls()).toEqual([]);
   });
 }
+
+test.each(["settle-throws", "throws", "settle-transition"] as const)(
+  "confirmed display tapAny preserves delivery after %s",
+  async (outcome) => {
+    const h = harness(true);
+    h.action.observedInteraction = BaseVisualChange.prototype.observedInteraction;
+    let postReads = 0;
+    h.observe.setObserveResult(() => {
+      if (h.dispatches.length > 0) {
+        postReads++;
+        if (outcome === "throws" || postReads > 1) {
+          if (outcome === "settle-transition") {
+            h.transitions.transition();
+          }
+          throw new Error("display post-read unavailable");
+        }
+      }
+      return h.observation;
+    });
+    const result = await h.action.execute({ action: "tap", display: "cover" });
+    expect(h.dispatches.length).toBeGreaterThan(0);
+    if (outcome === "throws") {
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Do not retry automatically");
+      expect(result.observation).toBeUndefined();
+    } else {
+      expect(result.success).toBe(true);
+      expect(result.observation?.viewHierarchy).toEqual(h.observation.viewHierarchy);
+      expect(result.observation?.freshness?.warning).toContain("display settle");
+      if (outcome === "settle-transition") {
+        expect(result.staleDisplay?.retry).toBe("observe");
+      }
+    }
+  },
+);
+
+test("tapAny block refusal before dispatch never receives the dispatched marker", async () => {
+  const h = harness(true);
+  h.action.observedInteraction = async () => {
+    h.transitions.transition();
+    return {
+      success: false,
+      error: "Unable to get view hierarchy, cannot tap on element",
+      observation: { ...h.observation, viewHierarchy: undefined },
+    };
+  };
+  const result = await h.action.execute({ action: "tap", display: "cover" });
+  expect(result.success).toBe(false);
+  expect(result.error).not.toContain("gesture was dispatched");
+  expect(result.error).not.toContain("Do not retry automatically");
+  expect(h.dispatches).toEqual([]);
+});

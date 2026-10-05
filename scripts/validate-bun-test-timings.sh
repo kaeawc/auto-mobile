@@ -22,6 +22,17 @@
 # closed and identifies the offenders that need a larger budget.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+source "$ROOT/scripts/lib/bun-unit-test.sh"
+runner_os="${RUNNER_OS:-}"
+if [[ -z "$runner_os" && "$(uname -s)" == Darwin ]]; then
+  runner_os=macOS
+fi
+configure_bun_unit_test "$ROOT" "$runner_os"
+# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+source "$ROOT/scripts/ios/run_with_timeout.sh"
+
 report_path="${1:-scratch/bun-test-report.xml}"
 report_dir="${report_path%.xml}.d"
 recheck_dir="${report_path%.xml}.recheck.d"
@@ -90,7 +101,7 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
         ;;
     esac
     case "$file" in
-      src/*|package.json|bun.lock|bunfig.toml|scripts/test-ts.sh|scripts/validate-bun-test-timings.sh|scripts/lib/junit-testcase-timings.ts)
+      src/*|package.json|bun.lock|bunfig.toml|scripts/test-ts.sh|scripts/validate-bun-test-timings.sh|scripts/lib/junit-testcase-timings.ts|scripts/lib/bun-unit-test.sh)
         # Runtime inputs can change test loading, preloads, or scheduling for
         # every unit test even when no test file itself changed.
         affects_unit_tests=true
@@ -137,9 +148,7 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
     case "$file" in
       test/*.test.ts)
         if [[ "$file" != *.integration.test.ts && "$file" != test/stress/* && -f "$file" ]]; then
-          bun test \
-            --isolate \
-            --timeout "${AUTOMOBILE_TEST_TIMEOUT_MS:-5000}" \
+          "${BUN_UNIT_TEST_COMMAND[@]}" \
             --reporter junit \
             --reporter-outfile "$report_dir/changed-${changed_count}.xml" \
             "$file"
@@ -346,12 +355,23 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
       # the real unit lane amortizes them instead of being billed to one test.
       # A failing assertion here is the unit lane's business, not the budget's:
       # report it and keep measuring rather than exiting with a bare status.
-      if ! bun test \
-        --isolate \
-        --timeout "${AUTOMOBILE_TEST_TIMEOUT_MS:-5000}" \
+      # Per-test timeouts do not bound a whole file (hooks/many tests can
+      # exceed them). Bound this process by the remaining recheck allowance so
+      # the validator, rather than the CI job timeout, prints the verdict.
+      # Invoke separately so the function is not in an errexit-suppressed condition.
+      set +e
+      run_with_timeout "$((recheck_budget_seconds - elapsed_seconds))" \
+        "${BUN_UNIT_TEST_COMMAND[@]}" \
         --reporter junit \
         --reporter-outfile "$recheck_report" \
-        "$file"; then
+        "$file"
+      recheck_status=$?
+      set -e
+      if [[ "$recheck_status" -eq 124 || "$recheck_status" -eq 137 ]]; then
+        # GNU timeout returns 137 if its two-second KILL escalation is needed.
+        file_complete=false
+        break
+      elif [[ "$recheck_status" -ne 0 ]]; then
         echo "Recheck run ${run} of ${file} did not pass; measuring whatever it reported." >&2
       fi
       if [[ -f "$recheck_report" ]]; then
@@ -436,7 +456,7 @@ FILENAME == recheck_file {
     label = label " #" $5
   }
   if ($1 in unverified) {
-    printf "Could not verify within the %ds recheck budget: %s (first sample %.2fms). Raise BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS to obtain an isolated median.\n", limit_budget, label, $4 > "/dev/stderr"
+    printf "Could not verify within the %ds recheck budget: %s (first sample %.2fms; file %s). Raise BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS to obtain an isolated median.\n", limit_budget, label, $4, $1 > "/dev/stderr"
     fail = 1
     next
   }

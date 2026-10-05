@@ -156,7 +156,9 @@ export function harness({
       options.previousObservation ??
       (observationFor ? await observe.execute({ display: options.display }) : frame());
     const result = await run(previous);
-    const observation = await observe.execute({ display: options.display });
+    const observation = await (options.postActionObserveScreen ?? observe).execute({
+      display: options.display,
+    });
     return { ...result, observation, effect: "changed" };
   };
   const dispatched = () => {

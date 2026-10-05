@@ -1,5 +1,6 @@
 import type { AndroidCtrlProxyClient } from "../../observe/android";
-import { StaleDisplayError } from "../../../models/StaleDisplayError";
+import { StaleDisplayError, withStaleDisplay } from "../../../models/StaleDisplayError";
+import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { SwipeResult } from "../../../models";
@@ -23,6 +24,13 @@ function searchDeviceInfo(
   return request;
 }
 
+function mustRethrowSearchDragError(error: unknown, dispatched: boolean): boolean {
+  return (
+    error instanceof DispatchedObservationError ||
+    (error instanceof StaleDisplayError && !dispatched)
+  );
+}
+
 /**
  * Reuse CtrlProxy's continued drag strokes: travel, then a stationary final stroke.
  * The final stroke emits UP at 100ms; a continued stationary stroke alone completes
@@ -44,6 +52,7 @@ export async function executeAndroidSearchDrag(options: {
   fallback: () => Promise<SwipeResult>;
   onFallback?: () => void;
   searchDragState?: AndroidSearchDragState;
+  onIndeterminate?: (cause: unknown) => never;
 }): Promise<SwipeResult> {
   const { client, x1, y1, x2, y2, duration, signal, displayId, beforeSend } = options;
   const fallback = () => {
@@ -52,16 +61,23 @@ export async function executeAndroidSearchDrag(options: {
     options.onFallback?.();
     return options.fallback();
   };
-  const indeterminate = (reason: string): SwipeResult => ({
-    success: false,
-    outcomeIndeterminate: true,
-    x1,
-    y1,
-    x2,
-    y2,
-    duration,
-    error: `Drag outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
-  });
+  const indeterminate = (cause: unknown): SwipeResult => {
+    options.onIndeterminate?.(cause);
+    const error = new DispatchedObservationError(cause);
+    return withStaleDisplay(
+      {
+        success: false,
+        outcomeIndeterminate: true,
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        error: error.message,
+      },
+      error,
+    );
+  };
   let dispatched = false;
   try {
     throwIfAborted(signal);
@@ -98,13 +114,13 @@ export async function executeAndroidSearchDrag(options: {
     }
     return { ...result, x1, y1, x2, y2, duration };
   } catch (error) {
-    if (error instanceof StaleDisplayError) {
+    if (mustRethrowSearchDragError(error, dispatched)) {
       throw error;
     }
     throwIfAborted(signal);
     if (dispatched) {
       logger.warn(`[SwipeOn] Search drag outcome indeterminate: ${errorMessage(error)}`, error);
-      return indeterminate(errorMessage(error));
+      return indeterminate(error);
     }
     // Optional CtrlProxy capability/connection failures are safe to retry via ADB before dispatch.
     logger.debug(`[SwipeOn] Precise search drag unavailable: ${errorMessage(error)}`, error);

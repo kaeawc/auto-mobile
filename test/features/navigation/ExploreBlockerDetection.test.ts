@@ -1097,11 +1097,8 @@ describe("ExploreBlockerDetection", () => {
 
     const device = {} as unknown as BootedDevice;
 
-    // A non-clickable element trips the classifier predicates but makes both
-    // handlePermissionDialog and dismissDialog no-op (they skip non-clickable
-    // nodes and never construct a TapOnElement), so no real device call fires.
     const permissionAndLoginElements: Element[] = [
-      { text: "Allow access", clickable: false } as Element,
+      { text: "Allow access", clickable: true } as Element,
       { text: "password", class: "android.widget.EditText", clickable: false } as Element,
     ];
     const loginElements: Element[] = [
@@ -1110,11 +1107,12 @@ describe("ExploreBlockerDetection", () => {
     ];
 
     test("handles a permission-and-login screen as a permission dialog, not a login dead-end", async () => {
-      // Permission is checked before login, so handleDeadEnd (the login handler)
-      // must never fire. Kills the `false && isPermissionDialog(...)` mutant,
-      // which would fall through to the login branch and invoke handleDeadEnd.
+      // Permission handling still takes precedence over normal login selection.
       let deadEndCalls = 0;
       const { parser } = makeParser(permissionAndLoginElements);
+      const tap = new FakeDialogTapAction();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
 
       const result = await detectAndHandleBlockers(
         observationWith({}),
@@ -1124,14 +1122,16 @@ describe("ExploreBlockerDetection", () => {
         async () => {
           deadEndCalls += 1;
         },
+        undefined,
+        { timer, tapActionFactory: tap.factory },
       );
 
       expect(deadEndCalls).toBe(0);
-      // No clickable permission button -> handlePermissionDialog returns false.
-      expect(result).toBe(false);
+      expect(tap.calls).toEqual([{ text: "Allow access", action: "tap" }]);
+      expect(result).toBe(true);
     });
 
-    test("routes a login screen to the dead-end handler and reports it handled", async () => {
+    test("leaves login screens to normal selection before dead-end handling", async () => {
       let deadEndCalls = 0;
       const { parser } = makeParser(loginElements);
 
@@ -1145,8 +1145,8 @@ describe("ExploreBlockerDetection", () => {
         },
       );
 
-      expect(deadEndCalls).toBe(1);
-      expect(result).toBe(true);
+      expect(deadEndCalls).toBe(0);
+      expect(result).toBe(false);
     });
 
     test("returns false and never handles blockers on a regular screen", async () => {
@@ -1171,9 +1171,8 @@ describe("ExploreBlockerDetection", () => {
     });
 
     test("bails out without extracting elements when the hierarchy carries an error", async () => {
-      // The errored hierarchy still resolves to login elements, so dropping the
-      // `|| viewHierarchy.hierarchy.error` guard would extract them and invoke
-      // handleDeadEnd. With the guard, extraction never runs.
+      // Dropping the hierarchy-error guard would extract the login elements.
+      // With the guard, extraction never runs.
       let deadEndCalls = 0;
       const { parser, extractionCount } = makeParser(loginElements);
 

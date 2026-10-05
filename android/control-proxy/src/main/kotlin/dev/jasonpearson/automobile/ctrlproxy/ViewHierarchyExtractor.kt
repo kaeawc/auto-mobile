@@ -457,6 +457,7 @@ internal constructor(
                 isActive = window.isActive,
                 isFocused = window.isFocused,
                 hierarchy = processedElement,
+                windowBounds = ElementBounds(windowBounds),
               )
             )
           }
@@ -535,6 +536,7 @@ internal constructor(
               isActive = true,
               isFocused = true,
               hierarchy = mainHierarchy!!,
+              windowBounds = windowInfos.firstOrNull { it.id == fallbackWindowId }?.bounds,
             )
           val existingIndex = windowEntries.indexOfFirst { it.windowId == fallbackWindowId }
           if (existingIndex >= 0) {
@@ -1594,6 +1596,7 @@ internal constructor(
     val isActive: Boolean,
     val isFocused: Boolean,
     val hierarchy: UIElementInfo,
+    val windowBounds: ElementBounds? = null,
   )
 
   private data class OrderCounter(var value: Int = 0)
@@ -1749,6 +1752,7 @@ internal constructor(
 
   private fun buildOcclusionInfo(windowEntries: List<WindowEntry>): Map<NodeKey, OcclusionInfo> {
     val nodes = mutableListOf<OcclusionNode>()
+    val windowBoundsByKey = windowEntries.associate { it.windowId to it.windowBounds }
     val imeWindowKeys =
       windowEntries
         .asSequence()
@@ -1783,12 +1787,12 @@ internal constructor(
       sortedNodes
         .withIndex()
         .groupBy { it.value.windowKey }
-        .mapValues { (_, entries) ->
+        .mapValues { (windowKey, entries) ->
           val groups =
             entries
-              .groupBy { it.value.bounds }
-              .map { (bounds, matches) ->
-                OcclusionBoundsGroup(bounds, matches)
+              .groupBy { clipOccluderBounds(it.value.bounds, windowBoundsByKey[windowKey]) }
+              .mapNotNull { (bounds, matches) ->
+                bounds?.let { OcclusionBoundsGroup(it, matches) }
               }
           val buckets = mutableMapOf<Int, MutableList<OcclusionBoundsGroup>>()
           val wide = mutableListOf<OcclusionBoundsGroup>()
@@ -1821,7 +1825,7 @@ internal constructor(
         )
       }
 
-      val candidates = mutableListOf<IndexedValue<OcclusionNode>>()
+      val candidates = mutableListOf<Pair<IndexedValue<OcclusionNode>, ElementBounds>>()
       val nodeBuckets = occlusionBuckets(node.bounds)
       for ((windowKey, windowIndex) in nodesByWindow) {
         if (windowKey == node.windowKey || windowIndex.lastIndex <= i) continue
@@ -1849,11 +1853,11 @@ internal constructor(
               bounds.top < node.bounds.bottom &&
               bounds.bottom > node.bounds.top
           ) {
-            candidates.add(entry)
+            candidates.add(entry to bounds)
           }
         }
       }
-      for (candidate in candidates.sortedBy { it.index }) {
+      for ((candidate, occluderBounds) in candidates.sortedBy { it.first.index }) {
         val occluder = candidate.value
         stats.occlusionCandidateComparisons.incrementAndGet()
         // Skip cross-window IME occluders: the IME's a11y root has a transparent wrapper that
@@ -1862,14 +1866,14 @@ internal constructor(
         if (occluder.windowKey != node.windowKey && occluder.windowKey in imeWindowKeys) {
           continue
         }
-        val intersection = intersectBounds(node.bounds, occluder.bounds) ?: continue
+        val intersection = intersectBounds(node.bounds, occluderBounds) ?: continue
         val overlapArea = intersection.width * intersection.height
         if (overlapArea <= 0) continue
 
         if (isDebugNode) {
           Log.d(
             TAG,
-            "[OCCLUSION]   Occluder: text='${occluder.element.text}', bounds=${occluder.bounds}, overlap=$overlapArea, order=${occluder.order}",
+            "[OCCLUSION]   Occluder: text='${occluder.element.text}', bounds=$occluderBounds, overlap=$overlapArea, order=${occluder.order}",
           )
         }
 
@@ -1995,6 +1999,14 @@ internal constructor(
       occludedByViewId = info?.occludedByViewId,
     )
   }
+
+  /** Clip coverage only; retain the framework's node bounds for targets and host output. */
+  internal fun clipOccluderBounds(
+    bounds: ElementBounds,
+    windowBounds: ElementBounds?,
+  ): ElementBounds? =
+    if (windowBounds == null || windowBounds.hasZeroArea()) bounds
+    else intersectBounds(bounds, windowBounds)
 
   private fun intersectBounds(bounds: ElementBounds, other: ElementBounds): ElementBounds? {
     val left = max(bounds.left, other.left)

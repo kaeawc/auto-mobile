@@ -4,6 +4,7 @@ import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { executeAndroidSearchDrag } from "../../../../src/features/action/swipeon/androidSearchDrag";
+import { StaleDisplayError } from "../../../../src/models/StaleDisplayError";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -260,6 +261,36 @@ test("dispatched drag rejection reports an indeterminate outcome for the loop", 
   });
   expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
   expect(result.error).toContain("ack lost");
+  expect(result.error).toContain("gesture was dispatched");
+  expect(result.error).toContain("Do not retry automatically");
+});
+
+test("a drag that loses its display after dispatch carries typed guidance and delivery", async () => {
+  const details = { observedGeneration: 1, currentGeneration: 2, retry: "observe" as const };
+  const result = await executeAndroidSearchDrag({
+    client: {
+      requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
+      requestDrag: async (...args) => {
+        args[12]?.();
+        throw new StaleDisplayError(details);
+      },
+    },
+    x1: 0,
+    y1: 600,
+    x2: 0,
+    y2: 0,
+    duration: 600,
+    fallback: async () => {
+      throw new Error("must not fall back after dispatch");
+    },
+  });
+  expect(result).toMatchObject({
+    success: false,
+    outcomeIndeterminate: true,
+    staleDisplay: details,
+  });
+  expect(result.error).toContain("gesture was dispatched");
+  expect(result.error).toContain("Do not retry automatically");
 });
 
 test("review: device-info probe is cached for one multi-step default-display search", async () => {

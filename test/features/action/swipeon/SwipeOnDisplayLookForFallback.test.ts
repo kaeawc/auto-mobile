@@ -38,7 +38,22 @@ test("correction: display dispatched timeout stops without a second ADB scroll",
   const result = await h.action.execute(search);
   expect(result.success).toBe(false);
   expect(result.error).toContain("indeterminate");
+  expect(result.error).toContain("gesture was dispatched");
+  expect(result.error).toContain("Do not retry automatically");
   expect(h.ctrl.getDragHistory()).toHaveLength(1);
+  expect(h.commands()).toEqual([]);
+});
+
+test("display drag transition after dispatch retains the delivered marker and staleDisplay", async () => {
+  const h = harness({ foundAfter: Infinity });
+  h.useRealObservedInteraction();
+  h.afterSwipe(() => h.flip());
+  const result = await h.action.execute(search);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("gesture was dispatched");
+  expect(result.error).toContain("Do not retry automatically");
+  expect(result.staleDisplay?.retry).toBe("observe");
+  expect(h.legs()).toHaveLength(1);
   expect(h.commands()).toEqual([]);
 });
 

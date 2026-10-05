@@ -1,3 +1,4 @@
+import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -209,6 +210,168 @@ const stabilityError =
   "Android tap aborted: could not re-find the target in the accessibility hierarchy with stable bounds after repeated refreshes (refusing tap using pre-observe coordinates). The UI may still be updating (list, keyboard, loading overlay, or animation).";
 
 describe("tapOn display verification", () => {
+  for (const extra of [{}, { action: "focus" }, { ensureChecked: true }] satisfies Array<
+    Partial<TapOnElementOptions>
+  >) {
+    test(`post-dispatch revision change preserves only verified claims: ${JSON.stringify(extra)}`, async () => {
+      const h = harness(true, { checked: false });
+      if (extra.action === "focus") {
+        const tree = hierarchy();
+        tree.hierarchy.node = {
+          text: "Wi-Fi",
+          class: "android.widget.EditText",
+          editable: true,
+          clickable: true,
+          focused: false,
+          bounds: { left: 20, top: 30, right: 80, bottom: 90 },
+        };
+        h.setCurrent(tree);
+        h.capture.read = () => tree;
+      }
+      h.action.observedInteraction = async (run, options) => {
+        const result = await run(h.observation());
+        h.transitions.transition();
+        return { ...result, observation: h.observation() };
+      };
+      const result = await h.execute(extra);
+      expect(h.dispatches).toHaveLength(1);
+      expect(result.staleDisplay?.retry).toBe("observe");
+      expect(result.observation?.settled).toBe(false);
+      expect(result.observation?.freshness?.warning).toContain("display settle validation");
+      if (extra.action === "focus" || extra.ensureChecked !== undefined) {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("gesture was dispatched");
+        expect(result.error).toContain("Do not retry automatically");
+      } else {
+        expect(result.success).toBe(true);
+        expect(result.error).toBeUndefined();
+      }
+    });
+  }
+
+  for (const extra of [
+    {},
+    { action: "longPress" },
+    { action: "focus" },
+    { ensureChecked: true },
+  ] satisfies Array<Partial<TapOnElementOptions>>) {
+    test(`legacy display path does not finalize invalidated post-state: ${JSON.stringify(extra)}`, async () => {
+      const h = harness(true);
+      h.action["executeOnDisplay"] = async () => undefined;
+      h.action.observedInteraction = async () => ({
+        success: true,
+        action: extra.action ?? "tap",
+        element: { text: "Wi-Fi", bounds: { left: 20, top: 30, right: 80, bottom: 90 } },
+        observation: { ...h.observation(), settled: false },
+        staleDisplay: { observedGeneration: 7, currentGeneration: 8, retry: "observe" },
+      });
+      const finalize = spyOn(h.action, "deriveTapEffectAfterPostTapObservation");
+      restores.push(() => finalize.mockRestore());
+      const result = await h.execute(extra);
+      expect(result.staleDisplay?.retry).toBe("observe");
+      expect(finalize).not.toHaveBeenCalled();
+      if (extra.action === "focus" || extra.ensureChecked !== undefined) {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Do not retry automatically");
+      } else {
+        expect(result.success).toBe(true);
+        expect(result.contextMenuOpened).toBeUndefined();
+        expect(result.selectionStarted).toBeUndefined();
+        expect(result.pressRecognized).toBeUndefined();
+      }
+    });
+  }
+
+  for (const phase of ["first read", "checked verification"] as const) {
+    test(`legacy display ${phase} preserves typed stale details and delivery`, async () => {
+      const h = harness(true, { checked: false });
+      h.action["executeOnDisplay"] = async () => undefined;
+      const stale = new StaleDisplayError({
+        observedGeneration: 7,
+        currentGeneration: 8,
+        retry: "observe",
+      });
+      h.action.observedInteraction = async () => {
+        if (phase === "first read") {
+          throw new DispatchedObservationError(stale);
+        }
+        return {
+          success: true,
+          action: "tap",
+          element: { bounds: { left: 20, top: 30, right: 80, bottom: 90 } },
+          observation: h.observation(),
+        };
+      };
+      h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+        observation,
+      });
+      h.action["applyEnsureCheckedResult"] = async () => {
+        throw stale;
+      };
+      const result = await h.execute({ ensureChecked: true });
+      expect(result.success).toBe(false);
+      expect(result.staleDisplay).toEqual(stale.details);
+      expect(result.error).toContain("gesture was dispatched");
+      expect(result.error).toContain("Do not retry automatically");
+    });
+  }
+
+  test.each(["settle-throws", "throws", "settle-transition"] as const)(
+    "confirmed CtrlProxy tap preserves delivery after %s",
+    async (outcome) => {
+      const h = harness(true);
+      let postReads = 0;
+      h.observe.setObserveResult(() => {
+        if (h.dispatches.length > 0) {
+          postReads++;
+          if (outcome === "throws" || postReads > 1) {
+            if (outcome === "settle-transition") {
+              h.transitions.transition();
+            }
+            throw new Error("display post-read unavailable");
+          }
+        }
+        return h.observation();
+      });
+      const result = await h.execute({});
+      expect(h.dispatches).toHaveLength(1);
+      if (outcome === "throws") {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Do not retry automatically");
+        expect(result.observation).toBeUndefined();
+      } else {
+        expect(result.success).toBe(true);
+        expect(result.observation?.viewHierarchy?.hierarchy).toEqual(hierarchy().hierarchy);
+        expect(result.observation?.settled).toBe(false);
+        expect(result.observation?.freshness?.warning).toContain("display settle");
+        if (outcome === "settle-transition") {
+          expect(result.staleDisplay?.retry).toBe("observe");
+        }
+      }
+    },
+  );
+
+  test("ensureChecked display verification read after delivery carries the dispatched marker", async () => {
+    const h = harness(true, { checked: false });
+    h.action.observedInteraction = async (run) => ({
+      ...(await run(h.observation())),
+      observation: h.observation(),
+    });
+    const sleep = h.timer.sleep.bind(h.timer);
+    h.timer.sleep = async (ms) => {
+      await sleep(ms);
+      if (h.dispatches.length > 0) {
+        h.transitions.transition();
+      }
+    };
+    const result = await h.execute({ ensureChecked: true });
+    expect(result.success).toBe(false);
+    expect(result.staleDisplay?.retry).toBe("observe");
+    expect(result.error).toContain("gesture was dispatched");
+    expect(result.error).toContain("Do not retry automatically");
+    expect(h.dispatches).toHaveLength(1);
+  });
+
   for (const ctrlProxy of [true, false]) {
     const route = ctrlProxy ? "CtrlProxy" : "adb input -d";
     for (const option of ["retryIfNoChange", "ensureTap"] as const) {

@@ -1,3 +1,5 @@
+import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
+import { StaleDisplayError, type StaleDisplayDetails } from "../../../models/StaleDisplayError";
 import {
   scopedSearchDescription,
   usesScopedSwipeContainer,
@@ -364,6 +366,7 @@ export class ScrollUntilVisible {
 
     const searchDragState: AndroidSearchDragState = {};
     let overlapRecoveryUsed = false;
+    let interruptedDisplay: StaleDisplayDetails | undefined;
     let swipeWarning: string | undefined;
     let lastAndroidSwipeError: string | undefined;
 
@@ -443,6 +446,19 @@ export class ScrollUntilVisible {
 
       if (swipeResult.observation?.viewHierarchy) {
         lastObservation = swipeResult.observation;
+      }
+
+      if (swipeResult.staleDisplay && !swipeResult.outcomeIndeterminate) {
+        // The retained capture is validated, but the later read is not. It can
+        // prove a match; it cannot authorize another swipe, even near timeout.
+        interruptedDisplay = swipeResult.staleDisplay;
+        foundElement = await this.matchInterruptedDisplaySearch(
+          options,
+          lastObservation,
+          containerElement,
+          interruptedDisplay,
+        );
+        break;
       }
 
       if (!swipeResult.success && this.deps.device.platform === "ios") {
@@ -529,7 +545,7 @@ export class ScrollUntilVisible {
           searchDragState,
         })
       ) {
-        lastObservation = await this.recoverSearchObservation({
+        const recovered = await this.recoverSearchObservation({
           previousKeys,
           observe,
           deadline: startTime + maxTime,
@@ -555,6 +571,8 @@ export class ScrollUntilVisible {
             overlapRecoveryUsed = true;
           },
         });
+        lastObservation = recovered.observation;
+        interruptedDisplay = recovered.staleDisplay;
       }
 
       if (recoveryAttempted) {
@@ -681,6 +699,7 @@ export class ScrollUntilVisible {
       y2: 0,
       duration: 0,
       warning: swipeWarning,
+      ...(interruptedDisplay ? { staleDisplay: interruptedDisplay } : {}),
     };
   }
 
@@ -759,9 +778,10 @@ export class ScrollUntilVisible {
     observe: () => Promise<ObserveResult>;
     deadline: number;
     onRecovery: () => void;
-  }): Promise<ObserveResult> {
+  }): Promise<{ observation: ObserveResult; staleDisplay?: StaleDisplayDetails }> {
     const { options, containerElement } = dispatch;
-    return recoverLookForOverlap({
+    let staleDisplay: StaleDisplayDetails | undefined;
+    const observation = await recoverLookForOverlap({
       previousKeys,
       observation: dispatch.observation,
       timer: this.deps.timer,
@@ -776,16 +796,23 @@ export class ScrollUntilVisible {
         ),
       backScroll: async (observation) => {
         onRecovery();
-        return this.performOverlapBackScroll({ ...dispatch, observation }, observe, deadline);
+        const recovered = await this.performOverlapBackScroll(
+          { ...dispatch, observation },
+          observe,
+          deadline,
+        );
+        staleDisplay = recovered.staleDisplay;
+        return recovered.observation;
       },
     });
+    return { observation, staleDisplay };
   }
 
   private async performOverlapBackScroll(
     dispatch: SearchSwipeDispatchOptions,
     observe: () => Promise<ObserveResult>,
     deadline: number,
-  ): Promise<ObserveResult> {
+  ): Promise<{ observation: ObserveResult; staleDisplay?: StaleDisplayDetails }> {
     const { options, observation, signal } = dispatch;
     const container = await this.findScrollableContainer(
       options,
@@ -807,22 +834,34 @@ export class ScrollUntilVisible {
     if (result.outcomeIndeterminate) {
       throw new ActionableError(result.error ?? "Recovery scroll outcome is indeterminate");
     }
+    if (result.staleDisplay) {
+      // A kept validated capture may prove the target, but never authorize more recovery gestures.
+      await this.matchInterruptedDisplaySearch(
+        options,
+        result.observation!,
+        container,
+        result.staleDisplay,
+      );
+      return { observation: result.observation!, staleDisplay: result.staleDisplay };
+    }
     if (!result.success || !result.observation?.viewHierarchy) {
       // Confirmed recovery rejection is optional; the original search can continue safely.
       logger.debug("[SwipeOn] Overlap recovery unavailable; continuing forward", result.error);
-      return observation;
+      return { observation };
     }
     if (await this.findVisibleSearchTarget(options, result.observation, container)) {
-      return result.observation;
+      return { observation: result.observation };
     }
-    return waitForScrollIdle(result.observation, {
-      observe,
-      timer: this.deps.timer,
-      maxWaitMs: Math.min(1500, Math.max(0, deadline - this.deps.timer.now())),
-      pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
-      logPrefix: "[SwipeOn] overshoot",
-      signal,
-    });
+    return {
+      observation: await waitForScrollIdle(result.observation, {
+        observe,
+        timer: this.deps.timer,
+        maxWaitMs: Math.min(1500, Math.max(0, deadline - this.deps.timer.now())),
+        pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
+        logPrefix: "[SwipeOn] overshoot",
+        signal,
+      }),
+    };
   }
 
   private async dispatchSearchSwipe({
@@ -920,6 +959,24 @@ export class ScrollUntilVisible {
             },
           },
         );
+  }
+
+  private async matchInterruptedDisplaySearch(
+    options: SwipeOnOptions,
+    observation: ObserveResult,
+    container: Element,
+    details: StaleDisplayDetails,
+  ): Promise<Element> {
+    const element = await this.findElementInHierarchy(
+      options.lookFor!,
+      observation.viewHierarchy!,
+      options.container,
+      container,
+    );
+    if (element && this.isElementWithinContainer(element, container.bounds, observation)) {
+      return element;
+    }
+    throw new DispatchedObservationError(new StaleDisplayError(details));
   }
 
   async findTargetElement(

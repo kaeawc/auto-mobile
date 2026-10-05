@@ -7,7 +7,11 @@ import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { AccessibilityNodeSelector, A11yTapCoordinatesResult } from "../observe/android/types";
-import { resourceIdActionError } from "./resourceIdActionError";
+import {
+  resourceIdActionError,
+  resolveTalkBackActionTarget,
+  type TalkBackTargetContext,
+} from "./resourceIdActionError";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import {
   FocusNavigationExecutor,
@@ -19,6 +23,8 @@ import type { TalkBackNavigationDriver } from "./TalkBackNavigationDriver";
 
 export interface TalkBackTapResult {
   success: boolean;
+  /** Current target confirmed before dispatch, including coordinate fallbacks. */
+  element?: Element;
   /**
    * - "focus-navigation": navigated via swipe gestures and activated with double-tap
    * - "accessibility-action": dispatched a direct accessibility action (ACTION_CLICK / ACTION_LONG_CLICK)
@@ -530,19 +536,37 @@ export class TalkBackTapStrategy {
   async executeDirectActivation(
     element: Element,
     driver: TalkBackNavigationDriver,
+    context: TalkBackTargetContext = {},
   ): Promise<TalkBackTapResult> {
+    const target = await resolveTalkBackActionTarget(
+      element,
+      () => driver.getAccessibilityHierarchy?.() ?? Promise.resolve(null),
+      context,
+    );
+    const confirmedElement = target.element !== element ? { element: target.element } : {};
+    element = target.element;
+    const guardDriver = {
+      supportsNodeActionSelectors: () => driver.supportsNodeActionSelectors(),
+      getAccessibilityHierarchy: async () => target.hierarchy,
+    };
     const selector = stableNodeSelectorForElement(element);
     if (!selector) {
       return {
         success: false,
+        ...confirmedElement,
         method: "accessibility-action",
         error: "Element has no stable selector for direct accessibility activation",
       };
     }
 
-    const targetError = await nodeActionTargetError(selector, driver, element);
+    const targetError = await nodeActionTargetError(selector, guardDriver, element);
     if (targetError) {
-      return { success: false, method: "accessibility-action", error: targetError };
+      return {
+        success: false,
+        ...confirmedElement,
+        method: "accessibility-action",
+        error: targetError,
+      };
     }
 
     const result = requiresNodeSelector(selector)
@@ -550,7 +574,7 @@ export class TalkBackTapStrategy {
       : await driver.requestAction("click", selector.resourceId);
     if (result.success) {
       logger.info(`[TalkBackTapStrategy] Direct activation via ACTION_CLICK succeeded`);
-      return { success: true, method: "accessibility-action" };
+      return { success: true, ...confirmedElement, method: "accessibility-action" };
     }
 
     if (result.dispatched && result.acknowledged !== true) {
@@ -558,6 +582,7 @@ export class TalkBackTapStrategy {
     }
     return {
       success: false,
+      ...confirmedElement,
       method: "accessibility-action",
       error: result.error ?? "ACTION_CLICK failed",
     };
@@ -685,25 +710,44 @@ export class TalkBackTapStrategy {
     durationMs: number,
     element: Element,
     driver: TalkBackNavigationDriver,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: DisplayFenceOption & TalkBackTargetContext = {},
   ): Promise<TalkBackTapResult> {
     const fence = fenceOptions.displayFence;
+    const target = await resolveTalkBackActionTarget(
+      element,
+      () => driver.getAccessibilityHierarchy?.() ?? Promise.resolve(null),
+      fenceOptions,
+    );
+    if (target.element !== element) {
+      const bounds = target.element.bounds;
+      x = Math.round((bounds.left + bounds.right) / 2);
+      y = Math.round((bounds.top + bounds.bottom) / 2);
+    }
+    const confirmedElement = target.element !== element ? { element: target.element } : {};
+    element = target.element;
+    const guardDriver = {
+      supportsNodeActionSelectors: () => driver.supportsNodeActionSelectors(),
+      getAccessibilityHierarchy: async () => target.hierarchy,
+    };
     const selector = stableNodeSelectorForElement(element);
 
     if (selector) {
-      const targetError = await nodeActionTargetError(selector, driver, element);
+      const targetError = await nodeActionTargetError(selector, guardDriver, element);
       if (targetError) {
         logger.info(`[TalkBackTapStrategy] ${targetError}`);
-        return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
-          displayFence: fence,
-        });
+        return {
+          ...(await this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
+            displayFence: fence,
+          })),
+          ...confirmedElement,
+        };
       }
       const longClickResult = requiresNodeSelector(selector)
         ? await driver.requestNodeAction("long_click", selector)
         : await driver.requestAction("long_click", selector.resourceId);
       if (longClickResult.success) {
         logger.info(`[TalkBackTapStrategy] Long press via ACTION_LONG_CLICK succeeded`);
-        return { success: true, method: "accessibility-action" };
+        return { success: true, ...confirmedElement, method: "accessibility-action" };
       }
       if (longClickResult.dispatched && longClickResult.acknowledged !== true) {
         throw indeterminateTapError(longClickResult.error);
@@ -711,6 +755,7 @@ export class TalkBackTapStrategy {
       if (advertisesAction(element, "long_click")) {
         return {
           success: false,
+          ...confirmedElement,
           method: "accessibility-action",
           error: longClickResult.error ?? "ACTION_LONG_CLICK failed",
           semanticActionFailure: true,
@@ -722,9 +767,12 @@ export class TalkBackTapStrategy {
       );
     }
 
-    return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
-      displayFence: fence,
-    });
+    return {
+      ...(await this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
+        displayFence: fence,
+      })),
+      ...confirmedElement,
+    };
   }
 
   /**

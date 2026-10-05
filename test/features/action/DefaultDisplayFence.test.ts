@@ -482,13 +482,18 @@ describe("TalkBack waits retain the action fence", () => {
               : "tap";
         const tapStrategy = new FakeTapStrategy();
         tapStrategy.setAccessibilityServiceEnabled(true);
-        const selector = new FakeElementSelector({
+        const targetElement: Element = {
           text: "Target",
           "resource-id": site === "longPress-fallback" ? "target-id" : undefined,
           clickable: true,
           "long-clickable": true,
           bounds: { left: 40, top: 60, right: 80, bottom: 100 },
-        } as Element);
+        };
+        const selector = new FakeElementSelector(targetElement);
+        h.screen.viewHierarchy = {
+          ...h.screen.viewHierarchy,
+          hierarchy: { node: { $: targetElement } },
+        };
         const result =
           tool === "tapOn"
             ? await h
@@ -523,7 +528,10 @@ describe("TalkBack waits retain the action fence", () => {
                     elementSelector: selector,
                   }),
                 );
-                action.setRefreshViewHierarchyForTesting(async () => null);
+                let captures = 0;
+                action.setRefreshViewHierarchyForTesting(async () =>
+                  ++captures === 1 ? h.screen.viewHierarchy! : null,
+                );
                 return action.execute({ action: actionName });
               })();
         if (mode === "transition") {

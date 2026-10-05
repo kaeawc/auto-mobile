@@ -1136,7 +1136,7 @@ describe("TapOnElement screen-reader navigation result", () => {
     }
     const targetElement = coordinate?.element ?? element;
     const observation = {
-      viewHierarchy: { hierarchy: {} },
+      viewHierarchy: { hierarchy: { node: { $: targetElement } } },
       screenSize: { width: 100, height: 100 },
     } as any;
     const command = new TapOnElement(

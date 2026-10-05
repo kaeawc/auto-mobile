@@ -4,4 +4,3 @@
  * monitors can depend on the utility without reversing the layer boundary.
  */
 export { SingleFlightInterval } from "../utils/SingleFlightInterval";
-export type { SingleFlightIntervalOptions } from "../utils/SingleFlightInterval";

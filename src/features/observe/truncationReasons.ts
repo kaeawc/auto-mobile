@@ -37,8 +37,6 @@ export const WINDOW_TRUNCATION_REASON_MEANINGS = {
   cancelled: "The capture was cancelled mid-walk.",
 } as const;
 
-export type WindowTruncationReason = keyof typeof WINDOW_TRUNCATION_REASON_MEANINGS;
-
 /** Normalize capture reasons without hiding unknown codes or changing their order. */
 export function normalizeWindowTruncationReasons(reasons: unknown): string[] {
   if (!Array.isArray(reasons)) {

@@ -8,7 +8,6 @@ async function buildJimp() {
 }
 
 export type JimpConstructor = Awaited<ReturnType<typeof buildJimp>>;
-export type JimpImage = InstanceType<JimpConstructor>;
 
 let jimpPromise: Promise<JimpConstructor> | undefined;
 

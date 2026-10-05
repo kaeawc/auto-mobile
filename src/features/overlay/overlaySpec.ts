@@ -1,15 +1,7 @@
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/overlay-spec-contract.json";
-export const {
-  MAX_OVERLAY_NODES,
-  MAX_OVERLAY_DEPTH,
-  MAX_OVERLAY_IMAGES,
-  MAX_OVERLAY_SPEC_BYTES,
-  MAX_OVERLAY_EMIT_PAYLOAD_BYTES,
-  MAX_OVERLAY_EMIT_PAYLOAD_DEPTH,
-  MAX_OVERLAY_SELECTOR_DEPTH,
-} = contract.limits;
+export const { MAX_OVERLAY_SPEC_BYTES, MAX_OVERLAY_EMIT_PAYLOAD_BYTES } = contract.limits;
 export type OverlayJson =
   | null
   | string
@@ -442,8 +434,6 @@ const specSchema = z
   .strict();
 export const overlaySpecSchema = specSchema;
 export type OverlaySpec = z.infer<typeof overlaySpecSchema>;
-export type OverlayAction = z.infer<typeof actionSchema>;
-export type OverlayPlacement = z.infer<typeof placementSchema>;
 export const OVERLAY_NODE_TYPES = [
   "box",
   "row",
@@ -461,41 +451,3 @@ export const OVERLAY_NODE_TYPES = [
 ] as const;
 export const OVERLAY_ACTION_TYPES = ["emit", "setPage", "setState", "dismiss"] as const;
 export const OVERLAY_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
-export const OVERLAY_ICON_NAMES = [
-  "home",
-  "search",
-  "settings",
-  "person",
-  "favorite",
-  "add",
-  "close",
-  "check",
-  "arrow_back",
-  "arrow_forward",
-  "chevron_left",
-  "chevron_right",
-  "menu",
-  "more_vert",
-  "share",
-  "edit",
-  "delete",
-  "info",
-  "warning",
-  "notifications",
-  "star",
-  "shopping_cart",
-  "help",
-  "refresh",
-  "done",
-  "cancel",
-  "play_arrow",
-  "pause",
-  "stop",
-  "mail",
-  "phone",
-  "location_on",
-  "calendar_today",
-  "visibility",
-  "lock",
-  "logout",
-] as const;

@@ -1204,26 +1204,11 @@ export class DaemonMcpProxy {
     const disabledTools = this.config.daemonOptions?.disabledTools ?? [];
     const toolResultsNoStructuredContent =
       this.config.daemonOptions?.toolResultsNoStructuredContent;
-    if (
-      enabledTools.length === 0 &&
-      disabledTools.length === 0 &&
-      toolResultsNoStructuredContent === undefined
-    ) {
-      return;
-    }
-
-    const updates: Array<{ toolNames: string[]; enabled: boolean }> = [];
-    if (enabledTools.length > 0) {
-      updates.push({ toolNames: [...enabledTools], enabled: true });
-    }
-    if (disabledTools.length > 0) {
-      updates.push({ toolNames: [...disabledTools], enabled: false });
-    }
-    if (updates.length === 0) {
-      // setToolEnabled is always-on; reaffirming it is a no-op that mints the
-      // connection profile needed to carry a structured-content-only policy.
-      updates.push({ toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true });
-    }
+    const updates = this.connectionPresentationUpdates(
+      enabledTools,
+      disabledTools,
+      toolResultsNoStructuredContent,
+    );
 
     for (const update of updates) {
       const requestedArgs = {
@@ -1250,6 +1235,35 @@ export class DaemonMcpProxy {
         );
       }
     }
+  }
+
+  private connectionPresentationUpdates(
+    enabledTools: string[],
+    disabledTools: string[],
+    toolResultsNoStructuredContent: boolean | undefined,
+  ): Array<{ toolNames: string[]; enabled: boolean }> {
+    if (
+      enabledTools.length === 0 &&
+      disabledTools.length === 0 &&
+      toolResultsNoStructuredContent === undefined
+    ) {
+      return [];
+    }
+
+    const updates: Array<{ toolNames: string[]; enabled: boolean }> = [];
+    if (enabledTools.length > 0) {
+      updates.push({ toolNames: [...enabledTools], enabled: true });
+    }
+    if (disabledTools.length > 0) {
+      updates.push({ toolNames: [...disabledTools], enabled: false });
+    }
+    if (updates.length === 0) {
+      // setToolEnabled is always-on; reaffirming it is a no-op that mints the
+      // connection profile needed to carry a structured-content-only policy.
+      updates.push({ toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true });
+    }
+
+    return updates;
   }
 
   // Drop the cached definitions for one list kind. Bumping the discovery epoch
@@ -1764,54 +1778,8 @@ export class DaemonMcpProxy {
       return;
     }
 
-    // The release portions (before the `+g<sha>` dev stamp) drive the
-    // newer/older decision. A plain release client intentionally matches a
-    // source-stamped daemon at that release; two stamped versions still detect
-    // source-checkout dev-skew.
-    const runningBase = releaseVersion(runningVersion);
-    const clientBase = releaseVersion(this.clientVersion);
-    const sameRelease = runningBase === clientBase;
-    const clientDeclaresFullVersion = clientBase !== this.clientVersion;
-
-    if (sameRelease && !clientDeclaresFullVersion) {
+    if (!this.requiresVersionRestart(status, runningVersion)) {
       return;
-    }
-
-    if (!this.config.autoStartDaemon) {
-      throw this.versionMismatchError(
-        runningVersion,
-        "autoStartDisabled",
-        "auto-start is disabled",
-        undefined,
-        buildIdentityFromStatus(status),
-      );
-    }
-
-    if (!sameRelease) {
-      const cmp =
-        runningBase.length > 0
-          ? compareStrictNumericVersions(clientBase, runningBase)
-          : Number.POSITIVE_INFINITY;
-
-      if (runningBase.length > 0 && !Number.isFinite(cmp)) {
-        throw this.versionMismatchError(
-          runningVersion,
-          "nonNumeric",
-          "version comparison is not numeric",
-          undefined,
-          buildIdentityFromStatus(status),
-        );
-      }
-
-      if (cmp <= 0) {
-        throw this.versionMismatchError(
-          runningVersion,
-          "daemonNewer",
-          "the running daemon is newer than this client",
-          undefined,
-          buildIdentityFromStatus(status),
-        );
-      }
     }
 
     // Reach here when the client is strictly newer OR the daemon is a same-release
@@ -1822,21 +1790,7 @@ export class DaemonMcpProxy {
     // it is blind to commits that change non-entry files — the git stamp is the only
     // signal. The restart is cooldown-bounded below so two checkouts cannot thrash.
 
-    if (status.startedAt) {
-      const daemonAgeMs = this.timer.now() - status.startedAt;
-      if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
-        logger.warn(
-          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${this.clientVersion}`,
-        );
-        throw this.versionMismatchError(
-          runningVersion,
-          "cooldown",
-          "restart is in cooldown",
-          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
-          buildIdentityFromStatus(status),
-        );
-      }
-    }
+    this.assertVersionRestartCooldownExpired(status, runningVersion);
 
     if (this.timer.now() >= reconciliationDeadline) {
       throw new DaemonUnavailableError(
@@ -1873,6 +1827,10 @@ export class DaemonMcpProxy {
       );
     }
 
+    await this.verifyRestartedVersion();
+  }
+
+  private async verifyRestartedVersion(): Promise<void> {
     const restartedStatus = await this.reconciliationStatus();
     const restartedVersion = restartedStatus.version?.trim() ?? "";
     if (!restartedStatus.running || restartedVersion !== this.clientVersion) {
@@ -1883,6 +1841,87 @@ export class DaemonMcpProxy {
         undefined,
         buildIdentityFromStatus(restartedStatus),
       );
+    }
+  }
+
+  private requiresVersionRestart(status: DaemonStatus, runningVersion: string): boolean {
+    // The release portions (before the `+g<sha>` dev stamp) drive the
+    // newer/older decision. A plain release client intentionally matches a
+    // source-stamped daemon at that release; two stamped versions still detect
+    // source-checkout dev-skew.
+    const runningBase = releaseVersion(runningVersion);
+    const clientBase = releaseVersion(this.clientVersion);
+    const sameRelease = runningBase === clientBase;
+    const clientDeclaresFullVersion = clientBase !== this.clientVersion;
+
+    if (sameRelease && !clientDeclaresFullVersion) {
+      return false;
+    }
+
+    if (!this.config.autoStartDaemon) {
+      throw this.versionMismatchError(
+        runningVersion,
+        "autoStartDisabled",
+        "auto-start is disabled",
+        undefined,
+        buildIdentityFromStatus(status),
+      );
+    }
+
+    this.assertNewerClientVersion(status, runningVersion, runningBase, clientBase, sameRelease);
+    return true;
+  }
+
+  private assertNewerClientVersion(
+    status: DaemonStatus,
+    runningVersion: string,
+    runningBase: string,
+    clientBase: string,
+    sameRelease: boolean,
+  ): void {
+    if (!sameRelease) {
+      const cmp =
+        runningBase.length > 0
+          ? compareStrictNumericVersions(clientBase, runningBase)
+          : Number.POSITIVE_INFINITY;
+
+      if (runningBase.length > 0 && !Number.isFinite(cmp)) {
+        throw this.versionMismatchError(
+          runningVersion,
+          "nonNumeric",
+          "version comparison is not numeric",
+          undefined,
+          buildIdentityFromStatus(status),
+        );
+      }
+
+      if (cmp <= 0) {
+        throw this.versionMismatchError(
+          runningVersion,
+          "daemonNewer",
+          "the running daemon is newer than this client",
+          undefined,
+          buildIdentityFromStatus(status),
+        );
+      }
+    }
+  }
+
+  private assertVersionRestartCooldownExpired(status: DaemonStatus, runningVersion: string): void {
+    if (status.startedAt) {
+      const daemonAgeMs = this.timer.now() - status.startedAt;
+      if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
+        logger.warn(
+          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${this.clientVersion}`,
+        );
+        throw this.versionMismatchError(
+          runningVersion,
+          "cooldown",
+          "restart is in cooldown",
+          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
+          buildIdentityFromStatus(status),
+        );
+      }
     }
   }
 

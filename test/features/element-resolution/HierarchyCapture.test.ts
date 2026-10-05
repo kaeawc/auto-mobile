@@ -1,3 +1,8 @@
+import {
+  recordObservationRead,
+  wasHierarchyReadDuringCall,
+  withObservationReadScope,
+} from "../../../src/features/observe/observationReadScope";
 import { ViewHierarchyCaptureReader } from "../../../src/features/observe/ViewHierarchyCaptureReader";
 import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
@@ -279,4 +284,32 @@ test("a missing device timestamp cannot satisfy a requested floor", async () => 
   await expect(capture.capture({ freshness: "fresh", minTimestamp: 1 })).rejects.toThrow(
     "timestamp floor",
   );
+});
+
+describe("observation read provenance", () => {
+  test("a read in an earlier call does not authorize a cache hit", async () => {
+    const hierarchy = { hierarchy: { node: {} } };
+    await withObservationReadScope(async () => {
+      recordObservationRead({ viewHierarchy: hierarchy });
+      expect(wasHierarchyReadDuringCall(hierarchy)).toBe(true);
+    });
+    await withObservationReadScope(async () => {
+      expect(wasHierarchyReadDuringCall(hierarchy)).toBe(false);
+    });
+  });
+
+  test("concurrent read scopes do not share authority", async () => {
+    const hierarchy = { hierarchy: { node: {} } };
+    await Promise.all([
+      withObservationReadScope(async () => {
+        recordObservationRead({ viewHierarchy: hierarchy });
+        await Promise.resolve();
+        expect(wasHierarchyReadDuringCall(hierarchy)).toBe(true);
+      }),
+      withObservationReadScope(async () => {
+        await Promise.resolve();
+        expect(wasHierarchyReadDuringCall(hierarchy)).toBe(false);
+      }),
+    ]);
+  });
 });

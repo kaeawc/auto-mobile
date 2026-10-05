@@ -1124,13 +1124,14 @@ class CtrlProxyMessageHandlerTest {
     }
 
   @Test
-  fun `overlay stub frame refuses host work with escaped echoed request id`() {
+  fun `overlay result frame carries failure and escaped echoed request id`() {
     val requestId = "quoted" + '"'
     val result =
-      json.decodeFromString<WebSocketResponse>(overlayNotWiredResultFrame(requestId))
-        as OverlayResult
+      json.decodeFromString<WebSocketResponse>(
+        overlayResultFrame(requestId, false, "render failed")
+      ) as OverlayResult
     assertEquals(requestId, result.requestId)
     assertFalse(result.success)
-    assertEquals("overlay host not wired", result.error)
+    assertEquals("render failed", result.error)
   }
 }

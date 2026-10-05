@@ -68,9 +68,11 @@ interface InteractiveOverlayHost {
 
   /**
    * Serializes gestures, waiting at least 100ms after making the live window untouchable. Restores
-   * in NonCancellable, unless dismissed/destroyed/replaced. A platform update failure throws rather
-   * than dispatching a gesture that could silently hit the overlay. Failed restoration leaves the
-   * active state set and throws; dismiss or replace can recover it. Do not nest on the same host.
+   * in NonCancellable, unless dismissed/destroyed. Show/replace preserve touch-through and the
+   * active token; restoration clears NOT_TOUCHABLE from the newest layout params. A platform update
+   * failure throws rather than dispatching a gesture that could silently hit the overlay. Failed
+   * restoration leaves the active state set and throws; dismissal can recover it. Do not nest on
+   * the same host.
    */
   suspend fun <T> withTouchThrough(
     settleMillis: Long = DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS,
@@ -81,10 +83,10 @@ interface InteractiveOverlayHost {
 /**
  * Standalone Compose host; it does not operate the highlight overlay.
  *
- * [onWindowAttached] runs immediately after a successful add. Service wiring must use it to
- * re-stack the highlight window (e.g. destroy + show). Equal window types use add order; an
- * application highlight overlay cannot currently sit above this accessibility overlay. The wiring
- * lane must settle that limitation. The callback must not throw or re-enter the host.
+ * [onWindowAttached] runs immediately after a successful add. Service wiring re-adds highlights as
+ * accessibility overlays so equal-type add order places them above this window; dismissal restores
+ * their normal permission-based type. Highlight touch/focus flags stay unchanged. The callback must
+ * not throw or re-enter the host.
  *
  * [context] must be the service/display context used for this window; [densityProvider] defaults to
  * its resources. All other platform access is constructor-injected. No permission probe occurs.
@@ -138,8 +140,10 @@ class DefaultInteractiveOverlayHost(
       )
     val current = window
     if (current != null) {
+      if (touchThroughToken != null) {
+        params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+      }
       if (!update(current, params)) return false
-      touchThroughToken = null
       current.request = request
       placement = request.placement
       applyContent(current)

@@ -88,3 +88,48 @@ internal class RecordingOverlayWindowManager(
   private fun snapshot(params: ViewGroup.LayoutParams) =
     WindowManager.LayoutParams().apply { copyFrom(params as WindowManager.LayoutParams) }
 }
+
+internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
+  val calls = mutableListOf<String>()
+  val requests = mutableListOf<InteractiveOverlayRequest>()
+  var accept = true
+  var failure: Exception? = null
+  override var isShowing = false
+  override var currentPlacement: OverlayPlacement? = null
+  override val isTouchThroughActive = false
+
+  private fun display(operation: String, request: InteractiveOverlayRequest): Boolean {
+    calls += operation
+    failure?.let { throw it }
+    if (accept) {
+      requests += request
+      isShowing = true
+      currentPlacement = request.placement
+    }
+    return accept
+  }
+
+  override suspend fun show(request: InteractiveOverlayRequest) = display("show", request)
+
+  override suspend fun replace(request: InteractiveOverlayRequest) = display("replace", request)
+
+  override suspend fun dismiss(): Boolean {
+    calls += "dismiss"
+    failure?.let { throw it }
+    if (accept) isShowing = false
+    return accept
+  }
+
+  override suspend fun destroy(): Boolean {
+    calls += "destroy"
+    failure?.let { throw it }
+    if (accept) isShowing = false
+    return accept
+  }
+
+  override suspend fun setOpacity(percent: Int) {
+    calls += "opacity:$percent"
+  }
+
+  override suspend fun <T> withTouchThrough(settleMillis: Long, block: suspend () -> T): T = block()
+}

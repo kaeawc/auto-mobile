@@ -20,6 +20,7 @@ import {
   type PlanExecutionOptions,
   type PlanStepWarnings,
   type PlanSkippedStep,
+  type PlanDeviceFailure,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
@@ -78,11 +79,16 @@ interface StepExecutionContext {
 }
 
 /**
- * The string warnings a tool payload reported, or undefined when it reported
+ * The string warnings a tool payload or thrown error reported, or undefined when it reported
  * none (issue #6868).
  */
-function toolResultWarnings(payload: Record<string, unknown>): string[] | undefined {
-  if (!Array.isArray(payload.warnings)) {
+function toolResultWarnings(payload: unknown): string[] | undefined {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    !("warnings" in payload) ||
+    !Array.isArray(payload.warnings)
+  ) {
     return undefined;
   }
   const warnings = payload.warnings.filter((entry): entry is string => typeof entry === "string");
@@ -95,8 +101,8 @@ interface StepExecutionResult {
   details: Record<string, unknown>;
   failureObservation?: FailureObservationSummary;
   /**
-   * Best-effort warnings the tool reported while still succeeding (issue
-   * #6868). Carried separately from `details` so the plan result can promote
+   * Best-effort warnings from the tool, including sub-steps preceding a failure.
+   * Carried separately from `details` so the plan result can promote
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
@@ -108,27 +114,44 @@ interface ParallelTrackFailure {
   abortConsequence: boolean;
 }
 
+/** Real causes first, then plan index (-1 last), then declared device order. */
+function compareParallelFailures(a: ParallelTrackFailure, b: ParallelTrackFailure): number {
+  if (a.abortConsequence !== b.abortConsequence) {
+    return a.abortConsequence ? 1 : -1;
+  }
+  const aIndex = a.failedStep.stepIndex === -1 ? Infinity : a.failedStep.stepIndex;
+  const bIndex = b.failedStep.stepIndex === -1 ? Infinity : b.failedStep.stepIndex;
+  if (aIndex !== bIndex) {
+    return aIndex < bIndex ? -1 : 1;
+  }
+  return a.deviceOrder - b.deviceOrder;
+}
+
+/** Omit the summary for successful plans and one-device partitions. */
+function parallelDeviceFailuresField(
+  failures: readonly ParallelTrackFailure[],
+  devices: readonly string[],
+): { deviceFailures?: PlanDeviceFailure[] } {
+  if (devices.length < 2 || failures.length === 0) {
+    return {};
+  }
+  return {
+    deviceFailures: [...failures]
+      .sort(compareParallelFailures)
+      .map(({ failedStep, deviceOrder }) => ({
+        ...failedStep,
+        device: devices[deviceOrder],
+      })),
+  };
+}
+
 /** Choose a stable failure after all tracks settle, preserving the abort's cause. */
 export function selectParallelFailure(
   failures: readonly ParallelTrackFailure[],
 ): PlanExecutionResult["failedStep"] {
   let selected: ParallelTrackFailure | undefined;
   for (const candidate of failures) {
-    if (!selected || (selected.abortConsequence && !candidate.abortConsequence)) {
-      selected = candidate;
-      continue;
-    }
-    if (candidate.abortConsequence !== selected.abortConsequence) {
-      continue;
-    }
-    const candidateIndex =
-      candidate.failedStep.stepIndex === -1 ? Infinity : candidate.failedStep.stepIndex;
-    const selectedIndex =
-      selected.failedStep.stepIndex === -1 ? Infinity : selected.failedStep.stepIndex;
-    if (
-      candidateIndex < selectedIndex ||
-      (candidateIndex === selectedIndex && candidate.deviceOrder < selected.deviceOrder)
-    ) {
+    if (!selected || compareParallelFailures(candidate, selected) < 0) {
       selected = candidate;
     }
   }
@@ -626,9 +649,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
           error,
         );
+        const warnings = toolResultWarnings(error);
         return {
           status: "skipped",
           error: errorMsg,
+          ...(warnings ? { warnings } : {}),
           details: {
             params: step.params,
             error: errorMsg,
@@ -650,6 +675,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         `${context.logPrefix} step ${step.tool} threw; returning failed status`,
         error,
       );
+      const warnings = toolResultWarnings(error);
       return {
         status: "failed",
         error: errorMsg,
@@ -657,8 +683,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           params: step.params,
           error: errorMsg,
           ...(failureObservation ? { failureObservation } : {}),
+          ...(warnings ? { warnings } : {}),
         },
         failureObservation,
+        ...(warnings ? { warnings } : {}),
       };
     }
   }
@@ -786,6 +814,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           logPrefix: `[PLAN_STEP_${i + 1}]`,
         });
 
+        if (stepResult.warnings) {
+          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
+        }
+
         if (stepResult.status === "skipped") {
           this.recordSkippedOptionalStep(
             { debugSteps, skippedSteps },
@@ -822,8 +854,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
               executionTimeMs: this.timer.now() - startTime,
               steps: debugSteps,
             },
-            // Warnings from the steps that DID succeed explain the state the
-            // failing step ran against, so a failed plan keeps them too.
+            // Include diagnostics from earlier steps and from sub-steps that
+            // ran inside the failing step.
             ...(warnings.length > 0 ? { warnings } : {}),
             ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
           };
@@ -835,10 +867,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
           durationMs: this.timer.now() - stepStartTime,
           details: stepResult.details,
         });
-        if (stepResult.warnings) {
-          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
-        }
-
         executedSteps++;
         logger.info(
           `[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`,
@@ -1171,6 +1199,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       executedSteps: totalExecutedSteps,
       totalSteps,
       failedStep: selectParallelFailure(failures),
+      ...parallelDeviceFailuresField(failures, partitionedPlan.devices),
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
@@ -1268,6 +1297,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
           debugLog: true,
         });
 
+        if (stepResult.warnings) {
+          warnings.push({
+            stepIndex: planIndex,
+            tool: step.tool,
+            device,
+            warnings: stepResult.warnings,
+          });
+        }
+
         if (stepResult.status === "skipped") {
           logger.warn(
             `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`,
@@ -1301,15 +1339,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             skippedSteps,
             warnings,
           };
-        }
-
-        if (stepResult.warnings) {
-          warnings.push({
-            stepIndex: planIndex,
-            tool: step.tool,
-            device,
-            warnings: stepResult.warnings,
-          });
         }
 
         executedSteps++;

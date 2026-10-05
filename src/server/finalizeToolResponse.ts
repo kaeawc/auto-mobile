@@ -1,3 +1,7 @@
+import {
+  terminalScreenshotUnavailable,
+  isTerminalScreenshotUnavailable,
+} from "../utils/PostActionCaptureContext";
 import type { ObserveResult, DisplayObservation } from "../models/ObserveResult";
 import {
   sanitizeObserveResult,
@@ -232,10 +236,13 @@ function attachObservationScreenshotUri(
     observationId?: string;
     observationScreenshotResourceUri?: string;
     screenshotCaptureAttempted?: boolean;
+    [terminalScreenshotUnavailable]?: boolean;
   },
   captureAttempted = observation.screenshotCaptureAttempted,
+  unavailable = isTerminalScreenshotUnavailable(observation as ObserveResult),
 ): void {
   if (
+    !unavailable &&
     captureAttempted !== false &&
     typeof observation.deviceId === "string" &&
     observation.deviceId.length > 0 &&
@@ -341,7 +348,7 @@ type ObservationDiffReason =
   | "diff_emitted"
   | "missing_baseline"
   | "screen_changed"
-  | "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations"
+  | "missing_session"
   | "unrenderable_hierarchy"
   | "disabled"
   | "stripped_by_actions_no_observe";
@@ -355,6 +362,7 @@ interface ObservationDiffScreenIdentity {
 interface ObservationDiffMetadata {
   mode: ObservationDiffMode;
   reason: ObservationDiffReason;
+  hint?: string;
   fromScreen?: ObservationDiffScreenIdentity;
   toScreen?: ObservationDiffScreenIdentity;
 }
@@ -580,7 +588,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         }),
       };
     }
-    attachObservationScreenshotUri(served);
+    attachObservationScreenshotUri(
+      served,
+      observeResult.screenshotCaptureAttempted,
+      isTerminalScreenshotUnavailable(observeResult),
+    );
     sanitizedPayload = served;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
@@ -619,12 +631,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         // Internal envelopes are consumed by in-process tool callers, not agents.
         // Keep them on the pre-diff/pre-strip shape without agent-facing metadata.
       } else if (!diffActive) {
-        observationDiff = { mode: "full", reason: "disabled" };
+        observationDiff = {
+          mode: "full",
+          reason: "disabled",
+          hint: "Set --actions-diff-observe to receive diffs.",
+        };
       } else if (!ctx.sessionUuid || !ctx.baselineStore) {
         observationDiff = {
           mode: "full",
-          reason:
-            "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+          reason: "missing_session",
+          hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
           toScreen: observationScreenIdentity(sanitized),
         };
       } else if (!hasRenderableHierarchy(sanitized)) {
@@ -731,6 +747,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             screenshotCaptureAttempted?: boolean;
           },
           (payload.observation as ObserveResult).screenshotCaptureAttempted,
+          isTerminalScreenshotUnavailable(payload.observation as ObserveResult),
         );
       }
       sanitizedPayload = {
@@ -1181,6 +1198,24 @@ function artifactExecutePlanPayload(
       nextPayload.failedStep = { ...payload.failedStep, failureObservation };
       changed = true;
     }
+  }
+
+  if (Array.isArray(payload.deviceFailures)) {
+    nextPayload.deviceFailures = payload.deviceFailures.map((failure) => {
+      if (!isRecord(failure)) {
+        return failure;
+      }
+      const failureObservation = artifactPlanObservation(
+        ctx,
+        failure.failureObservation,
+        "ExecutePlanFailureObservation",
+      );
+      if (!failureObservation) {
+        return failure;
+      }
+      changed = true;
+      return { ...failure, failureObservation };
+    });
   }
 
   if (isRecord(payload.debug) && Array.isArray(payload.debug.steps)) {

@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test }
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
-import type { BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
 import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
@@ -1187,50 +1187,127 @@ describe("criticalSection tool", () => {
     );
   });
 
+  describe("warnings before a required sub-step failure", () => {
+    let restoreTools: () => void;
+    let restoreCoordinator: () => void;
+    let coordinator: CriticalSectionCoordinator;
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "warning-failure-device",
+      name: "Warning Failure Device",
+    };
+
+    beforeEach(() => {
+      restoreTools = preserveToolRegistry();
+      coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+      restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    });
+
+    afterEach(() => {
+      coordinator.reset();
+      restoreCoordinator();
+      restoreTools();
+    });
+
+    test.each([false, true])("keeps earlier warnings with optional skip=%s", async (optional) => {
+      ToolRegistry.register("warningFirst", "warns", z.object({}), async () => ({
+        success: true,
+        warnings: ["keyboard dismissal failed"],
+      }));
+      ToolRegistry.register("warningSecond", "warns or skips", z.object({}), async () =>
+        optional
+          ? { success: false, error: "optional failure" }
+          : { success: true, warnings: ["epilogue failed"] },
+      );
+      ToolRegistry.register("warningThird", "fails", z.object({}), async () => {
+        throw new ActionableError("required failure");
+      });
+      const section = ToolRegistry.getToolForPlan("criticalSection")!;
+      const error: unknown = await section.deviceAwareHandler!(
+        device,
+        section.schema.parse({
+          lock: "warning-failure-lock",
+          deviceCount: 1,
+          steps: [
+            { tool: "warningFirst", params: { device: "A" } },
+            { tool: "warningSecond", params: { device: "A" }, optional },
+            { tool: "warningThird", params: { device: "A" } },
+          ],
+        }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toMatchObject({
+        message:
+          'Critical section "warning-failure-lock" failed for device warning-failure-device: Failed at step 3/3 (warningThird): required failure',
+        warnings: [
+          "step 1 (warningFirst): keyboard dismissal failed",
+          optional
+            ? "step 2 (warningSecond): optional step failed; skipped: optional failure"
+            : "step 2 (warningSecond): epilogue failed",
+        ],
+      });
+    });
+  });
+
   // A best-effort epilogue failure (issue #6868) keeps its step successful and
   // reports itself through `warnings`. The critical section retained only the
   // tool name and a success bit, so that outcome — previously the step's whole
   // `success:false` — vanished and the section reported an entirely clean
   // success while later steps ran against a screen the caller did not expect.
-  test("surfaces a successful step's warnings on the critical-section result", async () => {
-    const tool = ToolRegistry.getToolForPlan("criticalSection");
-    expect(tool).toBeDefined();
+  test.each(["direct", "structured", "text", "structured and hoisted"] as const)(
+    "surfaces a successful step's %s warnings exactly once",
+    async (shape) => {
+      const tool = ToolRegistry.getToolForPlan("criticalSection");
+      expect(tool).toBeDefined();
 
-    const fakeDevice: BootedDevice = {
-      platform: "android",
-      deviceId: "warn-device",
-      name: "Warn Device",
-    };
+      const fakeDevice: BootedDevice = {
+        platform: "android",
+        deviceId: "warn-device",
+        name: "Warn Device",
+      };
 
-    ToolRegistry.register("mockWarnStep", "warns", z.object({}), async () => ({
-      success: true,
-      keyboardDismissed: false,
-      warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
-    }));
-    ToolRegistry.register("mockCleanStep", "clean", z.object({}), async () => ({
-      success: true,
-    }));
+      const payload = {
+        success: true,
+        keyboardDismissed: false,
+        warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+      };
+      const structured = createStructuredToolResponse(payload);
+      const responses = {
+        direct: payload,
+        structured,
+        text: { success: true, content: structured.content },
+        "structured and hoisted": { ...structured, warnings: payload.warnings },
+      };
+      ToolRegistry.register("mockWarnStep", "warns", z.object({}), async () => responses[shape]);
+      ToolRegistry.register("mockCleanStep", "clean", z.object({}), async () => ({
+        success: true,
+      }));
 
-    CriticalSectionCoordinator.getInstance().registerExpectedDevices("warn-lock", 1);
+      CriticalSectionCoordinator.getInstance().registerExpectedDevices("warn-lock", 1);
 
-    const params = {
-      lock: "warn-lock",
-      deviceCount: 1,
-      steps: [
-        { tool: "mockCleanStep", params: {} },
-        { tool: "mockWarnStep", params: {} },
-      ],
-    };
+      const params = {
+        lock: "warn-lock",
+        deviceCount: 1,
+        steps: [
+          { tool: "mockCleanStep", params: {} },
+          { tool: "mockWarnStep", params: {} },
+        ],
+      };
 
-    const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
-    const result = JSON.parse(response.content[0].text);
+      const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
+      const result = JSON.parse(response.content[0].text);
 
-    expect(result.success).toBe(true);
-    expect(result.executedSteps).toBe(2);
-    expect(result.warnings).toEqual([
-      "step 2 (mockWarnStep): keyboard dismissal failed: Keyboard state unavailable",
-    ]);
-  });
+      expect(result.success).toBe(true);
+      expect(result.executedSteps).toBe(2);
+      expect(result.warnings).toEqual([
+        "step 2 (mockWarnStep): keyboard dismissal failed: Keyboard state unavailable",
+      ]);
+    },
+  );
 
   test("omits warnings entirely when every step is clean", async () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");

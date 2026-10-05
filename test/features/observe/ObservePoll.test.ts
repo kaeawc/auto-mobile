@@ -31,6 +31,28 @@ function obs(updatedAt: number, marker: string): ObserveResult {
 }
 
 describe("pollObserveUntil minTimestamp floor (#6284)", () => {
+  test.each([undefined, true])(
+    "forwards the push-wait opt-out without changing floors (%s)",
+    async (skipWaitForFresh) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const fake = new FakeObserveScreen();
+      fake.setObserveSequence([obs(20, "stable"), obs(20, "stable")]);
+      const outcome = await pollObserveUntil(
+        fake,
+        timer,
+        { timeoutMs: 1000, pollMs: 150, initialMinTimestampMs: 10, skipWaitForFresh },
+        (_observation, previous) => previous !== undefined,
+      );
+      expect(outcome.stopped).toBe(true);
+      expect(fake.getExecuteMinTimestamps()).toEqual([11, 20]);
+      expect(fake.getExecuteOptions().map((options) => options.skipWaitForFresh)).toEqual([
+        skipWaitForFresh ?? false,
+        skipWaitForFresh ?? false,
+      ]);
+    },
+  );
+
   test("admits only post-baseline evidence after exact poll intervals and preserves cache ordering", async () => {
     const timer = new FakeTimer();
     const fake = new FakeObserveScreen();

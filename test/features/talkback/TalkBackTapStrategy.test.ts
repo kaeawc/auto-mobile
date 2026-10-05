@@ -366,7 +366,72 @@ describe("TalkBackTapStrategy", () => {
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
-      expect(result.error).toContain("calculate navigation path");
+      expect(result.error).toBe("Could not calculate navigation path to target element");
+    });
+
+    test.each([{ elements: [] }, { elements: [{ "resource-id": "test:id/other" }] }])(
+      "reports child-cap truncation when the target is absent from %j",
+      async ({ elements }) => {
+        driver.queueTraversalResult({
+          elements,
+          focusedIndex: null,
+          totalCount: elements.length,
+          totalTimeMs: 1,
+          truncationReasons: ["max_children"],
+        });
+
+        const result = await strategy.executeTap(
+          "device-1",
+          { "resource-id": "test:id/missing" },
+          driver,
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(
+          "the accessibility traversal was truncated (max_children); the target may be beyond the cap",
+        );
+        expect(driver.getTapCount()).toBe(0);
+      },
+    );
+
+    test("activates a target present in a truncated traversal", async () => {
+      const element: Element = {
+        "resource-id": "test:id/button",
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      };
+      driver.setElements([element], 0);
+      driver.queueTraversalResult({
+        elements: [element],
+        focusedIndex: 0,
+        totalCount: 1,
+        totalTimeMs: 1,
+        truncationReasons: ["max_children"],
+      });
+      spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
+
+      const result = await strategy.executeTap("device-1", element, driver);
+
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(driver.getTapCount()).toBe(2);
+    });
+
+    test("keeps the missing-target error for an unrelated truncation reason", async () => {
+      driver.queueTraversalResult({
+        elements: [],
+        focusedIndex: null,
+        totalCount: 0,
+        totalTimeMs: 1,
+        truncationReasons: ["max_depth"],
+      });
+
+      const result = await strategy.executeTap(
+        "device-1",
+        { "resource-id": "test:id/missing" },
+        driver,
+      );
+
+      expect(result.error).toBe("Could not calculate navigation path to target element");
     });
 
     test("returns error when traversal order request fails", async () => {

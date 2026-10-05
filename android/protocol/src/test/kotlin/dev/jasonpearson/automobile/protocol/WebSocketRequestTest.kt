@@ -12,8 +12,55 @@ import org.junit.jupiter.api.Test
 
 class WebSocketRequestTest {
   private val json = Json {
-    classDiscriminator = "type"
+    // Mirrors WebSocketServer.protocolJson, including its numeric decoding policy.
+    prettyPrint = false
     ignoreUnknownKeys = true
+    classDiscriminator = "type"
+  }
+
+  @Test
+  fun `decimal millisecond literals are rejected rather than truncated or rounded`() {
+    val coordinates = "\"x1\":1,\"y1\":2,\"x2\":3,\"y2\":4"
+    val cases =
+      listOf(
+        Triple("request_tap_coordinates", "\"x\":1,\"y\":2", "duration"),
+        Triple("request_swipe", coordinates, "duration"),
+        Triple("request_two_finger_swipe", coordinates, "duration"),
+        Triple("request_drag", coordinates, "pressDurationMs"),
+        Triple("request_drag", coordinates, "dragDurationMs"),
+        Triple("request_drag", coordinates, "holdDurationMs"),
+        Triple("request_drag", coordinates, "holdTime"),
+        Triple("request_drag", coordinates, "duration"),
+        Triple(
+          "request_pinch",
+          "\"centerX\":1,\"centerY\":2,\"distanceStart\":3,\"distanceEnd\":4",
+          "duration",
+        ),
+        Triple("set_hierarchy_interval", "", "intervalMs"),
+        // Millisecond timestamps also use Long, but are not gesture durations.
+        Triple("request_hierarchy_if_stale", "", "sinceTimestamp"),
+        Triple("set_network_error_simulation", "\"enabled\":false", "expiresAtEpochMs"),
+      )
+    for ((type, requiredFields, field) in cases) {
+      val prefix = if (requiredFields.isEmpty()) "" else "$requiredFields,"
+      // A whole-valued decimal (250.0) still has a decimal point in the JSON token.
+      for (literal in listOf("250.5", "250.0")) {
+        val payload = """{"type":"$type","requestId":"ms-pin",$prefix"$field":$literal}"""
+        val failure =
+          assertFailsWith<SerializationException>("$type.$field = $literal") {
+            json.decodeFromString<WebSocketRequest>(payload)
+          }
+        assertTrue(failure.message.orEmpty().contains(literal), "$type.$field = $literal")
+      }
+      // Control: each payload really is otherwise valid and reaches its concrete request class.
+      val integerPayload = """{"type":"$type","requestId":"ms-pin",$prefix"$field":250}"""
+      val request = json.decodeFromString<WebSocketRequest>(integerPayload)
+      assertEquals("ms-pin", request.requestId)
+      assertEquals(
+        request,
+        json.decodeFromString<WebSocketRequest>(json.encodeToString(request)),
+      )
+    }
   }
 
   @Test

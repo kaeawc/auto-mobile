@@ -13,6 +13,7 @@ import {
 } from "../shared/SharedGestureDelegate";
 import { sendCommand } from "../DeviceServiceUtils";
 import type { DelegateContext, A11ySwipeResult, A11yTapCoordinatesResult } from "./types";
+import { normalizeCtrlProxyMilliseconds } from "./ctrlProxyProtocol";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
@@ -40,12 +41,24 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       idPrefix: "double_tap",
       responseType: "tap_coordinates",
       messageType: "request_tap_coordinates",
-      params: { x: this.coord(x), y: this.coord(y), duration: 50, doubleTap: true },
+      params: this.gestureParams("request_tap_coordinates", {
+        x: this.coord(x),
+        y: this.coord(y),
+        duration: 50,
+        doubleTap: true,
+      }),
       requiredCapability: "tap_double_v1",
       timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
       errorLabel: "Double tap",
       onDispatch,
     });
+  }
+
+  protected override gestureParams(
+    type: string,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return normalizeCtrlProxyMilliseconds(type, params);
   }
 
   /**
@@ -76,7 +89,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       idPrefix: "two_finger_swipe",
       responseType: "swipe",
       messageType: "request_two_finger_swipe",
-      params: {
+      params: this.gestureParams("request_two_finger_swipe", {
         x1: this.coord(x1),
         y1: this.coord(y1),
         x2: this.coord(x2),
@@ -84,7 +97,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
         duration,
         offset,
         ...this.gestureDisplayParams(displayId),
-      },
+      }),
       timeoutMs,
       perf,
       errorLabel: "Two-finger swipe",

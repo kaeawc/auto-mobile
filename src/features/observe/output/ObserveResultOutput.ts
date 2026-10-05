@@ -223,7 +223,7 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
   }
   // Lift the hierarchy's truncation provenance before the tree that carries it
   // is dropped (issue #6601). The skeleton is projected from elements that were
-  // already capped (per-node child cap, or a device-side `max_nodes`/`max_depth`
+  // already capped (host child cap, or a device-side `max_nodes`/`max_depth`/`max_children`
   // stop), so without this the default projection reports a short list with no
   // hint that rows are missing — exactly the silent false negative
   // `truncationReasons` exists to prevent. `layoutWarnings` / `performanceAudit`

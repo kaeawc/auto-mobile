@@ -1,0 +1,551 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 1`] = `[]`;
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 2`] = `
+[
+  {
+    "name": "navigation_apps",
+    "sql": "CREATE TABLE "navigation_apps" ("app_id" text primary key, "created_at" text default (datetime('now')) not null, "updated_at" text default (datetime('now')) not null)",
+    "tbl_name": "navigation_apps",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_navigation_apps_1",
+    "sql": null,
+    "tbl_name": "navigation_apps",
+    "type": "index",
+  },
+  {
+    "name": "navigation_nodes",
+    "sql": "CREATE TABLE "navigation_nodes" ("id" integer primary key autoincrement, "app_id" text not null references "navigation_apps" ("app_id") on delete cascade, "screen_name" text not null, "first_seen_at" integer not null, "last_seen_at" integer not null, "visit_count" integer default 1 not null, "back_stack_depth" integer, "task_id" integer, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "navigation_nodes",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_sequence",
+    "sql": "CREATE TABLE sqlite_sequence(name,seq)",
+    "tbl_name": "sqlite_sequence",
+    "type": "table",
+  },
+  {
+    "name": "idx_navigation_nodes_app_screen",
+    "sql": "CREATE UNIQUE INDEX "idx_navigation_nodes_app_screen" on "navigation_nodes" ("app_id", "screen_name")",
+    "tbl_name": "navigation_nodes",
+    "type": "index",
+  },
+  {
+    "name": "navigation_edges",
+    "sql": "CREATE TABLE "navigation_edges" ("id" integer primary key autoincrement, "app_id" text not null references "navigation_apps" ("app_id") on delete cascade, "from_screen" text not null, "to_screen" text not null, "tool_name" text, "tool_args" text, "timestamp" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "navigation_edges",
+    "type": "table",
+  },
+  {
+    "name": "idx_navigation_edges_app",
+    "sql": "CREATE INDEX "idx_navigation_edges_app" on "navigation_edges" ("app_id")",
+    "tbl_name": "navigation_edges",
+    "type": "index",
+  },
+  {
+    "name": "idx_navigation_edges_from",
+    "sql": "CREATE INDEX "idx_navigation_edges_from" on "navigation_edges" ("from_screen")",
+    "tbl_name": "navigation_edges",
+    "type": "index",
+  },
+  {
+    "name": "idx_navigation_edges_to",
+    "sql": "CREATE INDEX "idx_navigation_edges_to" on "navigation_edges" ("to_screen")",
+    "tbl_name": "navigation_edges",
+    "type": "index",
+  },
+  {
+    "name": "ui_elements",
+    "sql": "CREATE TABLE "ui_elements" ("id" integer primary key autoincrement, "app_id" text not null references "navigation_apps" ("app_id") on delete cascade, "text" text, "resource_id" text, "content_description" text, "class_name" text, "bounds_left" integer, "bounds_top" integer, "bounds_right" integer, "bounds_bottom" integer, "clickable" integer, "scrollable" integer, "first_seen_at" integer not null, "last_seen_at" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "ui_elements",
+    "type": "table",
+  },
+  {
+    "name": "idx_ui_elements_app",
+    "sql": "CREATE INDEX "idx_ui_elements_app" on "ui_elements" ("app_id")",
+    "tbl_name": "ui_elements",
+    "type": "index",
+  },
+  {
+    "name": "edge_ui_elements",
+    "sql": "CREATE TABLE "edge_ui_elements" ("edge_id" integer not null references "navigation_edges" ("id") on delete cascade, "ui_element_id" integer not null references "ui_elements" ("id") on delete cascade, "selection_order" integer default 0 not null)",
+    "tbl_name": "edge_ui_elements",
+    "type": "table",
+  },
+  {
+    "name": "idx_edge_ui_elements_pk",
+    "sql": "CREATE UNIQUE INDEX "idx_edge_ui_elements_pk" on "edge_ui_elements" ("edge_id", "ui_element_id")",
+    "tbl_name": "edge_ui_elements",
+    "type": "index",
+  },
+  {
+    "name": "node_modals",
+    "sql": "CREATE TABLE "node_modals" ("node_id" integer not null references "navigation_nodes" ("id") on delete cascade, "modal_identifier" text not null, "stack_level" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "node_modals",
+    "type": "table",
+  },
+  {
+    "name": "idx_node_modals_pk",
+    "sql": "CREATE UNIQUE INDEX "idx_node_modals_pk" on "node_modals" ("node_id", "stack_level")",
+    "tbl_name": "node_modals",
+    "type": "index",
+  },
+  {
+    "name": "edge_modals",
+    "sql": "CREATE TABLE "edge_modals" ("edge_id" integer not null references "navigation_edges" ("id") on delete cascade, "position" text not null, "modal_identifier" text not null, "stack_level" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "edge_modals",
+    "type": "table",
+  },
+  {
+    "name": "idx_edge_modals_pk",
+    "sql": "CREATE UNIQUE INDEX "idx_edge_modals_pk" on "edge_modals" ("edge_id", "position", "stack_level")",
+    "tbl_name": "edge_modals",
+    "type": "index",
+  },
+  {
+    "name": "scroll_positions",
+    "sql": "CREATE TABLE "scroll_positions" ("edge_id" integer primary key references "navigation_edges" ("id") on delete cascade, "target_element_id" integer not null references "ui_elements" ("id"), "container_element_id" integer references "ui_elements" ("id"), "direction" text not null, "speed" text, "swipe_count" integer, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "scroll_positions",
+    "type": "table",
+  },
+]
+`;
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 3`] = `
+[
+  {
+    "name": "navigation_apps",
+    "rows": [],
+  },
+  {
+    "name": "navigation_nodes",
+    "rows": [],
+  },
+  {
+    "name": "sqlite_sequence",
+    "rows": [],
+  },
+  {
+    "name": "navigation_edges",
+    "rows": [],
+  },
+  {
+    "name": "ui_elements",
+    "rows": [],
+  },
+  {
+    "name": "edge_ui_elements",
+    "rows": [],
+  },
+  {
+    "name": "node_modals",
+    "rows": [],
+  },
+  {
+    "name": "edge_modals",
+    "rows": [],
+  },
+  {
+    "name": "scroll_positions",
+    "rows": [],
+  },
+]
+`;
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 4`] = `
+[
+  {
+    "name": "navigation_apps",
+    "sql": "CREATE TABLE "navigation_apps" ("app_id" text primary key, "created_at" text default (datetime('now')) not null, "updated_at" text default (datetime('now')) not null)",
+    "tbl_name": "navigation_apps",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_navigation_apps_1",
+    "sql": null,
+    "tbl_name": "navigation_apps",
+    "type": "index",
+  },
+  {
+    "name": "navigation_nodes",
+    "sql": "CREATE TABLE "navigation_nodes" ("id" integer primary key autoincrement, "app_id" text not null references "navigation_apps" ("app_id") on delete cascade, "screen_name" text not null, "first_seen_at" integer not null, "last_seen_at" integer not null, "visit_count" integer default 1 not null, "back_stack_depth" integer, "task_id" integer, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "navigation_nodes",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_sequence",
+    "sql": "CREATE TABLE sqlite_sequence(name,seq)",
+    "tbl_name": "sqlite_sequence",
+    "type": "table",
+  },
+  {
+    "name": "idx_navigation_nodes_app_screen",
+    "sql": "CREATE UNIQUE INDEX "idx_navigation_nodes_app_screen" on "navigation_nodes" ("app_id", "screen_name")",
+    "tbl_name": "navigation_nodes",
+    "type": "index",
+  },
+  {
+    "name": "navigation_edges",
+    "sql": "CREATE TABLE "navigation_edges" ("id" integer primary key autoincrement, "app_id" text not null references "navigation_apps" ("app_id") on delete cascade, "from_screen" text not null, "to_screen" text not null, "tool_name" text, "tool_args" text, "timestamp" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "navigation_edges",
+    "type": "table",
+  },
+  {
+    "name": "idx_navigation_edges_app",
+    "sql": "CREATE INDEX "idx_navigation_edges_app" on "navigation_edges" ("app_id")",
+    "tbl_name": "navigation_edges",
+    "type": "index",
+  },
+  {
+    "name": "idx_navigation_edges_from",
+    "sql": "CREATE INDEX "idx_navigation_edges_from" on "navigation_edges" ("from_screen")",
+    "tbl_name": "navigation_edges",
+    "type": "index",
+  },
+  {
+    "name": "idx_navigation_edges_to",
+    "sql": "CREATE INDEX "idx_navigation_edges_to" on "navigation_edges" ("to_screen")",
+    "tbl_name": "navigation_edges",
+    "type": "index",
+  },
+  {
+    "name": "ui_elements",
+    "sql": "CREATE TABLE "ui_elements" ("id" integer primary key autoincrement, "app_id" text not null references "navigation_apps" ("app_id") on delete cascade, "text" text, "resource_id" text, "content_description" text, "class_name" text, "bounds_left" integer, "bounds_top" integer, "bounds_right" integer, "bounds_bottom" integer, "clickable" integer, "scrollable" integer, "first_seen_at" integer not null, "last_seen_at" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "ui_elements",
+    "type": "table",
+  },
+  {
+    "name": "idx_ui_elements_app",
+    "sql": "CREATE INDEX "idx_ui_elements_app" on "ui_elements" ("app_id")",
+    "tbl_name": "ui_elements",
+    "type": "index",
+  },
+  {
+    "name": "edge_ui_elements",
+    "sql": "CREATE TABLE "edge_ui_elements" ("edge_id" integer not null references "navigation_edges" ("id") on delete cascade, "ui_element_id" integer not null references "ui_elements" ("id") on delete cascade, "selection_order" integer default 0 not null)",
+    "tbl_name": "edge_ui_elements",
+    "type": "table",
+  },
+  {
+    "name": "idx_edge_ui_elements_pk",
+    "sql": "CREATE UNIQUE INDEX "idx_edge_ui_elements_pk" on "edge_ui_elements" ("edge_id", "ui_element_id")",
+    "tbl_name": "edge_ui_elements",
+    "type": "index",
+  },
+  {
+    "name": "node_modals",
+    "sql": "CREATE TABLE "node_modals" ("node_id" integer not null references "navigation_nodes" ("id") on delete cascade, "modal_identifier" text not null, "stack_level" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "node_modals",
+    "type": "table",
+  },
+  {
+    "name": "idx_node_modals_pk",
+    "sql": "CREATE UNIQUE INDEX "idx_node_modals_pk" on "node_modals" ("node_id", "stack_level")",
+    "tbl_name": "node_modals",
+    "type": "index",
+  },
+  {
+    "name": "edge_modals",
+    "sql": "CREATE TABLE "edge_modals" ("edge_id" integer not null references "navigation_edges" ("id") on delete cascade, "position" text not null, "modal_identifier" text not null, "stack_level" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "edge_modals",
+    "type": "table",
+  },
+  {
+    "name": "idx_edge_modals_pk",
+    "sql": "CREATE UNIQUE INDEX "idx_edge_modals_pk" on "edge_modals" ("edge_id", "position", "stack_level")",
+    "tbl_name": "edge_modals",
+    "type": "index",
+  },
+  {
+    "name": "scroll_positions",
+    "sql": "CREATE TABLE "scroll_positions" ("edge_id" integer primary key references "navigation_edges" ("id") on delete cascade, "target_element_id" integer not null references "ui_elements" ("id"), "container_element_id" integer references "ui_elements" ("id"), "direction" text not null, "speed" text, "swipe_count" integer, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "scroll_positions",
+    "type": "table",
+  },
+]
+`;
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 5`] = `[]`;
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 6`] = `
+[
+  {
+    "name": "failure_groups",
+    "sql": "CREATE TABLE "failure_groups" ("id" text primary key, "type" text not null, "signature" text not null, "title" text not null, "message" text not null, "severity" text not null, "first_occurrence" integer not null, "last_occurrence" integer not null, "total_count" integer default 0 not null, "unique_sessions" integer default 0 not null, "stack_trace_json" text, "tool_call_info_json" text, "created_at" text default (datetime('now')) not null, "updated_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_groups",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_failure_groups_1",
+    "sql": null,
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_groups_type",
+    "sql": "CREATE INDEX "idx_failure_groups_type" on "failure_groups" ("type")",
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_groups_signature",
+    "sql": "CREATE INDEX "idx_failure_groups_signature" on "failure_groups" ("signature")",
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_groups_last_occurrence",
+    "sql": "CREATE INDEX "idx_failure_groups_last_occurrence" on "failure_groups" ("last_occurrence")",
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "failure_occurrences",
+    "sql": "CREATE TABLE "failure_occurrences" ("id" text primary key, "group_id" text not null references "failure_groups" ("id") on delete cascade, "timestamp" integer not null, "device_id" text, "device_model" text not null, "os" text not null, "app_version" text not null, "session_id" text not null, "screen_at_failure" text, "test_name" text, "test_execution_id" integer, "error_code" text, "duration_ms" integer, "tool_args_json" text, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_occurrences",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_failure_occurrences_1",
+    "sql": null,
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_group",
+    "sql": "CREATE INDEX "idx_failure_occurrences_group" on "failure_occurrences" ("group_id")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_timestamp",
+    "sql": "CREATE INDEX "idx_failure_occurrences_timestamp" on "failure_occurrences" ("timestamp")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_session",
+    "sql": "CREATE INDEX "idx_failure_occurrences_session" on "failure_occurrences" ("session_id")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_device",
+    "sql": "CREATE INDEX "idx_failure_occurrences_device" on "failure_occurrences" ("device_id")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "failure_occurrence_screens",
+    "sql": "CREATE TABLE "failure_occurrence_screens" ("id" integer primary key autoincrement, "occurrence_id" text not null references "failure_occurrences" ("id") on delete cascade, "screen_name" text not null, "visit_order" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_occurrence_screens",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_sequence",
+    "sql": "CREATE TABLE sqlite_sequence(name,seq)",
+    "tbl_name": "sqlite_sequence",
+    "type": "table",
+  },
+  {
+    "name": "idx_failure_occurrence_screens_occurrence",
+    "sql": "CREATE INDEX "idx_failure_occurrence_screens_occurrence" on "failure_occurrence_screens" ("occurrence_id")",
+    "tbl_name": "failure_occurrence_screens",
+    "type": "index",
+  },
+  {
+    "name": "failure_captures",
+    "sql": "CREATE TABLE "failure_captures" ("id" text primary key, "occurrence_id" text not null references "failure_occurrences" ("id") on delete cascade, "type" text not null, "path" text not null, "timestamp" integer not null, "device_model" text not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_captures",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_failure_captures_1",
+    "sql": null,
+    "tbl_name": "failure_captures",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_captures_occurrence",
+    "sql": "CREATE INDEX "idx_failure_captures_occurrence" on "failure_captures" ("occurrence_id")",
+    "tbl_name": "failure_captures",
+    "type": "index",
+  },
+  {
+    "name": "failure_notifications",
+    "sql": "CREATE TABLE "failure_notifications" ("id" integer primary key autoincrement, "occurrence_id" text not null references "failure_occurrences" ("id") on delete cascade, "group_id" text not null, "type" text not null, "severity" text not null, "title" text not null, "timestamp" integer not null, "acknowledged" integer default 0 not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_notifications",
+    "type": "table",
+  },
+  {
+    "name": "idx_failure_notifications_timestamp",
+    "sql": "CREATE INDEX "idx_failure_notifications_timestamp" on "failure_notifications" ("timestamp")",
+    "tbl_name": "failure_notifications",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_notifications_acknowledged",
+    "sql": "CREATE INDEX "idx_failure_notifications_acknowledged" on "failure_notifications" ("acknowledged")",
+    "tbl_name": "failure_notifications",
+    "type": "index",
+  },
+]
+`;
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 7`] = `
+[
+  {
+    "name": "failure_groups",
+    "rows": [],
+  },
+  {
+    "name": "failure_occurrences",
+    "rows": [],
+  },
+  {
+    "name": "failure_occurrence_screens",
+    "rows": [],
+  },
+  {
+    "name": "sqlite_sequence",
+    "rows": [],
+  },
+  {
+    "name": "failure_captures",
+    "rows": [],
+  },
+  {
+    "name": "failure_notifications",
+    "rows": [],
+  },
+]
+`;
+
+exports[`structural SQLite characterization migration schema before, after and repeated up 8`] = `
+[
+  {
+    "name": "failure_groups",
+    "sql": "CREATE TABLE "failure_groups" ("id" text primary key, "type" text not null, "signature" text not null, "title" text not null, "message" text not null, "severity" text not null, "first_occurrence" integer not null, "last_occurrence" integer not null, "total_count" integer default 0 not null, "unique_sessions" integer default 0 not null, "stack_trace_json" text, "tool_call_info_json" text, "created_at" text default (datetime('now')) not null, "updated_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_groups",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_failure_groups_1",
+    "sql": null,
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_groups_type",
+    "sql": "CREATE INDEX "idx_failure_groups_type" on "failure_groups" ("type")",
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_groups_signature",
+    "sql": "CREATE INDEX "idx_failure_groups_signature" on "failure_groups" ("signature")",
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_groups_last_occurrence",
+    "sql": "CREATE INDEX "idx_failure_groups_last_occurrence" on "failure_groups" ("last_occurrence")",
+    "tbl_name": "failure_groups",
+    "type": "index",
+  },
+  {
+    "name": "failure_occurrences",
+    "sql": "CREATE TABLE "failure_occurrences" ("id" text primary key, "group_id" text not null references "failure_groups" ("id") on delete cascade, "timestamp" integer not null, "device_id" text, "device_model" text not null, "os" text not null, "app_version" text not null, "session_id" text not null, "screen_at_failure" text, "test_name" text, "test_execution_id" integer, "error_code" text, "duration_ms" integer, "tool_args_json" text, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_occurrences",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_failure_occurrences_1",
+    "sql": null,
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_group",
+    "sql": "CREATE INDEX "idx_failure_occurrences_group" on "failure_occurrences" ("group_id")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_timestamp",
+    "sql": "CREATE INDEX "idx_failure_occurrences_timestamp" on "failure_occurrences" ("timestamp")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_session",
+    "sql": "CREATE INDEX "idx_failure_occurrences_session" on "failure_occurrences" ("session_id")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_occurrences_device",
+    "sql": "CREATE INDEX "idx_failure_occurrences_device" on "failure_occurrences" ("device_id")",
+    "tbl_name": "failure_occurrences",
+    "type": "index",
+  },
+  {
+    "name": "failure_occurrence_screens",
+    "sql": "CREATE TABLE "failure_occurrence_screens" ("id" integer primary key autoincrement, "occurrence_id" text not null references "failure_occurrences" ("id") on delete cascade, "screen_name" text not null, "visit_order" integer not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_occurrence_screens",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_sequence",
+    "sql": "CREATE TABLE sqlite_sequence(name,seq)",
+    "tbl_name": "sqlite_sequence",
+    "type": "table",
+  },
+  {
+    "name": "idx_failure_occurrence_screens_occurrence",
+    "sql": "CREATE INDEX "idx_failure_occurrence_screens_occurrence" on "failure_occurrence_screens" ("occurrence_id")",
+    "tbl_name": "failure_occurrence_screens",
+    "type": "index",
+  },
+  {
+    "name": "failure_captures",
+    "sql": "CREATE TABLE "failure_captures" ("id" text primary key, "occurrence_id" text not null references "failure_occurrences" ("id") on delete cascade, "type" text not null, "path" text not null, "timestamp" integer not null, "device_model" text not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_captures",
+    "type": "table",
+  },
+  {
+    "name": "sqlite_autoindex_failure_captures_1",
+    "sql": null,
+    "tbl_name": "failure_captures",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_captures_occurrence",
+    "sql": "CREATE INDEX "idx_failure_captures_occurrence" on "failure_captures" ("occurrence_id")",
+    "tbl_name": "failure_captures",
+    "type": "index",
+  },
+  {
+    "name": "failure_notifications",
+    "sql": "CREATE TABLE "failure_notifications" ("id" integer primary key autoincrement, "occurrence_id" text not null references "failure_occurrences" ("id") on delete cascade, "group_id" text not null, "type" text not null, "severity" text not null, "title" text not null, "timestamp" integer not null, "acknowledged" integer default 0 not null, "created_at" text default (datetime('now')) not null)",
+    "tbl_name": "failure_notifications",
+    "type": "table",
+  },
+  {
+    "name": "idx_failure_notifications_timestamp",
+    "sql": "CREATE INDEX "idx_failure_notifications_timestamp" on "failure_notifications" ("timestamp")",
+    "tbl_name": "failure_notifications",
+    "type": "index",
+  },
+  {
+    "name": "idx_failure_notifications_acknowledged",
+    "sql": "CREATE INDEX "idx_failure_notifications_acknowledged" on "failure_notifications" ("acknowledged")",
+    "tbl_name": "failure_notifications",
+    "type": "index",
+  },
+]
+`;

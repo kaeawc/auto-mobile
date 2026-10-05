@@ -532,6 +532,7 @@ interface WsTraversalOrderResultMessage extends WsMessageBase {
     elements: AccessibilityNode[];
     focusedIndex: number | null;
     totalCount: number;
+    truncationReasons?: string[];
   };
 }
 
@@ -5407,6 +5408,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             elements,
             focusedIndex: focusedElement ? elements.indexOf(focusedElement) : null,
             totalCount: dropped > 0 ? elements.length : result.totalCount,
+            truncationReasons: result.truncationReasons,
             totalTimeMs: message.totalTimeMs,
             requestId: message.requestId,
             error: message.error,

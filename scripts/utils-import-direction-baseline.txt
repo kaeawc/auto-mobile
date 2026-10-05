@@ -1,5 +1,2 @@
-src/utils/ContentHashProvider.ts -> src/features/observe/GetAppMetadata
-src/utils/androidSystemUiAnr.ts -> src/features/utility/ElementParser
-src/utils/appearance/applyAppearanceOnConnect.ts -> src/server/appearanceManager
 src/utils/plan/PlanExecutor.ts -> src/daemon/daemonState
 src/utils/plan/PlanExecutor.ts -> src/server/toolRegistry

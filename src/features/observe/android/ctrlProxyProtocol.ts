@@ -5,7 +5,7 @@
  * `android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/WebSocketRequest.kt`
  * (issue #2752 / PR #2771). Every interface here corresponds to a `@SerialName`'d data class
  * on the device; every field name/type/optionality is checked against that contract so the JSON
- * on the wire stays byte-identical and the device decodes it without change.
+ * on the wire matches the device contract. Millisecond durations are rounded for its Long fields.
  *
  * Sends are constructed via the {@link ctrlProxyRequests} builders — each returns a typed
  * {@link CtrlProxyRequest} — and serialized through {@link serializeCtrlProxyRequest}. When a send
@@ -20,8 +20,9 @@
  *   `request_drag`, `request_pinch`, `request_set_text`, `request_ime_action`, `request_select_all`)
  *   are emitted through the cross-platform shared `sendCommand()` / `createMessage()` path in
  *   `src/features/observe/DeviceServiceUtils.ts`. They are typed here for contract completeness
- *   (drift cross-check) but intentionally NOT re-routed, to avoid coupling the shared iOS client
- *   to the Android contract. Unifying that path is a possible follow-up.
+ *   (drift cross-check). CtrlProxyGestures normalizes Android millisecond parameters through
+ *   this module before that shared path serializes them. They are not re-routed through Android's
+ *   typed serializer, keeping the shared iOS client independent of the Android contract.
  * - `request_hit_test` is device-supported but has no TS sender yet; typed here to keep the union
  *   equal to the device `@SerialName` set (the drift guard depends on that equality).
  * - The iOS client (`src/features/observe/ios/`) has its own hand-built sends that could get the
@@ -917,13 +918,49 @@ export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = Object.keys(
 // Serialization
 // =============================================================================
 
+const STROKE_DURATION_FIELDS = new Map<string, readonly string[]>([
+  ["request_tap_coordinates", ["duration"]],
+  ["request_swipe", ["duration"]],
+  ["request_two_finger_swipe", ["duration"]],
+  ["request_pinch", ["duration"]],
+]);
+
+const MILLISECOND_FIELDS = new Map<string, readonly string[]>([
+  ["request_drag", ["pressDurationMs", "dragDurationMs", "holdDurationMs", "holdTime", "duration"]],
+  ["set_hierarchy_interval", ["intervalMs"]],
+]);
+
 /**
- * Serialize a typed request to the exact JSON string sent on the wire. This is the single
- * serialization chokepoint for the Android control-proxy client — `undefined` fields are omitted
- * by `JSON.stringify` (matching the pre-migration send sites) while explicit `null`s are kept.
+ * Android's Long fields reject decimal JSON tokens; StrokeDescription also requires duration > 0.
+ * Drag phases and hierarchy intervals retain meaningful zeros. Leave other numbers untouched.
+ */
+export function normalizeCtrlProxyMilliseconds(
+  type: string,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const strokeFields = STROKE_DURATION_FIELDS.get(type);
+  const fields = strokeFields ?? MILLISECOND_FIELDS.get(type);
+  if (!fields) {
+    return params;
+  }
+  return Object.fromEntries(
+    Object.entries(params).map(([field, value]) => [
+      field,
+      fields.includes(field) && typeof value === "number"
+        ? strokeFields !== undefined || value > 0
+          ? Math.max(1, Math.round(value))
+          : Math.round(value)
+        : value,
+    ]),
+  );
+}
+
+/**
+ * Serialize typed Android requests with the gesture delegate's duration policy.
+ * JSON.stringify omits undefined fields and preserves explicit nulls.
  */
 export function serializeCtrlProxyRequest(request: CtrlProxyRequest): string {
-  return JSON.stringify(request);
+  return JSON.stringify(normalizeCtrlProxyMilliseconds(request.type, { ...request }));
 }
 
 // =============================================================================

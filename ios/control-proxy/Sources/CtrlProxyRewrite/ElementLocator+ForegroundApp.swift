@@ -270,42 +270,10 @@ extension ElementLocator {
             into bundleIds: inout [String],
             depth: Int = 0
         ) {
-            let identifier = element.identifier
-
-            // Springboard elements use "card:<bundleId>:sceneID:<sceneId>" format
-            // e.g., "card:com.tinyspeck.chatlyio:sceneID:com.tinyspeck.chatlyio-default"
-            // Also seen: "@card:<bundleId>:sceneID:..." and suffixes like "-window", "-sceneID"
-            if !identifier.isEmpty {
-                var cleanId = identifier
-
-                // Handle @card:*:sceneID:* and card:*:sceneID:* formats
-                if identifier.hasPrefix("@card:") {
-                    cleanId = String(identifier.dropFirst(6)) // Remove "@card:"
-                    if let colonIndex = cleanId.firstIndex(of: ":") {
-                        cleanId = String(cleanId[..<colonIndex])
-                    }
-                } else if identifier.hasPrefix("card:") {
-                    cleanId = String(identifier.dropFirst(5)) // Remove "card:"
-                    if let colonIndex = cleanId.firstIndex(of: ":") {
-                        cleanId = String(cleanId[..<colonIndex])
-                    }
-                }
-
-                // Clean up common suffixes
-                cleanId = cleanId.replacingOccurrences(of: "-window", with: "")
-                    .replacingOccurrences(of: "-sceneID", with: "")
-                    .replacingOccurrences(of: "-SceneWindow", with: "")
-
-                // Check if it looks like a bundle ID
-                if cleanId.contains("."), !cleanId.contains(" ") {
-                    if cleanId.hasPrefix("com.") || cleanId.hasPrefix("io.") || cleanId.hasPrefix("org.") ||
-                        cleanId.hasPrefix("net.") || cleanId.hasPrefix("me.") || cleanId.hasPrefix("dev.")
-                    {
-                        if !bundleIds.contains(cleanId) {
-                            bundleIds.append(cleanId)
-                        }
-                    }
-                }
+            if let bundleId = Self.bundleIdFromSpringboardIdentifier(element.identifier),
+               !bundleIds.contains(bundleId)
+            {
+                bundleIds.append(bundleId)
             }
 
             // Recursively check children

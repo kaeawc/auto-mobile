@@ -235,7 +235,9 @@ export class TalkBackTapStrategy {
         return {
           success: false,
           method: "focus-navigation",
-          error: "Could not calculate navigation path to target element",
+          error: traversalResult.truncationReasons?.includes("max_children")
+            ? "Could not calculate navigation path to target element: the accessibility traversal was truncated (max_children); the target may be beyond the cap"
+            : "Could not calculate navigation path to target element",
           screenReaderNavigation: navigationResult,
         };
       }

@@ -1,4 +1,5 @@
 import { afterEach, describe, it, expect } from "bun:test";
+import { dirname, join } from "node:path";
 import {
   parseAvdConfig,
   apiLevelToVersion,
@@ -558,4 +559,107 @@ describe("FileAvdConfigReader", () => {
     expect(config?.ramSizeMb).toBe(3072);
     expect(readPaths).toEqual([registryPath, configPath]);
   });
+});
+
+describe("FileAvdConfigReader constructor precedence", () => {
+  const keys = [
+    "HOME",
+    "USERPROFILE",
+    "ANDROID_USER_HOME",
+    "ANDROID_AVD_HOME",
+    "ANDROID_SDK_HOME",
+    "ANDROID_EMULATOR_HOME",
+  ] as const;
+  it.each([
+    [{ HOME: "/home" }, undefined, join("/home", ".android", "avd"), join("/home", ".android")],
+    [
+      { USERPROFILE: "/profile" },
+      undefined,
+      join("/profile", ".android", "avd"),
+      join("/profile", ".android"),
+    ],
+    [
+      { HOME: "", USERPROFILE: "/profile" },
+      undefined,
+      join("/profile", ".android", "avd"),
+      join("/profile", ".android"),
+    ],
+    [{}, undefined, join("", "avd"), ""],
+    [
+      { ANDROID_SDK_HOME: "/sdk" },
+      undefined,
+      join("/sdk", ".android", "avd"),
+      join("/sdk", ".android"),
+    ],
+    [
+      { ANDROID_USER_HOME: "/user", ANDROID_SDK_HOME: "/sdk" },
+      undefined,
+      join("/user", "avd"),
+      "/user",
+    ],
+    [
+      { ANDROID_EMULATOR_HOME: "/emulator", ANDROID_USER_HOME: "/user" },
+      undefined,
+      join("/emulator", "avd"),
+      "/emulator",
+    ],
+    [{ ANDROID_AVD_HOME: "/custom/avd" }, undefined, "/custom/avd", dirname("/custom/avd")],
+    [
+      { ANDROID_AVD_HOME: "/custom/avd", ANDROID_USER_HOME: "/user" },
+      undefined,
+      "/custom/avd",
+      "/user",
+    ],
+    [
+      { ANDROID_AVD_HOME: "/custom/avd", ANDROID_SDK_HOME: "/sdk" },
+      undefined,
+      "/custom/avd",
+      join("/sdk", ".android"),
+    ],
+    [
+      { ANDROID_AVD_HOME: "/custom/avd", ANDROID_EMULATOR_HOME: "/emulator" },
+      "/explicit/avd",
+      "/explicit/avd",
+      dirname("/explicit/avd"),
+    ],
+    [
+      {
+        HOME: "/home",
+        ANDROID_USER_HOME: "",
+        ANDROID_EMULATOR_HOME: "",
+        ANDROID_AVD_HOME: "",
+        ANDROID_SDK_HOME: "",
+      },
+      undefined,
+      join("/home", ".android", "avd"),
+      join("/home", ".android"),
+    ],
+    [{ ANDROID_AVD_HOME: "/custom/avd" }, "", "", dirname("")],
+  ] as const)(
+    "preserves environment %j and override %s",
+    (environment, override, avdHome, configHome) => {
+      const previous = keys.map((key) => process.env[key]);
+      try {
+        for (const key of keys) {
+          delete process.env[key];
+        }
+        Object.assign(process.env, environment);
+        const reader = new FileAvdConfigReader(
+          async () => "",
+          () => false,
+          override,
+        );
+        expect(reader.getAvdHome()).toBe(avdHome);
+        expect(Reflect.get(reader, "configHome")).toBe(configHome);
+      } finally {
+        keys.forEach((key, index) => {
+          if (previous[index] === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = previous[index];
+          }
+        });
+      }
+    },
+  );
 });

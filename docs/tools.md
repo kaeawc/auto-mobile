@@ -69,6 +69,7 @@ The existing flat `truncationReasons` field keeps its meaning and behavior.
 
 - `max_nodes`: this window's share of the node budget was exhausted.
 - `max_depth`: the tree was deeper than the depth cap.
+- `max_children`: a node exceeded the device's 256-child cap; its later children are missing even from the raw capture.
 - `cancelled`: the capture was cancelled mid-walk.
 
 Unknown reason codes from newer APKs pass through unchanged. Reasons within an

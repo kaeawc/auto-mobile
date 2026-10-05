@@ -444,6 +444,72 @@ describe("IosCtrlProxyBuilder", function () {
   });
 
   describe("needsRebuild", function () {
+    test.each([
+      {
+        checksum: "wrong",
+        expectedChecksum: "expected",
+        localHash: "expected-app",
+        storedHash: "expected-app",
+        result: true,
+        message: "checksum mismatch",
+      },
+      {
+        checksum: "expected",
+        expectedChecksum: "expected",
+        localHash: "wrong",
+        storedHash: "expected-app",
+        result: true,
+        message: "app hash mismatch",
+      },
+      {
+        checksum: "expected",
+        expectedChecksum: "expected",
+        localHash: null,
+        storedHash: "expected-app",
+        result: true,
+        message: "app hash mismatch",
+      },
+      {
+        checksum: "expected",
+        expectedChecksum: "expected",
+        localHash: "expected-app",
+        storedHash: undefined,
+        result: true,
+        message: "app hash missing from metadata",
+      },
+      {
+        checksum: "EXPECTED",
+        expectedChecksum: "expected",
+        localHash: "EXPECTED-APP",
+        storedHash: "expected-app",
+        result: false,
+        message: "up to date",
+      },
+    ])(
+      "checks cached identity $message",
+      async ({ checksum, expectedChecksum, localHash, storedHash, result, message }) => {
+        const builder = IosCtrlProxyBuilder.getInstance({ bundleCacheDir: tempDir });
+        await fs.writeFile(
+          path.join(tempDir, "ctrl-proxy-ios-bundle.json"),
+          JSON.stringify({ checksum, appHashes: { simulator: storedHash } }),
+        );
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting(expectedChecksum);
+        const artifacts = spyOn(builder, "getXctestrunPath").mockResolvedValue("cached.xctestrun");
+        const expected = spyOn(builder, "getExpectedAppHash").mockReturnValue("expected-app");
+        const actual = spyOn(builder, "getAppBundleHash").mockResolvedValue(localHash);
+        const info = spyOn(logger, "info").mockImplementation(() => {});
+        try {
+          expect(await builder.needsRebuild("simulator")).toBe(result);
+          expect(info.mock.calls.at(-1)?.[0]).toContain(message);
+        } finally {
+          artifacts.mockRestore();
+          expected.mockRestore();
+          actual.mockRestore();
+          info.mockRestore();
+        }
+      },
+    );
+
     test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD is true", async function () {
       process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD = "true";
 

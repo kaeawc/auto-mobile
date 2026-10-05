@@ -43,36 +43,42 @@ export async function detectHostAppearance(
   }
 
   if (process.platform === "linux") {
-    const gnomeScheme = await runCommand(
-      "gsettings",
-      ["get", "org.gnome.desktop.interface", "color-scheme"],
-      executor,
-    );
-    if (gnomeScheme?.stdout) {
-      return isDarkThemeValue(gnomeScheme.stdout) ? "dark" : "light";
-    }
-
-    const gnomeTheme = await runCommand(
-      "gsettings",
-      ["get", "org.gnome.desktop.interface", "gtk-theme"],
-      executor,
-    );
-    if (gnomeTheme?.stdout) {
-      return isDarkThemeValue(gnomeTheme.stdout) ? "dark" : "light";
-    }
-
-    const kdeTheme =
-      (await runCommand(
-        "kreadconfig5",
-        ["--group", "General", "--key", "ColorScheme"],
-        executor,
-      )) ??
-      (await runCommand("kreadconfig6", ["--group", "General", "--key", "ColorScheme"], executor));
-    if (kdeTheme?.stdout) {
-      return isDarkThemeValue(kdeTheme.stdout) ? "dark" : "light";
+    const appearance = await detectLinuxAppearance(executor);
+    if (appearance !== null) {
+      return appearance;
     }
   }
 
   logger.debug("[HostAppearance] Falling back to light appearance (unsupported host)");
   return "light";
+}
+
+async function detectLinuxAppearance(
+  executor: HostCommandExecutor,
+): Promise<AppearanceMode | null> {
+  const gnomeScheme = await runCommand(
+    "gsettings",
+    ["get", "org.gnome.desktop.interface", "color-scheme"],
+    executor,
+  );
+  if (gnomeScheme?.stdout) {
+    return isDarkThemeValue(gnomeScheme.stdout) ? "dark" : "light";
+  }
+
+  const gnomeTheme = await runCommand(
+    "gsettings",
+    ["get", "org.gnome.desktop.interface", "gtk-theme"],
+    executor,
+  );
+  if (gnomeTheme?.stdout) {
+    return isDarkThemeValue(gnomeTheme.stdout) ? "dark" : "light";
+  }
+
+  const kdeTheme =
+    (await runCommand("kreadconfig5", ["--group", "General", "--key", "ColorScheme"], executor)) ??
+    (await runCommand("kreadconfig6", ["--group", "General", "--key", "ColorScheme"], executor));
+  if (kdeTheme?.stdout) {
+    return isDarkThemeValue(kdeTheme.stdout) ? "dark" : "light";
+  }
+  return null;
 }

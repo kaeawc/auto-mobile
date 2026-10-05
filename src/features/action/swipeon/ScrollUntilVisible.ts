@@ -1,3 +1,4 @@
+import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { StaleDisplayError, type StaleDisplayDetails } from "../../../models/StaleDisplayError";
@@ -126,7 +127,7 @@ interface ScrollUntilVisibleDependencies {
 
 /** Display targeting supplies transport only; matching and scroll recovery stay shared. */
 export interface ScrollUntilVisibleStrategy {
-  observe: () => Promise<ObserveResult>;
+  observe: (options?: { freshness: "fresh"; timeoutMs: number }) => Promise<ObserveResult>;
   swipe: (options: {
     x1: number;
     y1: number;
@@ -219,7 +220,17 @@ export class ScrollUntilVisible {
     return this.executeWithStrategy({ options, progress, perf, signal });
   }
 
-  async executeWithStrategy({
+  async executeWithStrategy(args: {
+    options: SwipeOnResolvedOptions;
+    progress?: ProgressCallback;
+    perf?: PerformanceTracker;
+    signal?: AbortSignal;
+    strategy?: ScrollUntilVisibleStrategy;
+  }): Promise<SwipeOnResult> {
+    return withSwipeObservationReadScope(() => this.executeSearch(args));
+  }
+
+  private async executeSearch({
     options,
     progress,
     perf = new NoOpPerformanceTracker(),
@@ -234,9 +245,10 @@ export class ScrollUntilVisible {
   }): Promise<SwipeOnResult> {
     const observe =
       strategy?.observe ??
-      (() =>
+      ((captureOptions?: { freshness: "fresh"; timeoutMs: number }) =>
         this.deps.observeScreen.execute({
-          freshness: "cached-ok",
+          freshness: captureOptions?.freshness ?? "cached-ok",
+          timeoutMs: captureOptions?.timeoutMs,
           skipScreenshot: true,
           skipAccessibilityAudit: true,
           signal,
@@ -248,7 +260,14 @@ export class ScrollUntilVisible {
 
     const observationFence = strategy ? undefined : this.deps.captureDisplayFence?.();
     // Get initial observation
-    let lastObservation = await perf.track("initialObserve", () => observe());
+    let lastObservation = await perf.track("initialObserve", async () =>
+      freshSwipeHierarchy(
+        await observe(),
+        (timeoutMs) => observe({ freshness: "fresh", timeoutMs }),
+        this.deps.timer,
+        signal,
+      ),
+    );
     throwIfAborted(signal);
     if (!lastObservation.viewHierarchy || !lastObservation.screenSize) {
       throw new Error("Failed to get initial observation for scrolling until visible.");

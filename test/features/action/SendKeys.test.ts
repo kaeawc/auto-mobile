@@ -1238,8 +1238,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
           operation === "replace" && after === "",
         );
         expect(adb.getExecutedCommands()).toEqual([
-          "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
-          `shell input keyevent ${Array<string>(17).fill("KEYCODE_DEL").join(" ")}`,
+          "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+          "shell input keyevent KEYCODE_DEL",
           ...(operation === "replace" && after === "" ? ["shell input keyevent KEYCODE_A"] : []),
         ]);
         expect(calls).toEqual([]);
@@ -1271,15 +1271,17 @@ describe("DefaultSendKeysCommandExecutor", () => {
           ),
         ).toMatchObject({ success: true });
       }
-      const move =
+      const clearSequence =
         apiLevel !== null && apiLevel >= 31
-          ? "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END"
-          : "shell input keyevent KEYCODE_MOVE_END";
-      const sequence = [
-        move,
-        `shell input keyevent ${Array<string>(8).fill("KEYCODE_DEL").join(" ")}`,
-        "shell input keyevent KEYCODE_A",
-      ];
+          ? [
+              "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+              "shell input keyevent KEYCODE_DEL",
+            ]
+          : [
+              "shell input keyevent KEYCODE_MOVE_END",
+              `shell input keyevent ${Array<string>(8).fill("KEYCODE_DEL").join(" ")}`,
+            ];
+      const sequence = [...clearSequence, "shell input keyevent KEYCODE_A"];
       expect(adb.getExecutedCommands()).toEqual([
         ...(apiLevel === null ? ["shell getprop ro.build.version.sdk"] : []),
         ...sequence,
@@ -1335,8 +1337,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(await second).toMatchObject([{ status: "fulfilled", value: { success: true } }]);
     expect(adb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
     expect(adb.getExecutedCommands()).toEqual([
-      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
+      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+      "shell input keyevent KEYCODE_DEL",
     ]);
   });
 

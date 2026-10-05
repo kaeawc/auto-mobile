@@ -165,6 +165,7 @@ function isFocusedTextInputProperties(nodeProperties: Record<string, unknown>): 
   return hasKnownInputClass || exposesTextAction || explicitlyEditable;
 }
 
+/** Select all and delete on API 31+; older devices retain counted deletes from line end. */
 export async function clearTextWithKeyEvents(
   adb: AdbExecutor,
   count: number,
@@ -175,10 +176,17 @@ export async function clearTextWithKeyEvents(
   signal?.throwIfAborted();
   await adb.executeCommand(
     supportsKeyCombination
-      ? "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END"
+      ? "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A"
       : "shell input keyevent KEYCODE_MOVE_END",
   );
   signal?.throwIfAborted();
+
+  if (supportsKeyCombination) {
+    await adb.executeCommand("shell input keyevent KEYCODE_DEL");
+    onDelete?.();
+    signal?.throwIfAborted();
+    return;
+  }
 
   for (let index = 0; index < count; index += DELETE_KEYEVENT_CHUNK_SIZE) {
     signal?.throwIfAborted();

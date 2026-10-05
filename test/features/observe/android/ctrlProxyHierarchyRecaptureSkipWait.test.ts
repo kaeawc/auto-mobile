@@ -20,6 +20,10 @@ import type {
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import {
+  deviceLikeAndroidHierarchy,
+  DEVICE_CAPTURE_TIME,
+} from "../../../helpers/deviceLikeAndroidHierarchy";
 
 const DEFAULT_FRESH_WAIT_MS = 1000;
 const T = 1_700_000_000_000;
@@ -125,6 +129,57 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
   afterEach(() => {
     h?.restore();
     h = null;
+  });
+
+  test("requireFreshExtraction polls extract independently even when the prior sync is inside the cache serve window", async () => {
+    const device = await deviceLikeAndroidHierarchy();
+    try {
+      const first = await device.hierarchy.getAccessibilityHierarchy(
+        undefined,
+        undefined,
+        true,
+        DEVICE_CAPTURE_TIME + 1,
+      );
+      const second = await device.hierarchy.getAccessibilityHierarchy(
+        undefined,
+        undefined,
+        true,
+        first?.updatedAt,
+        false,
+        undefined,
+        { requireFreshExtraction: true },
+      );
+      expect(device.extractions()).toBe(2);
+      expect(first?.fresh).toBe(true);
+      expect(second?.fresh).toBe(true);
+      expect(second?.updatedAt).toBe(DEVICE_CAPTURE_TIME + 2);
+    } finally {
+      device.restore();
+    }
+  });
+
+  test("standalone inclusive reads still return the cached frame unverified without extracting", async () => {
+    const device = await deviceLikeAndroidHierarchy();
+    try {
+      const first = await device.hierarchy.getAccessibilityHierarchy(
+        undefined,
+        undefined,
+        true,
+        DEVICE_CAPTURE_TIME + 1,
+      );
+      const second = await device.hierarchy.getAccessibilityHierarchy(
+        undefined,
+        undefined,
+        false,
+        first?.updatedAt,
+      );
+      expect(device.extractions()).toBe(1);
+      expect(second?.updatedAt).toBe(first?.updatedAt);
+      expect(second?.fresh).toBe(false);
+      expect(device.timer.now()).toBe(DEVICE_CAPTURE_TIME + 30);
+    } finally {
+      device.restore();
+    }
   });
 
   test("a skip-wait read with a rejected cache goes straight to sync without burning the fresh wait", async () => {

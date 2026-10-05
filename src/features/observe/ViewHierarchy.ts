@@ -19,7 +19,10 @@ import { IOSCtrlProxyClient } from "./ios";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
-import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
+import type {
+  ViewHierarchy as ViewHierarchyInterface,
+  HierarchyReadOptions,
+} from "./interfaces/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import {
   normalizeIosHierarchy,
@@ -63,6 +66,7 @@ interface RecoveryReadContext {
   minTimestamp: number;
   signal?: AbortSignal;
   deadline?: number;
+  requireFreshExtraction?: boolean;
 }
 
 export class ViewHierarchy implements ViewHierarchyInterface {
@@ -133,11 +137,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal,
-    timeoutMs?: number,
+    readOptions?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult> {
     if (this.device.platform !== "ios" && this.device.platform !== "android") {
       throw new Error("Unsupported platform");
     }
+    const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
     const deadline = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
     const result =
       this.device.platform === "ios"
@@ -148,37 +153,25 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             skipWaitForFresh,
             minTimestamp,
             signal,
-            timeoutMs,
+            readOptions,
           );
-    return this.retryAfterTransportRecovery(
-      result,
+    return this.retryAfterTransportRecovery(result, {
       queryOptions,
       perf,
       skipWaitForFresh,
       minTimestamp,
       signal,
       deadline,
-    );
+      requireFreshExtraction:
+        typeof readOptions === "object" ? readOptions.requireFreshExtraction : undefined,
+    });
   }
 
   private async retryAfterTransportRecovery(
     result: ViewHierarchyResult,
-    queryOptions: ViewHierarchyQueryOptions | undefined,
-    perf: PerformanceTracker,
-    skipWaitForFresh: boolean,
-    minTimestamp: number,
-    signal: AbortSignal | undefined,
-    deadline: number | undefined,
+    context: RecoveryReadContext,
   ): Promise<ViewHierarchyResult> {
-    const context: RecoveryReadContext = {
-      queryOptions,
-      perf,
-      skipWaitForFresh,
-      minTimestamp,
-      signal,
-      deadline,
-    };
-    if (signal?.aborted) {
+    if (context.signal?.aborted) {
       return result;
     }
     if (this.device.platform === "ios") {
@@ -289,7 +282,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       context.skipWaitForFresh,
       context.minTimestamp,
       context.signal,
-      this.remainingRecoveryBudget(context),
+      context.requireFreshExtraction
+        ? {
+            timeoutMs: this.remainingRecoveryBudget(context),
+            requireFreshExtraction: context.requireFreshExtraction,
+          }
+        : this.remainingRecoveryBudget(context),
     );
   }
 
@@ -317,7 +315,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         context.skipWaitForFresh,
         context.minTimestamp,
         context.signal,
-        this.remainingRecoveryBudget(context),
+        context.requireFreshExtraction
+          ? {
+              timeoutMs: this.remainingRecoveryBudget(context),
+              requireFreshExtraction: context.requireFreshExtraction,
+            }
+          : this.remainingRecoveryBudget(context),
       );
     }
     return null;
@@ -448,8 +451,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal,
-    timeoutMs?: number,
+    readOptions?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult> {
+    const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
     const startTime = this.timer.now();
     logger.debug(
       `[VIEW_HIERARCHY] Starting Android getViewHierarchy (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`,
@@ -467,7 +471,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
           minTimestamp,
           useRawElementSearch,
           signal,
-          timeoutMs,
+          readOptions,
         );
 
       if (accessibilityHierarchy) {

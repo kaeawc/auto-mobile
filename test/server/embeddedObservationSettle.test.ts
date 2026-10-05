@@ -14,6 +14,18 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import type { ObserveScreenExecuteOptions } from "../../src/features/observe/interfaces/ObserveScreen";
 import { hierarchyUpdatedAtToMillis } from "../../src/features/observe/observeTimestamp";
 import { logger } from "../../src/utils/logger";
+import {
+  deviceLikeAndroidHierarchy,
+  DEVICE_CAPTURE_TIME,
+} from "../helpers/deviceLikeAndroidHierarchy";
+import { createObserveScreenForTest } from "../features/observe/observeScreenTestBuilders";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
+import { FakeDeviceStateCollector } from "../fakes/FakeDeviceStateCollector";
+import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
+import { displayTransitions } from "../../src/features/observe/DisplayTransition";
+import { createDeviceHierarchyCapture } from "../../src/features/observe/DeviceHierarchyCapture";
+import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
 
 /**
  * Unit coverage for the navigation-class embedded-observation settle gate
@@ -121,7 +133,162 @@ class StillFrameObserveScreen extends FakeObserveScreen {
   }
 }
 
+function deviceLikeObserveScreen(h: Awaited<ReturnType<typeof deviceLikeAndroidHierarchy>>) {
+  return createObserveScreenForTest(
+    h.device,
+    new FakeAdbClientFactory(h.adb),
+    {
+      viewHierarchy: h.viewHierarchy,
+      cacheStore: new FakeObserveCacheStore(h.timer),
+      deviceStateCollector: new FakeDeviceStateCollector(false) as never,
+      hierarchyCapture: createDeviceHierarchyCapture(h.device, {
+        timer: h.timer,
+        syncClientFactory: () => ({
+          requestHierarchySync: (...args) => h.hierarchy.requestHierarchySync(...args),
+          convertToViewHierarchyResult: (value) =>
+            h.hierarchy.convertToViewHierarchyResult(value as AccessibilityHierarchy),
+        }),
+      }),
+    },
+    h.timer,
+  );
+}
+
 describe("embedded settle on a still Android frame (#9579)", () => {
+  test.each([
+    {
+      name: "default floor-bearing observe stays cached",
+      floor: DEVICE_CAPTURE_TIME,
+      extractions: 0,
+    },
+    {
+      name: "requireFreshExtraction alone extracts with a floor",
+      floor: DEVICE_CAPTURE_TIME,
+      extractions: 1,
+      requireFreshExtraction: true,
+    },
+    {
+      name: "requireFreshExtraction without a floor stays cached",
+      floor: 0,
+      extractions: 0,
+      requireFreshExtraction: true,
+    },
+  ])("Android observe cache policy: $name", async (scenario) => {
+    const h = await deviceLikeAndroidHierarchy();
+    const screen = deviceLikeObserveScreen(h);
+    try {
+      const result = await screen.execute({
+        minTimestamp: scenario.floor,
+        ...("requireFreshExtraction" in scenario
+          ? { requireFreshExtraction: scenario.requireFreshExtraction }
+          : {}),
+        // Leave skipWaitForFresh omitted to exercise ObserveScreen's default.
+        skipScreenshot: true,
+        skipBackStack: true,
+        skipAccessibilityAudit: true,
+        skipPerformanceAudit: true,
+        skipRecompositionTracking: true,
+      });
+      expect(h.extractions()).toBe(scenario.extractions);
+      expect(result.viewHierarchy?.updatedAt).toBe(DEVICE_CAPTURE_TIME + scenario.extractions);
+      expect(result.freshness?.verified).toBe(scenario.extractions === 1);
+      expect(h.reads.map((read) => read.floor)).toEqual([scenario.floor]);
+    } finally {
+      h.restore();
+      resetObserveCacheStore();
+      displayTransitions.reset(h.device.deviceId);
+    }
+  });
+
+  test.each([
+    { name: "still", label: () => "Still screen", extractions: 2, elapsed: 190, settled: true },
+    {
+      name: "changing then stable",
+      label: (n: number) => (n < 2 ? "Loading" : "Ready"),
+      extractions: 3,
+      elapsed: 360,
+      settled: true,
+    },
+    {
+      name: "never stable",
+      label: (n: number) => `Frame ${n}`,
+      extractions: 6,
+      elapsed: 1000,
+      settled: false,
+    },
+    {
+      name: "explicit display",
+      label: () => "Still screen",
+      extractions: 2,
+      elapsed: 190,
+      settled: true,
+      routed: true,
+      pinned: false,
+    },
+    {
+      name: "pinned display",
+      label: () => "Still screen",
+      extractions: 2,
+      elapsed: 190,
+      settled: true,
+      routed: true,
+      pinned: true,
+    },
+  ])("real Android cache through ObserveScreen: $name", async (scenario) => {
+    const h = await deviceLikeAndroidHierarchy(scenario.label);
+    const routed = "routed" in scenario;
+    const screen = deviceLikeObserveScreen(h);
+    const recomposition = spyOn(screen, "processRecomposition").mockResolvedValue(undefined);
+    const warning = spyOn(logger, "warn");
+    const started = h.timer.now();
+    try {
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: {
+          ...obs(AIRPLANE_ROW_INFLATED, DEVICE_CAPTURE_TIME),
+          display: {
+            key: "0",
+            role: "unknown",
+            posture: "unknown",
+            generation: 0,
+            pinned: "pinned" in scenario && scenario.pinned,
+          },
+        },
+        args: routed && !scenario.pinned ? { display: "0" } : undefined,
+        settleObserve: new RealSettleObserve(screen, h.timer),
+      });
+      expect(result.settled).toBe(scenario.settled);
+      expect(h.extractions()).toBe(scenario.extractions);
+      expect(h.reads.every((read) => read.fresh === true)).toBe(true);
+      expect(h.reads.map((read) => read.updatedAt)).toEqual(
+        routed
+          ? []
+          : Array.from({ length: scenario.extractions }, (_, n) => DEVICE_CAPTURE_TIME + n + 1),
+      );
+      // Still inclusive after the first post-action read, but each result must
+      // come from a separate request_hierarchy, never from its cached copy.
+      expect(h.reads.slice(0, 2).map((read) => read.floor)).toEqual(
+        routed ? [] : [DEVICE_CAPTURE_TIME + 1, DEVICE_CAPTURE_TIME + 1],
+      );
+      expect(result.observation.freshness?.verified).toBe(true);
+      expect(result.observation.display?.key).toBe("0");
+      expect(h.timer.now() - started).toBe(scenario.elapsed);
+      expect(h.timer.getSleepHistory()).toEqual(
+        scenario.settled
+          ? Array(scenario.extractions - 1).fill(150)
+          : [150, 150, 150, 150, 150, 130],
+      );
+      expect(h.displayIds).toEqual(Array(scenario.extractions).fill(routed ? 0 : undefined));
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      recomposition.mockRestore();
+      warning.mockRestore();
+      h.restore();
+      resetObserveCacheStore();
+      displayTransitions.reset(h.device.deviceId);
+    }
+  });
+
   test("syncs past the action capture, then settles without waiting for a nonexistent push", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

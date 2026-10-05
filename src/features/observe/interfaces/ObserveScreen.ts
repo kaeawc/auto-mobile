@@ -23,6 +23,8 @@ export interface ObserveScreenExecuteOptions {
   /** Bounds an explicitly requested hierarchy capture. */
   timeoutMs?: number;
   skipWaitForFresh?: boolean;
+  /** Re-extract unverified Android cache hits with a positive timestamp floor. Off by default. */
+  requireFreshExtraction?: boolean;
   minTimestamp?: number;
   signal?: AbortSignal;
   skipBackStack?: boolean;

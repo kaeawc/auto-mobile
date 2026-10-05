@@ -74,7 +74,10 @@ import type {
 } from "./interfaces/ObserveScreen";
 export type { DeviceReadOptions } from "./interfaces/ObserveScreen";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
-import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
+import type {
+  ViewHierarchy as ViewHierarchyInterface,
+  HierarchyReadOptions,
+} from "./interfaces/ViewHierarchy";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
 import { getObserveCacheStore, setObserveCacheStore } from "./cache/ObserveCacheRegistry";
@@ -1472,7 +1475,9 @@ export class RealObserveScreen implements ObserveScreen {
         skipBackStack,
         observerMode || preserveDisplayState || options?.skipRecompositionTracking === true,
         capturedHierarchy,
-        options?.timeoutMs,
+        this.device.platform === "android" && options?.requireFreshExtraction
+          ? { timeoutMs: options.timeoutMs, requireFreshExtraction: options.requireFreshExtraction }
+          : options?.timeoutMs,
         requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
       );
 
@@ -2364,7 +2369,7 @@ export class RealObserveScreen implements ObserveScreen {
     skipBackStack: boolean = false,
     readOnly: boolean = false,
     capturedHierarchy?: ViewHierarchyResult,
-    timeoutMs?: number,
+    readOptions?: number | HierarchyReadOptions,
     displayId: number = 0,
   ): Promise<void> {
     switch (this.device.platform) {
@@ -2379,7 +2384,7 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
           readOnly,
           capturedHierarchy,
-          timeoutMs,
+          readOptions,
         );
         perf.end();
 
@@ -2524,7 +2529,7 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
           readOnly,
           capturedHierarchy,
-          timeoutMs,
+          readOptions,
         );
 
         // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.

@@ -1,3 +1,4 @@
+import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 import { linkWindowRoots } from "../linkWindowRoots";
 /**
  * CtrlProxyHierarchy - Delegate for hierarchy retrieval and caching.
@@ -529,7 +530,7 @@ export class CtrlProxyHierarchy {
    * Get view hierarchy from accessibility service.
    * This is the main entry point for getting hierarchy data from the accessibility service.
    *
-   * @param timeoutMs - Optional overall budget for this read. It bounds BOTH the
+   * @param readOptions - Optional read policy or overall budget. The budget bounds BOTH the
    *   WebSocket fresh-data wait and the ADB sync fallback, so a caller working
    *   against its own deadline (e.g. the keyboard state confirmation poll) cannot
    *   be blocked past that deadline by the 10s `requestHierarchySync` default.
@@ -541,8 +542,11 @@ export class CtrlProxyHierarchy {
     minTimestamp: number = 0,
     disableAllFiltering: boolean = false,
     signal?: AbortSignal,
-    timeoutMs?: number,
+    readOptions?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult | null> {
+    const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
+    const requireFreshExtraction =
+      typeof readOptions === "object" && readOptions.requireFreshExtraction === true;
     const startTime = this.context.timer.now();
     const cachedHierarchy = this.context.getCachedHierarchy();
 
@@ -595,8 +599,12 @@ export class CtrlProxyHierarchy {
       // receipt time; a fresh sync below re-stamps it to the current host clock.
       let receivedAt = response.receivedAt;
 
-      // If no hierarchy from WebSocket or data is stale, sync to get fresh data
-      const needsSync = !hierarchyData || (!isFresh && !response.withinCacheServeWindow);
+      // The embedded gate needs independent evidence for each floor-bearing poll (#9579).
+      // Other callers retain cache service even when they skip the push wait.
+      const needsSync =
+        !hierarchyData ||
+        (!isFresh && !response.withinCacheServeWindow) ||
+        (!isFresh && requireFreshExtraction && minTimestamp > 0);
       if (needsSync) {
         logger.debug(
           `[CTRL_PROXY] WebSocket returned ${hierarchyData ? "stale" : "no"} data (fresh=${isFresh}), syncing for fresh data`,

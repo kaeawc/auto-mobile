@@ -37,6 +37,7 @@ class OverlayManager(
       }
   }
 
+  private var interactiveOverlayAttached = false
   private var overlayView: View? = null
   private var overlayAdded = false
   private var overlayVisible = false
@@ -60,6 +61,32 @@ class OverlayManager(
     view.visibility = View.VISIBLE
     overlayVisible = true
     return true
+  }
+
+  /**
+   * Call on main after interactive addView: highlights use the same accessibility type and are
+   * re-added last, above the interactive window. Preserve the view, drawing state and visibility.
+   * Dismissal restores the normal permission-based type. Touch/focus flags never change.
+   */
+  fun setInteractiveOverlayAttached(attached: Boolean): Boolean {
+    if (!attached && !interactiveOverlayAttached) return true
+    interactiveOverlayAttached = attached
+    val view = overlayView
+    if (view != null && overlayAdded) {
+      try {
+        windowManager.removeViewImmediate(view)
+      } catch (error: Exception) {
+        Log.e(TAG, "Failed to restack highlight overlay", error)
+        return false
+      }
+      overlayAdded = false
+    }
+    overlayLayoutParams = null
+    if (view == null) return true
+    val visible = overlayVisible
+    val success = show()
+    if (!visible) hide()
+    return success
   }
 
   fun hide() {
@@ -116,7 +143,9 @@ class OverlayManager(
   }
 
   private fun resolveOverlayType(): Int {
-    return if (canDrawOverlays(context)) {
+    return if (interactiveOverlayAttached) {
+      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+    } else if (canDrawOverlays(context)) {
       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
     } else {
       Log.w(TAG, "SYSTEM_ALERT_WINDOW not granted; using accessibility overlay.")

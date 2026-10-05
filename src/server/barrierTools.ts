@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models/index";
 import { logger } from "../utils/logger";
-import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
+import { abortErrorFromSignal, createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { isDeviceLostError } from "./deviceLossOutcome";
@@ -67,10 +67,10 @@ const barrierHandler = async (
     `Device ${device.deviceId} arriving at barrier "${lock}" (expecting ${deviceCount} devices)`,
   );
 
-  throwIfAborted(signal);
+  throwIfAborted(signal, true);
 
   try {
-    await coordinator.awaitBarrier(lock, device.deviceId, deviceCount, timeout, namespace);
+    await coordinator.awaitBarrier(lock, device.deviceId, deviceCount, timeout, namespace, signal);
   } catch (error) {
     // Release any devices still waiting so they fail fast instead of hanging
     // until their own barrier timeout.
@@ -78,7 +78,13 @@ const barrierHandler = async (
 
     const errorMsg = errorMessage(error);
     logger.error(`Device ${device.deviceId} error at barrier "${lock}": ${errorMsg}`);
-    if (isDeviceLostError(error)) {
+    if (
+      isDeviceLostError(error) ||
+      (signal?.aborted &&
+        (signal.reason === undefined ||
+          signal.reason === null ||
+          error === abortErrorFromSignal(signal)))
+    ) {
       throw error;
     }
     throw new ActionableError(

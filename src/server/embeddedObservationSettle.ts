@@ -1,6 +1,8 @@
+import { StaleDisplayError } from "../models/StaleDisplayError";
 import {
   terminalScreenshotUnavailable,
   isTerminalScreenshotUnavailable,
+  terminalScreenshotCaptureError,
   captureChosenTerminalScreenshot,
   finalizePendingTerminalScreenshot,
   finalizePendingPostActionCaptures,
@@ -81,7 +83,7 @@ export async function settleEmbeddedObservation(
       undefined,
       input.signal,
     );
-    return { observation: input.observation, settled: false };
+    return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
   }
 
   // The settle loop's own budget is checked BETWEEN polls, so a single device
@@ -91,7 +93,7 @@ export async function settleEmbeddedObservation(
   // observing immediately. Real-clock deliberately: it fences a real device
   // read, which no fake clock governs, and fake-backed unit tests resolve long
   // before it can fire.
-  const strictDisplay = input.args?.display !== undefined || !!input.observation.display?.pinned;
+  const strictDisplay = isExplicitDisplay(input.observation, input.args);
   const deadline = AbortSignal.timeout(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
   try {
     const result = await input.settleObserve.execute({
@@ -132,10 +134,10 @@ export async function settleEmbeddedObservation(
         undefined,
         input.signal,
       );
-      return { observation: input.observation, settled: false };
+      return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
     }
     await captureAdoptedObservation(input, result.observation);
-    return adoptedObservationOutcome(input, result, strictDisplay);
+    return adoptedObservationOutcome(input, result);
   } catch (error) {
     // Nothing here may fail an action that ALREADY RAN. A settle read that
     // errors (CtrlProxy hiccup, transient device read failure), the deadline
@@ -151,7 +153,7 @@ export async function settleEmbeddedObservation(
       undefined,
       input.signal,
     );
-    return { observation: input.observation, settled: false };
+    return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
   }
 }
 
@@ -187,25 +189,53 @@ async function captureAdoptedObservation(
 function adoptedObservationOutcome(
   input: EmbeddedObservationSettleInput,
   result: EmbeddedObservationSettleOutcome,
-  strictDisplay: boolean,
 ): EmbeddedObservationSettleOutcome {
-  const displayCaptureFailed = strictDisplay && isTerminalScreenshotUnavailable(result.observation);
-  if (displayCaptureFailed && !input.signal?.aborted) {
-    result.observation.freshness = {
-      ...result.observation.freshness,
-      isFresh: result.observation.freshness?.isFresh ?? true,
-      warning: [
-        result.observation.freshness?.warning,
-        "Post-action terminal screenshot/audit failed; retaining the chosen observation",
-      ]
-        .filter(Boolean)
-        .join("; "),
-    };
-  }
-  return {
+  return terminalCaptureOutcome(input, {
     observation: mergeActionMetadata(input.observation, result.observation),
-    settled: displayCaptureFailed ? false : result.settled,
+    settled: result.settled,
+  });
+}
+
+const TERMINAL_CAPTURE_WARNING =
+  "Post-action terminal screenshot/audit failed; retaining the chosen observation";
+
+function isExplicitDisplay(observation: ObserveResult, args?: { display?: unknown }): boolean {
+  return args?.display !== undefined || !!observation.display?.pinned;
+}
+
+/** The same explicit-panel evidence contract for adopted, kept and bypassed frames. */
+function applyTerminalCaptureFailure(
+  observation: ObserveResult,
+  args?: { display?: unknown },
+  signal?: AbortSignal,
+  payload?: Record<string, unknown>,
+): boolean {
+  const strictDisplay = isExplicitDisplay(observation, args);
+  if (!strictDisplay || signal?.aborted || !isTerminalScreenshotUnavailable(observation)) {
+    return false;
+  }
+  const { isFresh = true, warning } = observation.freshness ?? {};
+  observation.freshness = {
+    ...observation.freshness,
+    isFresh,
+    warning: warning?.includes(TERMINAL_CAPTURE_WARNING)
+      ? warning
+      : [warning, TERMINAL_CAPTURE_WARNING].filter(Boolean).join("; "),
   };
+  observation.settled = false;
+  const error = terminalScreenshotCaptureError(observation);
+  if (payload && payload.staleDisplay === undefined && error instanceof StaleDisplayError) {
+    payload.staleDisplay = error.details;
+  }
+  return true;
+}
+
+function terminalCaptureOutcome(
+  input: EmbeddedObservationSettleInput,
+  outcome: EmbeddedObservationSettleOutcome,
+): EmbeddedObservationSettleOutcome {
+  const failed = applyTerminalCaptureFailure(outcome.observation, input.args, input.signal);
+  return { ...outcome, settled: failed ? false : outcome.settled };
 }
 
 /**
@@ -405,6 +435,13 @@ export async function settleEmbeddedObservationInResponse(
       writeToolEnvelopePayload(view, view.payload);
     }
     await finalizePendingPostActionCaptures();
+    if (
+      view &&
+      observation &&
+      applyTerminalCaptureFailure(observation, ctx.args, ctx.signal, view.payload)
+    ) {
+      writeToolEnvelopePayload(view, view.payload);
+    }
   }
 }
 

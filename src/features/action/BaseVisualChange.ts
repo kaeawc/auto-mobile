@@ -52,7 +52,10 @@ import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOption
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { hierarchyChanged, hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { deferTerminalScreenshot } from "../../utils/PostActionCaptureContext";
+import {
+  beginPostActionCaptureAction,
+  deferTerminalScreenshot,
+} from "../../utils/PostActionCaptureContext";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
@@ -297,6 +300,7 @@ export class BaseVisualChange {
     block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
     options: ObservedChangeOptions,
   ): Promise<any> {
+    await beginPostActionCaptureAction();
     const timeoutMs = options.timeoutMs || 12000;
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();

@@ -14,9 +14,14 @@ interface PendingCapture {
   observation: ObserveResult;
   capture: Capture;
 }
+interface UnavailableCapture {
+  observation: ObserveResult;
+  error?: unknown;
+}
 interface CaptureScope {
   pending: PendingCapture[];
-  unavailable: ObserveResult[];
+  unavailable: UnavailableCapture[];
+  multiAction: boolean;
   signal?: AbortSignal;
   closed: boolean;
 }
@@ -31,14 +36,30 @@ export async function runWithPostActionCaptureScope<T>(
   if (!enabled) {
     return scopes.run(undefined, fn);
   }
-  const scope: CaptureScope = { pending: [], unavailable: [], signal, closed: false };
+  const scope: CaptureScope = {
+    pending: [],
+    unavailable: [],
+    signal,
+    closed: false,
+    multiAction: false,
+  };
   return scopes.run(scope, async () => {
+    let completed = false;
     try {
-      return await fn();
+      const result = await fn();
+      completed = true;
+      return result;
     } finally {
-      // Also drain discarded/malformed handler results and throwing handlers.
-      await finalizePendingPostActionCaptures();
-      scope.closed = true;
+      try {
+        if (completed) {
+          // Successful discarded/malformed results still own terminal evidence.
+          await finalizePendingPostActionCaptures();
+        } else {
+          scope.pending = [];
+        }
+      } finally {
+        scope.closed = true;
+      }
     }
   });
 }
@@ -63,6 +84,17 @@ function sameObservation(left: ObserveResult, right: ObserveResult): boolean {
   );
 }
 
+/** Flush earlier evidence while its screen is current, before another gesture. */
+export async function beginPostActionCaptureAction(): Promise<void> {
+  const scope = scopes.getStore();
+  if (!scope || scope.closed || scope.pending.length === 0) {
+    return;
+  }
+  // Disable before awaiting: concurrent descendants cannot queue more old frames.
+  scope.multiAction = true;
+  await finalizePendingPostActionCaptures();
+}
+
 /** Records that action-time policy wanted a capture, without changing the result. */
 export function deferTerminalScreenshot(observation: ObserveResult, capture: Capture): boolean {
   const scope = scopes.getStore();
@@ -72,6 +104,9 @@ export function deferTerminalScreenshot(observation: ObserveResult, capture: Cap
   if (scope.closed) {
     // Async descendants must not start evidence work after their response left.
     return true;
+  }
+  if (scope.multiAction) {
+    return false;
   }
   // Text-only envelope parsing must still identify the pending observation.
   // RealObserveScreen supplies both ids; unidentified direct/fake results stay immediate.
@@ -100,7 +135,8 @@ export async function captureChosenTerminalScreenshot(
 ): Promise<void> {
   observation[terminalScreenshotUnavailable] = true;
   const scope = scopes.getStore();
-  scope?.unavailable.push(observation);
+  const unavailable: UnavailableCapture = { observation };
+  scope?.unavailable.push(unavailable);
   for (let attempt = 0; attempt < 2; attempt++) {
     if (scope?.closed || signal?.aborted) {
       return;
@@ -111,7 +147,7 @@ export async function captureChosenTerminalScreenshot(
       delete observation[terminalScreenshotUnavailable];
       if (scope) {
         scope.unavailable = scope.unavailable.filter(
-          (frame) => !sameObservation(frame, observation),
+          (frame) => !sameObservation(frame.observation, observation),
         );
       }
       if (observation.accessibilityAudit !== undefined) {
@@ -119,6 +155,7 @@ export async function captureChosenTerminalScreenshot(
       }
       return;
     } catch (error) {
+      unavailable.error = error;
       // A partially written capture/audit must not advertise nonexistent evidence.
       delete observation.screenshotPath;
       delete observation.screenshotSource;
@@ -170,6 +207,16 @@ export async function finalizePendingPostActionCaptures(): Promise<void> {
 export function isTerminalScreenshotUnavailable(observation: TerminalCaptureObservation): boolean {
   return (
     observation[terminalScreenshotUnavailable] === true ||
-    (scopes.getStore()?.unavailable.some((frame) => sameObservation(frame, observation)) ?? false)
+    (scopes
+      .getStore()
+      ?.unavailable.some((frame) => sameObservation(frame.observation, observation)) ??
+      false)
   );
+}
+
+/** Retain the thrown failure even when a text envelope reconstructs the frame. */
+export function terminalScreenshotCaptureError(observation: ObserveResult): unknown {
+  return scopes
+    .getStore()
+    ?.unavailable.find((frame) => sameObservation(frame.observation, observation))?.error;
 }

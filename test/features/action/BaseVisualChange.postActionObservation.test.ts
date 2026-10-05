@@ -649,6 +649,77 @@ describe("BaseVisualChange post-action observation", () => {
     expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
   });
 
+  test("multiple actions flush the earlier screen before the next gesture", async () => {
+    process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "false";
+    let screen = 0;
+    const order: string[] = [];
+    fakeObserveScreen.setObserveResult(() =>
+      makeObserve({
+        deviceId: "device-123",
+        observationId: `action-${screen}`,
+        updatedAt: screen,
+      }),
+    );
+    fakeObserveScreen.captureScreenshot = async (_perf, _signal, observation) => {
+      order.push(`capture-${observation?.observationId}-screen-${screen}`);
+      if (observation) {
+        observation.screenshotPath = `screen-${screen}.png`;
+      }
+    };
+    await runWithPostActionCaptureScope(undefined, async () => {
+      const action = createVisualChange();
+      const perform = () =>
+        action.observedInteraction(
+          async () => {
+            screen++;
+            order.push(`gesture-${screen}`);
+            return { success: true };
+          },
+          { changeExpected: false, skipPreviousObserve: true },
+        );
+      const first = await perform();
+      expect(hasPendingTerminalScreenshot(first.observation)).toBe(true);
+      const second = await perform();
+      expect(order).toEqual([
+        "gesture-1",
+        "capture-action-1-screen-1",
+        "gesture-2",
+        "capture-action-2-screen-2",
+      ]);
+      expect(first.observation.screenshotPath).toBe("screen-1.png");
+      expect(second.observation.screenshotPath).toBe("screen-2.png");
+      expect(hasPendingTerminalScreenshot(first.observation)).toBe(false);
+      expect(hasPendingTerminalScreenshot(second.observation)).toBe(false);
+    });
+    expect(order).toHaveLength(4);
+  });
+
+  test("several internal executes with only one terminal deferral keep one capture", async () => {
+    process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "false";
+    fakeObserveScreen.setObserveResult((index) =>
+      makeObserve({
+        deviceId: "device-123",
+        observationId: `internal-${index}`,
+      }),
+    );
+    await runWithPostActionCaptureScope(undefined, async () => {
+      const action = createVisualChange();
+      let terminal: ObserveResult | undefined;
+      for (let step = 0; step < 3; step++) {
+        const result = await action.observedInteraction(async () => ({ success: true }), {
+          changeExpected: false,
+          skipPreviousObserve: true,
+          deferPostActionScreenshot: true,
+        });
+        terminal = result.observation;
+      }
+      await action.captureTerminal(terminal!);
+      expect(hasPendingTerminalScreenshot(terminal!)).toBe(true);
+      expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
+    });
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+  });
+
   test("pipeline disabled policy still makes zero terminal captures", async () => {
     fakeObserveScreen.setObserveResult(makeObserve());
     await runWithPostActionCaptureScope(undefined, async () => {

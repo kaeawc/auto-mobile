@@ -1,3 +1,5 @@
+import { StaleDisplayError } from "../../src/models/StaleDisplayError";
+import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import {
   deferTerminalScreenshot,
   hasPendingTerminalScreenshot,
@@ -2010,4 +2012,166 @@ test.each([
     expect(hasPendingTerminalScreenshot(original)).toBe(false);
   });
   expect(captures).toBe(0);
+});
+
+const captureFailurePaths = [
+  "rejected gate",
+  "thrown settle",
+  "failed action",
+  "handler settled",
+  "no settle observe",
+  "not gated",
+  "adopt",
+  "finally bypass",
+] as const;
+describe("explicit-display deferred terminal capture failure", () => {
+  test.each(captureFailurePaths)(
+    "%s preserves warning and stale display in structured and text envelopes",
+    async (path) => {
+      for (const textOnly of [false, true]) {
+        const action = obs({}, 10);
+        action.deviceId = "fake-device";
+        action.observationId = "action";
+        action.display = {
+          key: "panel",
+          role: "external",
+          posture: "unknown",
+          generation: 1,
+          pinned: true,
+        };
+        action.freshness = { isFresh: true, warning: "existing warning" };
+        const chosen = {
+          ...action,
+          observationId: "adopted",
+          viewHierarchy: { ...action.viewHierarchy, updatedAt: 20 },
+        };
+        const error = new StaleDisplayError({
+          observedGeneration: 1,
+          currentGeneration: 2,
+          currentDisplayKey: "panel",
+          retry: "observe",
+        });
+        const capture = async () => {
+          throw error;
+        };
+        const settle: SettleObserve = {
+          async execute() {
+            if (path === "thrown settle") {
+              throw new Error("settle unavailable");
+            }
+            return {
+              observation:
+                path === "rejected gate" ? { ...chosen, freshness: { isFresh: false } } : chosen,
+              settled: true,
+              polls: 2,
+              waitMs: 0,
+              terminalReason: "settled",
+            };
+          },
+          captureScreenshot: capture,
+        };
+        const initial = {
+          success: path !== "failed action",
+          observation: action,
+          marker: "intact",
+          ...(path === "handler settled" ? { settled: true } : {}),
+        };
+        const response = textOnly
+          ? { content: [{ type: "text", text: JSON.stringify(initial) }] }
+          : createStructuredToolResponse(initial);
+        await runWithPostActionCaptureScope(undefined, async () => {
+          deferTerminalScreenshot(action, capture);
+          await settleEmbeddedObservationInResponse(response, {
+            name:
+              path === "not gated"
+                ? "captureProbe"
+                : path === "finally bypass"
+                  ? "observe"
+                  : "tapOn",
+            args: {},
+            internal: false,
+            createSettleObserve: () => (path === "no settle observe" ? undefined : settle),
+          });
+          const result = readToolEnvelopePayload(response)!.payload;
+          const final = result.observation as ObserveResult;
+          expect(final.freshness?.warning).toBe(
+            "existing warning; Post-action terminal screenshot/audit failed; retaining the chosen observation",
+          );
+          expect(final.settled).toBe(false);
+          expect(result.staleDisplay).toEqual(error.details);
+          expect(result.marker).toBe("intact");
+          expect(result.success).toBe(initial.success);
+          expect(final.observationId).toBe(path === "adopt" ? "adopted" : "action");
+          if (path === "handler settled") {
+            expect(result.settled).toBe(true);
+          }
+        });
+      }
+    },
+  );
+
+  test.each([
+    "implicit",
+    "cancelled",
+    "successful",
+    "existing stale display",
+    "args display",
+    "generic failure",
+  ] as const)("capture failure pin: %s", async (mode) => {
+    const action = obs({}, 10);
+    action.deviceId = "fake-device";
+    action.observationId = "action";
+    if (mode !== "implicit" && mode !== "args display") {
+      action.display = {
+        key: "panel",
+        role: "external",
+        posture: "unknown",
+        generation: 1,
+        pinned: true,
+      };
+    }
+    const controller = new AbortController();
+    const error = new StaleDisplayError({
+      observedGeneration: 1,
+      currentGeneration: 2,
+      retry: "observe",
+    });
+    const response = createStructuredToolResponse({
+      success: true,
+      observation: action,
+      ...(mode === "existing stale display" ? { staleDisplay: { existing: true } } : {}),
+    });
+    await runWithPostActionCaptureScope(controller.signal, async () => {
+      deferTerminalScreenshot(action, async () => {
+        if (mode === "successful") {
+          return;
+        }
+        if (mode === "cancelled") {
+          controller.abort();
+        }
+        throw mode === "generic failure" ? new Error("capture failed") : error;
+      });
+      await settleEmbeddedObservationInResponse(response, {
+        name: "tapOn",
+        args: mode === "args display" ? { display: "panel" } : {},
+        internal: false,
+        signal: controller.signal,
+        createSettleObserve: () => undefined,
+      });
+      const result = readToolEnvelopePayload(response)!.payload;
+      const final = result.observation as ObserveResult;
+      const warns = ["existing stale display", "args display", "generic failure"].includes(mode);
+      expect(!!final.freshness?.warning).toBe(warns);
+      if (warns) {
+        expect(final.settled).toBe(false);
+      }
+      expect(result.staleDisplay).toEqual(
+        mode === "existing stale display"
+          ? { existing: true }
+          : mode === "args display"
+            ? error.details
+            : undefined,
+      );
+    });
+  });
 });

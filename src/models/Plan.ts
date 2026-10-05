@@ -1,6 +1,6 @@
 import { Platform } from "./Platform";
 import type { FailureObservationSummary } from "./FailureObservation";
-import type { ExecutePlanDebugInfo, PlanStepWarnings } from "./ExecutePlanResult";
+import type { ExecutePlanDebugInfo, PlanSkippedStep, PlanStepWarnings } from "./ExecutePlanResult";
 
 export interface PlanStep {
   tool: string;
@@ -63,6 +63,8 @@ export interface PlanExecutionResult {
    * response unconditionally (#6887 review).
    */
   warnings?: PlanStepWarnings[];
+  /** Failed optional steps, in plan step order, promoted out of the trace. */
+  skippedSteps?: PlanSkippedStep[];
 }
 
 export interface DeviceExecutionResult {

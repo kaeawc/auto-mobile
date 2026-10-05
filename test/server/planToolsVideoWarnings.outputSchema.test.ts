@@ -44,3 +44,46 @@ test.each([false, true])(
     expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
   },
 );
+
+test("executePlan advertises optional typed skippedSteps", () => {
+  const schema = ToolRegistry.getTool("executePlan")!.outputSchema!;
+  const json = toJSONSchema(schema);
+  expect(json.properties?.skippedSteps).toMatchObject({
+    type: "array",
+    items: {
+      type: "object",
+      required: ["stepIndex", "tool", "error"],
+      properties: {
+        stepIndex: { type: "integer" },
+        tool: { type: "string" },
+        error: { type: "string" },
+        device: { type: "string" },
+      },
+    },
+  });
+  expect(json.required ?? []).not.toContain("skippedSteps");
+  for (const entry of [
+    { stepIndex: 0, tool: "tapOn" },
+    { stepIndex: 0.5, tool: "tapOn", error: "missing" },
+    { stepIndex: 0, tool: "tapOn", error: 123 },
+    { stepIndex: 0, tool: "tapOn", error: "missing", device: 123 },
+  ]) {
+    expect(schema.safeParse({ ...base, skippedSteps: [entry] }).success).toBe(false);
+  }
+});
+
+test("executePlan structured content preserves skippedSteps", async () => {
+  const result: ExecutePlanResult = {
+    ...base,
+    skippedSteps: [{ stepIndex: 0, tool: "tapOn", error: "missing", device: "A" }],
+  };
+  execute = spyOn(PlanExecutionOrchestrator.prototype, "execute").mockResolvedValue(result);
+  const tool = ToolRegistry.getTool("executePlan")!;
+  const response = await tool.deviceAwareHandler!(
+    { platform: "ios", deviceId: "fake-device", name: "Fake" },
+    { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
+  );
+  expect(response.structuredContent).toEqual(result);
+  expect(JSON.parse(response.content[0].text!)).toEqual(result);
+  expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+});

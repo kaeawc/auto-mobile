@@ -1690,6 +1690,31 @@
             "required": ["stepIndex", "tool", "warnings"],
             "additionalProperties": false
           }
+        },
+        "skippedSteps": {
+          "description": "Failed optional steps that were skipped while execution continued",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              }
+            },
+            "required": ["stepIndex", "tool", "error"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],

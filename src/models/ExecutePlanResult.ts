@@ -56,6 +56,16 @@ export interface PlanStepWarnings {
   warnings: string[];
 }
 
+/** A failed optional step that was skipped while execution continued. */
+export interface PlanSkippedStep {
+  /** 0-based index of the step in the plan. */
+  stepIndex: number;
+  tool: string;
+  error: string;
+  /** Device label, for multi-device plans only. */
+  device?: string;
+}
+
 export interface ExecutePlanResult {
   success: boolean;
   executedSteps: number;
@@ -74,6 +84,8 @@ export interface ExecutePlanResult {
   debug?: ExecutePlanDebugInfo;
   /** Best-effort warnings from steps that still succeeded (issue #6868). */
   warnings?: PlanStepWarnings[];
+  /** Failed optional steps, reported regardless of captureObserveSteps. */
+  skippedSteps?: PlanSkippedStep[];
   /** Populated when automatic plan video used multiple Android segments (screenrecord limit). */
   videoFilePaths?: string[];
   videoRecordingIds?: string[];

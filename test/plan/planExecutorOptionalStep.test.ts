@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, mock, spyOn, beforeEach, afterEach } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -22,7 +22,7 @@ describe("PlanExecutor — optional steps", () => {
   beforeEach(() => {
     originalDebugMode = isDebugModeEnabled();
     setDebugModeEnabled(false);
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = new DefaultPlanExecutor(new FakeTimer());
     const deviceSchema = z.object({
       platform: z.string().optional(),
       deviceId: z.string().optional(),
@@ -217,6 +217,10 @@ describe("PlanExecutor — optional steps", () => {
     expect(result.failedStep).toBeUndefined();
     // Only the mandatory step counts as executed; the optional one is skipped.
     expect(result.executedSteps).toBe(1);
+    expect(result.totalSteps).toBe(2);
+    expect(result.skippedSteps).toEqual([
+      { stepIndex: 0, tool: "optionalStepFail", error: "element not found" },
+    ]);
     const statuses = result.debug?.steps.map((s) => s.status);
     expect(statuses).toEqual(["skipped", "completed"]);
   });
@@ -286,18 +290,22 @@ describe("PlanExecutor — optional steps", () => {
   test("records skipped optional steps in multi-device per-device results", async () => {
     const plan: Plan = {
       name: "parallel-optional-fail-then-ok",
-      devices: ["device-a"],
+      devices: ["A"],
       steps: [
-        { tool: "optionalStepFail", params: { device: "device-a" }, optional: true },
-        { tool: "optionalStepOk", params: { device: "device-a" } },
+        { tool: "optionalStepFail", params: { device: "A" }, optional: true },
+        { tool: "optionalStepOk", params: { device: "A" } },
       ],
     };
 
     const result = await planExecutor.executePlan(plan, 0, "ios", "sim-1", "session-1");
-    const deviceResult = result.perDeviceResults?.get("device-a");
+    const deviceResult = result.perDeviceResults?.get("A");
 
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(1);
+    expect(result.totalSteps).toBe(2);
+    expect(result.skippedSteps).toEqual([
+      { stepIndex: 0, tool: "optionalStepFail", error: "element not found", device: "A" },
+    ]);
     expect(deviceResult?.success).toBe(true);
     expect(deviceResult?.executedSteps).toBe(1);
     expect(deviceResult?.skippedSteps).toEqual([
@@ -308,7 +316,7 @@ describe("PlanExecutor — optional steps", () => {
         error: "element not found",
         durationMs: expect.any(Number),
         details: {
-          params: { device: "device-a" },
+          params: { device: "A" },
           error: "element not found",
           optional: true,
         },
@@ -346,4 +354,141 @@ describe("PlanExecutor — optional steps", () => {
     expect(result.success).toBe(true);
     expect(result.perDeviceResults?.get("device-a")?.skippedSteps?.[0].durationMs).toBe(250);
   });
+
+  test.each([false, true])("clean result omits skippedSteps (parallel=%s)", async (parallel) => {
+    const result = await planExecutor.executePlan(
+      {
+        name: "clean",
+        ...(parallel ? { devices: ["A"] } : {}),
+        steps: [{ tool: "optionalStepOk", params: { device: "A" } }],
+      },
+      0,
+    );
+    expect(result).toMatchObject({ success: true, executedSteps: 1, totalSteps: 1 });
+    expect(result).not.toHaveProperty("skippedSteps");
+  });
+
+  test.each([false, true])(
+    "later required failure preserves earlier skip (parallel=%s)",
+    async (parallel) => {
+      const result = await planExecutor.executePlan(
+        {
+          name: "skip-then-fail",
+          ...(parallel ? { devices: ["A"] } : {}),
+          steps: [
+            { tool: "optionalStepFail", params: { device: "A" }, optional: true },
+            { tool: "optionalStepOk", params: { device: "A" } },
+            { tool: "optionalStepFail", params: { device: "A" } },
+          ],
+        },
+        0,
+      );
+      expect(result).toMatchObject({ success: false, executedSteps: 1, totalSteps: 3 });
+      expect(result.failedStep?.stepIndex).toBe(2);
+      expect(result.skippedSteps).toEqual([
+        {
+          stepIndex: 0,
+          tool: "optionalStepFail",
+          error: "element not found",
+          ...(parallel ? { device: "A" } : {}),
+        },
+      ]);
+    },
+  );
+
+  test("parallel skips are sorted across device tracks by plan index", async () => {
+    const result = await planExecutor.executePlan(
+      {
+        name: "sorted-skips",
+        devices: ["B", "A"],
+        steps: [
+          { tool: "optionalStepFail", params: { device: "A" }, optional: true },
+          { tool: "optionalStepFail", params: { device: "B" }, optional: true },
+          { tool: "optionalStepFail", params: { device: "A" }, optional: true },
+        ],
+      },
+      0,
+    );
+    expect(result).toMatchObject({ success: true, executedSteps: 0, totalSteps: 3 });
+    expect(result.skippedSteps).toEqual([
+      { stepIndex: 0, tool: "optionalStepFail", error: "element not found", device: "A" },
+      { stepIndex: 1, tool: "optionalStepFail", error: "element not found", device: "B" },
+      { stepIndex: 2, tool: "optionalStepFail", error: "element not found", device: "A" },
+    ]);
+  });
+
+  test.each([false, true])(
+    "abort between steps preserves earlier skip (parallel=%s)",
+    async (parallel) => {
+      const controller = new AbortController();
+      ToolRegistry.register(
+        "optionalStepTimed",
+        "abort after skip",
+        z.object({ device: z.string() }),
+        async () => {
+          controller.abort();
+          return createStructuredToolResponse({ success: true });
+        },
+      );
+      const result = await planExecutor.executePlan(
+        {
+          name: "skip-then-abort",
+          ...(parallel ? { devices: ["A"] } : {}),
+          steps: [
+            { tool: "optionalStepFail", params: { device: "A" }, optional: true },
+            { tool: "optionalStepTimed", params: { device: "A" } },
+            { tool: "optionalStepOk", params: { device: "A" } },
+          ],
+        },
+        0,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      expect(result).toMatchObject({ success: false, executedSteps: 0, totalSteps: 3 });
+      expect(result.skippedSteps).toEqual([
+        {
+          stepIndex: 0,
+          tool: "optionalStepFail",
+          error: "element not found",
+          ...(parallel ? { device: "A" } : {}),
+        },
+      ]);
+    },
+  );
+
+  test.each([false, true])(
+    "execution error preserves earlier skip (parallel=%s)",
+    async (parallel) => {
+      const executeStep = spyOn(planExecutor, "executeStep")
+        .mockResolvedValueOnce({ status: "skipped", error: "element not found", details: {} })
+        .mockRejectedValueOnce(new Error("execution interrupted"));
+      try {
+        const result = await planExecutor.executePlan(
+          {
+            name: "skip-then-interrupt",
+            ...(parallel ? { devices: ["A"] } : {}),
+            steps: [
+              { tool: "optionalStepFail", params: { device: "A" }, optional: true },
+              { tool: "optionalStepOk", params: { device: "A" } },
+            ],
+          },
+          0,
+        );
+        expect(result).toMatchObject({ success: false, executedSteps: 0, totalSteps: 2 });
+        expect(result.failedStep?.stepIndex).toBe(-1);
+        expect(result.skippedSteps).toEqual([
+          {
+            stepIndex: 0,
+            tool: "optionalStepFail",
+            error: "element not found",
+            ...(parallel ? { device: "A" } : {}),
+          },
+        ]);
+      } finally {
+        executeStep.mockRestore();
+      }
+    },
+  );
 });

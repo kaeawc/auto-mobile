@@ -1,5 +1,9 @@
+import {
+  withObservationReadScope,
+  wasHierarchyReadDuringCall,
+} from "../observe/observationReadScope";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
-import { freshTalkBackHierarchy } from "./freshTalkBackHierarchy";
+import { freshTapHierarchy } from "./freshTapHierarchy";
 import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
@@ -821,7 +825,7 @@ export class TapAnyElement extends BaseVisualChange {
     }
     // The debounce wait follows the post-tap probe. Capture after that wait,
     // then use tapAny's existing selector rather than the earlier coordinates.
-    const hierarchy = await freshTalkBackHierarchy(
+    const hierarchy = await freshTapHierarchy(
       (timeout) => (refresh ?? this.refreshViewHierarchy.bind(this))(timeout, screenSize, signal),
       this.timer,
       signal,
@@ -1515,7 +1519,7 @@ export class TapAnyElement extends BaseVisualChange {
         onActivationWarnings([TALKBACK_STATE_UNKNOWN_WARNING]);
       }
       if (talkBackState) {
-        viewHierarchy = await freshTalkBackHierarchy(
+        viewHierarchy = await freshTapHierarchy(
           (timeout) => refresh(timeout, observeResult.screenSize, signal),
           this.timer,
           signal,
@@ -1557,6 +1561,28 @@ export class TapAnyElement extends BaseVisualChange {
         containerFoundEver,
       }));
     }
+    if (this.requiresCachedHierarchyRefresh(viewHierarchy, talkBackState, requestCount)) {
+      viewHierarchy = await freshTapHierarchy(
+        (timeout) => refresh(timeout, observeResult.screenSize, signal),
+        this.timer,
+        signal,
+      );
+      observeResult.viewHierarchy = viewHierarchy;
+      selectedCapture = identifyObservedHierarchy(
+        this.device.platform,
+        viewHierarchy,
+        "fresh",
+        this.timer,
+      );
+      const current = this.findClickableElement(options, selectedCapture.hierarchy, {
+        observationScreenSize: observeResult.screenSize,
+        display: viewHierarchy,
+      });
+      if (!current.element) {
+        this.throwMissingClickableElement(options, current.containerFound);
+      }
+      element = current.element;
+    }
     const tapPoint = this.geometry.getElementCenter(element);
     const target = {
       element,
@@ -1579,6 +1605,19 @@ export class TapAnyElement extends BaseVisualChange {
     });
     perf.end();
     return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
+  }
+
+  private requiresCachedHierarchyRefresh(
+    hierarchy: ViewHierarchyResult,
+    talkBackState: boolean | null | undefined,
+    requestCount: number,
+  ): boolean {
+    return (
+      this.device.platform === "android" &&
+      !talkBackState &&
+      requestCount === 0 &&
+      !wasHierarchyReadDuringCall(hierarchy)
+    );
   }
 
   private async dispatchTapTarget({
@@ -1669,6 +1708,17 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   async execute(
+    options: TapAnyElementOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    request?: { requestDeadlineMs?: number },
+  ): Promise<TapAnyElementResult> {
+    return withObservationReadScope(() =>
+      this.executeWithReadScope(options, progress, signal, request),
+    );
+  }
+
+  private async executeWithReadScope(
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,

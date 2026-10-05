@@ -1,3 +1,4 @@
+import { recordObservationRead } from "./observationReadScope";
 import { displayPinFailure } from "./SessionDisplayContext";
 import {
   publishScreenshotPaths,
@@ -1946,7 +1947,7 @@ export class RealObserveScreen implements ObserveScreen {
       }
       logger.debug("Observe command completed");
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
-      return result;
+      return recordObservationRead(result);
     } catch (err) {
       if (preserveDisplayState) {
         signal?.throwIfAborted();

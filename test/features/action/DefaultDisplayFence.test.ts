@@ -90,6 +90,11 @@ function harness(platform: "android" | "ios", mode: Mode) {
   };
   const observe = Object.assign(new FakeObserveScreen(), { captureCacheGeneration: () => 0 });
   observe.setObserveResult(screen);
+  // Start these dispatch-fence tests with this call's observer read.
+  watch(observe, "getMostRecentCachedObserveResult").mockResolvedValue({
+    ...screen,
+    freshness: { isFresh: false },
+  });
   const android = new FakeCtrlProxy();
   const ios = new FakeIOSCtrlProxy(timer);
   watch(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(

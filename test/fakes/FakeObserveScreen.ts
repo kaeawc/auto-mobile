@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../src/features/observe/observationReadScope";
 import { ObserveResult } from "../../src/models";
 import type {
   ObserveScreen,
@@ -266,7 +267,7 @@ export class FakeObserveScreen implements ObserveScreen {
       throw error;
     }
 
-    return this.getNextObserveResult();
+    return recordObservationRead(this.getNextObserveResult());
   }
 
   async captureScreenshot(

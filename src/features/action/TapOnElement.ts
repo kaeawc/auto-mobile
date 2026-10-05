@@ -1,8 +1,12 @@
 import {
-  freshTalkBackHierarchy,
+  withObservationReadScope,
+  wasHierarchyReadDuringCall,
+} from "../observe/observationReadScope";
+import {
+  freshTapHierarchy,
   ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS,
   ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
-} from "./freshTalkBackHierarchy";
+} from "./freshTapHierarchy";
 import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
@@ -2864,6 +2868,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapVerificationOptions,
     observeResult: ObserveResult,
     signal?: AbortSignal,
+    poll = true,
   ): Promise<{
     selection: ElementSelectionResult;
     viewHierarchy: ViewHierarchyResult;
@@ -2931,7 +2936,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Keep an independent request ceiling even if the wall clock moves backward.
       const maxRequests = Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS);
       let nextPollAt = startTime;
-      while (this.timer.now() < deadline && requestCount < maxRequests) {
+      while (poll && this.timer.now() < deadline && requestCount < maxRequests) {
         throwIfAborted(signal);
         const delayMs = Math.min(nextPollAt, deadline) - this.timer.now();
         if (delayMs > 0) {
@@ -3889,6 +3894,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapOnElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
+    request?: { requestDeadlineMs?: number },
+  ): Promise<TapOnFocusResult> {
+    return withObservationReadScope(() =>
+      this.executeWithReadScope(options, progress, signal, recovery, request),
+    );
+  }
+
+  private async executeWithReadScope(
+    options: TapOnElementOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
     // Internal orchestration policy; never part of TapOnElementOptions or tool schemas.
     recovery?: { throwOnKeyboardOcclusion?: boolean },
     request?: { requestDeadlineMs?: number },
@@ -3960,7 +3977,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 )
               : undefined;
           if (this.device.platform === "android" && isAccessibilityServiceEnabled) {
-            const freshHierarchy = await freshTalkBackHierarchy(
+            const freshHierarchy = await freshTapHierarchy(
               this.tapVerificationRefresh({
                 screenSize: observeResult.screenSize,
                 signal,
@@ -4002,9 +4019,30 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             };
           }
 
-          const searchOutcome = await perf.track("findElement", () =>
+          let searchOutcome = await perf.track("findElement", () =>
             this.searchForElement(options, observeResult, signal),
           );
+          // Search polling, ensureChecked, and opt-in stability already acquire a
+          // current tree. Only a visible cache hit still needs revalidation.
+          if (
+            this.device.platform === "android" &&
+            !isAccessibilityServiceEnabled &&
+            searchOutcome.selection.element &&
+            !wasHierarchyReadDuringCall(viewHierarchy) &&
+            searchOutcome.stats.requestCount === 0 &&
+            options.ensureChecked === undefined &&
+            !this.strategy.shouldRunPreTapStability(options)
+          ) {
+            const freshHierarchy = await freshTapHierarchy(
+              this.tapVerificationRefresh({ screenSize: observeResult.screenSize, signal }),
+              this.timer,
+              signal,
+            );
+            this.replaceObservationHierarchy(observeResult, freshHierarchy, true);
+            // Revalidation is one capture, not another search-until loop. A gone
+            // selector must fail rather than dispatch the cached coordinates.
+            searchOutcome = await this.searchForElement(options, observeResult, signal, false);
+          }
           searchUntilStats = searchOutcome.stats;
           this.replaceObservationHierarchy(
             observeResult,

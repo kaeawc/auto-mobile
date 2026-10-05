@@ -1,9 +1,13 @@
+import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { FakeInstalledAppsProvider } from "../../fakes/FakeInstalledAppsProvider";
 import { FakeTargetUserDetector } from "../../fakes/FakeTargetUserDetector";
 import { recordWrongWindowEvidence } from "../../../src/features/observe/observationFreshness";
-import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import {
+  markWindowResolutionRequired,
+  resetObserveCacheStore,
+} from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
@@ -167,12 +171,16 @@ describe("tapOn cached element resolution", () => {
     expect(h.points).toEqual([{ x: 75, y: 221 }]);
   });
 
-  test("a normal fresh settled tap adds no pre-resolution hierarchy read", async () => {
+  test("a normal settled cache hit adds one pre-resolution hierarchy read", async () => {
     const h = harness(observation(12, true), observation(12, true));
+    const reads = spyOn(h.tap, "refreshViewHierarchy").mockResolvedValue(
+      observation(12, true).viewHierarchy!,
+    );
     const result = await h.tap.execute({ text: "Back", action: "tap", retryIfNoChange: false });
     expect(result.success).toBe(true);
     expect(h.points).toEqual([{ x: 75, y: 221 }]);
     expect(h.observe.getExecuteCallCount()).toBe(1); // existing post-action read only
+    expect(reads).toHaveBeenCalledTimes(1);
   });
 
   test("unobtainable fresh resolution preserves the warning and never dispatches", async () => {
@@ -237,6 +245,97 @@ function sameAppBack(talkBack = true) {
     (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy;
   return { ...h, driver, captures, current };
 }
+
+describe("TalkBack off cached observation safety", () => {
+  test("plain tap refuses text only on cached screen A", async () => {
+    const h = sameAppBack(false);
+    const result = await h.tap.execute({
+      text: "See all 27 apps",
+      action: "tap",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Element not found");
+    expect(h.points).toEqual([]);
+    expect(h.captures.requests).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("cached shared selector uses current screen B's bounds", async () => {
+    const h = sameAppBack(false);
+    const result = await h.tap.execute({
+      elementId: "android:id/title",
+      index: 1,
+      action: "tap",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.element?.text).toBe("Notifications");
+    expect(h.points).toEqual([{ x: 150, y: 550 }]);
+    expect(h.captures.requests).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("search polling already read B and needs no additional read", async () => {
+    const h = sameAppBack(false);
+    const result = await h.tap.execute({
+      text: "Notifications",
+      action: "tap",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(h.points).toEqual([{ x: 150, y: 550 }]);
+    expect(h.captures.requests).toHaveLength(1);
+    expect(result.searchUntil?.requestCount).toBe(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a search read returning the same hierarchy object needs no additional read", async () => {
+    const current = page([row("Apps", 300)], "Main");
+    const selector = new FakeElementSelector();
+    const h = harness(current, current, { elementSelector: selector });
+    const hierarchy = current.viewHierarchy!;
+    // A selector miss causes a read; an unchanged frame can retain its object
+    // identity. Read authority must come from the request, not object inequality.
+    const captures = new FakeHierarchyCapture(() => {
+      selector.setNextElement(row("Apps", 300));
+      return hierarchy;
+    });
+    h.tap.refreshViewHierarchy = async (timeoutMs) =>
+      (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy;
+    const result = await h.tap.execute({ text: "Apps", action: "tap", retryIfNoChange: false });
+    expect(result.success).toBe(true);
+    expect(h.points).toEqual([{ x: 150, y: 350 }]);
+    expect(captures.requests).toHaveLength(1);
+    expect(result.searchUntil?.requestCount).toBe(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("unavailable TalkBack-off revalidation refuses cached dispatch", async () => {
+    const h = sameAppBack(false);
+    const reads = spyOn(h.tap, "refreshViewHierarchy").mockResolvedValue(null);
+    const result = await h.tap.execute({ text: "Photos", action: "tap", retryIfNoChange: false });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("fresh tap hierarchy");
+    expect(result.error).not.toContain("TalkBack is on");
+    expect(h.points).toEqual([]);
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(h.timer.getSleepHistory()).toEqual([500, 300]);
+  });
+
+  test("same-screen cache needs exactly one read", async () => {
+    const current = page([row("Apps", 300)], "Main");
+    const h = harness(current, current);
+    const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
+    h.tap.refreshViewHierarchy = async (timeoutMs) =>
+      (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy;
+    const result = await h.tap.execute({ text: "Apps", action: "tap", retryIfNoChange: false });
+    expect(result.success).toBe(true);
+    expect(h.points).toEqual([{ x: 150, y: 350 }]);
+    expect(captures.requests).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+});
 
 describe("TalkBack cached observation after same-app BACK", () => {
   test("rejects text present only on cached screen A without any tap", async () => {
@@ -373,7 +472,7 @@ describe("TalkBack fresh hierarchy review regressions", () => {
       return null;
     };
     const result = await h.tap.execute({ text: "Apps", action: "tap", retryIfNoChange: false });
-    expect(result.error).toContain("accessibility service while TalkBack is on");
+    expect(result.error).toContain("accessibility service");
     expect(result.error).toContain("Observe again");
     expect(result.error).toContain("service is running");
     expect(timeouts).toEqual([800, 300]);
@@ -390,6 +489,61 @@ describe("TalkBack fresh hierarchy review regressions", () => {
     expect(guardReads).toHaveBeenCalledTimes(0);
     expect(h.observe.getExecuteCallCount()).toBe(1);
     expect(result.element?.bounds).toEqual(row("Apps", 300).bounds);
+  });
+});
+
+function cachedTapAny(current: ObserveResult) {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const detector = new FakeAccessibilityDetector();
+  detector.setTalkBackEnabled(false);
+  const adb = new FakeAdbExecutor();
+  const tap = new TapAnyElement(device, adb, {
+    timer,
+    accessibilityDetector: detector,
+    elementSelector: new ResolverElementSelector(),
+  });
+  const cached = page([row("Old", 1700)], "Old");
+  tap.observedInteraction = (callback) => callback({ ...cached });
+  const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
+  tap.setRefreshViewHierarchyForTesting(
+    async (_defaultRefresh, timeoutMs) =>
+      (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy,
+  );
+  return { tap, adb, captures, timer };
+}
+
+describe("tapAny TalkBack off cached safety", () => {
+  test("cached clickable disappears on screen B: no coordinate dispatch", async () => {
+    const h = cachedTapAny(page([], "Current"));
+    const result = await h.tap.execute({ action: "longPress", selectionStrategy: "first" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No clickable element found");
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+    expect(h.captures.requests).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("selects current clickable at B's coordinates", async () => {
+    const h = cachedTapAny(page([row("Current", 300)], "Current"));
+    const result = await h.tap.execute({ action: "longPress", selectionStrategy: "first" });
+    expect(result.success).toBe(true);
+    expect(result.element?.text).toBe("Current");
+    expect(h.adb.getExecutedCommands()).toContain(
+      "shell input touchscreen swipe 150 350 150 350 1000",
+    );
+    expect(h.captures.requests).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("missing cached target polls once with no additional read", async () => {
+    const h = cachedTapAny(page([row("Current", 300)], "Current"));
+    h.tap.observedInteraction = (callback) => callback(page([], "Old"));
+    const result = await h.tap.execute({ action: "longPress", selectionStrategy: "first" });
+    expect(result.success).toBe(true);
+    expect(h.captures.requests).toHaveLength(1);
+    expect(result.searchUntil?.requestCount).toBe(1);
+    expect(h.timer.getSleepHistory()).toEqual([100]);
   });
 });
 
@@ -448,7 +602,7 @@ describe("tapAny TalkBack fresh selection", () => {
     tap.setRefreshViewHierarchyForTesting(async () => null);
     const result = await tap.execute({ action: "longPress" });
     expect(result.success).toBe(false);
-    expect(result.error).toContain("accessibility service while TalkBack is on");
+    expect(result.error).toContain("accessibility service");
     expect(driver.tapHistory).toEqual([]);
     expect(driver.actionHistory).toEqual([]);
   });
@@ -525,3 +679,127 @@ describe("tapAny TalkBack retry freshness", () => {
     expect(reads).toBe(3);
   });
 });
+
+// Count actual fake acquisition calls, including the existing post-action reads.
+// The initial observe is outside the measured tap.
+for (const tool of ["tapOn", "tapAny"] as const) {
+  for (const talkBack of [false, true]) {
+    test.each(["cache", "invalidated", "expired"] as const)(
+      `${tool} hierarchy read counts (TalkBack ${talkBack}): %s`,
+      async (scenario) => {
+        const current = page([row("Apps", 300)], "Main");
+        const h = harness(current, current);
+        h.timer.setCurrentTime(1000);
+        h.adb.setDeviceTimestampMs(1000);
+        h.adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+        let dispatched = false;
+        const captures = new FakeHierarchyCapture(() => ({
+          ...current.viewHierarchy!,
+          hierarchy: dispatched
+            ? page([row("Opened", 600)], "Next").viewHierarchy!.hierarchy
+            : current.viewHierarchy!.hierarchy,
+          updatedAt: h.timer.now(),
+          receivedAt: h.timer.now(),
+          fresh: true,
+          foregroundActivity: "com.example.app/.Main",
+          wakefulness: "Awake" as const,
+        }));
+        const cache = new FakeObserveCacheStore(h.timer);
+        const screen = createObserveScreenForTest(
+          device,
+          new FakeAdbClientFactory(h.adb),
+          { viewHierarchy: new FakeViewHierarchy(), hierarchyCapture: captures, cacheStore: cache },
+          h.timer,
+        );
+        const execute = screen.execute.bind(screen);
+        screen.execute = (options) =>
+          execute({ ...options, skipScreenshot: true, skipBackStack: true });
+        await screen.execute({ freshness: "fresh" });
+        const setupReads = captures.requests.length;
+        expect(setupReads).toBe(1);
+        expect((await screen.getMostRecentCachedObserveResult()).freshness?.isFresh).toBe(true);
+        if (scenario === "invalidated") {
+          cache.clear(device.deviceId);
+          markWindowResolutionRequired(device.deviceId);
+        } else if (scenario === "expired") {
+          h.timer.advanceTime(6000); // default serve window is 5000ms, storage TTL is five minutes
+          h.adb.setDeviceTimestampMs(h.timer.now());
+        }
+        const driver = new HierarchyTalkBackDriver();
+        driver.hierarchy = current.viewHierarchy;
+        const detector = new FakeAccessibilityDetector();
+        detector.setTalkBackEnabled(talkBack);
+        const strategy = new TalkBackTapStrategy({ timer: h.timer });
+        const tap =
+          tool === "tapOn"
+            ? new TapOnElement(device, h.adb, {
+                timer: h.timer,
+                hierarchyCapture: captures,
+                tapStrategy: h.strategy,
+                talkBackStrategy: strategy,
+                talkBackDriverFactory: { createDriver: () => driver },
+                visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
+                selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+              })
+            : new TapAnyElement(device, h.adb, {
+                timer: h.timer,
+                hierarchyCapture: captures,
+                accessibilityDetector: detector,
+                accessibilityService: {
+                  requestTapCoordinates: async () => ({ success: true, totalTimeMs: 1 }),
+                  requestAction: async (action) => ({ success: true, action, totalTimeMs: 1 }),
+                  requestNodeAction: async (action) => ({ success: true, action, totalTimeMs: 1 }),
+                  supportsNodeActionSelectors: async () => false,
+                },
+                talkBackStrategy: strategy,
+                talkBackDriverFactory: { createDriver: () => driver },
+                elementSelector: new ResolverElementSelector(),
+              });
+        h.strategy.setAccessibilityServiceEnabled(talkBack);
+        tap.observeScreen = screen;
+        tap.awaitIdle = new FakeAwaitIdle();
+        tap.window = new FakeWindow();
+        tap.captureTerminalObservationScreenshot = async () => {};
+        tap.recordDeferredPredictionOutcome = async () => {};
+        if (tap instanceof TapOnElement) {
+          const dispatch = tap.executeAndroidTap.bind(tap);
+          tap.executeAndroidTap = async (...args) => {
+            const result = talkBack ? await dispatch(...args) : undefined;
+            dispatched = true;
+            return result;
+          };
+          tap.deriveTapEffectAfterPostTapObservation = async (_before, observation) => ({
+            observation,
+            effect: { screenChanged: true, basis: "viewHierarchy changed" },
+          });
+        } else {
+          tap.setBeforeAndroidTapForTesting(() => {
+            dispatched = true;
+          });
+        }
+        const guardReads = spyOn(driver, "getAccessibilityHierarchy");
+        const result = await tap.execute({
+          text: "Apps",
+          action: "tap",
+          retryIfNoChange: false,
+          selectionStrategy: "first",
+        });
+        expect(result.success).toBe(true);
+        expect(result.element?.bounds).toEqual(row("Apps", 300).bounds);
+        const reads = captures.requests.length - setupReads;
+        // tapOn: one resolution + one post-action read. tapAny also probes the tap effect.
+        expect(reads).toBe(
+          tool === "tapOn"
+            ? talkBack && scenario !== "cache"
+              ? 3
+              : 2
+            : talkBack && scenario !== "cache"
+              ? 4
+              : 3,
+        );
+        expect(guardReads).toHaveBeenCalledTimes(0);
+        expect(h.timer.getSleepHistory()).toEqual(tool === "tapAny" ? [300] : []);
+      },
+    );
+  }
+}

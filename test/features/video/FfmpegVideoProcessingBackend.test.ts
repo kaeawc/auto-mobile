@@ -1424,6 +1424,25 @@ function scriptedProbe(sizes: Array<number | null>): {
 }
 
 describe("waitForRecordingFileReady - post-exit file finalization", function () {
+  test.each([
+    { sizes: [null], observed: "never appeared" },
+    { sizes: [512, null], observed: "disappeared after appearing" },
+    { sizes: [0], observed: "stayed empty (0 bytes)" },
+    { sizes: [512, 1024, 2048], observed: "stopped at 2048 bytes but never stabilized" },
+  ])("pins the complete readiness timeout diagnostic: $observed", async ({ sizes, observed }) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const { probe, calls } = scriptedProbe(sizes);
+    const filePath = path.join("recordings", "raw.mov");
+
+    await expect(
+      waitForRecordingFileReady(filePath, { probe, timer, timeoutMs: 200, backoff: 100 }),
+    ).rejects.toThrow(
+      `iOS recording file not ready at ${filePath} after 200ms (3 probes): ${observed}`,
+    );
+    expect(calls()).toBe(3);
+  });
+
   test("returns the size once a late file appears and stabilizes", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

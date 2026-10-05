@@ -81,6 +81,7 @@ case "$1 $2" in
       */check-runs/12/annotations*|*/check-runs/13/annotations*|*/check-runs/14/annotations*) annotation_response '[]' ;;
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
+      */actions/jobs/44/logs) printf '%s\n' "$FAKE_XCTEST_LOG" ;;
       */actions/jobs/35/logs) printf 'First emulator attempt failed; captured diagnostics follow:\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=241\nStarting emulator retry attempt 2.\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=237: readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/36/logs) printf 'getAndroid automation runner readiness failed: phase=runner-health attempts=4\n' ;;
       */actions/jobs/31/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nStarting emulator retry attempt 2.\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
@@ -298,6 +299,29 @@ JSON
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 654
   [ "$status" -eq 0 ]
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Run AutoMobile tests that require emulator → none → RERUN-DONT-FIX"* ]]
+}
+
+@test "classifies XCTestRunner keyboard caret and launch timing as advisory flakes" {
+  fixture="$BATS_TEST_TMPDIR/xctest-ui-timing-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/xctest-ui-timing",
+  "jobs": [
+    {"databaseId": 44, "name": "XCTestRunner Simulator Tests", "conclusion": "failure", "steps": [{"name": "Run CtrlProxy iOS UI tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  for message in \
+    "runner time budget exhausted at caret probe" \
+    "could not verify the caret position" \
+    "did not gain keyboard focus" \
+    "Timed out while launching application via Xcode"; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_XCTEST_LOG="$message" bash "$SCRIPT" 9565
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"XCTestRunner Simulator Tests → Run CtrlProxy iOS UI tests → none → RERUN-DONT-FIX"* ]]
+    [[ "$output" == *"non-required, rerun; #9565"* ]]
+  done
 }
 
 @test "keeps Playground getAndroid runner-connect separate from boot flakes" {

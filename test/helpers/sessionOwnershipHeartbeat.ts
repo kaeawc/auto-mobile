@@ -1,4 +1,6 @@
 import { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
+import { DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE } from "../../src/daemon/types";
+import type { IdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 const DEFAULT_STOP_TIMEOUT_MS = 5_000;
@@ -32,6 +34,49 @@ export function createSingleClaimSessionOwnershipRenewal(
     // client-side response is subsequently lost.
     claimLivenessOwnership = false;
     await renew(shouldClaimLivenessOwnership, signal);
+  };
+}
+
+export function isLivenessOwnerSuperseded(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+  );
+}
+
+/**
+ * One-shot CLI clients displace this keeper, then stop heartbeating on exit.
+ * Restore ownership in the same tick with a fresh token: repeating a displaced
+ * token's claim is an idempotent no-op. Attempt only one re-claim per tick and
+ * propagate its failure; lost claim responses and other errors are not retried.
+ */
+export function createReclaimingSessionOwnershipRenewal(
+  renew: (
+    livenessOwnerToken: string,
+    claimLivenessOwnership: boolean,
+    signal: AbortSignal,
+  ) => Promise<void>,
+  idGenerator: IdGenerator,
+): (signal: AbortSignal) => Promise<void> {
+  let livenessOwnerToken = idGenerator.next();
+  const renewCurrentOwner = createSingleClaimSessionOwnershipRenewal((claim, signal) =>
+    renew(livenessOwnerToken, claim, signal),
+  );
+
+  return async (signal) => {
+    try {
+      await renewCurrentOwner(signal);
+    } catch (error) {
+      if (!isLivenessOwnerSuperseded(error)) {
+        throw error;
+      }
+      // The old token cannot take ownership back; a fresh claim protects the
+      // session between CLI invocations without waiting for the next interval.
+      livenessOwnerToken = idGenerator.next();
+      await renew(livenessOwnerToken, true, signal);
+    }
   };
 }
 

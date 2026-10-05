@@ -1,3 +1,5 @@
+import { logger } from "../../../../src/utils/logger";
+import { loggerCallsWithPrefix } from "../../../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../../src/db/dbWriteBarrier";
 import {
@@ -603,6 +605,7 @@ describe("DefaultIosSdkEventIngestor", () => {
   test.each(["none", "capture", "update", "lookup"] as const)(
     "navigation keeps awaited side-effect order when %s fails",
     async (failure) => {
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
       const calls: string[] = [];
       const graphWrite = Promise.withResolvers<void>();
       const screenshotManagerSpy = spyOn(
@@ -676,6 +679,21 @@ describe("DefaultIosSdkEventIngestor", () => {
         }
         expected.push("telemetry");
         expect(calls).toEqual(expected);
+        const warnings = loggerCallsWithPrefix(
+          warning.mock.calls,
+          "[IosSdkEventIngestor] Navigation screenshot lookup failed:",
+          "[IosSdkEventIngestor] Navigation screenshot update failed:",
+        );
+        expect(warnings).toEqual(
+          failure === "update" || failure === "lookup"
+            ? [
+                [
+                  `[IosSdkEventIngestor] Navigation screenshot ${failure} failed: ${failure} failed`,
+                  expect.objectContaining({ message: `${failure} failed` }),
+                ],
+              ]
+            : [],
+        );
         expect(recorder.navigation[0].event.screenshotUri).toBe(
           failure === "none" ? "automobile:navigation/nodes/0/screenshot?appId=com.app" : null,
         );
@@ -685,6 +703,7 @@ describe("DefaultIosSdkEventIngestor", () => {
         });
       } finally {
         screenshotManagerSpy.mockRestore();
+        warning.mockRestore();
       }
     },
   );
@@ -884,9 +903,28 @@ describe("DefaultIosSdkEventIngestor", () => {
         updatedAt: 1,
       } as unknown as ViewHierarchyResult;
       // Must not throw (telemetry is best-effort) ...
-      expect(() => ingestor.recordLayoutTelemetryEvent(unserializable)).not.toThrow();
-      // ... and must have restored the prior context despite the throw.
-      expect(recorder.getContext()).toEqual({ deviceId: "prev-device", sessionId: "prev-session" });
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(() => ingestor.recordLayoutTelemetryEvent(unserializable)).not.toThrow();
+        expect(recorder.getContext()).toEqual({
+          deviceId: "prev-device",
+          sessionId: "prev-session",
+        });
+        expect(
+          loggerCallsWithPrefix(
+            warning.mock.calls,
+            "[IosSdkEventIngestor] Layout telemetry recording failed:",
+          ),
+        ).toEqual([
+          [
+            expect.stringContaining("[IosSdkEventIngestor] Layout telemetry recording failed:"),
+            expect.any(TypeError),
+          ],
+        ]);
+        expect(recorder.layout).toEqual([]);
+      } finally {
+        warning.mockRestore();
+      }
     });
 
     test("stays non-fatal when restoring the context itself throws", () => {

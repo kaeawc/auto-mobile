@@ -40,6 +40,10 @@ export interface WaitForConditionOptions {
    * same domain the device freshness gate compares against. Never a host clock.
    */
   initialMinTimestampMs?: number;
+  /** Skip the push wait when the cache misses the floor; synchronously re-extract instead. */
+  skipWaitForFresh?: boolean;
+  /** Require independent Android extractions for floor-bearing polls. Off by default. */
+  requireFreshExtraction?: boolean;
   /** Keep per-poll back-stack reconciliation when the predicate reads activeWindow. */
   readBackStackEachPoll?: boolean;
 }

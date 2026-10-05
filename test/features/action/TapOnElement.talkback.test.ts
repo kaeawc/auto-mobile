@@ -5,7 +5,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import type { Element } from "../../../src/models/Element";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
-import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import { HierarchyTalkBackDriver as FakeTalkBackNavigationDriver } from "../talkback/HierarchyTalkBackDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";

@@ -1,9 +1,15 @@
+import {
+  nodeActionTargetError,
+  requiresNodeSelector,
+  stableNodeSelectorForElement,
+} from "../../talkback/TalkBackTapStrategy";
 import { StaleDisplayError } from "../../../models/StaleDisplayError";
 import type { FencedGestureOptions } from "../ExecuteGesture";
 import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
+import type { AccessibilityNodeSelector } from "../../observe/android/types";
 import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
@@ -307,14 +313,15 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
-    if (containerElement && containerElement["resource-id"]) {
+    const selector = containerElement && stableNodeSelectorForElement(containerElement);
+    if (selector) {
       const scrollResult = await this.attemptAccessibilityScroll({
         x1,
         y1,
         x2,
         y2,
         direction,
-        containerElement,
+        selector,
         gestureOptions,
         perf,
         signal,
@@ -366,7 +373,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     x2,
     y2,
     direction,
-    containerElement,
+    selector,
     gestureOptions,
     perf,
     signal,
@@ -376,7 +383,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     x2: number;
     y2: number;
     direction: SwipeDirection;
-    containerElement: Element;
+    selector: AccessibilityNodeSelector;
     gestureOptions?: FencedGestureOptions;
     perf?: PerformanceTracker;
     signal?: AbortSignal;
@@ -394,18 +401,37 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     // `direction` is the FINGER direction; see scrollActionForFingerDirection.
     const scrollAction = scrollActionForFingerDirection(direction);
 
+    const needsNodeSelector = requiresNodeSelector(selector);
+    const targetError = await nodeActionTargetError(selector, {
+      supportsNodeActionSelectors: () => this.accessibilityService.supportsNodeActionSelectors(),
+      getAccessibilityHierarchy: () =>
+        this.accessibilityService.getAccessibilityHierarchy(
+          undefined,
+          perf,
+          false,
+          undefined,
+          true,
+        ),
+    });
+    if (targetError) {
+      logger.info(`[SwipeOn] ${targetError}`);
+      return undefined;
+    }
+
     logger.info(
-      `[SwipeOn] Attempting ACTION_SCROLL (${scrollAction}) on container: ${containerElement["resource-id"]}`,
+      `[SwipeOn] Attempting ACTION_SCROLL (${scrollAction}) on container: ${JSON.stringify(selector)}`,
     );
 
     try {
       throwIfAborted(signal);
-      const result = await this.accessibilityService.requestAction(
-        scrollAction,
-        containerElement["resource-id"],
-        5000,
-        perf || new NoOpPerformanceTracker(),
-      );
+      const result = needsNodeSelector
+        ? await this.accessibilityService.requestNodeAction(scrollAction, selector, 5000, perf)
+        : await this.accessibilityService.requestAction(
+            scrollAction,
+            selector.resourceId,
+            5000,
+            perf || new NoOpPerformanceTracker(),
+          );
 
       if (result.success) {
         logger.info("[SwipeOn] ACTION_SCROLL succeeded");

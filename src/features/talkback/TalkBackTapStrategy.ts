@@ -7,6 +7,7 @@ import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { AccessibilityNodeSelector, A11yTapCoordinatesResult } from "../observe/android/types";
+import { resourceIdActionError } from "./resourceIdActionError";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import {
   FocusNavigationExecutor,
@@ -100,6 +101,25 @@ export function requiresNodeSelector(selector: AccessibilityNodeSelector): boole
   );
 }
 
+/** Resolve whether the observed selector can safely cross the native action boundary. */
+export async function nodeActionTargetError(
+  selector: AccessibilityNodeSelector,
+  driver: Pick<
+    TalkBackNavigationDriver,
+    "supportsNodeActionSelectors" | "getAccessibilityHierarchy"
+  >,
+): Promise<string | undefined> {
+  if (requiresNodeSelector(selector)) {
+    return (await driver.supportsNodeActionSelectors())
+      ? undefined
+      : "Runner does not support stable node selectors";
+  }
+  return resourceIdActionError(
+    selector.resourceId!,
+    () => driver.getAccessibilityHierarchy?.() ?? Promise.resolve(null),
+  );
+}
+
 function advertisesAction(element: Element, action: string): boolean {
   return Array.isArray(element.actions) && element.actions.includes(action);
 }
@@ -188,7 +208,12 @@ export class TalkBackTapStrategy {
         },
       });
     } catch (error) {
-      if (error instanceof StaleDisplayError || error instanceof ActionableError) {
+      // Navigation's typed failures are evidence; activation/caller failures must propagate.
+      if (
+        error instanceof StaleDisplayError ||
+        !(error instanceof ActionableError) ||
+        screenReaderNavigation?.reachable
+      ) {
         throw error;
       }
       const errorMsg = errorMessage(error);
@@ -381,7 +406,7 @@ export class TalkBackTapStrategy {
     logger.info(`[TalkBackTapStrategy] Focus navigation successful, activating element`);
 
     // Activate the focused element with double-tap gesture
-    const activationResult = await this.activateElement(element, driver, fence);
+    const activationResult = await this.activateElement(element, driver, fence, orderedElements);
     return { ...activationResult, screenReaderNavigation: navigationResult };
   }
 
@@ -440,12 +465,9 @@ export class TalkBackTapStrategy {
       };
     }
 
-    if (requiresNodeSelector(selector) && !(await driver.supportsNodeActionSelectors())) {
-      return {
-        success: false,
-        method: "accessibility-action",
-        error: "Runner does not support stable node selectors",
-      };
+    const targetError = await nodeActionTargetError(selector, driver);
+    if (targetError) {
+      return { success: false, method: "accessibility-action", error: targetError };
     }
 
     const result = requiresNodeSelector(selector)
@@ -594,10 +616,9 @@ export class TalkBackTapStrategy {
     const selector = stableNodeSelectorForElement(element);
 
     if (selector) {
-      if (requiresNodeSelector(selector) && !(await driver.supportsNodeActionSelectors())) {
-        logger.info(
-          "[TalkBackTapStrategy] Runner does not support stable node selectors; using coordinate long press",
-        );
+      const targetError = await nodeActionTargetError(selector, driver);
+      if (targetError) {
+        logger.info(`[TalkBackTapStrategy] ${targetError}`);
         return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
           displayFence: fence,
         });
@@ -638,11 +659,12 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver,
     fence: DisplayFence = { assertCurrent: () => {} },
+    orderedElements: Element[],
   ): Promise<TalkBackTapResult> {
     const resourceId = element["resource-id"] as string | undefined;
     // Activate against the node TalkBack actually focused (live bounds), not the
     // caller's possibly-stale element (#3918).
-    const center = await this.resolveActivationCenter(element, driver);
+    const center = await this.resolveActivationCenter(element, driver, orderedElements);
     const tapDuration = 50;
 
     // No usable bounds on either the focused node or the caller's element: never
@@ -653,10 +675,7 @@ export class TalkBackTapStrategy {
         logger.warn(
           "[TalkBackTapStrategy] Activation target has no bounds; using ACTION_CLICK fallback",
         );
-        const clickResult = await this.executeDirectActivation(
-          { "resource-id": resourceId, bounds: element.bounds },
-          driver,
-        );
+        const clickResult = await this.executeDirectActivation(element, driver);
         if (clickResult.success) {
           return { success: true, method: "accessibility-action" };
         }
@@ -684,10 +703,7 @@ export class TalkBackTapStrategy {
         logger.warn(
           `[TalkBackTapStrategy] Double-tap activation failed, trying ACTION_CLICK fallback`,
         );
-        const clickResult = await this.executeDirectActivation(
-          { "resource-id": resourceId, bounds: element.bounds },
-          driver,
-        );
+        const clickResult = await this.executeDirectActivation(element, driver);
         if (!clickResult.success) {
           return {
             success: false,
@@ -715,10 +731,7 @@ export class TalkBackTapStrategy {
       if (resourceId) {
         // If second tap fails, try ACTION_CLICK as fallback
         logger.warn(`[TalkBackTapStrategy] Second tap failed, trying ACTION_CLICK fallback`);
-        const clickResult = await this.executeDirectActivation(
-          { "resource-id": resourceId, bounds: element.bounds },
-          driver,
-        );
+        const clickResult = await this.executeDirectActivation(element, driver);
         if (!clickResult.success) {
           return {
             success: false,
@@ -800,15 +813,28 @@ export class TalkBackTapStrategy {
   private async resolveActivationCenter(
     element: Element,
     driver: TalkBackNavigationDriver,
+    orderedElements: Element[],
   ): Promise<{ x: number; y: number } | null> {
     try {
       const focus = await driver.requestCurrentFocus();
       const focused = focus.focusedElement;
-      if (focused?.bounds) {
-        return this.getElementCenter(focused);
+      if (focused?.bounds && !focus.error) {
+        const selector = this.createFocusSelector({
+          resourceId: nonEmptyString(element["resource-id"]),
+          elementText: nonEmptyString(element.text),
+          elementContentDesc: nonEmptyString(element["content-desc"]),
+          bounds: element.bounds,
+        });
+        // A repeated ID alone does not confirm the selected node: compare its bounds.
+        if (this.matcher.matchesFocusedTarget(focused, orderedElements, selector)) {
+          return this.getElementCenter(focused);
+        }
+        throw new ActionableError(
+          "TalkBack focus no longer matches the selected activation target.",
+        );
       }
     } catch (error) {
-      if (error instanceof StaleDisplayError) {
+      if (error instanceof ActionableError) {
         throw error;
       }
       // Live-focus read is best-effort; fall back to the caller's element bounds.

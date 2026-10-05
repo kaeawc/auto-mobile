@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
-import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import { HierarchyTalkBackDriver as FakeTalkBackNavigationDriver } from "./HierarchyTalkBackDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNavigationExecutor";
 import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
@@ -111,7 +111,9 @@ describe("TalkBackTapStrategy", () => {
 
     test("preserves typed failure before traversal evidence exists", async () => {
       const element = { text: "Button" };
-      spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("Service failed"));
+      spyOn(driver, "requestTraversalOrder").mockRejectedValue(
+        new ActionableError("Service failed"),
+      );
       expect(await strategy.executeTap("device-1", element, driver)).toEqual({
         success: false,
         method: "focus-navigation",
@@ -226,7 +228,7 @@ describe("TalkBackTapStrategy", () => {
       driver.setElements([element], 0);
 
       const navigateToElement = spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
-        new Error("Navigation failed"),
+        new ActionableError("Navigation failed"),
       );
 
       const result = await strategy.executeTap("device-1", element, driver);
@@ -249,7 +251,7 @@ describe("TalkBackTapStrategy", () => {
       } as Element;
       driver.setElements([element], 0);
       spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
-        new Error("Focus navigation is not converging on the target."),
+        new ActionableError("Focus navigation is not converging on the target."),
       );
 
       const result = await strategy.executeTap("device-1", element, driver);
@@ -275,7 +277,9 @@ describe("TalkBackTapStrategy", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
       driver.setElements([element], 0);
-      spyOn(mockExecutor, "navigateToElement").mockRejectedValue(new Error(message as string));
+      spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
+        new ActionableError(message as string),
+      );
 
       const result = await strategy.executeTap("device-1", element, driver);
 

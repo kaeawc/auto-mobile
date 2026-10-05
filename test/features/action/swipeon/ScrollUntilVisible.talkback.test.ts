@@ -1,5 +1,5 @@
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
@@ -468,6 +468,9 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fakeCtrlProxy = new FakeCtrlProxy();
+    spyOn(fakeCtrlProxy, "getAccessibilityHierarchy").mockResolvedValue({
+      hierarchy: { node: { $: CONTAINER_ELEMENT } },
+    });
     const finder = new FakeElementFinder();
     finder.nextScrollableContainer = CONTAINER_ELEMENT;
     // The target is only in the hierarchy once the device has scrolled forward.
@@ -666,6 +669,9 @@ test("review: TalkBack searches three disjoint keyed pages without scroll_backwa
   const detector = new FakeAccessibilityDetector();
   detector.setTalkBackEnabled(true);
   const ctrl = new FakeCtrlProxy();
+  spyOn(ctrl, "getAccessibilityHierarchy").mockResolvedValue({
+    hierarchy: { node: { $: CONTAINER_ELEMENT } },
+  });
   let page = 0;
   const requestAction = ctrl.requestAction.bind(ctrl);
   ctrl.requestAction = async (...args) => {

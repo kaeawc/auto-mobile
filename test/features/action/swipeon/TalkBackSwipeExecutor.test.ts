@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
   TalkBackSwipeExecutor,
   scrollActionForFingerDirection,
 } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
+import {
+  notificationHierarchy,
+  notificationRows,
+} from "../../talkback/capturedNotificationTargets";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -60,6 +64,9 @@ describe("TalkBackSwipeExecutor", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     fakeCtrlProxy = new FakeCtrlProxy();
+    spyOn(fakeCtrlProxy, "getAccessibilityHierarchy").mockResolvedValue({
+      hierarchy: { node: { $: { "resource-id": "test:id/scrollView" } } },
+    });
     executor = makeExecutor(
       ANDROID_DEVICE,
       fakeGestureExecutor,
@@ -67,6 +74,59 @@ describe("TalkBackSwipeExecutor", () => {
       fakeAccessibilityDetector,
       fakeTimer,
     );
+  });
+
+  test("duplicate captured list container uses two-finger coordinates without an ID action", async () => {
+    spyOn(fakeCtrlProxy, "getAccessibilityHierarchy").mockResolvedValue(notificationHierarchy);
+    const target = notificationRows[1];
+    const bounds = target.bounds!;
+    const x = Math.round((bounds.left + bounds.right) / 2);
+    await executor.executeAndroidSwipeWithAccessibility(
+      x,
+      bounds.bottom - 10,
+      x,
+      bounds.top + 10,
+      "up",
+      target,
+      { duration: 300 },
+      perf,
+    );
+    expect(fakeCtrlProxy.getActionHistory()).toEqual([]);
+    expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toEqual([
+      {
+        x1: x,
+        y1: bounds.bottom - 10,
+        x2: x,
+        y2: bounds.top + 10,
+        duration: 300,
+        offset: 100,
+        timeoutMs: 5000,
+        displayId: undefined,
+      },
+    ]);
+  });
+
+  test("duplicate container with a stable selector sends the scoped scroll", async () => {
+    spyOn(fakeCtrlProxy, "getAccessibilityHierarchy").mockResolvedValue(notificationHierarchy);
+    const target = { ...notificationRows[1], "test-tag": "selected-container" };
+    await executor.executeAndroidSwipeWithAccessibility(
+      540,
+      1500,
+      540,
+      1300,
+      "up",
+      target,
+      {},
+      perf,
+    );
+    expect(fakeCtrlProxy.getActionHistory()).toEqual([]);
+    expect(fakeCtrlProxy.getNodeActionHistory()).toMatchObject([
+      {
+        action: "scroll_forward",
+        selector: { resourceId: target["resource-id"], testTag: "selected-container" },
+      },
+    ]);
+    expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toEqual([]);
   });
 
   test("unsafe return duration rejects before either gesture", async () => {

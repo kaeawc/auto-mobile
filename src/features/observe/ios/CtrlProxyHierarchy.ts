@@ -381,7 +381,7 @@ export class CtrlProxyHierarchy {
         return {
           response: {
             hierarchy: cachedHierarchy.hierarchy,
-            [iosHierarchyAcquisition]: "client-cache",
+            [iosHierarchyAcquisition]: "client-cache" as const,
             fresh: true,
             updatedAt: cachedHierarchy.hierarchy.updatedAt,
             perfTiming: cachedHierarchy.perfTiming,

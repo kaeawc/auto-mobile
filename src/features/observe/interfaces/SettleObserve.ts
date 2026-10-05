@@ -33,6 +33,8 @@ export interface SettleOptions {
   skipWaitForFresh?: boolean;
   /** Embedded gate only: require independent Android extractions for floor-bearing polls. */
   requireFreshExtraction?: boolean;
+  /** Embedded gate: retry a contradicted finishing capture until the deadline; off for standalone settle. */
+  resumeOnTerminalMismatch?: boolean;
   /**
    * Skip the performance audit on every settle poll, forwarded verbatim to
    * {@link pollObserveUntil} (issue #6890 review). Off by default: the

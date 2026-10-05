@@ -23,6 +23,7 @@ import type { DeviceConnectionLostNotifier } from "../../../../src/features/obse
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
 import { loadCoordinateMappingVectors } from "../../../parity/coordinateMappingGoldenVectors";
 import { logger } from "../../../../src/utils/logger";
+import { loggerCallsWithPrefix } from "../../../helpers/loggerCallsWithPrefix";
 import {
   IOSCtrlProxyManager,
   type CtrlProxyIosManager,
@@ -391,6 +392,31 @@ describe("IOSCtrlProxyClient", function () {
 
     afterEach(() => {
       installDeviceDataStreamSocketServerForTesting(null);
+    });
+
+    test("screenshot backoff warns and preserves the failure result when capture throws", async () => {
+      const error = new Error("screenshot unavailable");
+      const subscribed = spyOn(streamServer, "hasSubscriberForDevice").mockReturnValue(true);
+      const capture = spyOn(ctrlProxyClient, "requestScreenshot").mockRejectedValue(error);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await ctrlProxyClient["captureScreenshotForBackoff"]()).toEqual({
+          success: false,
+          error: String(error),
+        });
+        expect(
+          loggerCallsWithPrefix(
+            warning.mock.calls,
+            "[IOSCtrlProxyClient] Screenshot backoff capture failed:",
+          ),
+        ).toEqual([
+          ["[IOSCtrlProxyClient] Screenshot backoff capture failed: screenshot unavailable", error],
+        ]);
+      } finally {
+        subscribed.mockRestore();
+        capture.mockRestore();
+        warning.mockRestore();
+      }
     });
 
     const cadenceMessages = (socket: CapturingWebSocket): Record<string, unknown>[] =>

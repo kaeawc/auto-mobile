@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import path from "node:path";
 import ts from "typescript";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
@@ -250,8 +250,30 @@ interface SourceIndex {
   imports: Map<string, { file: string; name: string }>;
   registrations: Array<{ name: string; handler: ts.Expression }>;
 }
-const serverDirectory = resolve(import.meta.dir, "../../src/server");
-function indexSource(file: string, source: string): SourceIndex {
+const serverDirectory = path.resolve(import.meta.dir, "../../src/server");
+
+function isInside(directory: string, target: string, pathApi = path): boolean {
+  const relative = pathApi.relative(directory, target);
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${pathApi.sep}`) &&
+    !pathApi.isAbsolute(relative)
+  );
+}
+
+function sourceKey(file: string, pathApi = path): string {
+  const normalized = pathApi.normalize(file);
+  // Windows glob results and resolved imports may differ in separators and case.
+  return pathApi.sep === "\\" ? normalized.replaceAll("\\", "/").toLowerCase() : normalized;
+}
+
+function indexSource(
+  file: string,
+  source: string,
+  directory = serverDirectory,
+  pathApi = path,
+): SourceIndex {
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   const index: SourceIndex = {
     source: ast,
@@ -289,9 +311,9 @@ function indexSource(file: string, source: string): SourceIndex {
       index.bindings.set(node.left.text, node.right);
     }
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-      const target = resolve(dirname(file), `${node.moduleSpecifier.text}.ts`);
+      const target = pathApi.resolve(pathApi.dirname(file), `${node.moduleSpecifier.text}.ts`);
       const names = node.importClause?.namedBindings;
-      if (target.startsWith(`${serverDirectory}/`) && names && ts.isNamedImports(names)) {
+      if (isInside(directory, target, pathApi) && names && ts.isNamedImports(names)) {
         for (const element of names.elements) {
           index.imports.set(element.name.text, {
             file: target,
@@ -327,7 +349,12 @@ function indexSource(file: string, source: string): SourceIndex {
   visit(ast);
   return index;
 }
-function auditHandler(indexes: Map<string, SourceIndex>, file: string, handler: ts.Node) {
+function auditHandler(
+  indexes: Map<string, SourceIndex>,
+  file: string,
+  handler: ts.Node,
+  pathApi = path,
+) {
   const visited = new Set<ts.Node>();
   const offenders: string[] = [];
   let structured = false;
@@ -336,7 +363,7 @@ function auditHandler(indexes: Map<string, SourceIndex>, file: string, handler: 
       return;
     }
     visited.add(node);
-    const index = indexes.get(currentFile)!;
+    const index = indexes.get(sourceKey(currentFile, pathApi))!;
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       const name = ts.isIdentifier(callee)
@@ -364,7 +391,8 @@ function auditHandler(indexes: Map<string, SourceIndex>, file: string, handler: 
         visit(currentFile, binding);
       }
       const imported = index.imports.get(node.text);
-      const importedBinding = imported && indexes.get(imported.file)?.bindings.get(imported.name);
+      const importedBinding =
+        imported && indexes.get(sourceKey(imported.file, pathApi))?.bindings.get(imported.name);
       if (imported && importedBinding) {
         visit(imported.file, importedBinding);
       }
@@ -402,7 +430,7 @@ let sourceAudit: Array<{ name: string; structured: boolean; offenders: string[] 
 beforeAll(() => {
   const indexes = new Map<string, SourceIndex>();
   for (const file of new Bun.Glob("**/*.ts").scanSync({ cwd: serverDirectory, absolute: true })) {
-    indexes.set(file, indexSource(file, readFileSync(file, "utf8")));
+    indexes.set(sourceKey(file), indexSource(file, readFileSync(file, "utf8")));
   }
   sourceAudit = [...indexes].flatMap(([file, index]) =>
     index.registrations.map(({ name, handler }) => ({
@@ -412,14 +440,14 @@ beforeAll(() => {
   );
 });
 test("every schema registration reaches a structured builder and no text-only builder", () => {
-  expect(sourceAudit.length).toBeGreaterThanOrEqual(25);
+  expect(sourceAudit.length).toBeGreaterThanOrEqual(26);
   expect(
     sourceAudit.filter(({ structured, offenders }) => !structured || offenders.length > 0),
   ).toEqual([]);
 });
 
 test("source guard detects helper and raw text envelopes while exempting error envelopes", () => {
-  const file = join(serverDirectory, "fixture.ts");
+  const file = path.join(serverDirectory, "fixture.ts");
   const index = indexSource(
     file,
     `
@@ -430,7 +458,7 @@ test("source guard detects helper and raw text envelopes while exempting error e
     function error() { return { content: [], isError: true }; }
   `,
   );
-  const indexes = new Map([[file, index]]);
+  const indexes = new Map([[sourceKey(file), index]]);
   expect(auditHandler(indexes, file, index.bindings.get("bad")!).offenders).toHaveLength(1);
   expect(auditHandler(indexes, file, index.bindings.get("raw")!).offenders).toHaveLength(1);
   expect(auditHandler(indexes, file, index.bindings.get("good")!)).toEqual({
@@ -438,4 +466,105 @@ test("source guard detects helper and raw text envelopes while exempting error e
     offenders: [],
   });
   expect(auditHandler(indexes, file, index.bindings.get("error")!).offenders).toEqual([]);
+});
+
+test("source paths use Windows containment and canonical keys", () => {
+  const directory = String.raw`C:\repo\src\server`;
+  const file = String.raw`C:\repo\src\server\handlers\x.ts`;
+  expect(isInside(directory, file, path.win32)).toBe(true);
+  expect(isInside(directory, "c:/repo/src/server/handlers/x.ts", path.win32)).toBe(true);
+  expect(isInside(directory, directory, path.win32)).toBe(false);
+  expect(isInside(directory, String.raw`C:\repo\src`, path.win32)).toBe(false);
+  expect(isInside(directory, String.raw`C:\repo\src\other\x.ts`, path.win32)).toBe(false);
+  expect(isInside(directory, String.raw`C:\repo\src\server-extra\x.ts`, path.win32)).toBe(false);
+  expect(isInside(directory, String.raw`D:\repo\src\server\x.ts`, path.win32)).toBe(false);
+  expect(isInside(directory, String.raw`C:\repo\src\server\..helpers\x.ts`, path.win32)).toBe(true);
+  expect(isInside(directory, String.raw`C:\repo\src\server\..\other\x.ts`, path.win32)).toBe(false);
+  expect(sourceKey(file, path.win32)).toBe("c:/repo/src/server/handlers/x.ts");
+  expect(sourceKey("c:/repo/src/server/handlers/../handlers/X.ts", path.win32)).toBe(
+    sourceKey(file, path.win32),
+  );
+  // POSIX filenames remain case-sensitive and may contain literal backslashes.
+  expect(sourceKey("/repo/server/../server/X.ts", path.posix)).toBe("/repo/server/X.ts");
+  expect(sourceKey(String.raw`/repo/server/a\b.ts`, path.posix)).toBe(
+    String.raw`/repo/server/a\b.ts`,
+  );
+});
+
+test("source guard follows Windows cross-file handlers and rejects text-only builders", () => {
+  const directory = String.raw`C:\repo\src\server`;
+  const registrationFile = String.raw`C:\repo\src\server\registrations.ts`;
+  const handlerFile = "c:/repo/src/server/handlers/responses.ts";
+  const registrationIndex = indexSource(
+    registrationFile,
+    `import { good as structuredHandler, bad as textHandler } from "./handlers/responses";
+ToolRegistry.register("structured", "", schema, structuredHandler, { outputSchema: schema });
+ToolRegistry.registerDeviceAware("text", "", schema, textHandler, { outputSchema: schema });`,
+    directory,
+    path.win32,
+  );
+  const handlerIndex = indexSource(
+    handlerFile,
+    `export function good() { return createStructuredToolResponse({ success: true }); }
+export function bad() { return createJSONToolResponse({ success: true }); }`,
+    directory,
+    path.win32,
+  );
+  const indexes = new Map([
+    [sourceKey(registrationFile, path.win32), registrationIndex],
+    [sourceKey(handlerFile, path.win32), handlerIndex],
+  ]);
+  expect(registrationIndex.registrations).toHaveLength(2);
+  expect(registrationIndex.imports.get("structuredHandler")).toEqual({
+    file: String.raw`C:\repo\src\server\handlers\responses.ts`,
+    name: "good",
+  });
+  const results = registrationIndex.registrations.map(({ name, handler }) => ({
+    name,
+    ...auditHandler(indexes, registrationFile, handler, path.win32),
+  }));
+  expect(results).toEqual([
+    { name: "structured", structured: true, offenders: [] },
+    {
+      name: "text",
+      structured: false,
+      offenders: [String.raw`C:\repo\src\server\handlers\responses.ts:2`],
+    },
+  ]);
+});
+
+test("source guard preserves audit results and line numbers with CRLF input", () => {
+  const directory = String.raw`C:\repo\src\server`;
+  const file = String.raw`C:\repo\src\server\fixture.ts`;
+  const source = `function helper() {
+  return createJSONToolResponse({ success: true });
+}
+function mixed() {
+  helper();
+  return createStructuredToolResponse({ success: true });
+}
+function raw() {
+  return { content: [{ type: "text", text: "ok" }] };
+}
+function error() {
+  return { content: [], isError: true };
+}
+ToolRegistry.register("mixed", "", schema, mixed, { outputSchema: schema });
+ToolRegistry.register("raw", "", schema, raw, { outputSchema: schema });
+ToolRegistry.register("error", "", schema, error, { outputSchema: schema });`;
+  const audit = (input: string) => {
+    const index = indexSource(file, input, directory, path.win32);
+    const indexes = new Map([[sourceKey(file, path.win32), index]]);
+    return index.registrations.map(({ name, handler }) => ({
+      name,
+      ...auditHandler(indexes, file, handler, path.win32),
+    }));
+  };
+  const lf = audit(source);
+  expect(lf).toEqual([
+    { name: "mixed", structured: true, offenders: [`${file}:2`] },
+    { name: "raw", structured: false, offenders: [`${file}:9: text-only envelope`] },
+    { name: "error", structured: false, offenders: [] },
+  ]);
+  expect(audit(source.replace(/\n/g, "\r\n"))).toEqual(lf);
 });

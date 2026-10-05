@@ -64,7 +64,7 @@ import {
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import {
   DEFAULT_VISION_CONFIG,
@@ -133,6 +133,7 @@ import {
   androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
+  indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { executeTouchscreenInput } from "./touchscreenInput";
 import {
@@ -5055,7 +5056,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   /**
    * Execute iOS tap using VoiceOver accessibility actions.
-   * Falls back to coordinate-based tap if no label is resolvable or if the action fails.
+   * Falls back if no label is resolvable or activation is confirmed not performed.
    *
    * @param action - The tap action to perform
    * @param element - The target element
@@ -5102,7 +5103,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       },
     );
 
-    this.invalidateIosCacheOnSuccess(result);
+    this.confirmVoiceOverActivation(result);
 
     if (!result.success) {
       logger.warn(
@@ -5111,6 +5112,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
       await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
     }
+  }
+
+  private confirmVoiceOverActivation(result: CtrlProxyActionResult): void {
+    if (result.dispatched && result.acknowledged !== true) {
+      throw indeterminateTapError(result.error);
+    }
+    this.invalidateIosCacheOnSuccess(result);
   }
 
   private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {

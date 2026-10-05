@@ -1,3 +1,4 @@
+import { parseAndroidRuntimePermissions } from "./parseAndroidRuntimePermissions";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -122,31 +123,6 @@ export interface AppPermissionsDependencies {
   simctl?: IosSimulatorPrivacyClient | null;
   tccReader?: TccPermissionReader | null;
   iosPhysicalClient?: IosPhysicalPrivacyClient | null;
-}
-
-function parseAndroidRuntimePermissions(output: string): Map<string, AppPermissionStateResult> {
-  const permissions = new Map<string, AppPermissionStateResult>();
-  const permissionLine = /^\s*([A-Za-z0-9_.]+):\s+granted=(true|false)\b(.*)$/;
-
-  for (const line of output.split(/\r?\n/)) {
-    const match = line.match(permissionLine);
-    if (!match) {
-      continue;
-    }
-
-    const [, permission, granted, rest] = match;
-    permissions.set(permission, {
-      permission,
-      state: granted === "true" ? "granted" : "denied",
-      source: "androidRuntime",
-      raw: {
-        granted: granted === "true",
-        flags: rest.trim() || null,
-      },
-    });
-  }
-
-  return permissions;
 }
 
 export class AppPermissions {
@@ -513,15 +489,16 @@ export class AppPermissions {
           `Package not installed: ${normalizedAppId}`,
         );
       }
-      const parsed = parseAndroidRuntimePermissions(stdout);
-      if (parsed.size === 0 && !/Package \[/.test(stdout)) {
+      const state = parseAndroidRuntimePermissions(stdout, normalizedAppId);
+      if (!state) {
         return this.androidQueryFailure(
           normalizedAppId,
           `Package lookup returned no data for ${normalizedAppId}`,
         );
       }
+      const parsed = new Map([...state.installPermissions, ...state.runtimePermissions]);
       const permissionNames =
-        requestedPermissions.length > 0 ? requestedPermissions : [...parsed.keys()];
+        requestedPermissions.length > 0 ? requestedPermissions : [...state.requestedPermissions];
 
       return {
         success: true,

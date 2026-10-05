@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BootedDevice } from "../../../src/models";
+import { ActionableError, BootedDevice } from "../../../src/models";
 import { GrantAndroidPermissions } from "../../../src/features/action/GrantAndroidPermissions";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -13,6 +13,119 @@ const androidDevice: BootedDevice = {
 };
 
 describe("GrantAndroidPermissions", () => {
+  test.each([
+    { permissionAction: "grant", userId: 0 },
+    { permissionAction: "grant", userId: 10 },
+    { permissionAction: "revoke", userId: 0 },
+    { permissionAction: "revoke", userId: 10 },
+  ] as const)(
+    "$permissionAction preserves explicit user $userId without install probes",
+    async ({ permissionAction, userId }) => {
+      const adb = new FakeAdbExecutor();
+      adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+      adb.setUsers([
+        { userId: 0, name: "Owner", flags: 0x13, running: true },
+        { userId: 10, name: "Work", flags: 0x30, running: true },
+      ]);
+      const action = new GrantAndroidPermissions(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => new NoOpPerformanceTracker(),
+      );
+
+      const result = await action.execute("com.example.app", {
+        action: permissionAction,
+        userId,
+        permissions: ["android.permission.CAMERA"],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.userId).toBe(userId);
+      expect(adb.getExecutedCommands()).toEqual([
+        `shell pm ${permissionAction} --user ${userId} 'com.example.app' 'android.permission.CAMERA'`,
+      ]);
+    },
+  );
+
+  test.each(["grant", "revoke"] as const)(
+    "%s targets the owner for a personal-only app with a running work profile",
+    async (permissionAction) => {
+      const adb = new FakeAdbExecutor();
+      adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+      adb.setUsers([
+        { userId: 0, name: "Owner", flags: 0x13, running: true },
+        { userId: 10, name: "Work", flags: 0x30, running: true },
+      ]);
+      adb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.example.app",
+        stderr: "",
+      });
+      adb.setCommandResponse("shell pm list packages --user 10", {
+        stdout: "package:com.example.other",
+        stderr: "",
+      });
+      const action = new GrantAndroidPermissions(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => new NoOpPerformanceTracker(),
+      );
+
+      const result = await action.execute("com.example.app", {
+        action: permissionAction,
+        permissions: ["android.permission.CAMERA"],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.userId).toBe(0);
+      expect(
+        adb
+          .getExecutedCommands()
+          .filter((command) => command.startsWith(`shell pm ${permissionAction} `)),
+      ).toEqual([
+        `shell pm ${permissionAction} --user 0 'com.example.app' 'android.permission.CAMERA'`,
+      ]);
+    },
+  );
+
+  test.each(["grant", "revoke"] as const)(
+    "%s rejects an app installed for no user before changing permissions",
+    async (permissionAction) => {
+      const adb = new FakeAdbExecutor();
+      adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+      adb.setUsers([
+        { userId: 0, name: "Owner", flags: 0x13, running: true },
+        { userId: 10, name: "Work", flags: 0x30, running: true },
+      ]);
+      for (const userId of [0, 10]) {
+        adb.setCommandResponse(`shell pm list packages --user ${userId}`, {
+          stdout: "package:com.example.other",
+          stderr: "",
+        });
+      }
+      const perf = new FakeRecordingPerformanceTracker();
+      const action = new GrantAndroidPermissions(
+        androidDevice,
+        new FakeAdbClientFactory(adb),
+        () => perf,
+      );
+      const execution = action.execute("com.example.app", {
+        action: permissionAction,
+        permissions: ["android.permission.CAMERA"],
+      });
+
+      await expect(execution).rejects.toBeInstanceOf(ActionableError);
+      await expect(execution).rejects.toThrow(
+        "App com.example.app is not installed for Android user 10",
+      );
+      expect(
+        adb
+          .getExecutedCommands()
+          .some((command) => command.startsWith(`shell pm ${permissionAction} `)),
+      ).toBe(false);
+      expect(perf.endCalls).toBe(1);
+    },
+  );
+
   test("ends the performance block exactly once when target-user resolution throws", async () => {
     const adb = new FakeAdbExecutor();
     const failure = new Error("adb offline during user resolution");

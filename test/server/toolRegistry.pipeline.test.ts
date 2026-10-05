@@ -8,6 +8,8 @@ import {
 import type { BootedDevice } from "../../src/models";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { DefaultAppCleanupService } from "../../src/server/AppCleanupService";
+import { ActionableError } from "../../src/models";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import type {
   ObservationArtifactPayload,
@@ -177,6 +179,65 @@ describe("ToolRegistry device-aware pipeline", () => {
     expect(response).toEqual({ success: true, finalized: true });
     expect(events).toEqual(["resolve", "audit", "handler", "after", "planLifecycle", "record"]);
   });
+
+  test.each(["result", "throw"])(
+    "executePlan keeps its passed result when app cleanup fails via %s",
+    async (outcome) => {
+      const log = new FakeLogger();
+      const registry = new ToolRegistryClass(new FakeTimer(), log);
+      registry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
+      registry.setCleanupService(
+        new DefaultAppCleanupService({
+          logger: log,
+          createClearAppData: () => ({
+            execute: async () => {
+              if (outcome === "throw") {
+                throw new ActionableError("App is not installed");
+              }
+              return {
+                success: false,
+                packageName: "com.example.app",
+                error: "App is not installed",
+              };
+            },
+          }),
+        }),
+      );
+      const restore = registry.setPipelineOverridesForTesting({
+        displayInventory: new FakeDisplayInventoryProvider(),
+        executionTargetResolver: {
+          resolveExecutionTarget: async (input) => ({
+            args: input.args,
+            device,
+            internalCall: false,
+            baseSessionUuid: undefined,
+            sessionUuid: undefined,
+            shouldResolveDevice: true,
+          }),
+        },
+        auditRunner: {
+          run: async (input) =>
+            input.handler(input.device, input.args, input.progress, input.signal),
+        },
+        afterToolCall: {
+          handle: async (input) => ({ durationMs: 0, finalizedResponse: input.response }),
+        },
+      });
+      try {
+        const passedPlan = { success: true, executedSteps: 1, totalSteps: 1 };
+        registry.registerDeviceAware("executePlan", "Plan", z.object({}), async () => passedPlan);
+        const response = await registry
+          .getTool("executePlan")!
+          .handler({ cleanupAppId: "com.example.app", cleanupClearAppData: true });
+        expect(response).toEqual(passedPlan);
+        expect(log.at("warn")).toHaveLength(1);
+        expect(log.at("warn")[0].message).toContain("App is not installed");
+      } finally {
+        restore();
+        registry.clearTools();
+      }
+    },
+  );
 
   test("returns a settled handler response when device-loss cancellation arrives after it succeeds", async () => {
     const controller = new AbortController();

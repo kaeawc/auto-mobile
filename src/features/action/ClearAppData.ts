@@ -5,6 +5,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { isPackageInstalledForUser } from "../../utils/android-cmdline-tools/isPackageInstalledForUser";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import {
@@ -104,11 +105,22 @@ export class ClearAppData {
       const targetUserId = await perf.track("detectTargetUser", async () => {
         return (
           await new AndroidUserTargetResolver(adb).resolve({
-            packageName,
             explicitUserId: userId,
+            packageName,
+            installedOnly: true,
           })
         ).userId;
       });
+
+      // Explicit users include launchApp's already-resolved target; leave that path unchanged.
+      if (
+        userId === undefined &&
+        !(await isPackageInstalledForUser(adb, packageName, targetUserId))
+      ) {
+        throw new ActionableError(
+          `App ${packageName} is not installed for Android user ${targetUserId}; install the app or specify userId for the user where it is installed`,
+        );
+      }
 
       try {
         // pm clear both clears data AND stops the app, no need for separate force-stop

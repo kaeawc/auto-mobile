@@ -374,6 +374,17 @@ function launchVerificationFailureMessage(reason: LaunchVerificationFailureReaso
   return reason;
 }
 
+function buildTerminateMessage(appId: string, result: TerminateAppResult): string {
+  if (result.wasInstalled === false) {
+    return `App ${appId} is not installed; nothing to terminate`;
+  }
+  if (result.wasRunning === false) {
+    return `App ${appId} was not running`;
+  }
+  // Preserve the existing message when the backend cannot establish running state.
+  return `Terminated app ${appId}`;
+}
+
 function buildLaunchMessage(
   appId: string,
   verified: boolean | undefined,
@@ -1053,7 +1064,7 @@ const terminateAppHandler = async (
     }
 
     return createStructuredToolResponse({
-      message: `Terminated app ${args.appId}`,
+      message: buildTerminateMessage(args.appId, result),
       observation: result.observation,
       ...result,
     });

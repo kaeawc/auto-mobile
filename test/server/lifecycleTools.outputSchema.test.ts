@@ -187,6 +187,61 @@ test("terminateApp preserves attached observation text", async () => {
   );
 });
 
+for (const target of [
+  device,
+  { name: "simulator", deviceId: "12345678-1234-1234-1234-123456789ABC", platform: "ios" },
+  { name: "physical", deviceId: "00008110-001234567890ABCD", platform: "ios" },
+] satisfies BootedDevice[]) {
+  test.each([
+    {
+      state: "not installed",
+      fields: { wasInstalled: false, wasRunning: false },
+      message: "App com.example is not installed; nothing to terminate",
+    },
+    {
+      state: "not running",
+      fields: { wasInstalled: true, wasRunning: false },
+      message: "App com.example was not running",
+    },
+    {
+      state: "running",
+      fields: { wasInstalled: true, wasRunning: true },
+      message: "Terminated app com.example",
+    },
+    {
+      state: "unknown",
+      fields: {},
+      message: "Terminated app com.example",
+    },
+    {
+      state: "running state unknown",
+      fields: { wasInstalled: true },
+      message: "Terminated app com.example",
+    },
+  ])(
+    `terminateApp on ${target.name} reports $state without changing fields`,
+    async ({ fields, message }) => {
+      const result: TerminateAppResult = {
+        success: true,
+        packageName: "com.example",
+        wasForeground: false,
+        ...(target.platform === "android" ? { userId: 0 } : {}),
+        ...fields,
+      };
+      setTerminateAppToolDependencies({
+        createTerminateApp: () => ({ execute: async () => result }),
+      });
+      const tool = ToolRegistry.getTool("terminateApp")!;
+      const response = await tool.deviceAwareHandler!(target, { appId: "com.example" });
+      const payload = { message, observation: result.observation, ...result };
+      expect(response.structuredContent).toEqual(payload);
+      expect(response.content).toEqual(createJSONToolResponse(payload).content);
+      expect(response.isError).toBeUndefined();
+      expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
+    },
+  );
+}
+
 for (const name of ["launchApp", "terminateApp"] as const) {
   test(`${name} failures still throw without manufacturing a text payload`, async () => {
     setLaunchAppToolDependencies({

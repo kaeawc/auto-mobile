@@ -633,16 +633,27 @@ async function deleteUnrecordedVmSnapshot(
   }
 }
 
-async function recordFailedVmSnapshotReclaim(
-  device: BootedDevice,
-  snapshotName: string,
-  includeSettings: boolean,
-  snapshotRepository: DeviceSnapshotRepository,
-  avdSnapshots: AvdSnapshotOperations,
-  vmSnapshotTimeoutMs: number,
-  now: () => Date,
-  error: unknown,
-): Promise<boolean> {
+interface FailedVmSnapshotReclaimContext {
+  device: BootedDevice;
+  snapshotName: string;
+  includeSettings: boolean;
+  snapshotRepository: DeviceSnapshotRepository;
+  avdSnapshots: AvdSnapshotOperations;
+  vmSnapshotTimeoutMs: number;
+  now: () => Date;
+  error: unknown;
+}
+
+async function recordFailedVmSnapshotReclaim({
+  device,
+  snapshotName,
+  includeSettings,
+  snapshotRepository,
+  avdSnapshots,
+  vmSnapshotTimeoutMs,
+  now,
+  error,
+}: FailedVmSnapshotReclaimContext): Promise<boolean> {
   const reason = `VM snapshot save was dispatched but capture failed: ${errorMessage(error)}`;
   let sizeBytes: number | null = null;
   try {
@@ -738,12 +749,18 @@ function isLegacyManifest(value: unknown): value is DeviceSnapshotManifest {
     typeof manifest.deviceId === "string" &&
     typeof manifest.deviceName === "string" &&
     (manifest.platform === "android" || manifest.platform === "ios") &&
-    (manifest.snapshotType === "adb" ||
-      manifest.snapshotType === "vm" ||
-      manifest.snapshotType === "simctl" ||
-      manifest.snapshotType === "app_data") &&
+    isLegacySnapshotType(manifest.snapshotType) &&
     typeof manifest.includeAppData === "boolean" &&
     typeof manifest.includeSettings === "boolean"
+  );
+}
+
+function isLegacySnapshotType(snapshotType: unknown): boolean {
+  return (
+    snapshotType === "adb" ||
+    snapshotType === "vm" ||
+    snapshotType === "simctl" ||
+    snapshotType === "app_data"
   );
 }
 
@@ -2280,16 +2297,16 @@ export async function captureDeviceSnapshot(
             device.deviceId.startsWith("emulator-") &&
             (wasVmSnapshotSaveDispatched(error) || vmSnapshotWasCaptured)
           ) {
-            const recordedPendingReclaim = await recordFailedVmSnapshotReclaim(
+            const recordedPendingReclaim = await recordFailedVmSnapshotReclaim({
               device,
               snapshotName,
-              mergedConfig.includeSettings,
+              includeSettings: mergedConfig.includeSettings,
               snapshotRepository,
               avdSnapshots,
-              mergedConfig.vmSnapshotTimeoutMs,
+              vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
               now,
               error,
-            );
+            });
             if (recordedPendingReclaim) {
               await notifySnapshotResources();
             }

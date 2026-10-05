@@ -53,6 +53,93 @@ interface EventGroup {
   errors: number;
 }
 
+type HostEntry = {
+  scheme: string;
+  host: string;
+  pathGroups: Map<string, EventGroup[]>;
+};
+
+function accumulateEvent(hostMap: Map<string, HostEntry>, event: NetworkEventWithId): void {
+  let scheme = "https";
+  let host = event.host ?? "unknown";
+
+  if (event.url) {
+    try {
+      const parsed = new URL(event.url);
+      scheme = parsed.protocol.replace(":", "");
+      host = parsed.hostname;
+    } catch {
+      // Captured URLs may be malformed; the event host still supplies a usable graph fallback.
+      logger.debug("Network graph URL could not be parsed; using fallback host");
+    }
+  }
+
+  const hostKey = `${scheme}://${host}`;
+  let entry = hostMap.get(hostKey);
+  if (!entry) {
+    entry = { scheme, host, pathGroups: new Map() };
+    hostMap.set(hostKey, entry);
+  }
+
+  const path = event.path ?? "/";
+  const groupKey = `${path}::${event.method}`;
+
+  let groups = entry.pathGroups.get(groupKey);
+  if (!groups) {
+    groups = [];
+    entry.pathGroups.set(groupKey, groups);
+  }
+  let group = groups.find((g) => g.method === event.method);
+  if (!group) {
+    group = {
+      method: event.method,
+      contentType: event.contentType,
+      durations: [],
+      success: 0,
+      errors: 0,
+    };
+    groups.push(group);
+  }
+
+  group.durations.push(event.durationMs);
+  if (isFailedNetworkRequest(event)) {
+    group.errors++;
+  } else {
+    group.success++;
+  }
+}
+
+function insertPathGroups(
+  root: Record<string, GraphNode>,
+  pathGroups: Map<string, EventGroup[]>,
+  minRequests: number,
+): void {
+  for (const [groupKey, groups] of pathGroups) {
+    const [path] = groupKey.split("::");
+    const segments = path.split("/").filter((s) => s.length > 0);
+
+    for (const group of groups) {
+      const totalRequests = group.success + group.errors;
+      if (totalRequests < minRequests) {
+        continue;
+      }
+
+      const sorted = [...group.durations].sort((a, b) => a - b);
+      const leaf: GraphLeaf & { _durations?: number[] } = {
+        method: group.method,
+        type: group.contentType ?? undefined,
+        success: group.success,
+        errors: group.errors,
+        p50: Math.round(computePercentile(sorted, 50)),
+        p95: Math.round(computePercentile(sorted, 95)),
+        _durations: group.durations,
+      };
+
+      insertIntoTree(root, segments, 0, leaf);
+    }
+  }
+}
+
 export function buildNetworkGraph(
   events: NetworkEventWithId[],
   options: { minRequests?: number } = {},
@@ -60,59 +147,10 @@ export function buildNetworkGraph(
   const minRequests = options.minRequests ?? 1;
 
   // Group events by scheme+host+path+method
-  const hostMap = new Map<
-    string,
-    { scheme: string; host: string; pathGroups: Map<string, EventGroup[]> }
-  >();
+  const hostMap = new Map<string, HostEntry>();
 
   for (const event of events) {
-    let scheme = "https";
-    let host = event.host ?? "unknown";
-
-    if (event.url) {
-      try {
-        const parsed = new URL(event.url);
-        scheme = parsed.protocol.replace(":", "");
-        host = parsed.hostname;
-      } catch {
-        // Captured URLs may be malformed; the event host still supplies a usable graph fallback.
-        logger.debug("Network graph URL could not be parsed; using fallback host");
-      }
-    }
-
-    const hostKey = `${scheme}://${host}`;
-    let entry = hostMap.get(hostKey);
-    if (!entry) {
-      entry = { scheme, host, pathGroups: new Map() };
-      hostMap.set(hostKey, entry);
-    }
-
-    const path = event.path ?? "/";
-    const groupKey = `${path}::${event.method}`;
-
-    let groups = entry.pathGroups.get(groupKey);
-    if (!groups) {
-      groups = [];
-      entry.pathGroups.set(groupKey, groups);
-    }
-    let group = groups.find((g) => g.method === event.method);
-    if (!group) {
-      group = {
-        method: event.method,
-        contentType: event.contentType,
-        durations: [],
-        success: 0,
-        errors: 0,
-      };
-      groups.push(group);
-    }
-
-    group.durations.push(event.durationMs);
-    if (isFailedNetworkRequest(event)) {
-      group.errors++;
-    } else {
-      group.success++;
-    }
+    accumulateEvent(hostMap, event);
   }
 
   const result: GraphHost[] = [];
@@ -120,30 +158,7 @@ export function buildNetworkGraph(
   for (const [, { scheme, host, pathGroups }] of hostMap) {
     const root: Record<string, GraphNode> = createPathNode();
 
-    for (const [groupKey, groups] of pathGroups) {
-      const [path] = groupKey.split("::");
-      const segments = path.split("/").filter((s) => s.length > 0);
-
-      for (const group of groups) {
-        const totalRequests = group.success + group.errors;
-        if (totalRequests < minRequests) {
-          continue;
-        }
-
-        const sorted = [...group.durations].sort((a, b) => a - b);
-        const leaf: GraphLeaf & { _durations?: number[] } = {
-          method: group.method,
-          type: group.contentType ?? undefined,
-          success: group.success,
-          errors: group.errors,
-          p50: Math.round(computePercentile(sorted, 50)),
-          p95: Math.round(computePercentile(sorted, 95)),
-          _durations: group.durations,
-        };
-
-        insertIntoTree(root, segments, 0, leaf);
-      }
-    }
+    insertPathGroups(root, pathGroups, minRequests);
 
     if (Object.keys(root).length > 0) {
       stripDurations(root);
@@ -190,6 +205,32 @@ function createPathNode(): Record<string, GraphNode> {
   return Object.create(null) as Record<string, GraphNode>;
 }
 
+function insertLeaf(
+  node: Record<string, GraphNode>,
+  key: string,
+  isParam: boolean,
+  leaf: GraphLeaf,
+): void {
+  // Leaf position — key includes method to separate GET/POST/etc on the same path
+  const leafKey = leaf.method ? `${key}[${leaf.method}]` : key;
+  const existing = node[leafKey];
+  if (existing && "success" in existing) {
+    // Merge stats with percentile recomputation (parameterized path collapse)
+    mergeLeafStats(existing as GraphLeaf & { _durations?: number[] }, leaf);
+  } else if (existing && "paths" in existing) {
+    // Existing branch — add stats to branch node (becomes a combined leaf+branch)
+    const combined = existing as GraphLeaf & GraphBranch & { _durations?: number[] };
+    mergeLeafStats(combined, leaf);
+    combined.method = leaf.method;
+    combined.type = leaf.type;
+  } else {
+    node[leafKey] = leaf;
+    if (isParam) {
+      (node[leafKey] as GraphLeaf & { parameterized?: boolean }).parameterized = true;
+    }
+  }
+}
+
 function insertIntoTree(
   node: Record<string, GraphNode>,
   segments: string[],
@@ -212,24 +253,7 @@ function insertIntoTree(
   const key = isParam ? "{id}" : segment;
 
   if (index === segments.length - 1) {
-    // Leaf position — key includes method to separate GET/POST/etc on the same path
-    const leafKey = leaf.method ? `${key}[${leaf.method}]` : key;
-    const existing = node[leafKey];
-    if (existing && "success" in existing) {
-      // Merge stats with percentile recomputation (parameterized path collapse)
-      mergeLeafStats(existing as GraphLeaf & { _durations?: number[] }, leaf);
-    } else if (existing && "paths" in existing) {
-      // Existing branch — add stats to branch node (becomes a combined leaf+branch)
-      const combined = existing as GraphLeaf & GraphBranch & { _durations?: number[] };
-      mergeLeafStats(combined, leaf);
-      combined.method = leaf.method;
-      combined.type = leaf.type;
-    } else {
-      node[leafKey] = leaf;
-      if (isParam) {
-        (node[leafKey] as GraphLeaf & { parameterized?: boolean }).parameterized = true;
-      }
-    }
+    insertLeaf(node, key, isParam, leaf);
   } else {
     // Branch position
     if (!node[key]) {

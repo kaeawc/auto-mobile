@@ -3634,7 +3634,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         action: options.action === "focus" ? "tap" : options.action,
         duration: options.duration,
       },
-      context,
+      { ...context, timer: this.timer },
     );
   }
 

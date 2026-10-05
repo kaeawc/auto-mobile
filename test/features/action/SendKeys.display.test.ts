@@ -304,6 +304,29 @@ describe("sendKeys Android focus read routing", () => {
     }
   }
 
+  test("focus, clear verification and final reads skip screenshots on the requested display", async () => {
+    const h = recordingHarness("cover");
+    h.observer.captureScreenshot = async () => {};
+    const result = await h.action.execute(
+      [{ action: "type", text: "abc", mode: "eventOnly", operation: "replace" }],
+      undefined,
+      undefined,
+      undefined,
+      "cover",
+    );
+    expect(result.success).toBe(true);
+    expect(h.reads.length).toBe(4);
+    expect(h.reads[0]).toMatchObject({ display: "cover", skipScreenshot: true });
+    expect(h.reads[1]).toMatchObject({ display: "cover", skipScreenshot: true });
+    expect(h.reads[2]).toMatchObject({ display: "cover", skipScreenshot: true, minTimestamp: 0 });
+    expect(h.reads[3]).toMatchObject({
+      display: "cover",
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+      minTimestamp: 1,
+    });
+  });
+
   test("an explicit display overrides the inherited session pin", async () => {
     const h = recordingHarness("cover");
     const result = await runWithSelectedDisplayPin(

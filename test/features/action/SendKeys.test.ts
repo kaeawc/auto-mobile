@@ -9,7 +9,14 @@ import { DefaultElementParser } from "../../../src/features/utility/ElementParse
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { describe, expect, mock, spyOn, test } from "bun:test";
-import { android, createSendKeysHarness, observer as harnessObserver } from "./SendKeysTestHarness";
+import {
+  android,
+  createSendKeysHarness,
+  createSendKeysCaptureHarness,
+  observer as harnessObserver,
+} from "./SendKeysTestHarness";
+import { settleEmbeddedObservationInResponse } from "../../../src/server/embeddedObservationSettle";
+import { createStructuredToolResponse, getStructuredPayload } from "../../../src/utils/toolUtils";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
@@ -740,8 +747,8 @@ describe("SendKeys", () => {
       await executor.type({ action: "type", text: "123" }, undefined, "external"),
     ).toMatchObject({ success: true });
     expect(observer.options).toEqual([
-      { signal: undefined, freshness: "fresh", display: "external" },
-      { signal: undefined, freshness: "fresh", display: "external" },
+      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
     ]);
   });
 
@@ -785,7 +792,9 @@ describe("SendKeys", () => {
       observer.options.filter(
         (options) => options?.freshness === "fresh" && options.minTimestamp === undefined,
       ),
-    ).toEqual([{ signal: undefined, freshness: "fresh", display: "external" }]);
+    ).toEqual([
+      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+    ]);
   });
 
   test.each(["123", "one *bold* two `code` tail"])(
@@ -2327,7 +2336,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
       }
       // Auto also observes once before typing to choose password-safe delivery.
       expect(observer.calls).toBe((mode === "auto" ? 1 : 0) + (success ? 1 : 3));
-      expect(observer.options.at(-1)).toEqual({ signal: undefined, freshness: "fresh" });
+      expect(observer.options.at(-1)).toEqual({
+        signal: undefined,
+        freshness: "fresh",
+        skipScreenshot: true,
+      });
       expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
       expect(textClient.calls.includes("clear")).toBe(operation === "replace");
       expect(
@@ -2397,7 +2410,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
     if (!success) {
       expect(result.error).toContain("IME partial commit");
     }
-    expect(observer.options).toContainEqual({ signal: undefined, freshness: "fresh" });
+    expect(observer.options).toContainEqual({
+      signal: undefined,
+      freshness: "fresh",
+      skipScreenshot: true,
+    });
     expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
@@ -3725,6 +3742,101 @@ describe("SendKeys IME focus regression", () => {
 });
 
 describe("SendKeys post-action capture boundary", () => {
+  test.each(["focused", "imeAction", "fallback", "failure"] as const)(
+    "%s takes one terminal screenshot after the response gate chooses its observation",
+    async (scenario) => {
+      const h = createSendKeysCaptureHarness(scenario);
+      await runWithPostActionCaptureScope(undefined, async () => {
+        const result = await h.action.execute(h.commands);
+        expect(result.success).toBe(scenario !== "failure");
+        expect(h.captures).toHaveLength(0);
+        expect(h.reads.every((read) => read.skipScreenshot === true)).toBe(true);
+        expect(hasPendingTerminalScreenshot(result.observation!)).toBe(true);
+        const beforeGate = structuredClone(result);
+        const response = createStructuredToolResponse(result);
+        await settleEmbeddedObservationInResponse(response, {
+          name: "sendKeys",
+          args: { commands: h.commands },
+          internal: false,
+          createSettleObserve: () => h.settleObserve,
+        });
+        expect(h.captures).toHaveLength(1);
+        const final = getStructuredPayload(response)!;
+        const captured = h.captures[0];
+        const expectedId =
+          scenario === "imeAction" ? "settle-2" : beforeGate.observation!.observationId;
+        expect(captured.observationId).toBe(expectedId);
+        expect(final.observation).toMatchObject({
+          observationId: expectedId,
+          screenshotPath: `${expectedId}.png`,
+          screenshotCapturedAt: 123,
+          settled: scenario === "imeAction",
+        });
+        expect(final.commands).toEqual(beforeGate.commands);
+        expect(final.success).toBe(beforeGate.success);
+        expect(final.error).toBe(beforeGate.error);
+        expect(final.completedCommands).toBe(beforeGate.completedCommands);
+        expect(final.observation?.viewHierarchy?.hierarchy.node).toMatchObject({
+          $: { text: scenario === "failure" ? "" : "shot0" },
+        });
+        if (scenario === "fallback") {
+          expect(final.commands[0].resolvedMode).toBe("eventAll");
+          expect(h.deliveries.map((delivery) => delivery.text).join("")).toBe("shot0");
+        }
+        if (scenario === "imeAction") {
+          expect(h.events.slice(-3)).toEqual([
+            "settle:start",
+            "settle:chosen:settle-2",
+            "capture:settle-2",
+          ]);
+        } else {
+          // In-place and failed actions retain exactly the action's final hierarchy.
+          expect(final.observation).toMatchObject({
+            viewHierarchy: beforeGate.observation!.viewHierarchy,
+            display: beforeGate.observation!.display,
+            updatedAt: beforeGate.observation!.updatedAt,
+          });
+          expect(h.events).not.toContain("settle:start");
+        }
+        expect(h.events.filter((event) => event.startsWith("capture:"))).toEqual([
+          `capture:${expectedId}`,
+        ]);
+      });
+    },
+  );
+
+  test("direct sendKeys captures the final observation immediately without a pipeline scope", async () => {
+    const h = createSendKeysCaptureHarness();
+    const result = await h.action.execute(h.commands);
+    expect(result.success).toBe(true);
+    expect(h.captures).toEqual([result.observation!]);
+    expect(result.observation?.screenshotPath).toBe("read-3.png");
+  });
+
+  test("explicit-display focus preparation captures nothing and preserves its routing", async () => {
+    const h = createSendKeysCaptureHarness();
+    await runWithPostActionCaptureScope(undefined, async () => {
+      const result = await h.action.execute(h.commands, undefined, undefined, undefined, "0");
+      expect(result.success).toBe(true);
+      expect(h.captures).toHaveLength(0);
+      expect(h.reads[0]).toEqual({
+        display: "0",
+        freshness: "cached-ok",
+        signal: undefined,
+        skipScreenshot: true,
+      });
+      expect(h.reads.every((read) => read.skipScreenshot === true)).toBe(true);
+      await settleEmbeddedObservationInResponse(createStructuredToolResponse(result), {
+        name: "sendKeys",
+        args: { commands: h.commands, display: "0" },
+        internal: false,
+        createSettleObserve: () => h.settleObserve,
+      });
+      expect(h.captures).toEqual([result.observation!]);
+      expect(h.captures[0].screenshotPath).toBe("read-4.png");
+    });
+  });
+
   class CapturingFocus extends BaseVisualChange {
     protected override shouldCapturePostActionScreenshot(): boolean {
       return true;

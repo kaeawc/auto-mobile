@@ -167,13 +167,8 @@ export function tryAcquireExclusiveLock(
     return true;
   }
 
-  let content: string;
-  try {
-    content = readFileSync(lockFilePath, "utf-8").trim();
-  } catch (error) {
-    // The lock file vanished between the failed `wx` create and this read (holder
-    // released it); treat as still-held so the caller retries rather than racing.
-    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
+  const content = readContendedLockContent(lockFilePath);
+  if (content === undefined) {
     return false;
   }
 
@@ -197,19 +192,55 @@ export function tryAcquireExclusiveLock(
     return false;
   }
 
+  const isOwnStaleLeak = isOwnStaleLock(ownerPid, tokenLine, pid, ownerToken, reclaimOwnPid);
+  if (isProcessRunning(ownerPid) && !isOwnStaleLeak) {
+    return false;
+  }
+
+  return reclaimExclusiveLock(lockFilePath, pid, ownerToken, metadata, ownerPid, tokenLine);
+}
+
+function readContendedLockContent(lockFilePath: string): string | undefined {
+  let content: string;
+  try {
+    content = readFileSync(lockFilePath, "utf-8").trim();
+  } catch (error) {
+    // The lock file vanished between the failed `wx` create and this read (holder
+    // released it); treat as still-held so the caller retries rather than racing.
+    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
+    return undefined;
+  }
+
+  return content;
+}
+
+function isOwnStaleLock(
+  ownerPid: number,
+  tokenLine: string | undefined,
+  pid: number,
+  ownerToken: string | undefined,
+  reclaimOwnPid: boolean,
+): boolean {
   // A same-PID lock is a reclaimable stale leak ONLY when its owner token differs
   // from ours (a crashed prior incarnation whose PID the OS recycled) or is absent
   // (a pre-token incarnation). A MATCHING token means this same process instance
   // still holds it live — an in-process reopen must wait, not steal it (#2947).
   // With no token supplied the pre-token semantics stand: any same-PID lock leaks.
-  const isOwnStaleLeak =
+  return (
     reclaimOwnPid &&
     ownerPid === pid &&
-    (ownerToken === undefined || (tokenLine ?? "") !== ownerToken);
-  if (isProcessRunning(ownerPid) && !isOwnStaleLeak) {
-    return false;
-  }
+    (ownerToken === undefined || (tokenLine ?? "") !== ownerToken)
+  );
+}
 
+function reclaimExclusiveLock(
+  lockFilePath: string,
+  pid: number,
+  ownerToken: string | undefined,
+  metadata: string | undefined,
+  ownerPid: number,
+  tokenLine: string | undefined,
+): boolean {
   // Dead holder (or our own recycled PID under reclaimOwnPid) — reclaim it.
   //
   // Do NOT unlink-by-path here: two openers can both read the same stale PID, and
@@ -238,26 +269,35 @@ export function tryAcquireExclusiveLock(
   }
   const claimedOwner = claimedContent === undefined ? undefined : parseLockContent(claimedContent);
   if (claimedOwner?.pid !== ownerPid || claimedOwner?.token !== tokenLine) {
-    // Hard-linking restores the displaced lock only if the destination is free;
-    // unlike rename-over-existing, it cannot clobber a third opener's fresh lock.
-    try {
-      linkSync(reclaimMarker, lockFilePath);
-    } catch (error) {
-      if (!existsSync(lockFilePath)) {
-        throw toActionableError(error, `Failed to restore displaced lock at ${lockFilePath}`);
-      }
-      // An occupied path is an expected race (including Windows EPERM); leave it.
-      logger.debug(
-        `src/utils/fileLock.ts: restore destination occupied at ${lockFilePath}: ${error}`,
-      );
-    }
-    try {
-      unlinkSync(reclaimMarker);
-    } catch (error) {
-      logger.warn(`src/utils/fileLock.ts: reclaim marker cleanup failed: ${error}`);
-    }
+    restoreDisplacedLock(lockFilePath, reclaimMarker);
     return false;
   }
+  removeStaleLockMarker(reclaimMarker);
+  return writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata);
+}
+
+function restoreDisplacedLock(lockFilePath: string, reclaimMarker: string): void {
+  // Hard-linking restores the displaced lock only if the destination is free;
+  // unlike rename-over-existing, it cannot clobber a third opener's fresh lock.
+  try {
+    linkSync(reclaimMarker, lockFilePath);
+  } catch (error) {
+    if (!existsSync(lockFilePath)) {
+      throw toActionableError(error, `Failed to restore displaced lock at ${lockFilePath}`);
+    }
+    // An occupied path is an expected race (including Windows EPERM); leave it.
+    logger.debug(
+      `src/utils/fileLock.ts: restore destination occupied at ${lockFilePath}: ${error}`,
+    );
+  }
+  try {
+    unlinkSync(reclaimMarker);
+  } catch (error) {
+    logger.warn(`src/utils/fileLock.ts: reclaim marker cleanup failed: ${error}`);
+  }
+}
+
+function removeStaleLockMarker(reclaimMarker: string): void {
   try {
     unlinkSync(reclaimMarker);
   } catch (error) {
@@ -267,7 +307,6 @@ export function tryAcquireExclusiveLock(
     // Concurrent cleanup already removed the stale marker; final `wx` still arbitrates.
     logger.debug(`src/utils/fileLock.ts: stale marker cleanup failed: ${error}`);
   }
-  return writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata);
 }
 
 /**

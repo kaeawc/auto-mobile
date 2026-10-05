@@ -98,40 +98,44 @@ export class HierarchyCollector {
         logger.debug(`[HierarchyCollector] Failed to clear availability cache: ${clearError}`);
       }
 
-      // Defensive/secondary path (#7534): the real `ViewHierarchy` resolves
-      // rather than throws for this failure class (see the resolved-result
-      // check in the success branch above, which is now primary). This
-      // string-matching guard stays for a `ViewHierarchy`/client
-      // implementation that genuinely throws instead.
-      const errorStr = String(error);
-      if (
-        device.platform === "android" &&
-        (errorStr.includes("WebSocket not connected") ||
-          errorStr.includes("Failed to connect to accessibility service"))
-      ) {
-        try {
-          this.opts.onAvailabilityLost?.(`CtrlProxy hierarchy connection lost: ${errorStr}`);
-        } catch (callbackError) {
-          logger.warn("[HierarchyCollector] Failed to report lost availability:", callbackError);
-        }
+      this.reportHierarchyError(result, device, error);
+    }
+  }
+
+  private reportHierarchyError(result: ObserveResult, device: BootedDevice, error: unknown): void {
+    // Defensive/secondary path (#7534): the real `ViewHierarchy` resolves
+    // rather than throws for this failure class (see the resolved-result
+    // check in the success branch above, which is now primary). This
+    // string-matching guard stays for a `ViewHierarchy`/client
+    // implementation that genuinely throws instead.
+    const errorStr = String(error);
+    if (
+      device.platform === "android" &&
+      (errorStr.includes("WebSocket not connected") ||
+        errorStr.includes("Failed to connect to accessibility service"))
+    ) {
+      try {
+        this.opts.onAvailabilityLost?.(`CtrlProxy hierarchy connection lost: ${errorStr}`);
+      } catch (callbackError) {
+        logger.warn("[HierarchyCollector] Failed to report lost availability:", callbackError);
       }
-      if (
-        errorStr.includes("null root node returned by UiTestAutomationBridge") ||
-        (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||
-        errorStr.includes("screen appears to be off")
-      ) {
-        appendObserveError(result, {
-          phase: "viewHierarchy",
-          message: "Screen appears to be off or device is locked",
-          cause: errorStr,
-        });
-      } else {
-        appendObserveError(result, {
-          phase: "viewHierarchy",
-          message: "Failed to retrieve view hierarchy",
-          cause: errorStr,
-        });
-      }
+    }
+    if (
+      errorStr.includes("null root node returned by UiTestAutomationBridge") ||
+      (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||
+      errorStr.includes("screen appears to be off")
+    ) {
+      appendObserveError(result, {
+        phase: "viewHierarchy",
+        message: "Screen appears to be off or device is locked",
+        cause: errorStr,
+      });
+    } else {
+      appendObserveError(result, {
+        phase: "viewHierarchy",
+        message: "Failed to retrieve view hierarchy",
+        cause: errorStr,
+      });
     }
   }
 

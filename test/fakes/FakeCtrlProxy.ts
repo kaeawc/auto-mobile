@@ -959,13 +959,20 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     text: string,
     occurrence: number,
     selector?: AccessibilityNodeSelector,
+    timeoutMs: number = 5000,
+    _perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yActionResult> {
+    signal?.throwIfAborted();
     await this.applyDelay("requestActivateAccessibilityLink");
     this.checkFailure("requestActivateAccessibilityLink");
+    signal?.throwIfAborted();
+    onDispatch?.();
     this.actionHistory.push({
       action: "activate_accessibility_link",
       resourceId: selector?.resourceId,
-      timeoutMs: 5000,
+      timeoutMs,
     });
     return {
       success: true,

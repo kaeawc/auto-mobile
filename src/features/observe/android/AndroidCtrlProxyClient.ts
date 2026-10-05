@@ -1190,6 +1190,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     selector?: AccessibilityNodeSelector,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yActionResult>;
 
   supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;
@@ -3744,36 +3746,58 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return connected && this.isCommandSupported("request_activate_accessibility_link");
   }
 
+  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
+  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
     text: string,
     occurrence: number,
     selector?: AccessibilityNodeSelector,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
     const action = "activate_accessibility_link";
+    const combinedSignal = combineWithAmbientAbort(signal);
+    const checkCancellation = (): void => combinedSignal?.throwIfAborted();
+    let requestId: string | undefined;
+    let dispatched = false;
+    const unconfirmed = (error: string): A11yActionResult => ({
+      success: false,
+      action,
+      totalTimeMs: this.timer.now() - startTime,
+      error,
+      dispatched,
+      acknowledged: false,
+      ...(dispatched ? { retryable: false } : {}),
+    });
     try {
-      if (!(await this.supportsAccessibilityLinkActivation(perf))) {
-        return {
-          success: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Connected Android runner does not support semantic accessibility-link activation",
-        };
+      const supported = await this.awaitActionWork(
+        () => this.supportsAccessibilityLinkActivation(perf),
+        combinedSignal,
+      );
+      checkCancellation();
+      if (!supported) {
+        return unconfirmed(
+          "Connected Android runner does not support semantic accessibility-link activation",
+        );
       }
-      const requestId = this.requestManager.generateId("accessibility-link");
+      requestId = this.requestManager.generateId("accessibility-link");
       const resultPromise = this.requestManager.register<A11yActionResult>(
         requestId,
         "accessibility-link",
         timeoutMs,
-        () => ({
+        () => unconfirmed(`Semantic link activation timed out after ${timeoutMs}ms`),
+        (error, totalTimeMs) => ({
           success: false,
           action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Semantic link activation timed out after ${timeoutMs}ms`,
+          totalTimeMs,
+          error,
+          acknowledged: true,
         }),
       );
+      checkCancellation();
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
@@ -3787,15 +3811,30 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           }),
         ),
       );
-      return await resultPromise;
+      dispatched = true;
+      onDispatch?.();
+      const result = await this.awaitCancellableRequest(
+        requestId,
+        resultPromise,
+        combinedSignal,
+        startTime,
+      );
+      checkCancellation();
+      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Semantic link activation failed: ${error}`);
-      return {
-        success: false,
-        action,
-        totalTimeMs: this.timer.now() - startTime,
-        error: `${error}`,
-      };
+      if (requestId) {
+        this.requestManager.resolveError(
+          requestId,
+          errorMessage(error),
+          this.timer.now() - startTime,
+        );
+      }
+      logger.warn("[CTRL_PROXY] Semantic link activation failed", error);
+      return unconfirmed(errorMessage(error));
+    } finally {
+      if (!dispatched) {
+        checkCancellation();
+      }
     }
   }
 

@@ -737,7 +737,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     occurrence: number,
     owner?: Element,
     viewHierarchy?: ViewHierarchyResult,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string }> {
+    const confirmActivation = (result: CtrlProxyActionResult, invalidate: () => void): void => {
+      if (result.dispatched && result.acknowledged !== true) {
+        // A lost reply may mean the screen navigated; discard the pre-activation tree.
+        invalidate();
+        throw indeterminateTapError(result.error);
+      }
+    };
     if (owner && !this.hasUniqueSemanticLinkOwner(owner, viewHierarchy)) {
       return {
         success: false,
@@ -758,7 +766,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         text,
         occurrence,
         selector,
+        undefined,
+        undefined,
+        signal,
       );
+      confirmActivation(result, () => {
+        AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+      });
       return { success: result.success, error: result.error };
     }
     if (this.device.platform === "ios") {
@@ -772,7 +786,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       const result = await IOSCtrlProxyClient.getInstance(
         this.device,
-      ).requestActivateAccessibilityLink(text, occurrence, ownerResourceId as string | undefined);
+      ).requestActivateAccessibilityLink(
+        text,
+        occurrence,
+        ownerResourceId as string | undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      confirmActivation(result, () => this.invalidateIosCacheOnSuccess({ success: true }));
       this.invalidateIosCacheOnSuccess(result);
       return { success: result.success, error: result.error };
     }
@@ -4006,6 +4028,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               occurrence,
               owner,
               viewHierarchy,
+              signal,
             );
             if (!activation.success) {
               return { success: false, error: activation.error };
@@ -4101,6 +4124,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               occurrence,
               element,
               viewHierarchy,
+              signal,
             );
             if (!activation.success) {
               return { success: false, error: activation.error };

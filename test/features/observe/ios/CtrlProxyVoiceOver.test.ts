@@ -745,6 +745,98 @@ describe("CtrlProxyVoiceOver", function () {
   });
 
   describe("requestActivateAccessibilityLink", function () {
+    test.each(["timeout", "transport", "refusal", "abort after dispatch"])(
+      "%s tracks dispatch, sends once, and cleans correlation",
+      async (mode) => {
+        const timer = new FakeTimer();
+        const { factory, getSocket } = createCapturingFactory(timer);
+        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, timer);
+        const controller = new AbortController();
+        let dispatchCount = 0;
+        try {
+          const pending = client.requestActivateAccessibilityLink(
+            "Terms",
+            0,
+            undefined,
+            5000,
+            undefined,
+            controller.signal,
+            () => {
+              dispatchCount++;
+            },
+          );
+          const socket = await waitForSocket(getSocket);
+          await waitForSocketOpen(socket);
+          await waitForSentMessages(socket);
+          const requestId = commandPayloads(socket!)[0].requestId;
+          if (mode === "timeout") {
+            timer.advanceTime(5000);
+          } else if (mode === "transport") {
+            client["requestManager"].cancelAll("WebSocket connection closed");
+          } else if (mode === "abort after dispatch") {
+            controller.abort(new Error("cancelled"));
+            for (let i = 0; i < 30; i++) {
+              await Promise.resolve();
+            }
+            expect(client["requestManager"].getPendingCount()).toBe(0);
+            timer.advanceTime(5000);
+          } else {
+            socket!.simulateMessage(
+              JSON.stringify({
+                type: "action_result",
+                requestId,
+                success: false,
+                error: "link refused",
+                totalTimeMs: 1,
+              }),
+            );
+          }
+          const result = await pending;
+          expect(result).toMatchObject({
+            success: false,
+            dispatched: true,
+            acknowledged: mode === "refusal",
+          });
+          expect(result.retryable).toBe(mode === "refusal" ? undefined : false);
+          expect(commandPayloads(socket!)).toHaveLength(1);
+          expect(dispatchCount).toBe(1);
+          expect(client["requestManager"].getPendingCount()).toBe(0);
+          if (mode === "refusal") {
+            expect(result.error).toBe("link refused");
+          }
+        } finally {
+          await client.close();
+        }
+      },
+    );
+
+    test("abort while connecting rethrows the reason without dispatch or registration", async () => {
+      const h = createIosDelegateHarness();
+      let finish!: (connected: boolean) => void;
+      h.context.ensureConnected = () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        });
+      const controller = new AbortController();
+      const reason = new Error("cancelled before connection");
+      const pending = new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink(
+        "Terms",
+        0,
+        undefined,
+        5000,
+        undefined,
+        controller.signal,
+      );
+      controller.abort(reason);
+      finish(true);
+      // An unfixed delegate sends despite cancellation; settle it so the regression fails promptly.
+      await Promise.resolve();
+      h.resolveLast({ success: true });
+      await expect(pending).rejects.toBe(reason);
+      expect(h.sentMessages).toHaveLength(0);
+      expect(h.requestManager.getPendingCount()).toBe(0);
+    });
+
     // GesturePerformer.swift:119-122 renders the reasons at 2147/2166 with
     // these prefixes; CommandHandler.swift:308 sends localizedDescription on the wire.
     test.each([
@@ -776,6 +868,7 @@ describe("CtrlProxyVoiceOver", function () {
         expect(result.success).toBe(false);
         expect(result.error).toBe(error);
         expect(result.error).not.toContain("does not support");
+        expect(result).toMatchObject({ dispatched: true, acknowledged: true });
       } finally {
         await client.close();
       }
@@ -854,6 +947,7 @@ describe("CtrlProxyVoiceOver", function () {
         const result = await resultPromise;
         expect(result.success).toBe(true);
         expect(result.totalTimeMs).toBe(3);
+        expect(result).toMatchObject({ dispatched: true, acknowledged: true });
         expect(result.error).toBeUndefined();
       } finally {
         await client.close();

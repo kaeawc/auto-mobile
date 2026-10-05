@@ -431,3 +431,58 @@ describe("TalkBack selected target safety", () => {
     });
   });
 });
+
+describe("TalkBack newer full hierarchy contradicts selected target", () => {
+  test.each(["tap", "longPress"] as const)(
+    "%s refuses stale duplicate-ID coordinates",
+    async (action) => {
+      const { driver, tap } = harness();
+      const selected = {
+        text: "Photos",
+        "resource-id": "android:id/title",
+        bounds: { left: 0, top: 1500, right: 300, bottom: 1600 },
+      };
+      driver.setElements([
+        { ...selected, text: "Apps", bounds: { left: 0, top: 300, right: 300, bottom: 400 } },
+        {
+          ...selected,
+          text: "Notifications",
+          bounds: { left: 0, top: 500, right: 300, bottom: 600 },
+        },
+      ]);
+      await expect(
+        tap.executeAndroidTap(action, 150, 1550, 500, selected, undefined, { action }),
+      ).rejects.toThrow("Element not found");
+      expect(driver.tapHistory).toEqual([]);
+      expect(driver.doubleTapHistory).toEqual([]);
+      expect(driver.actionHistory).toEqual([]);
+    },
+  );
+});
+
+describe("TalkBack selected node identity and bounds", () => {
+  test.each(["moved", "relabelled", "absent-id"])(
+    "refuses %s target before semantic action",
+    async (change) => {
+      const { driver, strategy } = harness();
+      const selected: Element = {
+        text: "Apps",
+        "resource-id": "android:id/title",
+        bounds: { left: 0, top: 300, right: 300, bottom: 400 },
+      };
+      driver.setElements([
+        {
+          ...selected,
+          ...(change === "moved" ? { bounds: { left: 0, top: 500, right: 300, bottom: 600 } } : {}),
+          ...(change === "relabelled" ? { text: "Photos" } : {}),
+          ...(change === "absent-id" ? { "resource-id": "other:id/title" } : {}),
+        },
+      ]);
+      await expect(strategy.executeDirectActivation(selected, driver)).rejects.toThrow(
+        "Element not found",
+      );
+      expect(driver.actionHistory).toEqual([]);
+      expect(driver.tapHistory).toEqual([]);
+    },
+  );
+});

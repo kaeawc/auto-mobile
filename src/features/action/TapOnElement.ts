@@ -3937,6 +3937,28 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
           }
 
+          // Resolve TalkBack selectors from a capture for this call, just as the
+          // existing search/stability refreshes do. Cache age cannot detect an
+          // external same-app BACK (#9785).
+          const activationWarnings: string[] = [];
+          let isAccessibilityServiceEnabled =
+            this.device.platform === "android"
+              ? await this.strategy.isAccessibilityServiceEnabled((warning) =>
+                  activationWarnings.push(warning),
+                )
+              : undefined;
+          if (this.device.platform === "android" && isAccessibilityServiceEnabled) {
+            const freshHierarchy = await this.tapVerificationRefresh({
+              screenSize: observeResult.screenSize,
+              signal,
+            })(TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS);
+            if (!freshHierarchy) {
+              throw new ActionableError("Unable to retrieve a fresh tap hierarchy");
+            }
+            this.replaceObservationHierarchy(observeResult, freshHierarchy, true);
+            viewHierarchy = freshHierarchy;
+          }
+
           if (options.accessibilityLink) {
             const occurrence = options.index ?? 0;
             const owner = this.resolveContainerElement(
@@ -4076,11 +4098,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             options.action = "tap";
           }
 
-          // Strategy returns the platform-relevant boolean: TalkBack on
-          // Android, VoiceOver on iOS. Downstream call paths are split by
-          // the platform switch below, so a single flag suffices.
-          const activationWarnings: string[] = [];
-          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled(
+          // Preserve iOS detection at the original activation boundary.
+          isAccessibilityServiceEnabled ??= await this.strategy.isAccessibilityServiceEnabled(
             (warning) => activationWarnings.push(warning),
           );
           const requireResourceId = isAccessibilityServiceEnabled;

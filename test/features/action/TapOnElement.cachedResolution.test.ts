@@ -9,8 +9,11 @@ import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createObserveScreenForTest } from "../observe/observeScreenTestBuilders";
-import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import type { ObserveResult } from "../../../src/models";
+import {
+  TapOnElement,
+  type TapOnElementDependencies,
+} from "../../../src/features/action/TapOnElement";
+import type { Element, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -19,6 +22,8 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
+import { HierarchyTalkBackDriver } from "../talkback/HierarchyTalkBackDriver";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 
 const device = { name: "resolution", deviceId: "resolution", platform: "android" } as const;
@@ -53,17 +58,23 @@ afterEach(() => {
   resetObserveCacheStore();
 });
 
-function harness(cached: ObserveResult, refreshed: ObserveResult) {
+function harness(
+  cached: ObserveResult,
+  refreshed: ObserveResult,
+  dependencies: TapOnElementDependencies = {},
+) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const observe = new FakeObserveScreen();
   observe.setObserveSequence([cached, refreshed]);
   const adb = new FakeAdbExecutor();
+  const strategy = new FakeTapStrategy();
   const tap = new TapOnElement(device, adb, {
     timer,
-    tapStrategy: new FakeTapStrategy(),
+    tapStrategy: strategy,
     visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+    ...dependencies,
   });
   tap.observeScreen = observe;
   tap.awaitIdle = new FakeAwaitIdle();
@@ -81,7 +92,7 @@ function harness(cached: ObserveResult, refreshed: ObserveResult) {
   };
   tap.captureTerminalObservationScreenshot = async () => {};
   tap.recordDeferredPredictionOutcome = async () => {};
-  return { tap, observe, points, timer, adb };
+  return { tap, observe, points, timer, adb, strategy };
 }
 
 describe("tapOn cached element resolution", () => {
@@ -170,5 +181,161 @@ describe("tapOn cached element resolution", () => {
     expect(stale.freshness?.isFresh).toBe(false);
     expect(h.points).toEqual([]);
     expect(h.observe.getExecuteCallCount()).toBe(1);
+  });
+});
+
+// Same package, different activities: external BACK does not mark a pending generation.
+const row = (text: string, top: number): Element => ({
+  text,
+  "resource-id": "android:id/title",
+  clickable: true,
+  bounds: { left: 0, top, right: 300, bottom: top + 100 },
+});
+function page(rows: Element[], activityName: string): ObserveResult {
+  return {
+    ...observation(0, true),
+    activeWindow: { appId: "com.example.app", activityName, layoutSeqSum: 0 },
+    viewHierarchy: createHierarchyForTest({
+      packageName: "com.example.app",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: rows.map((element) => ({ $: element, bounds: element.bounds })),
+        },
+      },
+    }),
+  };
+}
+function sameAppBack(talkBack = true) {
+  const cached = page(
+    [row("See all 27 apps", 1500), row("Photos", 1700), row("TalkBack", 1900)],
+    "Apps",
+  );
+  const current = page([row("Apps", 300), row("Notifications", 500)], "Main");
+  const driver = new HierarchyTalkBackDriver();
+  driver.hierarchy = current.viewHierarchy;
+  const strategyTimer = new FakeTimer();
+  strategyTimer.enableAutoAdvance();
+  const h = harness(cached, current, {
+    talkBackStrategy: new TalkBackTapStrategy({ timer: strategyTimer }),
+    talkBackDriverFactory: { createDriver: () => driver },
+  });
+  if (talkBack) {
+    h.tap.executeAndroidTap = TapOnElement.prototype.executeAndroidTap.bind(h.tap);
+  }
+  h.timer.setCurrentTime(2500); // cached capture at 1000, external BACK within cache window
+  h.strategy.setAccessibilityServiceEnabled(talkBack);
+  const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
+  // Exercise the shared fresh-capture seam and real resolver, not a fake selection.
+  h.tap.refreshViewHierarchy = async (timeoutMs) =>
+    (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy;
+  return { ...h, driver, captures, current };
+}
+
+describe("TalkBack cached observation after same-app BACK", () => {
+  test("rejects text present only on cached screen A without any tap", async () => {
+    const h = sameAppBack();
+    const result = await h.tap.execute({
+      text: "See all 27 apps",
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Element not found");
+    expect(h.driver.tapHistory).toEqual([]);
+    expect(h.driver.actionHistory).toEqual([]);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+    expect(h.captures.requests.length).toBeGreaterThan(0);
+    expect(h.captures.requests.every((request) => request.freshness === "fresh")).toBe(true);
+  });
+
+  test("resolves text on current screen B before search polling", async () => {
+    const h = sameAppBack();
+    const result = await h.tap.execute({
+      text: "Apps",
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.element?.bounds).toEqual(row("Apps", 300).bounds);
+    expect(h.driver.tapHistory).toEqual([{ x: 150, y: 350, durationMs: 500 }]);
+    expect(h.driver.actionHistory).toEqual([]);
+    expect(result.searchUntil?.requestCount).toBe(0);
+    expect(h.captures.requests).toHaveLength(1);
+  });
+
+  test("shared ID with index uses B's match count and coordinates", async () => {
+    const h = sameAppBack();
+    const result = await h.tap.execute({
+      elementId: "android:id/title",
+      index: 1,
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.element?.text).toBe("Notifications");
+    expect(result.selectedElement?.totalMatches).toBe(2);
+    expect(h.driver.tapHistory).toEqual([{ x: 150, y: 550, durationMs: 500 }]);
+    expect(h.driver.actionHistory).toEqual([]);
+  });
+
+  test("newer dispatch hierarchy rejects a target that disappeared after resolution", async () => {
+    const h = sameAppBack();
+    h.driver.hierarchy = page([row("System", 700)], "Main").viewHierarchy;
+    const result = await h.tap.execute({
+      text: "Notifications",
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Element not found");
+    expect(h.driver.tapHistory).toEqual([]);
+    expect(h.driver.actionHistory).toEqual([]);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("unavailable fresh capture refuses TalkBack dispatch", async () => {
+    const h = sameAppBack();
+    h.tap.refreshViewHierarchy = async () => null;
+    const result = await h.tap.execute({
+      text: "See all 27 apps",
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("fresh tap hierarchy");
+    expect(h.driver.tapHistory).toEqual([]);
+    expect(h.driver.actionHistory).toEqual([]);
+  });
+
+  test("TalkBack off retains search polling for text only on B", async () => {
+    const h = sameAppBack(false);
+    const result = await h.tap.execute({
+      text: "Notifications",
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.element?.text).toBe("Notifications");
+    expect(result.searchUntil?.requestCount).toBe(1);
+    expect(h.points).toEqual([{ x: 150, y: 550 }]);
+  });
+
+  test("TalkBack off preserves existing opt-in stability re-resolution", async () => {
+    const h = sameAppBack(false);
+    h.strategy.setShouldRunPreTapStability(true);
+    const result = await h.tap.execute({
+      elementId: "android:id/title",
+      index: 1,
+      action: "longPress",
+      preTapStability: true,
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.element?.text).toBe("Notifications");
+    expect(result.selectedElement?.totalMatches).toBe(2);
+    expect(h.points).toEqual([{ x: 150, y: 550 }]);
   });
 });

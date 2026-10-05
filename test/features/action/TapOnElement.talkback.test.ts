@@ -1164,6 +1164,8 @@ describe("TapOnElement screen-reader navigation result", () => {
         } as FeatureFlagService,
       },
     );
+    command.refreshViewHierarchy = async () => observation.viewHierarchy;
+    coordinate?.driver.setElements([targetElement], 0);
     spyOn(command as any, "observedInteraction").mockImplementation(async (block: any) => ({
       ...(await block(observation)),
       observation,
@@ -1432,6 +1434,10 @@ describe("TapOnElement TalkBack dispatch uncertainty", () => {
         talkBackStrategy: new TalkBackTapStrategy({ timer }),
         talkBackDriverFactory: { createDriver: () => driver },
       },
+    );
+    driver.setElements(
+      [{ "resource-id": "test:id/button", bounds: { left: 0, top: 0, right: 100, bottom: 100 } }],
+      0,
     );
     const attempt = tap.executeAndroidTap("tap", 50, 50, 500, {
       "resource-id": "test:id/button",

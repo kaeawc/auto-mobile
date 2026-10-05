@@ -442,7 +442,15 @@ describe("TalkBack waits retain the action fence", () => {
         if (site === "longPress-fallback") {
           Object.assign(driver, {
             getAccessibilityHierarchy: async () => ({
-              hierarchy: { node: { $: { "resource-id": "target-id" } } },
+              hierarchy: {
+                node: {
+                  $: {
+                    "resource-id": "target-id",
+                    text: "Target",
+                    bounds: { left: 40, top: 60, right: 80, bottom: 100 },
+                  },
+                },
+              },
             }),
           });
           watch(driver, "requestAction").mockImplementation(async () => {
@@ -488,6 +496,7 @@ describe("TalkBack waits retain the action fence", () => {
                   new TapOnElement(h.device, h.adb, {
                     ...h.deps,
                     tapStrategy,
+                    hierarchyCapture: new FakeHierarchyCapture(() => h.screen.viewHierarchy!),
                     talkBackStrategy: strategy,
                     talkBackDriverFactory: factory,
                     elementSelector: selector,

@@ -108,6 +108,7 @@ export async function nodeActionTargetError(
     TalkBackNavigationDriver,
     "supportsNodeActionSelectors" | "getAccessibilityHierarchy"
   >,
+  selectedElement?: Element,
 ): Promise<string | undefined> {
   if (requiresNodeSelector(selector)) {
     return (await driver.supportsNodeActionSelectors())
@@ -117,6 +118,7 @@ export async function nodeActionTargetError(
   return resourceIdActionError(
     selector.resourceId!,
     () => driver.getAccessibilityHierarchy?.() ?? Promise.resolve(null),
+    selectedElement,
   );
 }
 
@@ -538,7 +540,7 @@ export class TalkBackTapStrategy {
       };
     }
 
-    const targetError = await nodeActionTargetError(selector, driver);
+    const targetError = await nodeActionTargetError(selector, driver, element);
     if (targetError) {
       return { success: false, method: "accessibility-action", error: targetError };
     }
@@ -689,7 +691,7 @@ export class TalkBackTapStrategy {
     const selector = stableNodeSelectorForElement(element);
 
     if (selector) {
-      const targetError = await nodeActionTargetError(selector, driver);
+      const targetError = await nodeActionTargetError(selector, driver, element);
       if (targetError) {
         logger.info(`[TalkBackTapStrategy] ${targetError}`);
         return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {

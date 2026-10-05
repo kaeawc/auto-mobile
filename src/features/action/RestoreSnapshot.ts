@@ -408,24 +408,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
           continue;
         }
         try {
-          let applied = false;
-          try {
-            const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-            const a11yResult = await a11y.requestSettingsPut(settingsType, key, value, "string");
-            if (a11yResult.success) {
-              applied = true;
-            }
-          } catch (error) {
-            logger.debug(
-              `[RestoreSnapshot] a11y settings put failed for ${settingsType}/${key}: ${error}`,
-            );
-          }
-          if (!applied) {
-            // ADB hands the command to the device shell, so preserve the key and value as literal words.
-            await this.adb.executeCommand(
-              `shell settings put ${settingsType} ${shellQuote(key)} ${shellQuote(value)}`,
-            );
-          }
+          await this.applyAndroidSetting(settingsType, key, value);
           successCount++;
         } catch (error) {
           failureCount++;
@@ -444,6 +427,31 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       );
     }
     return failures;
+  }
+
+  private async applyAndroidSetting(
+    settingsType: SettingsNamespace,
+    key: string,
+    value: string,
+  ): Promise<void> {
+    let applied = false;
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11yResult = await a11y.requestSettingsPut(settingsType, key, value, "string");
+      if (a11yResult.success) {
+        applied = true;
+      }
+    } catch (error) {
+      logger.debug(
+        `[RestoreSnapshot] a11y settings put failed for ${settingsType}/${key}: ${error}`,
+      );
+    }
+    if (!applied) {
+      // ADB hands the command to the device shell, so preserve the key and value as literal words.
+      await this.adb.executeCommand(
+        `shell settings put ${settingsType} ${shellQuote(key)} ${shellQuote(value)}`,
+      );
+    }
   }
 
   /**

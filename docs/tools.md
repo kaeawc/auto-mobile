@@ -1779,6 +1779,12 @@ bar notification chrome. An artifact-spilled diff keeps its `skeleton`,
 `context`, and capture metadata inline while the bulky node and field deltas are
 available from its artifact pointer.
 
+A `changed` entry's `selector.index` uses the same duplicate candidate set and
+ranking as the next observation's skeleton. A duplicate selector without a safe
+index carries `selector.ambiguous: true`, including inert matches and groups
+with a child that can promote to a tap or toggle ancestor. Unique selectors
+carry neither `index` nor `ambiguous`; selectors with an index omit `ambiguous`.
+
 `observe.waitFor` element conditions (`appear`, `disappear`, `clickable`,
 `textEquals`, `countStable`, and legacy element predicates) accept a nested
 `container` chain and leaf `selectionStrategy: "first" | "random" | "unique"`.

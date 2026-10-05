@@ -93,6 +93,20 @@ const executePlanResultSchema = z
         failureObservation: z.any().optional(),
       })
       .optional(),
+    deviceFailures: z
+      .array(
+        z.object({
+          stepIndex: z.number().int(),
+          tool: z.string(),
+          error: z.string(),
+          device: z.string(),
+          failureObservation: z.any().optional(),
+        }),
+      )
+      .optional()
+      .describe(
+        "All failing device tracks for multi-device plans, including abort consequences; ordered by cause, plan step index (-1 last), then plan device order",
+      ),
     error: z.string().optional(),
     platform: z.enum(["android", "ios"]).optional(),
     deviceId: z.string().optional(),
@@ -114,7 +128,9 @@ const executePlanResultSchema = z
         }),
       )
       .optional()
-      .describe("Best-effort warnings from steps that still succeeded"),
+      .describe(
+        "Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed",
+      ),
     skippedSteps: z
       .array(
         z.object({

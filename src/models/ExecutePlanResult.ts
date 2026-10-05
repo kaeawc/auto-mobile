@@ -66,6 +66,18 @@ export interface PlanSkippedStep {
   device?: string;
 }
 
+/** A failing device track in a multi-device plan, including cancellation consequences. */
+export interface PlanDeviceFailure {
+  /** 0-based plan step index, or -1 for a track-level failure without a step. */
+  stepIndex: number;
+  tool: string;
+  error: string;
+  /** Device label from the plan. */
+  device: string;
+  /** Failure evidence captured for this device, when available. */
+  failureObservation?: FailureObservationSummary;
+}
+
 export interface ExecutePlanResult {
   success: boolean;
   executedSteps: number;
@@ -77,12 +89,14 @@ export interface ExecutePlanResult {
     device?: string;
     failureObservation?: FailureObservationSummary;
   };
+  /** All failing tracks for plans with two or more devices, in reported-failure order. */
+  deviceFailures?: PlanDeviceFailure[];
   error?: string;
   platform?: "android" | "ios";
   deviceId?: string; // The device ID that executed the plan (e.g., "emulator-5554" or "7B3A3792-DB53-4654-BA94-27A1D305C3B7")
   deviceMapping?: Record<string, string>; // Maps device labels to device IDs (e.g., {"A": "emulator-5554", "B": "emulator-5556"})
   debug?: ExecutePlanDebugInfo;
-  /** Best-effort warnings from steps that still succeeded (issue #6868). */
+  /** Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed (issue #6868). */
   warnings?: PlanStepWarnings[];
   /** Failed optional steps, reported regardless of captureObserveSteps. */
   skippedSteps?: PlanSkippedStep[];

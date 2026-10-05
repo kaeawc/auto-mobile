@@ -1,3 +1,7 @@
+import {
+  runWithPostActionCaptureScope,
+  postActionCaptures,
+} from "../utils/PostActionCaptureContext";
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
@@ -1884,7 +1888,8 @@ export class ToolRegistryClass {
             undefined,
           );
         }
-        const response = await runWithToolSelectionContext(
+        const captures = postActionCaptures(signal, resolvedTarget.internalCall, name);
+        return await runWithToolSelectionContext(
           // Bind the ROUTING session, not the selection profile, so
           // nested calls re-inject the correct derived routing UUID.
           {
@@ -1893,7 +1898,7 @@ export class ToolRegistryClass {
             explicitObserveDeviceRead:
               selectionContext?.explicitObserveDeviceRead === true && !handlerArgs.sessionUuid,
           },
-          async () => {
+          captures(async () => {
             try {
               let response: any | undefined;
               if (!resolvedTarget.shouldResolveDevice) {
@@ -1966,9 +1971,8 @@ export class ToolRegistryClass {
                 sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
               });
             }
-          },
+          }),
         );
-        return response;
       } finally {
         void Promise.resolve()
           .then(() =>
@@ -2085,12 +2089,17 @@ export class ToolRegistryClass {
     const invocation = this.createInternalToolInvocationContext(args, options);
 
     return runWithToolSelectionContext(invocation, () =>
-      this.invokeInternalTool(
-        resolved,
-        invocation.args,
-        progress ?? getToolSelectionContext()?.planRequest?.progress,
+      runWithPostActionCaptureScope(
         signal,
-        options.targetDevice,
+        () =>
+          this.invokeInternalTool(
+            resolved,
+            invocation.args,
+            progress ?? getToolSelectionContext()?.planRequest?.progress,
+            signal,
+            options.targetDevice,
+          ),
+        false,
       ),
     );
   }

@@ -1115,6 +1115,9 @@ describe("finalizeToolResponse", () => {
     ): any {
       const metadata = structuredPayload(finalized).observationDiff;
       expect(metadata).toMatchObject(expected);
+      if (!("hint" in expected)) {
+        expect(metadata).not.toHaveProperty("hint");
+      }
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observationDiff).toEqual(metadata);
       return metadata;
@@ -1210,8 +1213,41 @@ describe("finalizeToolResponse", () => {
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
-      expectObservationDiff(finalized, { mode: "full", reason: "disabled" });
+      expectObservationDiff(finalized, {
+        mode: "full",
+        reason: "disabled",
+        hint: "Set --actions-diff-observe to receive diffs.",
+      });
       expect(map.size).toBe(0);
+    });
+
+    test("disabled diff hint stays concise while missing-session guidance is preserved", () => {
+      serverConfig.setActionsDiffObserveEnabled(false);
+      const { store } = makeStore();
+      const disabled = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+      const hint: string = JSON.parse(disabled.content[0].text).observationDiff.hint;
+      expect(hint).toContain("--actions-diff-observe");
+      expect(hint.length).toBeLessThan(60);
+      expect(hint).not.toContain(";");
+      expectObservationDiff(disabled, {
+        mode: "full",
+        reason: "disabled",
+        hint: "Set --actions-diff-observe to receive diffs.",
+      });
+
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const missingSession = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", baselineStore: store },
+      );
+      expectObservationDiff(missingSession, {
+        mode: "full",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+      });
     });
 
     test("observe emits the full observation and resets the baseline", () => {
@@ -2264,8 +2300,8 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
     });
 
@@ -2280,8 +2316,8 @@ describe("finalizeToolResponse", () => {
       expect(observation.viewHierarchy).toBeUndefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
     });
 
@@ -2631,8 +2667,8 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
       expect(map.size).toBe(0);
     });
@@ -3788,6 +3824,67 @@ describe("finalizeToolResponse", () => {
       expect(writer.writes[3].data).toEqual(debugFailureObservation.viewHierarchy);
       expect(writer.writes[4].data).toBe(debugFailureObservation.rawViewHierarchy);
       expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
+    });
+
+    test("executePlan artifacts every device failure observation and preserves the failure list", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const observation = {
+        capturedAtMs: 123,
+        visibleTextsSample: ["Submit"],
+        viewHierarchy: { hierarchy: { node: { "resource-id": "root" } } },
+        rawViewHierarchy: '<hierarchy><node text="large" /></hierarchy>',
+      };
+      const payload = {
+        success: false,
+        executedSteps: 0,
+        totalSteps: 3,
+        deviceFailures: [
+          {
+            device: "A",
+            stepIndex: 0,
+            tool: "tapOn",
+            error: "missing",
+            failureObservation: observation,
+          },
+          {
+            device: "B",
+            stepIndex: 1,
+            tool: "tapOn",
+            error: "missing",
+            failureObservation: observation,
+          },
+          { device: "C", stepIndex: -1, tool: "unknown", error: "track failure" },
+        ],
+      };
+      for (const internal of [true, false]) {
+        const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+          name: "executePlan",
+          artifactWriter: writer,
+          internal,
+        });
+        const failures = structuredPayload(finalized).deviceFailures;
+        expect(failures).toHaveLength(3);
+        expect(failures[2]).toEqual(payload.deviceFailures[2]);
+        if (internal) {
+          expect(failures).toEqual(payload.deviceFailures);
+          expect(writer.writes).toHaveLength(0);
+        } else {
+          for (const failure of failures.slice(0, 2)) {
+            expect(failure.failureObservation.visibleTextsSample).toEqual(["Submit"]);
+            expect(failure.failureObservation.viewHierarchy.artifact.payload).toBe(
+              "ExecutePlanFailureObservationViewHierarchy",
+            );
+            expect(failure.failureObservation.rawViewHierarchy.artifact.payload).toBe(
+              "ExecutePlanFailureObservationRawViewHierarchy",
+            );
+          }
+          expect(writer.writes).toHaveLength(4);
+          expect(finalized.content[0].text).toBe(
+            stringifyToolResponse(structuredPayload(finalized)),
+          );
+        }
+      }
+      expect(payload.deviceFailures[0].failureObservation).toEqual(observation);
     });
 
     test("getNetworkGraph artifacts aggregate graph and keeps host count inline", () => {

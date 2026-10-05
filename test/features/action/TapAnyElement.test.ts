@@ -297,8 +297,9 @@ describe("TapAnyElement Android gesture dispatch", () => {
     );
     tapAny.observedInteraction = (action) =>
       action({ viewHierarchy: observedHierarchy, screenSize: { width: 500, height: 500 } });
+    let refreshCount = 0;
     tapAny.setRefreshViewHierarchyForTesting(async () => ({
-      hierarchy: { node: { marker: "after" } },
+      hierarchy: { node: { marker: `after-${++refreshCount}` } },
     }));
     return {
       tapAny,

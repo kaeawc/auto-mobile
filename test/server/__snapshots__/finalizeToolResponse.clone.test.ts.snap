@@ -10,7 +10,7 @@ exports[`finalizeToolResponse serialized shape compatibility diff with full proj
 
 exports[`finalizeToolResponse serialized shape compatibility oversized spill 1`] = `
 {
-  "inline": "{"success":true,"artifact":{"path":"/tmp/fixture.json","format":"json","payload":"ToolResponse","bytes":70251,"tool":"tapOn","resourceUri":"automobile:tool-output/fixture"}}",
+  "inline": "{"success":true,"artifact":{"path":"/tmp/fixture.json","format":"json","payload":"ToolResponse","bytes":70305,"tool":"tapOn","resourceUri":"automobile:tool-output/fixture"}}",
   "writes": [
     {
       "payload": "ObserveResult",
@@ -19,7 +19,7 @@ exports[`finalizeToolResponse serialized shape compatibility oversized spill 1`]
     },
     {
       "payload": "ToolResponse",
-      "sha256": "cd4f1d0c68d64dda156c623f0b650d2a0c1f42cea60410c1f3be2ee4af2e0793",
+      "sha256": "77432a5407bbdec6f075370c97a2ebe4af4dfcd6303ec4f238962769faa861ff",
       "tool": "tapOn",
     },
   ],

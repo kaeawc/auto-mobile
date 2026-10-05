@@ -201,6 +201,7 @@ describe("gesture request sequences", () => {
       const tap = new TapAnyElement(device, new FakeAdbClient(), {
         timer,
         elementSelector: selector,
+        accessibilityDetector: new FakeAccessibilityDetector(),
       });
       const controller = new AbortController();
       tap.observedInteraction = async (action) => {
@@ -238,10 +239,10 @@ describe("gesture request sequences", () => {
         undefined,
         controller.signal,
       );
-      if (mode === "immediate") {
-        expect(calls).toEqual(["observe", "select", "tap:150:150:0"]);
-      }
       const result = await run;
+      if (mode === "immediate") {
+        expect(calls).toEqual(["observe", "select", "tap:150:150:0", "retry-check"]);
+      }
       const successful = mode === "immediate" || mode === "poll" || mode === "null";
       expect(result.success).toBe(successful);
       if (successful) {

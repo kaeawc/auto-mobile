@@ -1,3 +1,13 @@
+import { StaleDisplayError } from "../models/StaleDisplayError";
+import {
+  terminalScreenshotUnavailable,
+  isTerminalScreenshotUnavailable,
+  terminalScreenshotCaptureError,
+  captureChosenTerminalScreenshot,
+  finalizePendingTerminalScreenshot,
+  finalizePendingPostActionCaptures,
+  hasPendingTerminalScreenshot,
+} from "../utils/PostActionCaptureContext";
 import { isAdoptableCapture } from "../features/observe/isAdoptableCapture";
 import type { ObserveResult } from "../models/ObserveResult";
 import type { SettleObserve } from "../features/observe/interfaces/SettleObserve";
@@ -67,7 +77,13 @@ export async function settleEmbeddedObservation(
   input: EmbeddedObservationSettleInput,
 ): Promise<EmbeddedObservationSettleOutcome> {
   if (!isSettleGatedActionClass(input.actionClass)) {
-    return { observation: input.observation, settled: false };
+    await finalizePendingTerminalScreenshot(
+      input.observation,
+      input.observation,
+      undefined,
+      input.signal,
+    );
+    return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
   }
 
   // The settle loop's own budget is checked BETWEEN polls, so a single device
@@ -77,7 +93,7 @@ export async function settleEmbeddedObservation(
   // observing immediately. Real-clock deliberately: it fences a real device
   // read, which no fake clock governs, and fake-backed unit tests resolve long
   // before it can fire.
-  const strictDisplay = input.args?.display !== undefined || !!input.observation.display?.pinned;
+  const strictDisplay = isExplicitDisplay(input.observation, input.args);
   const deadline = AbortSignal.timeout(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
   try {
     const result = await input.settleObserve.execute({
@@ -110,30 +126,116 @@ export async function settleEmbeddedObservation(
       // adopted terminal capture is processed once inside the poll loop (#6932).
       skipRecompositionTracking: true,
     });
+    input.signal?.throwIfAborted();
     if (!isAdoptableCapture(input.observation, result.observation, strictDisplay)) {
-      return { observation: input.observation, settled: false };
+      await finalizePendingTerminalScreenshot(
+        input.observation,
+        input.observation,
+        undefined,
+        input.signal,
+      );
+      return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
     }
-    if (input.observation.screenshotCaptureAttempted === true) {
-      // Screenshot policy already ran on the action. Its pixels cannot describe
-      // this later tree: capture once under the adopted id, never on a poll.
-      // Like other terminal evidence, capture uses caller cancellation rather
-      // than the settle deadline, which bounds only hierarchy polling.
-      await input.settleObserve.captureScreenshot?.(result.observation, input.signal);
-    }
-    return {
-      observation: mergeActionMetadata(input.observation, result.observation),
-      settled: result.settled,
-    };
+    await captureAdoptedObservation(input, result.observation);
+    return adoptedObservationOutcome(input, result);
   } catch (error) {
     // Nothing here may fail an action that ALREADY RAN. A settle read that
     // errors (CtrlProxy hiccup, transient device read failure), the deadline
     // above, and request cancellation all degrade the same way: hand back the
-    // capture the action took, honestly flagged as unsettled. Rethrowing would
+    // action hierarchy, honestly flagged as unsettled. Pending evidence is
+    // finalized unless the caller itself cancelled. Rethrowing would
     // turn a completed tap into a tool error, and a client that retried it
     // would tap twice.
     logger.warn(`[EmbeddedObservationSettle] settle failed: ${errorMessage(error)}`, error);
-    return { observation: input.observation, settled: false };
+    await finalizePendingTerminalScreenshot(
+      input.observation,
+      input.observation,
+      undefined,
+      input.signal,
+    );
+    return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
   }
+}
+
+async function captureAdoptedObservation(
+  input: EmbeddedObservationSettleInput,
+  observation: ObserveResult,
+): Promise<void> {
+  if (hasPendingTerminalScreenshot(input.observation)) {
+    await finalizePendingTerminalScreenshot(
+      input.observation,
+      observation,
+      input.settleObserve.captureScreenshot?.bind(input.settleObserve),
+      input.signal,
+    );
+  } else if (input.observation.screenshotCaptureAttempted === true) {
+    // Screenshot policy already ran on the action. Its pixels cannot describe
+    // this later tree: capture once under the adopted id, never on a poll.
+    // Like other terminal evidence, capture uses caller cancellation rather
+    // than the settle deadline, which bounds only hierarchy polling.
+    await captureChosenTerminalScreenshot(
+      observation,
+      async (chosen, signal) => {
+        if (!input.settleObserve.captureScreenshot) {
+          throw new Error("Terminal screenshot capture unavailable");
+        }
+        await input.settleObserve.captureScreenshot(chosen, signal);
+      },
+      input.signal,
+    );
+  }
+}
+
+function adoptedObservationOutcome(
+  input: EmbeddedObservationSettleInput,
+  result: EmbeddedObservationSettleOutcome,
+): EmbeddedObservationSettleOutcome {
+  return terminalCaptureOutcome(input, {
+    observation: mergeActionMetadata(input.observation, result.observation),
+    settled: result.settled,
+  });
+}
+
+const TERMINAL_CAPTURE_WARNING =
+  "Post-action terminal screenshot/audit failed; retaining the chosen observation";
+
+function isExplicitDisplay(observation: ObserveResult, args?: { display?: unknown }): boolean {
+  return args?.display !== undefined || !!observation.display?.pinned;
+}
+
+/** The same explicit-panel evidence contract for adopted, kept and bypassed frames. */
+function applyTerminalCaptureFailure(
+  observation: ObserveResult,
+  args?: { display?: unknown },
+  signal?: AbortSignal,
+  payload?: Record<string, unknown>,
+): boolean {
+  const strictDisplay = isExplicitDisplay(observation, args);
+  if (!strictDisplay || signal?.aborted || !isTerminalScreenshotUnavailable(observation)) {
+    return false;
+  }
+  const { isFresh = true, warning } = observation.freshness ?? {};
+  observation.freshness = {
+    ...observation.freshness,
+    isFresh,
+    warning: warning?.includes(TERMINAL_CAPTURE_WARNING)
+      ? warning
+      : [warning, TERMINAL_CAPTURE_WARNING].filter(Boolean).join("; "),
+  };
+  observation.settled = false;
+  const error = terminalScreenshotCaptureError(observation);
+  if (payload && payload.staleDisplay === undefined && error instanceof StaleDisplayError) {
+    payload.staleDisplay = error.details;
+  }
+  return true;
+}
+
+function terminalCaptureOutcome(
+  input: EmbeddedObservationSettleInput,
+  outcome: EmbeddedObservationSettleOutcome,
+): EmbeddedObservationSettleOutcome {
+  const failed = applyTerminalCaptureFailure(outcome.observation, input.args, input.signal);
+  return { ...outcome, settled: failed ? false : outcome.settled };
 }
 
 /**
@@ -213,6 +315,11 @@ function mergeActionMetadata(
   const merged = Object.fromEntries(
     Object.entries(settledObservation).filter(([, value]) => value !== undefined),
   ) as ObserveResult;
+  if (terminalScreenshotUnavailable in settledObservation) {
+    Object.assign(merged, {
+      [terminalScreenshotUnavailable]: settledObservation[terminalScreenshotUnavailable],
+    });
+  }
   for (const field of ACTION_AUTHORED_OBSERVATION_METADATA) {
     if (merged[field] === undefined && actionObservation[field] !== undefined) {
       Object.assign(merged, { [field]: actionObservation[field] });
@@ -315,6 +422,33 @@ export async function settleEmbeddedObservationInResponse(
   response: unknown,
   ctx: EmbeddedObservationSettleContext,
 ): Promise<void> {
+  try {
+    await settleEmbeddedObservationResponse(response, ctx);
+  } finally {
+    const view = readToolEnvelopePayload(response);
+    const observation = view && readEmbeddedObservation(view.payload);
+    if (
+      view &&
+      observation &&
+      (await finalizePendingTerminalScreenshot(observation, observation, undefined, ctx.signal))
+    ) {
+      writeToolEnvelopePayload(view, view.payload);
+    }
+    await finalizePendingPostActionCaptures();
+    if (
+      view &&
+      observation &&
+      applyTerminalCaptureFailure(observation, ctx.args, ctx.signal, view.payload)
+    ) {
+      writeToolEnvelopePayload(view, view.payload);
+    }
+  }
+}
+
+async function settleEmbeddedObservationResponse(
+  response: unknown,
+  ctx: EmbeddedObservationSettleContext,
+): Promise<void> {
   if (ctx.internal || ctx.name === "observe") {
     return;
   }
@@ -335,6 +469,7 @@ export async function settleEmbeddedObservationInResponse(
   // than stamping a contradiction into the same response.
   const handlerSettled = readHandlerSettledVerdict(view.payload);
   if (view.payload.success === false) {
+    await finalizePendingTerminalScreenshot(observation, observation, undefined, ctx.signal);
     // The action failed; re-observing would buy the client nothing and would
     // charge a settle budget to an error path. The capture it did return is
     // still an action observation, so it carries the honest verdict for a
@@ -348,6 +483,7 @@ export async function settleEmbeddedObservationInResponse(
   }
 
   if (handlerSettled !== undefined) {
+    await finalizePendingTerminalScreenshot(observation, observation, undefined, ctx.signal);
     // The handler already ran a stability wait against THIS capture, so there
     // is nothing left for this gate to establish — whichever way that wait
     // came out.
@@ -384,6 +520,8 @@ export async function settleEmbeddedObservationInResponse(
   if (isSettleGatedActionClass(actionClass) && !settleObserve) {
     // No device to re-observe with. Leave the response exactly as the handler
     // built it rather than stamping a gate verdict that was never evaluated.
+    await finalizePendingTerminalScreenshot(observation, observation, undefined, ctx.signal);
+    writeToolEnvelopePayload(view, view.payload);
     return;
   }
 
@@ -397,6 +535,7 @@ export async function settleEmbeddedObservationInResponse(
       })
     : { observation, settled: false };
 
+  await finalizePendingTerminalScreenshot(observation, outcome.observation, undefined, ctx.signal);
   writeToolEnvelopePayload(view, {
     ...view.payload,
     observation: { ...outcome.observation, settled: outcome.settled },

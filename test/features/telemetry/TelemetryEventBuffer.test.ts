@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   TelemetryEventBuffer,
   type BatchTelemetryRepository,
@@ -94,6 +95,60 @@ describe("TelemetryEventBuffer", () => {
     repository = new FakeBatchTelemetryRepository();
     timer = new FakeTimer();
   });
+
+  it.each(["logs", "os", "navigation", "layout"])(
+    "drains kinds in order and drops only the failed %s batch without retrying",
+    async (failingKind) => {
+      const calls: string[] = [];
+      const failure = new Error("batch failed");
+      const record = async (kind: string, rows: unknown[]) => {
+        calls.push(`${kind}:${rows.length}`);
+        if (kind === failingKind) {
+          throw failure;
+        }
+      };
+      const sink: BatchTelemetryRepository = {
+        recordLogEvents: (rows) => record("logs", rows),
+        recordOsEvents: (rows) => record("os", rows),
+        recordNavigationEvents: (rows) => record("navigation", rows),
+        recordLayoutEvents: (rows) => record("layout", rows),
+      };
+      const buffer = new TelemetryEventBuffer(sink, timer, { maxBufferedRows: 4 });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        buffer.addLayout({
+          ...makeOs("layout"),
+          subType: "recomposition",
+          composableName: null,
+          composableId: null,
+          recompositionCount: null,
+          durationMs: null,
+          likelyCause: null,
+          detailsJson: null,
+        });
+        buffer.addNavigation({
+          ...makeOs("navigation"),
+          destination: "screen",
+          source: null,
+          arguments: null,
+          metadata: null,
+        });
+        buffer.addOs(makeOs("resume"));
+        buffer.addLog(makeLog("first"));
+        await buffer.flush();
+        expect(calls).toEqual(["logs:1", "os:1", "navigation:1", "layout:1"]);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][1]).toBe(failure);
+        await buffer.flush();
+        expect(calls).toHaveLength(4);
+        buffer.addLog(makeLog("next"));
+        await buffer.flush();
+        expect(calls).toEqual(["logs:1", "os:1", "navigation:1", "layout:1", "logs:1"]);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 
   it("does not flush before the cap is reached or the interval fires", () => {
     const buffer = new TelemetryEventBuffer(repository, timer, { maxBufferedRows: 3 });

@@ -938,290 +938,288 @@ export function describeListAppsResult(
   );
 }
 
+const listAppsHandler = async (
+  device: BootedDevice,
+  args: ListAppsArgs,
+  _progress?: unknown,
+  signal?: AbortSignal,
+) => {
+  const { toolResponseFormatter, queryInstalledApps: queryApps } = getListAppsToolDependencies();
+  try {
+    signal?.throwIfAborted();
+    const content = await queryApps(
+      {
+        deviceId: device.deviceId,
+        platform: device.platform,
+        type: args.type,
+        search: args.search,
+        profile: args.profile,
+      },
+      signal,
+    );
+    signal?.throwIfAborted();
+
+    return toolResponseFormatter.createJSONToolResponse({
+      message: describeListAppsResult(device.deviceId, content),
+      ...content,
+    });
+  } catch (error) {
+    throw toActionableError(error, `Failed to list apps for device ${device.deviceId}`);
+  }
+};
+
+// Launch app handler
+const launchAppHandler = async (
+  device: BootedDevice,
+  args: LaunchAppActionArgs,
+  _progress?: unknown,
+  signal?: AbortSignal,
+) => {
+  let mutationMayHaveHappened = false;
+  let mutationToken: string | undefined;
+  try {
+    signal?.throwIfAborted();
+    const prepared = prepareLaunchArguments(device, args);
+    mutationToken = prepared.mutationToken;
+    const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
+    mutationMayHaveHappened = true;
+    const result = await launchApp.execute(
+      args.appId,
+      args.clearAppData ?? false,
+      args.coldBoot ?? false,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+      prepared.launchArguments,
+    );
+    signal?.throwIfAborted();
+
+    const safeResult = result.error
+      ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
+      : result;
+    return createStructuredToolResponse(buildLaunchAppResponse(args.appId, safeResult));
+  } catch (error) {
+    if (mutationToken) {
+      iosMutationTokens.clear(device.deviceId, args.appId, mutationToken);
+    }
+    const safeError = redactLaunchError(error, mutationToken);
+    if (isDeviceLostError(error)) {
+      throw safeError;
+    }
+    // A typed launch failure (uninstalled package, foreground mismatch) is
+    // already an actionable error — surface it verbatim rather than re-wrapping
+    // it as "Failed to launch app: Error: ..." (#5868).
+    if (safeError instanceof ActionableError) {
+      throw safeError;
+    }
+    throw toActionableError(safeError, `Failed to launch app`);
+  } finally {
+    if (mutationMayHaveHappened) {
+      await refreshInstalledAppResources(device.deviceId);
+    }
+  }
+};
+
+// Terminate app handler
+const terminateAppHandler = async (
+  device: BootedDevice,
+  args: AppActionArgs,
+  _progress?: unknown,
+  signal?: AbortSignal,
+) => {
+  let mutationMayHaveHappened = false;
+  try {
+    signal?.throwIfAborted();
+    if (device.platform === "ios") {
+      iosMutationTokens.clear(device.deviceId, args.appId);
+    }
+    const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
+    mutationMayHaveHappened = true;
+    const result = await terminateApp.execute(
+      args.appId,
+      {
+        skipUiStability: true, // skip the 12+ second stability polling
+      },
+      signal,
+    );
+
+    // A typed failure (e.g. an iOS installed-app listing that failed, or a
+    // devicectl termination error) must surface as an error rather than a
+    // response claiming the app was terminated — issue #5621. Mirrors the
+    // uninstall handler below.
+    if (!result.success) {
+      throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
+    }
+
+    return createStructuredToolResponse({
+      message: `Terminated app ${args.appId}`,
+      observation: result.observation,
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    throw toActionableError(error, `Failed to terminate app`);
+  } finally {
+    if (mutationMayHaveHappened) {
+      await refreshInstalledAppResources(device.deviceId);
+    }
+  }
+};
+
+const crashAppHandler = async (
+  device: BootedDevice,
+  args: CrashAppActionArgs,
+  _progress?: unknown,
+  signal?: AbortSignal,
+) => {
+  const dependencies = getCrashAppToolDependencies();
+  let mutationMayHaveHappened = false;
+  try {
+    signal?.throwIfAborted();
+    mutationMayHaveHappened = true;
+    const result = await dependencies.createCrashApp(device).execute(args.appId, signal);
+    signal?.throwIfAborted();
+
+    const message = result.success
+      ? `Crashed app ${args.appId} via ${result.mechanism}${
+          result.confirmed ? " (OS crash confirmed)" : " (confirmation unavailable)"
+        }`
+      : (result.error ?? `Failed to crash app ${args.appId}`);
+    return createStructuredToolResponse({ message, ...result });
+  } catch (error) {
+    if (isDeviceLostError(error) || error instanceof ActionableError) {
+      throw error;
+    }
+    throw toActionableError(error, `Failed to crash app`);
+  } finally {
+    if (mutationMayHaveHappened) {
+      await refreshInstalledAppResources(device.deviceId);
+    }
+  }
+};
+
+const appLifecycleHandler = async (
+  device: BootedDevice,
+  args: { appId: string; action: AppLifecycleAction },
+  _progress?: unknown,
+  signal?: AbortSignal,
+) => {
+  let mutationMayHaveHappened = false;
+  try {
+    signal?.throwIfAborted();
+    const result = await getAppLifecycleToolDependencies()
+      .createAppLifecycle(device)
+      .execute(args.appId, args.action, {
+        signal,
+        onMutation: () => {
+          mutationMayHaveHappened = true;
+        },
+      });
+    signal?.throwIfAborted();
+    const message = result.success
+      ? (result.message ??
+        (args.action === "background"
+          ? `Backgrounded app ${args.appId}`
+          : `Completed background kill request for ${args.appId}`))
+      : (result.error ?? `Failed to perform appLifecycle ${args.action} for ${args.appId}`);
+    return createStructuredToolResponse({ ...result, message });
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (isDeviceLostError(error) || error instanceof ActionableError) {
+      throw error;
+    }
+    throw toActionableError(error, "Failed to perform app lifecycle action");
+  } finally {
+    if (mutationMayHaveHappened) {
+      await refreshInstalledAppResources(device.deviceId);
+    }
+  }
+};
+
+// Install app handler
+const installAppHandler = async (
+  device: BootedDevice,
+  args: InstallAppArgs,
+  _progress?: unknown,
+  signal?: AbortSignal,
+) => {
+  let mutationMayHaveHappened = false;
+  try {
+    signal?.throwIfAborted();
+    const installApp = getInstallAppToolDependencies().createInstallApp(device);
+    mutationMayHaveHappened = true;
+    const result = await installApp.execute(args.artifactPath, undefined, signal);
+    if (!result.success) {
+      throw new ActionableError(result.error || `Failed to install app from ${args.artifactPath}`);
+    }
+    const message = result.warning
+      ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
+      : `Installed app from ${args.artifactPath}`;
+
+    return createJSONToolResponse({
+      message,
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    throw toActionableError(error, `Failed to install app`);
+  } finally {
+    if (mutationMayHaveHappened) {
+      await refreshInstalledAppResources(device.deviceId);
+    }
+  }
+};
+
+// Uninstall app handler
+const uninstallAppHandler = async (
+  device: BootedDevice,
+  args: UninstallAppArgs,
+  _progress?: unknown,
+  signal?: AbortSignal,
+) => {
+  let mutationMayHaveHappened = false;
+  try {
+    signal?.throwIfAborted();
+    const uninstallApp = getUninstallAppToolDependencies().createUninstallApp(device);
+    mutationMayHaveHappened = true;
+    const result = await uninstallApp.execute(
+      args.appId,
+      args.keepData ?? false,
+      undefined,
+      signal,
+    );
+
+    if (!result.success) {
+      throw new ActionableError(result.error || `Failed to uninstall app ${args.appId}`);
+    }
+
+    const message = result.wasInstalled
+      ? `Uninstalled app ${args.appId}${result.keepData ? " (data preserved)" : ""}`
+      : `App ${args.appId} was not installed`;
+
+    return createJSONToolResponse({
+      message,
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    throw toActionableError(error, `Failed to uninstall app`);
+  } finally {
+    if (mutationMayHaveHappened) {
+      await refreshInstalledAppResources(device.deviceId);
+    }
+  }
+};
+
 // Register tools
 export function registerAppTools() {
-  const listAppsHandler = async (
-    device: BootedDevice,
-    args: ListAppsArgs,
-    _progress?: unknown,
-    signal?: AbortSignal,
-  ) => {
-    const { toolResponseFormatter, queryInstalledApps: queryApps } = getListAppsToolDependencies();
-    try {
-      signal?.throwIfAborted();
-      const content = await queryApps(
-        {
-          deviceId: device.deviceId,
-          platform: device.platform,
-          type: args.type,
-          search: args.search,
-          profile: args.profile,
-        },
-        signal,
-      );
-      signal?.throwIfAborted();
-
-      return toolResponseFormatter.createJSONToolResponse({
-        message: describeListAppsResult(device.deviceId, content),
-        ...content,
-      });
-    } catch (error) {
-      throw toActionableError(error, `Failed to list apps for device ${device.deviceId}`);
-    }
-  };
-
-  // Launch app handler
-  const launchAppHandler = async (
-    device: BootedDevice,
-    args: LaunchAppActionArgs,
-    _progress?: unknown,
-    signal?: AbortSignal,
-  ) => {
-    let mutationMayHaveHappened = false;
-    let mutationToken: string | undefined;
-    try {
-      signal?.throwIfAborted();
-      const prepared = prepareLaunchArguments(device, args);
-      mutationToken = prepared.mutationToken;
-      const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
-      mutationMayHaveHappened = true;
-      const result = await launchApp.execute(
-        args.appId,
-        args.clearAppData ?? false,
-        args.coldBoot ?? false,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-        prepared.launchArguments,
-      );
-      signal?.throwIfAborted();
-
-      const safeResult = result.error
-        ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
-        : result;
-      return createStructuredToolResponse(buildLaunchAppResponse(args.appId, safeResult));
-    } catch (error) {
-      if (mutationToken) {
-        iosMutationTokens.clear(device.deviceId, args.appId, mutationToken);
-      }
-      const safeError = redactLaunchError(error, mutationToken);
-      if (isDeviceLostError(error)) {
-        throw safeError;
-      }
-      // A typed launch failure (uninstalled package, foreground mismatch) is
-      // already an actionable error — surface it verbatim rather than re-wrapping
-      // it as "Failed to launch app: Error: ..." (#5868).
-      if (safeError instanceof ActionableError) {
-        throw safeError;
-      }
-      throw toActionableError(safeError, `Failed to launch app`);
-    } finally {
-      if (mutationMayHaveHappened) {
-        await refreshInstalledAppResources(device.deviceId);
-      }
-    }
-  };
-
-  // Terminate app handler
-  const terminateAppHandler = async (
-    device: BootedDevice,
-    args: AppActionArgs,
-    _progress?: unknown,
-    signal?: AbortSignal,
-  ) => {
-    let mutationMayHaveHappened = false;
-    try {
-      signal?.throwIfAborted();
-      if (device.platform === "ios") {
-        iosMutationTokens.clear(device.deviceId, args.appId);
-      }
-      const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
-      mutationMayHaveHappened = true;
-      const result = await terminateApp.execute(
-        args.appId,
-        {
-          skipUiStability: true, // skip the 12+ second stability polling
-        },
-        signal,
-      );
-
-      // A typed failure (e.g. an iOS installed-app listing that failed, or a
-      // devicectl termination error) must surface as an error rather than a
-      // response claiming the app was terminated — issue #5621. Mirrors the
-      // uninstall handler below.
-      if (!result.success) {
-        throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
-      }
-
-      return createStructuredToolResponse({
-        message: `Terminated app ${args.appId}`,
-        observation: result.observation,
-        ...result,
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw toActionableError(error, `Failed to terminate app`);
-    } finally {
-      if (mutationMayHaveHappened) {
-        await refreshInstalledAppResources(device.deviceId);
-      }
-    }
-  };
-
-  const crashAppHandler = async (
-    device: BootedDevice,
-    args: CrashAppActionArgs,
-    _progress?: unknown,
-    signal?: AbortSignal,
-  ) => {
-    const dependencies = getCrashAppToolDependencies();
-    let mutationMayHaveHappened = false;
-    try {
-      signal?.throwIfAborted();
-      mutationMayHaveHappened = true;
-      const result = await dependencies.createCrashApp(device).execute(args.appId, signal);
-      signal?.throwIfAborted();
-
-      const message = result.success
-        ? `Crashed app ${args.appId} via ${result.mechanism}${
-            result.confirmed ? " (OS crash confirmed)" : " (confirmation unavailable)"
-          }`
-        : (result.error ?? `Failed to crash app ${args.appId}`);
-      return createStructuredToolResponse({ message, ...result });
-    } catch (error) {
-      if (isDeviceLostError(error) || error instanceof ActionableError) {
-        throw error;
-      }
-      throw toActionableError(error, `Failed to crash app`);
-    } finally {
-      if (mutationMayHaveHappened) {
-        await refreshInstalledAppResources(device.deviceId);
-      }
-    }
-  };
-
-  const appLifecycleHandler = async (
-    device: BootedDevice,
-    args: { appId: string; action: AppLifecycleAction },
-    _progress?: unknown,
-    signal?: AbortSignal,
-  ) => {
-    let mutationMayHaveHappened = false;
-    try {
-      signal?.throwIfAborted();
-      const result = await getAppLifecycleToolDependencies()
-        .createAppLifecycle(device)
-        .execute(args.appId, args.action, {
-          signal,
-          onMutation: () => {
-            mutationMayHaveHappened = true;
-          },
-        });
-      signal?.throwIfAborted();
-      const message = result.success
-        ? (result.message ??
-          (args.action === "background"
-            ? `Backgrounded app ${args.appId}`
-            : `Completed background kill request for ${args.appId}`))
-        : (result.error ?? `Failed to perform appLifecycle ${args.action} for ${args.appId}`);
-      return createStructuredToolResponse({ ...result, message });
-    } catch (error) {
-      signal?.throwIfAborted();
-      if (isDeviceLostError(error) || error instanceof ActionableError) {
-        throw error;
-      }
-      throw toActionableError(error, "Failed to perform app lifecycle action");
-    } finally {
-      if (mutationMayHaveHappened) {
-        await refreshInstalledAppResources(device.deviceId);
-      }
-    }
-  };
-
-  // Install app handler
-  const installAppHandler = async (
-    device: BootedDevice,
-    args: InstallAppArgs,
-    _progress?: unknown,
-    signal?: AbortSignal,
-  ) => {
-    let mutationMayHaveHappened = false;
-    try {
-      signal?.throwIfAborted();
-      const installApp = getInstallAppToolDependencies().createInstallApp(device);
-      mutationMayHaveHappened = true;
-      const result = await installApp.execute(args.artifactPath, undefined, signal);
-      if (!result.success) {
-        throw new ActionableError(
-          result.error || `Failed to install app from ${args.artifactPath}`,
-        );
-      }
-      const message = result.warning
-        ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
-        : `Installed app from ${args.artifactPath}`;
-
-      return createJSONToolResponse({
-        message,
-        ...result,
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw toActionableError(error, `Failed to install app`);
-    } finally {
-      if (mutationMayHaveHappened) {
-        await refreshInstalledAppResources(device.deviceId);
-      }
-    }
-  };
-
-  // Uninstall app handler
-  const uninstallAppHandler = async (
-    device: BootedDevice,
-    args: UninstallAppArgs,
-    _progress?: unknown,
-    signal?: AbortSignal,
-  ) => {
-    let mutationMayHaveHappened = false;
-    try {
-      signal?.throwIfAborted();
-      const uninstallApp = getUninstallAppToolDependencies().createUninstallApp(device);
-      mutationMayHaveHappened = true;
-      const result = await uninstallApp.execute(
-        args.appId,
-        args.keepData ?? false,
-        undefined,
-        signal,
-      );
-
-      if (!result.success) {
-        throw new ActionableError(result.error || `Failed to uninstall app ${args.appId}`);
-      }
-
-      const message = result.wasInstalled
-        ? `Uninstalled app ${args.appId}${result.keepData ? " (data preserved)" : ""}`
-        : `App ${args.appId} was not installed`;
-
-      return createJSONToolResponse({
-        message,
-        ...result,
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw toActionableError(error, `Failed to uninstall app`);
-    } finally {
-      if (mutationMayHaveHappened) {
-        await refreshInstalledAppResources(device.deviceId);
-      }
-    }
-  };
-
   const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermissionsArgs) => {
     const permissions = new AppPermissions(device);
     const result = await permissions.getPermissions(args.appId, {

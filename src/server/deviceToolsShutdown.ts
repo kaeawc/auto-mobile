@@ -1612,6 +1612,61 @@ interface ShutdownResult {
 
 const deviceShutdownService = new DeviceShutdownService();
 
+async function finishShutdownCleanup(
+  shutdownContext: ShutdownDeadlineContext,
+  dependencies: DeviceToolsDependencies,
+  perf: ReturnType<typeof createPerformanceTracker>,
+  options: {
+    strictDeadline: boolean;
+    timeoutMs: number;
+    retiredIncarnation: number;
+  },
+): Promise<void> {
+  const { device } = shutdownContext;
+  const { strictDeadline, timeoutMs, retiredIncarnation } = options;
+  const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
+  const notification = cleanup.then(async () => {
+    await notifyResourcesAfterShutdown(dependencies);
+  });
+  const release = cleanup.then(async (cacheCleared) => {
+    // Failed persistence must keep the dirty fence across device-ID reuse.
+    if (!cacheCleared) {
+      return;
+    }
+    // Prefer releasing after the notification's own re-invalidation has
+    // been queued, but never wait on it unboundedly: a notifier that
+    // never settles must not retain this device's bookkeeping forever.
+    await settleWithin(notification, dependencies.timer, timeoutMs);
+    await getInstalledAppsCacheWriteCoordinator().releaseDevice(
+      device.deviceId,
+      retiredIncarnation,
+    );
+  });
+  // Keep late cleanup visible to DB shutdown without blocking a later
+  // device teardown retry if resource notification never settles.
+  void getDbWriteBarrier().trackExisting(notification);
+  void getDbWriteBarrier().trackExisting(release);
+
+  await runPostShutdownStep(
+    shutdownContext,
+    perf,
+    "cleanup",
+    "installed-app cleanup did not complete",
+    strictDeadline,
+    async () => {
+      await cleanup;
+    },
+  );
+  await runPostShutdownStep(
+    shutdownContext,
+    perf,
+    "notifyResources",
+    "resource notification did not complete",
+    strictDeadline,
+    async () => await notification,
+  );
+}
+
 export async function shutdownDevice(
   context: ShutdownEntryContext,
   dependencies: DeviceToolsDependencies,
@@ -1759,47 +1814,11 @@ export async function shutdownDevice(
         await releaseShutdownReservation();
         unregisterDirectSessionsForDevice(device.deviceId);
 
-        const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
-        const notification = cleanup.then(async () => {
-          await notifyResourcesAfterShutdown(dependencies);
-        });
-        const release = cleanup.then(async (cacheCleared) => {
-          // Failed persistence must keep the dirty fence across device-ID reuse.
-          if (!cacheCleared) {
-            return;
-          }
-          // Prefer releasing after the notification's own re-invalidation has
-          // been queued, but never wait on it unboundedly: a notifier that
-          // never settles must not retain this device's bookkeeping forever.
-          await settleWithin(notification, dependencies.timer, timeoutMs);
-          await getInstalledAppsCacheWriteCoordinator().releaseDevice(
-            device.deviceId,
-            retiredIncarnation,
-          );
-        });
-        // Keep late cleanup visible to DB shutdown without blocking a later
-        // device teardown retry if resource notification never settles.
-        void getDbWriteBarrier().trackExisting(notification);
-        void getDbWriteBarrier().trackExisting(release);
-
-        await runPostShutdownStep(
-          shutdownContext,
-          perf,
-          "cleanup",
-          "installed-app cleanup did not complete",
+        await finishShutdownCleanup(shutdownContext, dependencies, perf, {
           strictDeadline,
-          async () => {
-            await cleanup;
-          },
-        );
-        await runPostShutdownStep(
-          shutdownContext,
-          perf,
-          "notifyResources",
-          "resource notification did not complete",
-          strictDeadline,
-          async () => await notification,
-        );
+          timeoutMs,
+          retiredIncarnation,
+        });
 
         perf.end();
         return {

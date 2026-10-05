@@ -89,80 +89,102 @@ export async function getDaemonHealthReport(
       );
     }
   } else {
+    await checkDaemonPidFile(report, pidFilePath, timer);
+  }
+  if (isWin32 || report.socketExists) {
+    await probeDaemonHealthSocket(report, socketPath, isWin32, timer, options);
+  }
+  addDaemonHealthRecommendations(report);
+
+  return report;
+}
+
+async function checkDaemonPidFile(
+  report: DaemonHealthReport,
+  pidFilePath: string,
+  timer: Timer,
+): Promise<void> {
+  try {
+    const pidContent = await readFile(pidFilePath, "utf-8");
+    const pidData: PidFileData = JSON.parse(pidContent);
+    report.pidFileValid = true;
+    report.daemonPid = pidData.pid;
+    report.daemonPort = pidData.port;
+
+    // Check if process is actually running
     try {
-      const pidContent = await readFile(pidFilePath, "utf-8");
-      const pidData: PidFileData = JSON.parse(pidContent);
-      report.pidFileValid = true;
-      report.daemonPid = pidData.pid;
-      report.daemonPort = pidData.port;
+      process.kill(pidData.pid, 0); // Check if process exists
+      report.daemonRunning = true;
 
-      // Check if process is actually running
-      try {
-        process.kill(pidData.pid, 0); // Check if process exists
-        report.daemonRunning = true;
-
-        // Calculate uptime
-        if (pidData.startedAt) {
-          report.daemonUptime = timer.now() - new Date(pidData.startedAt).getTime();
-        }
-      } catch (error) {
-        // A stale PID is expected during health checks; the recommendation reports it.
-        logger.debug(`Daemon PID liveness probe failed: ${errorMessage(error)}`);
-        report.recommendations.push(
-          `PID file references process ${pidData.pid} which is not running. ` +
-            `Daemon may have crashed. Stale PID file should be cleaned up.`,
-        );
+      // Calculate uptime
+      if (pidData.startedAt) {
+        report.daemonUptime = timer.now() - new Date(pidData.startedAt).getTime();
       }
     } catch (error) {
-      if (error instanceof SyntaxError) {
-        // JSON parser errors may quote file contents; keep the log context static.
-        logger.warn("Daemon PID file check failed: invalid JSON");
-      } else {
-        logger.warn(`Daemon PID file check failed: ${errorMessage(error)}`, error);
-      }
-      report.recommendations.push(`PID file exists but is invalid or unreadable: ${error}`);
+      // A stale PID is expected during health checks; the recommendation reports it.
+      logger.debug(`Daemon PID liveness probe failed: ${errorMessage(error)}`);
+      report.recommendations.push(
+        `PID file references process ${pidData.pid} which is not running. ` +
+          `Daemon may have crashed. Stale PID file should be cleaned up.`,
+      );
     }
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      // JSON parser errors may quote file contents; keep the log context static.
+      logger.warn("Daemon PID file check failed: invalid JSON");
+    } else {
+      logger.warn(`Daemon PID file check failed: ${errorMessage(error)}`, error);
+    }
+    report.recommendations.push(`PID file exists but is invalid or unreadable: ${error}`);
   }
+}
 
+async function probeDaemonHealthSocket(
+  report: DaemonHealthReport,
+  socketPath: string,
+  isWin32: boolean,
+  timer: Timer,
+  options: DaemonHealthReportOptions,
+): Promise<void> {
   // Try to connect to socket to verify daemon responsiveness. A daemon can be
   // serving via socket even when PID bookkeeping is stale or missing. On POSIX
   // this is gated on the file existing; on win32 there is nothing to gate on
   // (a named pipe has no filesystem entry), so the probe always runs there and
   // its result is what DETERMINES socketExists/socketAccessible — never assumed.
-  if (isWin32 || report.socketExists) {
-    try {
-      // Observation-only probe: never unlinks a live daemon's socket, even if
-      // PID bookkeeping is momentarily stale (issue #2658, #6140).
-      const available = await DaemonClient.isAvailable(socketPath, {
-        signal: options.signal,
-        timeoutMs: options.timeoutMs,
-        timer,
-      });
-      report.socketConnectable = available;
-      if (isWin32) {
-        report.socketExists = available;
-        report.socketAccessible = available;
-      }
-      if (!available) {
-        report.recommendations.push(
-          isWin32
-            ? "Named pipe not found or not responding. Daemon may not be running."
-            : "Socket file exists, but socket is not responding. Daemon may be stuck or unresponsive.",
-        );
-      } else if (!report.daemonRunning) {
-        report.daemonRunning = true;
-        report.recommendations.push(
-          "Daemon socket is responsive, but PID bookkeeping is stale or missing.",
-        );
-      }
-    } catch (error) {
-      report.lastError = errorMessage(error);
+  try {
+    // Observation-only probe: never unlinks a live daemon's socket, even if
+    // PID bookkeeping is momentarily stale (issue #2658, #6140).
+    const available = await DaemonClient.isAvailable(socketPath, {
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+      timer,
+    });
+    report.socketConnectable = available;
+    if (isWin32) {
+      report.socketExists = available;
+      report.socketAccessible = available;
+    }
+    if (!available) {
       report.recommendations.push(
-        "Socket connection test failed. Daemon may be unresponsive or socket may be corrupted.",
+        isWin32
+          ? "Named pipe not found or not responding. Daemon may not be running."
+          : "Socket file exists, but socket is not responding. Daemon may be stuck or unresponsive.",
+      );
+    } else if (!report.daemonRunning) {
+      report.daemonRunning = true;
+      report.recommendations.push(
+        "Daemon socket is responsive, but PID bookkeeping is stale or missing.",
       );
     }
+  } catch (error) {
+    report.lastError = errorMessage(error);
+    report.recommendations.push(
+      "Socket connection test failed. Daemon may be unresponsive or socket may be corrupted.",
+    );
   }
+}
 
+function addDaemonHealthRecommendations(report: DaemonHealthReport): void {
   // Generate recommendations
   if (report.recommendations.length === 0) {
     if (report.daemonRunning && report.socketConnectable) {
@@ -173,8 +195,6 @@ export async function getDaemonHealthReport(
       );
     }
   }
-
-  return report;
 }
 
 /**

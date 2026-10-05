@@ -210,6 +210,13 @@ export class Window implements WindowInterface {
       }
     }
 
+    return this.readFreshActiveWindow(perf, options);
+  }
+
+  private async readFreshActiveWindow(
+    perf: PerformanceTracker,
+    options: GetActiveOptions,
+  ): Promise<ActiveWindowInfo> {
     // Bound and cancel EVERY device read below with ONE shared budget + combined
     // signal, so no sub-read (initial dumpsys, API-level probe, API-27 legacy
     // fallback) can outlive the caller deadline or survive an abort. `timeoutMs`
@@ -246,44 +253,17 @@ export class Window implements WindowInterface {
         apiLevel = await this.adb.getAndroidApiLevel(remainingMs(), signal);
       }
 
-      let parsed: { appId: string; activityName: string } | null = null;
-
-      if (apiLevel !== null && apiLevel !== undefined && apiLevel <= 27) {
-        // API 27 and below: try mCurrentFocus/mFocusedApp first (most reliable when present)
-        parsed = parseDumpsysWindowFocus(stdout);
-        if (!parsed) {
-          // Fall back to window block scanning (ty=1 + isReadyForDisplay)
-          parsed = parseActiveWindowLegacy(stdout);
-        }
-        if (!parsed) {
-          // Try separate dumpsys window command (shorter output)
-          parsed = await this.parseActiveWindowFromDumpsysWindow(remainingMs(), signal);
-        }
+      let parsed = this.parseInitialActiveWindow(stdout, apiLevel);
+      if (this.isLegacyApiLevel(apiLevel) && !parsed) {
+        // Try separate dumpsys window command (shorter output)
+        parsed = await this.parseActiveWindowFromDumpsysWindow(remainingMs(), signal);
         if (!parsed) {
           // Fall through to modern as safety net
           parsed = parseActiveWindowModern(stdout);
         }
-      } else {
-        parsed = parseActiveWindowModern(stdout);
       }
 
-      const packageName = parsed?.appId ?? "";
-      const activityName = parsed?.activityName ?? "";
-
-      // Extract layout sequence sum from all windows
-      let layoutSeqSum = 0;
-      const layoutSeqMatches = stdout.matchAll(/mLayoutSeq=([\d\.]+)/g);
-
-      if (layoutSeqMatches) {
-        for (const match of layoutSeqMatches) {
-          const layoutSeqInt = parseInt(match[1], 10);
-          if (!isNaN(layoutSeqInt)) {
-            layoutSeqSum += layoutSeqInt;
-          }
-        }
-      }
-
-      const result = { appId: packageName, activityName, layoutSeqSum };
+      const result = this.buildActiveWindowInfo(stdout, parsed);
 
       if (options.cacheResult !== false) {
         this.cachedActiveWindow = result;
@@ -291,12 +271,7 @@ export class Window implements WindowInterface {
         logger.info("[WINDOW] Cached new active window information");
       }
 
-      if (!packageName || !activityName) {
-        const sample = stdout.trim().slice(0, 200);
-        logger.warn(
-          `[WINDOW] Failed to parse active window from dumpsys output. Sample: ${sample || "<empty>"}`,
-        );
-      }
+      this.warnIfActiveWindowMissing(stdout, result);
 
       return result;
     } catch (err) {
@@ -312,6 +287,58 @@ export class Window implements WindowInterface {
         activityName: "",
         layoutSeqSum: 0,
       };
+    }
+  }
+
+  private isLegacyApiLevel(apiLevel: number | null): boolean {
+    return apiLevel !== null && apiLevel !== undefined && apiLevel <= 27;
+  }
+
+  private parseInitialActiveWindow(
+    stdout: string,
+    apiLevel: number | null,
+  ): { appId: string; activityName: string } | null {
+    if (this.isLegacyApiLevel(apiLevel)) {
+      // API 27 and below: try mCurrentFocus/mFocusedApp first (most reliable when present)
+      let parsed = parseDumpsysWindowFocus(stdout);
+      if (!parsed) {
+        // Fall back to window block scanning (ty=1 + isReadyForDisplay)
+        parsed = parseActiveWindowLegacy(stdout);
+      }
+      return parsed;
+    }
+    return parseActiveWindowModern(stdout);
+  }
+
+  private buildActiveWindowInfo(
+    stdout: string,
+    parsed: { appId: string; activityName: string } | null,
+  ): ActiveWindowInfo {
+    const packageName = parsed?.appId ?? "";
+    const activityName = parsed?.activityName ?? "";
+
+    // Extract layout sequence sum from all windows
+    let layoutSeqSum = 0;
+    const layoutSeqMatches = stdout.matchAll(/mLayoutSeq=([\d\.]+)/g);
+
+    if (layoutSeqMatches) {
+      for (const match of layoutSeqMatches) {
+        const layoutSeqInt = parseInt(match[1], 10);
+        if (!isNaN(layoutSeqInt)) {
+          layoutSeqSum += layoutSeqInt;
+        }
+      }
+    }
+
+    return { appId: packageName, activityName, layoutSeqSum };
+  }
+
+  private warnIfActiveWindowMissing(stdout: string, result: ActiveWindowInfo): void {
+    if (!result.appId || !result.activityName) {
+      const sample = stdout.trim().slice(0, 200);
+      logger.warn(
+        `[WINDOW] Failed to parse active window from dumpsys output. Sample: ${sample || "<empty>"}`,
+      );
     }
   }
 
@@ -367,87 +394,87 @@ export class Window implements WindowInterface {
 export function parseActiveWindowModern(
   stdout: string,
 ): { appId: string; activityName: string } | null {
-  let packageName = "";
-  let activityName = "";
-
   // First try to get from imeControlTarget (original approach)
   const imeControlMatch = stdout.match(
     /imeControlTarget.*?Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}/,
   );
 
   if (imeControlMatch && imeControlMatch.length >= 3) {
-    packageName = imeControlMatch[1];
-    activityName = imeControlMatch[2];
-  } else {
-    // Handle Pop-Up Window case
-    const popupControlMatch = stdout.match(
-      /imeControlTarget.*?Window\{([0-9a-f]+)\s+u\d+\s+Pop-Up Window\}/i,
-    );
-
-    if (popupControlMatch) {
-      const hexRef = popupControlMatch[1];
-      const windowRegex = new RegExp(
-        `Window #\\d+ Window\\{${hexRef} u\\d+ Pop-Up Window\\}:([\\s\\S]*?)(?=Window #\\d+|$)`,
-      );
-      const windowMatch = stdout.match(windowRegex);
-
-      if (windowMatch) {
-        const activityRecordMatch = windowMatch[1].match(
-          /mActivityRecord=ActivityRecord\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)(?:\s+t\d+)?\}/,
-        );
-
-        if (activityRecordMatch && activityRecordMatch.length >= 3) {
-          packageName = activityRecordMatch[1];
-          activityName = activityRecordMatch[2];
-        }
-      }
-    }
-
-    // If still no match, try fallback approaches.
-    //
-    // This scan is BLOCK-BOUNDED (issue #6289): each window's visibility fields
-    // (`mViewVisibility`/`isOnScreen`/`isVisible`) are read only from within
-    // that window's own block, delimited by the next `Window #N` header. The
-    // previous single-regex form let `[\s\S]*?` run PAST the header window's
-    // block, so on API 29-30 captures lacking a parseable imeControlTarget it
-    // could pair an EARLIER hidden app's `package/activity` header with a LATER
-    // visible window's visibility fields — reporting a backgrounded app as
-    // foreground. The scan is also launcher-AWARE: a genuinely-visible launcher
-    // window is now a valid foreground result (only SystemUI overlays are
-    // excluded), so Home verification reads the launcher instead of falling
-    // through to whatever hidden app happened to appear first.
-    if (!packageName || !activityName) {
-      const visible = parseFirstVisibleModernWindow(stdout);
-      if (visible) {
-        packageName = visible.appId;
-        activityName = visible.activityName;
-      }
-
-      if (!packageName || !activityName) {
-        const anyAppMatch = stdout.match(
-          /Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION/,
-        );
-        if (anyAppMatch && anyAppMatch.length >= 3) {
-          packageName = anyAppMatch[1];
-          activityName = anyAppMatch[2];
-        }
-      }
-    }
-
-    if (!packageName || !activityName) {
-      const visibleAppRegex =
-        /Window #\d+ Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION[\s\S]*?isOnScreen=true[\s\S]*?isVisible=true/gs;
-      const visibleMatch = visibleAppRegex.exec(stdout);
-
-      if (visibleMatch && visibleMatch.length >= 3) {
-        packageName = visibleMatch[1];
-        activityName = visibleMatch[2];
-      }
-    }
+    return { appId: imeControlMatch[1], activityName: imeControlMatch[2] };
   }
 
-  if (packageName && activityName) {
-    return { appId: packageName, activityName };
+  const popup = parsePopupActiveWindow(stdout);
+  if (popup) {
+    return popup;
+  }
+
+  // If still no match, try fallback approaches.
+  //
+  // This scan is BLOCK-BOUNDED (issue #6289): each window's visibility fields
+  // (`mViewVisibility`/`isOnScreen`/`isVisible`) are read only from within
+  // that window's own block, delimited by the next `Window #N` header. The
+  // previous single-regex form let `[\s\S]*?` run PAST the header window's
+  // block, so on API 29-30 captures lacking a parseable imeControlTarget it
+  // could pair an EARLIER hidden app's `package/activity` header with a LATER
+  // visible window's visibility fields — reporting a backgrounded app as
+  // foreground. The scan is also launcher-AWARE: a genuinely-visible launcher
+  // window is now a valid foreground result (only SystemUI overlays are
+  // excluded), so Home verification reads the launcher instead of falling
+  // through to whatever hidden app happened to appear first.
+  const visible = parseFirstVisibleModernWindow(stdout);
+  if (visible) {
+    return visible;
+  }
+
+  const anyApp = parseBaseApplicationWindow(stdout);
+  if (anyApp) {
+    return anyApp;
+  }
+
+  const visibleAppRegex =
+    /Window #\d+ Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION[\s\S]*?isOnScreen=true[\s\S]*?isVisible=true/gs;
+  const visibleMatch = visibleAppRegex.exec(stdout);
+
+  if (visibleMatch && visibleMatch.length >= 3) {
+    return { appId: visibleMatch[1], activityName: visibleMatch[2] };
+  }
+  return null;
+}
+
+function parseBaseApplicationWindow(
+  stdout: string,
+): { appId: string; activityName: string } | null {
+  const anyAppMatch = stdout.match(
+    /Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION/,
+  );
+  if (anyAppMatch && anyAppMatch.length >= 3) {
+    return { appId: anyAppMatch[1], activityName: anyAppMatch[2] };
+  }
+  return null;
+}
+
+function parsePopupActiveWindow(stdout: string): { appId: string; activityName: string } | null {
+  // Handle Pop-Up Window case
+  const popupControlMatch = stdout.match(
+    /imeControlTarget.*?Window\{([0-9a-f]+)\s+u\d+\s+Pop-Up Window\}/i,
+  );
+
+  if (popupControlMatch) {
+    const hexRef = popupControlMatch[1];
+    const windowRegex = new RegExp(
+      `Window #\\d+ Window\\{${hexRef} u\\d+ Pop-Up Window\\}:([\\s\\S]*?)(?=Window #\\d+|$)`,
+    );
+    const windowMatch = stdout.match(windowRegex);
+
+    if (windowMatch) {
+      const activityRecordMatch = windowMatch[1].match(
+        /mActivityRecord=ActivityRecord\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)(?:\s+t\d+)?\}/,
+      );
+
+      if (activityRecordMatch && activityRecordMatch.length >= 3) {
+        return { appId: activityRecordMatch[1], activityName: activityRecordMatch[2] };
+      }
+    }
   }
   return null;
 }

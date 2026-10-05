@@ -1800,6 +1800,40 @@ describe("systemTray headerless two-notification group", () => {
     ToolRegistry.clearTools();
   });
 
+  test.each([
+    ["collapsed", "Gamma", "gamma body"],
+    ["collapsed", "Delta", "delta body"],
+    ["expanded", "Gamma", "gamma body"],
+    ["expanded", "Delta", "delta body"],
+  ] as const)(
+    "matches composite app, title and body in the captured %s %s row",
+    async (state, title, body) => {
+      const fakeTimer = new FakeTimer();
+      const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+      const hierarchy = headerlessTwoNotificationGroups[state];
+      setSystemTrayDependencies({
+        timer: fakeTimer,
+        adbFactory: () => fakeAdb,
+        observeScreenFactory: () => new SequencedObserveScreen([createObservation(hierarchy)]),
+      });
+      const result = await waitForNotificationMatch(
+        device,
+        { title, body, appId: "com.android.shell" },
+        ["Shell", "com.android.shell"],
+        500,
+      );
+      expect(result.match?.match.matches.title?.text).toBe(title);
+      expect(result.match?.match.matches.body?.text).toBe(body);
+      expect(result.match?.candidate.groupNode?.["resource-id"]).toBe(
+        "com.android.systemui:id/expandableNotificationRow",
+      );
+      expect(result.match?.candidate.element).toBeDefined();
+      expect(fakeAdb.getExecutedCommands().filter((command) => command.includes("input"))).toEqual(
+        [],
+      );
+    },
+  );
+
   for (const [title, y] of [
     ["Gamma", 1054],
     ["Delta", 835],

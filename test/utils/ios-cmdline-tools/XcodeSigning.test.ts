@@ -268,6 +268,177 @@ describe("XcodeSigningManager profile eligibility (env-selected preferred profil
     }
   });
 
+  type Profile = Awaited<ReturnType<XcodeSigningManager["listProvisioningProfiles"]>>[number];
+  const typedProfile = (overrides: Partial<Profile> = {}): Profile => ({
+    uuid: "typed-profile",
+    name: "Typed Profile",
+    teamIds: [teamId],
+    expirationDate: new Date("2030-01-01"),
+    provisionsAllDevices: false,
+    provisionedDevices: [deviceUdid],
+    entitlements: {},
+    developerCertificates: [
+      { fingerprint: "MATCH", issuer: "Apple CA", validTo: new Date("2030-01-01") },
+    ],
+    profileType: "development",
+    path: join("profiles", "typed.mobileprovision"),
+    ...overrides,
+  });
+
+  test("preserves preference warnings, manual warnings, and entitlements write order", async () => {
+    process.env.AUTOMOBILE_IOS_PROFILE_NAME = "Typed Profile";
+    process.env.AUTOMOBILE_IOS_CODE_SIGN_IDENTITY = "missing";
+    const { deps } = createFakeDependencies();
+    const calls: string[] = [];
+    deps.now = () => {
+      calls.push("now");
+      return ELIGIBILITY_NOW;
+    };
+    deps.mkdir = async () => {
+      calls.push("mkdir");
+    };
+    deps.writeFile = async () => {
+      calls.push("write");
+    };
+    const profile = typedProfile({
+      expirationDate: new Date("2020-01-01"),
+      provisionedDevices: [],
+      entitlements: { value: "owned schema" },
+      developerCertificates: [
+        { fingerprint: "MATCH", issuer: "Other CA", validTo: new Date("2020-01-01") },
+      ],
+    });
+    const manager = new XcodeSigningManager(deps);
+    const spies = [
+      spyOn(manager, "listProvisioningProfiles").mockImplementation(async () => {
+        calls.push("profiles");
+        return [profile];
+      }),
+      spyOn(manager, "listSigningIdentities").mockImplementation(async () => {
+        calls.push("identities");
+        return [{ fingerprint: "MATCH", name: "identity" }];
+      }),
+      spyOn(manager, "detectTeamIdsFromXcode").mockImplementation(async () => {
+        calls.push("teams");
+        return [];
+      }),
+    ];
+    try {
+      const result = await manager.resolveSigningForDevice(deviceUdid);
+      expect(result.style).toBe("manual");
+      expect(result.profile).toBe(profile);
+      expect(result.teamId).toBe(teamId);
+      expect(result.warnings).toEqual([
+        "Provisioning profile 'Typed Profile' is expired",
+        `Provisioning profile 'Typed Profile' does not include device ${deviceUdid}`,
+        "Requested signing identity 'missing' not found",
+        "Signing certificate for 'Typed Profile' is expired",
+        "Signing certificate issuer for 'Typed Profile' is not an Apple CA",
+        "Development profile 'Typed Profile' missing get-task-allow entitlement",
+      ]);
+      expect(calls).toEqual(["profiles", "identities", "teams", "now", "mkdir", "write"]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  });
+
+  test("filters expiry, team and device before stable profile-type ordering", async () => {
+    process.env.AUTOMOBILE_IOS_TEAM_IDS = "PREFERRED,SECOND";
+    const { deps } = createFakeDependencies();
+    deps.now = () => ELIGIBILITY_NOW;
+    const first = typedProfile({ uuid: "first", teamIds: ["PREFERRED"] });
+    const manager = new XcodeSigningManager(deps);
+    const spies = [
+      spyOn(manager, "listProvisioningProfiles").mockResolvedValue([
+        typedProfile({ expirationDate: new Date(ELIGIBILITY_NOW), teamIds: ["PREFERRED"] }),
+        typedProfile({ teamIds: ["OTHER"] }),
+        typedProfile({ teamIds: ["PREFERRED"], provisionedDevices: null }),
+        typedProfile({
+          teamIds: ["PREFERRED"],
+          profileType: "enterprise",
+          provisionsAllDevices: true,
+        }),
+        first,
+        typedProfile({ uuid: "second", teamIds: ["PREFERRED"] }),
+      ]),
+      spyOn(manager, "listSigningIdentities").mockResolvedValue([
+        { fingerprint: "MATCH", name: "identity" },
+      ]),
+      spyOn(manager, "detectTeamIdsFromXcode").mockResolvedValue(["DETECTED"]),
+    ];
+    try {
+      const result = await manager.resolveSigningForDevice(deviceUdid);
+      expect(result.profile).toBe(first);
+      expect(result.teamId).toBe("PREFERRED");
+      expect(result.warnings).toEqual([
+        "Development profile 'Typed Profile' missing get-task-allow entitlement",
+      ]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  });
+
+  for (const preference of ["match", "Named Identity"]) {
+    test(`matches identity preference ${preference} and checks distribution entitlement`, async () => {
+      process.env.AUTOMOBILE_IOS_CODE_SIGN_IDENTITY = preference;
+      const { deps } = createFakeDependencies();
+      const profile = typedProfile({
+        profileType: "distribution",
+        provisionsAllDevices: true,
+        entitlements: { "get-task-allow": true },
+        developerCertificates: [],
+      });
+      const manager = new XcodeSigningManager(deps);
+      const identity = { fingerprint: "MATCH", name: "Named Identity" };
+      const spies = [
+        spyOn(manager, "listProvisioningProfiles").mockResolvedValue([profile]),
+        spyOn(manager, "listSigningIdentities").mockResolvedValue([identity]),
+        spyOn(manager, "detectTeamIdsFromXcode").mockResolvedValue([]),
+      ];
+      try {
+        const result = await manager.resolveSigningForDevice(deviceUdid);
+        expect(result.identity).toBe(identity);
+        expect(result.warnings).toEqual([
+          "Distribution profile 'Typed Profile' enables get-task-allow",
+        ]);
+      } finally {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      }
+    });
+  }
+
+  test("automatic fallback retains missing preference warning order", async () => {
+    process.env.AUTOMOBILE_IOS_PROFILE_UUID = "absent";
+    process.env.AUTOMOBILE_IOS_CODE_SIGN_IDENTITY = "absent";
+    const { deps } = createFakeDependencies();
+    const manager = new XcodeSigningManager(deps);
+    const spies = [
+      spyOn(manager, "listProvisioningProfiles").mockResolvedValue([]),
+      spyOn(manager, "listSigningIdentities").mockResolvedValue([]),
+      spyOn(manager, "detectTeamIdsFromXcode").mockResolvedValue([]),
+    ];
+    try {
+      const result = await manager.resolveSigningForDevice(deviceUdid);
+      expect(result.style).toBe("automatic");
+      expect(result.teamId).toBeUndefined();
+      expect(result.warnings).toEqual([
+        "Requested provisioning profile 'absent' not found",
+        "Requested signing identity 'absent' not found",
+        "No matching provisioning profile found for device",
+      ]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  });
+
   const otherDevice = "00008030FFFFFFFFFF";
 
   test("selects a valid device-included development profile named via env (manual, no expiry/device warning)", async () => {

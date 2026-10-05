@@ -1,10 +1,14 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
+import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
+import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { ActionableError } from "../../src/models";
 
 /**
  * A best-effort epilogue that fails keeps the step successful and reports itself
@@ -161,5 +165,179 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
     expect(result.success).toBe(true);
     const step = result.debug?.steps.find((s) => s.step.includes(": sendKeys"));
     expect(step?.details?.warnings).toBeUndefined();
+  });
+});
+
+describe("PlanExecutor — failed criticalSection warnings", () => {
+  let executor: DefaultPlanExecutor;
+  let timer: FakeTimer;
+  let restoreTools: () => void;
+  let restoreCoordinator: () => void;
+  let coordinator: CriticalSectionCoordinator;
+  let restoreHandler: () => void;
+  const observe = mock(async () =>
+    createStructuredToolResponse({
+      updatedAt: 0,
+      activeWindow: { appId: "fake.app" },
+      viewHierarchy: { text: "failure screen" },
+    }),
+  );
+
+  beforeEach(() => {
+    restoreTools = preserveToolRegistry();
+    timer = new FakeTimer();
+    executor = new DefaultPlanExecutor(timer);
+    coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+    restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    registerCriticalSectionTools();
+    const section = ToolRegistry.getToolForPlan("criticalSection")!;
+    // Bind the real section handler to a fake device; avoid device acquisition/DB access.
+    const handler = spyOn(section, "handler").mockImplementation((params, progress, signal) =>
+      section.deviceAwareHandler!(
+        { platform: "android", deviceId: "fake-device", name: "Fake" },
+        params,
+        progress,
+        signal,
+      ),
+    );
+    restoreHandler = () => handler.mockRestore();
+    observe.mockClear();
+    ToolRegistry.register(
+      "observe",
+      "fake failure observation",
+      z.object({}).passthrough(),
+      observe,
+    );
+    ToolRegistry.register("sectionWarning", "warns", z.object({}).passthrough(), async () => ({
+      success: true,
+      warnings: ["epilogue failed"],
+    }));
+    ToolRegistry.register("sectionFailure", "fails", z.object({}).passthrough(), async () => {
+      throw new ActionableError("required failure");
+    });
+  });
+
+  afterEach(() => {
+    restoreHandler();
+    coordinator.reset();
+    restoreCoordinator();
+    restoreTools();
+  });
+
+  function sectionStep(device = "A", optional = false, withWarnings = true): Plan["steps"][number] {
+    return {
+      tool: "criticalSection",
+      params: {
+        device,
+        lock: `warning-lock-${device}`,
+        deviceCount: 1,
+        steps: [
+          ...(withWarnings
+            ? [
+                { tool: "sectionWarning", params: { device } },
+                {
+                  tool: optional ? "sectionFailure" : "sectionWarning",
+                  params: { device },
+                  optional,
+                },
+              ]
+            : []),
+          { tool: "sectionFailure", params: { device } },
+        ],
+      },
+    };
+  }
+
+  test.each([false, true])(
+    "failed section retains top-level warnings with optional skip=%s",
+    async (optional) => {
+      const result = await executor.executePlan(
+        {
+          name: "failed-section-warnings",
+          steps: [{ tool: "sectionWarning", params: {} }, sectionStep("A", optional)],
+        },
+        0,
+        "android",
+        "fake-device",
+      );
+      expect(result.success).toBe(false);
+      expect(result.executedSteps).toBe(1);
+      expect(result.failedStep).toMatchObject({ stepIndex: 1, tool: "criticalSection" });
+      expect(result.warnings).toEqual([
+        { stepIndex: 0, tool: "sectionWarning", warnings: ["epilogue failed"] },
+        {
+          stepIndex: 1,
+          tool: "criticalSection",
+          warnings: [
+            "step 1 (sectionWarning): epilogue failed",
+            optional
+              ? "step 2 (sectionFailure): optional step failed; skipped: required failure"
+              : "step 2 (sectionWarning): epilogue failed",
+          ],
+        },
+      ]);
+      expect(result.skippedSteps).toBeUndefined();
+    },
+  );
+
+  test("failed section captures failureObservation through the existing executeStep catch", async () => {
+    const result = await executor.executePlan(
+      { name: "section-observation", steps: [sectionStep()] },
+      0,
+      "android",
+      "fake-device",
+    );
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.failureObservation).toMatchObject({
+      activeWindow: { appId: "fake.app" },
+      viewHierarchy: { text: "failure screen" },
+    });
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("failed section with no accumulated warnings omits the warnings field", async () => {
+    const result = await executor.executePlan(
+      { name: "section-no-warnings", steps: [sectionStep("A", false, false)] },
+      0,
+    );
+    expect(result.success).toBe(false);
+    expect(result).not.toHaveProperty("warnings");
+  });
+
+  test("multi-device failed sections retain warnings with plan indexes and device labels", async () => {
+    const result = await executor.executePlan(
+      {
+        name: "multi-device-section-warnings",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "sectionWarning", params: { device: "A" } },
+          { tool: "sectionWarning", params: { device: "B" } },
+          sectionStep("A"),
+          sectionStep("B"),
+        ],
+      },
+      0,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "finish-current-step",
+    );
+    expect(result.success).toBe(false);
+    expect(result.executedSteps).toBe(2);
+    expect(result.warnings).toEqual([
+      { stepIndex: 0, tool: "sectionWarning", device: "A", warnings: ["epilogue failed"] },
+      { stepIndex: 1, tool: "sectionWarning", device: "B", warnings: ["epilogue failed"] },
+      ...["A", "B"].map((device, index) => ({
+        stepIndex: index + 2,
+        tool: "criticalSection",
+        device,
+        warnings: [
+          "step 1 (sectionWarning): epilogue failed",
+          "step 2 (sectionWarning): epilogue failed",
+        ],
+      })),
+    ]);
   });
 });

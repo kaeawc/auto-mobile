@@ -106,7 +106,15 @@ test.each([
     executedSteps: 1,
     totalSteps: 2,
     deviceMapping: { A: "fake-A", B: "fake-B" },
-    failedStep: { stepIndex: 1, tool: "tapOn", error: "B failed" },
+    failedStep: { stepIndex: 1, tool: "criticalSection", error: "B failed" },
+    warnings: [
+      {
+        stepIndex: 1,
+        tool: "criticalSection",
+        device: "B",
+        warnings: ["step 1 (sendKeys): keyboard dismissal failed"],
+      },
+    ],
   },
 ])("executePlan failure keeps its structured and text payload: %j", async (result) => {
   execute = spyOn(PlanExecutionOrchestrator.prototype, "execute").mockResolvedValue(result);

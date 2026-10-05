@@ -78,11 +78,16 @@ interface StepExecutionContext {
 }
 
 /**
- * The string warnings a tool payload reported, or undefined when it reported
+ * The string warnings a tool payload or thrown error reported, or undefined when it reported
  * none (issue #6868).
  */
-function toolResultWarnings(payload: Record<string, unknown>): string[] | undefined {
-  if (!Array.isArray(payload.warnings)) {
+function toolResultWarnings(payload: unknown): string[] | undefined {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    !("warnings" in payload) ||
+    !Array.isArray(payload.warnings)
+  ) {
     return undefined;
   }
   const warnings = payload.warnings.filter((entry): entry is string => typeof entry === "string");
@@ -95,8 +100,8 @@ interface StepExecutionResult {
   details: Record<string, unknown>;
   failureObservation?: FailureObservationSummary;
   /**
-   * Best-effort warnings the tool reported while still succeeding (issue
-   * #6868). Carried separately from `details` so the plan result can promote
+   * Best-effort warnings from the tool, including sub-steps preceding a failure.
+   * Carried separately from `details` so the plan result can promote
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
@@ -650,6 +655,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         `${context.logPrefix} step ${step.tool} threw; returning failed status`,
         error,
       );
+      const warnings = toolResultWarnings(error);
       return {
         status: "failed",
         error: errorMsg,
@@ -657,8 +663,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           params: step.params,
           error: errorMsg,
           ...(failureObservation ? { failureObservation } : {}),
+          ...(warnings ? { warnings } : {}),
         },
         failureObservation,
+        ...(warnings ? { warnings } : {}),
       };
     }
   }
@@ -797,6 +805,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           continue;
         }
 
+        if (stepResult.warnings) {
+          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
+        }
+
         if (stepResult.status === "failed") {
           logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${stepResult.error}`);
           debugSteps.push({
@@ -822,8 +834,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
               executionTimeMs: this.timer.now() - startTime,
               steps: debugSteps,
             },
-            // Warnings from the steps that DID succeed explain the state the
-            // failing step ran against, so a failed plan keeps them too.
+            // Include diagnostics from earlier steps and from sub-steps that
+            // ran inside the failing step.
             ...(warnings.length > 0 ? { warnings } : {}),
             ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
           };
@@ -835,10 +847,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
           durationMs: this.timer.now() - stepStartTime,
           details: stepResult.details,
         });
-        if (stepResult.warnings) {
-          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
-        }
-
         executedSteps++;
         logger.info(
           `[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`,
@@ -1283,6 +1291,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
           continue;
         }
 
+        if (stepResult.warnings) {
+          warnings.push({
+            stepIndex: planIndex,
+            tool: step.tool,
+            device,
+            warnings: stepResult.warnings,
+          });
+        }
+
         if (stepResult.status === "failed") {
           logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${stepResult.error}`);
           return {
@@ -1301,15 +1318,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             skippedSteps,
             warnings,
           };
-        }
-
-        if (stepResult.warnings) {
-          warnings.push({
-            stepIndex: planIndex,
-            tool: step.tool,
-            device,
-            warnings: stepResult.warnings,
-          });
         }
 
         executedSteps++;

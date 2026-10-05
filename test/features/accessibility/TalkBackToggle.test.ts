@@ -1,3 +1,4 @@
+import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   TalkBackToggle,
@@ -67,6 +68,80 @@ describe("TalkBackToggle", () => {
   let fakeDetector: FakeAccessibilityDetector;
   let fakeTimer: FakeTimer;
   let fakeSecureSettings: FakeSecureSettingsRpc;
+
+  test("unreadable disabling state is a typed failure, never already disabled", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("enabled_accessibility_services", new Error("device offline"));
+    const detector = new DefaultAccessibilityDetector(new FakeTimer());
+    detector.clearAllCache();
+    const result = await new TalkBackToggle(
+      ANDROID_DEVICE,
+      adb,
+      detector,
+      new FakeTimer(),
+      new FakeSecureSettingsRpc(),
+    ).toggle(false);
+    expect(result.applied).toBe(false);
+    expect(result.currentState).toBeUndefined();
+    expect(result.reason).toContain("could not determine");
+    expect(adb.getExecutedCommands()).not.toContain(
+      "shell settings delete secure enabled_accessibility_services",
+    );
+  });
+
+  test("disable confirms device state and replaces the shared detection cache immediately", async () => {
+    const service = "com.google.android.marvin.talkback/.TalkBackService";
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("enabled_accessibility_services", { stdout: service, stderr: "" });
+    const timer = new FakeTimer();
+    const detector = new DefaultAccessibilityDetector(timer);
+    detector.clearAllCache();
+    expect(await detector.detectMethod(ANDROID_DEVICE.deviceId, adb)).toBe("talkback");
+    const secure = new FakeSecureSettingsRpc();
+    secure.setGetResult({ success: true, found: true, value: service });
+    secure.setPutResult({ success: true });
+    adb.setCommandResponseSequence("enabled_accessibility_services", [
+      { stdout: service, stderr: "" },
+      { stdout: "null", stderr: "" },
+    ]);
+    const result = await new TalkBackToggle(ANDROID_DEVICE, adb, detector, timer, secure).toggle(
+      false,
+    );
+    expect(result).toEqual({ supported: true, applied: true, currentState: false });
+    expect(secure.putCalls).toContainEqual({
+      key: "enabled_accessibility_services",
+      value: null,
+      valueType: undefined,
+    });
+    const reads = adb.getExecutedCommands().length;
+    expect(await detector.detectMethod(ANDROID_DEVICE.deviceId, adb)).toBe("unknown");
+    expect(adb.getExecutedCommands()).toHaveLength(reads);
+    detector.clearAllCache();
+  });
+
+  test("unreadable post-change confirmation omits currentState and reports unknown", async () => {
+    fakeDetector.setDefaultResult(null);
+    const state = spyOn(fakeDetector, "resolveState").mockResolvedValue(null);
+    state.mockResolvedValueOnce({ enabled: true, service: "talkback", ctrlProxyEnabled: false });
+    try {
+      const result = await new TalkBackToggle(
+        ANDROID_DEVICE,
+        fakeAdb,
+        fakeDetector,
+        fakeTimer,
+        fakeSecureSettings,
+      ).toggle(false);
+      expect(result.applied).toBe(false);
+      expect(result.currentState).toBeUndefined();
+      expect(result.reason).toContain("unknown (could not determine)");
+      expect(
+        fakeAdb.wasCommandExecuted("settings delete secure enabled_accessibility_services"),
+      ).toBe(true);
+      expect(fakeTimer.getSleepHistory()).toEqual([500, 500, 500]);
+    } finally {
+      state.mockRestore();
+    }
+  });
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
@@ -227,7 +302,7 @@ describe("TalkBackToggle", () => {
         expect(result).toEqual({
           supported: true,
           applied: false,
-          currentState: false,
+          currentState: true,
           reason: "TalkBack permission dialog dismissal could not be confirmed",
         });
         expect(foreground).not.toHaveBeenCalled();
@@ -320,7 +395,8 @@ describe("TalkBackToggle", () => {
           // One idempotency read + four confirmation reads. Enabling also has
           // three sleeps in the existing no-dialog dismissal loop.
           expect(fakeDetector.getDetectionCallCount()).toBe(5);
-          expect(fakeDetector.getInvalidatedDevices()).toHaveLength(5);
+          // Each settings attempt also invalidates immediately, including partial writes.
+          expect(fakeDetector.getInvalidatedDevices()).toHaveLength(7);
           expect(fakeTimer.getSleepHistory()).toEqual(
             enabled ? [500, 500, 500, 500, 500, 500] : [500, 500, 500],
           );

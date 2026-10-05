@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, test } from "bun:test";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { AndroidTapStrategy } from "../../../src/features/action/strategies/AndroidTapStrategy";
 import { IosTapStrategy } from "../../../src/features/action/strategies/IosTapStrategy";
@@ -18,6 +18,23 @@ import type { FeatureFlagService } from "../../../src/features/featureFlags/Feat
  * regression that drops one of the shared members will surface as a
  * compile error here.
  */
+test("Android tap strategy retries unknown once and reports its default decision", async () => {
+  const detector = new FakeAccessibilityDetector();
+  detector.setDefaultResult(null);
+  const warnings: string[] = [];
+  const strategy = new AndroidTapStrategy(
+    { name: "android", deviceId: "unknown", platform: "android" },
+    new FakeAdbClient(),
+    detector,
+  );
+  expect(await strategy.isAccessibilityServiceEnabled((warning) => warnings.push(warning))).toBe(
+    false,
+  );
+  expect(detector.getDetectionCallCount()).toBe(2);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("could not determine");
+});
+
 describe("TapStrategy", () => {
   const androidDevice: BootedDevice = {
     deviceId: "emulator-5554",

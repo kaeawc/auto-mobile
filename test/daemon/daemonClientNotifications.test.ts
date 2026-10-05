@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../src/utils/logger";
 import { DaemonClient } from "../../src/daemon/client";
 import { isDaemonNotification, type DaemonNotification } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -32,6 +33,27 @@ describe("isDaemonNotification", () => {
 });
 
 describe("DaemonClient notification frames", () => {
+  test("skips blank lines and continues after a malformed frame while retaining partial data", () => {
+    const client = new DaemonClient("/fake/socket", 1000, new FakeTimer());
+    const received: string[] = [];
+    client.onNotification((notification) => received.push(notification.method));
+    const errors = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      client.simulateIncomingDataForTesting(
+        Buffer.from('\n  \n{bad}\n{"type":"daemon_notification",'),
+      );
+      expect(received).toEqual([]);
+      expect(errors).toHaveBeenCalledTimes(1);
+      client.simulateIncomingDataForTesting(
+        Buffer.from('"method":"notifications/tools/list_changed"}\n'),
+      );
+      expect(received).toEqual(["notifications/tools/list_changed"]);
+      expect(errors).toHaveBeenCalledTimes(1);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   test("routes notification frames to registered handlers", () => {
     const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
     const received: DaemonNotification[] = [];

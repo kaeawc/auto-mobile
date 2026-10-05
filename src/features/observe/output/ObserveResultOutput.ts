@@ -263,29 +263,19 @@ function reduceTopLevelDebugPerfTelemetry(out: ObserveResult): void {
 
   const gfxMetrics = out.gfxMetrics as Partial<NonNullable<ObserveResult["gfxMetrics"]>>;
 
-  if (auditMetrics.p50Ms !== null && auditMetrics.p50Ms !== undefined) {
-    delete gfxMetrics.percentile50thMs;
-  }
-  if (auditMetrics.p90Ms !== null && auditMetrics.p90Ms !== undefined) {
-    delete gfxMetrics.percentile90thMs;
-  }
-  if (auditMetrics.p95Ms !== null && auditMetrics.p95Ms !== undefined) {
-    delete gfxMetrics.percentile95thMs;
-  }
-  if (auditMetrics.p99Ms !== null && auditMetrics.p99Ms !== undefined) {
-    delete gfxMetrics.percentile99thMs;
-  }
-  if (auditMetrics.missedVsyncCount !== null && auditMetrics.missedVsyncCount !== undefined) {
-    delete gfxMetrics.missedVsyncCount;
-  }
-  if (auditMetrics.slowUiThreadCount !== null && auditMetrics.slowUiThreadCount !== undefined) {
-    delete gfxMetrics.slowUiThreadCount;
-  }
-  if (
-    auditMetrics.frameDeadlineMissedCount !== null &&
-    auditMetrics.frameDeadlineMissedCount !== undefined
-  ) {
-    delete gfxMetrics.frameDeadlineMissedCount;
+  const frameFields = [
+    ["p50Ms", "percentile50thMs"],
+    ["p90Ms", "percentile90thMs"],
+    ["p95Ms", "percentile95thMs"],
+    ["p99Ms", "percentile99thMs"],
+    ["missedVsyncCount", "missedVsyncCount"],
+    ["slowUiThreadCount", "slowUiThreadCount"],
+    ["frameDeadlineMissedCount", "frameDeadlineMissedCount"],
+  ] as const;
+  for (const [auditField, gfxField] of frameFields) {
+    if (auditMetrics[auditField] !== null && auditMetrics[auditField] !== undefined) {
+      delete gfxMetrics[gfxField];
+    }
   }
 }
 
@@ -389,6 +379,17 @@ function trimHierarchyNodes(
     return;
   }
 
+  trimHierarchyNodeAttributes(node, referencedOccluderViewIds);
+
+  for (const child of toNodeArray(node.node)) {
+    trimHierarchyNodes(child, referencedOccluderViewIds);
+  }
+}
+
+function trimHierarchyNodeAttributes(
+  node: ViewHierarchyNode,
+  referencedOccluderViewIds: ReadonlySet<string>,
+): void {
   const attrs: Record<string, unknown> = node;
 
   // Drop view-id when it is identical to resource-id (redundant duplicate).
@@ -417,10 +418,6 @@ function trimHierarchyNodes(
     if ((value === "false" || value === false) && DEFAULT_FALSE_BOOLEAN_ATTRS.has(key)) {
       delete attrs[key];
     }
-  }
-
-  for (const child of toNodeArray(node.node)) {
-    trimHierarchyNodes(child, referencedOccluderViewIds);
   }
 }
 
@@ -1430,35 +1427,42 @@ function isIosObservation(obs: ObserveResult): boolean {
   }
   const viewHierarchy = obs.viewHierarchy;
   if (viewHierarchy) {
-    if (hasAndroidHierarchySignals(viewHierarchy)) {
-      return false;
-    }
-    if (viewHierarchy.screenScale !== undefined) {
-      return true;
-    }
-    const hierarchy = viewHierarchy.hierarchy as Record<string, unknown>;
-    if (
-      hierarchy.type === "XCUIElementTypeApplication" ||
-      hierarchy.elementType === "application"
-    ) {
-      return true;
-    }
-    if (typeof hierarchy.bundleId === "string" && !viewHierarchy.hierarchy.node) {
-      return true;
-    }
-    const roots = toNodeArray(viewHierarchy.hierarchy.node);
-    if (
-      roots.some(
-        (root) =>
-          classNameForDiff(root) === "XCUIApplication" ||
-          classNameForDiff(root) === "XCUIElementTypeApplication",
-      )
-    ) {
-      return true;
+    const platform = hierarchyObservationPlatform(viewHierarchy);
+    if (platform !== undefined) {
+      return platform === "ios";
     }
   }
   const appId = obs.activeWindow?.appId ?? obs.viewHierarchy?.packageName ?? "";
   return appId.startsWith("com.apple.") || appId.endsWith(".ios");
+}
+
+function hierarchyObservationPlatform(
+  viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+): "android" | "ios" | undefined {
+  if (hasAndroidHierarchySignals(viewHierarchy)) {
+    return "android";
+  }
+  if (viewHierarchy.screenScale !== undefined) {
+    return "ios";
+  }
+  const hierarchy = viewHierarchy.hierarchy as Record<string, unknown>;
+  if (hierarchy.type === "XCUIElementTypeApplication" || hierarchy.elementType === "application") {
+    return "ios";
+  }
+  if (typeof hierarchy.bundleId === "string" && !viewHierarchy.hierarchy.node) {
+    return "ios";
+  }
+  const roots = toNodeArray(viewHierarchy.hierarchy.node);
+  if (
+    roots.some(
+      (root) =>
+        classNameForDiff(root) === "XCUIApplication" ||
+        classNameForDiff(root) === "XCUIElementTypeApplication",
+    )
+  ) {
+    return "ios";
+  }
+  return undefined;
 }
 
 function hasAndroidHierarchySignals(
@@ -1685,16 +1689,18 @@ export function isSameObservationScreen(baseline: ObserveResult, next: ObserveRe
       baselineIdentity.key === nextIdentity.key
     );
   }
-  if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
+  return hasSameLegacyObservationScreen(baseline, next);
+}
+
+function hasSameLegacyObservationScreen(baseline: ObserveResult, next: ObserveResult): boolean {
+  const windowFields = ["appId", "activityName"] as const;
+  const sameWindow = windowFields.every(
+    (field) => (baseline.activeWindow?.[field] ?? "") === (next.activeWindow?.[field] ?? ""),
+  );
+  if (!sameWindow) {
     return false;
   }
-  if ((baseline.activeWindow?.activityName ?? "") !== (next.activeWindow?.activityName ?? "")) {
-    return false;
-  }
-  if ((baseline.viewHierarchy?.packageName ?? "") !== (next.viewHierarchy?.packageName ?? "")) {
-    return false;
-  }
-  return true;
+  return (baseline.viewHierarchy?.packageName ?? "") === (next.viewHierarchy?.packageName ?? "");
 }
 
 /**
@@ -1722,40 +1728,14 @@ export function diffObserveResult(
   const removed: DiffRepairNode[] = [];
   const changed: ObserveDiffNodeChange[] = [];
 
-  for (const pathKey of new Set([...baseByKey.keys(), ...nextByKey.keys()])) {
-    const baseNodes = baseByKey.get(pathKey) ?? [];
-    const nextNodes = nextByKey.get(pathKey) ?? [];
-    const paired = Math.min(baseNodes.length, nextNodes.length);
-    for (let i = 0; i < paired; i++) {
-      const attrChanges = diffAttributes(baseNodes[i].attributes, nextNodes[i].attributes);
-      if (Object.keys(attrChanges).length > 0) {
-        changed.push({
-          key: nextNodes[i].key,
-          selector: deriveDiffSelector(
-            nextNodes[i].attributes,
-            occurrenceIndexByPathKey.get(nextNodes[i].pathKey),
-          ),
-          changes: attrChanges,
-        });
-      }
-    }
-    for (let i = paired; i < nextNodes.length; i++) {
-      added.push({
-        pathKey: nextNodes[i].pathKey,
-        key: nextNodes[i].key,
-        attributes: nextNodes[i].attributes,
-        ancestorClasses: nextNodes[i].ancestorClasses,
-      });
-    }
-    for (let i = paired; i < baseNodes.length; i++) {
-      removed.push({
-        pathKey: baseNodes[i].pathKey,
-        key: baseNodes[i].key,
-        attributes: baseNodes[i].attributes,
-        ancestorClasses: baseNodes[i].ancestorClasses,
-      });
-    }
-  }
+  collectPositionalNodeDiffs({
+    baseByKey,
+    nextByKey,
+    occurrenceIndexByPathKey,
+    added,
+    removed,
+    changed,
+  });
 
   // Content-hash node identity (issue #3053, default on): re-pair leftover
   // remove+add nodes that share a unique stable content key into a `changed`
@@ -1794,6 +1774,69 @@ export function diffObserveResult(
       .filter((node): node is ObserveDiffNode => node !== undefined),
     changed,
   };
+  appendDisplayChange(diff, baseline, next);
+
+  appendFieldChanges(diff, baseline, next, cfg);
+
+  return diff;
+}
+
+function collectPositionalNodeDiffs({
+  baseByKey,
+  nextByKey,
+  occurrenceIndexByPathKey,
+  added,
+  removed,
+  changed,
+}: {
+  baseByKey: Map<string, FlatObserveNode[]>;
+  nextByKey: Map<string, FlatObserveNode[]>;
+  occurrenceIndexByPathKey: Map<string, number>;
+  added: DiffRepairNode[];
+  removed: DiffRepairNode[];
+  changed: ObserveDiffNodeChange[];
+}): void {
+  for (const pathKey of new Set([...baseByKey.keys(), ...nextByKey.keys()])) {
+    const baseNodes = baseByKey.get(pathKey) ?? [];
+    const nextNodes = nextByKey.get(pathKey) ?? [];
+    const paired = Math.min(baseNodes.length, nextNodes.length);
+    for (let i = 0; i < paired; i++) {
+      const attrChanges = diffAttributes(baseNodes[i].attributes, nextNodes[i].attributes);
+      if (Object.keys(attrChanges).length > 0) {
+        changed.push({
+          key: nextNodes[i].key,
+          selector: deriveDiffSelector(
+            nextNodes[i].attributes,
+            occurrenceIndexByPathKey.get(nextNodes[i].pathKey),
+          ),
+          changes: attrChanges,
+        });
+      }
+    }
+    for (let i = paired; i < nextNodes.length; i++) {
+      added.push({
+        pathKey: nextNodes[i].pathKey,
+        key: nextNodes[i].key,
+        attributes: nextNodes[i].attributes,
+        ancestorClasses: nextNodes[i].ancestorClasses,
+      });
+    }
+    for (let i = paired; i < baseNodes.length; i++) {
+      removed.push({
+        pathKey: baseNodes[i].pathKey,
+        key: baseNodes[i].key,
+        attributes: baseNodes[i].attributes,
+        ancestorClasses: baseNodes[i].ancestorClasses,
+      });
+    }
+  }
+}
+
+function appendDisplayChange(
+  diff: ObserveDiff,
+  baseline: ObserveResult,
+  next: ObserveResult,
+): void {
   if (
     baseline.display &&
     next.display &&
@@ -1810,30 +1853,21 @@ export function diffObserveResult(
       to: { key: toKey, role: toRole, posture: toPosture },
     };
   }
+}
 
+function appendFieldChanges(
+  diff: ObserveDiff,
+  baseline: ObserveResult,
+  next: ObserveResult,
+  cfg?: DiffObserveConfig,
+): void {
   const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
   const elementFields = cfg?.elementFields ?? DIFF_ELEMENT_FIELDS;
   const fields: NonNullable<ObserveDiff["fields"]> = {};
   const baseRecord: Record<string, unknown> = baseline;
   const nextRecord: Record<string, unknown> = next;
   for (const field of scalarFields) {
-    const equal =
-      field === "layoutWarnings"
-        ? layoutWarningsEqual(baseRecord[field], nextRecord[field])
-        : valuesEqual(baseRecord[field], nextRecord[field]);
-    if (field === "layoutWarnings" && cfg?.layoutWarningsDiffMode === "perEntry") {
-      const layoutWarnings = diffLayoutWarningsPerEntry(baseRecord[field], nextRecord[field]);
-      if (
-        layoutWarnings.added.length > 0 ||
-        layoutWarnings.removed.length > 0 ||
-        layoutWarnings.scope !== undefined ||
-        layoutWarnings.total !== undefined
-      ) {
-        fields[field] = layoutWarnings;
-      }
-    } else if (!equal) {
-      fields[field] = { from: baseRecord[field], to: nextRecord[field] };
-    }
+    appendScalarFieldChange(fields, field, baseRecord, nextRecord, cfg);
   }
   // Element mirror fields (#3052): compare/emit the `node`-subtree-stripped form
   // (the subtree is redundant with the node diff and unbounded in size), with a
@@ -1849,6 +1883,30 @@ export function diffObserveResult(
   if (Object.keys(fields).length > 0) {
     diff.fields = fields;
   }
+}
 
-  return diff;
+function appendScalarFieldChange(
+  fields: NonNullable<ObserveDiff["fields"]>,
+  field: string,
+  baseRecord: Record<string, unknown>,
+  nextRecord: Record<string, unknown>,
+  cfg?: DiffObserveConfig,
+): void {
+  const equal =
+    field === "layoutWarnings"
+      ? layoutWarningsEqual(baseRecord[field], nextRecord[field])
+      : valuesEqual(baseRecord[field], nextRecord[field]);
+  if (field === "layoutWarnings" && cfg?.layoutWarningsDiffMode === "perEntry") {
+    const layoutWarnings = diffLayoutWarningsPerEntry(baseRecord[field], nextRecord[field]);
+    if (
+      layoutWarnings.added.length > 0 ||
+      layoutWarnings.removed.length > 0 ||
+      layoutWarnings.scope !== undefined ||
+      layoutWarnings.total !== undefined
+    ) {
+      fields[field] = layoutWarnings;
+    }
+  } else if (!equal) {
+    fields[field] = { from: baseRecord[field], to: nextRecord[field] };
+  }
 }

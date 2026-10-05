@@ -10,6 +10,7 @@ import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   resolveDisplayFence,
   type DisplayFenceOption,
+  type DisplayFence,
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../observe/shared/SharedGestureDelegate";
@@ -58,7 +59,10 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
@@ -887,7 +891,17 @@ export class TapAnyElement extends BaseVisualChange {
       attachRawViewHierarchy(filtered, rawHierarchy);
       return filtered;
     }
-    if (this.device.platform === "ios" && screenSize?.width && screenSize?.height) {
+    if (this.device.platform === "ios") {
+      return this.prepareIosViewHierarchyForResponse(rawHierarchy, screenSize);
+    }
+    return rawHierarchy;
+  }
+
+  private prepareIosViewHierarchyForResponse(
+    rawHierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
+  ): ViewHierarchyResult {
+    if (screenSize?.width && screenSize?.height) {
       const filtered = this.viewHierarchy.filterOffscreenNodes(
         rawHierarchy,
         screenSize.width,
@@ -1303,6 +1317,272 @@ export class TapAnyElement extends BaseVisualChange {
     }
   }
 
+  private throwMissingClickableElement(
+    options: TapAnyElementOptions,
+    containerFoundEver: boolean,
+  ): never {
+    if (options.container && !containerFoundEver) {
+      const containerLabel = options.container.elementId
+        ? `elementId '${options.container.elementId}'`
+        : `text '${options.container.text}'`;
+      throw new ActionableError(`Container element not found with provided ${containerLabel}`);
+    }
+    const containerHint = options.container
+      ? ` within container ${options.container.elementId ? `elementId '${options.container.elementId}'` : `text '${options.container.text}'`}`
+      : "";
+    throw new ActionableError(`No clickable element found${containerHint}`);
+  }
+
+  private async pollClickableTarget({
+    options,
+    observeResult,
+    refresh,
+    signal,
+    selectedCapture,
+    searchDurationMs,
+    startTime,
+    lastHash,
+    containerFoundEver,
+  }: {
+    options: TapAnyElementOptions;
+    observeResult: ObserveResult;
+    refresh: RefreshViewHierarchy;
+    signal?: AbortSignal;
+    selectedCapture: HierarchySnapshot;
+    searchDurationMs: number;
+    startTime: number;
+    lastHash: string | null;
+    containerFoundEver: boolean;
+  }) {
+    let requestCount = 0;
+    let changeCount = 0;
+    let element: Element | null = null;
+    const deadline = startTime + searchDurationMs;
+    while (this.timer.now() < deadline) {
+      throwIfAborted(signal);
+      await this.timer.sleep(TapAnyElement.SEARCH_POLL_INTERVAL_MS);
+      const remainingTimeMs = Math.max(0, deadline - this.timer.now());
+      if (remainingTimeMs <= 0) {
+        break;
+      }
+      const refreshed = await refresh(remainingTimeMs, observeResult.screenSize, signal);
+      requestCount += 1;
+      if (!refreshed) {
+        continue;
+      }
+
+      // A hierarchy request can consume the last millisecond of the
+      // search window. Do not select from its result after the
+      // deadline: CtrlProxy may have served a stale fallback when its
+      // synchronous refresh timed out, and a late candidate must not
+      // turn a bounded search into an unbounded tap.
+      if (this.timer.now() >= deadline) {
+        break;
+      }
+
+      const hash = this.hashViewHierarchy(refreshed);
+      if (hash && hash !== lastHash) {
+        changeCount += 1;
+        lastHash = hash;
+      }
+
+      selectedCapture = identifyObservedHierarchy(
+        this.device.platform,
+        refreshed,
+        "fresh",
+        this.timer,
+        undefined,
+        { iosMultiPanel: this.iosMultiPanel },
+      );
+      const found = this.findClickableElement(options, selectedCapture.hierarchy, {
+        observationScreenSize: observeResult.screenSize,
+        display: observeResult.viewHierarchy,
+      });
+      element = found.element;
+      containerFoundEver = containerFoundEver || found.containerFound;
+      if (element) {
+        break;
+      }
+    }
+
+    if (!element) {
+      this.throwMissingClickableElement(options, containerFoundEver);
+    }
+
+    return { element, selectedCapture, startTime, requestCount, changeCount };
+  }
+
+  private async tapObservedElement({
+    options,
+    observeResult,
+    fence,
+    targetDisplay,
+    refresh,
+    onActivationWarnings,
+    perf,
+    signal,
+  }: {
+    options: TapAnyElementOptions;
+    observeResult: ObserveResult;
+    fence?: DisplayFence;
+    targetDisplay: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
+    refresh: RefreshViewHierarchy;
+    onActivationWarnings: (messages?: string[]) => void;
+    perf: PerformanceTracker;
+    signal?: AbortSignal;
+  }) {
+    throwIfAborted(signal);
+
+    const viewHierarchy = observeResult.viewHierarchy;
+    if (!viewHierarchy) {
+      perf.end();
+      return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
+    }
+
+    let selectedCapture = identifyObservedHierarchy(
+      this.device.platform,
+      viewHierarchy,
+      "cached-ok",
+      this.timer,
+      undefined,
+      { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
+    );
+    const searchDurationMs = this.getSearchUntilDuration(options);
+    const startTime = this.timer.now();
+    let requestCount = 0;
+    let changeCount = 0;
+    const lastHash = this.hashViewHierarchy(viewHierarchy);
+
+    const found = this.findClickableElement(options, selectedCapture.hierarchy, {
+      observationScreenSize: observeResult.screenSize,
+      display: observeResult.viewHierarchy,
+    });
+    let element = found.element;
+    const containerFoundEver = found.containerFound;
+
+    if (!element) {
+      ({ element, selectedCapture, requestCount, changeCount } = await this.pollClickableTarget({
+        options,
+        observeResult,
+        refresh,
+        signal,
+        selectedCapture,
+        searchDurationMs,
+        startTime,
+        lastHash,
+        containerFoundEver,
+      }));
+    }
+    const tapPoint = this.geometry.getElementCenter(element);
+    const target = {
+      element,
+      capture: selectedCapture,
+      scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
+    };
+    const action = options.action;
+    await this.dispatchTapTarget({
+      options,
+      observeResult,
+      fence,
+      targetDisplay,
+      refresh,
+      onActivationWarnings,
+      signal,
+      tapPoint,
+      target,
+      action,
+    });
+    perf.end();
+    return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
+  }
+
+  private async dispatchTapTarget({
+    options,
+    observeResult,
+    fence,
+    targetDisplay,
+    refresh,
+    onActivationWarnings,
+    signal,
+    tapPoint,
+    target,
+    action,
+  }: {
+    options: TapAnyElementOptions;
+    observeResult: ObserveResult;
+    fence?: DisplayFence;
+    targetDisplay: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
+    refresh: RefreshViewHierarchy;
+    onActivationWarnings: (messages?: string[]) => void;
+    signal?: AbortSignal;
+    tapPoint: { x: number; y: number };
+    target: CapturedTapTarget;
+    action: TapAnyElementOptions["action"];
+  }): Promise<void> {
+    const { element, capture: selectedCapture } = target;
+    const longPressDuration = this.getLongPressDuration(options);
+    const tapContext = { displayFence: fence, onActivationWarnings };
+
+    logger.info(
+      `[TapAnyElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on clickable element: ` +
+        `text=${JSON.stringify(element.text)}, ` +
+        `bounds=${JSON.stringify(element.bounds)}`,
+    );
+
+    switch (this.device.platform) {
+      case "android": {
+        const preTapHash = this.hashViewHierarchy(selectedCapture.hierarchy);
+        const dispatch = targetDisplay
+          ? await androidDisplayTapDispatch(
+              this.accessibilityService,
+              this.adb,
+              { action, duration: longPressDuration },
+              { target: targetDisplay, signal, onDispatched: () => {} },
+            )
+          : undefined;
+        if (dispatch) {
+          this.assertSelectedCapture(selectedCapture);
+          await dispatch(tapPoint);
+        } else {
+          await this.executeAndroidTap(
+            action,
+            tapPoint.x,
+            tapPoint.y,
+            longPressDuration,
+            target,
+            signal,
+            tapContext,
+          );
+        }
+        await this.retryAndroidTapIfNoChange(
+          preTapHash,
+          target,
+          action,
+          longPressDuration,
+          observeResult.screenSize,
+          signal,
+          { ...tapContext, selectionOptions: options, refresh, dispatch },
+        );
+        break;
+      }
+      case "ios":
+        targetDisplay?.assertCurrent();
+        this.assertSelectedCapture(selectedCapture);
+        await this.executeIosTap(
+          action,
+          tapPoint.x,
+          tapPoint.y,
+          longPressDuration,
+          element,
+          signal,
+          { displayFence: fence, scoped: target.scoped },
+        );
+        break;
+      default:
+        throw unsupportedPlatformError(this.device.platform, "tap any element");
+    }
+  }
+
   async execute(
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
@@ -1361,173 +1641,17 @@ export class TapAnyElement extends BaseVisualChange {
         }
       };
       const result = await this.observedInteraction(
-        async (observeResult: ObserveResult, fence) => {
-          throwIfAborted(signal);
-
-          const viewHierarchy = observeResult.viewHierarchy;
-          if (!viewHierarchy) {
-            perf.end();
-            return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
-          }
-
-          let selectedCapture = identifyObservedHierarchy(
-            this.device.platform,
-            viewHierarchy,
-            "cached-ok",
-            this.timer,
-            undefined,
-            { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
-          );
-          const searchDurationMs = this.getSearchUntilDuration(options);
-          const startTime = this.timer.now();
-          let requestCount = 0;
-          let changeCount = 0;
-          let lastHash = this.hashViewHierarchy(viewHierarchy);
-
-          let found = this.findClickableElement(options, selectedCapture.hierarchy, {
-            observationScreenSize: observeResult.screenSize,
-            display: observeResult.viewHierarchy,
-          });
-          let element = found.element;
-          let containerFoundEver = found.containerFound;
-
-          if (!element) {
-            const deadline = startTime + searchDurationMs;
-            while (this.timer.now() < deadline) {
-              throwIfAborted(signal);
-              await this.timer.sleep(TapAnyElement.SEARCH_POLL_INTERVAL_MS);
-              const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-              if (remainingTimeMs <= 0) {
-                break;
-              }
-              const refreshed = await refresh(remainingTimeMs, observeResult.screenSize, signal);
-              requestCount += 1;
-              if (!refreshed) {
-                continue;
-              }
-
-              // A hierarchy request can consume the last millisecond of the
-              // search window. Do not select from its result after the
-              // deadline: CtrlProxy may have served a stale fallback when its
-              // synchronous refresh timed out, and a late candidate must not
-              // turn a bounded search into an unbounded tap.
-              if (this.timer.now() >= deadline) {
-                break;
-              }
-
-              const hash = this.hashViewHierarchy(refreshed);
-              if (hash && hash !== lastHash) {
-                changeCount += 1;
-                lastHash = hash;
-              }
-
-              selectedCapture = identifyObservedHierarchy(
-                this.device.platform,
-                refreshed,
-                "fresh",
-                this.timer,
-                undefined,
-                { iosMultiPanel: this.iosMultiPanel },
-              );
-              found = this.findClickableElement(options, selectedCapture.hierarchy, {
-                observationScreenSize: observeResult.screenSize,
-                display: observeResult.viewHierarchy,
-              });
-              element = found.element;
-              containerFoundEver = containerFoundEver || found.containerFound;
-              if (element) {
-                break;
-              }
-            }
-          }
-
-          if (!element) {
-            if (options.container && !containerFoundEver) {
-              const containerLabel = options.container.elementId
-                ? `elementId '${options.container.elementId}'`
-                : `text '${options.container.text}'`;
-              throw new ActionableError(
-                `Container element not found with provided ${containerLabel}`,
-              );
-            }
-            const containerHint = options.container
-              ? ` within container ${options.container.elementId ? `elementId '${options.container.elementId}'` : `text '${options.container.text}'`}`
-              : "";
-            throw new ActionableError(`No clickable element found${containerHint}`);
-          }
-
-          const tapPoint = this.geometry.getElementCenter(element);
-          const target = {
-            element,
-            capture: selectedCapture,
-            scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
-          };
-          const action = options.action;
-          const longPressDuration = this.getLongPressDuration(options);
-          const tapContext = { displayFence: fence, onActivationWarnings };
-
-          logger.info(
-            `[TapAnyElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on clickable element: ` +
-              `text=${JSON.stringify(element.text)}, ` +
-              `bounds=${JSON.stringify(element.bounds)}`,
-          );
-
-          switch (this.device.platform) {
-            case "android": {
-              const preTapHash = this.hashViewHierarchy(selectedCapture.hierarchy);
-              const dispatch = targetDisplay
-                ? await androidDisplayTapDispatch(
-                    this.accessibilityService,
-                    this.adb,
-                    { action, duration: longPressDuration },
-                    { target: targetDisplay, signal, onDispatched: () => {} },
-                  )
-                : undefined;
-              if (dispatch) {
-                this.assertSelectedCapture(selectedCapture);
-                await dispatch(tapPoint);
-              } else {
-                await this.executeAndroidTap(
-                  action,
-                  tapPoint.x,
-                  tapPoint.y,
-                  longPressDuration,
-                  target,
-                  signal,
-                  tapContext,
-                );
-              }
-              await this.retryAndroidTapIfNoChange(
-                preTapHash,
-                target,
-                action,
-                longPressDuration,
-                observeResult.screenSize,
-                signal,
-                { ...tapContext, selectionOptions: options, refresh, dispatch },
-              );
-              break;
-            }
-            case "ios":
-              targetDisplay?.assertCurrent();
-              this.assertSelectedCapture(selectedCapture);
-              await this.executeIosTap(
-                action,
-                tapPoint.x,
-                tapPoint.y,
-                longPressDuration,
-                element,
-                signal,
-                { displayFence: fence, scoped: target.scoped },
-              );
-              break;
-            default:
-              throw unsupportedPlatformError(this.device.platform, "tap any element");
-          }
-
-          perf.end();
-          return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
-        },
+        (observeResult, fence) =>
+          this.tapObservedElement({
+            options,
+            observeResult,
+            fence,
+            targetDisplay,
+            refresh,
+            onActivationWarnings,
+            perf,
+            signal,
+          }),
         {
           changeExpected: false,
           display: targetDisplay?.observation.display.key,

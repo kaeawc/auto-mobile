@@ -16,6 +16,34 @@ import {
 import { SIMULATOR_FPS_DEFAULT } from "../../../src/features/screen-stream/IosScreenCaptureHelper";
 
 describe("parseIceServers", () => {
+  test("pins empty and mixed JSON URL expansion including absent credentials", () => {
+    expect(parseIceServers("[]")).toEqual([]);
+    expect(parseIceServers('[{"urls":[]},{"urls":""},{"urls":["stun:a","turn:b"]}]')).toEqual([
+      { urls: "", username: undefined, credential: undefined },
+      { urls: "stun:a", username: undefined, credential: undefined },
+      { urls: "turn:b", username: undefined, credential: undefined },
+    ]);
+    expect(parseIceServers(" , stun:a, , turn:b, ")).toEqual([
+      { urls: "stun:a" },
+      { urls: "turn:b" },
+    ]);
+  });
+
+  test.each([null, {}, { urls: 1 }, { urls: ["stun:a", 1] }])(
+    "pins the error for an invalid ICE entry %j",
+    (entry) => {
+      expect(() => parseIceServers(JSON.stringify([entry]))).toThrow(
+        'AUTOMOBILE_WEBRTC_ICE_SERVERS JSON entries must have a string or string[] "urls".',
+      );
+    },
+  );
+
+  test("pins the malformed JSON error", () => {
+    expect(() => parseIceServers("[not json")).toThrow(
+      "Invalid JSON in AUTOMOBILE_WEBRTC_ICE_SERVERS.",
+    );
+  });
+
   test("parses a comma-separated URL list", () => {
     expect(parseIceServers("stun:a:1, turn:b:2")).toEqual([
       { urls: "stun:a:1" },
@@ -67,6 +95,96 @@ describe("parseSize", () => {
 });
 
 describe("resolveWebRtcStreamingConfig", () => {
+  test("pins the complete default configuration and blank environment fallbacks", () => {
+    expect(
+      resolveWebRtcStreamingConfig(
+        {},
+        {
+          [WEBRTC_ENV.WHIP_ENDPOINT]: " https://coord/whip ",
+          [WEBRTC_ENV.ICE_SERVERS]: " ",
+          [WEBRTC_ENV.BITRATE_KBPS]: " ",
+          [WEBRTC_ENV.MAX_SIZE]: " ",
+          [WEBRTC_ENV.IOS_SIMULATOR_FPS]: " ",
+          [WEBRTC_ENV.ANDROID_FPS]: " ",
+        },
+      ),
+    ).toEqual({
+      whipEndpoint: "https://coord/whip",
+      bearerToken: undefined,
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      bitrateKbps: undefined,
+      size: undefined,
+      iosSimulatorFps: 15,
+      androidFps: 30,
+      trickleIce: false,
+      audioEnabled: false,
+    });
+  });
+
+  test("pins every override and bypasses invalid environment values", () => {
+    expect(
+      resolveWebRtcStreamingConfig(
+        {
+          whipEndpoint: "https://override/whip",
+          bearerToken: "",
+          iceServers: [],
+          bitrateKbps: 1234.6,
+          size: { width: 720, height: 1280 },
+          iosSimulatorFps: 5,
+          androidFps: 60,
+          trickleIce: false,
+          audioEnabled: false,
+        },
+        {
+          [WEBRTC_ENV.WHIP_ENDPOINT]: "invalid",
+          [WEBRTC_ENV.WHIP_TOKEN]: "env-token",
+          [WEBRTC_ENV.ICE_SERVERS]: "[invalid",
+          [WEBRTC_ENV.BITRATE_KBPS]: "invalid",
+          [WEBRTC_ENV.MAX_SIZE]: "invalid",
+          [WEBRTC_ENV.IOS_SIMULATOR_FPS]: "invalid",
+          [WEBRTC_ENV.ANDROID_FPS]: "invalid",
+          [WEBRTC_ENV.TRICKLE_ICE]: "true",
+          [WEBRTC_ENV.AUDIO]: "true",
+        },
+      ),
+    ).toEqual({
+      whipEndpoint: "https://override/whip",
+      bearerToken: "",
+      iceServers: [],
+      bitrateKbps: 1235,
+      size: { width: 720, height: 1280 },
+      iosSimulatorFps: 5,
+      androidFps: 60,
+      trickleIce: false,
+      audioEnabled: false,
+    });
+  });
+
+  test("pins validation order and exact errors for encoding environment values", () => {
+    const env = { [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip" };
+    const invalid = {
+      [WEBRTC_ENV.BITRATE_KBPS]: "bad",
+      [WEBRTC_ENV.MAX_SIZE]: "bad",
+      [WEBRTC_ENV.IOS_SIMULATOR_FPS]: "bad",
+      [WEBRTC_ENV.ANDROID_FPS]: "bad",
+    };
+    expect(() => resolveWebRtcStreamingConfig({}, { ...env, ...invalid })).toThrow(
+      'Invalid bitrate "bad"; expected a positive number of kbps.',
+    );
+    expect(() =>
+      resolveWebRtcStreamingConfig({ bitrateKbps: 1000 }, { ...env, ...invalid }),
+    ).toThrow('Invalid size "bad"; expected WIDTHxHEIGHT (e.g. 1280x720).');
+    const encoding = { bitrateKbps: 1000, size: { width: 720, height: 1280 } };
+    expect(() => resolveWebRtcStreamingConfig(encoding, { ...env, ...invalid })).toThrow(
+      'Invalid iOS Simulator capture fps "bad"; expected an integer in [5, 60]. Set AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS or pass iosSimulatorFps.',
+    );
+    expect(() =>
+      resolveWebRtcStreamingConfig({ ...encoding, iosSimulatorFps: 15 }, { ...env, ...invalid }),
+    ).toThrow(
+      'Invalid Android capture fps "bad"; expected an integer in [1, 60]. Set AUTOMOBILE_WEBRTC_ANDROID_FPS or pass androidFps.',
+    );
+  });
+
   test("reads defaults from the environment", () => {
     const env = {
       [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",

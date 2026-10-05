@@ -57,10 +57,11 @@ small `bundledDependencies` set for the conflicting Jimp paths:
   the package. The native `@img/sharp-*` binaries remain unbundled and
   platform-selected.
 
-The selected bundle adds about 17 MiB to the package. The unpacked-size guard is
-therefore 37 MiB: enough for the reproducible Jimp closure, but still a bounded
-release contract. It was raised from 36 MiB on 2026-10-04, when the package
-reached 37.8 MB; the bundled source map is 20.6 MB of that.
+The selected bundle adds about 17 MiB to the package. Source maps no longer embed
+sources by default; opt out for local debugging with
+`AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`.
+The unpacked-size guard is 26 MiB (27,262,976 bytes): the 2026-10-04 measurement of
+23,707,712 bytes plus 3 MiB, rounded up to a whole MiB (#9571).
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:

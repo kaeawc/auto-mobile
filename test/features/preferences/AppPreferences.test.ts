@@ -94,6 +94,41 @@ class ScriptedSimCtlClient {
 }
 
 describe("AppPreferences", () => {
+  test.each([
+    { key: "greeting", type: "string", value: 'hello "xml" & world', found: true },
+    { key: "empty", type: "string", value: "", found: true },
+    { key: "enabled", type: "bool", value: true, found: true },
+    { key: "launch_count", type: "int", value: -7, found: true },
+    { key: "ratio", type: "float", value: 0.1, found: true },
+    { key: "max_long", type: "long", value: "9223372036854775807", found: true },
+    { key: "flags", type: "stringSet", value: ["first", 'say "hi"'], found: true },
+    { key: "nullable", type: undefined, value: null, found: false },
+    { key: "absent", type: undefined, value: null, found: false },
+  ])("characterizes captured Android preference $key", async (row) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "cat shared_prefs/settings.xml",
+      createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+    );
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.getPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "settings",
+      key: row.key,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      key: row.key,
+      type: row.type,
+      value: row.value,
+      found: row.found,
+    });
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell run-as com.example.app cat shared_prefs/settings.xml",
+    ]);
+  });
+
   test("reads Android system properties with adb getprop", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

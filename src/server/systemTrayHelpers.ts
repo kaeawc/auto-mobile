@@ -1130,20 +1130,13 @@ const collectCompositeNotificationCandidates = (
     return matches;
   };
 
-  const visit = (
+  const visitChildren = (
     node: ViewHierarchyNode,
     depth: number,
-    groupNode?: ViewHierarchyNode,
-  ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
-    if (!node || visited.has(node)) {
-      return { matches: {}, hasAll: false };
-    }
-    visited.add(node);
-
-    let combinedMatches = resolveNodeMatches(node);
+    currentGroupNode: ViewHierarchyNode | undefined,
+    combinedMatches: SystemTrayMatchResult["matches"],
+  ): { combinedMatches: SystemTrayMatchResult["matches"]; childHasAll: boolean } => {
     let childHasAll = false;
-
-    const currentGroupNode = nodeIsNotificationGroup(node) ? node : groupNode;
     const children = node.node;
     if (Array.isArray(children)) {
       for (const child of children) {
@@ -1160,6 +1153,28 @@ const collectCompositeNotificationCandidates = (
         childHasAll = true;
       }
     }
+
+    return { combinedMatches, childHasAll };
+  };
+
+  const visit = (
+    node: ViewHierarchyNode,
+    depth: number,
+    groupNode?: ViewHierarchyNode,
+  ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
+    if (!node || visited.has(node)) {
+      return { matches: {}, hasAll: false };
+    }
+    visited.add(node);
+
+    const nodeMatches = resolveNodeMatches(node);
+    const currentGroupNode = nodeIsNotificationGroup(node) ? node : groupNode;
+    const { combinedMatches, childHasAll } = visitChildren(
+      node,
+      depth,
+      currentGroupNode,
+      nodeMatches,
+    );
 
     const hasAll = requiredKeys.every((key) => Boolean(combinedMatches[key]));
     if (hasAll && !childHasAll) {

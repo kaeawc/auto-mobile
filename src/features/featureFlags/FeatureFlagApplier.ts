@@ -52,6 +52,14 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "navigation-screenshots":
         serverConfig.setNavigationScreenshotsEnabled(enabled);
         break;
+      default:
+        this.applyOutputReduction(key, enabled);
+        break;
+    }
+  }
+
+  private applyOutputReduction(key: FeatureFlagKey, enabled: boolean): void {
+    switch (key) {
       case "observe-result-include-elements":
         serverConfig.setObserveResultIncludeElementsEnabled(enabled);
         break;
@@ -110,10 +118,7 @@ const parseContrastConfig = (contrast?: unknown): AccessibilityAuditConfig["cont
   }
 
   const config = contrast as Record<string, unknown>;
-  const samplingPoints =
-    config.samplingPoints === 5 || config.samplingPoints === 9 || config.samplingPoints === 13
-      ? config.samplingPoints
-      : DEFAULT_ACCESSIBILITY_CONFIG.contrast?.samplingPoints;
+  const samplingPoints = parseContrastSamplingPoints(config);
 
   return {
     useMultiPointSampling:
@@ -135,3 +140,10 @@ const parseContrastConfig = (contrast?: unknown): AccessibilityAuditConfig["cont
     samplingPoints,
   };
 };
+
+const parseContrastSamplingPoints = (
+  config: Record<string, unknown>,
+): NonNullable<AccessibilityAuditConfig["contrast"]>["samplingPoints"] =>
+  config.samplingPoints === 5 || config.samplingPoints === 9 || config.samplingPoints === 13
+    ? config.samplingPoints
+    : DEFAULT_ACCESSIBILITY_CONFIG.contrast?.samplingPoints;

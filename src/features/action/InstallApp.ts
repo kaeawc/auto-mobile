@@ -891,6 +891,39 @@ export class InstallApp {
     const afterBundleIds = this.extractBundleIds(afterApps);
 
     const newBundles = this.diffSets(beforeBundleIds, afterBundleIds);
+    const packageName = await this.resolveInstalledIosSimulatorBundle(
+      appPath,
+      perf,
+      afterApps,
+      afterBundleIds,
+      newBundles,
+      postListingWarning,
+    );
+    const warnings = this.iosSimulatorInstallWarnings(
+      postListingWarning,
+      downgraded,
+      packageName,
+      newBundles,
+    );
+
+    const upgrade = downgraded ? false : packageName ? beforeBundleIds.has(packageName) : false;
+
+    return {
+      success: true,
+      upgrade,
+      packageName,
+      warning: warnings.length > 0 ? warnings.join(" ") : undefined,
+    };
+  }
+
+  private async resolveInstalledIosSimulatorBundle(
+    appPath: string,
+    perf: PerformanceTracker,
+    afterApps: any[],
+    afterBundleIds: Set<string>,
+    newBundles: string[],
+    postListingWarning?: string,
+  ): Promise<string | undefined> {
     let packageName = this.findBundleIdByPath(afterApps, appPath);
     if (!packageName && newBundles.length === 1) {
       packageName = newBundles[0];
@@ -911,6 +944,15 @@ export class InstallApp {
       }
     }
 
+    return packageName;
+  }
+
+  private iosSimulatorInstallWarnings(
+    postListingWarning: string | undefined,
+    downgraded: boolean,
+    packageName: string | undefined,
+    newBundles: string[],
+  ): string[] {
     const warnings: string[] = [];
 
     if (postListingWarning) {
@@ -935,14 +977,7 @@ export class InstallApp {
       }
     }
 
-    const upgrade = downgraded ? false : packageName ? beforeBundleIds.has(packageName) : false;
-
-    return {
-      success: true,
-      upgrade,
-      packageName,
-      warning: warnings.length > 0 ? warnings.join(" ") : undefined,
-    };
+    return warnings;
   }
 
   /**

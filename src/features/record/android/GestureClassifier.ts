@@ -60,49 +60,11 @@ export class GestureClassifier {
   /** Feed one frame. Returns a completed GestureEvent or null. */
   feedFrame(frame: RawTouchFrame): GestureEvent | null {
     // 1. Register new contacts and update last-known positions
-    for (const slot of frame.activeSlots) {
-      const existing = this.contacts.get(slot.slotId);
-      if (existing) {
-        // A later axis report proves movement only from its first seen value.
-        // It cannot recover the missing contact-start coordinate.
-        if (!Number.isFinite(existing.startX)) {
-          existing.startX = slot.x;
-        }
-        if (!Number.isFinite(existing.startY)) {
-          existing.startY = slot.y;
-        }
-        existing.lastX = slot.x;
-        existing.lastY = slot.y;
-        existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
-      } else {
-        this.contacts.set(slot.slotId, {
-          startX: slot.x,
-          startY: slot.y,
-          arrivedAt: frame.arrivedAt,
-          lastX: slot.x,
-          lastY: slot.y,
-          unknownAxes: slot.unknownAxes,
-        });
-      }
-    }
+    this.updateContacts(frame);
 
     // 2. Update pinch state while 2 fingers are active
     const activeCount = frame.activeSlots.length;
-    if (activeCount === 2) {
-      this.inTwoFingerMode = true;
-      const [a, b] = frame.activeSlots;
-      const unknownAxes = mergeUnknownAxes(
-        this.contacts.get(a.slotId)?.unknownAxes,
-        this.contacts.get(b.slotId)?.unknownAxes,
-      );
-      const dist = unknownAxes?.length ? undefined : this.screenDist(a.x, a.y, b.x, b.y);
-      if (!this.pinchState) {
-        this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
-      } else {
-        this.pinchState.finalDist = dist;
-        this.pinchState.unknownAxes = mergeUnknownAxes(this.pinchState.unknownAxes, unknownAxes);
-      }
-    }
+    this.updatePinchState(frame, activeCount);
 
     // 3. Nothing released → nothing to emit
     if (frame.releasedSlots.length === 0) {
@@ -128,27 +90,7 @@ export class GestureClassifier {
 
     // 5. Single-finger gesture: exactly 1 slot released, 0 remaining
     if (!this.inTwoFingerMode && frame.releasedSlots.length === 1 && activeCount === 0) {
-      const slotId = frame.releasedSlots[0];
-      const contact = this.contacts.get(slotId);
-      this.contacts.delete(slotId);
-      if (!contact) {
-        return null;
-      }
-
-      if (contact.unknownAxes?.length) {
-        return this.evaluateUnknownContact(contact, frame.arrivedAt);
-      }
-
-      const { x: downX, y: downY } = this.scaler.toScreenPoint(contact.startX, contact.startY);
-      const { x: upX, y: upY } = this.scaler.toScreenPoint(contact.lastX, contact.lastY);
-      const durationMs = frame.arrivedAt - contact.arrivedAt;
-      const displacement = dist(downX, downY, upX, upY);
-      const slopPx = GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp;
-
-      if (displacement < slopPx) {
-        return this.evaluateTapOrLongPress(downX, downY, durationMs, frame.arrivedAt);
-      }
-      return this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
+      return this.completeSingleFingerGesture(frame);
     }
 
     // Clean up released contacts in other cases
@@ -161,6 +103,76 @@ export class GestureClassifier {
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  private updateContacts(frame: RawTouchFrame): void {
+    for (const slot of frame.activeSlots) {
+      const existing = this.contacts.get(slot.slotId);
+      if (existing) {
+        // A later axis report proves movement only from its first seen value.
+        // It cannot recover the missing contact-start coordinate.
+        if (!Number.isFinite(existing.startX)) {
+          existing.startX = slot.x;
+        }
+        if (!Number.isFinite(existing.startY)) {
+          existing.startY = slot.y;
+        }
+        existing.lastX = slot.x;
+        existing.lastY = slot.y;
+        existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
+      } else {
+        this.contacts.set(slot.slotId, {
+          startX: slot.x,
+          startY: slot.y,
+          arrivedAt: frame.arrivedAt,
+          lastX: slot.x,
+          lastY: slot.y,
+          unknownAxes: slot.unknownAxes,
+        });
+      }
+    }
+  }
+
+  private updatePinchState(frame: RawTouchFrame, activeCount: number): void {
+    if (activeCount === 2) {
+      this.inTwoFingerMode = true;
+      const [a, b] = frame.activeSlots;
+      const unknownAxes = mergeUnknownAxes(
+        this.contacts.get(a.slotId)?.unknownAxes,
+        this.contacts.get(b.slotId)?.unknownAxes,
+      );
+      const dist = unknownAxes?.length ? undefined : this.screenDist(a.x, a.y, b.x, b.y);
+      if (!this.pinchState) {
+        this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
+      } else {
+        this.pinchState.finalDist = dist;
+        this.pinchState.unknownAxes = mergeUnknownAxes(this.pinchState.unknownAxes, unknownAxes);
+      }
+    }
+  }
+
+  private completeSingleFingerGesture(frame: RawTouchFrame): GestureEvent | null {
+    const slotId = frame.releasedSlots[0];
+    const contact = this.contacts.get(slotId);
+    this.contacts.delete(slotId);
+    if (!contact) {
+      return null;
+    }
+
+    if (contact.unknownAxes?.length) {
+      return this.evaluateUnknownContact(contact, frame.arrivedAt);
+    }
+
+    const { x: downX, y: downY } = this.scaler.toScreenPoint(contact.startX, contact.startY);
+    const { x: upX, y: upY } = this.scaler.toScreenPoint(contact.lastX, contact.lastY);
+    const durationMs = frame.arrivedAt - contact.arrivedAt;
+    const displacement = dist(downX, downY, upX, upY);
+    const slopPx = GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp;
+
+    if (displacement < slopPx) {
+      return this.evaluateTapOrLongPress(downX, downY, durationMs, frame.arrivedAt);
+    }
+    return this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
+  }
 
   private evaluateUnknownContact(contact: ContactInfo, arrivedAt: number): GestureEvent {
     this.lastTap = null;

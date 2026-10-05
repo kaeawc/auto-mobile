@@ -271,6 +271,41 @@ export function isInjectedDeviceIdSchema(zodSchema: object): boolean {
   );
 }
 
+function compactExclusiveSelectorBranches(
+  branches: unknown[],
+): { compact: Record<string, unknown>; anyOf: Array<{ required: string[] }> } | null {
+  const merged: Record<string, unknown> = {};
+  const anyOf: Array<{ required: string[] }> = [];
+  let matchesPattern = true;
+  for (const branch of branches) {
+    const b = branch as Record<string, any>;
+    if (
+      b?.type !== "object" ||
+      typeof b.properties !== "object" ||
+      !Array.isArray(b.required) ||
+      b.required.length !== 1 ||
+      Object.keys(b.properties).length !== 1
+    ) {
+      matchesPattern = false;
+      break;
+    }
+    const key = b.required[0] as string;
+    if (!(key in b.properties)) {
+      matchesPattern = false;
+      break;
+    }
+    merged[key] = b.properties[key];
+    anyOf.push({ required: [key] });
+  }
+  if (!matchesPattern) {
+    return null;
+  }
+  return {
+    compact: { type: "object", additionalProperties: false, properties: merged },
+    anyOf,
+  };
+}
+
 /**
  * Compacts advertised "exactly one of" selector properties. `z.union([...strict
  * objects])` (the elementId/text/textAny selectors, `container`, etc.) expands to
@@ -299,37 +334,11 @@ export function compactExclusiveSelectorProperties(
     if (!Array.isArray(branches) || branches.length < 2) {
       continue;
     }
-    const merged: Record<string, unknown> = {};
-    const anyOf: Array<{ required: string[] }> = [];
-    let matchesPattern = true;
-    for (const branch of branches) {
-      const b = branch as Record<string, any>;
-      if (
-        b?.type !== "object" ||
-        typeof b.properties !== "object" ||
-        !Array.isArray(b.required) ||
-        b.required.length !== 1 ||
-        Object.keys(b.properties).length !== 1
-      ) {
-        matchesPattern = false;
-        break;
-      }
-      const key = b.required[0] as string;
-      if (!(key in b.properties)) {
-        matchesPattern = false;
-        break;
-      }
-      merged[key] = b.properties[key];
-      anyOf.push({ required: [key] });
-    }
-    if (!matchesPattern) {
+    const result = compactExclusiveSelectorBranches(branches);
+    if (!result) {
       continue;
     }
-    const compact: Record<string, unknown> = {
-      type: "object",
-      additionalProperties: false,
-      properties: merged,
-    };
+    const { compact, anyOf } = result;
     if (typeof prop.description === "string") {
       compact.description = prop.description;
     }

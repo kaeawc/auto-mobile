@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { promises as fsPromises, type Stats } from "node:fs";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import path from "node:path";
@@ -19,6 +20,7 @@ import {
   type StoppableProcess,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import {
+  VideoCaptureFinalizationError,
   VideoCaptureStartCleanupError,
   type VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
@@ -29,9 +31,14 @@ import type { FfmpegClient } from "../../../src/utils/media/FfmpegClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
+import {
+  ProcessTeardownUnconfirmedError,
+  trackProcess,
+} from "../../../src/utils/ChildProcessTracker";
 
 const duoEnumerate = loadDuoEnumerate();
 
@@ -92,6 +99,278 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       format: "mp4",
       device: mockDevice,
     };
+  });
+
+  test.each([null, 0])(
+    "fails terminally after iOS capture exit when the raw file size is %s",
+    async (size) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const removed: string[] = [];
+      backend = new FfmpegVideoProcessingBackend(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        timer,
+        {
+          remove: async (filePath) => {
+            removed.push(filePath);
+          },
+        },
+        undefined,
+        { size: async () => size },
+      );
+      const captureTracker = createProcessTracker();
+      captureTracker.process.exitCode = 0;
+      captureTracker.exitState.exitCode = 0;
+      captureTracker.exitPromise = Promise.resolve();
+      Object.defineProperty(backend, "postProcessRecording", {
+        value: async () => {
+          await waitForRecordingFileReady("/fake/raw.mov", {
+            timer,
+            probe: { size: async () => size },
+          });
+        },
+      });
+      const error = await backend
+        .stop({
+          recordingId: mockConfig.recordingId,
+          outputPath: mockConfig.outputPath,
+          startedAt: mockConfig.startedAt,
+          backendHandle: {
+            platform: "ios",
+            captureTracker,
+            capturePath: "/fake/raw.mov",
+            config: mockConfig,
+          },
+        })
+        .catch((error: unknown) => error);
+      expect(removed).toEqual(["/fake/raw.mov"]);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(error).toMatchObject({
+        retainOwnership: false,
+        message: expect.stringContaining("no usable video"),
+      });
+    },
+  );
+
+  test.each(["encoder failure", "encoder teardown", "timeout", "file probe"])(
+    "terminal %s keeps a non-empty raw capture and reports its path",
+    async (failure) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const removed: string[] = [];
+      const cause =
+        failure === "encoder teardown"
+          ? new ProcessTeardownUnconfirmedError("encoder may still be running")
+          : new Error(failure);
+      const rawPath = "/fake/recoverable-raw.mov";
+      const codecProbe = {
+        codec: async () => {
+          throw cause;
+        },
+      };
+      backend = new FfmpegVideoProcessingBackend(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        codecProbe,
+        timer,
+        {
+          remove: async (filePath) => {
+            removed.push(filePath);
+          },
+        },
+        undefined,
+        {
+          size: async (filePath) => {
+            if (failure === "file probe" && filePath === rawPath) {
+              throw new Error("stat failed");
+            }
+            return 4096;
+          },
+        },
+      );
+      const captureTracker = createProcessTracker();
+      captureTracker.process.exitCode = 0;
+      captureTracker.exitPromise = Promise.resolve();
+      const encoder = new FakeChildProcess(timer);
+      const ffmpegTracker = trackProcess(encoder);
+      Object.defineProperty(backend, "postProcessRecording", {
+        value: async () => {
+          throw cause;
+        },
+      });
+      const error = await backend
+        .stop({
+          recordingId: mockConfig.recordingId,
+          outputPath: mockConfig.outputPath,
+          startedAt: mockConfig.startedAt,
+          backendHandle: {
+            platform: "ios",
+            captureTracker,
+            ffmpegTracker,
+            capturePath: rawPath,
+            config: mockConfig,
+          },
+        })
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(removed).toEqual([]);
+      expect(encoder.killed).toBe(true);
+      expect(encoder.signalCode).toBe("SIGKILL");
+      expect(error).toMatchObject({
+        retainOwnership: false,
+        retainedCapturePath: rawPath,
+        cause,
+        message: expect.stringContaining(rawPath),
+      });
+    },
+  );
+
+  test("codec probe failure after successful post-processing keeps raw bytes until codec verification", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const removed: string[] = [];
+    const cause = new Error("codec probe failed");
+    const rawPath = "/fake/recoverable-raw.mov";
+    const encoder = new FakeChildProcess(timer);
+    encoder.exitCode = 0;
+    const ffmpegClient: FfmpegClient = {
+      binaryPath: "fake-ffmpeg",
+      start: () => ({ process: encoder, tracker: trackProcess(encoder) }),
+      probe: async () => ({ version: "7.1", encoders: [] }),
+      run: async () => {
+        throw new Error("unused");
+      },
+      pipe: () => {
+        throw new Error("unused");
+      },
+    };
+    // Fake the PR head's filesystem calls as well as the fixed injected probe,
+    // so both versions reach the actual post-processing + codec-probe path.
+    const stat = spyOn(fsPromises, "stat").mockResolvedValue({ size: 4096 } as Stats);
+    const access = spyOn(fsPromises, "access").mockResolvedValue(undefined);
+    const rm = spyOn(fsPromises, "rm").mockImplementation(async (filePath) => {
+      removed.push(String(filePath));
+    });
+    try {
+      backend = new FfmpegVideoProcessingBackend(
+        undefined,
+        undefined,
+        ffmpegClient,
+        () => "linux",
+        {
+          codec: async () => {
+            throw cause;
+          },
+        },
+        timer,
+        {
+          remove: async (filePath) => {
+            removed.push(filePath);
+          },
+        },
+        undefined,
+        { size: async () => 4096 },
+      );
+      const captureTracker = createProcessTracker();
+      captureTracker.process.exitCode = 0;
+      captureTracker.exitPromise = Promise.resolve();
+      const error = await backend
+        .stop({
+          recordingId: mockConfig.recordingId,
+          outputPath: mockConfig.outputPath,
+          startedAt: mockConfig.startedAt,
+          backendHandle: {
+            platform: "ios",
+            captureTracker,
+            capturePath: rawPath,
+            config: mockConfig,
+          },
+        })
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(removed).toEqual([]);
+      expect(error).toMatchObject({
+        cause,
+        retainOwnership: false,
+        retainedCapturePath: rawPath,
+        message: expect.stringContaining(rawPath),
+      });
+    } finally {
+      stat.mockRestore();
+      access.mockRestore();
+      rm.mockRestore();
+    }
+  });
+
+  test("does not enter terminal cleanup before capture exit is confirmed", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const removed: string[] = [];
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+      {
+        remove: async (filePath) => {
+          removed.push(filePath);
+        },
+      },
+    );
+    const error = await backend
+      .stop({
+        recordingId: mockConfig.recordingId,
+        outputPath: mockConfig.outputPath,
+        startedAt: mockConfig.startedAt,
+        backendHandle: {
+          platform: "ios",
+          captureTracker: createProcessTracker(),
+          capturePath: "/fake/live-raw.mov",
+          config: mockConfig,
+        },
+      })
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ProcessTeardownUnconfirmedError);
+    expect(error).not.toBeInstanceOf(VideoCaptureFinalizationError);
+    expect(removed).toEqual([]);
+  });
+
+  test("terminal post-processing failure with no capture path has no raw file to keep", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    const captureTracker = createProcessTracker();
+    captureTracker.process.exitCode = 0;
+    captureTracker.exitPromise = Promise.resolve();
+    const error = await backend
+      .stop({
+        recordingId: mockConfig.recordingId,
+        outputPath: mockConfig.outputPath,
+        startedAt: mockConfig.startedAt,
+        backendHandle: { platform: "ios", captureTracker, config: mockConfig },
+      })
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+    expect(error).toMatchObject({
+      retainOwnership: false,
+      message: expect.stringContaining("no usable video"),
+    });
+    expect((error as VideoCaptureFinalizationError).retainedCapturePath).toBeUndefined();
   });
 
   test("starts iOS recording through the injected SimCtl argv boundary", async function () {

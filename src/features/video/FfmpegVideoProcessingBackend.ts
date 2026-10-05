@@ -3,7 +3,6 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { platform } from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
-import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { ActionableError, type BootedDevice } from "../../models";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -24,7 +23,6 @@ import {
   type FfmpegProcess,
 } from "../../utils/media/FfmpegClient";
 import {
-  getFileSize,
   PROCESS_EXIT_TIMEOUT_MS,
   trackProcess,
   waitForExit,
@@ -34,6 +32,7 @@ import {
   type StoppableProcess,
 } from "../../utils/ChildProcessTracker";
 import {
+  VideoCaptureFinalizationError,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
@@ -140,6 +139,9 @@ const defaultRecordingFileProbe: RecordingFileProbe = {
       const stats = await fsPromises.stat(filePath);
       return stats.size;
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw toActionableError(error, `Failed to stat recording ${filePath}`);
+      }
       // ENOENT is expected while ffmpeg hasn't created the output file yet;
       // null lets the readiness poll keep waiting instead of erroring out.
       logger.debug(
@@ -476,6 +478,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       const metadata = hierarchy ? client.getScreenScaleMetadata() : null;
       return metadata ? { width: metadata.pixelWidth, height: metadata.pixelHeight } : null;
     },
+    private readonly recordingFileProbe: RecordingFileProbe = defaultRecordingFileProbe,
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -507,49 +510,100 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for FFmpeg video recording.");
     }
 
-    if (backendHandle.platform === "android") {
-      await waitForExit(
-        backendHandle.captureTracker.process,
-        backendHandle.captureTracker.exitPromise,
-      );
+    // A fulfilled tracked exit promise proves capture teardown; signaling alone
+    // does not. Leave failures from this wait outside the terminal path.
+    await waitForExit(
+      backendHandle.captureTracker.process,
+      backendHandle.captureTracker.exitPromise,
+      {
+        timeoutMs:
+          backendHandle.platform === "ios"
+            ? IOS_RECORDING_STOP_TIMEOUT_MS
+            : PROCESS_EXIT_TIMEOUT_MS,
+        timer: this.timer,
+      },
+    );
 
-      if (backendHandle.ffmpegTracker) {
+    try {
+      if (backendHandle.platform === "ios") {
+        await this.postProcessRecording(backendHandle);
+      } else if (backendHandle.ffmpegTracker) {
         await waitForExit(
           backendHandle.ffmpegTracker.process,
           backendHandle.ffmpegTracker.exitPromise,
+          { timer: this.timer },
         );
       }
-    } else {
-      // iOS: simctl writes the moov atom only after SIGINT, so give it a generous
-      // window to finalize the file before escalating to SIGKILL. A premature
-      // SIGKILL truncates the raw .mov and breaks the ffmpeg `-c copy` remux.
-      await waitForExit(
-        backendHandle.captureTracker.process,
-        backendHandle.captureTracker.exitPromise,
-        { timeoutMs: IOS_RECORDING_STOP_TIMEOUT_MS },
+      const sizeBytes = await this.recordingFileProbe.size(handle.outputPath);
+      if (!sizeBytes) {
+        throw new ActionableError("The finalized recording is missing or contains zero bytes.");
+      }
+      // Probe the produced codec: the iOS copy path can preserve HEVC.
+      const codec = await this.codecProbe.codec(handle.outputPath);
+      if (backendHandle.capturePath) {
+        try {
+          await this.captureFileRemover.remove(backendHandle.capturePath);
+        } catch (error) {
+          logger.warn(
+            `[FfmpegVideo] Failed to remove raw recording: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }
+      this.logProcessWarnings("capture", backendHandle.captureTracker);
+      if (backendHandle.ffmpegTracker) {
+        this.logProcessWarnings("ffmpeg", backendHandle.ffmpegTracker);
+      }
+      return {
+        recordingId: handle.recordingId,
+        outputPath: handle.outputPath,
+        startedAt: handle.startedAt,
+        endedAt: backendHandle.captureTracker.exitState.endedAt ?? new Date().toISOString(),
+        sizeBytes,
+        codec,
+      };
+    } catch (error) {
+      throw await this.buildFinalizationError(backendHandle, error);
+    }
+  }
+
+  private async buildFinalizationError(
+    backendHandle: FfmpegBackendHandle,
+    error: unknown,
+  ): Promise<VideoCaptureFinalizationError> {
+    // Capture is gone, so release its owner, but preserve recoverable raw bytes.
+    const cleanupError = await this.cleanupStartingTrackers(
+      [backendHandle.ffmpegTracker].filter(
+        (tracker): tracker is ProcessTracker => tracker !== undefined,
+      ),
+    );
+    if (cleanupError) {
+      logger.warn(
+        `[FfmpegVideo] Failed to clean up recording encoder: ${errorMessage(cleanupError)}`,
+        cleanupError,
       );
-      await this.postProcessRecording(backendHandle);
     }
-
-    const sizeBytes = await getFileSize(handle.outputPath);
-    // Report what was actually produced. The iOS `-c copy` fast path preserves
-    // the simctl source (HEVC on modern hardware), while the re-encode branches
-    // emit H.264 — a single constant mislabeled the common case (#4965).
-    const codec = await this.codecProbe.codec(handle.outputPath);
-
-    this.logProcessWarnings("capture", backendHandle.captureTracker);
-    if (backendHandle.ffmpegTracker) {
-      this.logProcessWarnings("ffmpeg", backendHandle.ffmpegTracker);
+    let retainedCapturePath = backendHandle.capturePath;
+    if (retainedCapturePath) {
+      try {
+        const rawSize = await this.recordingFileProbe.size(retainedCapturePath);
+        if (rawSize === null || rawSize === 0) {
+          await this.captureFileRemover.remove(retainedCapturePath);
+          retainedCapturePath = undefined;
+        }
+      } catch (cleanupError) {
+        logger.warn(
+          `[FfmpegVideo] Could not inspect or remove raw recording; retaining ${retainedCapturePath}: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
     }
-
-    return {
-      recordingId: handle.recordingId,
-      outputPath: handle.outputPath,
-      startedAt: handle.startedAt,
-      endedAt: backendHandle.captureTracker.exitState.endedAt ?? new Date().toISOString(),
-      sizeBytes,
-      codec,
-    };
+    return new VideoCaptureFinalizationError(
+      retainedCapturePath
+        ? `Capture exited but finalization failed. Raw capture retained at ${retainedCapturePath}. ${errorMessage(error)}`
+        : `Capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
+      { cause: error, retainedCapturePath },
+    );
   }
 
   async forceStop(handle: RecordingHandle): Promise<void> {
@@ -567,6 +621,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           timeoutMs: 0,
           forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
           signal: "SIGKILL",
+          timer: this.timer,
         });
       }),
     );
@@ -1140,7 +1195,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // can lag behind process exit on a loaded runner. Poll for a stable, non-empty
     // file before failing, so a momentarily-missing file is not a hard error (#2730).
     try {
-      await waitForRecordingFileReady(capturePath);
+      await waitForRecordingFileReady(capturePath, {
+        timer: this.timer,
+        probe: this.recordingFileProbe,
+      });
     } catch (error) {
       const reason = errorMessage(error);
       throw new ActionableError(
@@ -1187,6 +1245,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     await waitForExit(ffmpegProcess, ffmpegTracker.exitPromise, {
       timeoutMs: FFMPEG_POST_PROCESS_TIMEOUT_MS,
       signal: null,
+      timer: this.timer,
     });
 
     if (isFailedExitState(ffmpegTracker.exitState)) {
@@ -1196,12 +1255,6 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
 
     await this.assertFfmpegOutputReady(backendHandle.config.outputPath, ffmpegArgs, ffmpegTracker);
-
-    try {
-      await fsPromises.rm(capturePath, { recursive: true, force: true });
-    } catch (error) {
-      logger.warn(`[FfmpegVideo] Failed to remove raw recording ${capturePath}: ${error}`);
-    }
   }
 
   private async buildFfmpegArgs(
@@ -1414,15 +1467,14 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     args: string[],
     tracker: FfmpegDiagnosticsTracker,
   ): Promise<void> {
-    const outputExists = await pathExists(outputPath);
-    if (!outputExists) {
+    const sizeBytes = await this.recordingFileProbe.size(outputPath);
+    if (sizeBytes === null) {
       throw new ActionableError(
         this.buildFfmpegFailureMessage("FFmpeg output file missing", args, tracker, outputPath),
       );
     }
 
-    const sizeBytes = await getFileSize(outputPath);
-    if (!sizeBytes || sizeBytes <= 0) {
+    if (!sizeBytes) {
       throw new ActionableError(
         this.buildFfmpegFailureMessage("FFmpeg output file is empty", args, tracker, outputPath),
       );

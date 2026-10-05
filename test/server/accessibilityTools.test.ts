@@ -11,6 +11,12 @@ import { accessibilityStateSchema } from "../../src/server/toolOutputSchemas";
 import { VoiceOverToggle } from "../../src/features/accessibility/VoiceOverToggle";
 import type { BootedDevice } from "../../src/models";
 import type { VoiceOverResult } from "../../src/models/AccessibilityResult";
+import { ActionableError } from "../../src/models/ActionableError";
+import { accessibilityDetector } from "../../src/features/accessibility/AccessibilityDetector";
+import { iosVoiceOverDetector } from "../../src/features/accessibility/IosVoiceOverDetector";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const ANDROID_DEVICE = {
   name: "a",
@@ -183,6 +189,181 @@ describe("accessibilityTools", () => {
         accessibilityStateSchema.safeParse({ enabled: true, service: "talkback", ...fields })
           .success,
       ).toBe(false);
+    });
+  });
+
+  describe("handler characterization", () => {
+    test.each([true, false])("detects fresh Android state (%s)", async (enabled) => {
+      const calls: string[] = [];
+      const adb = new FakeAdbExecutor();
+      const spies = [
+        spyOn(accessibilityDetector, "invalidateCache").mockImplementation(() => {
+          calls.push("invalidate");
+        }),
+        spyOn(defaultAdbClientFactory, "create").mockImplementation(() => {
+          calls.push("client");
+          return adb;
+        }),
+        spyOn(accessibilityDetector, "isAccessibilityEnabled").mockImplementation(async () => {
+          calls.push("enabled");
+          return enabled;
+        }),
+        spyOn(accessibilityDetector, "detectMethod").mockImplementation(async () => {
+          calls.push("method");
+          return enabled ? "talkback" : "unknown";
+        }),
+      ];
+      try {
+        registerAccessibilityTools();
+        expect(await accessibilityHandler()(ANDROID_DEVICE, {})).toMatchObject({
+          structuredContent: { enabled, service: enabled ? "talkback" : "unknown" },
+        });
+        expect(calls).toEqual(["invalidate", "client", "enabled", "method"]);
+      } finally {
+        spies.forEach((spy) => spy.mockRestore());
+      }
+    });
+
+    test.each([true, false])("detects fresh iOS state (%s)", async (enabled) => {
+      const calls: string[] = [];
+      const client = new FakeIOSCtrlProxy(new FakeTimer());
+      const spies = [
+        spyOn(iosVoiceOverDetector, "invalidateCache").mockImplementation(() => {
+          calls.push("invalidate");
+        }),
+        spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(() => {
+          calls.push("client");
+          return client as IOSCtrlProxyClient;
+        }),
+        spyOn(iosVoiceOverDetector, "isVoiceOverEnabled").mockImplementation(async () => {
+          calls.push("enabled");
+          return enabled;
+        }),
+      ];
+      try {
+        registerAccessibilityTools();
+        expect(await accessibilityHandler()(IOS_DEVICE, {})).toMatchObject({
+          structuredContent: { enabled, service: enabled ? "voiceover" : "unknown" },
+        });
+        expect(calls).toEqual(["invalidate", "client", "enabled"]);
+      } finally {
+        spies.forEach((spy) => spy.mockRestore());
+      }
+    });
+
+    test.each([undefined, "unavailable"])("rejects unsupported TalkBack (%s)", async (reason) => {
+      const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
+        new FakeAdbExecutor(),
+      );
+      const toggle = spyOn(TalkBackToggle.prototype, "toggle").mockResolvedValue({
+        supported: false,
+        applied: false,
+        reason,
+      });
+      try {
+        registerAccessibilityTools();
+        await expect(accessibilityHandler()(ANDROID_DEVICE, { talkback: true })).rejects.toThrow(
+          reason ?? "TalkBack toggle is not supported on this device",
+        );
+      } finally {
+        toggle.mockRestore();
+        factory.mockRestore();
+      }
+    });
+
+    test.each([new ActionableError("known"), new Error("unexpected")])(
+      "preserves actionable errors and wraps unexpected failures: %s",
+      async (error) => {
+        const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
+          new FakeAdbExecutor(),
+        );
+        const toggle = spyOn(TalkBackToggle.prototype, "toggle").mockRejectedValue(error);
+        try {
+          registerAccessibilityTools();
+          if (error instanceof ActionableError) {
+            await expect(accessibilityHandler()(ANDROID_DEVICE, { talkback: false })).rejects.toBe(
+              error,
+            );
+          } else {
+            await expect(
+              accessibilityHandler()(ANDROID_DEVICE, { talkback: false }),
+            ).rejects.toThrow("Failed to toggle accessibility services");
+          }
+        } finally {
+          toggle.mockRestore();
+          factory.mockRestore();
+        }
+      },
+    );
+
+    test("defaults an absent TalkBack state and omits an applied toggle's reason", async () => {
+      const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
+        new FakeAdbExecutor(),
+      );
+      const toggle = spyOn(TalkBackToggle.prototype, "toggle").mockResolvedValue({
+        supported: true,
+        applied: true,
+        reason: "already applied",
+      });
+      try {
+        registerAccessibilityTools();
+        const response = await accessibilityHandler()(ANDROID_DEVICE, { talkback: false });
+        expect(response).toHaveProperty("structuredContent", {
+          enabled: false,
+          service: "unknown",
+        });
+      } finally {
+        toggle.mockRestore();
+        factory.mockRestore();
+      }
+    });
+
+    test.each([true, false, undefined])(
+      "reports confirmed VoiceOver with state %s",
+      async (currentState) => {
+        const toggle = spyOn(VoiceOverToggle.prototype, "toggle").mockResolvedValue({
+          supported: true,
+          applied: true,
+          currentState,
+        });
+        try {
+          registerAccessibilityTools();
+          expect(await accessibilityHandler()(IOS_DEVICE, { voiceover: false })).toMatchObject({
+            structuredContent: {
+              enabled: currentState ?? false,
+              service: currentState ? "voiceover" : "unknown",
+            },
+          });
+        } finally {
+          toggle.mockRestore();
+        }
+      },
+    );
+
+    test.each([
+      { supported: false, applied: false, reason: "unsupported" },
+      { supported: false, applied: false },
+      { supported: true, applied: false },
+    ])("rejects VoiceOver failures: %j", async (result) => {
+      const toggle = spyOn(VoiceOverToggle.prototype, "toggle").mockResolvedValue(result);
+      try {
+        registerAccessibilityTools();
+        await expect(accessibilityHandler()(IOS_DEVICE, { voiceover: true })).rejects.toThrow(
+          result.reason ??
+            (result.supported
+              ? "VoiceOver toggle could not be confirmed"
+              : "VoiceOver toggle is not supported on this device"),
+        );
+      } finally {
+        toggle.mockRestore();
+      }
+    });
+
+    test("rejects an unsupported platform", async () => {
+      registerAccessibilityTools();
+      await expect(
+        accessibilityHandler()({ ...ANDROID_DEVICE, platform: "other" } as BootedDevice, {}),
+      ).rejects.toThrow("Unsupported platform: other");
     });
   });
 

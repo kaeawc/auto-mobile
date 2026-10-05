@@ -33,27 +33,10 @@ describe("turbo lint inputs cover the shell script chain", () => {
   }
 
   function coveredBy(inputs: readonly string[], path: string): boolean {
-    return inputs.some((input) => {
-      if (input === path) {
-        return true;
-      }
-      if (input.endsWith("/**")) {
-        return path.startsWith(input.slice(0, -"**".length));
-      }
-      if (input.endsWith("/**/*.sh")) {
-        const prefix = input.slice(0, -"**/*.sh".length);
-        return path.startsWith(prefix) && path.endsWith(".sh");
-      }
-      if (input.endsWith("/*.sh")) {
-        const prefix = input.slice(0, -"*.sh".length);
-        return (
-          path.startsWith(prefix) &&
-          path.endsWith(".sh") &&
-          !path.slice(prefix.length).includes("/")
-        );
-      }
-      return false;
-    });
+    return (
+      inputs.some((input) => !input.startsWith("!") && new Bun.Glob(input).match(path)) &&
+      !inputs.some((input) => input.startsWith("!") && new Bun.Glob(input.slice(1)).match(path))
+    );
   }
 
   test("every shell script in the lint chain exists and invalidates lint", () => {

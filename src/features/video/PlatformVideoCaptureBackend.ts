@@ -240,33 +240,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
           handle.recordingId,
         );
       } finally {
-        // A recording that never stabilized might still be open on the device.
-        // Retain it instead of deleting the only potentially completeable copy.
-        // Once it did stabilize, retain the existing cleanup behavior for a
-        // subsequent pull failure.
-        if (!deviceFileFinalized) {
-          logger.warn(
-            `[VideoCapture] Retaining unstable device file ${backendHandle.deviceTempPath} for recovery`,
-          );
-        } else {
-          logger.info(`[VideoCapture] Cleaning up temp file on device`);
-          const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
-          try {
-            const rmProcess = await adb.spawn(rmArgs);
-            await new Promise<void>((resolve) => {
-              rmProcess.once("exit", () => {
-                logger.info(`[VideoCapture] Temp file cleaned up`);
-                resolve();
-              });
-              rmProcess.once("error", (err) => {
-                logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-                resolve();
-              });
-            });
-          } catch (err) {
-            logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-          }
-        }
+        await this.cleanupDeviceRecording(adb, backendHandle, deviceFileFinalized);
       }
 
       const sizeBytes = await getFileSize(handle.outputPath);
@@ -274,14 +248,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
       const codec = await this.codecProbe.codec(handle.outputPath);
 
-      if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
-        logger.warn(
-          `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
-        );
-      }
-      if (backendHandle.stderr.length > 0) {
-        logger.info(`[VideoCapture] Stderr output: ${backendHandle.stderr.join("")}`);
-      }
+      this.logRecordingExit(backendHandle);
       return {
         recordingId: handle.recordingId,
         outputPath: handle.outputPath,
@@ -301,6 +268,51 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         // recovery path instead of orphaning that deviceTempPath.
         { cause: error, retainOwnership: !deviceFileFinalized },
       );
+    }
+  }
+
+  private async cleanupDeviceRecording(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+    deviceFileFinalized: boolean,
+  ): Promise<void> {
+    // A recording that never stabilized might still be open on the device.
+    // Retain it instead of deleting the only potentially completeable copy.
+    // Once it did stabilize, retain the existing cleanup behavior for a
+    // subsequent pull failure.
+    if (!deviceFileFinalized) {
+      logger.warn(
+        `[VideoCapture] Retaining unstable device file ${backendHandle.deviceTempPath} for recovery`,
+      );
+    } else {
+      logger.info(`[VideoCapture] Cleaning up temp file on device`);
+      const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
+      try {
+        const rmProcess = await adb.spawn(rmArgs);
+        await new Promise<void>((resolve) => {
+          rmProcess.once("exit", () => {
+            logger.info(`[VideoCapture] Temp file cleaned up`);
+            resolve();
+          });
+          rmProcess.once("error", (err) => {
+            logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+            resolve();
+          });
+        });
+      } catch (err) {
+        logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+      }
+    }
+  }
+
+  private logRecordingExit(backendHandle: AndroidBackendHandle): void {
+    if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
+      logger.warn(
+        `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
+      );
+    }
+    if (backendHandle.stderr.length > 0) {
+      logger.info(`[VideoCapture] Stderr output: ${backendHandle.stderr.join("")}`);
     }
   }
 

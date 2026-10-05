@@ -10,6 +10,16 @@ import { RealSettleObserve } from "../observe/SettleObserve";
 import type { TapEffect } from "../../models/TapOnElementResult";
 import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../observe/DeviceHierarchyCapture";
+import { hasWrongWindowEvidence } from "../observe/observationFreshness";
+import {
+  pendingWindowResolutionGeneration,
+  completeWindowResolutionRead,
+} from "../observe/cache/ObserveCacheRegistry";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../observe/DeviceWindowCacheInvalidator";
 import {
   staleDisplayError,
   StaleDisplayError,
@@ -130,6 +140,10 @@ export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
 
 interface ObservedChangeOptions {
   changeExpected: boolean;
+  /** Retire pre-action trees before the post-action capture, including partial dispatch failures. */
+  foregroundAppMayChange?: boolean;
+  /** Hardware navigation and URL dispatch do not resolve coordinates from the prior tree. */
+  usesObservationForResolution?: boolean;
   /** Bind pre/post captures to the panel prepared by the action. */
   display?: string;
   previousObservation?: ObserveResult;
@@ -171,6 +185,8 @@ export class BaseVisualChange {
       ? cached.freshness?.isFresh !== true
       : cached.freshness?.isFresh === false;
   }
+
+  windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
 
   device: BootedDevice;
   adb: AdbExecutor;
@@ -316,7 +332,12 @@ export class BaseVisualChange {
     if (options.skipPreviousObserve) {
       logger.info("[BaseVisualChange] Skipping previous observe (app was terminated/cleared)");
     } else if (!previousObserveResult) {
+      const resolutionGeneration =
+        options.usesObservationForResolution !== false
+          ? pendingWindowResolutionGeneration(this.device.deviceId)
+          : undefined;
       let staleCachedRefetch = false;
+      let knownWrongWindow = resolutionGeneration !== undefined;
       try {
         if (progress) {
           await progress(10, 100, "Getting previous view hierarchy...");
@@ -325,31 +346,35 @@ export class BaseVisualChange {
           const cached = options.display
             ? undefined
             : await this.observeScreen.getMostRecentCachedObserveResult();
+          knownWrongWindow ||= hasWrongWindowEvidence(cached);
           // Preserve the missing/errored-cache fallback; a rejected usable cache
           // must instead get exactly one fresh read before any action is dispatched.
-          staleCachedRefetch = Boolean(
-            cached?.viewHierarchy &&
-            !cached.viewHierarchy.hierarchy.error &&
-            BaseVisualChange.shouldRefetchCachedObservation(cached),
+          const usableCached = Boolean(
+            cached?.viewHierarchy && !cached.viewHierarchy.hierarchy.error,
           );
+          staleCachedRefetch =
+            resolutionGeneration !== undefined ||
+            (usableCached && BaseVisualChange.shouldRefetchCachedObservation(cached!));
           if (
-            !cached?.viewHierarchy ||
-            cached.viewHierarchy.hierarchy.error ||
-            BaseVisualChange.shouldRefetchCachedObservation(cached, options.skipCallerDisplayFence)
+            !usableCached ||
+            staleCachedRefetch ||
+            BaseVisualChange.shouldRefetchCachedObservation(cached!, options.skipCallerDisplayFence)
           ) {
             return this.observeScreen.execute({
               freshness:
                 staleCachedRefetch || options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+              timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+              skipStaleWindowRecovery: true,
               display: options.display,
               queryOptions: options.queryOptions,
               perf,
               signal: options.signal,
             });
           }
-          return cached;
+          return cached!;
         });
       } catch (error) {
-        if (staleCachedRefetch) {
+        if (knownWrongWindow && options.usesObservationForResolution !== false) {
           throw new ActionableError("Cannot perform action without view hierarchy", {
             cause: error,
           });
@@ -358,6 +383,8 @@ export class BaseVisualChange {
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
             freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+            timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+            skipStaleWindowRecovery: true,
             display: options.display,
             queryOptions: options.queryOptions,
             perf,
@@ -368,12 +395,27 @@ export class BaseVisualChange {
 
       if (
         !previousObserveResult ||
-        (staleCachedRefetch &&
+        (knownWrongWindow &&
+          options.usesObservationForResolution !== false &&
           (!previousObserveResult.viewHierarchy ||
             previousObserveResult.viewHierarchy.hierarchy.error))
       ) {
         throw new ActionableError("Cannot perform action without view hierarchy");
       }
+      if (resolutionGeneration !== undefined && !hasWrongWindowEvidence(previousObserveResult)) {
+        completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
+      }
+    }
+
+    if (
+      !options.skipPreviousObserve &&
+      options.usesObservationForResolution !== false &&
+      !options.previousObservation &&
+      hasWrongWindowEvidence(previousObserveResult!)
+    ) {
+      throw new ActionableError(
+        `Cannot resolve elements against a wrong-window hierarchy: ${previousObserveResult?.freshness?.warning ?? "The refreshed observation still belongs to another window"}`,
+      );
     }
 
     const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
@@ -397,7 +439,13 @@ export class BaseVisualChange {
       if (coordinateAction && actionDisplayRevision() !== displayRevision) {
         throw this.staleDisplay(observedGeneration);
       }
-      return block(previousObserveResult!, fence);
+      try {
+        return await block(previousObserveResult!, fence);
+      } finally {
+        if (options.foregroundAppMayChange) {
+          this.windowCacheInvalidator.invalidate(this.device, true);
+        }
+      }
     });
 
     // Unconfirmed iOS text must return before post-action reads consume the

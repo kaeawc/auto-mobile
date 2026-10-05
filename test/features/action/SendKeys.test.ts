@@ -496,6 +496,23 @@ const typeFocusedInputError =
   'Android event delivery requires a focused editable field. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.';
 
 describe("SendKeys", () => {
+  test("sendKeys with a not-fresh current hierarchy still delivers keys", async () => {
+    const observation = focusedAndroidObservation("123", {}, 0);
+    observation.freshness = { isFresh: false, category: "window_identity" };
+    const staleObserver = createObserver(observation);
+    const h = createSendKeysHarness(android);
+    const sendKeys = new SendKeys(android, createAdbFactory(h.adb), {
+      executor: h.executor,
+      observer: staleObserver,
+      timestampProvider: { now: async () => 0 },
+      timer: new FakeTimer(),
+    });
+    const result = await sendKeys.execute([{ action: "key", key: "enter" }]);
+    expect(result.success).toBe(true);
+    expect(result.completedCommands).toBe(1);
+    expect(result.observation?.freshness?.isFresh).toBe(false);
+  });
+
   function imeVerificationHarness(observer: SendKeysObserver) {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

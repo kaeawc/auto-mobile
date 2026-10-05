@@ -58,6 +58,17 @@ describe("Shake", () => {
     (shake as any).awaitIdle = fakeAwaitIdle;
   });
 
+  test("shake dispatches with a not-fresh current pre-read", async () => {
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      viewHierarchy: { hierarchy: {} },
+      freshness: { isFresh: false, category: "window_identity" },
+    });
+    const result = await shake.execute({ duration: 0 });
+    expect(result.success).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("emu sensor set acceleration 0:0:0")).toBe(true);
+  });
+
   describe("execute", () => {
     test.each([
       { name: "defaults", options: undefined, duration: 1000, intensity: 100 },

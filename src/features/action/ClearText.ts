@@ -322,6 +322,7 @@ export class ClearText extends BaseVisualChange {
         }
       },
       {
+        usesObservationForResolution: false,
         changeExpected: false, // Whether text changed cannot be determined reliably.
         tolerancePercent: 0.0,
         timeoutMs: 100,

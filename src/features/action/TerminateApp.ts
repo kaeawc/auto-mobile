@@ -26,7 +26,6 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { RealObserveScreen } from "../observe/ObserveScreen";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 import { sequenceBackoff } from "../../utils/Backoff";
@@ -35,32 +34,14 @@ import { sequenceBackoff } from "../../utils/Backoff";
 const TERMINATE_VERIFY_BUDGET_MS = 3000;
 const TERMINATE_VERIFY_BACKOFF_MS = [50, 100, 200, 400, 800] as const;
 
-/**
- * Invalidates the host-side cached window/hierarchy record for a device after
- * its foreground process is force-stopped (issue #5867). Without this, a client
- * that terminates a stuck app and re-observes to recover is re-served the same
- * stale wrong-window hierarchy from cache. Injected so the invalidation is
- * exercised in tests without a real CtrlProxy connection.
- */
-export interface DeviceWindowCacheInvalidator {
-  invalidate(device: BootedDevice): void;
-}
-
-/**
- * Default invalidator: drops the existing platform CtrlProxy hierarchy cache
- * (never bootstraps a connection just to clear it) and the observe-result cache
- * for the device, so the next observe re-syncs fresh.
- */
-export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInvalidator {
-  invalidate(device: BootedDevice): void {
-    if (device.platform === "android") {
-      AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.invalidateCache();
-    } else {
-      IOSCtrlProxyClient.getExistingInstance(device.deviceId)?.clearCache();
-    }
-    RealObserveScreen.clearCache(device.deviceId);
-  }
-}
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../observe/DeviceWindowCacheInvalidator";
+export {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../observe/DeviceWindowCacheInvalidator";
 
 registerDeviceIncarnationListener({
   name: "observe-window-cache",

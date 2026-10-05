@@ -257,6 +257,7 @@ export class InputText extends BaseVisualChange {
         }
       },
       {
+        usesObservationForResolution: false,
         changeExpected: true,
         tolerancePercent: 0.0,
         timeoutMs: 5000,

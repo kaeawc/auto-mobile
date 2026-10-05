@@ -354,6 +354,9 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
+    // Recovery must reuse the injected reader rather than construct a device client.
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(viewHierarchy.getCalls()[1]).toEqual({ skipWaitForFresh: true, minTimestamp: now });
     expect(result.activeWindow?.appId).toBe("com.google.android.calendar");
     expect(result.freshness?.verified).toBe(false);
     expect(result.freshness?.isFresh).toBe(false);

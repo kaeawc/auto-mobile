@@ -124,6 +124,27 @@ describe("LaunchApp", () => {
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  test("foreground launch retires the pre-launch hierarchy before post-action observation", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+    fakeAdb.setCommandResponse("shell am start --user 0", {
+      stdout: "Starting: Intent",
+      stderr: "",
+    });
+    const invalidator = new FakeDeviceWindowCacheInvalidator();
+    launchApp.windowCacheInvalidator = invalidator;
+    fakeObserveScreen.setObserveResult(() => {
+      expect(invalidator.calls).toEqual([device]);
+      return {
+        ...createObserveResult(),
+        activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
+      };
+    });
+    const result = await launchApp.execute(packageName, false, false);
+    expect(result.success).toBe(true);
+    expect(invalidator.calls).toEqual([device]);
+  });
+
   test("install-aware targeting launches a personal-only app with a running work profile", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
@@ -2688,7 +2709,7 @@ describe("LaunchApp", () => {
       `Timed out waiting for launch observation to show ${packageName}`,
     );
     expect(result.observation).toBeUndefined();
-    expect(invalidated).toEqual([device]);
+    expect(invalidated).toEqual([device, device]);
   });
 
   // Deterministic launch payload shape (issue #5872 AC2): when the observation is
@@ -3354,6 +3375,7 @@ describe("LaunchApp", () => {
       const clearedBundleIds: string[] = [];
       const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
         clearSdkScreenIdentity: (bundleId: string) => clearedBundleIds.push(bundleId),
+        invalidateCache: () => {},
       } as unknown as IOSCtrlProxyClient);
 
       try {
@@ -3760,8 +3782,12 @@ describe("LaunchApp", () => {
       "simulator cold boot invalidates after termination (throws=%s)",
       async (throws) => {
         fakeTimer.enableAutoAdvance();
-        const invalidator = new FakeDeviceWindowCacheInvalidator(() => {
-          expect(h.simctlCalls).toEqual([`terminate:${userBundleId}`]);
+        const invalidator = new FakeDeviceWindowCacheInvalidator((_device, preserveAppIdentity) => {
+          expect(h.simctlCalls).toEqual(
+            preserveAppIdentity
+              ? [`terminate:${userBundleId}`, `launch:${userBundleId}`]
+              : [`terminate:${userBundleId}`],
+          );
         });
         const h = createDeviceHarness({
           deviceId: simulatorUdid,
@@ -3770,7 +3796,7 @@ describe("LaunchApp", () => {
         });
         try {
           expect((await h.iosLaunchApp.execute(userBundleId, false, true)).success).toBe(true);
-          expect(invalidator.calls).toHaveLength(1);
+          expect(invalidator.calls).toHaveLength(2);
           expect(invalidator.calls[0]).toMatchObject({ deviceId: simulatorUdid, platform: "ios" });
         } finally {
           h.cleanup();
@@ -3795,7 +3821,7 @@ describe("LaunchApp", () => {
           `terminate:${userBundleId}`,
           "get_app_container",
         ]);
-        expect(invalidator.calls).toHaveLength(2);
+        expect(invalidator.calls).toHaveLength(3);
         expect(invalidator.calls[0]).toBe(invalidator.calls[1]);
         expect(invalidator.calls[1]?.deviceId).toBe(simulatorUdid);
       } finally {

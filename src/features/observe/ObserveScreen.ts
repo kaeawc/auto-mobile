@@ -109,7 +109,11 @@ import {
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLockStateProbe";
-import { computeFreshness } from "./observationFreshness";
+import {
+  computeFreshness,
+  inheritWrongWindowEvidence,
+  recordWrongWindowEvidence,
+} from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
@@ -1149,7 +1153,10 @@ export class RealObserveScreen implements ObserveScreen {
             cached.displayRevision !== displayTransitions.revision(this.device.deviceId)) ||
           displayTransitions.geometryChanged(this.device.deviceId, cached.screenSize);
         if (cached.freshness?.isFresh === false) {
-          return { ...cached, freshness: { ...cached.freshness, ageMs: freshness.ageMs } };
+          return inheritWrongWindowEvidence(cached, {
+            ...cached,
+            freshness: { ...cached.freshness, ageMs: freshness.ageMs },
+          });
         }
         return {
           ...cached,
@@ -1454,7 +1461,10 @@ export class RealObserveScreen implements ObserveScreen {
           panelKey: requestedPanel?.key,
           captureStart,
         });
-      } else if (options?.freshness) {
+      } else if (
+        options?.freshness &&
+        !(this.device.platform === "android" && options.requireFreshExtraction)
+      ) {
         try {
           const captured = await this.hierarchyCapture.capture(captureRequest);
           capturedHierarchy = captured.hierarchy;
@@ -1485,6 +1495,51 @@ export class RealObserveScreen implements ObserveScreen {
       // Use the sampled display's activity when CtrlProxy's window event came
       // from another panel.
       const sampledForeground = await foregroundSnapshot;
+      // The framework-window probe is a serial ADB read. Keep it lazy, but share
+      // one result across both freshness checks for this execute() call.
+      let confirmedFrameworkErrorDialog: Promise<boolean> | undefined;
+      const getConfirmedFrameworkErrorDialog = (): Promise<boolean> => {
+        confirmedFrameworkErrorDialog ??= this.isConfirmedFrameworkErrorDialog(
+          result.viewHierarchy,
+          signal,
+        );
+        return confirmedFrameworkErrorDialog;
+      };
+
+      // Recover only a confirmed app-vs-app mismatch, before screenshots and
+      // all derived processing. Polls already manage their own extraction policy.
+      const recoverWrongWindow =
+        this.device.platform === "android" &&
+        !observerMode &&
+        !preserveDisplayState &&
+        !explicitlyRouted &&
+        !options?.skipRecompositionTracking &&
+        !options?.requireFreshExtraction &&
+        !options?.skipStaleWindowRecovery;
+      const initialMismatch = recoverWrongWindow
+        ? await this.resolveWindowIdentityMismatch(
+            result,
+            foregroundIdentity,
+            { sampled: false, identity: undefined, activityAttributionMismatch: false },
+            getConfirmedFrameworkErrorDialog,
+            signal,
+          )
+        : undefined;
+      const remainingMs = Math.min(
+        500,
+        (options?.timeoutMs ?? DEFAULT_HIERARCHY_READ_TIMEOUT_MS) - (this.timer.now() - startTime),
+      );
+      if (initialMismatch && remainingMs > 0) {
+        await this.refreshKnownStaleHierarchy(
+          result,
+          initialMismatch.foreground,
+          options,
+          remainingMs,
+        );
+        // The replacement has a new package; dialog confirmation belongs to it.
+        confirmedFrameworkErrorDialog = undefined;
+      }
+
       if (
         (result.backStack?.displayCount ?? 0) < 2 &&
         sampledForeground !== null &&
@@ -1740,18 +1795,21 @@ export class RealObserveScreen implements ObserveScreen {
       // reload within the TTL, and a consumer reading the cached tree directly
       // (e.g. `SwipeOn.getScrollableContext`, nav/registry embeds) would accept a
       // phantom hierarchy without its `isFresh: false` signal (issue #5867).
-      // The framework-window probe is a serial ADB read. Keep it lazy, but share
-      // one result across both freshness checks for this execute() call.
-      let confirmedFrameworkErrorDialog: Promise<boolean> | undefined;
-      const getConfirmedFrameworkErrorDialog = (): Promise<boolean> => {
-        confirmedFrameworkErrorDialog ??= this.isConfirmedFrameworkErrorDialog(
-          result.viewHierarchy,
-          signal,
-        );
-        return confirmedFrameworkErrorDialog;
-      };
 
       const foregroundUnavailable = routedAggregateSecondary && sampledForeground === null;
+      const statusBarOnlyHierarchy = await this.resolveStatusBarOnlyHierarchy(
+        result,
+        foregroundIdentity,
+        postCaptureForeground,
+        signal,
+      );
+      const windowIdentityMismatch = await this.resolveWindowIdentityMismatch(
+        result,
+        foregroundIdentity,
+        postCaptureForeground,
+        getConfirmedFrameworkErrorDialog,
+        signal,
+      );
       result.freshness = computeFreshness({
         requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
         actualTimestamp: this.resolveObservationTimestampMs(result),
@@ -1779,19 +1837,8 @@ export class RealObserveScreen implements ObserveScreen {
             ? `The foreground app of display ${requestedDisplayId} could not be determined.`
             : undefined),
         missingForegroundWindow: resolveMissingForegroundWindow(result),
-        statusBarOnlyHierarchy: await this.resolveStatusBarOnlyHierarchy(
-          result,
-          foregroundIdentity,
-          postCaptureForeground,
-          signal,
-        ),
-        windowIdentityMismatch: await this.resolveWindowIdentityMismatch(
-          result,
-          foregroundIdentity,
-          postCaptureForeground,
-          getConfirmedFrameworkErrorDialog,
-          signal,
-        ),
+        statusBarOnlyHierarchy,
+        windowIdentityMismatch,
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
         // A matching package and recent timestamp do not verify an empty first-run
         // capture (#6352). Use all content collections, not just clickable controls:
@@ -1813,7 +1860,11 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
-      if (observerMode && result.freshness.unavailableDetail) {
+      if (windowIdentityMismatch) {
+        recordWrongWindowEvidence(result);
+      }
+
+      if (observerMode && result.freshness?.unavailableDetail) {
         result.freshness.warning += ` ${result.freshness.unavailableDetail}`;
       }
       const staleDisplay =
@@ -1923,6 +1974,62 @@ export class RealObserveScreen implements ObserveScreen {
         fallback.deviceLock = await iosLockState;
       }
       return this.createCriticalFallback(err, { fallback });
+    }
+  }
+
+  /** One bounded hierarchy extraction; derived work and screenshots run later once. */
+  private async refreshKnownStaleHierarchy(
+    result: ObserveResult,
+    foreground: string,
+    options: ObserveScreenExecuteOptions | undefined,
+    remainingMs: number,
+  ): Promise<void> {
+    const signal = options?.signal;
+    const retryController = new AbortController();
+    const retrySignal = signal
+      ? AbortSignal.any([signal, retryController.signal])
+      : retryController.signal;
+    try {
+      const hierarchy = await raceWithDeadline(
+        // Use the same reader as the initial collection, including its injected
+        // client. A fresh action capture can construct a separate resident client.
+        () =>
+          this.viewHierarchy.getViewHierarchy(
+            {},
+            new NoOpPerformanceTracker(),
+            true,
+            // A positive, inclusive device floor requests independent extraction
+            // without requiring the replacement to have a later timestamp.
+            Math.max(1, result.viewHierarchy?.updatedAt ?? 1),
+            retrySignal,
+            { timeoutMs: remainingMs, requireFreshExtraction: true },
+          ),
+        {
+          timer: this.timer,
+          timeoutMs: remainingMs,
+          signal,
+          label: "Known-stale hierarchy refresh",
+          onTimeout: () => retryController.abort(),
+        },
+      );
+      if (
+        hierarchy?.fresh === true &&
+        hasUsableHierarchy(hierarchy) &&
+        hierarchy.packageName === foreground &&
+        this.platformValidator.validate(this.device.platform, hierarchy).valid
+      ) {
+        this.applyRecapturedHierarchy(result, hierarchy);
+        this.recorrelateActiveWindowToRecapture(result, hierarchy);
+        // Earlier back-stack/lock samples describe the discarded window.
+        delete result.backStack;
+        delete result.deviceLock;
+      }
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(
+        `[ObserveScreen] Known-stale hierarchy refresh failed: ${describeError(error)}`,
+        error,
+      );
     }
   }
 

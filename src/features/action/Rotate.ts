@@ -1130,6 +1130,7 @@ export class Rotate extends BaseVisualChange {
       {
         // The runner can report a successful no-op. A hierarchy diff is not
         // evidence that its screen rotated, and a no-op needs no visual change.
+        usesObservationForResolution: false,
         changeExpected: false,
         timeoutMs: 5000,
         progress,
@@ -1150,6 +1151,7 @@ export class Rotate extends BaseVisualChange {
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     const observationOptions = {
+      usesObservationForResolution: false,
       changeExpected: true,
       timeoutMs: 5000,
       progress,

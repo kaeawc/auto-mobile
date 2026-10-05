@@ -38,6 +38,10 @@ import { assertSafeSnapshotName } from "../../utils/snapshotNameValidation";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { IOS_APP_DATA_FOLDERS } from "../../utils/ios-cmdline-tools/iosAppContainer";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../observe/DeviceWindowCacheInvalidator";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { promises as fs } from "fs";
@@ -112,6 +116,7 @@ function getAndroidRestoreDetails(
  * - **iOS**: app container restore via `simctl` (app_data snapshots only).
  */
 export class RestoreSnapshot implements SnapshotRestoreProvider {
+  windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
   private device: BootedDevice;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
@@ -468,6 +473,8 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       logger.info(`Launched ${packageName}`);
     } catch (error) {
       logger.warn(`Failed to restore foreground app: ${error}`);
+    } finally {
+      this.windowCacheInvalidator.invalidate(this.device, true);
     }
   }
 

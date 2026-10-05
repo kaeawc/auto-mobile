@@ -1047,10 +1047,8 @@ internal constructor(
       val elementBounds = ElementBounds(bounds)
 
       // Filter completely offscreen nodes early to avoid processing subtrees
-      if (screenDimensions != null && screenDimensions.isValid()) {
-        if (elementBounds.isCompletelyOffscreen(screenDimensions.width, screenDimensions.height)) {
-          return null
-        }
+      if (elementBounds.isCompletelyOffscreen(screenDimensions)) {
+        return null
       }
 
       // We intentionally do NOT filter on node.isVisibleToUser here. Android's flag is

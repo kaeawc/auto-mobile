@@ -1644,6 +1644,25 @@
           "required": ["executionTimeMs", "steps"],
           "additionalProperties": false
         },
+        "videoFilePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "videoRecordingIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "videoWarnings": {
+          "description": "Video capture gaps, truncation or failures",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "warnings": {
           "description": "Best-effort warnings from steps that still succeeded",
           "type": "array",

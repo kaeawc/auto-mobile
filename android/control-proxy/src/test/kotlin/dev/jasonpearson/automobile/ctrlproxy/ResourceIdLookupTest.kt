@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Rect
+import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -11,6 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class ResourceIdLookupTest {
@@ -139,6 +142,87 @@ class ResourceIdLookupTest {
       node("root", children = listOf(first, visible)),
       dimensions = dimensions,
     )
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun `throwing dimension provider preserves first match`() {
+    assertProviderSelected("first") { throw IllegalStateException("dimensions unavailable") }
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun `null dimension provider preserves first match`() {
+    assertProviderSelected("first") { null }
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun `provider receives root display and prefers on-screen duplicate`() {
+    assertProviderSelected("visible") { displayId ->
+      assertEquals(7, displayId)
+      screen
+    }
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun `unknown root window skips provider and preserves first match`() {
+    assertProviderSelected("first", attachWindow = false) {
+      throw AssertionError("unknown display must not invoke provider")
+    }
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun `null root skips dimension provider`() {
+    assertNull(
+      findNodeByResourceIdOnRootDisplay(null, "row") {
+        throw AssertionError("null root must not invoke provider")
+      }
+    )
+  }
+
+  @Test
+  @Config(sdk = [29])
+  fun `pre-R root uses default display without a window`() {
+    assertProviderSelected("visible", attachWindow = false) { displayId ->
+      assertEquals(Display.DEFAULT_DISPLAY, displayId)
+      screen
+    }
+  }
+
+  private fun assertProviderSelected(
+    expected: String,
+    attachWindow: Boolean = true,
+    provider: (Int) -> ScreenDimensions?,
+  ) {
+    val root =
+      node("root", children = listOf(node("first", "row", offScreen), node("visible", "row")))
+    if (attachWindow) {
+      // The lookup helper owns recycling the window returned by root.window.
+      AccessibilityWindowInfo.obtain().also {
+        shadowOf(it).setDisplayId(7)
+        shadowOf(root).setAccessibilityWindowInfo(it)
+      }
+    }
+    var selected: AccessibilityNodeInfo? = null
+    var providerCalls = 0
+    try {
+      selected =
+        findNodeByResourceIdOnRootDisplay(root, "row") {
+          providerCalls++
+          provider(it)
+        }
+      assertEquals(expected, selected?.text?.toString())
+      assertEquals(
+        if (attachWindow || android.os.Build.VERSION.SDK_INT < 30) 1 else 0,
+        providerCalls,
+      )
+    } finally {
+      if (selected !== root) selected?.recycle()
+      root.recycle()
+    }
   }
 
   private fun assertSelected(

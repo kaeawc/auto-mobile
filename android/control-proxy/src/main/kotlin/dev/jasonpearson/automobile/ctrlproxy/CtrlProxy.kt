@@ -184,6 +184,36 @@ internal fun findNodeByResourceId(
   return findMatch(root, requireOnScreen = false)
 }
 
+/** Resolve dimensions from the lookup root without querying or selecting other windows. */
+internal fun findNodeByResourceIdOnRootDisplay(
+  root: AccessibilityNodeInfo?,
+  resourceId: String,
+  dimensionsProvider: (Int) -> ScreenDimensions?,
+): AccessibilityNodeInfo? {
+  val dimensions =
+    try {
+      val displayId =
+        if (root == null) {
+          null
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+          Display.DEFAULT_DISPLAY
+        } else {
+          root.window?.let { window ->
+            try {
+              window.displayId
+            } finally {
+              window.recycle()
+            }
+          }
+        }
+      displayId?.let(dimensionsProvider)
+    } catch (e: Exception) {
+      Log.w("CtrlProxy", "Failed to get lookup root screen dimensions", e)
+      null
+    }
+  return findNodeByResourceId(root, resourceId, dimensions)
+}
+
 internal data class NodeSelectorFields(
   val resourceId: String?,
   val testTag: String?,
@@ -4829,7 +4859,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         foundTargetNode =
           if (resourceId != null) {
             // Find node by resource-id
-            findNodeByResourceId(root, resourceId, getScreenDimensions(activeDisplayId()))
+            findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
           } else {
             // Find currently focused input node
             findFocusedEditableNode(root)
@@ -5718,7 +5748,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (effectiveSelector != null) {
           findNodeBySelector(root, effectiveSelector)
         } else if (resourceId != null) {
-          findNodeByResourceId(root, resourceId, getScreenDimensions(activeDisplayId()))
+          findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
         } else {
           null
         }

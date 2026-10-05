@@ -558,6 +558,45 @@ function deriveDiffSelector(
   return { elementId, label, ...replay };
 }
 
+/** Match only serialized merged/window copies, never peers within either tree. */
+function selectorCopyKey(candidate: SearchableEntry): string | undefined {
+  if (!candidate.bounds) {
+    return undefined;
+  }
+  const properties = { ...candidate.properties, bounds: candidate.bounds };
+  // Sanitizing the merged hierarchy drops this redundant alias; windows retain it.
+  if (properties["view-id"] === properties["resource-id"]) {
+    delete properties["view-id"];
+  }
+  return stableStringify(properties, true);
+}
+
+function distinctSelectorCandidates(projected: readonly SearchableEntry[]): SearchableEntry[] {
+  const seen = new Set<ViewHierarchyNode>();
+  const windowSources = new Set(
+    projected.filter((candidate) => candidate.rootGroup !== 0).map((candidate) => candidate.source),
+  );
+  const mergedCopies = new Map<string, number>();
+  const candidates: SearchableEntry[] = [];
+  for (const candidate of projected) {
+    if (seen.has(candidate.source)) {
+      continue;
+    }
+    seen.add(candidate.source);
+    const key = selectorCopyKey(candidate);
+    const copies = key === undefined ? 0 : (mergedCopies.get(key) ?? 0);
+    if (key !== undefined && candidate.rootGroup === 0 && !windowSources.has(candidate.source)) {
+      mergedCopies.set(key, copies + 1);
+    } else if (key !== undefined && candidate.rootGroup !== 0 && copies > 0) {
+      // Pair one-to-one: identical siblings or separate windows remain distinct.
+      mergedCopies.set(key, copies - 1);
+      continue;
+    }
+    candidates.push(candidate);
+  }
+  return candidates;
+}
+
 /** Build replay metadata once, only after a changed entry requests a selector. */
 function computeSelectorOccurrenceIndexes(
   nodes: readonly FlatObserveNode[],
@@ -575,14 +614,8 @@ function computeSelectorOccurrenceIndexes(
   )!;
   const projection = projectSkeleton(elements, next.screenSize);
   const { rowsBySource, imeSources } = projectSkeletonReplayRows(elements, projection);
-  const seen = new Set<ViewHierarchyNode>();
-  const candidates = projected.filter((candidate) => {
-    if (seen.has(candidate.source) || imeSources.has(candidate.source)) {
-      return false;
-    }
-    seen.add(candidate.source);
-    return true;
-  });
+  const nonImeCandidates = projected.filter((candidate) => !imeSources.has(candidate.source));
+  const candidates = distinctSelectorCandidates(nonImeCandidates);
   const byId = new Map<string, SearchableEntry[]>();
   const byLabel = new Map<string, SearchableEntry[]>();
   const unsafeGroups = new Set<string>();
@@ -600,10 +633,16 @@ function computeSelectorOccurrenceIndexes(
       group.push(candidate);
       byLabel.set(key, group);
     }
+  }
+  // Inspect both copies' original ancestry, without renumbering projected entries.
+  for (const candidate of nonImeCandidates) {
     if (candidate.affordances.length === 0 && hasTapAncestor(candidate, projected)) {
       // Only this candidate's preferred selector group is unsafe. An id-bearing
       // child's label must not suppress an unrelated id-less label group.
-      const key = selectorGroupKey(elementId, label);
+      const key = selectorGroupKey(
+        diffElementId(candidate.properties),
+        diffLabel(candidate.properties),
+      );
       if (key !== undefined) {
         unsafeGroups.add(key);
       }
@@ -1769,6 +1808,7 @@ export function diffObserveResult(
   const baseByKey = groupByKey(flattenForDiff(baseline, cfg?.collapseKeyboard));
   const nextByKey = groupByKey(nextFlatNodes);
   let projected: readonly SearchableEntry[] | undefined;
+  let candidates: readonly SearchableEntry[] | undefined;
   let replayByPathKey: ReturnType<typeof computeSelectorOccurrenceIndexes> | undefined;
   const selectorForNode = (node: Pick<FlatObserveNode, "attributes" | "pathKey">) => {
     const selector = deriveDiffSelector(node.attributes);
@@ -1776,10 +1816,11 @@ export function diffObserveResult(
       return selector;
     }
     projected ??= new SearchableHierarchy().project(next.viewHierarchy);
+    candidates ??= distinctSelectorCandidates(projected);
     // A unique selector cannot need an index or ambiguity metadata. Check the
     // captured matches first so it never requests the full skeleton projection.
     const sources = new Set<ViewHierarchyNode>();
-    for (const candidate of projected) {
+    for (const candidate of candidates) {
       const matches =
         selector.elementId !== undefined
           ? diffElementId(candidate.properties) === selector.elementId

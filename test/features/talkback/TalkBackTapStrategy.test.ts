@@ -558,6 +558,7 @@ describe("TalkBackTapStrategy", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
+      driver.setElements([element], 0);
       driver.setActionResult({ success: true, action: "long_click", totalTimeMs: 1 });
 
       const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
@@ -648,6 +649,7 @@ describe("TalkBackTapStrategy", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
+      driver.setElements([element], 0);
       driver.setActionResult({
         success: false,
         action: "long_click",
@@ -842,6 +844,7 @@ describe("TalkBackTapStrategy", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
+      driver.setElements([element], 0);
       driver.setActionResult({ success: true, action: "click", totalTimeMs: 1 });
 
       const result = await strategy.executeDirectActivation(element, driver);
@@ -873,6 +876,7 @@ describe("TalkBackTapStrategy", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
+      driver.setElements([element], 0);
       driver.setActionResult({
         success: false,
         action: "click",

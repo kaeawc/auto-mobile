@@ -14,6 +14,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
@@ -2464,6 +2465,8 @@ export class SendKeys {
       let result: SendKeysCommandResult;
       try {
         routing.assertCurrent?.();
+        // Command dispatches below bypass BaseVisualChange's action boundary.
+        await beginPostActionCaptureAction();
         result = await this.executeCommand(
           command,
           signal,

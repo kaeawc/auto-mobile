@@ -1,3 +1,7 @@
+import {
+  terminalScreenshotUnavailable,
+  isTerminalScreenshotUnavailable,
+} from "../utils/PostActionCaptureContext";
 import type { ObserveResult, DisplayObservation } from "../models/ObserveResult";
 import {
   sanitizeObserveResult,
@@ -232,10 +236,13 @@ function attachObservationScreenshotUri(
     observationId?: string;
     observationScreenshotResourceUri?: string;
     screenshotCaptureAttempted?: boolean;
+    [terminalScreenshotUnavailable]?: boolean;
   },
   captureAttempted = observation.screenshotCaptureAttempted,
+  unavailable = isTerminalScreenshotUnavailable(observation as ObserveResult),
 ): void {
   if (
+    !unavailable &&
     captureAttempted !== false &&
     typeof observation.deviceId === "string" &&
     observation.deviceId.length > 0 &&
@@ -581,7 +588,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         }),
       };
     }
-    attachObservationScreenshotUri(served);
+    attachObservationScreenshotUri(
+      served,
+      observeResult.screenshotCaptureAttempted,
+      isTerminalScreenshotUnavailable(observeResult),
+    );
     sanitizedPayload = served;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
@@ -736,6 +747,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             screenshotCaptureAttempted?: boolean;
           },
           (payload.observation as ObserveResult).screenshotCaptureAttempted,
+          isTerminalScreenshotUnavailable(payload.observation as ObserveResult),
         );
       }
       sanitizedPayload = {
@@ -1186,6 +1198,24 @@ function artifactExecutePlanPayload(
       nextPayload.failedStep = { ...payload.failedStep, failureObservation };
       changed = true;
     }
+  }
+
+  if (Array.isArray(payload.deviceFailures)) {
+    nextPayload.deviceFailures = payload.deviceFailures.map((failure) => {
+      if (!isRecord(failure)) {
+        return failure;
+      }
+      const failureObservation = artifactPlanObservation(
+        ctx,
+        failure.failureObservation,
+        "ExecutePlanFailureObservation",
+      );
+      if (!failureObservation) {
+        return failure;
+      }
+      changed = true;
+      return { ...failure, failureObservation };
+    });
   }
 
   if (isRecord(payload.debug) && Array.isArray(payload.debug.steps)) {

@@ -1,3 +1,4 @@
+import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
 import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
@@ -1046,6 +1047,8 @@ export class Explore extends BaseVisualChange {
         );
       }
 
+      // Recovery dispatches below bypass BaseVisualChange's action boundary.
+      await beginPostActionCaptureAction();
       if (this.device.platform === "android") {
         // Preserve the Explore instance's injected transport and timer. Calling
         // press() avoids nested observed-interaction progress on this operation.
@@ -1089,6 +1092,8 @@ export class Explore extends BaseVisualChange {
         );
       }
 
+      // Recovery dispatches below bypass BaseVisualChange's action boundary.
+      await beginPostActionCaptureAction();
       if (this.device.platform === "android") {
         // PressButton's Android home path retains the injected ADB/timer and
         // performs the same accessibility-service then ADB fallback. Forward

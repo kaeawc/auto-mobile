@@ -9,6 +9,12 @@ if (logPath) {
   appendTimingEvent(logPath, { event: "start", file, t: started });
   afterAll(() => {
     const ended = Date.now();
-    appendTimingEvent(logPath, { event: "end", file, t: ended, elapsedMs: ended - started });
+    appendTimingEvent(logPath, {
+      event: "end",
+      file,
+      t: ended,
+      elapsedMs: ended - started,
+      rss: process.memoryUsage().rss,
+    });
   });
 }

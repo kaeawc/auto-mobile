@@ -13,6 +13,18 @@ import { FakeDeviceProvisioner } from "../fakes/FakeDeviceProvisioner";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 
+import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { setDeviceManager } from "../../src/server/bootedDeviceResources";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+
 isolateToolRegistry();
 
 describe("startDevice --create-if-missing wiring", () => {
@@ -20,8 +32,12 @@ describe("startDevice --create-if-missing wiring", () => {
   let fakeMatcher: FakeDeviceMatcher;
   let fakeGate: FakeDeviceCreationGate;
   let fakeProvisioner: FakeDeviceProvisioner;
+  let sessionManager: SessionManager;
 
   beforeEach(() => {
+    resetDeviceToolsDependencies();
+    DaemonState.getInstance().reset();
+    clearDirectSessionDevices();
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeMatcher = new FakeDeviceMatcher();
     fakeGate = new FakeDeviceCreationGate(false);
@@ -46,12 +62,37 @@ describe("startDevice --create-if-missing wiring", () => {
       deviceProvisionerFactory: () => fakeProvisioner,
     });
 
+    const timer = new FakeTimer();
+    const idGenerator = new CountingIdGenerator("creation-test");
+    setDeviceToolsDependencies({ timer, idGenerator });
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
+    setDeviceManager(fakeDeviceUtils);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "creation-test-daemon", {
+        timer,
+        idGenerator,
+        deviceManager: fakeDeviceUtils,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+      }),
+    );
+    // Assignment rechecks iOS liveness through the POOL's manager, independently
+    // of the tool's discovery manager. FakeDeviceUtils records booted creations.
+    DaemonState.getInstance().initialize(
+      sessionManager,
+      pool,
+      new DeviceSessionRegistry(timer, idGenerator),
+    );
     registerDeviceTools();
   });
 
   afterEach(() => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
+    sessionManager.stopCleanupTimer();
+    clearDirectSessionDevices();
+    setDeviceManager(null);
+    PlatformDeviceManagerFactory.reset();
   });
 
   async function callStartDevice(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -145,6 +186,9 @@ describe("startDevice --create-if-missing wiring", () => {
 
     await callStartDevice({ platform: "ios" });
 
+    expect(
+      fakeDeviceUtils.getBootedDevicesDetailedCalls().some((call) => call.platform === "ios"),
+    ).toBe(true);
     expect(fakeGate.calls).toEqual([undefined]);
     expect(fakeProvisioner.requests).toHaveLength(1);
   });

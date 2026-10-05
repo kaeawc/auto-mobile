@@ -8,12 +8,26 @@
 SCRIPT="scripts/check-daemon-launcher-boundary.sh"
 FIXTURE="src/daemon/DaemonLauncherBoundaryFixture.ts"
 
+# The unchanged production tree is checked once; fixture tests keep their own
+# parser run against the single changed file instead of rescanning production.
+setup_file() {
+  local scan_status=0
+  bash "$SCRIPT" > "$BATS_FILE_TMPDIR/scan.output" 2>&1 || scan_status=$?
+  printf '%s\n' "$scan_status" > "$BATS_FILE_TMPDIR/scan.status"
+}
+
+assert_production_scan() {
+  [ "$(cat "$BATS_FILE_TMPDIR/scan.status")" -eq 0 ]
+  [[ "$(cat "$BATS_FILE_TMPDIR/scan.output")" == *"no direct production daemon invocations"* ]]
+}
+
 teardown() {
   rm -f "$FIXTURE"
 }
 
 @test "allows DaemonLauncher to own daemon execution" {
-  run bash "$SCRIPT"
+  status="$(cat "$BATS_FILE_TMPDIR/scan.status")"
+  output="$(cat "$BATS_FILE_TMPDIR/scan.output")"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -25,7 +39,8 @@ teardown() {
     'spawn("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -37,7 +52,8 @@ teardown() {
     'execSync("bunx @kaeawc/auto-mobile --daemon-mode");' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -49,7 +65,8 @@ teardown() {
     'execFileSync("ps", ["-p", "42", "-o", "lstart="]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -62,7 +79,8 @@ teardown() {
     'launch(command, daemonArgs);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -74,7 +92,8 @@ teardown() {
     'childProcess.execSync(command);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -86,7 +105,8 @@ teardown() {
     'childProcess.execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -98,7 +118,8 @@ teardown() {
     'childProcess["execFileSync"]("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -113,7 +134,8 @@ teardown() {
     'childProcess[("execFileSync" satisfies string)]("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -130,7 +152,8 @@ teardown() {
     '(childProcess.execFileSync)("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -155,7 +178,8 @@ teardown() {
     '(childProcess satisfies typeof childProcess).execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 8 ]]
@@ -168,7 +192,8 @@ teardown() {
     'launcher.execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -185,7 +210,8 @@ teardown() {
     'inspect({ execFileSync() {} });' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -198,7 +224,8 @@ teardown() {
     'launch("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -213,7 +240,8 @@ teardown() {
     'computedLaunch("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
@@ -228,7 +256,8 @@ teardown() {
     'childProcess[executorAlias]("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
@@ -248,7 +277,8 @@ teardown() {
     'parenthesizedLaunch("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -291,7 +321,8 @@ teardown() {
     'inspect({ execFileSync() {} });' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -308,7 +339,8 @@ teardown() {
     'destructuredLaunch("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -327,7 +359,8 @@ teardown() {
     'commonJsChildProcess.execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -346,7 +379,8 @@ teardown() {
     'remainingExecutor("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -362,7 +396,8 @@ teardown() {
     'unknownChildProcess.execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -416,7 +451,8 @@ teardown() {
     'methodBeforeReassignment = safeLaunch;' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 7 ]]
@@ -442,7 +478,8 @@ teardown() {
     'spawn("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -460,7 +497,8 @@ teardown() {
     'remaining.spawn("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -482,7 +520,8 @@ teardown() {
     '(() => launch("auto-mobile", ["--daemon-mode"]))();' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 6 ]]
@@ -501,7 +540,8 @@ teardown() {
     'remaining.spawn("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 1 ]]
@@ -550,7 +590,8 @@ teardown() {
     'require("node:child_process").execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 10 ]]
@@ -594,7 +635,8 @@ teardown() {
     'namespace.execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -634,7 +676,8 @@ teardown() {
     'localRequireScope();' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 4 ]]
@@ -659,7 +702,8 @@ teardown() {
     'invoke();' \
     > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  assert_production_scan
+  run bash "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *'launch("auto-mobile", ["--daemon-mode"])'* ]]

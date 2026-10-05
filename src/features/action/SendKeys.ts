@@ -65,6 +65,11 @@ const ANDROID_TYPE_FOCUSED_INPUT_ERROR = `${ANDROID_FOCUSED_INPUT_ERROR}. For pr
 
 // Give posted formatters/recomposition a bounded chance to finish after a mismatch.
 export const IME_COMMIT_READ_BACK_SETTLE_MS = 150;
+/** Bounded settled re-reads used by the clear, eventLast caret and eventAll case read-backs. */
+const ANDROID_READ_BACK_ATTEMPTS = 3;
+/** CtrlProxy's caret-unknown warning (InsertTextPlanner.kt), removed once the caret is proven. */
+const CARET_UNKNOWN_WARNING =
+  /Text was inserted, but the caret could not be placed after it \([^)]*\); the caret position is unknown, so insert any further text with request_insert_text rather than key events/;
 
 class ImeRestorationError extends Error {}
 import {
@@ -593,8 +598,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const clearResult = await this.textClient.clear(
       this.device.platform === "ios" ? signal : undefined,
     );
-    if (clearResult.success || this.device.platform !== "android") {
+    if (this.device.platform !== "android") {
       return clearResult;
+    }
+    if (clearResult.success) {
+      // set_text("") is acknowledged before the app applies it; a following a11y insert
+      // plans from a fresh node snapshot and would otherwise write old + new text (#9884).
+      return (await this.verifyAndroidClearApplied(signal, display)) ?? clearResult;
     }
     logger.warn(`[SendKeys] Android accessibility clear failed: ${clearResult.error}`);
     const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
@@ -609,6 +619,58 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       };
     }
     return this.clearEventOnlyForReplace(textLength, signal, display);
+  }
+
+  /** Poll the focused field until the acknowledged clear is visible; unreadable fields pass. */
+  private async verifyAndroidClearApplied(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult | undefined> {
+    try {
+      let remaining: number | undefined;
+      for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
+        }
+        const observation = await this.readFreshObservation(signal, display);
+        remaining = this.readFocusedTextLength(observation);
+        if (!remaining) {
+          return undefined;
+        }
+      }
+      return {
+        success: false,
+        error: `Field was not fully cleared: ${remaining} UTF-16 units remain`,
+      };
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] Clear read-back unavailable: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  private async readFreshObservation(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<ObserveResult> {
+    this.checkAbort(signal);
+    const observation = await this.observer.execute({
+      signal,
+      freshness: "fresh",
+      skipScreenshot: true,
+      ...(display === undefined ? {} : { display }),
+    });
+    this.checkAbort(signal);
+    return observation;
+  }
+
+  private readFocusedTextLength(observation: ObserveResult): number | undefined {
+    const hierarchy = observation.viewHierarchy;
+    if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
+      return undefined;
+    }
+    // Hint-aware, like ClearText.verifyKeyEventClear: placeholder text counts as empty.
+    return getFocusedTextLength(hierarchy);
   }
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
@@ -1435,18 +1497,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
     const prefix = chars.slice(0, split.index).join("");
     const suffix = chars.slice(split.index + 1).join("");
-    const initialResult = await this.prepareEventLastPrefix(prefix, operation, signal);
+    const initialResult = await this.confirmEventLastCaret(
+      await this.prepareEventLastPrefix(prefix, operation, signal),
+      prefix,
+      signal,
+    );
     if (!initialResult.success) {
       return initialResult;
-    }
-
-    if (initialResult.caretPlaced === false) {
-      return markPartialAfterMutation({
-        ...initialResult,
-        success: false,
-        error:
-          "eventLast requires a real tail key event, but the prefix insert could not place the caret; remaining text was not sent",
-      });
     }
     const precedingState = await this.readPrecedingState(suffix.length > 0);
     const eventFailure = await this.executeKeyEventPlanSafely(
@@ -1476,6 +1533,61 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         [initialResult.warning],
       );
     }
+  }
+
+  /** Turn a `caretPlaced: false` prefix result into a failure unless the caret is proven (#9887). */
+  private async confirmEventLastCaret(
+    result: TextActionResult,
+    prefix: string,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult> {
+    if (!result.success || result.caretPlaced !== false) {
+      return result;
+    }
+    // Compose fields report "not placed" even when the caret sits after the prefix.
+    if (!(await this.isCaretProvenAfterPrefix(prefix, signal))) {
+      return markPartialAfterMutation({
+        ...result,
+        success: false,
+        error:
+          "eventLast requires a real tail key event, but the prefix insert could not place the caret; remaining text was not sent",
+      });
+    }
+    this.resetCaretState();
+    return this.withoutCaretUnknownWarning(result);
+  }
+
+  /** Read the insert state back (bounded) and prove a collapsed caret right after the prefix. */
+  private async isCaretProvenAfterPrefix(prefix: string, signal?: AbortSignal): Promise<boolean> {
+    if (!this.textClient.readInsertTextState) {
+      return false;
+    }
+    for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
+      }
+      this.checkAbort(signal);
+      try {
+        const state = await this.textClient.readInsertTextState();
+        if (state && caretIsAfterPrefix(state, prefix)) {
+          return true;
+        }
+      } catch (error) {
+        this.checkAbort(signal, error);
+        logger.warn(
+          `[SendKeys] eventLast caret read-back unavailable: ${errorMessage(error)}`,
+          error,
+        );
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private withoutCaretUnknownWarning(result: TextActionResult): TextActionResult {
+    const { warning, ...rest } = result;
+    const remaining = warning?.replace(CARET_UNKNOWN_WARNING, "").trim();
+    return { ...rest, ...(remaining ? { warning: remaining } : {}) };
   }
 
   private async findLastKeyEvent(
@@ -1537,12 +1649,56 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!clearResult.success) {
       return clearResult;
     }
-    return this.executeAndroidEventAllCharacters(
+    const typed = await this.executeAndroidEventAllCharacters(
       graphemes,
       operation === "replace",
       operation === "replace",
       signal,
     );
+    return typed.success ? this.verifyEventAllLetterCase(text, typed, signal, display) : typed;
+  }
+
+  /**
+   * Some keyboards/fields change letter case after key events (#9888). Report only the
+   * case-insensitive match; any other mismatch or an unreadable field is left alone.
+   */
+  private async verifyEventAllLetterCase(
+    text: string,
+    typed: TextActionResult,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    if (text.toLowerCase() === text.toUpperCase()) {
+      return typed;
+    }
+    try {
+      for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
+        }
+        const field = this.readFocusedText(await this.readFreshObservation(signal, display));
+        if (field === undefined || field.includes(text)) {
+          return typed;
+        }
+        if (!field.toLowerCase().includes(text.toLowerCase())) {
+          return typed;
+        }
+        if (attempt === ANDROID_READ_BACK_ATTEMPTS - 1) {
+          return this.withTextWarnings(
+            {
+              success: false,
+              partialApplication: true,
+              error: `eventAll typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the keyboard or field changed the letter case. Use mode "ime" or "a11y" for exact case.`,
+            },
+            [typed.warning],
+          );
+        }
+      }
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] eventAll case read-back unavailable: ${errorMessage(error)}`, error);
+    }
+    return typed;
   }
 
   private withTextWarnings(
@@ -2665,6 +2821,15 @@ export class SendKeys {
 
 function isSemanticKey(key: SendKeysKey): key is SendKeysSemanticKey {
   return (SEND_KEYS_SEMANTIC_KEYS as readonly string[]).includes(key);
+}
+
+function caretIsAfterPrefix(state: InsertTextState, prefix: string): boolean {
+  return (
+    !state.isShowingHintText &&
+    typeof state.text === "string" &&
+    state.selectionStart === state.selectionEnd &&
+    state.text.slice(0, state.selectionStart).endsWith(prefix)
+  );
 }
 
 function markPartialAfterMutation(result: TextActionResult): TextActionResult {

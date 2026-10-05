@@ -599,7 +599,7 @@ describe("SendKeys", () => {
         success: true,
         resolvedMode: supportsIme ? "ime" : "eventAll",
       });
-      expect(observer.calls).toBe(2);
+      expect(observer.calls).toBe(supportsIme ? 2 : 3); // eventAll adds a case read-back.
       expect(readState).toHaveBeenCalledTimes(0);
       expect(textClient.commitViaImeCalls).toHaveLength(supportsIme ? 1 : 0);
       expect(textClient.calls.filter((call) => call.startsWith("insert:"))).toHaveLength(0);
@@ -1880,7 +1880,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
       expect(result).toMatchObject({ success: true, resolvedMode: expectedMode });
       expect(textClient.commitViaImeCalls).toEqual([]);
       expect(textClient.calls).not.toContain("clear");
-      expect(observer.calls).toBe(1);
+      // eventAll adds one letter-case read-back (unreadable for a password field).
+      expect(observer.calls).toBe(operation === "insert" ? 2 : 1);
       if (operation === "replace") {
         expect(textClient.calls).toContain("replace:new");
       }
@@ -4248,4 +4249,233 @@ describe("Android insertion stops mixed typing after an unconfirmed suffix or ru
       expect(events).toEqual(value.startsWith("a") ? ["shell input keyevent KEYCODE_A"] : []);
     });
   }
+});
+
+describe("Android clear, eventLast caret and eventAll case read-backs", () => {
+  function sequencedObserver(texts: Array<string | undefined>, order: string[] = []) {
+    const options: Array<Parameters<SendKeysObserver["execute"]>[0]> = [];
+    const observer = {
+      captureScreenshot: async () => null,
+      execute: async (callOptions: Parameters<SendKeysObserver["execute"]>[0]) => {
+        options.push(callOptions);
+        order.push("read");
+        const text = texts[Math.min(options.length - 1, texts.length - 1)];
+        return text === undefined
+          ? ({ timestamp: 0 } as ObserveResult)
+          : focusedAndroidObservation(text, {}, 0);
+      },
+    } as unknown as SendKeysObserver;
+    return { observer, options, reads: () => options.length };
+  }
+
+  function harness(texts: Array<string | undefined>, state?: () => unknown) {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(34);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const order: string[] = [];
+    const { client, calls } = createTextClient();
+    const baseInsert = client.insert;
+    client.clear = async () => {
+      order.push("clear");
+      return { success: true };
+    };
+    client.insert = async (text, options) => {
+      order.push("insert");
+      return baseInsert(text, options);
+    };
+    if (state) {
+      client.readInsertTextState = async () => state() as never;
+    }
+    const seq = sequencedObserver(texts, order);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      seq.observer,
+      { textClient: client, timer },
+    );
+    return { adb, timer, order, client, calls, seq, executor };
+  }
+
+  const keyCommands = (adb: FakeAdbExecutor) =>
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input"));
+
+  describe("#9884 clear waits for the field to empty", () => {
+    test("polls until empty before the a11y insert is dispatched", async () => {
+      const h = harness(["old z", "old z", ""]);
+      expect(await h.executor.clear(undefined, "2")).toEqual({ success: true });
+      expect(await h.executor.type({ action: "type", text: "Na1 k", mode: "a11y" })).toMatchObject({
+        success: true,
+      });
+      expect(h.order).toEqual(["clear", "read", "read", "read", "insert"]);
+      expect(h.timer.getSleepHistory()).toEqual([150, 150]);
+      expect(h.seq.options.every((o) => o?.skipScreenshot === true && o.display === "2")).toBe(
+        true,
+      );
+    });
+
+    test("an already-empty field needs one read and no sleep", async () => {
+      const h = harness([""]);
+      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(h.seq.reads()).toBe(1);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+      expect(h.seq.options[0]).not.toHaveProperty("display");
+    });
+
+    test("a field that never empties fails the clear and stops the batch before the insert", async () => {
+      const h = harness(["old z"]);
+      const sendKeys = new SendKeys(androidDevice, createAdbFactory(h.adb), {
+        executor: h.executor,
+        observer: h.seq.observer,
+        timer: h.timer,
+        timestampProvider: { now: async () => 0 },
+      });
+      const result = await sendKeys.execute([
+        { action: "clear" },
+        { action: "type", text: "Na1 k", mode: "a11y" },
+      ]);
+      expect(result).toMatchObject({
+        success: false,
+        failedIndex: 0,
+        error: "Field was not fully cleared: 5 UTF-16 units remain",
+      });
+      expect(h.calls.filter((call) => call.startsWith("insert:"))).toEqual([]);
+      expect(h.timer.getSleepHistory().slice(0, 2)).toEqual([150, 150]);
+    });
+
+    test("an unreadable field stays a pass", async () => {
+      const h = harness([undefined]);
+      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(h.seq.reads()).toBe(1);
+    });
+
+    test("hint text counts as empty", async () => {
+      const h = harness([]);
+      const hinted = focusedAndroidObservation("Type here", { "hint-text": "Type here" }, 0);
+      h.seq.observer.execute = async () => hinted;
+      expect(await h.executor.clear()).toEqual({ success: true });
+    });
+  });
+
+  describe("#9887 eventLast proves the caret from the read-back state", () => {
+    const placedFalse = (client: SendKeysTextClient) => {
+      client.insert = async () => ({
+        success: true,
+        caretPlaced: false,
+        warning:
+          "Text was inserted, but the caret could not be placed after it (selection placement was not attempted); the caret position is unknown, so insert any further text with request_insert_text rather than key events",
+      });
+    };
+
+    test("sends the tail key event when the caret is collapsed right after the prefix", async () => {
+      const h = harness([""], () => ({
+        text: "abc de",
+        isShowingHintText: false,
+        selectionStart: 6,
+        selectionEnd: 6,
+      }));
+      placedFalse(h.client);
+      const result = await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" });
+      expect(result).toMatchObject({ success: true, resolvedMode: "eventLast" });
+      expect(result.warning).toBeUndefined();
+      expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
+    });
+
+    test("waits for the state to settle", async () => {
+      let reads = 0;
+      const h = harness([""], () => ({
+        text: reads++ === 0 ? "abc" : "abc de",
+        isShowingHintText: false,
+        selectionStart: 6,
+        selectionEnd: 6,
+      }));
+      placedFalse(h.client);
+      expect(
+        await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" }),
+      ).toMatchObject({ success: true });
+      expect(h.timer.getSleepHistory()).toEqual([150]);
+    });
+
+    test.each([
+      ["unreadable state", () => undefined],
+      [
+        "caret not after the prefix",
+        () => ({ text: "abc de", isShowingHintText: false, selectionStart: 2, selectionEnd: 2 }),
+      ],
+      [
+        "selection range",
+        () => ({ text: "abc de", isShowingHintText: false, selectionStart: 0, selectionEnd: 6 }),
+      ],
+      [
+        "hint text",
+        () => ({ text: "abc de", isShowingHintText: true, selectionStart: 6, selectionEnd: 6 }),
+      ],
+    ])("still fails for %s", async (_name, state) => {
+      const h = harness([""], state);
+      placedFalse(h.client);
+      const result = await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" });
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        error: expect.stringContaining("prefix insert could not place the caret"),
+      });
+      expect(keyCommands(h.adb)).toEqual([]);
+    });
+  });
+
+  describe("#9888 eventAll reports a keyboard letter-case change", () => {
+    test("pins the emitted key events for mixed case with spaces", async () => {
+      const h = harness(["Ab cD ef"]);
+      expect(
+        await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
+      ).toMatchObject({ success: true });
+      expect(keyCommands(h.adb)).toEqual([
+        "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A",
+        "shell input keyevent KEYCODE_B",
+        "shell input keyevent KEYCODE_SPACE",
+        "shell input keyevent KEYCODE_C",
+        "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_D",
+        "shell input keyevent KEYCODE_SPACE",
+        "shell input keyevent KEYCODE_E",
+        "shell input keyevent KEYCODE_F",
+      ]);
+    });
+
+    test("fails when the field holds the text in a different case", async () => {
+      const h = harness(["Ab CD ef"]);
+      const result = await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" });
+      const message = String(result.error);
+      expect(result).toMatchObject({ success: false, partialApplication: true });
+      expect(message).toContain("the keyboard or field changed the letter case");
+      expect(message).toContain('"Ab CD ef"');
+      expect(h.timer.getSleepHistory()).toEqual([150, 150]);
+      expect(h.seq.options.every((o) => o?.skipScreenshot === true)).toBe(true);
+    });
+
+    test("recovers when the field settles to the exact text", async () => {
+      const h = harness(["Ab CD ef", "Ab cD ef"]);
+      expect(
+        await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
+      ).toMatchObject({ success: true });
+    });
+
+    test.each([
+      ["a different mismatch", "zzz"],
+      ["an unreadable field", undefined],
+    ])("leaves %s alone", async (_name, field) => {
+      // The first read is the focus pre-check; later reads are the case read-back.
+      const h = harness(["Ab cD ef", field]);
+      expect(
+        await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
+      ).toMatchObject({ success: true });
+    });
+
+    test("does not read back caseless text", async () => {
+      const h = harness(["123 456"]);
+      expect(
+        await h.executor.type({ action: "type", text: "123 456", mode: "eventAll" }),
+      ).toMatchObject({ success: true });
+      expect(h.seq.reads()).toBe(1);
+    });
+  });
 });

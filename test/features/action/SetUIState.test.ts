@@ -99,6 +99,31 @@ describe("SetUIState", () => {
     fakeTimer.enableAutoAdvance();
   });
 
+  test("warns and preserves a field failure when focus throws", async () => {
+    const error = new Error("focus transport failed");
+    const tap = spyOn(fakeTap, "execute").mockRejectedValue(error);
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await createSetUIState()["applyFieldValue"](
+        { text: "Name" },
+        { selector: { text: "Name" }, value: "Jane" },
+        "text",
+      );
+      expect(result).toEqual({ success: false, error: error.message, stopRetrying: false });
+      expect(
+        loggerCallsWithPrefix(warning.mock.calls, "[SetUIState] Failed to apply field value:"),
+      ).toEqual([
+        [
+          "[SetUIState] Failed to apply field value: focus transport failed",
+          expect.objectContaining({ message: error.message, cause: error }),
+        ],
+      ]);
+    } finally {
+      tap.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
   describe("text field handling", () => {
     test("Android setUIState opts into hint fallback when primary field text misses", async () => {
       const hierarchy = createHierarchyWithElement({
@@ -293,7 +318,7 @@ describe("SetUIState", () => {
       }
     });
 
-    test("later occlusion after a successful recovery warns once without dismissing again", async () => {
+    test("later occlusion warns for recovery and field failure without dismissing again", async () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const scenario = keyboardRecoveryScenario({ initiallyOpen: true });
@@ -305,15 +330,19 @@ describe("SetUIState", () => {
         expect(result.fields[0].error).toBe(scenario.focusError.message);
         expect(scenario.dismissCalls()).toBe(1);
         const warnings = loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]");
-        expect(warnings).toHaveLength(1);
+        expect(warnings).toHaveLength(2);
         expect(warnings[0][0]).toBe("[SetUIState] IME recovery failed");
+        expect(warnings[1]).toEqual([
+          `[SetUIState] Failed to apply field value: ${scenario.focusError.message}`,
+          scenario.focusError,
+        ]);
       } finally {
         warn.mockRestore();
       }
     });
 
     test.each(["stillOccluded", "dismissFails", "dismissThrows"] as const)(
-      "failed IME recovery emits exactly one SetUIState warning when %s",
+      "failed IME recovery warns for recovery and field failure when %s",
       async (failure) => {
         const warn = spyOn(logger, "warn").mockImplementation(() => {});
         try {
@@ -323,8 +352,12 @@ describe("SetUIState", () => {
           });
           expect(result.success).toBe(false);
           const warnings = loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]");
-          expect(warnings).toHaveLength(1);
+          expect(warnings).toHaveLength(2);
           expect(warnings[0][0]).toBe("[SetUIState] IME recovery failed");
+          expect(warnings[1]).toEqual([
+            `[SetUIState] Failed to apply field value: ${scenario.focusError.message}`,
+            scenario.focusError,
+          ]);
         } finally {
           warn.mockRestore();
         }

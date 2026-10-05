@@ -8,6 +8,9 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { logger } from "../../../src/utils/logger";
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 
 const deleteCommand = (count: number): string =>
@@ -685,4 +688,28 @@ describe("ClearText Android ADB fallback", () => {
     expect(result.error).toContain("tvos");
     expect(result.error).not.toBe("Failed to clear text");
   });
+});
+
+test("iOS clear warns and preserves the failure result when CtrlProxy throws", async () => {
+  const error = new Error("clear unavailable");
+  const client = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(() => {
+    throw error;
+  });
+  const warning = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const action = new ClearText(
+      { name: "fake", platform: "ios", deviceId: "fake" },
+      null,
+      undefined,
+      new FakeTimer(),
+    );
+    const result = await action["executeiOSClearText"]({ updatedAt: 0 });
+    expect(result).toEqual({ success: false, error: String(error) });
+    expect(
+      loggerCallsWithPrefix(warning.mock.calls, "[ClearText] CtrlProxy iOS exception:"),
+    ).toEqual([[expect.stringContaining("clear unavailable"), error]]);
+  } finally {
+    client.mockRestore();
+    warning.mockRestore();
+  }
 });

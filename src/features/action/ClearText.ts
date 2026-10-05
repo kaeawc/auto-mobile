@@ -21,7 +21,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toSearchable } from "../utility/SearchableNode";
-import { ANDROID_INPUT_CLASSES } from "../utility/elementProperties";
+import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
 
 export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 export const DELETE_KEYEVENT_CHUNK_SIZE = 50;
@@ -52,8 +52,9 @@ function getEditableTextLength(
   const searchable = toSearchable(properties);
   const text = searchable.textSources.value ?? searchable.textSources.text;
   const hint = properties["hint-text"];
-  const android =
-    searchable.className?.startsWith("android.") || searchable.className?.startsWith("androidx.");
+  const android = ["android.", "androidx."].some((prefix) =>
+    searchable.className?.startsWith(prefix),
+  );
   // Android hierarchy nodes carry no showing-hint flag. Typed text identical to
   // the hint is indistinguishable and counts as empty for verification/skip-clear.
   // SendKeys includes the raw hint length for deletes so replace cannot under-delete
@@ -61,7 +62,18 @@ function getEditableTextLength(
   if (!includeHintText && android && typeof hint === "string" && hint !== "" && text === hint) {
     return 0;
   }
-  return typeof text === "string" ? text.length : searchable.capturedTextLength;
+  const capturedLength = typeof text === "string" ? text.length : searchable.capturedTextLength;
+  // CtrlProxy omits empty Android text. Require a focused input and preserved
+  // non-password metadata; missing iOS values and classless nodes stay unreadable.
+  if (
+    capturedLength === undefined &&
+    android &&
+    isFocusedTextInputProperties(properties) &&
+    !isTruthyFlag(properties.password)
+  ) {
+    return 0;
+  }
+  return capturedLength;
 }
 
 /** Include hint text only when budgeting deletes, rather than checking remaining text. */
